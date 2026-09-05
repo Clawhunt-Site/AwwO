@@ -1,0 +1,75 @@
+{
+  "observed_at": "2026-09-04T16:23:10.161Z",
+  "scope": "isolated createDemoService only; no backend/browser claims",
+  "R1_casefold": {
+    "title": "Straße",
+    "exact_query_total": 1,
+    "folded_query": "STRASSE",
+    "expected_folded_query_total": 1,
+    "actual_folded_query_total": 1,
+    "published_view_revision": "demo-published-2"
+  },
+  "R2_quality_invalidation": {
+    "publishFailure": {
+      "status": 422,
+      "code": "QUALITY_FAILED",
+      "details": {
+        "findings": [
+          {
+            "rule_id": "REF_INTEGRITY",
+            "severity": "blocker",
+            "field": "metadata",
+            "passed": false,
+            "message": "关联条目已停用。"
+          }
+        ],
+        "quality_run_id": "quality-104"
+      }
+    },
+    "before_reactivate": {
+      "draft_count": 3,
+      "blocked_draft_count": 1,
+      "unchecked_draft_count": 2,
+      "error_draft_count": 0,
+      "passed_draft_count": 0,
+      "published_findings": {
+        "documents_with_blockers": 0,
+        "documents_with_warnings": 0,
+        "checked_documents": 0,
+        "unchecked_documents": 8,
+        "error_documents": 0,
+        "last_checked_at": null
+      },
+      "rules_not_run": [
+        "STALE_CONTENT"
+      ]
+    },
+    "after_reactivate": {
+      "draft_count": 3,
+      "blocked_draft_count": 0,
+      "unchecked_draft_count": 3,
+      "error_draft_count": 0,
+      "passed_draft_count": 0,
+      "published_findings": {
+        "documents_with_blockers": 0,
+        "documents_with_warnings": 0,
+        "checked_documents": 0,
+        "unchecked_documents": 8,
+        "error_documents": 0,
+        "last_checked_at": null
+      },
+      "rules_not_run": [
+        "STALE_CONTENT"
+      ]
+    },
+    "current_version_quality_status": "unchecked",
+    "expected_after_reactivate": {
+      "blocked_draft_count": 0,
+      "unchecked_draft_count": 3
+    },
+    "actual_after_reactivate": {
+      "blocked_draft_count": 0,
+      "unchecked_draft_count": 3
+    }
+  }
+}

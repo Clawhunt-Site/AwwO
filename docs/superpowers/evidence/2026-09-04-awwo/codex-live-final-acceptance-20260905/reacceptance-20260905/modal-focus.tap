@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: fixture: Tab from autofocus close button wraps to first link
+ok 1 - fixture: Tab from autofocus close button wraps to first link
+  ---
+  duration_ms: 136.9878
+  type: 'test'
+  ...
+# Subtest: fixture: Shift+Tab from first link wraps to last close button
+ok 2 - fixture: Shift+Tab from first link wraps to last close button
+  ---
+  duration_ms: 23.5393
+  type: 'test'
+  ...
+# Subtest: fixture: intermediate Tab stays native; Escape and close restoration are preserved
+ok 3 - fixture: intermediate Tab stays native; Escape and close restoration are preserved
+  ---
+  duration_ms: 22.7721
+  type: 'test'
+  ...
+# Subtest: app-owned showModal: a single button contains both Tab directions without data-dialog-open
+ok 4 - app-owned showModal: a single button contains both Tab directions without data-dialog-open
+  ---
+  duration_ms: 10.9855
+  type: 'test'
+  ...
+# Subtest: dynamic endpoints exclude disabled, hidden, inert and negative tabindex controls
+ok 5 - dynamic endpoints exclude disabled, hidden, inert and negative tabindex controls
+  ---
+  duration_ms: 21.4906
+  type: 'test'
+  ...
+# Subtest: positive tabindex endpoints use sequential order rather than DOM order
+ok 6 - positive tabindex endpoints use sequential order rather than DOM order
+  ---
+  duration_ms: 10.2214
+  type: 'test'
+  ...
+# Subtest: nonmodal dialogs, modifier shortcuts and disposed helpers do not intercept Tab
+ok 7 - nonmodal dialogs, modifier shortcuts and disposed helpers do not intercept Tab
+  ---
+  duration_ms: 5.2527
+  type: 'test'
+  ...
+# Subtest: modal with only a programmatically focused heading keeps Tab inside
+ok 8 - modal with only a programmatically focused heading keeps Tab inside
+  ---
+  duration_ms: 4.6733
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 874.7717

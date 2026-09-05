@@ -1,0 +1,18 @@
+{
+  "title": "장면 커스터마이즈",
+  "videoQuality": "동영상 품질",
+  "qualityLow": "낮음",
+  "qualityMedium": "중간",
+  "qualityHigh": "높음",
+  "duration": "길이",
+  "audio": "오디오",
+  "vipBadge": "VIP",
+  "estTime": "예상 시간",
+  "mins": "분",
+  "energyCost": "에너지 소모",
+  "createNow": "지금 만들기",
+  "unlockVipToCreate": "VIP 잠금 해제하여 만들기",
+  "cancel": "취소",
+  "needSubscription": "에너지 팩을 구매하여 VIP 기능을 해제하세요",
+  "loadingCost": "계산 중..."
+}

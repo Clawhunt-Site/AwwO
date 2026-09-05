@@ -1,0 +1,98 @@
+{
+  "status": "passed",
+  "observed_at": "2026-09-04T15:53:54.879Z",
+  "scope": "main demo modules; no live backend or browser acceptance",
+  "runtime": {
+    "node": "v22.16.0",
+    "unicode": "16.0",
+    "icu": "77.1"
+  },
+  "source_hashes": {
+    "src/app.js": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+    "src/api.js": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+    "src/demo.js": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+    "src/unicode-casefold.js": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+    "data/unicode/17.0.0/CaseFolding.txt": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+    "scripts/generate-unicode-casefold.mjs": "e9fa4c26ac5911c271caf0ebd446e516f62be4354dfb5a76d31c6d3f5d9b5327",
+    "tests/model.test.js": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+    "tests/ui-dom.test.js": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+    "tests/demo-regressions.test.js": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+    "tests/unicode-casefold.test.js": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+    "artifacts/contract-review-repro.mjs": "f7e781e0840f2ff6963d350b900ec4634541e7a57b41fad2c38366aeb97059b5"
+  },
+  "reproduction": {
+    "observed_at": "2026-09-04T15:53:54.879Z",
+    "scope": "isolated createDemoService only; no backend/browser claims",
+    "R1_casefold": {
+      "title": "Straße",
+      "exact_query_total": 1,
+      "folded_query": "STRASSE",
+      "expected_folded_query_total": 1,
+      "actual_folded_query_total": 1,
+      "published_view_revision": "demo-published-2"
+    },
+    "R2_quality_invalidation": {
+      "publishFailure": {
+        "status": 422,
+        "code": "QUALITY_FAILED",
+        "details": {
+          "findings": [
+            {
+              "rule_id": "REF_INTEGRITY",
+              "severity": "blocker",
+              "field": "metadata",
+              "passed": false,
+              "message": "关联条目已停用。"
+            }
+          ],
+          "quality_run_id": "quality-104"
+        }
+      },
+      "before_reactivate": {
+        "draft_count": 3,
+        "blocked_draft_count": 1,
+        "unchecked_draft_count": 2,
+        "error_draft_count": 0,
+        "passed_draft_count": 0,
+        "published_findings": {
+          "documents_with_blockers": 0,
+          "documents_with_warnings": 0,
+          "checked_documents": 0,
+          "unchecked_documents": 8,
+          "error_documents": 0,
+          "last_checked_at": null
+        },
+        "rules_not_run": [
+          "STALE_CONTENT"
+        ]
+      },
+      "after_reactivate": {
+        "draft_count": 3,
+        "blocked_draft_count": 0,
+        "unchecked_draft_count": 3,
+        "error_draft_count": 0,
+        "passed_draft_count": 0,
+        "published_findings": {
+          "documents_with_blockers": 0,
+          "documents_with_warnings": 0,
+          "checked_documents": 0,
+          "unchecked_documents": 8,
+          "error_documents": 0,
+          "last_checked_at": null
+        },
+        "rules_not_run": [
+          "STALE_CONTENT"
+        ]
+      },
+      "current_version_quality_status": "unchecked",
+      "expected_after_reactivate": {
+        "blocked_draft_count": 0,
+        "unchecked_draft_count": 3
+      },
+      "actual_after_reactivate": {
+        "blocked_draft_count": 0,
+        "unchecked_draft_count": 3
+      }
+    }
+  }
+}

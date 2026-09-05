@@ -1,0 +1,1141 @@
+{
+  "_note": "Generated from superclaw.trust_contracts — do not hand-edit. Regenerate via server/server/scripts/gen-trust-golden-vectors.py.",
+  "jcs": [
+    {
+      "name": "primitives_true",
+      "input": true,
+      "expected_hex": "74727565"
+    },
+    {
+      "name": "primitives_false",
+      "input": false,
+      "expected_hex": "66616c7365"
+    },
+    {
+      "name": "primitives_null",
+      "input": null,
+      "expected_hex": "6e756c6c"
+    },
+    {
+      "name": "int_zero",
+      "input": 0,
+      "expected_hex": "30"
+    },
+    {
+      "name": "int_neg",
+      "input": -42,
+      "expected_hex": "2d3432"
+    },
+    {
+      "name": "int_max_safe",
+      "input": 9007199254740991,
+      "expected_hex": "39303037313939323534373430393931"
+    },
+    {
+      "name": "int_min_safe",
+      "input": -9007199254740991,
+      "expected_hex": "2d39303037313939323534373430393931"
+    },
+    {
+      "name": "empty_object",
+      "input": {},
+      "expected_hex": "7b7d"
+    },
+    {
+      "name": "empty_array",
+      "input": [],
+      "expected_hex": "5b5d"
+    },
+    {
+      "name": "key_sorting_ascii",
+      "input": {
+        "b": 1,
+        "a": 2,
+        "c": 3,
+        "A": 4
+      },
+      "expected_hex": "7b2241223a342c2261223a322c2262223a312c2263223a337d"
+    },
+    {
+      "name": "nested",
+      "input": {
+        "z": [
+          3,
+          2,
+          {
+            "y": 1,
+            "x": 2
+          }
+        ],
+        "a": {
+          "n": null,
+          "m": true
+        }
+      },
+      "expected_hex": "7b2261223a7b226d223a747275652c226e223a6e756c6c7d2c227a223a5b332c322c7b2278223a322c2279223a317d5d7d"
+    },
+    {
+      "name": "string_escapes",
+      "input": "tab\tnewline\nquote\"backslash\\\u0001bell",
+      "expected_hex": "227461625c746e65776c696e655c6e71756f74655c226261636b736c6173685c5c5c753030303162656c6c22"
+    },
+    {
+      "name": "unicode_bmp",
+      "input": {
+        "é": 1,
+        "e": 2,
+        "z": 3
+      },
+      "expected_hex": "7b2265223a322c227a223a332c22c3a9223a317d"
+    },
+    {
+      "name": "key_sorting_non_bmp",
+      "input": {
+        "😀": 1,
+        "￿": 2,
+        "a": 3
+      },
+      "expected_hex": "7b2261223a332c22f09f9880223a312c22efbfbf223a327d"
+    },
+    {
+      "name": "array_of_objects",
+      "input": [
+        {
+          "b": 1,
+          "a": 2
+        },
+        {
+          "d": 3,
+          "c": 4
+        }
+      ],
+      "expected_hex": "5b7b2261223a322c2262223a317d2c7b2263223a342c2264223a337d5d"
+    },
+    {
+      "name": "proto_pollution_keys",
+      "input": {
+        "__proto__": 1,
+        "constructor": 2,
+        "a": 3
+      },
+      "expected_hex": "7b225f5f70726f746f5f5f223a312c2261223a332c22636f6e7374727563746f72223a327d"
+    }
+  ],
+  "nfc_then_jcs": [
+    {
+      "name": "decomposed_string",
+      "input": "é",
+      "expected_hex": "22c3a922"
+    },
+    {
+      "name": "decomposed_in_object",
+      "input": {
+        "café": "naïve"
+      },
+      "expected_hex": "7b22636166c3a9223a226e61c3af7665227d"
+    }
+  ],
+  "keyid": [
+    {
+      "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+      "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee"
+    },
+    {
+      "public_key": "ed25519:gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+      "keyid": "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4"
+    },
+    {
+      "public_key": "ed25519:7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+      "keyid": "sha256:2e8ca4c3b98bdbd91144ae2aeec3d7fbc44a5fb289f3688a763f4d07b0840e8e"
+    }
+  ],
+  "verify": [
+    {
+      "name": "valid_single_threshold1",
+      "envelope": {
+        "signed": {
+          "kind": "plugin",
+          "id": "dev.x.y",
+          "version": "1.0.0",
+          "n": 7
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee": {
+          "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        },
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4": {
+          "public_key": "ed25519:gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 1,
+      "expect": "ok",
+      "verified": [
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee"
+      ]
+    },
+    {
+      "name": "valid_single_threshold2_fails",
+      "envelope": {
+        "signed": {
+          "kind": "plugin",
+          "id": "dev.x.y",
+          "version": "1.0.0",
+          "n": 7
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee": {
+          "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        },
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4": {
+          "public_key": "ed25519:gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 2,
+      "expect": "fail"
+    },
+    {
+      "name": "two_sigs_threshold2_ok",
+      "envelope": {
+        "signed": {
+          "kind": "plugin",
+          "id": "dev.x.y",
+          "version": "1.0.0",
+          "n": 7
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          },
+          {
+            "keyid": "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4",
+            "sig": "ed25519:YpdK/HQLVihdIdsOJQN78TAkulY52ZindgyDVjg945PEvSWFEEdwcMGdaaV8W9yDkAMCl+SxQ47xIenkuAy7BA=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee": {
+          "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        },
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4": {
+          "public_key": "ed25519:gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 2,
+      "expect": "ok",
+      "verified": [
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4"
+      ]
+    },
+    {
+      "name": "tampered_payload_fails",
+      "envelope": {
+        "signed": {
+          "kind": "plugin",
+          "id": "dev.x.y",
+          "version": "9.9.9",
+          "n": 7
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee": {
+          "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        },
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4": {
+          "public_key": "ed25519:gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 1,
+      "expect": "fail"
+    },
+    {
+      "name": "spoofed_keyid_ignored_fails",
+      "envelope": {
+        "signed": {
+          "kind": "plugin",
+          "id": "dev.x.y",
+          "version": "1.0.0",
+          "n": 7
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4": {
+          "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 1,
+      "expect": "fail"
+    },
+    {
+      "name": "unknown_keyid_ignored_fails",
+      "envelope": {
+        "signed": {
+          "kind": "plugin",
+          "id": "dev.x.y",
+          "version": "1.0.0",
+          "n": 7
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4": {
+          "public_key": "ed25519:gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 1,
+      "expect": "fail"
+    },
+    {
+      "name": "duplicate_keyid_counts_once_fails_threshold2",
+      "envelope": {
+        "signed": {
+          "kind": "plugin",
+          "id": "dev.x.y",
+          "version": "1.0.0",
+          "n": 7
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          },
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee": {
+          "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        },
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4": {
+          "public_key": "ed25519:gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 2,
+      "expect": "fail"
+    },
+    {
+      "name": "duplicate_keyid_threshold1_ok",
+      "envelope": {
+        "signed": {
+          "kind": "plugin",
+          "id": "dev.x.y",
+          "version": "1.0.0",
+          "n": 7
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          },
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:xreQpDYbF6f0cTl85EiZxmmPnhysfSfonimJwOM448wH7YpsZdcx7K/JbAhbzMZERtvhalRuapV/+LdJSbMqBg=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee": {
+          "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        },
+        "sha256:b19bcbcbc7bb9acbe35dfe8e32039b6d55313ee69200868a2bfc17d23c059dc4": {
+          "public_key": "ed25519:gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 1,
+      "expect": "ok",
+      "verified": [
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee"
+      ]
+    },
+    {
+      "name": "proto_key_in_signed_ok",
+      "envelope": {
+        "signed": {
+          "__proto__": {
+            "x": 1
+          },
+          "id": "z",
+          "n": 1
+        },
+        "signatures": [
+          {
+            "keyid": "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee",
+            "sig": "ed25519:8tgY4DyHEAQWdi02SMZZRJgH7jPqOW8jPwkIl4CxN582z9XPgp2/aWMRVyCMQAQhSxX6hG1JByFyuD30AJX0DA=="
+          }
+        ]
+      },
+      "keys": {
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee": {
+          "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          "keytype": "ed25519",
+          "scheme": "ed25519"
+        }
+      },
+      "threshold": 1,
+      "expect": "ok",
+      "verified": [
+        "sha256:64fa6c830687963e1ba59129325b3535913e4ee26c53822486183f2f213403ee"
+      ]
+    }
+  ],
+  "cosign": [
+    {
+      "name": "valid_required_only",
+      "entry": {
+        "kind": "plugin",
+        "capability_id": "dev.x.tool",
+        "version": "1.2.0",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "official_signature": "ed25519:poesc17UWAQEqlYKmA6fTQ3JS2b74RlhgPsXo1O1zoIo4MPCfX8zWg8akvcKugc2tbVdRZb4pU3KFRg4ozEQDA==",
+        "official_signer_keyid": "sha256:3afdf6529a3c3a556a69f22477c03fb5fa7de6dbece0cab261869e2db9b99cc3"
+      },
+      "official_public_key": "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "expect": true
+    },
+    {
+      "name": "valid_with_optional",
+      "entry": {
+        "kind": "plugin",
+        "capability_id": "dev.x.tool",
+        "version": "1.2.0",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "blob_digest": "sha256:6d98e8b6420256639e35f3b5e821e1b564efc124a5c842a9b91f490ea6efd663",
+        "length": 4096,
+        "official_signature": "ed25519:U7f0B5EWY1qIwyisPJtM8jIchyz0Di18N5iXBkD3SgRqal9msCkuxlDlMbg4SplAXdGQvC3fG6YjjSZz8725BQ==",
+        "official_signer_keyid": "sha256:3afdf6529a3c3a556a69f22477c03fb5fa7de6dbece0cab261869e2db9b99cc3"
+      },
+      "official_public_key": "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "expect": true
+    },
+    {
+      "name": "valid_material_prefixed",
+      "entry": {
+        "kind": "plugin",
+        "capability_id": "dev.x.tool",
+        "version": "1.2.0",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "official_signature": "ed25519:poesc17UWAQEqlYKmA6fTQ3JS2b74RlhgPsXo1O1zoIo4MPCfX8zWg8akvcKugc2tbVdRZb4pU3KFRg4ozEQDA==",
+        "official_signer_keyid": "sha256:3afdf6529a3c3a556a69f22477c03fb5fa7de6dbece0cab261869e2db9b99cc3"
+      },
+      "official_public_key": "ed25519:/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "expect": true
+    },
+    {
+      "name": "no_trust_root",
+      "entry": {
+        "kind": "plugin",
+        "capability_id": "dev.x.tool",
+        "version": "1.2.0",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "official_signature": "ed25519:poesc17UWAQEqlYKmA6fTQ3JS2b74RlhgPsXo1O1zoIo4MPCfX8zWg8akvcKugc2tbVdRZb4pU3KFRg4ozEQDA==",
+        "official_signer_keyid": "sha256:3afdf6529a3c3a556a69f22477c03fb5fa7de6dbece0cab261869e2db9b99cc3"
+      },
+      "official_public_key": "",
+      "expect": false
+    },
+    {
+      "name": "tampered_field",
+      "entry": {
+        "kind": "plugin",
+        "capability_id": "dev.x.tool",
+        "version": "9.9.9",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "official_signature": "ed25519:poesc17UWAQEqlYKmA6fTQ3JS2b74RlhgPsXo1O1zoIo4MPCfX8zWg8akvcKugc2tbVdRZb4pU3KFRg4ozEQDA==",
+        "official_signer_keyid": "sha256:3afdf6529a3c3a556a69f22477c03fb5fa7de6dbece0cab261869e2db9b99cc3"
+      },
+      "official_public_key": "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "expect": false
+    },
+    {
+      "name": "wrong_claimed_keyid",
+      "entry": {
+        "kind": "plugin",
+        "capability_id": "dev.x.tool",
+        "version": "1.2.0",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "official_signature": "ed25519:poesc17UWAQEqlYKmA6fTQ3JS2b74RlhgPsXo1O1zoIo4MPCfX8zWg8akvcKugc2tbVdRZb4pU3KFRg4ozEQDA==",
+        "official_signer_keyid": "sha256:5e7459cd56611296605dd221670501a615751e1a079f528652090a16f5956598"
+      },
+      "official_public_key": "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "expect": false
+    },
+    {
+      "name": "foreign_signer_spoofed_keyid",
+      "entry": {
+        "kind": "plugin",
+        "capability_id": "dev.x.tool",
+        "version": "1.2.0",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "official_signature": "ed25519:OocLBs+oO8ftC+ouve7CwiR+HDv1/Y5t6bdI+NlFWnlj7+WHvdxE5tXnFQ65Zto2JuB7jy9Hl+yYdCvv79r5Cg==",
+        "official_signer_keyid": "sha256:3afdf6529a3c3a556a69f22477c03fb5fa7de6dbece0cab261869e2db9b99cc3"
+      },
+      "official_public_key": "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "expect": false
+    },
+    {
+      "name": "missing_capability_id",
+      "entry": {
+        "kind": "plugin",
+        "version": "1.2.0",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "official_signature": "ed25519:poesc17UWAQEqlYKmA6fTQ3JS2b74RlhgPsXo1O1zoIo4MPCfX8zWg8akvcKugc2tbVdRZb4pU3KFRg4ozEQDA==",
+        "official_signer_keyid": "sha256:3afdf6529a3c3a556a69f22477c03fb5fa7de6dbece0cab261869e2db9b99cc3"
+      },
+      "official_public_key": "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "expect": false
+    },
+    {
+      "name": "noncanonical_signature",
+      "entry": {
+        "kind": "plugin",
+        "capability_id": "dev.x.tool",
+        "version": "1.2.0",
+        "package_digest": "sha256:46addc4fb8069a24be600f7ea1203626c5a11038708a86cc4ab235bc6b93eea1",
+        "artifact_ref": "superclaw-object://capabilities/dev.x.tool/1.2.0/pkg.scplug",
+        "official_signature": "ed25519:poesc1\n7UWAQEqlYKmA6fTQ3JS2b74RlhgPsXo1O1zoIo4MPCfX8zWg8akvcKugc2tbVdRZb4pU3KFRg4ozEQDA==",
+        "official_signer_keyid": "sha256:3afdf6529a3c3a556a69f22477c03fb5fa7de6dbece0cab261869e2db9b99cc3"
+      },
+      "official_public_key": "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "expect": false
+    }
+  ],
+  "package_digest": {
+    "manifest_name": "superclaw-plugin.json",
+    "manifest": {
+      "id": "dev.x.tool",
+      "version": "1.2.0",
+      "runtime": {
+        "type": "mcp"
+      },
+      "description": "héllo 世界 😀",
+      "tools": [
+        {
+          "name": "b"
+        },
+        {
+          "name": "a"
+        }
+      ],
+      "provenance": {
+        "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "signature": "ed25519:placeholder",
+        "signer": "root"
+      }
+    },
+    "files": [
+      {
+        "relative": "data.txt",
+        "mode_signal": 0,
+        "content_b64": "cGxhaW4gZGF0YQo="
+      },
+      {
+        "relative": "entry.py",
+        "mode_signal": 1,
+        "content_b64": "cHJpbnQoJ2hpJykK"
+      },
+      {
+        "relative": "lib/util.py",
+        "mode_signal": 0,
+        "content_b64": "eCA9IDEK"
+      },
+      {
+        "relative": "superclaw-plugin.json",
+        "mode_signal": 0,
+        "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4yLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgImRlc2NyaXB0aW9uIjogImhcdTAwZTlsbG8gXHU0ZTE2XHU3NTRjIFx1ZDgzZFx1ZGUwMCIsICJ0b29scyI6IFt7Im5hbWUiOiAiYiJ9LCB7Im5hbWUiOiAiYSJ9XSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OnBsYWNlaG9sZGVyIiwgInNpZ25lciI6ICJyb290In19"
+      }
+    ],
+    "expected_digest": "sha256:f86a891518e15bdb79be30342063971ead354b8b08af9481bc9b38e816117846"
+  },
+  "signature": {
+    "digest": "sha256:9d7ec3059a3be4a437e8028d9a498f2fd4adfa7183af52ecc712704ee1dc8260",
+    "public_key_bare": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+    "public_key_prefixed": "ed25519:6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+    "valid_signature": "ed25519:UoiC9CTzs8fEzw9Krrd5+JVvOXzV5fPf53ppnl1HoRAfDEGtdZvZJcYwgDCRLEqOtJJo8oHUztToVLbgOLdaCQ==",
+    "wrong_signature": "ed25519:HPfW3J1aANEgIAo/7y9Y8r4WdStjSoensMS/LRfVLEurqEHHHhun+NVgecGWdJ/CHpBrIS0TTacFCK9fG9CgAA==",
+    "other_public_key_bare": "E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o="
+  },
+  "revocation": {
+    "id_field": "plugin_id",
+    "target": {
+      "artifact_id": "dev.x.tool",
+      "version": "1.2.0",
+      "declared_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "computed_digest": "sha256:a59e0c6ede391ee8993a089818bc52f7858009108bf083bc6510daa086181381"
+    },
+    "cases": [
+      {
+        "name": "version_match_no_digest",
+        "revocation": {
+          "revoked": [
+            {
+              "plugin_id": "dev.x.tool",
+              "version": "1.2.0"
+            }
+          ]
+        },
+        "revoked": true
+      },
+      {
+        "name": "id_only_all_versions",
+        "revocation": {
+          "revoked": [
+            {
+              "plugin_id": "dev.x.tool"
+            }
+          ]
+        },
+        "revoked": true
+      },
+      {
+        "name": "version_mismatch",
+        "revocation": {
+          "revoked": [
+            {
+              "plugin_id": "dev.x.tool",
+              "version": "9.9.9"
+            }
+          ]
+        },
+        "revoked": false
+      },
+      {
+        "name": "other_id",
+        "revocation": {
+          "revoked": [
+            {
+              "plugin_id": "dev.other"
+            }
+          ]
+        },
+        "revoked": false
+      },
+      {
+        "name": "declared_digest_match",
+        "revocation": {
+          "revoked": [
+            {
+              "plugin_id": "dev.x.tool",
+              "version": "1.2.0",
+              "package_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ]
+        },
+        "revoked": true
+      },
+      {
+        "name": "computed_digest_match",
+        "revocation": {
+          "revoked": [
+            {
+              "plugin_id": "dev.x.tool",
+              "package_digest": "sha256:a59e0c6ede391ee8993a089818bc52f7858009108bf083bc6510daa086181381"
+            }
+          ]
+        },
+        "revoked": true
+      },
+      {
+        "name": "digest_no_match",
+        "revocation": {
+          "revoked": [
+            {
+              "plugin_id": "dev.x.tool",
+              "package_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            }
+          ]
+        },
+        "revoked": false
+      },
+      {
+        "name": "empty_list",
+        "revocation": {
+          "revoked": []
+        },
+        "revoked": false
+      }
+    ]
+  },
+  "verify_package": [
+    {
+      "name": "valid_root_signed",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:f68562eaa3c67073ed998801ad1a62659c487ecfeaa976c3b738d488e69402bb",
+          "signature": "ed25519:7N3jIh877Mr4Ha1GMJwO7+9vD+eov/S+CAC3tQyCM2jgfZBD7fdsj4Lg1+EV+E3gY+scNbUN77MQA8S4kr2IDg==",
+          "signer": "root"
+        }
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1NjpmNjg1NjJlYWEzYzY3MDczZWQ5OTg4MDFhZDFhNjI2NTljNDg3ZWNmZWFhOTc2YzNiNzM4ZDQ4OGU2OTQwMmJiIiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OjdOM2pJaDg3N01yNEhhMUdNSndPNys5dkQrZW92L1MrQ0FDM3RReUNNMmpnZlpCRDdmZHNqNExnMStFVitFM2dZK3NjTmJVTjc3TVFBOFM0a3IySURnPT0iLCAic2lnbmVyIjogInJvb3QifX0="
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": "ed25519:Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=",
+      "expect": "ok",
+      "result": {
+        "plugin_id": "dev.x.tool",
+        "version": "1.0.0",
+        "digest": "sha256:f68562eaa3c67073ed998801ad1a62659c487ecfeaa976c3b738d488e69402bb",
+        "signer_class": "root"
+      }
+    },
+    {
+      "name": "digest_mismatch",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "signature": "ed25519:7N3jIh877Mr4Ha1GMJwO7+9vD+eov/S+CAC3tQyCM2jgfZBD7fdsj4Lg1+EV+E3gY+scNbUN77MQA8S4kr2IDg==",
+          "signer": "root"
+        }
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1NjoxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OjdOM2pJaDg3N01yNEhhMUdNSndPNys5dkQrZW92L1MrQ0FDM3RReUNNMmpnZlpCRDdmZHNqNExnMStFVitFM2dZK3NjTmJVTjc3TVFBOFM0a3IySURnPT0iLCAic2lnbmVyIjogInJvb3QifX0="
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": "ed25519:Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=",
+      "expect": "fail"
+    },
+    {
+      "name": "bad_signature",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:f68562eaa3c67073ed998801ad1a62659c487ecfeaa976c3b738d488e69402bb",
+          "signature": "ed25519:bz+spoHD/WfCIy5QNDz99ZJCVHOLYix48pt7oDKfoPHmqYsqqNgCjRHC5XX+KkuItFVxlvl4oA7NswChUJmpAg==",
+          "signer": "root"
+        }
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1NjpmNjg1NjJlYWEzYzY3MDczZWQ5OTg4MDFhZDFhNjI2NTljNDg3ZWNmZWFhOTc2YzNiNzM4ZDQ4OGU2OTQwMmJiIiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OmJ6K3Nwb0hEL1dmQ0l5NVFORHo5OVpKQ1ZIT0xZaXg0OHB0N29ES2ZvUEhtcVlzcXFOZ0NqUkhDNVhYK0trdUl0RlZ4bHZsNG9BN05zd0NoVUptcEFnPT0iLCAic2lnbmVyIjogInJvb3QifX0="
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": "ed25519:Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=",
+      "expect": "fail"
+    },
+    {
+      "name": "external_mcp_root_ok",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "external_mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:fc87528d509a62f90a03982c4866d5e84b21f4abc633c87811593063477c3ca6",
+          "signature": "ed25519:3Gk8QPUvL41+Uff7PH2PAHIxw1Wd71P3B+ZYBYQqcxfqIaTsWlXy2XHN0JEQT5A/HIL8tuCRHikCr9uQT8a3Bw==",
+          "signer": "root"
+        }
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJleHRlcm5hbF9tY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1NjpmYzg3NTI4ZDUwOWE2MmY5MGEwMzk4MmM0ODY2ZDVlODRiMjFmNGFiYzYzM2M4NzgxMTU5MzA2MzQ3N2MzY2E2IiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OjNHazhRUFV2TDQxK1VmZjdQSDJQQUhJeHcxV2Q3MVAzQitaWUJZUXFjeGZxSWFUc1dsWHkyWEhOMEpFUVQ1QS9ISUw4dHVDUkhpa0NyOXVRVDhhM0J3PT0iLCAic2lnbmVyIjogInJvb3QifX0="
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": "ed25519:Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=",
+      "expect": "ok",
+      "result": {
+        "plugin_id": "dev.x.tool",
+        "version": "1.0.0",
+        "digest": "sha256:fc87528d509a62f90a03982c4866d5e84b21f4abc633c87811593063477c3ca6",
+        "signer_class": "root"
+      }
+    },
+    {
+      "name": "external_mcp_non_root_fail",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "external_mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:fc87528d509a62f90a03982c4866d5e84b21f4abc633c87811593063477c3ca6",
+          "signature": "ed25519:wBzVoIAnZHGhNoRy6S3Z0LUJ/yxCl04Gpr3b8NNFvjlQ5O+sgjR17gUYx1kSmOQ6Wi+iEYOx6ybFXQSxOyrQCA==",
+          "signer": "root"
+        }
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJleHRlcm5hbF9tY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1NjpmYzg3NTI4ZDUwOWE2MmY5MGEwMzk4MmM0ODY2ZDVlODRiMjFmNGFiYzYzM2M4NzgxMTU5MzA2MzQ3N2MzY2E2IiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OndCelZvSUFuWkhHaE5vUnk2UzNaMExVSi95eENsMDRHcHIzYjhOTkZ2amxRNU8rc2dqUjE3Z1VZeDFrU21PUTZXaStpRVlPeDZ5YkZYUVN4T3lyUUNBPT0iLCAic2lnbmVyIjogInJvb3QifX0="
+        }
+      ],
+      "options": {
+        "public_key": "ed25519:C1E62bSSQBXKCQLtB5BE06xdvsIwbwaUjBDajrbjny0=",
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": null,
+      "expect": "fail"
+    },
+    {
+      "name": "skill_origin_field_rejected",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:883dddd5e2df097b16ae1e44d61966d639b3cbcd1f6e66af3221de47cdc8c2c5",
+          "signature": "ed25519:BlqcZ2atccXvo1JaLpgbCF3Jnj/0bD35PmvbtJ7H+oRGYjFR9MBjZx9lL7kL0gnUqiThqn+txAWfunPyUf4/Aw==",
+          "signer": "root"
+        },
+        "skill_origin": true
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1Njo4ODNkZGRkNWUyZGYwOTdiMTZhZTFlNDRkNjE5NjZkNjM5YjNjYmNkMWY2ZTY2YWYzMjIxZGU0N2NkYzhjMmM1IiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OkJscWNaMmF0Y2NYdm8xSmFMcGdiQ0YzSm5qLzBiRDM1UG12YnRKN0grb1JHWWpGUjlNQmpaeDlsTDdrTDBnblVxaVRocW4rdHhBV2Z1blB5VWY0L0F3PT0iLCAic2lnbmVyIjogInJvb3QifSwgInNraWxsX29yaWdpbiI6IHRydWV9"
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": "ed25519:Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=",
+      "expect": "fail"
+    },
+    {
+      "name": "skill_id_prefix_rejected",
+      "manifest": {
+        "id": "skill.demo",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:cbfb6661f463f521fecc81b355eb98eef9a78d0f9b1cb1e9421a4b2d7d7fcf4f",
+          "signature": "ed25519:dqm9ZYoNn+kHs9XXyGZgqpV/IHhFzAhd4B6+/bi6wTZvjyFTlQD3NP+hXqZFQYTQZ069EqngULcOSN1h4HPlBQ==",
+          "signer": "root"
+        }
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJza2lsbC5kZW1vIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1NjpjYmZiNjY2MWY0NjNmNTIxZmVjYzgxYjM1NWViOThlZWY5YTc4ZDBmOWIxY2IxZTk0MjFhNGIyZDdkN2ZjZjRmIiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OmRxbTlaWW9ObitrSHM5WFh5R1pncXBWL0lIaEZ6QWhkNEI2Ky9iaTZ3VFp2anlGVGxRRDNOUCtoWHFaRlFZVFFaMDY5RXFuZ1VMY09TTjFoNEhQbEJRPT0iLCAic2lnbmVyIjogInJvb3QifX0="
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": "ed25519:Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=",
+      "expect": "fail"
+    },
+    {
+      "name": "sign_free_local_skill_ok",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:883dddd5e2df097b16ae1e44d61966d639b3cbcd1f6e66af3221de47cdc8c2c5",
+          "signature": "ed25519:z36g1mno4lwE6BzKrHrSF8HmRTEMm7wHghUzuC2Dy9GRHtFvukaWa2JRVm93I/suoKlzKvB3a09Dcc/SN4PiCg==",
+          "signer": "root"
+        },
+        "skill_origin": true
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1Njo4ODNkZGRkNWUyZGYwOTdiMTZhZTFlNDRkNjE5NjZkNjM5YjNjYmNkMWY2ZTY2YWYzMjIxZGU0N2NkYzhjMmM1IiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OnozNmcxbW5vNGx3RTZCektySHJTRjhIbVJURU1tN3dIZ2hVenVDMkR5OUdSSHRGdnVrYVdhMkpSVm05M0kvc3VvS2x6S3ZCM2EwOURjYy9TTjRQaUNnPT0iLCAic2lnbmVyIjogInJvb3QifSwgInNraWxsX29yaWdpbiI6IHRydWV9"
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "local",
+        "reject_skill_origin": false,
+        "revocation_data": null
+      },
+      "root_env": null,
+      "expect": "ok",
+      "result": {
+        "plugin_id": "dev.x.tool",
+        "version": "1.0.0",
+        "digest": "sha256:883dddd5e2df097b16ae1e44d61966d639b3cbcd1f6e66af3221de47cdc8c2c5",
+        "signer_class": "none"
+      }
+    },
+    {
+      "name": "local_skill_but_reject_origin_fail",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:883dddd5e2df097b16ae1e44d61966d639b3cbcd1f6e66af3221de47cdc8c2c5",
+          "signature": "ed25519:z36g1mno4lwE6BzKrHrSF8HmRTEMm7wHghUzuC2Dy9GRHtFvukaWa2JRVm93I/suoKlzKvB3a09Dcc/SN4PiCg==",
+          "signer": "root"
+        },
+        "skill_origin": true
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1Njo4ODNkZGRkNWUyZGYwOTdiMTZhZTFlNDRkNjE5NjZkNjM5YjNjYmNkMWY2ZTY2YWYzMjIxZGU0N2NkYzhjMmM1IiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OnozNmcxbW5vNGx3RTZCektySHJTRjhIbVJURU1tN3dIZ2hVenVDMkR5OUdSSHRGdnVrYVdhMkpSVm05M0kvc3VvS2x6S3ZCM2EwOURjYy9TTjRQaUNnPT0iLCAic2lnbmVyIjogInJvb3QifSwgInNraWxsX29yaWdpbiI6IHRydWV9"
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "local",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": null,
+      "expect": "fail"
+    },
+    {
+      "name": "revoked_fail",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": {
+          "type": "mcp"
+        },
+        "provenance": {
+          "package_digest": "sha256:f68562eaa3c67073ed998801ad1a62659c487ecfeaa976c3b738d488e69402bb",
+          "signature": "ed25519:7N3jIh877Mr4Ha1GMJwO7+9vD+eov/S+CAC3tQyCM2jgfZBD7fdsj4Lg1+EV+E3gY+scNbUN77MQA8S4kr2IDg==",
+          "signer": "root"
+        }
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6IHsidHlwZSI6ICJtY3AifSwgInByb3ZlbmFuY2UiOiB7InBhY2thZ2VfZGlnZXN0IjogInNoYTI1NjpmNjg1NjJlYWEzYzY3MDczZWQ5OTg4MDFhZDFhNjI2NTljNDg3ZWNmZWFhOTc2YzNiNzM4ZDQ4OGU2OTQwMmJiIiwgInNpZ25hdHVyZSI6ICJlZDI1NTE5OjdOM2pJaDg3N01yNEhhMUdNSndPNys5dkQrZW92L1MrQ0FDM3RReUNNMmpnZlpCRDdmZHNqNExnMStFVitFM2dZK3NjTmJVTjc3TVFBOFM0a3IySURnPT0iLCAic2lnbmVyIjogInJvb3QifX0="
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": {
+          "revoked": [
+            {
+              "plugin_id": "dev.x.tool"
+            }
+          ]
+        }
+      },
+      "root_env": "ed25519:Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=",
+      "expect": "fail"
+    },
+    {
+      "name": "runtime_non_object_fail",
+      "manifest": {
+        "id": "dev.x.tool",
+        "version": "1.0.0",
+        "runtime": "external_mcp",
+        "provenance": {
+          "package_digest": "sha256:aa440bd973770148a499670e8fb3c1131a16db849fce986de16746f6dc1271e4",
+          "signature": "ed25519:xDgtTN5/iOqb61rodw0WnhIfI1IKmyT5YAsVavZZCeXYYIKZgtBPQau56HpVVmA/tc7GJ5muge8/F6eOMBjbAQ==",
+          "signer": "root"
+        }
+      },
+      "files": [
+        {
+          "relative": "entry.py",
+          "mode_signal": 0,
+          "content_b64": "cHJpbnQoJ3gnKQo="
+        },
+        {
+          "relative": "superclaw-plugin.json",
+          "mode_signal": 0,
+          "content_b64": "eyJpZCI6ICJkZXYueC50b29sIiwgInZlcnNpb24iOiAiMS4wLjAiLCAicnVudGltZSI6ICJleHRlcm5hbF9tY3AiLCAicHJvdmVuYW5jZSI6IHsicGFja2FnZV9kaWdlc3QiOiAic2hhMjU2OmFhNDQwYmQ5NzM3NzAxNDhhNDk5NjcwZThmYjNjMTEzMWExNmRiODQ5ZmNlOTg2ZGUxNjc0NmY2ZGMxMjcxZTQiLCAic2lnbmF0dXJlIjogImVkMjU1MTk6eERndFRONS9pT3FiNjFyb2R3MFduaElmSTFJS215VDVZQXNWYXZaWkNlWFlZSUtaZ3RCUFFhdTU2SHBWVm1BL3RjN0dKNW11Z2U4L0Y2ZU9NQmpiQVE9PSIsICJzaWduZXIiOiAicm9vdCJ9fQ=="
+        }
+      ],
+      "options": {
+        "public_key": null,
+        "provenance": "remote",
+        "reject_skill_origin": true,
+        "revocation_data": null
+      },
+      "root_env": "ed25519:Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=",
+      "expect": "fail"
+    }
+  ]
+}

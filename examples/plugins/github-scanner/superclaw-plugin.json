@@ -1,0 +1,115 @@
+{
+  "schema_version": "0.1.0",
+  "id": "dev.superclaw.github-scanner",
+  "name": "GitHub Scanner",
+  "version": "0.1.0",
+  "summary": "Demonstrates a credential-requiring plugin without embedding user secrets.",
+  "source": {
+    "type": "developer_upload",
+    "clawhunt_problem_id": null,
+    "developer_id": "dev_fixture"
+  },
+  "runtime": {
+    "type": "mcp_sidecar",
+    "entrypoint": "bin/github-scanner",
+    "args": ["mcp"],
+    "transport": "stdio",
+    "mcp_protocol_versions": ["2025-06-18"],
+    "platforms": ["darwin-arm64", "linux-x64"]
+  },
+  "tools": [
+    {
+      "name": "github_scan",
+      "description": "Scan GitHub metadata using a locally injected token.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "owner": { "type": "string" },
+          "repo": { "type": "string" }
+        },
+        "required": ["owner", "repo"],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "artifacts": {
+            "type": "array",
+            "items": { "type": "object" }
+          }
+        },
+        "required": ["text", "artifacts"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "permissions": {
+    "filesystem": [],
+    "network": [
+      { "host": "api.github.com" }
+    ],
+    "environment": ["GITHUB_TOKEN"]
+  },
+  "configuration": {
+    "secrets": [
+      {
+        "name": "GITHUB_TOKEN",
+        "description": "GitHub token injected locally by SuperClaw credential manager.",
+        "required": true,
+        "inject_as": "env",
+        "env_name": "GITHUB_TOKEN"
+      }
+    ],
+    "settings": [
+      {
+        "name": "default_owner",
+        "type": "string",
+        "description": "Default GitHub owner used when a call omits an owner value.",
+        "required": false,
+        "validation": {
+          "pattern": "^[A-Za-z0-9_.-]{1,80}$",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "ui": {
+          "control": "text",
+          "label": "Default owner",
+          "placeholder": "ClawHunt-Store",
+          "help": "Used only as non-secret local plugin configuration."
+        },
+        "default": "ClawHunt-Store"
+      }
+    ]
+  },
+  "acceptance": {
+    "level": "L2",
+    "tests": ["tests/smoke.sh"],
+    "evidence_fixtures": ["evidence-fixtures/smoke.json"],
+    "latency_budget_ms": 5000
+  },
+  "limits": {
+    "startup_timeout_ms": 3000,
+    "tool_timeout_ms": 30000,
+    "max_model_output_bytes": 65536,
+    "max_evidence_bytes": 5242880,
+    "max_memory_mb": 256
+  },
+  "resource_profile": {
+    "latency_class": "standard",
+    "expected_p95_latency_ms": 5000,
+    "cpu_class": "medium",
+    "memory_class": "medium",
+    "io_profile": "network"
+  },
+  "commerce": {
+    "pricing_model": "private_beta",
+    "metering": "per_invocation"
+  },
+  "provenance": {
+    "build_type": "developer_upload",
+    "source_digest": null,
+    "package_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "signature": "ed25519:fixture-signature"
+  }
+}

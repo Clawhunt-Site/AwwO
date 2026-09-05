@@ -1,0 +1,21 @@
+{
+  "searchPlaceholder": "搜索任何内容…",
+  "clear": "清除",
+  "searchHint": "输入以搜索机器人…",
+  "noContent": "该分类暂无内容",
+  "resultCount": "{{count}} 个结果",
+  "resultCount_other": "{{count}} 个结果",
+  "personalizedForYou": "为你推荐",
+  "basedOnPreferences": "基于你的风格偏好与使用习惯",
+  "noRecommendations": "暂无推荐",
+  "matchPercent": "{{percent}}% 匹配",
+  "celebritySex": "名人\n性爱",
+  "sexyOutfits": "性感\n装扮",
+  "classicActs": "经典\n场景",
+  "wildEncounters": "狂野\n邂逅",
+  "lgbtSex": "LGBT\n性爱",
+  "selfDirectorTitle": "没找到你想要的？",
+  "selfDirectorDesc": "自己描述，我们为你量身创作。",
+  "selfDirectorCta": "试试看",
+  "selfDirectorLoading": "加载中…"
+}

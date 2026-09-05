@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "event_types": [
+    "message.delta",
+    "message.completed",
+    "tool.started",
+    "tool.delta",
+    "tool.completed",
+    "error",
+    "reasoning.delta",
+    "reasoning.completed",
+    "usage",
+    "approval.requested",
+    "approval.resolved",
+    "adapter.diagnostic"
+  ],
+  "must_event_types": [
+    "message.delta",
+    "message.completed",
+    "tool.started",
+    "tool.delta",
+    "tool.completed",
+    "error"
+  ],
+  "gated_event_types": [
+    "reasoning.delta",
+    "reasoning.completed",
+    "usage",
+    "approval.requested",
+    "approval.resolved",
+    "adapter.diagnostic"
+  ],
+  "tool_kinds": [
+    "command",
+    "file",
+    "mcp",
+    "builtin",
+    "approval",
+    "unknown"
+  ],
+  "tool_statuses": [
+    "running",
+    "ok",
+    "error",
+    "cancelled"
+  ],
+  "stream_types": [
+    "stdout",
+    "stderr",
+    "patch",
+    "result",
+    "log",
+    "progress"
+  ],
+  "call_id_sources": [
+    "runtime",
+    "projector_synthesized"
+  ],
+  "id_sources": [
+    "sqlite",
+    "synthetic",
+    "none"
+  ],
+  "capability_tiers": [
+    "full",
+    "partial",
+    "batch"
+  ],
+  "snapshot_states": [
+    "WAITING_FOR_HUMAN_GATE",
+    "cancelled",
+    "completed",
+    "failed"
+  ],
+  "truncate_budget_bytes": 10240,
+  "redaction_placeholder": "[REDACTED]",
+  "envelope_fields": {
+    "required": [
+      "schema_version",
+      "type",
+      "seq",
+      "ts",
+      "runtime_id",
+      "capability_tier",
+      "payload"
+    ],
+    "optional": [
+      "session_id",
+      "run_id",
+      "turn_id",
+      "id",
+      "id_source"
+    ]
+  },
+  "tool_call_fields": {
+    "required": [
+      "call_id",
+      "call_id_source",
+      "kind",
+      "status",
+      "truncated"
+    ],
+    "optional": [
+      "name",
+      "input",
+      "output",
+      "degraded_fields",
+      "redacted_fields",
+      "artifact_refs",
+      "exit_code",
+      "duration_ms"
+    ]
+  },
+  "envelope_field_types": {
+    "schema_version": {
+      "type": "int",
+      "const": 1
+    },
+    "type": {
+      "type": "string",
+      "enum_ref": "event_types"
+    },
+    "seq": {
+      "type": "int",
+      "nullable": false,
+      "note": "real int, not bool"
+    },
+    "ts": {
+      "type": "string",
+      "format": "iso8601"
+    },
+    "runtime_id": {
+      "type": "string"
+    },
+    "capability_tier": {
+      "type": "string",
+      "enum_ref": "capability_tiers"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "session_id": {
+      "type": "string",
+      "nullable": true
+    },
+    "run_id": {
+      "type": "string",
+      "nullable": true
+    },
+    "turn_id": {
+      "type": "string",
+      "nullable": true
+    },
+    "id": {
+      "type": [
+        "int",
+        "string"
+      ],
+      "nullable": true
+    },
+    "id_source": {
+      "type": "string",
+      "enum_ref": "id_sources",
+      "nullable": true
+    }
+  },
+  "tool_call_field_types": {
+    "call_id": {
+      "type": "string"
+    },
+    "call_id_source": {
+      "type": "string",
+      "enum_ref": "call_id_sources"
+    },
+    "name": {
+      "type": "string",
+      "nullable": true
+    },
+    "kind": {
+      "type": "string",
+      "enum_ref": "tool_kinds"
+    },
+    "status": {
+      "type": "string",
+      "enum_ref": "tool_statuses"
+    },
+    "input": {
+      "type": "json",
+      "nullable": true
+    },
+    "output": {
+      "type": [
+        "json",
+        "string"
+      ],
+      "nullable": true
+    },
+    "degraded_fields": {
+      "type": "array",
+      "items": "string"
+    },
+    "redacted_fields": {
+      "type": "array",
+      "items": "string"
+    },
+    "truncated": {
+      "type": "object",
+      "shape": {
+        "input": "bool",
+        "output": "bool"
+      }
+    },
+    "artifact_refs": {
+      "type": "array",
+      "items": "object",
+      "nullable": true
+    },
+    "exit_code": {
+      "type": "int",
+      "nullable": true
+    },
+    "duration_ms": {
+      "type": "int",
+      "nullable": true
+    }
+  },
+  "validator_rules": {
+    "display_event": "display_contracts.validate_display_event",
+    "tool_call": "display_contracts.validate_tool_call"
+  }
+}

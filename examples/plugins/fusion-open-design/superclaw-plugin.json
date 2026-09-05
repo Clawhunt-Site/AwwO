@@ -1,0 +1,439 @@
+{
+  "schema_version": "0.1.0",
+  "id": "com.superclaw.open-design",
+  "name": "SuperClaw Open Design Fusion",
+  "version": "0.1.0",
+  "summary": "Projects Open Design skills, design systems, artifacts, exports, and critique through SuperClaw.",
+  "source": {
+    "type": "first_party",
+    "clawhunt_problem_id": null,
+    "developer_id": "superclaw"
+  },
+  "runtime": {
+    "type": "mcp_sidecar",
+    "entrypoint": "bin/fusion-open-design",
+    "args": [
+      "mcp"
+    ],
+    "transport": "stdio",
+    "mcp_protocol_versions": [
+      "2025-06-18"
+    ],
+    "platforms": [
+      "darwin-arm64",
+      "linux-x64",
+      "win32-x64"
+    ]
+  },
+  "tools": [
+    {
+      "name": "agents_catalog",
+      "description": "Open Design fusion projection for agents catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "byok_proxy_catalog",
+      "description": "Open Design fusion projection for byok proxy catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "skills_catalog",
+      "description": "List available design skills with mode, surface, scenario, and preview metadata.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "skills": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "skills"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "run_skill_artifact",
+      "description": "Open Design fusion projection for run skill artifact.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "design_systems_catalog",
+      "description": "List available design-system entries with tags and display metadata.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "design_systems": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "design_systems"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "visual_directions_catalog",
+      "description": "Open Design fusion projection for visual directions catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "device_frames_catalog",
+      "description": "Open Design fusion projection for device frames catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "artifact_preview",
+      "description": "Create or fetch a sandboxed artifact preview reference for SuperClaw evidence.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "preview_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "preview_url"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "export_bundle",
+      "description": "Export a generated design artifact bundle for handoff.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "critique_self_check",
+      "description": "Return a structured design critique summary suitable for verification evidence.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "scores": {
+            "type": "object"
+          },
+          "findings": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "scores",
+          "findings"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "media_generation_catalog",
+      "description": "Open Design fusion projection for media generation catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "prompt_templates_catalog",
+      "description": "Open Design fusion projection for prompt templates catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "claude_design_import",
+      "description": "Open Design fusion projection for claude design import.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "project_persistence",
+      "description": "Open Design fusion projection for project persistence.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "tools_dev_lifecycle",
+      "description": "Open Design fusion projection for tools dev lifecycle.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "desktop_shell",
+      "description": "Open Design fusion projection for desktop shell.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "mcp_live_artifacts",
+      "description": "Open Design fusion projection for mcp live artifacts.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "deploy_handoff",
+      "description": "Open Design fusion projection for deploy handoff.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "plugin_catalog",
+      "description": "Open Design fusion projection for plugin catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "i18n_catalog",
+      "description": "Open Design fusion projection for i18n catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "agent_spawn",
+      "description": "Open Design fusion projection for agent spawn. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "byok_model_stream",
+      "description": "Open Design fusion projection for byok model stream. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "media_generation_request",
+      "description": "Open Design fusion projection for media generation request. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "desktop_sidecar_control",
+      "description": "Open Design fusion projection for desktop sidecar control. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "deploy_publish",
+      "description": "Open Design fusion projection for deploy publish. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  ],
+  "permissions": {
+    "filesystem": [
+      {
+        "mode": "readwrite",
+        "scope": "artifact_dir"
+      }
+    ],
+    "network": [],
+    "environment": []
+  },
+  "acceptance": {
+    "level": "L2",
+    "tests": [
+      "tests/smoke.sh"
+    ],
+    "evidence_fixtures": [
+      "evidence-fixtures/smoke.json"
+    ],
+    "latency_budget_ms": 10000
+  },
+  "limits": {
+    "startup_timeout_ms": 3000,
+    "tool_timeout_ms": 10000,
+    "max_model_output_bytes": 65536,
+    "max_evidence_bytes": 5242880,
+    "max_memory_mb": 256
+  },
+  "resource_profile": {
+    "latency_class": "standard",
+    "expected_p95_latency_ms": 10000,
+    "cpu_class": "medium",
+    "memory_class": "medium",
+    "io_profile": "filesystem_write"
+  },
+  "commerce": {
+    "pricing_model": "private_beta",
+    "metering": "per_invocation"
+  },
+  "provenance": {
+    "build_type": "first_party",
+    "source_digest": null,
+    "package_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "signature": "ed25519:fixture-signature"
+  }
+}

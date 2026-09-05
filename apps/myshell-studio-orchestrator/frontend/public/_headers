@@ -1,0 +1,14 @@
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+
+/*.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/version.txt
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Access-Control-Allow-Origin: *
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

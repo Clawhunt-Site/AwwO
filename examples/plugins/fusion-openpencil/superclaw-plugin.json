@@ -1,0 +1,778 @@
+{
+  "schema_version": "0.1.0",
+  "id": "com.superclaw.openpencil",
+  "name": "SuperClaw OpenPencil Fusion",
+  "version": "0.1.0",
+  "summary": "Projects OpenPencil document, canvas, node, variable, MCP, and codegen capabilities through SuperClaw.",
+  "source": {
+    "type": "first_party",
+    "clawhunt_problem_id": null,
+    "developer_id": "superclaw"
+  },
+  "runtime": {
+    "type": "mcp_sidecar",
+    "entrypoint": "bin/fusion-openpencil",
+    "args": [
+      "mcp"
+    ],
+    "transport": "stdio",
+    "mcp_protocol_versions": [
+      "2025-06-18"
+    ],
+    "platforms": [
+      "darwin-arm64",
+      "linux-x64",
+      "win32-x64"
+    ]
+  },
+  "tools": [
+    {
+      "name": "open_document",
+      "description": "OpenPencil fusion projection for open document.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "document_open",
+      "description": "Open or create an OpenPencil design document reference for a run.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "batch_get",
+      "description": "OpenPencil fusion projection for batch get.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "get_selection",
+      "description": "OpenPencil fusion projection for get selection.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "snapshot_layout",
+      "description": "Record a canvas layout snapshot as evidence.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_empty_space",
+      "description": "OpenPencil fusion projection for find empty space.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "add_page",
+      "description": "OpenPencil fusion projection for add page.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "remove_page",
+      "description": "OpenPencil fusion projection for remove page.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "rename_page",
+      "description": "OpenPencil fusion projection for rename page.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "reorder_page",
+      "description": "OpenPencil fusion projection for reorder page.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "duplicate_page",
+      "description": "OpenPencil fusion projection for duplicate page.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "insert_node",
+      "description": "OpenPencil fusion projection for insert node.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "update_node",
+      "description": "OpenPencil fusion projection for update node.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "delete_node",
+      "description": "OpenPencil fusion projection for delete node.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "move_node",
+      "description": "OpenPencil fusion projection for move node.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "copy_node",
+      "description": "OpenPencil fusion projection for copy node.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "replace_node",
+      "description": "OpenPencil fusion projection for replace node.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "import_svg",
+      "description": "OpenPencil fusion projection for import svg.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "get_design_prompt",
+      "description": "OpenPencil fusion projection for get design prompt.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "batch_design",
+      "description": "OpenPencil fusion projection for batch design.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "design_skeleton",
+      "description": "OpenPencil fusion projection for design skeleton.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "design_content",
+      "description": "OpenPencil fusion projection for design content.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "design_refine",
+      "description": "OpenPencil fusion projection for design refine.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "read_nodes",
+      "description": "Read canvas nodes as bounded structured data for an agent turn.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "codegen_plan",
+      "description": "OpenPencil fusion projection for codegen plan.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "codegen_submit_chunk",
+      "description": "OpenPencil fusion projection for codegen submit chunk.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "codegen_assemble",
+      "description": "OpenPencil fusion projection for codegen assemble.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "codegen_clean",
+      "description": "OpenPencil fusion projection for codegen clean.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "codegen_export",
+      "description": "Export canvas content to a selected code target for delivery handoff.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "target"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "get_variables",
+      "description": "OpenPencil fusion projection for get variables.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "set_variables",
+      "description": "OpenPencil fusion projection for set variables.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "set_themes",
+      "description": "OpenPencil fusion projection for set themes.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "get_design_md",
+      "description": "OpenPencil fusion projection for get design md.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "set_design_md",
+      "description": "OpenPencil fusion projection for set design md.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "export_design_md",
+      "description": "OpenPencil fusion projection for export design md.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "save_theme_preset",
+      "description": "OpenPencil fusion projection for save theme preset.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "load_theme_preset",
+      "description": "OpenPencil fusion projection for load theme preset.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "list_theme_presets",
+      "description": "OpenPencil fusion projection for list theme presets.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "theme_presets",
+      "description": "List available style guide and theme preset identifiers for canvas generation.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "presets": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "presets"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_style_guide_tags",
+      "description": "OpenPencil fusion projection for get style guide tags.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "get_style_guide",
+      "description": "OpenPencil fusion projection for get style guide.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "search_all_unique_properties",
+      "description": "OpenPencil fusion projection for search all unique properties.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "replace_all_matching_properties",
+      "description": "OpenPencil fusion projection for replace all matching properties.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "figma_import",
+      "description": "OpenPencil fusion projection for figma import.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "cli_control",
+      "description": "OpenPencil fusion projection for cli control.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "sdk_embed",
+      "description": "OpenPencil fusion projection for sdk embed.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "desktop_shell",
+      "description": "OpenPencil fusion projection for desktop shell.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "agent_team_orchestration",
+      "description": "OpenPencil fusion projection for agent team orchestration.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "acp_server",
+      "description": "OpenPencil fusion projection for acp server.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "debug_validation_report",
+      "description": "OpenPencil fusion projection for debug validation report. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "debug_logs_tail",
+      "description": "OpenPencil fusion projection for debug logs tail. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "debug_screenshot",
+      "description": "OpenPencil fusion projection for debug screenshot. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  ],
+  "permissions": {
+    "filesystem": [
+      {
+        "mode": "readwrite",
+        "scope": "artifact_dir"
+      }
+    ],
+    "network": [],
+    "environment": []
+  },
+  "acceptance": {
+    "level": "L2",
+    "tests": [
+      "tests/smoke.sh"
+    ],
+    "evidence_fixtures": [
+      "evidence-fixtures/smoke.json"
+    ],
+    "latency_budget_ms": 10000
+  },
+  "limits": {
+    "startup_timeout_ms": 3000,
+    "tool_timeout_ms": 10000,
+    "max_model_output_bytes": 65536,
+    "max_evidence_bytes": 5242880,
+    "max_memory_mb": 256
+  },
+  "resource_profile": {
+    "latency_class": "standard",
+    "expected_p95_latency_ms": 10000,
+    "cpu_class": "medium",
+    "memory_class": "medium",
+    "io_profile": "filesystem_write"
+  },
+  "commerce": {
+    "pricing_model": "private_beta",
+    "metering": "per_invocation"
+  },
+  "provenance": {
+    "build_type": "first_party",
+    "source_digest": null,
+    "package_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "signature": "ed25519:fixture-signature"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "status": "passed",
+  "observed_at": "2026-09-04T16:23:10.164Z",
+  "R1": "passed",
+  "R2": "passed",
+  "scope": "Independent replay of original acceptance fixture against current demo; no real backend claims",
+  "adaptation": "Only import path adjusted for dated evidence directory; original acceptance fixture preserved"
+}

@@ -1,0 +1,18 @@
+{
+  "title": "Personnaliser la scène",
+  "videoQuality": "Qualité vidéo",
+  "qualityLow": "Basse",
+  "qualityMedium": "Moyenne",
+  "qualityHigh": "Haute",
+  "duration": "Durée",
+  "audio": "Audio",
+  "vipBadge": "VIP",
+  "estTime": "TEMPS EST.",
+  "mins": "min",
+  "energyCost": "COÛT EN ÉNERGIE",
+  "createNow": "Créer maintenant",
+  "unlockVipToCreate": "Débloquer VIP pour créer",
+  "cancel": "Annuler",
+  "needSubscription": "Achetez un pack d'énergie pour débloquer les fonctionnalités VIP",
+  "loadingCost": "Calcul en cours..."
+}

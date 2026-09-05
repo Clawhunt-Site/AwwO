@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clawhunt.store/schemas/superclaw-company.schema.json",
+  "title": "SuperClaw Company Template",
+  "description": "Standardized, signed company blueprint for the Capability Workshop (方向一). A STATIC governance template — roles + charters + per-role equipment allowlist + policy/budget defaults. It declares structure only; it never installs, runs, authorizes or instantiates anything (that is the CompanyTemplate domain model's proposal/commit flow, kernel-side). Mirrors the shared signed-artifact envelope (provenance/source/commerce/semver); deliberately does NOT carry plugin `acceptance` (tests/evidence_fixtures).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "version", "summary", "kind", "source", "commerce", "roles", "provenance"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$", "minLength": 2, "maxLength": 128},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.-][0-9A-Za-z.-]+)?$"},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "kind": {"const": "company"},
+    "logo": {"type": "string", "maxLength": 4096},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "developer_id"],
+      "properties": {
+        "type": {"enum": ["official", "developer", "local"]},
+        "developer_id": {"type": "string", "minLength": 1, "maxLength": 200},
+        "clawhunt_problem_id": {"type": "string", "maxLength": 200}
+      }
+    },
+    "commerce": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pricing_model"],
+      "properties": {
+        "pricing_model": {"enum": ["free", "paid_manual", "private_beta"]},
+        "metering": {"type": "string", "maxLength": 200}
+      }
+    },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "charter"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$", "minLength": 1, "maxLength": 80},
+          "charter": {"type": "string", "minLength": 1, "maxLength": 8000},
+          "reports_to": {"type": ["string", "null"], "maxLength": 80},
+          "backend_policy": {"type": "string", "maxLength": 80},
+          "model": {"type": "string", "maxLength": 120}
+        }
+      }
+    },
+    "equipment_requirements": {
+      "type": "object",
+      "description": "Per-role required equipment. Keys MUST be declared role names. Each value lists skill/plugin ids the role needs; instantiation intersects these with what the target workspace actually grants and drops the rest (kernel-side, human-gated).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skills": {"type": "array", "items": {"type": "string", "maxLength": 200}, "maxItems": 200},
+          "plugins": {"type": "array", "items": {"type": "string", "maxLength": 200}, "maxItems": 200}
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "high_risk_policies": {"type": "object"}
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_budget_seconds": {"type": "integer", "minimum": 0},
+        "default_token_budget": {"type": "integer", "minimum": 0}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build_type", "package_digest", "signature"],
+      "properties": {
+        "build_type": {"enum": ["official", "developer", "local"]},
+        "source_digest": {"type": "string", "maxLength": 200},
+        "package_digest": {"type": "string", "maxLength": 200},
+        "signature": {"type": "string", "maxLength": 4096}
+      }
+    }
+  }
+}

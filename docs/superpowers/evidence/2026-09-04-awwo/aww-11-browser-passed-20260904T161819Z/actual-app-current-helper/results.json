@@ -1,0 +1,562 @@
+{
+  "startedAt": "2026-09-04T16:18:19.104688+00:00",
+  "url": "http://127.0.0.1:4173/",
+  "mode": "current-app",
+  "scope": "Actual application help dialog in a fresh in-memory demo session; keyboard focus only.",
+  "doesNotProve": [
+    "real identity service",
+    "backend authorization",
+    "screen reader compliance"
+  ],
+  "sourceHashesBefore": {
+    "src/app.js": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+    "src/accessibility.js": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+    "index.html": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295"
+  },
+  "cases": [
+    {
+      "name": "forward_boundary",
+      "steps": [
+        {
+          "action": "open_help",
+          "hasFocus": true,
+          "activeElement": {
+            "tag": "BUTTON",
+            "id": null,
+            "role": null,
+            "text": "知道了",
+            "tabIndex": 0
+          },
+          "activeIsBody": false,
+          "activeInsideDialog": true,
+          "dialogOpen": true,
+          "dialogIsModal": true,
+          "focusableDescendants": [
+            {
+              "tag": "BUTTON",
+              "id": null,
+              "role": null,
+              "text": "知道了",
+              "tabIndex": 0
+            }
+          ]
+        },
+        {
+          "action": "Tab",
+          "hasFocus": true,
+          "activeElement": {
+            "tag": "BUTTON",
+            "id": null,
+            "role": null,
+            "text": "知道了",
+            "tabIndex": 0
+          },
+          "activeIsBody": false,
+          "activeInsideDialog": true,
+          "dialogOpen": true,
+          "dialogIsModal": true,
+          "focusableDescendants": [
+            {
+              "tag": "BUTTON",
+              "id": null,
+              "role": null,
+              "text": "知道了",
+              "tabIndex": 0
+            }
+          ]
+        },
+        {
+          "action": "Tab",
+          "hasFocus": true,
+          "activeElement": {
+            "tag": "BUTTON",
+            "id": null,
+            "role": null,
+            "text": "知道了",
+            "tabIndex": 0
+          },
+          "activeIsBody": false,
+          "activeInsideDialog": true,
+          "dialogOpen": true,
+          "dialogIsModal": true,
+          "focusableDescendants": [
+            {
+              "tag": "BUTTON",
+              "id": null,
+              "role": null,
+              "text": "知道了",
+              "tabIndex": 0
+            }
+          ]
+        },
+        {
+          "action": "Tab",
+          "hasFocus": true,
+          "activeElement": {
+            "tag": "BUTTON",
+            "id": null,
+            "role": null,
+            "text": "知道了",
+            "tabIndex": 0
+          },
+          "activeIsBody": false,
+          "activeInsideDialog": true,
+          "dialogOpen": true,
+          "dialogIsModal": true,
+          "focusableDescendants": [
+            {
+              "tag": "BUTTON",
+              "id": null,
+              "role": null,
+              "text": "知道了",
+              "tabIndex": 0
+            }
+          ]
+        }
+      ],
+      "escapeRestoresTrigger": true,
+      "passed": true
+    },
+    {
+      "name": "reverse_boundary",
+      "steps": [
+        {
+          "action": "open_help",
+          "hasFocus": true,
+          "activeElement": {
+            "tag": "BUTTON",
+            "id": null,
+            "role": null,
+            "text": "知道了",
+            "tabIndex": 0
+          },
+          "activeIsBody": false,
+          "activeInsideDialog": true,
+          "dialogOpen": true,
+          "dialogIsModal": true,
+          "focusableDescendants": [
+            {
+              "tag": "BUTTON",
+              "id": null,
+              "role": null,
+              "text": "知道了",
+              "tabIndex": 0
+            }
+          ]
+        },
+        {
+          "action": "Shift+Tab",
+          "hasFocus": true,
+          "activeElement": {
+            "tag": "BUTTON",
+            "id": null,
+            "role": null,
+            "text": "知道了",
+            "tabIndex": 0
+          },
+          "activeIsBody": false,
+          "activeInsideDialog": true,
+          "dialogOpen": true,
+          "dialogIsModal": true,
+          "focusableDescendants": [
+            {
+              "tag": "BUTTON",
+              "id": null,
+              "role": null,
+              "text": "知道了",
+              "tabIndex": 0
+            }
+          ]
+        },
+        {
+          "action": "Shift+Tab",
+          "hasFocus": true,
+          "activeElement": {
+            "tag": "BUTTON",
+            "id": null,
+            "role": null,
+            "text": "知道了",
+            "tabIndex": 0
+          },
+          "activeIsBody": false,
+          "activeInsideDialog": true,
+          "dialogOpen": true,
+          "dialogIsModal": true,
+          "focusableDescendants": [
+            {
+              "tag": "BUTTON",
+              "id": null,
+              "role": null,
+              "text": "知道了",
+              "tabIndex": 0
+            }
+          ]
+        },
+        {
+          "action": "Shift+Tab",
+          "hasFocus": true,
+          "activeElement": {
+            "tag": "BUTTON",
+            "id": null,
+            "role": null,
+            "text": "知道了",
+            "tabIndex": 0
+          },
+          "activeIsBody": false,
+          "activeInsideDialog": true,
+          "dialogOpen": true,
+          "dialogIsModal": true,
+          "focusableDescendants": [
+            {
+              "tag": "BUTTON",
+              "id": null,
+              "role": null,
+              "text": "知道了",
+              "tabIndex": 0
+            }
+          ]
+        }
+      ],
+      "escapeRestoresTrigger": true,
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "browser": "152.0.7977.82",
+  "servedAppJsSha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+  "servedAccessibilitySha256": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+  "focusEvents": [
+    {
+      "type": "focusout",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "H1",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BODY",
+      "activeId": null
+    },
+    {
+      "type": "focusin",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "focusout",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BODY",
+      "activeId": null
+    },
+    {
+      "type": "focusin",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Tab",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Tab",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Tab",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Tab",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Tab",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Tab",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Escape",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "focusout",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BODY",
+      "activeId": null
+    },
+    {
+      "type": "focusin",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Escape",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "focusout",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BODY",
+      "activeId": null
+    },
+    {
+      "type": "focusin",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Shift",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Tab",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Tab",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Shift",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Shift",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Tab",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Tab",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Shift",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Shift",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Tab",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Tab",
+      "shiftKey": true,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Shift",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keydown",
+      "key": "Escape",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "focusout",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BODY",
+      "activeId": null
+    },
+    {
+      "type": "focusin",
+      "key": null,
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    },
+    {
+      "type": "keyup",
+      "key": "Escape",
+      "shiftKey": false,
+      "targetTag": "BUTTON",
+      "targetId": null,
+      "hasFocus": true,
+      "activeTag": "BUTTON",
+      "activeId": null
+    }
+  ],
+  "sourceHashesAfter": {
+    "src/app.js": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+    "src/accessibility.js": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+    "index.html": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295"
+  },
+  "servedAppMatchesOriginalSource": true,
+  "appSourceUnchangedDuringTest": true,
+  "allWatchedSourcesUnchangedDuringTest": true,
+  "servedHelperMatchesExpected": true,
+  "passed": true,
+  "status": "passed",
+  "finishedAt": "2026-09-04T16:18:21.096786+00:00"
+}

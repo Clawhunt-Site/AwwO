@@ -1,0 +1,21 @@
+{
+  "searchPlaceholder": "Search anything…",
+  "clear": "Clear",
+  "searchHint": "Type to search bots…",
+  "noContent": "No content in this category yet",
+  "resultCount": "{{count}} result",
+  "resultCount_other": "{{count}} results",
+  "personalizedForYou": "Personalized for you",
+  "basedOnPreferences": "Based on your style preferences & usage",
+  "noRecommendations": "No recommendations yet",
+  "matchPercent": "{{percent}}% match",
+  "celebritySex": "Celebrity\nSex",
+  "sexyOutfits": "Sexy\nOutfits",
+  "classicActs": "Classic\nActs",
+  "wildEncounters": "Wild\nEncounters",
+  "lgbtSex": "LGBT\nSex",
+  "selfDirectorTitle": "Didn't find what you're looking for?",
+  "selfDirectorDesc": "Describe it yourself — we'll create it just for you.",
+  "selfDirectorCta": "Try it",
+  "selfDirectorLoading": "Loading…"
+}

@@ -1,0 +1,18 @@
+{
+  "title": "Настроить сцену",
+  "videoQuality": "Качество видео",
+  "qualityLow": "Низкое",
+  "qualityMedium": "Среднее",
+  "qualityHigh": "Высокое",
+  "duration": "Длительность",
+  "audio": "Звук",
+  "vipBadge": "VIP",
+  "estTime": "ОЦЕН. ВРЕМЯ",
+  "mins": "мин",
+  "energyCost": "СТОИМОСТЬ ЭНЕРГИИ",
+  "createNow": "Создать сейчас",
+  "unlockVipToCreate": "Разблокировать VIP",
+  "cancel": "Отмена",
+  "needSubscription": "Купите энергетический пакет, чтобы разблокировать VIP-функции",
+  "loadingCost": "Вычисление..."
+}

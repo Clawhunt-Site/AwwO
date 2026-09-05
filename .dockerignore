@@ -1,0 +1,100 @@
+# ============================================================================
+# .dockerignore —— 精简 Docker 构建上下文
+# ----------------------------------------------------------------------------
+# Dockerfile 仅 COPY：pyproject.toml、README.md、packages、apps 四项，
+# 构建分两阶段（node:22-slim 构建 web → python:3.12-slim 跑 uvicorn）。
+# 因此除上述路径外的一切都可安全排除，避免把 .git/node_modules/third_party
+# 等巨大且无关的内容塞进构建上下文，拖慢甚至撑爆构建。
+# ============================================================================
+
+# --- 版本控制与 IDE 配置（构建用不到，且 .git 含 448+ PR 历史，巨大）---
+.git
+.gitignore
+.gitattributes
+.githooks
+.vscode
+.idea
+
+# --- 依赖与构建产物（容器内会重新安装/构建，宿主产物一律不带入）---
+**/node_modules
+**/dist
+**/build
+**/target
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.egg-info
+.venv
+venv
+
+# --- 运行态与本地状态（数据库/运行目录不应进镜像）---
+.local
+.gemini
+.grok
+.claude
+.worktrees
+.superclaw
+data
+artifacts
+runtime
+!apps/myshell-studio-orchestrator/orchestrator/backend/studio_app/infrastructure/runtime
+!apps/myshell-studio-orchestrator/orchestrator/backend/studio_app/infrastructure/runtime/**
+ledgers
+screenshots
+recordings
+browser-profiles
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite
+**/*.sqlite3
+**/*.log
+
+# --- 测试与各类工具缓存（与构建无关）---
+.pytest_cache
+.mypy_cache
+.ruff_cache
+coverage
+tests
+.codex-cli-advisor
+.gemini-cli-advisor
+.grok-cli-advisor
+.antigravity-cli-advisor
+.codex-orchestrator
+.goalgo
+.playwright-mcp
+
+# --- 文档与无关顶层目录（Dockerfile 不 COPY，排除以瘦身上下文）---
+docs
+specs
+CCimages
+third_party
+examples
+schemas
+scripts
+# The image build needs this one: it applies each vendored workspace package's publishConfig so the
+# control plane resolves @paperclipai/* to its BUILT dist instead of TypeScript source.
+!scripts/apply-workspace-publish-config.mjs
+!apps/myshell-studio-orchestrator/scripts/
+apps/myshell-studio-orchestrator/scripts/*
+!apps/myshell-studio-orchestrator/scripts/prepare-canvaspro-static.sh
+skills
+
+# --- 杂项 / OS 与编辑器垃圾 ---
+.DS_Store
+*.swp
+CHANGELOG.md
+THIRD_PARTY_NOTICES.md
+AGENTS.md
+CLAUDE.md
+coordination.md
+
+# --- 环境变量文件（含敏感配置，绝不进镜像；保留示例供参考）---
+.env
+.env.*
+!.env.example
+
+# --- 前端构建中间产物（容器内 npm run build 会重新生成 dist）---
+apps/web/dist
+apps/desktop/backend/dist
+apps/desktop/backend/build

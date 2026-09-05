@@ -1,0 +1,18 @@
+{
+  "title": "Scène aanpassen",
+  "videoQuality": "Videokwaliteit",
+  "qualityLow": "Laag",
+  "qualityMedium": "Gemiddeld",
+  "qualityHigh": "Hoog",
+  "duration": "Duur",
+  "audio": "Audio",
+  "vipBadge": "VIP",
+  "estTime": "GESCH. TIJD",
+  "mins": "min",
+  "energyCost": "ENERGIEKOSTEN",
+  "createNow": "Nu maken",
+  "unlockVipToCreate": "VIP ontgrendelen om te maken",
+  "cancel": "Annuleren",
+  "needSubscription": "Koop een energiepakket om VIP-functies te ontgrendelen",
+  "loadingCost": "Berekenen..."
+}

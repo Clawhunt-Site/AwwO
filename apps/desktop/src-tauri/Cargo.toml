@@ -1,0 +1,27 @@
+[package]
+name = "superclaw_desktop"
+version = "0.1.9"
+edition = "2021"
+
+[lib]
+name = "superclaw_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Decodes the base64 image bytes forwarded by the surface for "Reveal in Finder"
+# on pasted/uploaded images (no source file on disk). Tiny, audited, pinned.
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `unstable` enables multi-webview (`Window::add_child`, `Manager::get_window` /
+# `get_webview`) — the native browser child webview overlaid on the reference panel.
+tauri = { version = "2", features = ["unstable"] }
+# Single desktop instance: a second launch focuses the existing window instead of
+# starting a second shell. This makes the startup self-heal sweep safe (there is
+# never a *concurrent* instance whose shared sidecar we might reap) and matches
+# the expected one-window UX.
+tauri-plugin-single-instance = "2"
+ureq = { version = "2", features = ["json"] }

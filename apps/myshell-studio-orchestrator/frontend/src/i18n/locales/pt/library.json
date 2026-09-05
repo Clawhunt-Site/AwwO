@@ -1,0 +1,21 @@
+{
+  "title": "Biblioteca",
+  "failedToLoad": "Falha ao carregar",
+  "noCreationsYet": "Nenhuma criação ainda",
+  "noCreationsDesc": "Escolha um personagem e comece a gerar — suas imagens e vídeos aparecerão aqui.",
+  "browseCharacters": "Ver personagens",
+  "generationFailed": "Falha na geração",
+  "inQueue": "Na fila...",
+  "generatingStatus": "Gerando...",
+  "aiPick": "Escolha IA",
+  "formatNotSupported": "Formato não suportado",
+  "videoFallbackDesc": "Este vídeo não pode ser reproduzido no Telegram. Toque abaixo para assistir no navegador.",
+  "openInBrowser": "Abrir no navegador",
+  "download": "Baixar",
+  "like": "Curtir",
+  "dislike": "Não curtir",
+  "share": "Compartilhar",
+  "shareToTelegram": "Compartilhar no Telegram",
+  "sharePreview": "Pré-visualização desfocada",
+  "cancel": "Cancelar"
+}

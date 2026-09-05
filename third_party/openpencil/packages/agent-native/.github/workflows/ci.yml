@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Run tests
+        run: zig build test
+
+      - name: Build library
+        run: zig build
+
+  build-napi:
+    name: Build NAPI (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos
+            arch: arm64
+            runner: macos-14
+            zig_target: aarch64-macos
+          - os: macos
+            arch: x64
+            runner: macos-14 # cross-compile from arm64; macos-13 is retired
+            zig_target: x86_64-macos
+          - os: linux
+            arch: x64
+            runner: ubuntu-latest
+            # See release.yml for why we pin glibc 2.17 here.
+            zig_target: x86_64-linux-gnu.2.17
+          - os: windows
+            arch: x64
+            # Cross-compile from linux — napi_* imports come from
+            # napi/node_api.def via `zig dlltool` (see build.zig).
+            runner: ubuntu-latest
+            zig_target: x86_64-windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build NAPI addon
+        run: zig build napi -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig_target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent_napi-${{ matrix.os }}-${{ matrix.arch }}.node
+          path: zig-out/napi/agent_napi.node
+          retention-days: 30

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>团队知识库 · 响应式与键盘验收夹具</title>
+  <link rel="stylesheet" href="../src/styles.css">
+</head>
+<body class="a11y-fixture">
+  <a class="skip-link" href="#main-content">跳到主内容</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="工作区导航">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">知</span>团队知识库</div>
+      <p class="muted">让团队经验被找到、被复用。</p>
+      <div class="field">
+        <label for="workspace">当前工作区</label>
+        <select id="workspace"><option>产品与研发</option><option>客户成功</option></select>
+      </div>
+      <nav aria-label="主导航">
+        <a href="#documents" aria-current="page">文档检索</a>
+        <a href="#metrics">数据看板</a>
+        <a href="#members">成员与角色</a>
+        <a href="#settings">工作区设置</a>
+      </nav>
+      <div class="notice"><strong>当前角色：查看成员</strong><br><small>可阅读授权范围内的已发布文档。</small></div>
+    </aside>
+    <main id="main-content" class="main" tabindex="-1">
+      <header class="topbar"><span class="muted">工作台 / 文档检索</span><button class="button" type="button" data-dialog-open="help-dialog">键盘操作帮助</button></header>
+      <p class="demo-banner">样式验收夹具 · 本页内容为示例，不连接业务后端。</p>
+      <div class="page-header" id="documents">
+        <div><h1>找到团队的下一步</h1><p class="muted">浏览已发布知识，沿着经验继续向前。</p></div>
+        <div class="actions"><button class="button" disabled aria-describedby="create-hint">创建文档</button><small id="create-hint">仅编辑者及获授权管理员可创建</small></div>
+      </div>
+      <form id="search-form" class="panel" role="search" aria-label="搜索团队知识">
+        <div class="toolbar">
+          <div class="field"><label for="query">关键词</label><input id="query" name="query" type="search" placeholder="搜索标题、正文或关键词"></div>
+          <div class="field"><label for="category">分类</label><select id="category" name="category"><option value="">全部分类</option><option>项目协作</option></select></div>
+          <button class="button primary" type="submit">搜索文档</button>
+        </div>
+        <p class="help-text">工作区切换后保留当前检索条件。只展示你有权阅读的内容。</p>
+      </form>
+      <p id="app-status" role="status" aria-atomic="true">已展示 2 篇示例文档。</p>
+      <ul class="document-list">
+        <li class="document-card">
+          <div class="document-meta"><span class="badge published">已发布</span><span class="badge">项目协作</span></div>
+          <h2><a href="#document-preview">跨团队项目交接：从决策记录到交付复盘</a></h2>
+          <p class="muted">用清晰的责任人、版本与来源，帮助下一位协作者理解背景。</p>
+          <div class="document-meta"><span>负责人：陈雨</span><span>版本 v2</span><span>示例更新时间：2026-09-04</span></div>
+        </li>
+        <li class="document-card">
+          <div class="document-meta"><span class="badge published">已发布</span><span class="badge">阅读权限：当前工作区</span></div>
+          <h2><a href="#document-preview">多工作区知识内容检索与权限可见性验收使用的超长连续中文文档标题用于检测窄屏换行</a></h2>
+          <p class="muted">长链接换行示例：<a href="https://example.com/knowledge/averylongunbrokenpathforresponsivevalidationwithoutspaces">https://example.com/knowledge/averylongunbrokenpathforresponsivevalidationwithoutspaces</a></p>
+        </li>
+      </ul>
+      <section id="metrics" aria-labelledby="metrics-title">
+        <h2 id="metrics-title">数据看板</h2>
+        <p class="help-text">夹具不计算业务指标；实际口径与时间由应用接入。</p>
+        <div class="stats-grid">
+          <div class="stat-card"><span class="stat-label">发布文档</span><strong class="stat-value">—</strong><p class="help-text">未连接数据</p></div>
+          <div class="stat-card"><span class="stat-label">活跃贡献者</span><strong class="stat-value">—</strong><p class="help-text">未连接数据</p></div>
+          <div class="stat-card"><span class="stat-label">过期文档</span><strong class="stat-value">—</strong><p class="help-text">未连接数据</p></div>
+          <div class="stat-card"><span class="stat-label">缺失元数据</span><strong class="stat-value">—</strong><p class="help-text">未连接数据</p></div>
+        </div>
+      </section>
+      <section class="panel" id="members" aria-labelledby="members-title">
+        <h2 id="members-title">成员与角色</h2>
+        <p class="help-text" id="table-hint">窄屏下，可聚焦表格区域并使用左右方向键浏览全部列。</p>
+        <div class="table-wrap" role="region" aria-labelledby="members-title" aria-describedby="table-hint" tabindex="0">
+          <table><caption>工作区成员示例</caption><thead><tr><th scope="col">成员</th><th scope="col">角色</th><th scope="col">权限说明</th><th scope="col">操作</th></tr></thead>
+          <tbody><tr><th scope="row">陈雨</th><td>Owner</td><td>所有权转移由 Owner 操作</td><td><div class="actions"><button class="button" disabled>变更角色</button><button class="button" disabled>移除成员</button></div></td></tr></tbody></table>
+        </div>
+      </section>
+      <section class="panel" id="settings" aria-labelledby="settings-title">
+        <h2 id="settings-title">元数据表单样式</h2>
+        <form id="metadata-form" novalidate>
+          <div class="form-grid">
+            <div class="field"><label for="title">文档标题（必填）</label><input id="title" name="title" required aria-describedby="title-help"><small id="title-help">使用清晰、可检索的标题。</small><span id="title-error" class="field-error" hidden>请输入文档标题。</span></div>
+            <div class="field"><label for="owner">负责人</label><input id="owner" name="owner" value="陈雨" readonly></div>
+            <div class="field full-width"><label for="body">正文</label><textarea id="body" name="body">示例正文，不写入业务数据。</textarea></div>
+            <label class="checkbox-label full-width"><input type="checkbox" name="confirmed">我已核对来源引用</label>
+          </div>
+          <div class="dialog-actions"><button class="button primary" type="submit">验证表单</button></div>
+        </form>
+      </section>
+      <section class="panel" id="document-preview" aria-labelledby="preview-title"><h2 id="preview-title">基础状态</h2>
+        <div class="empty-state"><h3>没有找到匹配文档</h3><p>尝试其他关键词，或清除筛选条件。</p></div>
+        <p class="alert error">加载失败。请稍后重试；你的输入仍保留在页面中。</p>
+        <p class="loading"><span class="spinner" aria-hidden="true"></span>正在加载文档…</p>
+      </section>
+    </main>
+  </div>
+  <dialog id="help-dialog" aria-labelledby="help-title" aria-describedby="help-description">
+    <h2 id="help-title">键盘操作帮助</h2>
+    <p id="help-description">使用 Tab 移动到下一项，Shift + Tab 返回上一项。按 Escape 关闭此窗口并返回帮助按钮。</p>
+    <a href="#help-description">重新阅读键盘说明</a>
+    <div class="dialog-actions"><button class="button primary" type="button" data-dialog-close autofocus>关闭帮助</button></div>
+  </dialog>
+  <script type="module">
+    import { initAccessibility, announceStatus } from '../src/accessibility.js';
+    initAccessibility();
+    document.querySelector('#search-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      announceStatus('示例检索已完成，展示 2 篇文档。');
+    });
+    document.querySelector('#metadata-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const title = document.querySelector('#title');
+      const error = document.querySelector('#title-error');
+      const valid = title.value.trim().length > 0;
+      error.hidden = valid;
+      title.setAttribute('aria-invalid', String(!valid));
+      title.setAttribute('aria-describedby', valid ? 'title-help' : 'title-help title-error');
+      announceStatus(valid ? '示例表单校验通过，未保存到业务系统。' : '表单未通过校验，请修正文档标题。');
+      if (!valid) title.focus();
+    });
+    window.fixtureReady = true;
+  </script>
+</body>
+</html>

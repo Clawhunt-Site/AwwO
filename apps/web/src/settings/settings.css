@@ -1,0 +1,831 @@
+/* Settings surface styles (settings-redesign PR-3).
+   New settings markup styles live here, consuming the global design tokens
+   from styles.css — never raw colors. Legacy .control-card styles remain in
+   styles.css until the final cleanup step removes them. */
+
+/* ---- panel of rows ---- */
+
+.settings-panel {
+  display: grid;
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.setting-row {
+  display: grid;
+  gap: 0;
+}
+
+.setting-row + .setting-row {
+  border-top: 1px solid var(--border-light);
+}
+
+.setting-row-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  padding: 12px 16px;
+}
+
+.setting-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.setting-row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setting-row-label {
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.setting-row-description {
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.setting-row-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.setting-row-footer {
+  padding: 0 16px 14px;
+}
+
+/* ---- segmented control ---- */
+
+.segmented-control {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-muted);
+}
+
+.segmented-control button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.segmented-control button:hover {
+  color: var(--text-primary);
+}
+
+.segmented-control button.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+}
+
+/* ---- account token usage ---- */
+
+@media (min-width: 861px) {
+  .workspace-control .workspace-page.control-page.settings-fullscreen-page > .settings-content-stack-account {
+    width: min(calc(100% - 96px), 928px);
+  }
+}
+
+.account-token-usage-card {
+  display: grid;
+  gap: 18px;
+}
+
+.account-token-usage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.account-token-title {
+  margin-bottom: 6px;
+}
+
+.account-token-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.account-token-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-muted);
+}
+
+.account-token-stat {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-right: 1px solid var(--border-light);
+}
+
+.account-token-stat:last-child {
+  border-right: 0;
+}
+
+.account-token-stat svg {
+  color: var(--text-secondary);
+}
+
+.account-token-stat span,
+.account-token-stat small {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.account-token-stat strong {
+  color: var(--text-primary);
+  font-size: clamp(1rem, 1.5vw, 1.22rem);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.account-token-activity-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.account-token-activity-head strong {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.account-token-map-scroll {
+  overflow-x: auto;
+  padding: 10px 0 2px;
+}
+
+.account-token-map-inner {
+  --token-cell-size: 13px;
+  --token-cell-gap: 4px;
+  position: relative;
+  display: grid;
+  gap: 10px;
+  width: max-content;
+  min-width: 100%;
+}
+
+.account-token-heatmap {
+  display: grid;
+  gap: var(--token-cell-gap);
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, var(--token-cell-size));
+  grid-auto-columns: var(--token-cell-size);
+  width: max-content;
+  min-height: calc(var(--token-cell-size) * 7 + var(--token-cell-gap) * 6);
+  align-items: start;
+}
+
+.account-token-cell {
+  display: block;
+  width: var(--token-cell-size);
+  height: var(--token-cell-size);
+  border-radius: 4px;
+  background: var(--bg-muted);
+  border: 1px solid var(--border-light);
+  outline: none;
+}
+
+.account-token-cell.empty {
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.account-token-cell[data-level='1'] {
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-muted));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-light));
+}
+
+.account-token-cell[data-level='2'] {
+  background: color-mix(in srgb, var(--accent) 46%, var(--bg-muted));
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-light));
+}
+
+.account-token-cell[data-level='3'] {
+  background: color-mix(in srgb, var(--accent) 66%, var(--bg-muted));
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border-light));
+}
+
+.account-token-cell[data-level='4'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.account-token-cell.active,
+.account-token-cell:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px color-mix(in srgb, var(--accent) 52%, transparent);
+}
+
+.account-token-tooltip {
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  z-index: 1;
+  max-width: min(420px, calc(100vw - 64px));
+  transform: translateX(-50%);
+  padding: 9px 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.35;
+  box-shadow: var(--shadow-md);
+  white-space: normal;
+}
+
+.account-token-month-labels {
+  display: grid;
+  gap: var(--token-cell-gap);
+  align-items: start;
+  width: max-content;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.account-token-month-labels span {
+  min-width: var(--token-cell-size);
+}
+
+/* ---- toggle switch ---- */
+
+.toggle-switch {
+  position: relative;
+  width: 42px;
+  height: 25px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-muted);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+  flex-shrink: 0;
+}
+
+.toggle-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 22%);
+  transition: transform 140ms ease;
+}
+
+.toggle-switch.on {
+  border-color: var(--agent-running);
+  background: var(--agent-running);
+}
+
+.toggle-switch.on .toggle-switch-thumb {
+  transform: translateX(17px);
+}
+
+/* ---- responsive: the settings surface had no narrow-viewport handling ---- */
+
+@media (max-width: 860px) {
+  .workspace-control .workspace-page.control-page.settings-fullscreen-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-sidebar {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+    height: auto;
+    flex-direction: column;
+    padding: 14px 12px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .settings-nav-list {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 14px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .settings-nav-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .settings-nav-group > span {
+    display: none;
+  }
+
+  .settings-nav-group button {
+    white-space: nowrap;
+  }
+
+  .control-page > .workspace-header,
+  .control-page > .composer-message,
+  .control-page > .settings-content-stack {
+    grid-column: 1;
+    width: calc(100% - 32px);
+  }
+
+  .control-page > .workspace-header {
+    padding-top: 22px;
+  }
+
+  .setting-row-main {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .setting-row-control {
+    margin-left: 44px;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
+  .account-token-usage-head,
+  .account-token-activity-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .account-token-actions {
+    justify-content: flex-start;
+  }
+
+  .account-token-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .account-token-stat {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .account-token-stat:nth-child(odd) {
+    border-right: 1px solid var(--border-light);
+  }
+
+  .account-token-stat:last-child {
+    grid-column: 1 / -1;
+    border-right: 0;
+    border-bottom: 0;
+  }
+}
+
+/* ---- schema-driven runtime config fields ---- */
+
+.runtime-config-fields {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.runtime-config-fields .setting-row-label code {
+  font-size: 0.84rem;
+  color: var(--text-primary);
+}
+
+.runtime-config-fields input {
+  min-width: 200px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.settings-advanced-disclosure > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 4px 2px;
+}
+
+.settings-advanced-disclosure[open] > summary {
+  margin-bottom: 10px;
+}
+
+/* Signed-in ClawHunt account header: avatar + name + email, mirroring the
+   bottom-left account menu (reuses .account-avatar / .account-kicker). */
+.settings-account-identity {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin: 2px 0 6px;
+}
+
+.settings-account-identity > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-account-identity strong {
+  overflow-wrap: anywhere;
+}
+
+.settings-account-handle {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+/* Inline notice row inside the account card (e.g. agent key not ready). Neutral
+   sunken container; the colored status pill carries the tone (and already handles
+   dark mode), so the row itself stays theme-token only. */
+.settings-inline-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* Relay balance / usage — a sunken stat panel (balance / used / quota) instead of
+   bare stacked paragraphs. A muted value reads as "not yet known" without shouting;
+   a real value is bold and primary-coloured. */
+.relay-usage {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  background: var(--surface-sunken);
+}
+
+.relay-usage-stats {
+  display: grid;
+  /* 单列分行：当前套餐 / 当前权益 / 中转余额（自费）/ 套餐额度——各占一行，
+     语义分源不混；额度行的进度条占满整宽。 */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+/* 权益来源（admin/试用/赠送）/ "自费" 等次级标注：弱化、不抢主值。 */
+.relay-usage-source {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.relay-usage-stat {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.relay-usage-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+
+.relay-usage-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.relay-usage-value.muted {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+/* 额度进度条：套餐有真实配额上限时画"已用/总量"；不限额/未知时退化为文字（无此条）。 */
+.relay-usage-quota .relay-usage-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.relay-usage-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+  margin: 4px 0 3px;
+}
+
+.relay-usage-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.relay-usage-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.relay-usage-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 520px) {
+  .relay-usage-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- color scheme ---- */
+
+/* Trigger: a square icon-button that sits beside the Light/Dark control in the
+   Appearance row, matching the segmented control's height and token palette. */
+.color-scheme-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.color-scheme-trigger:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* Dialog body: stacked sections inside the shared DialogShell. Uses the same
+   theme tokens it edits, so swatches re-theme live as the user picks colors. */
+.color-scheme-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 20px 24px 22px;
+}
+
+.color-scheme-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.color-scheme-section-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.color-scheme-section-hint {
+  margin: -4px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.color-scheme-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.color-scheme-preset {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-light);
+  border-radius: 11px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.color-scheme-preset:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.color-scheme-preset.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--accent-soft);
+}
+
+.color-scheme-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+}
+
+/* The only literal colors here: a fixed multicolor wheel that *is* the "custom palette"
+   icon (no semantic token maps to "rainbow"); mirrors the pre-redesign swatch. */
+.color-scheme-swatch-custom {
+  background: conic-gradient(#e11d6b, #d98a04, #0f9d58, #4f5fd6, #e11d6b);
+}
+
+.color-scheme-preset-label {
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.color-scheme-tokens {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+}
+
+.color-scheme-token {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-card);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.color-scheme-token:hover {
+  border-color: var(--border-strong);
+}
+
+/* The native color input is unstyleable across browsers; wrap it in a rounded
+   chip and clip the raw control so only a clean swatch shows. */
+.color-scheme-token-swatch {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+}
+
+.color-scheme-token-swatch input[type='color'] {
+  position: absolute;
+  inset: -6px;
+  width: calc(100% + 12px);
+  height: calc(100% + 12px);
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.color-scheme-token-label {
+  min-width: 0;
+  line-height: 1.25;
+}
+
+/* Advanced disclosure: the per-token editor + bundle import/export collapse here,
+   so the default dialog is just the constrained preset list. */
+.color-scheme-advanced {
+  border: 1px solid var(--border-light);
+  border-radius: 11px;
+  background: var(--surface-sunken);
+}
+
+.color-scheme-advanced-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.color-scheme-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.color-scheme-advanced-summary:hover {
+  color: var(--text-primary);
+}
+
+.color-scheme-advanced-caret {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+}
+
+.color-scheme-advanced[open] .color-scheme-advanced-caret {
+  transform: rotate(90deg);
+}
+
+.color-scheme-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 14px 14px;
+}
+
+.color-scheme-advanced-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.color-scheme-advanced-actions .text-button,
+.color-scheme-dialog-actions .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.color-scheme-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.color-scheme-error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-radius: 9px;
+  padding: 8px 11px;
+}

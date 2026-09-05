@@ -1,0 +1,18 @@
+{
+  "title": "تخصيص المشهد",
+  "videoQuality": "جودة الفيديو",
+  "qualityLow": "منخفضة",
+  "qualityMedium": "متوسطة",
+  "qualityHigh": "عالية",
+  "duration": "المدة",
+  "audio": "الصوت",
+  "vipBadge": "VIP",
+  "estTime": "الوقت المتوقع",
+  "mins": "دقائق",
+  "energyCost": "تكلفة الطاقة",
+  "createNow": "إنشاء الآن",
+  "unlockVipToCreate": "افتح VIP للإنشاء",
+  "cancel": "إلغاء",
+  "needSubscription": "اشترِ حزمة طاقة لفتح ميزات VIP",
+  "loadingCost": "جاري الحساب..."
+}

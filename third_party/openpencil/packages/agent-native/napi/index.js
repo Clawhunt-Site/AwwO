@@ -1,0 +1,89 @@
+// Runtime loader for @zseven-w/agent-native NAPI addon.
+// Uses ESM + createRequire so Vite's module runner can process this file.
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const _require = createRequire(import.meta.url);
+
+const candidates = [
+  join(__dirname, "..", "zig-out", "napi", "agent_napi.node"),
+  join(__dirname, "agent_napi.node"),
+];
+
+let addon;
+for (const p of candidates) {
+  if (existsSync(p)) {
+    addon = _require(p);
+    break;
+  }
+}
+
+if (!addon) {
+  throw new Error(
+    `@zseven-w/agent-native: could not locate agent_napi.node.\n` +
+    `Run \`zig build napi\` from the agent/ repo to build it.\n` +
+    `Searched:\n${candidates.map((c) => `  ${c}`).join("\n")}`
+  );
+}
+
+// Re-export bridge functions directly.
+export const {
+  agentVersion,
+  createAnthropicProvider,
+  createOpenAICompatProvider,
+  destroyProvider,
+  setProviderPlaceholderTextQuirk,
+  createToolRegistry,
+  registerToolSchema,
+  destroyToolRegistry,
+  seedMessages,
+  resolveToolResult,
+  pushToolProgress,
+  abortEngine,
+  destroyQueryEngine,
+  destroyIterator,
+  createSubAgent,
+  subAgentRun,
+  abortSubAgent,
+  destroySubAgent,
+  createTeam,
+  addTeamMember,
+  runTeam,
+  resolveTeamToolResult,
+  abortTeam,
+  destroyTeam,
+  teamRegisterDelegate,
+  runTeamMember,
+  resolveMemberToolResult,
+  seedTeamMessages,
+} = addon;
+
+// createQueryEngine: destructure config object → flat args for Bun NAPI compat.
+const _createQueryEngine = addon.createQueryEngine;
+export function createQueryEngine(config) {
+  return _createQueryEngine(
+    config.provider,
+    config.tools ?? null,
+    config.systemPrompt ?? "",
+    config.maxTurns ?? 50,
+    config.cwd ?? ".",
+    config.maxOutputTokens ?? 16384,
+  );
+}
+
+// submitMessage: synchronous (just creates iterator, no HTTP).
+export async function submitMessage(engine, prompt) {
+  return addon.submitMessage(engine, prompt);
+}
+
+// nextEvent: returns native NAPI Promise (async work on background thread).
+// No timeout wrapper — nextEvent blocks both during HTTP streaming AND while
+// waiting for external tool results (which can take minutes for orchestration).
+// The SSE ping keep-alive in chat.ts prevents Bun's idle timeout.
+export const nextEvent = addon.nextEvent;
+
+export default addon;

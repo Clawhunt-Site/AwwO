@@ -1,0 +1,109 @@
+{
+  "checkedAt": "2026-09-04T16:12:01.217Z",
+  "checks": [
+    {
+      "name": "Page reflow 320px",
+      "passed": true,
+      "details": {
+        "viewport": 320,
+        "scrollWidth": 320
+      }
+    },
+    {
+      "name": "Page reflow 375px",
+      "passed": true,
+      "details": {
+        "viewport": 375,
+        "scrollWidth": 375
+      }
+    },
+    {
+      "name": "Page reflow 768px",
+      "passed": true,
+      "details": {
+        "viewport": 768,
+        "scrollWidth": 768
+      }
+    },
+    {
+      "name": "Page reflow 1280px",
+      "passed": true,
+      "details": {
+        "viewport": 1280,
+        "scrollWidth": 1280
+      }
+    },
+    {
+      "name": "320px with 200% root font stress (not browser zoom)",
+      "passed": true,
+      "details": {
+        "viewport": 320,
+        "scrollWidth": 320
+      }
+    },
+    {
+      "name": "First Tab reaches skip link",
+      "passed": true
+    },
+    {
+      "name": "Skip link transfers focus",
+      "passed": true
+    },
+    {
+      "name": "Help trigger keyboard reachable",
+      "passed": true
+    },
+    {
+      "name": "Help opens as modal",
+      "passed": true
+    },
+    {
+      "name": "Modal contains keyboard focus",
+      "passed": false
+    },
+    {
+      "name": "Escape closes and restores trigger",
+      "passed": true
+    },
+    {
+      "name": "Invalid title focused and described",
+      "passed": true
+    },
+    {
+      "name": "Status region updates",
+      "passed": true
+    },
+    {
+      "name": "Forced colors current-link focus outline changes",
+      "passed": true,
+      "details": {
+        "before": {
+          "style": "none",
+          "width": "3px",
+          "color": "rgb(0, 0, 159)",
+          "offset": "0px"
+        },
+        "after": {
+          "style": "solid",
+          "width": "3px",
+          "color": "rgb(55, 0, 110)",
+          "offset": "3px"
+        },
+        "focusVisible": true
+      }
+    }
+  ],
+  "hashes": {
+    "tests/responsive-accessibility.html": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+    "src/styles.css": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+    "styles.css": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+    "src/accessibility.js": "e882b45bbeb3e21843fdb6ad319c31e9514885a5ac2b5113d42399d5f298777d"
+  },
+  "browser": "152.0.7977.82",
+  "limitation": "Fixture checks only; no screen reader or integrated application acceptance.",
+  "checkboxLayout": {
+    "labelDisplay": "flex",
+    "labelWidth": 254,
+    "checkboxWidth": 18
+  }
+}

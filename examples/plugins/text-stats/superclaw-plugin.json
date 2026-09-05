@@ -1,0 +1,78 @@
+{
+  "schema_version": "0.1.0",
+  "id": "dev.leon.text-stats",
+  "name": "Text Stats",
+  "version": "1.0.0",
+  "summary": "Compute deterministic word and character counts for a snippet of text through the SuperClaw plugin contract.",
+  "source": {
+    "type": "developer",
+    "clawhunt_problem_id": null,
+    "developer_id": "leon"
+  },
+  "runtime": {
+    "type": "mcp_sidecar",
+    "entrypoint": "bin/text-stats",
+    "args": ["mcp"],
+    "transport": "stdio",
+    "mcp_protocol_versions": ["2025-06-18"],
+    "platforms": ["darwin-arm64", "linux-x64"]
+  },
+  "tools": [
+    {
+      "name": "text_stats",
+      "description": "Return the word count and character count of the provided text.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "words": { "type": "integer" },
+          "chars": { "type": "integer" }
+        },
+        "required": ["words", "chars"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "permissions": {
+    "filesystem": [],
+    "network": [],
+    "environment": []
+  },
+  "acceptance": {
+    "level": "L1",
+    "tests": ["tests/smoke.sh"],
+    "evidence_fixtures": ["evidence-fixtures/smoke.json"],
+    "latency_budget_ms": 1000
+  },
+  "limits": {
+    "startup_timeout_ms": 3000,
+    "tool_timeout_ms": 30000,
+    "max_model_output_bytes": 65536,
+    "max_evidence_bytes": 5242880,
+    "max_memory_mb": 128
+  },
+  "resource_profile": {
+    "latency_class": "interactive",
+    "expected_p95_latency_ms": 1000,
+    "cpu_class": "low",
+    "memory_class": "low",
+    "io_profile": "none"
+  },
+  "commerce": {
+    "pricing_model": "free",
+    "metering": "none"
+  },
+  "provenance": {
+    "build_type": "developer",
+    "source_digest": null,
+    "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "signature": "ed25519:fixture-signature"
+  }
+}

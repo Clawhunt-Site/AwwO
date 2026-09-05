@@ -1,0 +1,45 @@
+# Production collection server: PostgreSQL + the FastAPI ingest/query/web-ui app.
+# Bring up with:  docker compose up -d
+# Then open the web UI at http://<host>:8900/
+#
+# SECURITY: postgres is NOT published to the host/public — only the app (on the
+# compose-internal network) can reach it. Only the app's port is exposed.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: telemetry
+      POSTGRES_USER: telemetry
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - telemetry_pgdata:/var/lib/postgresql/data
+    # No `ports:` — deliberately not reachable from outside the compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telemetry -d telemetry"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: ../..
+      dockerfile: apps/telemetry_server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TELEMETRY_ENV: production
+      TELEMETRY_DATABASE_URL: postgresql://telemetry:${POSTGRES_PASSWORD}@db:5432/telemetry
+      TELEMETRY_INGEST_TOKEN: ${TELEMETRY_INGEST_TOKEN:?set TELEMETRY_INGEST_TOKEN in .env}
+      TELEMETRY_QUERY_TOKEN: ${TELEMETRY_QUERY_TOKEN:?set TELEMETRY_QUERY_TOKEN in .env}
+      TELEMETRY_HOST: 0.0.0.0
+      TELEMETRY_PORT: "8900"
+      TELEMETRY_TIER_C_RETENTION_DAYS: "7"
+      TELEMETRY_RETENTION_INTERVAL_SECONDS: "3600"
+    ports:
+      - "8900:8900"   # the only port exposed; front this with TLS (nginx/caddy)
+
+volumes:
+  telemetry_pgdata:

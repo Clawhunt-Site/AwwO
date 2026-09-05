@@ -1,0 +1,17 @@
+{
+  "searchPlaceholder": "Поиск…",
+  "clear": "Очистить",
+  "searchHint": "Введи запрос для поиска ботов…",
+  "noContent": "В этой категории пока нет контента",
+  "resultCount": "{{count}} результат",
+  "resultCount_other": "{{count}} результатов",
+  "personalizedForYou": "Подобрано для тебя",
+  "basedOnPreferences": "На основе твоих предпочтений и использования",
+  "noRecommendations": "Рекомендаций пока нет",
+  "matchPercent": "{{percent}}% совпадение",
+  "celebritySex": "Секс со\nзнаменитостями",
+  "sexyOutfits": "Сексуальные\nнаряды",
+  "classicActs": "Классические\nсцены",
+  "wildEncounters": "Дикие\nвстречи",
+  "lgbtSex": "ЛГБТ\nсекс"
+}

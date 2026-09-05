@@ -1,0 +1,151 @@
+{
+  "read_at_utc": "2026-09-04T16:19:52.375863+00:00",
+  "reported_execution_at": "2026-09-04T16:17:24.473Z",
+  "browser": "152.0.7977.82",
+  "checks_total": 14,
+  "checks_passed": 14,
+  "source_hashes": {
+    "tests/responsive-accessibility.html": {
+      "recorded": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+      "current": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+      "matches": true
+    },
+    "src/styles.css": {
+      "recorded": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "current": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "matches": true
+    },
+    "styles.css": {
+      "recorded": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "current": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "matches": true
+    },
+    "src/accessibility.js": {
+      "recorded": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+      "current": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+      "matches": true
+    }
+  },
+  "original_harness_unchanged": {
+    "artifacts/aww-11-browser-review.mjs": true,
+    "tests/browser_smoke.py": true
+  },
+  "application_smoke": {
+    "status": "passed",
+    "viewports": [
+      1440,
+      768,
+      375,
+      320
+    ],
+    "checks": [
+      "login",
+      "skip link",
+      "published documents",
+      "native dialog Escape and focus restoration",
+      "mobile navigation Escape and focus",
+      "horizontal overflow",
+      "page errors"
+    ],
+    "does_not_prove": [
+      "real auth",
+      "backend permissions",
+      "screen reader compliance"
+    ]
+  },
+  "screenshots": [
+    {
+      "path": "artifacts/aww-11-browser-evidence/fixture-1280.png",
+      "width": 1280,
+      "height": 2364,
+      "bytes": 159074,
+      "sha256": "bae4e465fcddf114ab2765a2c14c6c0128bccd4cec7943b11b75d9ce62b798ef",
+      "modified_at_utc": "2026-09-04T16:17:25.901341+00:00"
+    },
+    {
+      "path": "artifacts/aww-11-browser-evidence/fixture-320-root-font-200.png",
+      "width": 320,
+      "height": 4812,
+      "bytes": 245306,
+      "sha256": "92952b1a6bff2e90f6a036d593b4fe366e64cce199236e4eec529c991ec87106",
+      "modified_at_utc": "2026-09-04T16:17:26.004299+00:00"
+    },
+    {
+      "path": "artifacts/aww-11-browser-evidence/fixture-320.png",
+      "width": 320,
+      "height": 3706,
+      "bytes": 152736,
+      "sha256": "5dced350963d9e44969ea14f7489277bc77c46d756e2697dc24d4d7734d2a663",
+      "modified_at_utc": "2026-09-04T16:17:25.620224+00:00"
+    },
+    {
+      "path": "artifacts/aww-11-browser-evidence/fixture-375.png",
+      "width": 375,
+      "height": 3620,
+      "bytes": 152245,
+      "sha256": "e5b4ee4c19639fc1cf4ff8a39b88a14c7bc6e7684b2a7d165cb4010a77b34738",
+      "modified_at_utc": "2026-09-04T16:17:25.707932+00:00"
+    },
+    {
+      "path": "artifacts/aww-11-browser-evidence/fixture-768.png",
+      "width": 768,
+      "height": 2864,
+      "bytes": 154595,
+      "sha256": "9a8f83c693c04100cb206df70acbc3d3f66d75a04a8044f14e62bc86c2eeeb6b",
+      "modified_at_utc": "2026-09-04T16:17:25.798099+00:00"
+    },
+    {
+      "path": "artifacts/aww-11-browser-evidence/forced-colors-current-focus.png",
+      "width": 320,
+      "height": 3706,
+      "bytes": 144197,
+      "sha256": "ab0beac80fdc41d7abb30f951cf5f4089edfc4536d04207f741423c8e8d3ef1c",
+      "modified_at_utc": "2026-09-04T16:17:26.257755+00:00"
+    },
+    {
+      "path": "artifacts/browser/documents-320.png",
+      "width": 320,
+      "height": 2925,
+      "bytes": 110897,
+      "sha256": "9bda4b03a888eecd7ebda126317c590d12282572b5bb3902f0aa5abeea1ddcbf",
+      "modified_at_utc": "2026-09-04T16:17:28.199800+00:00"
+    },
+    {
+      "path": "artifacts/browser/documents-375.png",
+      "width": 375,
+      "height": 2925,
+      "bytes": 119162,
+      "sha256": "8c450857678fd8f1c336e6cd012ef9b960f986af57e9cc6a1caa8ab49729c4e2",
+      "modified_at_utc": "2026-09-04T16:17:28.083602+00:00"
+    },
+    {
+      "path": "artifacts/browser/documents-768.png",
+      "width": 768,
+      "height": 1754,
+      "bytes": 97084,
+      "sha256": "8c9b966ce8a7b6028e0d5dc11bdbc9f1d3d6c350bae53f835ffdeb97483e5c8b",
+      "modified_at_utc": "2026-09-04T16:17:27.970801+00:00"
+    },
+    {
+      "path": "artifacts/browser/documents-desktop.png",
+      "width": 1440,
+      "height": 1493,
+      "bytes": 137400,
+      "sha256": "7aba2b688dd2c0a26f16093cf614286d32be96b479b0c859ab461ce4dee03e64",
+      "modified_at_utc": "2026-09-04T16:17:27.803212+00:00"
+    },
+    {
+      "path": "artifacts/browser/login-desktop.png",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 62629,
+      "sha256": "cc66c6f6e21a1a1d6ea0f7dd79b97fc39492fc7d530e40ec431800454968a9cd",
+      "modified_at_utc": "2026-09-04T16:17:27.520959+00:00"
+    }
+  ],
+  "evidence_report_sha256": {
+    "fixture": "0189f0951b329ba6a096a10269036d17fe70822c721c803ec0530c6911b36966",
+    "application": "8d5fc6dad23718512df3a0921aa27b4ca8de30cad6b39212a0025b5a4d014012"
+  },
+  "scope": "Host evidence readback only. No browser launch or source changes in this run."
+}

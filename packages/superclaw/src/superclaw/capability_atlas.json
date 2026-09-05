@@ -1,0 +1,4013 @@
+{
+  "atlas_version": "1.0.0",
+  "source_manifest": "all_skills_with_links.md (2026-05-29) + live scans of openclaw-arxchibo, wshobson/agents, openclaw builtins, external repos",
+  "capabilities": [
+    {
+      "id": "accessibility-compliance",
+      "name": "accessibility-compliance",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/accessibility-compliance",
+      "description": "WCAG accessibility auditing, compliance validation, and UI testing for screen readers, keyboard navigation, and inclusive design. Use when auditing or fixing accessibility issues.",
+      "triggers": [
+        "wcag audit",
+        "accessibility compliance",
+        "screen reader testing",
+        "keyboard navigation",
+        "inclusive design"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "acp-router",
+      "name": "ACP Router",
+      "category": "agent-orchestration",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Routes Agent Client Protocol (ACP) sessions across Claude Code, Codex, and Pi backends. Use when spawning or switching agent harnesses through OpenClaw's ACP layer.",
+      "triggers": [
+        "acp routing",
+        "agent backend switch",
+        "claude code backend",
+        "codex backend",
+        "pi agent routing"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "adversarial-verification",
+      "name": "adversarial-verification",
+      "category": "knowledge-research",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/adversarial-verification",
+      "description": "Adversarially verifies research claims against independent sources to catch errors and unsupported assertions; use before finalizing deep-research reports.",
+      "triggers": [
+        "verify claims",
+        "adversarial verification",
+        "fact check report",
+        "source cross-check"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "agent-orchestration",
+      "name": "agent-orchestration",
+      "category": "agent-orchestration",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/agent-orchestration",
+      "description": "Multi-agent system optimization, agent improvement workflows, and context management. Use when tuning or coordinating multiple AI agents.",
+      "triggers": [
+        "multi-agent optimization",
+        "agent improvement",
+        "agent workflow",
+        "context management"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "agent-teams",
+      "name": "agent-teams",
+      "category": "agent-orchestration",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/agent-teams",
+      "description": "Orchestrates multi-agent teams for parallel code review, hypothesis-driven debugging, and coordinated feature development using Claude Code Agent Teams.",
+      "triggers": [
+        "agent teams",
+        "parallel code review",
+        "coordinated development",
+        "multi-agent debugging"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "api-scaffolding",
+      "name": "api-scaffolding",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/api-scaffolding",
+      "description": "REST and GraphQL API scaffolding, framework selection, backend architecture, and API generation. Use when starting a new API or service.",
+      "triggers": [
+        "api scaffolding",
+        "rest api generation",
+        "graphql setup",
+        "backend architecture"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "api-testing-observability",
+      "name": "api-testing-observability",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/api-testing-observability",
+      "description": "API testing automation, request mocking, OpenAPI documentation generation, observability setup, and monitoring. Use when testing or instrumenting APIs.",
+      "triggers": [
+        "api testing",
+        "request mocking",
+        "openapi docs",
+        "api monitoring"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "apify",
+      "name": "Apify",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/apify",
+      "description": "Integrates the Apify web scraping platform to run actors and crawlers for structured data extraction. Use when scraping websites at scale via Apify.",
+      "triggers": [
+        "apify",
+        "run apify actor",
+        "web scraping platform",
+        "crawler",
+        "scrape website data"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "application-performance",
+      "name": "application-performance",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/application-performance",
+      "description": "Application profiling, performance optimization, and observability for frontend and backend systems. Use when diagnosing slowness or optimizing performance.",
+      "triggers": [
+        "performance profiling",
+        "app optimization",
+        "slow application",
+        "observability setup"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "approval-flow",
+      "name": "Approval Flow",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/approval-flow",
+      "description": "Routes pending actions through a human approval workflow before execution. Use when changes or sensitive operations require sign-off before the agent proceeds.",
+      "triggers": [
+        "approval flow",
+        "request approval",
+        "sign-off",
+        "pending approval",
+        "human review gate"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "appsflyer",
+      "name": "AppsFlyer",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/appsflyer",
+      "description": "Queries AppsFlyer mobile attribution data for installs, campaigns, and marketing performance. Use when analyzing user acquisition and attribution metrics.",
+      "triggers": [
+        "appsflyer",
+        "mobile attribution",
+        "install attribution",
+        "ua campaign data",
+        "marketing attribution"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "appstore-connect",
+      "name": "App Store Connect",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/appstore-connect",
+      "description": "Operates Apple App Store Connect for app metadata, builds, TestFlight, and reports. Use for iOS app release and store management tasks.",
+      "triggers": [
+        "app store connect",
+        "ios release",
+        "testflight",
+        "app metadata",
+        "apple developer"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "arm-cortex-microcontrollers",
+      "name": "arm-cortex-microcontrollers",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/arm-cortex-microcontrollers",
+      "description": "ARM Cortex-M firmware development for Teensy, STM32, nRF52, and SAMD with peripheral drivers and memory safety patterns. Use for embedded firmware work.",
+      "triggers": [
+        "arm cortex firmware",
+        "stm32 development",
+        "embedded drivers",
+        "microcontroller code",
+        "teensy nrf52"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "art-workshop-bot-pipeline",
+      "name": "art-workshop-bot-pipeline",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/art-workshop-bot-pipeline",
+      "description": "End-to-end pipeline to batch-create and publish MyShell art workshop ShellAgent bots via Playwright/CDP UI automation plus direct save/review-submit API injection.",
+      "triggers": [
+        "myshell bot publishing",
+        "batch create bots",
+        "art workshop",
+        "shellagent pipeline",
+        "cyber developer cron"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "away-summary",
+      "name": "away-summary",
+      "category": "communication",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-away-summary",
+      "description": "Summarizes messages and events that occurred while the owner was away, producing a catch-up digest on return.",
+      "triggers": [
+        "away summary",
+        "what did i miss",
+        "catch me up",
+        "message digest"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "awesome-design-md",
+      "name": "Awesome DESIGN.md",
+      "category": "engineering",
+      "origin": "tool",
+      "source_url": "https://github.com/VoltAgent/awesome-design-md",
+      "description": "Curated DESIGN.md design-system files from 70+ brand websites (color tokens, typography, components) for AI agents to generate brand-consistent UI. Use when styling UI like a known brand.",
+      "triggers": [
+        "design md",
+        "brand design system",
+        "ui style reference",
+        "design tokens",
+        "brand consistent ui"
+      ],
+      "integration": "tool",
+      "availability": "external"
+    },
+    {
+      "id": "backend-api-security",
+      "name": "backend-api-security",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/backend-api-security",
+      "description": "API security hardening, authentication implementation, authorization patterns, rate limiting, and input validation. Use when securing backend APIs.",
+      "triggers": [
+        "api security",
+        "authentication implementation",
+        "rate limiting",
+        "input validation",
+        "authorization patterns"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "backend-development",
+      "name": "backend-development",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/backend-development",
+      "description": "Backend API design, GraphQL architecture, Temporal workflow orchestration, and test-driven backend development. Use for general backend feature work.",
+      "triggers": [
+        "backend api design",
+        "graphql architecture",
+        "temporal workflows",
+        "tdd backend"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "backend-organics-coding-workflow",
+      "name": "Backend Organics Coding Workflow",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/backend-organics-coding-workflow",
+      "description": "Coding workflow conventions for the Organics backend project. Use when developing, modifying, or reviewing Organics backend services.",
+      "triggers": [
+        "organics backend",
+        "organics development",
+        "organics service",
+        "backend coding workflow"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "base44",
+      "name": "Base44",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/base44",
+      "description": "Manages content and apps on the Base44 CMS platform. Use when creating or updating Base44-hosted site content.",
+      "triggers": [
+        "base44",
+        "cms content",
+        "base44 app",
+        "update cms site"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "bb-browser",
+      "name": "bb-browser",
+      "category": "platform-integration",
+      "origin": "tool",
+      "source_url": "https://github.com/epiral/bb-browser",
+      "description": "CLI and MCP server letting agents drive your logged-in Chrome via CDP, with 103 commands across 36 site adapters. Use to access authenticated sites without APIs.",
+      "triggers": [
+        "browser automation",
+        "logged-in chrome",
+        "mcp browser",
+        "site adapters",
+        "authenticated scraping"
+      ],
+      "integration": "tool",
+      "availability": "external"
+    },
+    {
+      "id": "block-no-verify",
+      "name": "block-no-verify",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/block-no-verify",
+      "description": "PreToolUse hook preventing AI agents from using --no-verify, --no-gpg-sign, and other flags that bypass git hooks. Use to enforce git hook integrity.",
+      "triggers": [
+        "block no-verify",
+        "git hook bypass",
+        "commit guardrails",
+        "pretooluse hook"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "blockchain-web3",
+      "name": "blockchain-web3",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/blockchain-web3",
+      "description": "Smart contract development with Solidity, DeFi protocol implementation, NFT platforms, and Web3 application architecture. Use for blockchain projects.",
+      "triggers": [
+        "solidity smart contracts",
+        "defi protocol",
+        "nft platform",
+        "web3 architecture"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "bobo-cli",
+      "name": "Bobo CLI",
+      "category": "engineering",
+      "origin": "tool",
+      "source_url": "https://github.com/Arxchibobo/bobo-cli",
+      "description": "User's own AI pair-programming terminal assistant: REPL and one-shot modes, sub-agents, verification agent, context compression, persistent memory, 47 skills, multi-provider APIs. Use for terminal coding help.",
+      "triggers": [
+        "bobo cli",
+        "terminal assistant",
+        "ai pair programming",
+        "cli agent",
+        "repl coding"
+      ],
+      "integration": "tool",
+      "availability": "external"
+    },
+    {
+      "id": "bot-monitor",
+      "name": "Bot Monitor",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/bot-monitor",
+      "description": "Monitors deployed bot health, status, and metrics, alerting on failures. Use when checking whether production bots are running correctly.",
+      "triggers": [
+        "bot monitor",
+        "bot health",
+        "bot status check",
+        "bot downtime alert"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "bottleneck-reporting",
+      "name": "Bottleneck Reporting",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/bottleneck-reporting",
+      "description": "Reports work blockers and bottlenecks to the team or task owner. Use when a task is stuck and needs escalation or visibility.",
+      "triggers": [
+        "report blocker",
+        "bottleneck",
+        "stuck task",
+        "escalate issue",
+        "blocked work"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "brand-landingpage",
+      "name": "brand-landingpage",
+      "category": "marketing-seo",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/brand-landingpage",
+      "description": "Guides developers from brand discovery through iterative design to deployment-ready landing page HTML via Stitch. Use when building branded landing pages.",
+      "triggers": [
+        "landing page",
+        "brand discovery",
+        "stitch design",
+        "deployment-ready html"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "browser-cdp",
+      "name": "Browser CDP",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/browser-cdp",
+      "description": "Controls a browser via Chrome DevTools Protocol for automation, inspection, and scripted interaction. Use for low-level browser automation tasks.",
+      "triggers": [
+        "cdp",
+        "chrome devtools protocol",
+        "browser automation",
+        "headless chrome",
+        "remote debugging"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "buddy-pet",
+      "name": "buddy-pet",
+      "category": "communication",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-buddy-pet",
+      "description": "Virtual buddy/pet companion persona for chat channels providing playful interaction and engagement features.",
+      "triggers": [
+        "buddy pet",
+        "virtual pet",
+        "companion bot"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "business-analytics",
+      "name": "business-analytics",
+      "category": "data-analytics",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/business-analytics",
+      "description": "Business metrics analysis, KPI tracking, financial reporting, and data-driven decision making. Use when analyzing business performance data.",
+      "triggers": [
+        "kpi tracking",
+        "business metrics",
+        "financial reporting",
+        "data-driven decisions"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "c4-architecture",
+      "name": "c4-architecture",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/c4-architecture",
+      "description": "C4 architecture documentation workflow with bottom-up code analysis, component synthesis, container mapping, and context diagram generation. Use when documenting system architecture.",
+      "triggers": [
+        "c4 diagrams",
+        "architecture documentation",
+        "container mapping",
+        "context diagram"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "ccp",
+      "name": "CCP",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/ccp",
+      "description": "Internal coordination protocol used between in-house agents and services. Use when exchanging messages or tasks following the internal CCP convention.",
+      "triggers": [
+        "ccp protocol",
+        "internal protocol",
+        "agent protocol",
+        "message convention"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "cicd-automation",
+      "name": "cicd-automation",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/cicd-automation",
+      "description": "CI/CD pipeline configuration, GitHub Actions/GitLab CI workflow setup, and automated deployment pipeline orchestration. Use when building or fixing CI pipelines.",
+      "triggers": [
+        "ci/cd pipeline",
+        "github actions",
+        "gitlab ci",
+        "deployment automation"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "clawflow",
+      "name": "ClawFlow",
+      "category": "agent-orchestration",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Multi-task orchestration runtime for OpenClaw that coordinates parallel agent tasks and workflows. Use for running and managing multiple concurrent agent jobs.",
+      "triggers": [
+        "multi-task orchestration",
+        "clawflow run",
+        "parallel agent tasks",
+        "workflow runtime",
+        "task coordination"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "clawflow-inbox-triage",
+      "name": "ClawFlow Inbox Triage",
+      "category": "productivity-workflow",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Inbox triage mode for ClawFlow that classifies and prioritizes incoming items into actionable tasks. Use when processing message or notification backlogs through OpenClaw.",
+      "triggers": [
+        "inbox triage",
+        "message backlog",
+        "prioritize inbox",
+        "clawflow triage",
+        "notification sorting"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "clawsec-suite",
+      "name": "clawsec-suite",
+      "category": "security",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-clawsec-suite",
+      "description": "Security suite for OpenClaw agents: hardening, secret hygiene, and security checks across agent configuration and workspace.",
+      "triggers": [
+        "security audit",
+        "clawsec",
+        "harden agent",
+        "secret scan"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "cloakbrowser",
+      "name": "CloakBrowser",
+      "category": "engineering",
+      "origin": "tool",
+      "source_url": "https://github.com/CloakHQ/CloakBrowser",
+      "description": "Stealth Chromium with 58 C++-level fingerprint patches; drop-in Playwright/Puppeteer replacement passing reCAPTCHA, Cloudflare, FingerprintJS. Use for automation or scraping on bot-protected sites.",
+      "triggers": [
+        "stealth browser",
+        "bypass bot detection",
+        "anti-detect scraping",
+        "cloudflare bypass",
+        "playwright stealth"
+      ],
+      "integration": "tool",
+      "availability": "external"
+    },
+    {
+      "id": "cloud-infrastructure",
+      "name": "cloud-infrastructure",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/cloud-infrastructure",
+      "description": "Cloud architecture for AWS/Azure/GCP/OCI, Kubernetes cluster configuration, Terraform IaC, hybrid networking, and multi-cloud cost optimization. Use for cloud infrastructure design.",
+      "triggers": [
+        "cloud architecture",
+        "terraform iac",
+        "kubernetes cluster",
+        "multi-cloud cost",
+        "aws azure gcp"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "cloudwatch-logs",
+      "name": "cloudwatch-logs",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/cloudwatch-logs",
+      "description": "Search and analyze AWS CloudWatch logs with Logs Insights queries: find errors, trace requests, aggregate across services, investigate ECS issues over flexible time ranges.",
+      "triggers": [
+        "cloudwatch logs",
+        "aws log search",
+        "trace request",
+        "ecs errors",
+        "logs insights"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "cms-landing-page-optimizer",
+      "name": "CMS Landing Page Optimizer",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/cms-landing-page-optimizer",
+      "description": "Optimizes CMS landing pages for conversion and SEO. Use when improving landing page copy, structure, or search performance.",
+      "triggers": [
+        "landing page optimization",
+        "lp optimizer",
+        "cms page seo",
+        "conversion improvement"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "code-documentation",
+      "name": "code-documentation",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/code-documentation",
+      "description": "Documentation generation, code explanation, and technical writing with automated doc generation and tutorial creation. Use when documenting code or writing tutorials.",
+      "triggers": [
+        "generate docs",
+        "code explanation",
+        "technical writing",
+        "tutorial creation"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "code-refactoring",
+      "name": "code-refactoring",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/code-refactoring",
+      "description": "Code cleanup, refactoring automation, and technical debt management with context restoration. Use when restructuring or modernizing existing code.",
+      "triggers": [
+        "refactor code",
+        "code cleanup",
+        "technical debt",
+        "restructure module"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "codebase-cleanup",
+      "name": "codebase-cleanup",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/codebase-cleanup",
+      "description": "Technical debt reduction, dependency updates, and code refactoring automation. Use for codebase-wide hygiene and modernization passes.",
+      "triggers": [
+        "codebase cleanup",
+        "dependency updates",
+        "tech debt reduction",
+        "dead code removal"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "coding-agent",
+      "name": "Coding Agent",
+      "category": "agent-orchestration",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Delegates coding tasks to Codex, Claude Code, or Pi agents via background processes. Use for building features, reviewing PRs, or refactoring large codebases; not one-liner fixes.",
+      "triggers": [
+        "delegate coding task",
+        "spawn codex",
+        "background coding agent",
+        "claude code subprocess",
+        "refactor large codebase",
+        "pr review agent"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "coding-workflow",
+      "name": "Coding Workflow",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/coding-workflow",
+      "description": "Standard coding workflow covering plan, implement, test, and review conventions. Use when executing structured development tasks.",
+      "triggers": [
+        "coding workflow",
+        "dev process",
+        "implement feature",
+        "code conventions"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "comfyui-skill-openclaw",
+      "name": "comfyui-skill-openclaw",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/comfyui-skill-openclaw",
+      "description": "ComfyUI workflow integration for OpenClaw: run image/video generation workflows through a ComfyUI backend.",
+      "triggers": [
+        "comfyui",
+        "image workflow",
+        "run comfyui workflow",
+        "stable diffusion pipeline"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "comprehensive-review",
+      "name": "comprehensive-review",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/comprehensive-review",
+      "description": "Multi-perspective code analysis covering architecture, security, and best practices. Use for thorough pre-merge or audit-style code reviews.",
+      "triggers": [
+        "comprehensive code review",
+        "architecture review",
+        "security review",
+        "best practices check"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "conductor",
+      "name": "conductor",
+      "category": "productivity-workflow",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/conductor",
+      "description": "Context-Driven Development plugin turning Claude Code into a project management tool with Context, Spec & Plan, Implement workflow. Use for structured project execution.",
+      "triggers": [
+        "context-driven development",
+        "spec and plan",
+        "project management workflow",
+        "structured implementation"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "content-marketing",
+      "name": "content-marketing",
+      "category": "marketing-seo",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/content-marketing",
+      "description": "Content marketing strategy, web research, and information synthesis for marketing operations. Use when planning or producing marketing content.",
+      "triggers": [
+        "content marketing strategy",
+        "marketing research",
+        "content synthesis",
+        "marketing operations"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "context-budget-analyzer",
+      "name": "context-budget-analyzer",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/context-budget-analyzer",
+      "description": "Analyzes token/context budget usage in sessions, tracking consumption per layer and recommending savings; use when context approaches limits.",
+      "triggers": [
+        "context budget",
+        "token usage analysis",
+        "context audit",
+        "token burn"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "context-compressor",
+      "name": "context-compressor",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/context-compressor",
+      "description": "Compresses session context (up to ~95%) while preserving key facts so long sessions can continue or resume cheaply.",
+      "triggers": [
+        "compress context",
+        "context compression",
+        "shrink context",
+        "resume long session"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "context-management",
+      "name": "context-management",
+      "category": "agent-orchestration",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/context-management",
+      "description": "Context persistence, restoration, and long-running conversation management. Use when sessions span long tasks and context must survive restarts.",
+      "triggers": [
+        "context persistence",
+        "session restoration",
+        "long conversation",
+        "context restore"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "cron-scripts",
+      "name": "Cron Scripts",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/cron-scripts",
+      "description": "Manages cron jobs and scheduled scripts: create, list, update, and debug recurring tasks. Use when scheduling or maintaining periodic automation.",
+      "triggers": [
+        "cron job",
+        "scheduled script",
+        "recurring task",
+        "crontab",
+        "schedule automation"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "customer-sales-automation",
+      "name": "customer-sales-automation",
+      "category": "communication",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/customer-sales-automation",
+      "description": "Customer support workflow automation, sales pipeline management, email campaigns, and CRM integration. Use when automating support or sales operations.",
+      "triggers": [
+        "customer support automation",
+        "sales pipeline",
+        "email campaigns",
+        "crm integration"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "data-engineering",
+      "name": "data-engineering",
+      "category": "data-analytics",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/data-engineering",
+      "description": "ETL pipeline construction, data warehouse design, batch processing workflows, and data-driven feature development. Use when building data pipelines.",
+      "triggers": [
+        "etl pipeline",
+        "data warehouse",
+        "batch processing",
+        "data pipeline design"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "data-validation-suite",
+      "name": "data-validation-suite",
+      "category": "data-analytics",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/data-validation-suite",
+      "description": "Schema validation, data quality monitoring, streaming validation pipelines, and input validation for backend APIs. Use when ensuring data correctness.",
+      "triggers": [
+        "schema validation",
+        "data quality",
+        "streaming validation",
+        "input validation"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "database-cloud-optimization",
+      "name": "database-cloud-optimization",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/database-cloud-optimization",
+      "description": "Database query optimization, cloud cost optimization, and scalability improvements. Use when reducing query latency or cloud spend.",
+      "triggers": [
+        "query optimization",
+        "cloud cost reduction",
+        "database scaling",
+        "slow queries"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "database-design",
+      "name": "database-design",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/database-design",
+      "description": "Database architecture, schema design, and SQL optimization for production systems. Use when designing or evolving database schemas.",
+      "triggers": [
+        "schema design",
+        "database architecture",
+        "sql optimization",
+        "data modeling"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "database-migrations",
+      "name": "database-migrations",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/database-migrations",
+      "description": "Database migration automation, observability, and cross-database migration strategies. Use when planning or executing schema/data migrations.",
+      "triggers": [
+        "database migration",
+        "schema migration",
+        "cross-database move",
+        "migration automation"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "debugging-toolkit",
+      "name": "debugging-toolkit",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/debugging-toolkit",
+      "description": "Interactive debugging, developer experience optimization, and smart debugging workflows. Use when stepping through tricky bugs interactively.",
+      "triggers": [
+        "interactive debugging",
+        "smart debugging",
+        "dx optimization",
+        "debug workflow"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "deep-research",
+      "name": "Deep Research",
+      "category": "knowledge-research",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/deep-research",
+      "description": "Runs a multi-step deep research pipeline from question refinement to a cited final report. Use for thorough multi-source research on any topic.",
+      "triggers": [
+        "deep research",
+        "research report",
+        "multi-source research",
+        "literature review"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "defuddle",
+      "name": "defuddle",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/defuddle",
+      "description": "Extracts clean Markdown from web pages, stripping navigation, ads, and clutter; token-cheap alternative to web_fetch with metadata extraction (author, date, schema.org).",
+      "triggers": [
+        "extract article",
+        "clean markdown from url",
+        "web content extraction",
+        "readability",
+        "fetch page text"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "dependency-management",
+      "name": "dependency-management",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/dependency-management",
+      "description": "Dependency auditing, version management, and security vulnerability scanning. Use when upgrading packages or auditing third-party dependencies.",
+      "triggers": [
+        "dependency audit",
+        "version upgrades",
+        "vulnerability scan",
+        "package management"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "deployment-strategies",
+      "name": "deployment-strategies",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/deployment-strategies",
+      "description": "Deployment patterns, rollback automation, and infrastructure templates. Use when choosing blue-green, canary, or rollback strategies.",
+      "triggers": [
+        "deployment patterns",
+        "rollback automation",
+        "canary release",
+        "blue-green deploy"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "deployment-validation",
+      "name": "deployment-validation",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/deployment-validation",
+      "description": "Pre-deployment checks, configuration validation, and deployment readiness assessment. Use before shipping releases to production.",
+      "triggers": [
+        "pre-deployment checks",
+        "config validation",
+        "release readiness",
+        "deploy checklist"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "designclaw",
+      "name": "designclaw",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-designclaw",
+      "description": "Design generation toolkit for OpenClaw: produce UI and visual design assets and layouts from prompts.",
+      "triggers": [
+        "designclaw",
+        "design generation",
+        "ui design asset",
+        "visual layout"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "developer-essentials",
+      "name": "developer-essentials",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/developer-essentials",
+      "description": "Essential developer skills: Git workflows, SQL optimization, error handling, code review, E2E testing, authentication, debugging, and monorepo management. Use as a general-purpose toolkit.",
+      "triggers": [
+        "git workflows",
+        "error handling",
+        "e2e testing",
+        "monorepo management",
+        "sql optimization"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "diandian-aso",
+      "name": "diandian-aso",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/diandian-aso",
+      "description": "Query and export App Store ASO data from DiDian (app.diandian.com) via browser automation: keyword coverage, rankings, search volume, and competitor keyword analysis.",
+      "triggers": [
+        "diandian aso",
+        "keyword coverage",
+        "app store rankings",
+        "aso data export",
+        "competitor keywords"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "distributed-debugging",
+      "name": "distributed-debugging",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/distributed-debugging",
+      "description": "Distributed system tracing and debugging across microservices. Use when chasing failures spanning multiple services.",
+      "triggers": [
+        "distributed tracing",
+        "microservices debugging",
+        "cross-service failure",
+        "trace analysis"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "documentation-generation",
+      "name": "documentation-generation",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/documentation-generation",
+      "description": "OpenAPI specification generation, Mermaid diagram creation, tutorial writing, and API reference documentation. Use when producing developer-facing docs.",
+      "triggers": [
+        "openapi spec",
+        "mermaid diagrams",
+        "api reference",
+        "tutorial writing"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "documentation-standards",
+      "name": "documentation-standards",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/documentation-standards",
+      "description": "HADS semantic tagging convention for documentation efficient for both humans and AI, reducing token consumption and hallucination risk. Use when standardizing docs for AI consumption.",
+      "triggers": [
+        "hads standard",
+        "ai-friendly docs",
+        "semantic tagging",
+        "documentation convention"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "dotnet-contribution",
+      "name": "dotnet-contribution",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/dotnet-contribution",
+      "description": ".NET backend development with C#, ASP.NET Core, Entity Framework Core, and Dapper for production applications. Use for C#/.NET projects.",
+      "triggers": [
+        "dotnet backend",
+        "asp.net core",
+        "entity framework",
+        "c# development"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "doubao-seed",
+      "name": "doubao-seed",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/doubao-seed",
+      "description": "Calls ByteDance Doubao models via Volcano Ark API: Seed 2.0 Pro multimodal text/image understanding and Seedream 4.0 text-to-image generation. Not for video (Seedance).",
+      "triggers": [
+        "doubao",
+        "seedream",
+        "seed 2.0 pro",
+        "volcano ark api",
+        "chinese multimodal llm"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "error-debugging",
+      "name": "error-debugging",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/error-debugging",
+      "description": "Error analysis, trace debugging, and multi-agent problem diagnosis. Use when investigating errors with stack traces and logs.",
+      "triggers": [
+        "error analysis",
+        "trace debugging",
+        "stack trace",
+        "problem diagnosis"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "error-diagnostics",
+      "name": "error-diagnostics",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/error-diagnostics",
+      "description": "Error tracing, root cause analysis, and smart debugging for production systems. Use when diagnosing live production errors.",
+      "triggers": [
+        "root cause analysis",
+        "production errors",
+        "error tracing",
+        "live debugging"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "excalidraw-diagram-generator",
+      "name": "Excalidraw Diagram Generator",
+      "category": "media-generation",
+      "origin": "external-service",
+      "source_url": "https://excalidraw.com",
+      "description": "Excalidraw virtual whiteboard for hand-drawn style diagrams, flowcharts, and wireframes; scenes are JSON so agents can generate them programmatically. Use for sketch-style diagram creation.",
+      "triggers": [
+        "excalidraw",
+        "hand-drawn diagram",
+        "whiteboard sketch",
+        "flowchart",
+        "wireframe"
+      ],
+      "integration": "service",
+      "availability": "external"
+    },
+    {
+      "id": "feisou-search",
+      "name": "feisou-search",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/feisou-search",
+      "description": "Searches public Feishu (Lark) cloud documents via the FeiSou API to find Chinese knowledge bases, tutorials, ops manuals, and technical documentation.",
+      "triggers": [
+        "feishu search",
+        "feisou",
+        "chinese docs search",
+        "lark documents",
+        "find chinese tutorial"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "figma-mcp",
+      "name": "Figma MCP",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/figma-mcp",
+      "description": "Accesses the Figma API to read designs, export assets, and inspect components. Use when pulling design context from Figma files.",
+      "triggers": [
+        "figma api",
+        "design file",
+        "export design assets",
+        "figma components"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "finance-dashboard",
+      "name": "Finance Dashboard",
+      "category": "finance-trading",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/finance-dashboard",
+      "description": "Builds and updates a finance dashboard tracking revenue, costs, and key financial metrics. Use when reviewing or reporting business financials.",
+      "triggers": [
+        "finance dashboard",
+        "revenue tracking",
+        "financial metrics",
+        "cost report"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "framework-migration",
+      "name": "framework-migration",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/framework-migration",
+      "description": "Framework updates, migration planning, and architectural transformation workflows. Use when upgrading frameworks or porting between stacks.",
+      "triggers": [
+        "framework upgrade",
+        "migration planning",
+        "architecture transformation",
+        "version migration"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "frontend-mobile-development",
+      "name": "frontend-mobile-development",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/frontend-mobile-development",
+      "description": "Frontend UI development and mobile application implementation across platforms. Use when building web or mobile user interfaces.",
+      "triggers": [
+        "frontend ui",
+        "mobile app development",
+        "cross-platform ui",
+        "react native"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "frontend-mobile-security",
+      "name": "frontend-mobile-security",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/frontend-mobile-security",
+      "description": "XSS prevention, CSRF protection, content security policies, mobile app security, and secure storage patterns. Use when hardening client-side code.",
+      "triggers": [
+        "xss prevention",
+        "csrf protection",
+        "content security policy",
+        "mobile app security"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "full-stack-orchestration",
+      "name": "full-stack-orchestration",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/full-stack-orchestration",
+      "description": "End-to-end feature orchestration with testing, security, performance, and deployment. Use when delivering complete full-stack features.",
+      "triggers": [
+        "full-stack feature",
+        "end-to-end delivery",
+        "feature orchestration",
+        "ship feature"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "functional-programming",
+      "name": "functional-programming",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/functional-programming",
+      "description": "Functional programming with Elixir, OTP patterns, Phoenix framework, and distributed systems. Use for Elixir/Phoenix or FP-style projects.",
+      "triggers": [
+        "elixir development",
+        "otp patterns",
+        "phoenix framework",
+        "functional programming"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "game-development",
+      "name": "game-development",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/game-development",
+      "description": "Unity game development with C# scripting and Minecraft server plugin development with Bukkit/Spigot APIs. Use for game or game-server projects.",
+      "triggers": [
+        "unity development",
+        "c# game scripting",
+        "minecraft plugin",
+        "bukkit spigot"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "geo-audit",
+      "name": "GEO Audit",
+      "category": "marketing-seo",
+      "origin": "external-oss",
+      "source_url": "https://github.com/zilisrikle/geo-audit-skill",
+      "description": "Multi-agent Generative Engine Optimization audit: scores AI citability 0-30, detects 15 AI crawlers, mines question gaps, rewrites content. Use to get content cited by AI engines.",
+      "triggers": [
+        "geo audit",
+        "ai citability",
+        "generative engine optimization",
+        "ai seo",
+        "llm visibility"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "gh-issues",
+      "name": "GitHub Issues Auto-Fix",
+      "category": "engineering",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Fetches GitHub issues, spawns parallel sub-agents to implement fixes and open PRs, then monitors and addresses review comments. Use for automated issue-to-PR workflows.",
+      "triggers": [
+        "auto-fix github issues",
+        "issues to prs",
+        "parallel issue fixing",
+        "monitor pr reviews",
+        "gh-issues"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "git-pr-workflows",
+      "name": "git-pr-workflows",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/git-pr-workflows",
+      "description": "Git workflow automation, pull request enhancement, and team onboarding processes. Use when streamlining PR creation and review flows.",
+      "triggers": [
+        "pr workflow",
+        "git automation",
+        "pull request enhancement",
+        "team onboarding"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "category": "engineering",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "GitHub operations via gh CLI: issues, PRs, CI runs, code review, API queries. Use for checking PR status, CI logs, or creating and filtering issues and PRs.",
+      "triggers": [
+        "gh cli",
+        "pr status",
+        "ci run logs",
+        "create issue",
+        "list pull requests",
+        "github api query"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "github-cli",
+      "name": "GitHub CLI",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/github-cli",
+      "description": "Drives the gh CLI for repos, issues, pull requests, and releases. Use for GitHub operations from the terminal.",
+      "triggers": [
+        "github cli",
+        "gh command",
+        "create pr",
+        "manage issues",
+        "github release"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "github-explorer",
+      "name": "github-explorer",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-github-explorer",
+      "description": "Explores GitHub: search repositories, browse code and trending projects, and inspect repo metadata for research or discovery.",
+      "triggers": [
+        "explore github",
+        "search repos",
+        "trending repositories",
+        "browse repo"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "glm",
+      "name": "GLM",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/glm",
+      "description": "Calls Zhipu GLM large language model APIs for text generation and reasoning. Use when delegating tasks to GLM models.",
+      "triggers": [
+        "glm",
+        "zhipu",
+        "chatglm",
+        "glm api",
+        "chinese llm"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "goal-ops-self-remind",
+      "name": "Goal Ops Self Remind",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/goal-ops-self-remind",
+      "description": "Self-reminder system keeping the agent aligned with active goals during operations. Use for periodic goal check-ins and reminders.",
+      "triggers": [
+        "goal reminder",
+        "self remind",
+        "goal check-in",
+        "stay on track"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "goal-participant",
+      "name": "Goal Participant",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/goal-participant",
+      "description": "Lets the agent participate in shared team goals, tracking contributions and progress. Use when joining or updating collaborative goals.",
+      "triggers": [
+        "goal participation",
+        "shared goal",
+        "team objective",
+        "progress update"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "google-workspace",
+      "name": "google-workspace",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/google-workspace",
+      "description": "Access Google Docs, Sheets, Drive, Calendar, Gmail, GA4 Analytics, and Indexing API: read/write docs, query sheets, manage files, send mail, pull analytics data.",
+      "triggers": [
+        "google docs",
+        "google sheets",
+        "drive files",
+        "send gmail",
+        "ga4 analytics",
+        "google calendar"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "gptimage-seedance-director",
+      "name": "gptimage-seedance-director",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/gptimage-seedance-director",
+      "description": "End-to-end video pipeline: topic to GPT Image 2 storyboard frames to Seedance 2.0 image-to-video, with modes for film storyboards, TikTok vertical ads, and story art.",
+      "triggers": [
+        "video generation pipeline",
+        "storyboard images",
+        "seedance video",
+        "tiktok ad video",
+        "image to video"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "grok-api",
+      "name": "grok-api",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/grok-api",
+      "description": "Calls xAI Grok API through a LeonAI proxy for chat, reasoning, image generation/editing, and video generation using the Responses API format.",
+      "triggers": [
+        "grok chat",
+        "xai api",
+        "grok image generation",
+        "grok video",
+        "grok-4"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "groupmind",
+      "name": "GroupMind",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/groupmind",
+      "description": "GroupMind collective-intelligence workflow for multi-participant discussion and decision synthesis. Use when coordinating group brainstorming or consensus building.",
+      "triggers": [
+        "groupmind",
+        "group discussion",
+        "collective intelligence",
+        "consensus building"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "gtm-asc-auto-recovery",
+      "name": "GTM ASC Auto Recovery",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/gtm-claw-capability",
+      "description": "Automatically detects and recovers failed App Store Connect operations in the go-to-market pipeline. Use when ASC tasks fail and need retry.",
+      "triggers": [
+        "asc recovery",
+        "gtm auto recovery",
+        "app store connect retry",
+        "pipeline recovery"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "gtm-bot-selection",
+      "name": "GTM Bot Selection",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/gtm-claw-capability",
+      "description": "Selects which bots or products to promote in go-to-market campaigns based on performance data. Use during GTM product curation.",
+      "triggers": [
+        "bot selection",
+        "gtm picks",
+        "product curation",
+        "campaign selection"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "gtm-image-gen",
+      "name": "GTM Image Gen",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/gtm-claw-capability",
+      "description": "Generates marketing images for go-to-market campaigns and bot listings. Use when GTM creative assets are needed.",
+      "triggers": [
+        "gtm image",
+        "marketing image",
+        "campaign creative",
+        "listing image"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "gtm-indexing-checker",
+      "name": "GTM Indexing Checker",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/gtm-claw-capability",
+      "description": "Checks search engine indexing status of go-to-market pages. Use when verifying whether published pages are indexed by Google.",
+      "triggers": [
+        "indexing check",
+        "google index status",
+        "page indexed",
+        "search console"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "gtm-noindex-monitor",
+      "name": "GTM Noindex Monitor",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/gtm-claw-capability",
+      "description": "Monitors pages for accidental noindex tags and alerts on SEO indexing regressions. Use for continuous noindex surveillance of GTM pages.",
+      "triggers": [
+        "noindex monitor",
+        "seo regression",
+        "meta robots",
+        "indexing alert"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "guance",
+      "name": "Guance",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/guance",
+      "description": "Queries the Guance observability cloud for logs, metrics, and traces. Use when investigating production telemetry hosted on Guance.",
+      "triggers": [
+        "guance",
+        "observability cloud",
+        "query logs",
+        "traces and metrics"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "healthcheck",
+      "name": "Healthcheck",
+      "category": "security",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Host security hardening and risk-tolerance configuration for machines running OpenClaw. Use for security audits, firewall/SSH/update hardening, exposure review, or scheduled periodic checks.",
+      "triggers": [
+        "security audit",
+        "harden host",
+        "firewall ssh hardening",
+        "risk posture",
+        "exposure review",
+        "openclaw version check"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "hermes-openai-codex-provider",
+      "name": "Hermes OpenAI Codex Provider",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/hermes-openai-codex-provider",
+      "description": "Provider adapter exposing OpenAI Codex as a backend within the Hermes system. Use when routing coding tasks to Codex through Hermes.",
+      "triggers": [
+        "hermes provider",
+        "codex backend",
+        "openai codex",
+        "model routing"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "heygen",
+      "name": "HeyGen",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/heygen",
+      "description": "Generates avatar videos with HeyGen: script to talking-head video, translation, and rendering. Use when producing AI presenter videos.",
+      "triggers": [
+        "heygen",
+        "avatar video",
+        "talking head",
+        "ai video generation"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "high-agency",
+      "name": "high-agency",
+      "category": "self-improvement",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/high-agency",
+      "description": "Sustains always-on high agency via internalized standards, identity anchoring, cross-session learning, and self-recovery; use for complex multi-step tasks, long debugging, and ownership-demanding work.",
+      "triggers": [
+        "high agency",
+        "ownership mindset",
+        "sustained motivation",
+        "self recovery",
+        "think like owner"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "honeycomb",
+      "name": "Honeycomb",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/honeycomb",
+      "description": "Queries Honeycomb observability for traces, events, and performance analysis. Use when debugging distributed system behavior via Honeycomb.",
+      "triggers": [
+        "honeycomb",
+        "tracing",
+        "observability query",
+        "performance debugging"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "hr-legal-compliance",
+      "name": "hr-legal-compliance",
+      "category": "productivity-workflow",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/hr-legal-compliance",
+      "description": "HR policy documentation, legal compliance templates (GDPR/SOC2/HIPAA), employment contracts, and regulatory documentation. Use for HR or legal document work.",
+      "triggers": [
+        "hr policy",
+        "gdpr template",
+        "employment contract",
+        "regulatory documentation"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "html-artifacts",
+      "name": "html-artifacts",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/html-artifacts",
+      "description": "Produces self-contained interactive HTML artifacts instead of markdown for docs, reports, plans, specs, mockups, diagrams, and decks needing layout, color, or interactivity.",
+      "triggers": [
+        "html artifact",
+        "interactive report",
+        "visual writeup",
+        "html doc",
+        "mockup page"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "html-ppt",
+      "name": "html-ppt",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/html-ppt-skill",
+      "description": "Generates presentation slide decks as self-contained PPT-style HTML for sharing, presenting, and export.",
+      "triggers": [
+        "html slides",
+        "presentation deck",
+        "make ppt",
+        "slide deck html"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "hv-analysis",
+      "name": "hv-analysis",
+      "category": "knowledge-research",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/hv-analysis",
+      "description": "Horizontal-vertical deep-research method: vertical axis narrates a subject's full history, horizontal axis benchmarks current competitors; produces a polished PDF research report with crossed-axis insights.",
+      "triggers": [
+        "deep research",
+        "horizontal vertical analysis",
+        "research a product",
+        "competitor comparison",
+        "company deep dive"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "hyperframes",
+      "name": "hyperframes",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/hyperframes",
+      "description": "Creates HyperFrames HTML video compositions: animations, title cards, overlays, synced captions, voiceovers, audio-reactive visuals, and scene transitions using GSAP timelines and timing attributes.",
+      "triggers": [
+        "hyperframes",
+        "html video composition",
+        "audio reactive animation",
+        "synced captions",
+        "scene transitions"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "hyperframes-cli",
+      "name": "hyperframes-cli",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/hyperframes-cli",
+      "description": "HyperFrames CLI dev loop via npx hyperframes: scaffold (init), validate (lint, inspect), preview, render, and environment troubleshooting (doctor, browser, info, upgrade).",
+      "triggers": [
+        "hyperframes cli",
+        "render video",
+        "hyperframes init",
+        "preview composition",
+        "hyperframes doctor"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "hyperframes-gsap",
+      "name": "hyperframes-gsap",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/hyperframes-gsap",
+      "description": "GSAP animation reference for HyperFrames compositions: tweens, easing, stagger, timelines with labels and nesting, playback control, and performance best practices.",
+      "triggers": [
+        "gsap animation",
+        "hyperframes timeline",
+        "easing curves",
+        "stagger animation",
+        "gsap performance"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "hyperframes-media",
+      "name": "hyperframes-media",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/hyperframes-media",
+      "description": "Asset preprocessing for HyperFrames: local Kokoro text-to-speech narration, Whisper transcription for captions, and u2net background removal for transparent video overlays.",
+      "triggers": [
+        "text to speech",
+        "transcribe audio",
+        "remove background",
+        "voiceover generation",
+        "captions from speech"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "hyperframes-tailwind",
+      "name": "hyperframes-tailwind",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/hyperframes-tailwind",
+      "description": "Tailwind CSS v4 browser-runtime patterns for HyperFrames compositions: utility classes, CSS-first theme tokens, v3-vs-v4 syntax debugging, and when to precompile.",
+      "triggers": [
+        "tailwind hyperframes",
+        "tailwind v4",
+        "theme tokens",
+        "browser runtime tailwind"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "image-uploader",
+      "name": "Image Uploader",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/image-uploader",
+      "description": "Uploads images to hosting or CDN and returns shareable URLs. Use when an image needs a public link.",
+      "triggers": [
+        "upload image",
+        "image host",
+        "cdn upload",
+        "get image url"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "incident-response",
+      "name": "incident-response",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/incident-response",
+      "description": "Production incident management, triage workflows, and automated incident resolution. Use during outages or post-incident follow-up.",
+      "triggers": [
+        "incident management",
+        "production outage",
+        "triage workflow",
+        "incident resolution"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "infographic-skill",
+      "name": "infographic-skill",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/infographic-skill",
+      "description": "Creates infographic-style visuals that summarize data or concepts as polished shareable graphics.",
+      "triggers": [
+        "infographic",
+        "visual summary",
+        "data graphic"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "ios-growth",
+      "name": "ios-growth",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/ios-growth",
+      "description": "iOS growth data toolkit: keyword rank monitoring, competitor analysis, chart tracking, and download/revenue estimation, auto-selecting between Apify (free) and DiDian (paid) data sources.",
+      "triggers": [
+        "ios keyword ranking",
+        "aso analysis",
+        "competitor monitoring",
+        "app store charts",
+        "download estimates"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "javascript-typescript",
+      "name": "javascript-typescript",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/javascript-typescript",
+      "description": "JavaScript and TypeScript development with ES6+, Node.js, React, and modern web frameworks. Use for JS/TS application work.",
+      "triggers": [
+        "typescript development",
+        "node.js",
+        "react development",
+        "es6 javascript"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "julia-development",
+      "name": "julia-development",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/julia-development",
+      "description": "Modern Julia 1.10+ development: package management, scientific computing, high-performance numerical code, and production best practices. Use for Julia projects.",
+      "triggers": [
+        "julia development",
+        "scientific computing",
+        "numerical code",
+        "julia packages"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "jvm-languages",
+      "name": "jvm-languages",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/jvm-languages",
+      "description": "JVM language development including Java, Scala, and C# with enterprise patterns and frameworks. Use for Java/Scala enterprise codebases.",
+      "triggers": [
+        "java development",
+        "scala development",
+        "jvm enterprise",
+        "spring framework"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "kubernetes-operations",
+      "name": "kubernetes-operations",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/kubernetes-operations",
+      "description": "Kubernetes manifest generation, networking, security policies, observability, GitOps workflows, and auto-scaling. Use when operating or configuring Kubernetes clusters.",
+      "triggers": [
+        "kubernetes manifests",
+        "gitops workflow",
+        "k8s networking",
+        "auto-scaling",
+        "cluster security"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "lanbow",
+      "name": "Lanbow",
+      "category": "marketing-seo",
+      "origin": "external-service",
+      "source_url": "https://lanbow.com",
+      "description": "Enterprise growth-decision platform automating advertising and capital-allocation decisions from live market signals, with creative variant generation and reinforcement-learning memory. Use for large-scale growth operations.",
+      "triggers": [
+        "growth decisions",
+        "ad spend optimization",
+        "capital allocation",
+        "enterprise marketing",
+        "media buying"
+      ],
+      "integration": "service",
+      "availability": "external"
+    },
+    {
+      "id": "lightweight-explorer",
+      "name": "lightweight-explorer",
+      "category": "knowledge-research",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/lightweight-explorer",
+      "description": "Lightweight, low-token exploration of websites or codebases for quick reconnaissance without heavy fetching or full crawls.",
+      "triggers": [
+        "lightweight explore",
+        "quick recon",
+        "cheap browse",
+        "low token exploration"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-book",
+      "name": "ljg-book",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Deconstructs a book into five structural elements: core question, assumptions, framework, key views, overview. Use for fast structural book digestion.",
+      "triggers": [
+        "book breakdown",
+        "read book",
+        "book structure",
+        "book summary"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-card",
+      "name": "ljg-card",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Converts text content into designed PNG visual cards: long-form images, infographics, multi-card sets, visual notes, comics, whiteboards. Use to share knowledge as images.",
+      "triggers": [
+        "visual card",
+        "infographic",
+        "png card",
+        "knowledge card",
+        "content to image"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-invest",
+      "name": "ljg-invest",
+      "category": "finance-trading",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Evaluates whether a project functions as an order-creation machine. Use for first-principles investment and project-viability analysis.",
+      "triggers": [
+        "investment analysis",
+        "evaluate project",
+        "invest thesis",
+        "order creation machine"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-learn",
+      "name": "ljg-learn",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Dissects a concept from eight perspectives to extract its core insight. Use when learning or deeply understanding an unfamiliar concept.",
+      "triggers": [
+        "concept analysis",
+        "understand concept",
+        "deep learning",
+        "eight perspectives"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-paper",
+      "name": "ljg-paper",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Extracts the core idea of an academic paper and explains it for general audiences. Use when reading or summarizing research papers.",
+      "triggers": [
+        "read paper",
+        "paper summary",
+        "academic paper",
+        "explain research"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-paper-flow",
+      "name": "ljg-paper-flow",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Workflow chaining paper reading with comic-style card generation: distills a paper's core idea then renders it as visual cards. Use for shareable paper explainers.",
+      "triggers": [
+        "paper to card",
+        "paper comic",
+        "paper workflow",
+        "visual paper summary"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-paper-river",
+      "name": "ljg-paper-river",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Traces a paper's research genealogy by recursively examining cited prior work up to five layers plus recent developments. Use to map a research lineage.",
+      "triggers": [
+        "paper lineage",
+        "research genealogy",
+        "citation tracing",
+        "paper origins"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-plain",
+      "name": "ljg-plain",
+      "category": "communication",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Rewrites any content so a twelve-year-old can understand it. Use to simplify jargon-heavy text into plain language.",
+      "triggers": [
+        "simplify text",
+        "plain language",
+        "explain simply",
+        "eli12"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-present",
+      "name": "ljg-present",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Presentation generator supporting high-low flow and banner styles. Use to turn content into styled slide decks.",
+      "triggers": [
+        "generate presentation",
+        "slides",
+        "banner style",
+        "presentation deck"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-push",
+      "name": "ljg-push",
+      "category": "productivity-workflow",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Syncs locally modified ljg-* skills to the ljg-skills GitHub repo, converting between org-mode and markdown branches. Use after editing ljg skills.",
+      "triggers": [
+        "push skills",
+        "sync skills",
+        "skill deploy",
+        "ljg sync"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-qa",
+      "name": "ljg-qa",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Converts article, paper, or book content into question-and-answer chains with formatted answers. Use to turn reading material into study Q&A.",
+      "triggers": [
+        "content to qa",
+        "question chains",
+        "study questions",
+        "qa generation"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-rank",
+      "name": "ljg-rank",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Identifies the irreducible independent generators of a domain — the minimal concepts everything else derives from. Use to find a field's first principles.",
+      "triggers": [
+        "first principles",
+        "domain generators",
+        "core concepts",
+        "irreducible basis"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-read",
+      "name": "ljg-read",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Companion reading tool offering three-layer translation, structure annotation, guiding questions, and cross-disciplinary insights. Use for guided close reading of texts.",
+      "triggers": [
+        "companion reading",
+        "close reading",
+        "annotate text",
+        "reading assistant"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-relationship",
+      "name": "ljg-relationship",
+      "category": "self-improvement",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Diagnoses interpersonal relationships across five levels using a psychoanalytic framework. Use to analyze and improve a personal or work relationship.",
+      "triggers": [
+        "relationship diagnosis",
+        "interpersonal analysis",
+        "psychoanalytic framework",
+        "relationship advice"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-roundtable",
+      "name": "ljg-roundtable",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Runs a structured multi-perspective roundtable dialogue on a topic with ASCII framework diagrams. Use to examine a question from several expert viewpoints.",
+      "triggers": [
+        "roundtable",
+        "multi perspective",
+        "expert debate",
+        "structured dialogue"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-skill-map",
+      "name": "ljg-skill-map",
+      "category": "productivity-workflow",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Visualizes all installed Claude skills as a map. Use to inventory, browse, or present your skill collection.",
+      "triggers": [
+        "skill map",
+        "list skills",
+        "skill inventory",
+        "visualize skills"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-think",
+      "name": "ljg-think",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Recursively explores an observation down to its indivisible essence. Use for first-principles thinking about a phenomenon or idea.",
+      "triggers": [
+        "recursive thinking",
+        "essence analysis",
+        "first principles",
+        "deep think"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-travel",
+      "name": "ljg-travel",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Generates a cultural research document and portable reference cards for a city. Use for trip preparation and city culture deep-dives.",
+      "triggers": [
+        "travel research",
+        "city guide",
+        "trip prep",
+        "culture cards"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-word",
+      "name": "ljg-word",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Deep-dives into an English word's semantics, etymology, and the conceptual breakthrough it encodes. Use for vocabulary mastery and word-level insight.",
+      "triggers": [
+        "word analysis",
+        "etymology",
+        "english word",
+        "vocabulary deep dive"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-word-flow",
+      "name": "ljg-word-flow",
+      "category": "knowledge-research",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Workflow chaining word analysis with infographic card generation: analyzes an English word then renders the insight as a visual card.",
+      "triggers": [
+        "word to card",
+        "word infographic",
+        "word workflow",
+        "vocabulary card"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-writes",
+      "name": "ljg-writes",
+      "category": "communication",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Produces surgical 1000-1500 word layered analysis essays dissecting a viewpoint. Use to write deep, structured opinion analysis.",
+      "triggers": [
+        "viewpoint analysis",
+        "write essay",
+        "deep analysis",
+        "layered writing"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "ljg-x-download",
+      "name": "ljg-x-download",
+      "category": "platform-integration",
+      "origin": "external-oss",
+      "source_url": "https://github.com/lijigang/ljg-skills",
+      "description": "Reportedly downloads X (Twitter) posts and threads for local archiving. Not present in the current repo; likely removed or renamed. Use to save X content.",
+      "triggers": [
+        "x download",
+        "twitter download",
+        "save tweet",
+        "thread archive"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "llm-application-dev",
+      "name": "llm-application-dev",
+      "category": "agent-orchestration",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/llm-application-dev",
+      "description": "LLM application development with LangGraph, RAG systems, vector search, and AI agent architectures. Use when building LLM-powered apps or agents.",
+      "triggers": [
+        "langgraph",
+        "rag system",
+        "vector search",
+        "ai agent architecture",
+        "llm app"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "machine-learning-ops",
+      "name": "machine-learning-ops",
+      "category": "data-analytics",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/machine-learning-ops",
+      "description": "ML model training pipelines, hyperparameter tuning, model deployment automation, experiment tracking, and MLOps workflows. Use for ML lifecycle management.",
+      "triggers": [
+        "mlops",
+        "model training pipeline",
+        "hyperparameter tuning",
+        "experiment tracking",
+        "model deployment"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "mcporter",
+      "name": "mcporter",
+      "category": "platform-integration",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Uses the mcporter CLI to list, configure, authenticate, and call MCP servers and tools directly over HTTP or stdio, including ad-hoc servers and config edits.",
+      "triggers": [
+        "mcp server list",
+        "call mcp tool",
+        "mcporter",
+        "mcp auth",
+        "configure mcp server"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "meigen-ai-design",
+      "name": "meigen-ai-design",
+      "category": "media-generation",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/meigen-ai-design",
+      "description": "AI image generation with creative workflow orchestration, parallel multi-direction output, prompt engineering, and 1,300+ inspiration library. Requires MeiGen MCP server.",
+      "triggers": [
+        "ai image generation",
+        "meigen",
+        "comfyui",
+        "creative prompt engineering"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "memory-manager",
+      "name": "memory-manager",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/memory-manager",
+      "description": "Structured long-term memory system: auto-captures, classifies, prunes, and retrieves agent memories; loads at session start, records corrections and preferences, archives completed tasks.",
+      "triggers": [
+        "remember this",
+        "long term memory",
+        "memory pruning",
+        "recall history",
+        "save preference"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "mempalace",
+      "name": "MemPalace",
+      "category": "self-improvement",
+      "origin": "tool",
+      "source_url": "https://github.com/milla-jovovich/mempalace",
+      "description": "Local-first AI memory: verbatim conversation storage, semantic search, knowledge graph, pluggable vector backends, 29-tool MCP server. Use for persistent cross-session agent memory without cloud APIs.",
+      "triggers": [
+        "persistent memory",
+        "memory palace",
+        "conversation recall",
+        "knowledge graph",
+        "local memory"
+      ],
+      "integration": "tool",
+      "availability": "external"
+    },
+    {
+      "id": "modal",
+      "name": "Modal",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/modal",
+      "description": "Runs GPU workloads on Modal serverless cloud: deploy functions, run inference and batch jobs. Use when cloud GPU compute is needed.",
+      "triggers": [
+        "modal gpu",
+        "serverless gpu",
+        "cloud compute",
+        "run inference job"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "mp-caveman",
+      "name": "mp-caveman",
+      "category": "communication",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mp-caveman",
+      "description": "Ultra-compressed reply mode cutting roughly 75% of tokens by dropping articles, filler, and pleasantries while keeping technical accuracy; activate when context is tight.",
+      "triggers": [
+        "caveman mode",
+        "be brief",
+        "less tokens",
+        "short replies"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "mp-diagnose",
+      "name": "mp-diagnose",
+      "category": "engineering",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mp-diagnose",
+      "description": "Disciplined six-phase bug diagnosis loop: build feedback loop, reproduce, minimise, hypothesise, instrument, fix with regression test. Use for hard bugs and performance regressions.",
+      "triggers": [
+        "debug this",
+        "diagnose bug",
+        "root cause analysis",
+        "performance regression",
+        "intermittent failure"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "mp-grill-with-docs",
+      "name": "mp-grill-with-docs",
+      "category": "engineering",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mp-grill-with-docs",
+      "description": "Question-by-question grilling to align requirements and stress-test designs, tightening project terminology and updating CONTEXT.md and ADRs as decisions crystallize.",
+      "triggers": [
+        "grill me",
+        "stress test plan",
+        "requirements alignment",
+        "adr update",
+        "domain glossary"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "mp-handoff",
+      "name": "mp-handoff",
+      "category": "productivity-workflow",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mp-handoff",
+      "description": "Compacts the current session into a structured handoff document so another agent or future session can resume seamlessly; use before compaction or session end.",
+      "triggers": [
+        "handoff",
+        "session handoff",
+        "write handoff doc",
+        "continue next session"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "mp-improve-architecture",
+      "name": "mp-improve-architecture",
+      "category": "engineering",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mp-improve-architecture",
+      "description": "Finds codebase deepening opportunities informed by domain language and ADRs: consolidate tightly-coupled modules, improve testability and AI navigability; good for periodic code health checks.",
+      "triggers": [
+        "improve architecture",
+        "refactoring opportunities",
+        "decouple modules",
+        "code health check"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "mp-prototype",
+      "name": "mp-prototype",
+      "category": "engineering",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mp-prototype",
+      "description": "Rapid throwaway prototypes that answer one question each: validate data models, state machines, or UI options before committing to a design decision.",
+      "triggers": [
+        "prototype this",
+        "try options",
+        "validate design",
+        "quick spike"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "mp-tdd",
+      "name": "mp-tdd",
+      "category": "engineering",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mp-tdd",
+      "description": "Red-green-refactor test-driven development: behavior-focused integration-style tests through public interfaces, providing regression protection for new features and bug fixes.",
+      "triggers": [
+        "tdd",
+        "test first",
+        "red green refactor",
+        "write tests first"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "mp-zoom-out",
+      "name": "mp-zoom-out",
+      "category": "engineering",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mp-zoom-out",
+      "description": "Steps up one abstraction level to map related modules and callers, situating unfamiliar local code within the wider system before diving in.",
+      "triggers": [
+        "zoom out",
+        "module map",
+        "system overview",
+        "unfamiliar code"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "multi-platform-apps",
+      "name": "multi-platform-apps",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/multi-platform-apps",
+      "description": "Cross-platform application development coordinating web, iOS, Android, and desktop implementations. Use when one feature must ship across platforms.",
+      "triggers": [
+        "cross-platform app",
+        "ios android web",
+        "desktop app",
+        "multi-platform feature"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "myshell-image-gen",
+      "name": "MyShell Image Gen",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/myshell-image-gen",
+      "description": "Generates images through MyShell platform models and bots. Use when creating images via MyShell APIs.",
+      "triggers": [
+        "myshell image",
+        "generate image",
+        "myshell bot art"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "mysql",
+      "name": "MySQL",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/mysql",
+      "description": "Connects to MySQL databases to run queries, inspect schemas, and manage data. Use for direct MySQL database access.",
+      "triggers": [
+        "mysql",
+        "sql query",
+        "database query",
+        "inspect schema"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "nano-banana-pro",
+      "name": "nano-banana-pro",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/nano-banana-pro",
+      "description": "Generates or edits images with Google Nano Banana Pro (Gemini 3 Pro Image): text-to-image and image-to-image at 1K/2K/4K via script with --input-image.",
+      "triggers": [
+        "generate image",
+        "edit image",
+        "nano banana",
+        "text to image",
+        "4k image"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "node-connect",
+      "name": "Node Connect",
+      "category": "platform-integration",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Diagnoses OpenClaw node connection and pairing failures for Android, iOS, and macOS companion apps. Use when QR/setup-code pairing fails or gateway/Tailscale routing errors appear.",
+      "triggers": [
+        "node pairing failed",
+        "qr connect fails",
+        "gateway bind error",
+        "tailscale node connect",
+        "bootstrap token invalid",
+        "companion app pairing"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "non-blocking-wait",
+      "name": "Non-Blocking Wait",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/non-blocking-wait",
+      "description": "Waits for long-running operations without blocking the agent loop, polling and resuming when done. Use for asynchronous waiting on slow tasks.",
+      "triggers": [
+        "non-blocking wait",
+        "async wait",
+        "poll status",
+        "long-running task"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "notion",
+      "name": "Notion",
+      "category": "platform-integration",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Notion API integration for creating, reading, and updating pages, databases (data sources), and blocks. Use when managing Notion content programmatically with an API key.",
+      "triggers": [
+        "notion page",
+        "notion database",
+        "create notion page",
+        "update notion block",
+        "notion api"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "notion-image-bots",
+      "name": "Notion Image Bots",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/notion-image-bots",
+      "description": "Syncs bot images and assets into Notion databases. Use when managing bot artwork records in Notion.",
+      "triggers": [
+        "notion images",
+        "bot gallery",
+        "sync notion assets",
+        "bot image records"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "notion-standup",
+      "name": "Notion Standup",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/notion-standup",
+      "description": "Writes daily standup updates into Notion. Use for posting or compiling standup notes in the team Notion workspace.",
+      "triggers": [
+        "notion standup",
+        "daily update",
+        "standup notes",
+        "team standup"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "notion-task-sync",
+      "name": "Notion Task Sync",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/notion-task-sync",
+      "description": "Syncs tasks between agent task lists and Notion databases. Use when keeping Notion task boards up to date.",
+      "triggers": [
+        "notion sync",
+        "task sync",
+        "sync todo",
+        "notion database update"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "observability-monitoring",
+      "name": "observability-monitoring",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/observability-monitoring",
+      "description": "Metrics collection, logging infrastructure, distributed tracing, SLO implementation, and monitoring dashboards. Use when instrumenting systems for observability.",
+      "triggers": [
+        "metrics collection",
+        "logging infrastructure",
+        "slo implementation",
+        "monitoring dashboards",
+        "distributed tracing"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "omni-channel-agent",
+      "name": "omni-channel-agent",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/omni-channel-agent",
+      "description": "Omni-channel product-selection agent aggregating social trends, SEO research, competitor ads (Facebook/TikTok), and KOL trend radar into Slack-formatted launch-decision reports.",
+      "triggers": [
+        "product selection",
+        "social media trends",
+        "competitor ads",
+        "tiktok trends",
+        "kol radar",
+        "seo research"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "openclaw-backup",
+      "name": "myclaw-backup",
+      "category": "platform-integration",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/openclaw-backup",
+      "description": "Backs up and restores all OpenClaw configuration, agent memory, skills, and workspace data; schedules snapshots, migrates servers, and offers browser-based download/upload. Handles sensitive credentials.",
+      "triggers": [
+        "openclaw backup",
+        "restore snapshot",
+        "migrate server",
+        "scheduled backup",
+        "data protection"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "payment-processing",
+      "name": "payment-processing",
+      "category": "finance-trading",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/payment-processing",
+      "description": "Payment gateway integration with Stripe and PayPal, checkout flows, subscription billing, and PCI compliance. Use when adding payments to applications.",
+      "triggers": [
+        "stripe integration",
+        "checkout flow",
+        "subscription billing",
+        "pci compliance",
+        "paypal"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "performance-testing-review",
+      "name": "performance-testing-review",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/performance-testing-review",
+      "description": "Performance analysis, test coverage review, and AI-powered code quality assessment. Use when evaluating test suites and performance characteristics.",
+      "triggers": [
+        "performance analysis",
+        "test coverage review",
+        "code quality assessment",
+        "benchmark review"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "pexoai-agent",
+      "name": "pexo-agent",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/pexoai-agent",
+      "description": "Conversational AI content agent: describe what you want and Pexo plans, generates, and delivers finished videos and images including product videos, ads, explainers, and social clips.",
+      "triggers": [
+        "make a video",
+        "ai video",
+        "product video",
+        "explainer video",
+        "ai content creation"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "plugin-eval",
+      "name": "plugin-eval",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/plugin-eval",
+      "description": "Plugin evaluation tooling for the wshobson agents marketplace (no description in manifest; v0.1.1). Use when testing or evaluating Claude Code plugins.",
+      "triggers": [
+        "plugin evaluation",
+        "plugin testing",
+        "marketplace eval"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "pm-agent-loop",
+      "name": "PM Agent Loop",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/pm-agent-loop",
+      "description": "Product-manager agent loop that continuously triages requirements, prioritizes, and drives product tasks. Use for autonomous PM-style task management.",
+      "triggers": [
+        "pm loop",
+        "product manager agent",
+        "requirement triage",
+        "prioritize backlog"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "ppt-master",
+      "name": "PPT Master",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/hugohe3/ppt-master",
+      "description": "Generates native editable .pptx decks with speaker notes from PDFs, Word docs, or text, using custom templates, fully local. Use for document-to-PowerPoint conversion.",
+      "triggers": [
+        "generate pptx",
+        "powerpoint from pdf",
+        "editable slides",
+        "ppt generation",
+        "speaker notes"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "proactive-self-improving",
+      "name": "proactive-self-improving-agent",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/proactive-self-improving",
+      "description": "Auto-captures experience: logs failures to ERRORS.md, corrections and better practices to LEARNINGS.md, missing capabilities to FEATURE_REQUESTS.md; promotes lessons recurring three-plus times into agent docs.",
+      "triggers": [
+        "record learning",
+        "capture experience",
+        "error log",
+        "self evolve",
+        "promote lesson"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "proactive-task-engine",
+      "name": "Proactive Task Engine",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/proactive-task-engine",
+      "description": "Proactive task engine that discovers, schedules, and executes tasks without prompting. Use for autonomous background task execution.",
+      "triggers": [
+        "task engine",
+        "proactive tasks",
+        "autonomous execution",
+        "background tasks"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "prod-release-ci",
+      "name": "Prod Release CI",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/prod-release-ci",
+      "description": "Production release CI workflow: build, verify, and ship releases safely. Use when deploying to production environments.",
+      "triggers": [
+        "production release",
+        "ci deploy",
+        "ship release",
+        "release pipeline"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "product-analysis-framework",
+      "name": "product-analysis-framework",
+      "category": "knowledge-research",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/product-analysis-framework",
+      "description": "Objective five-part product/SaaS analysis: what it is, core capabilities, pricing, fit and non-fit scenarios, plus decision advice mapped to the user's business context.",
+      "triggers": [
+        "analyze product",
+        "is it worth using",
+        "saas research",
+        "tool evaluation",
+        "product breakdown"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "protect-mcp",
+      "name": "protect-mcp",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/protect-mcp",
+      "description": "Cedar policy enforcement plus Ed25519 signed receipts for every Claude Code tool call; receipts independently verifiable offline. Use for cryptographic tool-call governance.",
+      "triggers": [
+        "cedar policy",
+        "signed receipts",
+        "tool call governance",
+        "ed25519 audit"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "pua-skill",
+      "name": "pua",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/pua-skill",
+      "description": "Anti-slacking motivation engine using corporate PUA rhetoric; fires when the agent fails repeatedly, is about to give up, waits passively, or the user says try harder.",
+      "triggers": [
+        "try harder",
+        "stop giving up",
+        "exhaust all options",
+        "don't slack",
+        "retry differently"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "python-development",
+      "name": "python-development",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/python-development",
+      "description": "Modern Python 3.12+ development with Django, FastAPI, async patterns, and production best practices. Use for Python application work.",
+      "triggers": [
+        "python development",
+        "fastapi",
+        "django",
+        "async python"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "qa-auth",
+      "name": "QA Auth",
+      "category": "engineering",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/qa-auth",
+      "description": "Handles authentication and credentials for QA test environments. Use when automated tests need authenticated sessions.",
+      "triggers": [
+        "qa auth",
+        "test login",
+        "test credentials",
+        "auth for testing"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "quantitative-trading",
+      "name": "quantitative-trading",
+      "category": "finance-trading",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/quantitative-trading",
+      "description": "Quantitative analysis, algorithmic trading strategies, financial modeling, portfolio risk management, and backtesting. Use for quant finance and trading systems.",
+      "triggers": [
+        "algorithmic trading",
+        "backtesting",
+        "portfolio risk",
+        "financial modeling",
+        "quant strategy"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "quick-data-dashboard",
+      "name": "Quick Data Dashboard",
+      "category": "data-analytics",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/quick-data-dashboard",
+      "description": "Quickly assembles data dashboards from query results for at-a-glance metrics. Use when a fast visual data summary is needed.",
+      "triggers": [
+        "data dashboard",
+        "quick dashboard",
+        "metrics view",
+        "visualize data"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "remotion-gpu",
+      "name": "Remotion GPU",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/remotion-gpu",
+      "description": "Renders Remotion videos on GPU infrastructure for faster output. Use when programmatic video rendering needs GPU acceleration.",
+      "triggers": [
+        "remotion render",
+        "gpu render",
+        "video rendering",
+        "remotion cloud"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "reverse-engineering",
+      "name": "reverse-engineering",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/reverse-engineering",
+      "description": "Binary reverse engineering, malware analysis, firmware security, and software protection research for authorized security research, CTFs, and defensive security.",
+      "triggers": [
+        "reverse engineering",
+        "malware analysis",
+        "binary analysis",
+        "firmware security",
+        "ctf"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "review-agent-governance",
+      "name": "review-agent-governance",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/review-agent-governance",
+      "description": "Requires human approval before AI agents post PR reviews, comments, merges, or CI config writes. Cedar-gated, receipt-signed. Use to govern autonomous review bots.",
+      "triggers": [
+        "agent governance",
+        "human approval gate",
+        "pr review bot",
+        "cedar gating"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "runninghub-skills",
+      "name": "runninghub",
+      "category": "media-generation",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/runninghub-skills",
+      "description": "Generates images, videos, audio, and 3D models via RunningHub API (170+ endpoints) and runs any custom ComfyUI workflow AI application by webappId.",
+      "triggers": [
+        "runninghub",
+        "comfyui workflow",
+        "image to video",
+        "text to speech",
+        "3d model generation",
+        "music generation"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "s3-file",
+      "name": "S3 File",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/s3-file",
+      "description": "Uploads, downloads, and manages files in AWS S3 buckets. Use for S3 file storage operations.",
+      "triggers": [
+        "s3 upload",
+        "s3 download",
+        "bucket file",
+        "aws storage"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "scrapling",
+      "name": "scrapling-official",
+      "category": "engineering",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/scrapling",
+      "description": "Adaptive web scraping with anti-bot bypass (Cloudflare Turnstile), stealth headless browsing, spiders framework, and JavaScript rendering. Use when web_fetch fails or sites block bots.",
+      "triggers": [
+        "scrape website",
+        "anti-bot bypass",
+        "cloudflare bypass",
+        "write spider",
+        "crawl site"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "security-compliance",
+      "name": "security-compliance",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/security-compliance",
+      "description": "SOC2, HIPAA, and GDPR compliance validation, secrets scanning, compliance checklists, and regulatory documentation. Use for compliance audits and evidence prep.",
+      "triggers": [
+        "soc2 compliance",
+        "hipaa validation",
+        "gdpr audit",
+        "secrets scanning"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "security-scanning",
+      "name": "security-scanning",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/security-scanning",
+      "description": "SAST analysis, dependency vulnerability scanning, OWASP Top 10 compliance, container security scanning, and automated hardening. Use for code and container security scans.",
+      "triggers": [
+        "sast analysis",
+        "owasp top 10",
+        "container scanning",
+        "vulnerability scanning",
+        "security hardening"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "self-improving",
+      "name": "Self Improving",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/self-improving",
+      "description": "Self-improvement loop that records mistakes and updates the agent's own behavior and skills. Use after errors to capture and apply lessons.",
+      "triggers": [
+        "self improve",
+        "learn from mistake",
+        "update behavior",
+        "capture lesson"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "self-rationalization-guard",
+      "name": "self-rationalization-guard",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/self-rationalization-guard",
+      "description": "Guards against agent self-rationalization: detects excuse-making, fake-success claims, and unverified assumptions, forcing verification before declaring completion.",
+      "triggers": [
+        "self rationalization",
+        "verify before claiming",
+        "fake success guard",
+        "no excuses"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "semrush",
+      "name": "semrush",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/semrush",
+      "description": "Queries Semrush API for SEO data: keyword research, domain analytics, backlink analysis, competitor domains, search volume, and traffic insights.",
+      "triggers": [
+        "semrush",
+        "keyword volume",
+        "backlink analysis",
+        "domain traffic",
+        "seo competitors"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "seo-analysis-monitoring",
+      "name": "seo-analysis-monitoring",
+      "category": "marketing-seo",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/seo-analysis-monitoring",
+      "description": "Content freshness analysis, keyword cannibalization detection, and authority building for SEO. Use when monitoring or diagnosing SEO health.",
+      "triggers": [
+        "content freshness",
+        "cannibalization detection",
+        "seo monitoring",
+        "authority building"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "seo-content-creation",
+      "name": "seo-content-creation",
+      "category": "marketing-seo",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/seo-content-creation",
+      "description": "SEO content writing, planning, and quality auditing with E-E-A-T optimization. Use when producing search-optimized content.",
+      "triggers": [
+        "seo writing",
+        "e-e-a-t",
+        "content planning",
+        "seo quality audit"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "seo-technical-optimization",
+      "name": "seo-technical-optimization",
+      "category": "marketing-seo",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/seo-technical-optimization",
+      "description": "Technical SEO optimization including meta tags, keywords, page structure, and featured snippets. Use when fixing on-page technical SEO.",
+      "triggers": [
+        "technical seo",
+        "meta tags",
+        "featured snippets",
+        "page structure"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "shell-image-video",
+      "name": "shell-image-video",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/shell-image-video",
+      "description": "RunningHub workflow integrations: Nari Fan outfit change, image face swap, Wan2.2 motion transfer (plus upgraded version), and 150-frame HD dance video generation.",
+      "triggers": [
+        "face swap",
+        "dress change",
+        "motion transfer",
+        "dance video",
+        "nari fan"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "shell-scripting",
+      "name": "shell-scripting",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/shell-scripting",
+      "description": "Production-grade Bash scripting with defensive programming, POSIX compliance, and comprehensive testing. Use when writing or hardening shell scripts.",
+      "triggers": [
+        "bash scripting",
+        "posix compliance",
+        "defensive shell",
+        "script testing"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "ship-mate",
+      "name": "ship-mate",
+      "category": "agent-orchestration",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/ship-mate",
+      "description": "Turns a story file into a shipped, reviewed, tested feature via orchestrator, architect, developer, PR reviewer, QA, and Playwright pipeline. Use for autonomous feature delivery.",
+      "triggers": [
+        "story to feature",
+        "dev pipeline",
+        "multi-agent shipping",
+        "automated qa",
+        "playwright pipeline"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "signed-audit-trails",
+      "name": "signed-audit-trails",
+      "category": "security",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/signed-audit-trails",
+      "description": "Teaching skill: cookbook walkthrough of Cedar-gated tool calls with Ed25519 receipts, offline verification, and CI/CD integration. Pairs with protect-mcp plugin.",
+      "triggers": [
+        "signed audit trail",
+        "receipt verification",
+        "cedar walkthrough",
+        "tool call auditing"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "skill-auto-improver",
+      "name": "skill-auto-improver",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-skill-auto-improver",
+      "description": "Automatically audits and improves existing skills based on usage outcomes, failures, and recurring friction.",
+      "triggers": [
+        "improve skill",
+        "skill audit",
+        "auto improve skills",
+        "skill maintenance"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "skill-contribution",
+      "name": "Skill Contribution",
+      "category": "self-improvement",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/skill-contribution",
+      "description": "Packages and contributes skills back to the shared skill repository. Use when publishing or upstreaming a new skill.",
+      "triggers": [
+        "contribute skill",
+        "publish skill",
+        "upstream skill",
+        "share skill"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "skill-creator",
+      "name": "Skill Creator",
+      "category": "self-improvement",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Creates, edits, improves, or audits AgentSkills. Use when authoring a new skill, restructuring a skill directory, or validating SKILL.md files against the AgentSkills spec.",
+      "triggers": [
+        "create a skill",
+        "improve skill",
+        "audit skill.md",
+        "author agentskill",
+        "tidy up skill",
+        "skill spec validation"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "category": "communication",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Controls Slack from OpenClaw via the slack tool: send, edit, or delete messages, react with emoji, pin/unpin items, and fetch member info in channels or DMs.",
+      "triggers": [
+        "slack message",
+        "react to slack",
+        "pin slack message",
+        "slack channel",
+        "send dm slack"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "slack-canvas",
+      "name": "Slack Canvas",
+      "category": "communication",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/slack-canvas",
+      "description": "Creates and edits Slack Canvas documents. Use when publishing structured docs inside Slack channels.",
+      "triggers": [
+        "slack canvas",
+        "channel doc",
+        "create canvas",
+        "edit canvas"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "slack-todo-agent",
+      "name": "Slack Todo Agent",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/slack-todo-agent",
+      "description": "Manages todos from Slack messages: captures, tracks, and reports task status in Slack. Use for Slack-driven task management.",
+      "triggers": [
+        "slack todo",
+        "task from message",
+        "track todos",
+        "slack tasks"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "slides",
+      "name": "slides",
+      "category": "media-generation",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/slides",
+      "description": "Creates slide deck presentations from content outlines or briefs.",
+      "triggers": [
+        "make slides",
+        "slide deck",
+        "presentation creation"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "star-office",
+      "name": "Star Office",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/Star-Office-UI",
+      "description": "Virtual office simulation where agents collaborate in shared rooms and roles. Use for multi-agent virtual workplace coordination.",
+      "triggers": [
+        "virtual office",
+        "star office",
+        "agent workplace",
+        "office simulation"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "startup-business-analyst",
+      "name": "startup-business-analyst",
+      "category": "data-analytics",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/startup-business-analyst",
+      "description": "Startup business analysis with market sizing (TAM/SAM/SOM), financial modeling, team planning, and strategic research. Use when evaluating startup ideas or markets.",
+      "triggers": [
+        "market sizing",
+        "tam sam som",
+        "financial modeling",
+        "startup analysis",
+        "strategic research"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "stitch-design",
+      "name": "Google Stitch",
+      "category": "media-generation",
+      "origin": "external-service",
+      "source_url": "https://stitch.withgoogle.com",
+      "description": "Google Stitch AI UI design generator: creates app and web screens, design systems, and variants from text prompts; supports DESIGN.md and Figma export. Use for rapid UI mockups.",
+      "triggers": [
+        "stitch",
+        "ui generation",
+        "screen mockup",
+        "design system",
+        "text to ui"
+      ],
+      "integration": "service",
+      "availability": "external"
+    },
+    {
+      "id": "structured-decision-alignment",
+      "name": "Structured Decision Alignment",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-structured-decision-alignment",
+      "description": "Structured decision-making framework aligning options, criteria, and stakeholder input before committing. Use for systematic handling of complex decisions.",
+      "triggers": [
+        "decision alignment",
+        "structured decision",
+        "evaluate options",
+        "decision framework"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "systems-programming",
+      "name": "systems-programming",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/systems-programming",
+      "description": "Systems programming with Rust, Go, C, and C++ for performance-critical and low-level development. Use for systems-level code.",
+      "triggers": [
+        "rust development",
+        "go development",
+        "c++ systems",
+        "low-level performance"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "task-autopilot",
+      "name": "Task Autopilot",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/task-autopilot",
+      "description": "Autopilot mode that plans and executes tasks end-to-end with minimal supervision. Use to run work autonomously.",
+      "triggers": [
+        "task autopilot",
+        "autonomous mode",
+        "run unattended",
+        "auto execute"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "tdd-workflows",
+      "name": "tdd-workflows",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/tdd-workflows",
+      "description": "Test-driven development methodology with red-green-refactor cycles and code review. Use when developing features test-first.",
+      "triggers": [
+        "tdd",
+        "red-green-refactor",
+        "test-first development",
+        "tdd code review"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "team-collaboration",
+      "name": "team-collaboration",
+      "category": "productivity-workflow",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/team-collaboration",
+      "description": "Team workflows, issue management, standup automation, and developer experience optimization. Use when streamlining team processes.",
+      "triggers": [
+        "issue management",
+        "standup automation",
+        "team workflow",
+        "developer experience"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "team-tasks",
+      "name": "team-tasks",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-team-tasks",
+      "description": "Manages and syncs team task lists: assignment, status tracking, and reporting across team members.",
+      "triggers": [
+        "team tasks",
+        "task sync",
+        "assign task",
+        "task status report"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "tg-automation",
+      "name": "TG Automation",
+      "category": "communication",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/tg-automation",
+      "description": "Automates Telegram: sends messages, manages chats and channels, and runs bot interactions. Use for Telegram messaging automation.",
+      "triggers": [
+        "telegram automation",
+        "tg bot",
+        "send telegram message",
+        "manage channel"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "topic-page-optimizer",
+      "name": "Topic Page Optimizer",
+      "category": "marketing-seo",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/topic-page-optimizer",
+      "description": "Optimizes topic pages for SEO: keywords, structure, and internal links. Use when improving topic page search rankings.",
+      "triggers": [
+        "topic page seo",
+        "optimize topic page",
+        "page ranking",
+        "internal links"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "ui-design",
+      "name": "ui-design",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/ui-design",
+      "description": "UI/UX design for mobile (iOS, Android, React Native) and web applications with design systems, accessibility, and modern patterns. Use when designing app interfaces.",
+      "triggers": [
+        "ui/ux design",
+        "design system",
+        "mobile ui",
+        "accessibility patterns"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "undercover-mode",
+      "name": "undercover-mode",
+      "category": "communication",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-undercover-mode",
+      "description": "Low-profile operating mode for the agent in shared channels, behaving discreetly like a human participant.",
+      "triggers": [
+        "undercover mode",
+        "stealth mode",
+        "low profile bot"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "unit-testing",
+      "name": "unit-testing",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/unit-testing",
+      "description": "Unit and integration test automation for Python and JavaScript with debugging support. Use when writing or fixing test suites.",
+      "triggers": [
+        "unit tests",
+        "integration tests",
+        "pytest jest",
+        "test automation"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "user-profile-query",
+      "name": "User Profile Query",
+      "category": "data-analytics",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/user-profile-query",
+      "description": "Queries user profile data from internal systems for support and analysis. Use when looking up a user's account details.",
+      "triggers": [
+        "user lookup",
+        "profile query",
+        "account details",
+        "user data"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "uzi-deep-analysis",
+      "name": "deep-analysis",
+      "category": "finance-trading",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/uzi-deep-analysis",
+      "description": "Institutional-grade stock deep analysis for A-share/HK/US: 22 data dimensions, 51-investor panel scoring, DCF/Comps/LBO valuation, trap detection, and Bloomberg-style HTML reports.",
+      "triggers": [
+        "stock deep analysis",
+        "dcf valuation",
+        "equity research",
+        "ic memo",
+        "should i buy this stock"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "uzi-investor-panel",
+      "name": "investor-panel",
+      "category": "finance-trading",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/uzi-investor-panel",
+      "description": "Panel of 50 legendary investors scores a stock by their own methodologies, outputting signal/confidence/score/verdict across value, growth, macro, technical, and quant schools.",
+      "triggers": [
+        "investor panel",
+        "would buffett buy",
+        "panel vote",
+        "investor scoring",
+        "legendary investors"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "uzi-lhb-analyzer",
+      "name": "lhb-analyzer",
+      "category": "finance-trading",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/uzi-lhb-analyzer",
+      "description": "A-share dragon-tiger list (LHB) analyzer: identifies hot-money seats, institution-versus-speculator dynamics, and cross-sector comparison to spot recognized leaders.",
+      "triggers": [
+        "dragon tiger list",
+        "lhb analysis",
+        "hot money seats",
+        "who is buying this stock"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "uzi-trap-detector",
+      "name": "trap-detector",
+      "category": "finance-trading",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/uzi-trap-detector",
+      "description": "Pump-and-dump scam detector: scans eight risk signals when stock tips come from friends, chat groups, gurus, or social media; outputs color-coded risk rating.",
+      "triggers": [
+        "pump and dump",
+        "stock scam check",
+        "is this stock safe",
+        "tip from group",
+        "trap detection"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "video-frames",
+      "name": "Video Frames",
+      "category": "media-generation",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Extracts frames or short clips from videos using ffmpeg. Use when grabbing stills, thumbnails, or trimmed segments from video files.",
+      "triggers": [
+        "extract video frames",
+        "ffmpeg clip",
+        "video thumbnail",
+        "grab still from video",
+        "trim video segment"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "weather",
+      "name": "Weather",
+      "category": "knowledge-research",
+      "origin": "openclaw-builtin",
+      "source_url": "https://github.com/openclaw/openclaw",
+      "description": "Gets current weather and forecasts via wttr.in or Open-Meteo with no API key. Use for temperature, rain, or forecast queries; not historical data or severe-weather alerts.",
+      "triggers": [
+        "current weather",
+        "forecast for city",
+        "will it rain",
+        "temperature in",
+        "weekly weather"
+      ],
+      "integration": "skill",
+      "availability": "local"
+    },
+    {
+      "id": "web-scripting",
+      "name": "web-scripting",
+      "category": "engineering",
+      "origin": "wshobson-arsenal",
+      "source_url": "https://github.com/wshobson/agents/tree/main/plugins/web-scripting",
+      "description": "Web scripting with PHP and Ruby for web applications, CMS development, and backend services. Use for PHP/Ruby web projects.",
+      "triggers": [
+        "php development",
+        "ruby development",
+        "cms development",
+        "web scripting"
+      ],
+      "integration": "plugin",
+      "availability": "local"
+    },
+    {
+      "id": "weekly-report",
+      "name": "Weekly Report",
+      "category": "productivity-workflow",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/weekly-report",
+      "description": "Compiles weekly work reports from activity logs and task records. Use when generating the weekly status report.",
+      "triggers": [
+        "weekly report",
+        "status report",
+        "week summary",
+        "work recap"
+      ],
+      "integration": "skill",
+      "availability": "declared"
+    },
+    {
+      "id": "worker-prompt-craft",
+      "name": "worker-prompt-craft",
+      "category": "agent-orchestration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/worker-prompt-craft",
+      "description": "Crafts effective prompts for spawned worker/sub-agent instances: scoping, context packing, and output contracts for fan-out tasks.",
+      "triggers": [
+        "worker prompt",
+        "subagent prompt",
+        "fan out prompts",
+        "prompt for workers"
+      ],
+      "integration": "skill",
+      "availability": "external"
+    },
+    {
+      "id": "wshobson-arsenal",
+      "name": "wshobson-arsenal",
+      "category": "engineering",
+      "origin": "external-oss",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/wshobson-arsenal",
+      "description": "Index into the 81-plugin wshobson/agents marketplace: 191 domain-expert agents, 155 skills, 102 commands; search index.json by keyword, then load matching skill or persona.",
+      "triggers": [
+        "domain expert agent",
+        "wshobson",
+        "plugin marketplace",
+        "specialized persona",
+        "vetted reference"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    },
+    {
+      "id": "yt-search-download",
+      "name": "yt-search-download",
+      "category": "platform-integration",
+      "origin": "self-built",
+      "source_url": "https://github.com/Arxchibobo/openclaw-arxchibo/tree/main/skills/yt-search-download",
+      "description": "Searches YouTube via Data API v3 and downloads videos, MP3 audio, or subtitles with yt-dlp; supports channel browsing, sorting, and video metadata lookup.",
+      "triggers": [
+        "youtube search",
+        "download youtube video",
+        "youtube to mp3",
+        "download subtitles",
+        "channel latest videos"
+      ],
+      "integration": "skill",
+      "availability": "vendored"
+    }
+  ]
+}

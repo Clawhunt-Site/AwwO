@@ -1,0 +1,51 @@
+# .gcloudignore — slims the Cloud Build source upload for `gcloud run deploy --source`.
+#
+# CRITICAL: this file REPLACES .gitignore for the upload. .gitignore's SHORT unanchored
+# patterns (artifacts/ dist/ build/) collide with SOURCE dirs the web build needs
+# (e.g. server/ui/src/components/artifacts, which vite bundles) — under .gitignore fallback
+# those tracked source files were dropped from the upload and the web build failed
+# UNRESOLVED_IMPORT. So here we exclude ONLY unambiguous junk, with NO short source-colliding
+# patterns. Everything under server/, apps/, packages/ source is uploaded (matches CI checkout).
+
+# Version control
+.git/
+
+# Dependencies — regenerated in-container (pnpm -C server install / npm ci)
+node_modules/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Build outputs (no source dir is named 'target'; safe unanchored)
+target/
+
+# Huge untracked desktop build outputs
+/apps/desktop/backend/build/
+/apps/desktop/backend/dist/
+
+# Top-level vendored tree the Dockerfile never COPYs (~260M)
+/third_party/
+
+# Local envs / DBs / logs
+/.local/
+/.gemini/
+/.grok/
+/.claude/
+/.codex-cli-advisor/
+/.gemini-cli-advisor/
+/.codex-orchestrator/
+/.worktrees/
+/.superclaw/
+.env
+.env.*
+!.env.example
+/.venv/
+venv/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log

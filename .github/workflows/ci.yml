@@ -1,0 +1,156 @@
+name: ci
+
+# Trigger scope is deliberately narrow to conserve Actions minutes (the org is on
+# the Free 2,000-min/month pool, shared across all private repos):
+#   - pull_request covers every branch that has an open PR.
+#   - push fires on main/staging only (post-merge acceptance). It no longer fires
+#     on codex/** because those branches are already covered by pull_request —
+#     keeping both double-ran the matrix on every push.
+# Minutes are reclaimed by the concurrency block below, NOT by skipping any change.
+on:
+  # Manual trigger so the matrix (incl. the windows-latest job) can be run on
+  # demand without opening a PR — useful right after re-enabling Actions.
+  workflow_dispatch:
+  # No paths-ignore: in this repo docs/Markdown are TEST INPUTS, not inert prose
+  # — e.g. apps/web/tests/static-ui.test.mjs asserts on docs/codex-like-agentos-app.md
+  # and tests/test_skill_author.py asserts on skills/**/SKILL.md. Skipping CI on a
+  # *.md/docs change would let a test-breaking edit merge unverified, so every
+  # change runs the matrix. Minutes are reclaimed by concurrency + trigger scope.
+  pull_request:
+  # `staging` is included proactively per AGENTS.md (optional online-acceptance
+  # branch); it costs nothing until that branch exists.
+  push:
+    branches: [main, staging]
+
+concurrency:
+  # Group PR runs by PR number so a newer commit cancels the PR's superseded
+  # in-flight run — the biggest saver under rapid, agent-driven pushes. A push to
+  # main/staging has no pull_request.number, so it falls back to the unique
+  # run_id: each acceptance run lands in its own group and is therefore NEVER
+  # cancelled or queue-skipped. Post-merge acceptance CI must always complete for
+  # every commit — with no branch protection it is the only green-integration signal.
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      # §〇 lint:只 lint 我们自己的源代码(packages/apps);third_party vendored 经 tool.ruff exclude
+      - run: ruff check packages apps
+      # §〇 测试(含 state schema migration via tests/test_state.py)
+      - run: python -m pytest -q
+      - run: python -m pip install --require-hashes -r apps/myshell-studio-orchestrator/orchestrator/backend/requirements.lock
+      - run: python -m pytest -q apps/myshell-studio-orchestrator/orchestrator/backend/tests apps/myshell-studio-orchestrator/scripts
+      # §〇 启动冒烟①:CLI 能 import+启动+配置自检
+      - run: superclaw doctor
+      # §〇 启动冒烟②(真服务,fail-on-health):API 起到本地端口 + curl /health,200 才算启动成功
+      - run: |
+          python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8765 &
+          SERVER=$!
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8765/health >/dev/null 2>&1 && break || sleep 1; done
+          curl -fsS http://127.0.0.1:8765/health
+          RC=$?
+          kill $SERVER 2>/dev/null || true
+          exit $RC
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # The web build statically fuses the board (server/ui): apps/web/vite.config.mjs
+      # imports @mdxeditor/editor from server/ui, whose deps live in the server pnpm
+      # workspace. Install them first or vite config load fails (MODULE_NOT_FOUND).
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm -C server install --frozen-lockfile
+      - run: npm ci --prefix apps/web
+      - run: npm test --prefix apps/web
+      # §〇 构建:web 生产构建
+      - run: npm run build --prefix apps/web
+      # NOTE: no standalone creative-canvas CI build. Its deps (Remotion + bleeding-edge
+      # vite 8 / rolldown) yield a package-lock that never stays in sync across the
+      # Windows/Linux npm split (`@emnapi` floats by patch; `npm install --prefix` even
+      # mis-resolves package.json on Windows), and its standalone build is NOT a shipped
+      # artifact: since the session-canvas rebuild apps/web no longer touches it at all; the only
+      # consumer is the myshell orchestrator, whose Docker build compiles it. Covered without a
+      # fragile per-platform install here.
+      # apps/gateway IS a shipped runtime component — the Docker image builds it and every
+      # chat turn and graph run is proxied through it — but it had NO CI coverage at all
+      # until 2026-08-27, when an untested startup path (a stale marker on a persistent
+      # volume) took the whole product down. It is a small standalone npm project; run its
+      # suite and build. Linux only: processStartSignature reads /proc, so its test cannot
+      # pass on the windows job.
+      - run: npm ci --prefix apps/gateway
+      - run: npm test --prefix apps/gateway
+      - run: npm run build --prefix apps/gateway
+      - run: npm ci --prefix apps/myshell-studio-orchestrator/frontend
+      - run: npm run test:studio-session --prefix apps/myshell-studio-orchestrator/frontend
+      - run: npm run test:studio-smoke --prefix apps/myshell-studio-orchestrator/frontend
+      - run: npm run build --prefix apps/myshell-studio-orchestrator/frontend
+      - run: docker build --target frontend-build -f apps/myshell-studio-orchestrator/orchestrator/Dockerfile .
+
+  # Windows is now a VERIFIED platform (form B: local CLI / API / web on Windows),
+  # not just "web client of a Linux backend". This job is the P0+P1 gate from
+  # docs/windows-support-assessment.md. The desktop .msi/.exe installer build is
+  # intentionally NOT here (it costs ~15 Actions min + Rust toolchain); it lives in
+  # the tag-triggered release workflow (desktop-windows.yml) so PRs stay cheap.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      # lint: same scope as Linux (our source only; third_party excluded via tool.ruff)
+      - run: ruff check packages apps
+      # tests: POSIX-only tests (mode bits / signals / fork / os.name='posix' fakes)
+      # auto-skip on Windows via the `posix_only` marker hook in tests/conftest.py,
+      # so a GREEN run here means "Windows is healthy", not "POSIX assumptions passed".
+      - run: python -m pytest -q
+      # smoke ①: the P0 gate — CLI imports + starts + self-checks. Proves the
+      # relay_key fcntl→msvcrt guard keeps `import superclaw.cli` alive on Windows.
+      - run: superclaw doctor
+      # smoke ②: real API server on loopback, fail on non-200 /health (PowerShell).
+      - shell: pwsh
+        run: |
+          $p = Start-Process python -ArgumentList '-m','uvicorn','apps.api.main:app','--host','127.0.0.1','--port','8765' -PassThru
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/health -TimeoutSec 2 | Out-Null; $ok = $true; break }
+              catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ok) { throw "API /health did not come up" }
+            Write-Host "/health OK"
+          } finally { if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force } }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # The web build statically fuses the board (server/ui): apps/web/vite.config.mjs
+      # imports @mdxeditor/editor from server/ui, whose deps live in the server pnpm
+      # workspace. Install them first or vite config load fails (MODULE_NOT_FOUND).
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm -C server install --frozen-lockfile
+      - run: npm ci --prefix apps/web
+      - run: npm test --prefix apps/web
+      # build: web production build on Windows (the desktop frontendDist source)
+      - run: npm run build --prefix apps/web
+      # NOTE: no standalone creative-canvas CI build. Its deps (Remotion + bleeding-edge
+      # vite 8 / rolldown) yield a package-lock that never stays in sync across the
+      # Windows/Linux npm split (`@emnapi` floats by patch; `npm install --prefix` even
+      # mis-resolves package.json on Windows), and its standalone build is NOT a shipped
+      # artifact: since the session-canvas rebuild apps/web no longer touches it at all; the only
+      # consumer is the myshell orchestrator, whose Docker build compiles it. Covered without a
+      # fragile per-platform install here.
+      - run: npm ci --prefix apps/myshell-studio-orchestrator/frontend
+      - run: npm run test:studio-session --prefix apps/myshell-studio-orchestrator/frontend
+      - run: npm run test:studio-smoke --prefix apps/myshell-studio-orchestrator/frontend
+      - run: npm run build --prefix apps/myshell-studio-orchestrator/frontend

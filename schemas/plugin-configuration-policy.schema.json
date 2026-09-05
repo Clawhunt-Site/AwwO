@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superclaw.dev/schemas/plugin-configuration-policy.schema.json",
+  "title": "SuperClaw Plugin Configuration Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plugin_id", "version_range", "secrets", "settings"],
+  "properties": {
+    "plugin_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*)+$"
+    },
+    "version_range": { "type": "string", "minLength": 1 },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "required", "allowed_storage", "inject_as", "env_name"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "required": { "type": "boolean" },
+          "allowed_storage": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "enum": ["local_keychain", "local_encrypted_file"] }
+          },
+          "inject_as": { "type": "string", "enum": ["env"] },
+          "env_name": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "rotation_hint_days": { "type": "integer", "minimum": 1 },
+          "ui": { "$ref": "#/$defs/secret_ui" }
+        }
+      }
+    },
+    "settings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type", "description", "required"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "type": { "type": "string", "enum": ["string", "integer", "number", "boolean"] },
+          "description": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "default": {},
+          "validation": { "$ref": "#/$defs/setting_validation" },
+          "ui": { "$ref": "#/$defs/setting_ui" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "setting_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enum": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": ["string", "integer", "number", "boolean"] }
+        },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "step": { "type": "number", "exclusiveMinimum": 0 },
+        "minLength": { "type": "integer", "minimum": 0 },
+        "maxLength": { "type": "integer", "minimum": 0 },
+        "pattern": { "type": "string", "minLength": 1 },
+        "format": { "type": "string", "enum": ["uri"] }
+      }
+    },
+    "setting_ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "control": { "type": "string", "enum": ["text", "textarea", "url", "number", "switch", "select"] },
+        "label": { "type": "string", "minLength": 1 },
+        "placeholder": { "type": "string" },
+        "help": { "type": "string" },
+        "advanced": { "type": "boolean" },
+        "section": { "type": "string", "enum": ["basic", "advanced"] },
+        "step": { "type": "integer", "minimum": 1 },
+        "step_title": { "type": "string" },
+        "step_description": { "type": "string" }
+      }
+    },
+    "secret_ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "help": { "type": "string" },
+        "advanced": { "type": "boolean" },
+        "section": { "type": "string", "enum": ["basic", "advanced"] },
+        "step": { "type": "integer", "minimum": 1 },
+        "step_title": { "type": "string" },
+        "step_description": { "type": "string" }
+      }
+    }
+  }
+}

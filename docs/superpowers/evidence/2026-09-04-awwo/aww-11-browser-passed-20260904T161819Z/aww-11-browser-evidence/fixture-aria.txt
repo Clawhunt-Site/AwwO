@@ -1,0 +1,107 @@
+- link "跳到主内容":
+  - /url: "#main-content"
+- complementary "工作区导航":
+  - text: 团队知识库
+  - paragraph: 让团队经验被找到、被复用。
+  - text: 当前工作区
+  - combobox "当前工作区":
+    - option "产品与研发" [selected]
+    - option "客户成功"
+  - navigation "主导航":
+    - link "文档检索":
+      - /url: "#documents"
+    - link "数据看板":
+      - /url: "#metrics"
+    - link "成员与角色":
+      - /url: "#members"
+    - link "工作区设置":
+      - /url: "#settings"
+  - strong: 当前角色：查看成员
+  - text: 可阅读授权范围内的已发布文档。
+- main:
+  - text: 工作台 / 文档检索
+  - button "键盘操作帮助"
+  - paragraph: 样式验收夹具 · 本页内容为示例，不连接业务后端。
+  - heading "找到团队的下一步" [level=1]
+  - paragraph: 浏览已发布知识，沿着经验继续向前。
+  - button "创建文档" [disabled]
+  - text: 仅编辑者及获授权管理员可创建
+  - search "搜索团队知识":
+    - text: 关键词
+    - searchbox "关键词": 知识
+    - text: 分类
+    - combobox "分类":
+      - option "全部分类" [selected]
+      - option "项目协作"
+    - button "搜索文档"
+    - paragraph: 工作区切换后保留当前检索条件。只展示你有权阅读的内容。
+  - status: 示例检索已完成，展示 2 篇文档。
+  - list:
+    - listitem:
+      - text: 已发布 项目协作
+      - heading "跨团队项目交接：从决策记录到交付复盘" [level=2]:
+        - link "跨团队项目交接：从决策记录到交付复盘":
+          - /url: "#document-preview"
+      - paragraph: 用清晰的责任人、版本与来源，帮助下一位协作者理解背景。
+      - text: 负责人：陈雨 版本 v2 示例更新时间：2026-09-04
+    - listitem:
+      - text: 已发布 阅读权限：当前工作区
+      - heading "多工作区知识内容检索与权限可见性验收使用的超长连续中文文档标题用于检测窄屏换行" [level=2]:
+        - link "多工作区知识内容检索与权限可见性验收使用的超长连续中文文档标题用于检测窄屏换行":
+          - /url: "#document-preview"
+      - paragraph:
+        - text: 长链接换行示例：
+        - link "https://example.com/knowledge/averylongunbrokenpathforresponsivevalidationwithoutspaces":
+          - /url: https://example.com/knowledge/averylongunbrokenpathforresponsivevalidationwithoutspaces
+  - region "数据看板":
+    - heading "数据看板" [level=2]
+    - paragraph: 夹具不计算业务指标；实际口径与时间由应用接入。
+    - text: 发布文档
+    - strong: —
+    - paragraph: 未连接数据
+    - text: 活跃贡献者
+    - strong: —
+    - paragraph: 未连接数据
+    - text: 过期文档
+    - strong: —
+    - paragraph: 未连接数据
+    - text: 缺失元数据
+    - strong: —
+    - paragraph: 未连接数据
+  - region "成员与角色":
+    - heading "成员与角色" [level=2]
+    - paragraph: 窄屏下，可聚焦表格区域并使用左右方向键浏览全部列。
+    - region "成员与角色":
+      - table "工作区成员示例":
+        - caption: 工作区成员示例
+        - rowgroup:
+          - row "成员 角色 权限说明 操作":
+            - columnheader "成员"
+            - columnheader "角色"
+            - columnheader "权限说明"
+            - columnheader "操作"
+        - rowgroup:
+          - row "陈雨 Owner 所有权转移由 Owner 操作 变更角色 移除成员":
+            - rowheader "陈雨"
+            - cell "Owner"
+            - cell "所有权转移由 Owner 操作"
+            - cell "变更角色 移除成员":
+              - button "变更角色" [disabled]
+              - button "移除成员" [disabled]
+  - region "元数据表单样式":
+    - heading "元数据表单样式" [level=2]
+    - text: 文档标题（必填）
+    - textbox "文档标题（必填）"
+    - text: 使用清晰、可检索的标题。 请输入文档标题。 负责人
+    - textbox "负责人": 陈雨
+    - text: 正文
+    - textbox "正文": 示例正文，不写入业务数据。
+    - checkbox "我已核对来源引用"
+    - text: 我已核对来源引用
+    - button "验证表单"
+  - region "基础状态":
+    - heading "基础状态" [level=2]
+    - heading "没有找到匹配文档" [level=3]
+    - paragraph: 尝试其他关键词，或清除筛选条件。
+    - paragraph: 加载失败。请稍后重试；你的输入仍保留在页面中。
+    - paragraph: 正在加载文档…

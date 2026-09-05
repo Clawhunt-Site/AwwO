@@ -1,0 +1,105 @@
+name: desktop-windows
+
+# Build the Windows desktop installer (.msi + NSIS .exe) with the PyInstaller
+# Python sidecar bundled in. Kept OUT of ci.yml because it is expensive (Rust
+# compile + PyInstaller freeze, ~15 Actions min) — it runs only on demand
+# (workflow_dispatch) or when a release tag is pushed, so PR CI stays cheap.
+#
+# windows-latest ships Rust + MSVC + WebView2 SDK, and the checkout path has no
+# apostrophe, so the local-dev workarounds (absolute-icon config / build junction)
+# are NOT needed here: the committed tauri.conf.json (relative icon) builds clean.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+      - "desktop-v*"
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    env:
+      # Authenticode code-signing secrets (OPTIONAL). To ship SIGNED installers
+      # (no SmartScreen warning), add these repo secrets:
+      #   WINDOWS_CERT_BASE64    — base64 of the code-signing .pfx
+      #                            (PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx')))
+      #   WINDOWS_CERT_PASSWORD  — the .pfx password
+      # When absent, the Sign step is SKIPPED and installers ship UNSIGNED (today's
+      # behavior) — so this workflow is safe to run/merge before a cert is procured.
+      WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Create the project venv the desktop build scripts expect (.venv\Scripts\
+      # python.exe) and install the harness + PyInstaller (desktop-build extra).
+      - shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -e ".[dev,desktop-build]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # The web build (tauri beforeBuildCommand) fuses the board (server/ui), which
+      # imports @mdxeditor from the server pnpm workspace — install it first.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm -C server install --frozen-lockfile
+      - run: npm ci --prefix apps/web
+      - run: npm ci --prefix apps/desktop
+
+      # build-backend.mjs (PyInstaller freeze + stage into src-tauri/resources) then
+      # `tauri build`. tauri:build:win deliberately skips the macOS-only post step.
+      # Release tags MUST bake the PRODUCTION app env (endpoints, build-profile.json);
+      # tauri:build:win defaults to staging, so a release asset built without this
+      # would silently point desktop users at the staging backend.
+      - shell: pwsh
+        env:
+          APP_ENV: production
+          VITE_APP_ENV: production
+        run: npm --prefix apps/desktop run tauri:build:win
+
+      - name: Collect installers
+        shell: pwsh
+        run: |
+          $out = "dist-installers"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $bundle = "apps/desktop/src-tauri/target/release/bundle"
+          Get-ChildItem -Path $bundle -Recurse -Include *.msi,*.exe -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName -Destination $out -Force }
+          Get-ChildItem $out
+
+      - name: Sign installers (Authenticode — only when WINDOWS_CERT_BASE64 is set)
+        if: env.WINDOWS_CERT_BASE64 != ''
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
+          $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]'Exportable,PersistKeySet'
+          $cert  = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes, $env:WINDOWS_CERT_PASSWORD, $flags)
+          if (-not $cert.HasPrivateKey) { throw 'code-signing cert has no private key' }
+          $files = Get-ChildItem dist-installers -Recurse -Include *.msi, *.exe
+          foreach ($f in $files) {
+            $r = Set-AuthenticodeSignature -FilePath $f.FullName -Certificate $cert `
+                   -HashAlgorithm SHA256 -TimestampServer 'http://timestamp.digicert.com'
+            Write-Host ("signed {0}: {1}" -f $f.Name, $r.Status)
+            if ($r.Status -ne 'Valid') { throw ("signing failed for {0}: {1}" -f $f.Name, $r.StatusMessage) }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clawhunt-windows-installers
+          path: dist-installers/*
+          if-no-files-found: error
+
+      # When a tag triggered the run, publish the installers as release assets.
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-installers/*

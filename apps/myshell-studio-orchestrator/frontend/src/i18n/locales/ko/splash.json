@@ -1,0 +1,6 @@
+{
+  "ageVerification": "연령 확인",
+  "ageDesc": "이 콘텐츠는 성인 대상이에요. 계속하려면 <strong>만 18세 이상</strong>이어야 해요.",
+  "iAmOver18": "만 18세 이상이에요, 계속하기",
+  "iAmUnder18": "만 18세 미만이에요, 나가기"
+}

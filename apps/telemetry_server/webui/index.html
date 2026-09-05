@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SuperClaw 遥测监控</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1a1a1a; --muted:#6b6b6b; --line:#e2e2e2;
+    --bg:#fafafa; --card:#fff; --accent:#185fa5; --abg:#e6f1fb; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color:var(--fg); background:var(--bg); font-size:14px; line-height:1.5; }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); background:var(--card);
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:17px; font-weight:600; margin:0; }
+  header .env { font-size:12px; color:var(--muted); }
+  main { padding:24px; max-width:1100px; margin:0 auto; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:12px; margin-bottom:24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card .label { font-size:12px; color:var(--muted); }
+  .card .value { font-size:24px; font-weight:600; margin-top:4px; }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px; }
+  .field { display:flex; flex-direction:column; gap:4px; }
+  .field label { font-size:12px; color:var(--muted); }
+  input, select, button { font:inherit; padding:7px 10px; border:1px solid var(--line);
+    border-radius:8px; background:var(--card); color:var(--fg); }
+  button { cursor:pointer; background:var(--abg); border-color:var(--accent); color:var(--accent); font-weight:500; }
+  button:hover { filter:brightness(0.97); }
+  .row-toggle { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); }
+  table { width:100%; border-collapse:collapse; background:var(--card);
+    border:1px solid var(--line); border-radius:10px; overflow:hidden; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line);
+    white-space:nowrap; max-width:280px; overflow:hidden; text-overflow:ellipsis; }
+  th { background:#f3f3f3; font-weight:600; font-size:12px; color:var(--muted); }
+  tr:last-child td { border-bottom:none; }
+  .empty { padding:32px; text-align:center; color:var(--muted); }
+  .hint { font-size:12px; color:var(--muted); margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SuperClaw 遥测监控</h1>
+  <span class="env" id="env">连接中…</span>
+  <div class="field" style="margin-left:auto">
+    <label for="token">访问令牌（生产需填）</label>
+    <input id="token" type="password" placeholder="TELEMETRY_INGEST_TOKEN" style="width:220px">
+  </div>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+
+  <div class="controls">
+    <div class="field">
+      <label for="tier">数据层</label>
+      <select id="tier">
+        <option value="A">A · 审计统计</option>
+        <option value="B">B · 诊断</option>
+        <option value="C">C · 原始（仅元数据）</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="trace">trace_id</label>
+      <input id="trace" placeholder="按运行筛选">
+    </div>
+    <div class="field">
+      <label for="device">device_id</label>
+      <input id="device" placeholder="按设备筛选">
+    </div>
+    <div class="field">
+      <label for="limit">条数</label>
+      <input id="limit" type="number" value="100" min="1" max="1000" style="width:90px">
+    </div>
+    <button id="run">查询</button>
+    <label class="row-toggle"><input type="checkbox" id="auto"> 每 5 秒自动刷新</label>
+  </div>
+
+  <div id="result"></div>
+  <p class="hint">Tier C 仅返回元数据（格式 / 大小 / 指纹），密文与原始内容绝不经查询接口返回。</p>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let timer = null;
+
+  // Escape EVERYTHING from the server — telemetry rows are attacker-influenced
+  // (a malicious upload could carry <img onerror> in a field). Never innerHTML
+  // raw values. This neutralizes stored XSS that could steal the operator token.
+  function esc(v) {
+    return String(v ?? "").replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
+  function authHeaders() {
+    const t = $("token").value.trim();
+    return t ? { "Authorization": "Bearer " + t } : {};
+  }
+
+  async function api(path) {
+    const res = await fetch(path, { headers: authHeaders() });
+    if (res.status === 401) throw new Error("令牌无效或缺失（请在右上角填写访问令牌）");
+    if (!res.ok) throw new Error("请求失败：HTTP " + res.status);
+    return res.json();
+  }
+
+  async function loadStats() {
+    try {
+      const s = await api("/api/stats");
+      const cards = [
+        ["A 审计行", s.tier_a_rows], ["B 诊断行", s.tier_b_rows],
+        ["C 原始行", s.tier_c_rows], ["上传批次", s.uploads],
+        ["设备数", s.devices], ["累计成本(分)", (s.total_cost_cents || 0).toFixed(0)],
+      ];
+      $("cards").innerHTML = cards.map(([k, v]) =>
+        `<div class="card"><div class="label">${k}</div><div class="value">${v}</div></div>`).join("");
+    } catch (e) { $("cards").innerHTML = `<div class="card"><div class="label">状态</div><div class="value" style="font-size:14px;color:#a32d2d">${e.message}</div></div>`; }
+  }
+
+  async function loadHealth() {
+    try { const h = await api("/v1/telemetry/health"); $("env").textContent = "环境：" + h.env + " · 已连接"; }
+    catch (e) { $("env").textContent = e.message; }
+  }
+
+  async function runQuery() {
+    const tier = $("tier").value;
+    const params = new URLSearchParams({ tier, limit: $("limit").value || "100" });
+    if ($("trace").value.trim()) params.set("trace_id", $("trace").value.trim());
+    if ($("device").value.trim()) params.set("device_id", $("device").value.trim());
+    try {
+      const data = await api("/api/query?" + params.toString());
+      renderTable(data.rows);
+    } catch (e) { $("result").innerHTML = `<div class="empty">${e.message}</div>`; }
+  }
+
+  function renderTable(rows) {
+    if (!rows || rows.length === 0) { $("result").innerHTML = `<div class="empty">没有数据</div>`; return; }
+    const cols = Object.keys(rows[0]);
+    const head = "<tr>" + cols.map(c => `<th>${esc(c)}</th>`).join("") + "</tr>";
+    const body = rows.map(r => "<tr>" + cols.map(c => {
+      const v = r[c]; return `<td title="${esc(v)}">${esc(v)}</td>`;
+    }).join("") + "</tr>").join("");
+    $("result").innerHTML = `<table>${head}${body}</table>`;
+  }
+
+  async function refreshAll() { await loadHealth(); await loadStats(); await runQuery(); }
+
+  $("run").addEventListener("click", runQuery);
+  $("auto").addEventListener("change", (e) => {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (e.target.checked) timer = setInterval(refreshAll, 5000);
+  });
+  refreshAll();
+</script>
+</body>
+</html>

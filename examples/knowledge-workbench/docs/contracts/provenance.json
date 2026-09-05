@@ -1,0 +1,36 @@
+{
+  "source": "AwwO seven-node local generation, 2026-09-04",
+  "documents": [
+    {
+      "file": "architecture.md",
+      "source_artifact": "knowledge-saas-boundary-v1.md",
+      "source_sha256": "91b7624f9cf2c119a8c16bf7f812b067c660ab407f732308e8e4258a4ec1ef2e",
+      "changes": "Local absolute references replaced with example-relative filenames."
+    },
+    {
+      "file": "identity-permissions.md",
+      "source_artifact": "identity-permissions-v1.md",
+      "source_sha256": "06150c0bdc6136db5a6bcafeaf6b6be904cc6b55d47d21bef69118f7e31c3ee2",
+      "changes": "Local absolute references replaced with example-relative filenames."
+    },
+    {
+      "file": "data-governance.md",
+      "source_artifact": "knowledge-governance-v1.md",
+      "source_sha256": "34f6eb320271b20736717bcb3e19acffd1274c5526cf99e57edf3484fb22f136",
+      "changes": "Local absolute references replaced with example-relative filenames."
+    },
+    {
+      "file": "backend-api.md",
+      "source_artifact": "backend-contract-v1.md",
+      "source_sha256": "1982adc830675f0131cd30bfba6a32776f3a54026caec1efa2ab13e4cdebdf86",
+      "changes": "Local absolute references replaced with example-relative filenames."
+    },
+    {
+      "file": "acceptance-criteria.md",
+      "source_artifact": "acceptance-criteria.md",
+      "source_sha256": "0eb5423c746725fc7a44e38a15c480b9ed5a84a8d177d2b52269ab1c31098f8e",
+      "changes": "Local absolute references replaced with example-relative filenames."
+    }
+  ],
+  "launch_materials": "Extracted only the assets/copy/specifications output fields; runtime and authentication metadata excluded."
+}

@@ -1,0 +1,18 @@
+{
+  "title": "シーンをカスタマイズ",
+  "videoQuality": "動画品質",
+  "qualityLow": "低",
+  "qualityMedium": "中",
+  "qualityHigh": "高",
+  "duration": "長さ",
+  "audio": "音声",
+  "vipBadge": "VIP",
+  "estTime": "予想時間",
+  "mins": "分",
+  "energyCost": "エネルギー消費",
+  "createNow": "今すぐ作成",
+  "unlockVipToCreate": "VIPを解除して作成",
+  "cancel": "キャンセル",
+  "needSubscription": "エネルギーパックを購入してVIP機能を解除",
+  "loadingCost": "計算中..."
+}

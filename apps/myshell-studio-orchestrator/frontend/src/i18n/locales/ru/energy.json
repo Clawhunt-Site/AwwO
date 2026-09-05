@@ -1,0 +1,22 @@
+{
+  "getEnergy": "Получить энергию",
+  "getMoreDesc": "Получи больше энергии, чтобы продолжить генерацию.",
+  "loadingPacks": "Загрузка пакетов...",
+  "noPacks": "Нет доступных пакетов энергии",
+  "bestValue": "Лучшее предложение",
+  "pricePerUnit": "≈ ${{price}} / энергия",
+  "savePercent": "Экономия {{percent}}%",
+  "processing": "Обработка...",
+  "buyEnergy": "Купить {{amount}} энергии",
+  "selectAPack": "Выбери пакет",
+  "energyHistory": "История энергии",
+  "all": "Все",
+  "usage": "Использование",
+  "purchases": "Покупки",
+  "noHistoryYet": "Истории пока нет",
+  "loadMore": "Загрузить ещё",
+  "purchased": "Куплено",
+  "energyAmount": "{{amount}} энергии",
+  "generatedWith": "Сгенерировано с",
+  "unknown": "Неизвестно"
+}

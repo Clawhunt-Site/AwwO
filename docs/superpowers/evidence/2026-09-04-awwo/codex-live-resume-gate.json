@@ -1,0 +1,12 @@
+{
+  "elapsedMs": 2203.7105,
+  "checkedAt": "2026-09-04T16:15:00.8803142Z",
+  "response": "event: error\ndata: {\"event\":\"error\",\"detail\":\"comment failed (upstream 409): Issue follow-up blocked by unresolved blockers\"}\n\n",
+  "readback": {
+    "latestCommentAt": "2026-09-04T16:02:52.277Z",
+    "latestCommentId": "f0f91185-3c5a-4023-a5cd-cb5fda193461",
+    "checkedAt": "2026-09-04T16:16:59.3623517Z",
+    "commentCount": 4,
+    "noNewCommentSinceAttempt": true
+  }
+}

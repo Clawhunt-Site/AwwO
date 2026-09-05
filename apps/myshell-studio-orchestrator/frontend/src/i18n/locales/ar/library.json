@@ -1,0 +1,21 @@
+{
+  "title": "المكتبة",
+  "failedToLoad": "فشل التحميل",
+  "noCreationsYet": "لا توجد إبداعات بعد",
+  "noCreationsDesc": "اختر شخصية وابدأ الإنشاء — ستظهر صورك ومقاطع الفيديو هنا.",
+  "browseCharacters": "تصفح الشخصيات",
+  "generationFailed": "فشل الإنشاء",
+  "inQueue": "في قائمة الانتظار...",
+  "generatingStatus": "جارٍ الإنشاء...",
+  "aiPick": "اختيار AI",
+  "formatNotSupported": "الصيغة غير مدعومة",
+  "videoFallbackDesc": "لا يمكن تشغيل هذا الفيديو في تيليجرام. انقر أدناه للمشاهدة في المتصفح.",
+  "openInBrowser": "فتح في المتصفح",
+  "download": "تحميل",
+  "like": "إعجاب",
+  "dislike": "عدم إعجاب",
+  "share": "مشاركة",
+  "shareToTelegram": "مشاركة على تيليجرام",
+  "sharePreview": "معاينة ضبابية",
+  "cancel": "إلغاء"
+}

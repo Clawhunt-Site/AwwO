@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.png binary
+*.webp binary
+*.zip binary
+# Force textual diff for TypeScript sources so a stray control byte can
+# never make git/GitHub mislabel a source file as binary and hide its diff.
+*.ts  diff
+*.tsx diff
+
+# Frozen verification records contain byte hashes. Preserve their original bytes.
+docs/superpowers/evidence/** -text
+examples/knowledge-workbench/docs/contracts/** -text

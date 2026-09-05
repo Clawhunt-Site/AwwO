@@ -1,0 +1,17 @@
+{
+  "searchPlaceholder": "무엇이든 검색…",
+  "clear": "지우기",
+  "searchHint": "봇을 검색해 보세요…",
+  "noContent": "이 카테고리에는 아직 콘텐츠가 없어요",
+  "resultCount": "{{count}}개 결과",
+  "resultCount_other": "{{count}}개 결과",
+  "personalizedForYou": "맞춤 추천",
+  "basedOnPreferences": "회원님의 스타일 취향과 이용 패턴을 기반으로 추천해요",
+  "noRecommendations": "아직 추천이 없어요",
+  "matchPercent": "{{percent}}% 일치",
+  "celebritySex": "셀럽\n섹스",
+  "sexyOutfits": "섹시\n의상",
+  "classicActs": "클래식\n액트",
+  "wildEncounters": "와일드\n인카운터",
+  "lgbtSex": "LGBT\n섹스"
+}

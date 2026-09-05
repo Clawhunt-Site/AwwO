@@ -1,0 +1,51 @@
+{
+  "name": "fantasia-miniapp",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "prepare:canvaspro": "bash ../scripts/prepare-canvaspro-static.sh --optional",
+    "dev": "npm run prepare:canvaspro && vite",
+    "dev:studio": "bash ../scripts/dev.sh",
+    "build": "npm run prepare:canvaspro && tsc -b && vite build",
+    "preview": "vite preview",
+    "smoke:studio": "node scripts/studio-frontend-smoke.mjs",
+    "smoke:canvaspro": "node scripts/studio-frontend-smoke.mjs --canvaspro-only",
+    "smoke:creative-director": "node scripts/creative-director-smoke.mjs",
+    "generate:studio-api": "node scripts/generate-studio-api-types.mjs",
+    "test:studio-session": "node --test --experimental-strip-types scripts/studio-session.test.mjs",
+    "test:studio-smoke": "node --test scripts/studio-frontend-smoke.test.mjs",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build -o storybook-static"
+  },
+  "dependencies": {
+    "@telegram-apps/sdk-react": "^2.0.0",
+    "i18next": "^26.0.6",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "lucide-react": "^1.8.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.4",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@chromatic-com/storybook": "^4",
+    "@storybook/addon-a11y": "9.1.20",
+    "@storybook/addon-docs": "9.1.20",
+    "@storybook/addon-onboarding": "9.1.20",
+    "@storybook/addon-vitest": "9.1.20",
+    "@storybook/react-vite": "9.1.20",
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "msw": "^2.13.5",
+    "msw-storybook-addon": "^2.0.7",
+    "playwright": "^1.59.1",
+    "storybook": "9.1.20",
+    "tailwindcss": "^4.2.4",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.0",
+    "wrangler": "^4.78.0"
+  }
+}

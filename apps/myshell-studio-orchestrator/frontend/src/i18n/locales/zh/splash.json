@@ -1,0 +1,6 @@
+{
+  "ageVerification": "年龄验证",
+  "ageDesc": "此内容面向成年受众。你必须年满 <strong>18 周岁</strong>才能继续。",
+  "iAmOver18": "我已满 18 岁，继续",
+  "iAmUnder18": "我未满 18 岁，退出"
+}

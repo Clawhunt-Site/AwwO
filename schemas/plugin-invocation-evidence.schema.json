@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://superclaw.dev/schemas/plugin-invocation-evidence.schema.json",
+  "title": "SuperClaw Plugin Invocation Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "plugin_id",
+    "plugin_version",
+    "package_digest",
+    "tool_name",
+    "started_at",
+    "finished_at",
+    "status",
+    "entitlement_id",
+    "input_digest",
+    "output_digest",
+    "evidence_artifact_id"
+  ],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "plugin_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*)+$"
+    },
+    "plugin_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "package_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "tool_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "status": { "type": "string", "enum": ["ok", "error", "denied", "timeout"] },
+    "entitlement_id": { "type": ["string", "null"] },
+    "input_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "output_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "evidence_artifact_id": { "type": "string", "minLength": 1 },
+    "policy_decision": { "type": "string" },
+    "sandbox_exit_status": { "type": ["integer", "null"] }
+  }
+}

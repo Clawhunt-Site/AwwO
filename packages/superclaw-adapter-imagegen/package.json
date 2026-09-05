@@ -1,0 +1,26 @@
+{
+  "name": "superclaw-adapter-imagegen",
+  "version": "0.1.0",
+  "description": "SuperClaw external adapter plugin: image generation agent runtime backed by RunningHub (ComfyUI workflows)",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"tests/*.test.mjs\""
+  },
+  "dependencies": {
+    "@paperclipai/adapter-utils": "file:../../server/packages/adapter-utils"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.21",
+    "typescript": "^5.7.3"
+  }
+}

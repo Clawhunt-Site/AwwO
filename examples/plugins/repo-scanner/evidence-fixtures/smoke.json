@@ -1,0 +1,16 @@
+{
+  "run_id": "run_fixture_repo",
+  "plugin_id": "dev.superclaw.repo-scanner",
+  "plugin_version": "0.1.0",
+  "package_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "tool_name": "repo_scan",
+  "started_at": "2026-06-01T00:00:00Z",
+  "finished_at": "2026-06-01T00:00:01Z",
+  "status": "ok",
+  "entitlement_id": "ent_fixture_repo",
+  "input_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "output_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "evidence_artifact_id": "artifact_repo_smoke",
+  "policy_decision": "allowed",
+  "sandbox_exit_status": 0
+}

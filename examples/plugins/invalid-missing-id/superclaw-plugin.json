@@ -1,0 +1,48 @@
+{
+  "schema_version": "0.1.0",
+  "name": "Invalid Missing Id",
+  "version": "0.1.0",
+  "summary": "Invalid fixture that deterministically fails because id is missing.",
+  "source": {
+    "type": "first_party",
+    "clawhunt_problem_id": null,
+    "developer_id": "superclaw"
+  },
+  "runtime": {
+    "type": "mcp_sidecar",
+    "entrypoint": "bin/missing",
+    "args": ["mcp"],
+    "transport": "stdio",
+    "mcp_protocol_versions": ["2025-06-18"],
+    "platforms": ["darwin-arm64"]
+  },
+  "tools": [
+    {
+      "name": "invalid_tool",
+      "description": "This fixture is intentionally invalid.",
+      "input_schema": { "type": "object" },
+      "output_schema": { "type": "object" }
+    }
+  ],
+  "permissions": {
+    "filesystem": [],
+    "network": [],
+    "environment": []
+  },
+  "acceptance": {
+    "level": "L1",
+    "tests": ["tests/smoke.sh"],
+    "evidence_fixtures": ["evidence-fixtures/smoke.json"],
+    "latency_budget_ms": 1000
+  },
+  "commerce": {
+    "pricing_model": "free",
+    "metering": "none"
+  },
+  "provenance": {
+    "build_type": "first_party",
+    "source_digest": null,
+    "package_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "signature": "ed25519:fixture-signature"
+  }
+}

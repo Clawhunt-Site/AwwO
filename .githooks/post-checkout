@@ -1,0 +1,24 @@
+#!/bin/sh
+# superclaw-local-guard — warn (never block) when the PRIMARY checkout switches to
+# a feature branch (the misuse that lets parallel sessions stash/clobber WIP).
+# Same self-gating as the commit guard (this repo + primary tree only).
+# args: $1=prev-HEAD $2=new-HEAD $3=flag(1=branch checkout)
+set -f
+[ "$3" = "1" ] || exit 0
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -e "$root/.githooks/.superclaw-guard" ] || exit 0
+gd=$(cd "$(git rev-parse --git-dir 2>/dev/null)" 2>/dev/null && pwd) || exit 0
+cd=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd) || exit 0
+[ -n "$gd" ] && [ "$gd" = "$cd" ] || exit 0
+branch=$(git symbolic-ref --short -q HEAD 2>/dev/null) || exit 0
+[ "$branch" = "main" ] && exit 0
+for pat in $(git config --get-all guard.allowBranch 2>/dev/null); do
+  case "$branch" in $pat) exit 0 ;; esac
+done
+cat >&2 <<MSG
+⚠️  PRIMARY checkout switched to a feature branch: $branch
+    The primary checkout should stay on main. Do feature work in an isolated
+    worktree, or parallel sessions will stash/clobber each other's uncommitted WIP:
+      git worktree add ~/superclaw-wt/<slug> -b feat/<slug> origin/main
+MSG
+exit 0

@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos
+            arch: arm64
+            runner: macos-14
+            zig_target: aarch64-macos
+            native: true
+          - os: macos
+            arch: x64
+            # macos-13 runners are retired — cross-compile from the arm64
+            # runner; zig's cross toolchain handles the Mach-O x64 target.
+            runner: macos-14
+            zig_target: x86_64-macos
+            native: false
+          - os: linux
+            arch: x64
+            runner: ubuntu-latest
+            # Pin glibc ≥ 2.17 so Zig emits a portable SONAME (`libc.so.6`)
+            # instead of hard-coding the runner's absolute libc path (which
+            # on Debian/Ubuntu is a linker script, breaking Node's dlopen).
+            zig_target: x86_64-linux-gnu.2.17
+            native: true
+          - os: windows
+            arch: x64
+            # Cross-compile from linux — avoids MSVC toolchain detection on
+            # windows-latest and gives an identical build host to the linux
+            # matrix entry. The import lib for napi_* comes from
+            # napi/node_api.def via `zig dlltool` (see build.zig).
+            runner: ubuntu-latest
+            zig_target: x86_64-windows
+            native: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Run tests
+        if: matrix.native
+        run: zig build test
+
+      - name: Build NAPI addon
+        run: zig build napi -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig_target }}
+
+      - name: Rename artifact
+        shell: bash
+        run: cp zig-out/napi/agent_napi.node agent_napi-${{ matrix.os }}-${{ matrix.arch }}.node
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: agent_napi-${{ matrix.os }}-${{ matrix.arch }}.node

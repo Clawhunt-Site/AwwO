@@ -1,0 +1,65 @@
+[
+  {
+    "id": "49ef2341-a5de-4e56-a82c-c14aa8ce2e1e",
+    "name": "用户登录与工作区权限",
+    "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+    "adapterType": "codex_local",
+    "workingDirectory": "C:/tmp/awwo-codex-live-20260904/49ef2341-a5de-4e56-a82c-c14aa8ce2e1e",
+    "bypassApprovals": false,
+    "scheduledHeartbeat": false
+  },
+  {
+    "id": "ae72d21f-6c0e-46d9-8e46-2996a914815e",
+    "name": "知识库上线物料",
+    "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+    "adapterType": "codex_local",
+    "workingDirectory": "C:/tmp/awwo-codex-live-20260904/ae72d21f-6c0e-46d9-8e46-2996a914815e",
+    "bypassApprovals": false,
+    "scheduledHeartbeat": false
+  },
+  {
+    "id": "b9ee56d4-f04a-4dfd-a805-d9f17713f46c",
+    "name": "后端接口与业务规则",
+    "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+    "adapterType": "codex_local",
+    "workingDirectory": "C:/tmp/awwo-codex-live-20260904/b9ee56d4-f04a-4dfd-a805-d9f17713f46c",
+    "bypassApprovals": false,
+    "scheduledHeartbeat": false
+  },
+  {
+    "id": "376683f0-56ab-45fe-906e-c87d0ae1658e",
+    "name": "文档数据治理",
+    "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+    "adapterType": "codex_local",
+    "workingDirectory": "C:/tmp/awwo-codex-live-20260904/376683f0-56ab-45fe-906e-c87d0ae1658e",
+    "bypassApprovals": false,
+    "scheduledHeartbeat": false
+  },
+  {
+    "id": "a784236e-c48a-468d-b14f-8392297e0452",
+    "name": "知识库 Web 工作台",
+    "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+    "adapterType": "codex_local",
+    "workingDirectory": "C:/tmp/awwo-codex-live-20260904/a784236e-c48a-468d-b14f-8392297e0452",
+    "bypassApprovals": false,
+    "scheduledHeartbeat": false
+  },
+  {
+    "id": "513806c8-269e-4221-a536-b52956f519ce",
+    "name": "交付验收",
+    "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+    "adapterType": "codex_local",
+    "workingDirectory": "C:/tmp/awwo-codex-live-20260904/513806c8-269e-4221-a536-b52956f519ce",
+    "bypassApprovals": false,
+    "scheduledHeartbeat": false
+  },
+  {
+    "id": "e6b90c56-2d1d-412f-9ee6-2758668b6558",
+    "name": "产品边界与架构需求",
+    "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+    "adapterType": "codex_local",
+    "workingDirectory": "C:/tmp/awwo-codex-live-20260904/e6b90c56-2d1d-412f-9ee6-2758668b6558",
+    "bypassApprovals": false,
+    "scheduledHeartbeat": false
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "title": "라이브러리",
+  "failedToLoad": "불러오기 실패",
+  "noCreationsYet": "아직 작품이 없어요",
+  "noCreationsDesc": "캐릭터를 선택하고 생성을 시작해 보세요. 이미지와 동영상이 여기에 표시돼요.",
+  "browseCharacters": "캐릭터 둘러보기",
+  "generationFailed": "생성에 실패했어요",
+  "inQueue": "대기 중…",
+  "generatingStatus": "생성 중…",
+  "aiPick": "AI 추천",
+  "formatNotSupported": "지원되지 않는 형식이에요",
+  "videoFallbackDesc": "이 동영상은 Telegram에서 재생할 수 없어요. 아래를 탭하면 브라우저에서 볼 수 있어요.",
+  "openInBrowser": "브라우저에서 열기",
+  "download": "다운로드",
+  "like": "좋아요",
+  "dislike": "싫어요",
+  "share": "공유",
+  "shareToTelegram": "Telegram에 공유",
+  "sharePreview": "블러 미리보기",
+  "cancel": "취소"
+}

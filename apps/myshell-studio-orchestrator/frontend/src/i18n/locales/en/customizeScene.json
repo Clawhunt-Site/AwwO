@@ -1,0 +1,18 @@
+{
+  "title": "Customize Scene",
+  "videoQuality": "Video Quality",
+  "qualityLow": "Low",
+  "qualityMedium": "Medium",
+  "qualityHigh": "High",
+  "duration": "Duration",
+  "audio": "Audio",
+  "vipBadge": "VIP",
+  "estTime": "EST. TIME",
+  "mins": "mins",
+  "energyCost": "ENERGY COST",
+  "createNow": "Create Now",
+  "unlockVipToCreate": "Unlock VIP to Create",
+  "cancel": "Cancel",
+  "needSubscription": "Purchase an energy pack to unlock VIP features",
+  "loadingCost": "Calculating..."
+}

@@ -1,0 +1,29 @@
+{
+  "name": "superclaw-desktop",
+  "version": "0.1.9",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri:dev": "tauri dev --config src-tauri/tauri.conf.json",
+    "tauri:build": "node scripts/build-backend.mjs && node scripts/build-clawwork-binary.mjs && node scripts/build-node-server.mjs && tauri build --config src-tauri/tauri.conf.json && node scripts/prepare-macos-bundle.mjs",
+    "tauri:build:win": "node scripts/build-backend.mjs && node scripts/build-node-server.mjs && tauri build --bundles nsis --config src-tauri/tauri.conf.json",
+    "build:node-server": "node scripts/build-node-server.mjs",
+    "tauri:build:staging": "APP_ENV=staging VITE_APP_ENV=staging npm run tauri:build",
+    "tauri:build:production": "APP_ENV=production VITE_APP_ENV=production npm run tauri:build",
+    "build:backend": "node scripts/build-backend.mjs",
+    "build:clawwork": "node scripts/build-clawwork-binary.mjs",
+    "test:config": "node tests/desktop-config.test.mjs",
+    "test:app-env": "node tests/desktop-app-env.test.mjs",
+    "test:launch-smoke": "node tests/desktop-launch-smoke.test.mjs",
+    "test:runtime-smoke": "node tests/desktop-runtime-smoke.test.mjs",
+    "test:workbench-smoke": "node tests/desktop-workbench-smoke.test.mjs",
+    "test:installed-bundle-smoke": "node tests/desktop-installed-bundle-smoke.test.mjs",
+    "test:beta-acceptance": "node tests/desktop-beta-acceptance.test.mjs",
+    "test:prune": "node tests/prune-vendored-agent-clis.test.mjs",
+    "test:dedup": "node tests/dedup-native-dylibs.test.mjs",
+    "test:bundle-scripts": "node tests/prune-vendored-agent-clis.test.mjs && node tests/dedup-native-dylibs.test.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

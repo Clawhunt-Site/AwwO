@@ -1,0 +1,97 @@
+[
+  {
+    "relative": "index.html",
+    "sha256": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\index.html"
+  },
+  {
+    "relative": "styles.css",
+    "sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\styles.css"
+  },
+  {
+    "relative": "src/styles.css",
+    "sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\styles.css"
+  },
+  {
+    "relative": "src/accessibility.js",
+    "sha256": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\accessibility.js"
+  },
+  {
+    "relative": "src/app.js",
+    "sha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\app.js"
+  },
+  {
+    "relative": "src/api.js",
+    "sha256": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\api.js"
+  },
+  {
+    "relative": "src/demo.js",
+    "sha256": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\demo.js"
+  },
+  {
+    "relative": "src/unicode-casefold.js",
+    "sha256": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\unicode-casefold.js"
+  },
+  {
+    "relative": "src/copy.js",
+    "sha256": "9d507bcb1091ce6055cb12ea7249e9a896b9e691e523171f195541d175b57a4b",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\copy.js"
+  },
+  {
+    "relative": "server.py",
+    "sha256": "7d4a60649afa61b1dcf821c125ac07ab059b7dce99df7725e7dfecb3b8af9989",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\server.py"
+  },
+  {
+    "relative": "tests/model.test.js",
+    "sha256": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\model.test.js"
+  },
+  {
+    "relative": "tests/ui-dom.test.js",
+    "sha256": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\ui-dom.test.js"
+  },
+  {
+    "relative": "tests/demo-regressions.test.js",
+    "sha256": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\demo-regressions.test.js"
+  },
+  {
+    "relative": "tests/unicode-casefold.test.js",
+    "sha256": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\unicode-casefold.test.js"
+  },
+  {
+    "relative": "tests/accessibility-modal-focus.test.js",
+    "sha256": "972923c7f09675ccc52f0bec2504934e453dfe550d06575b3cc9a2767d21bd32",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\accessibility-modal-focus.test.js"
+  },
+  {
+    "relative": "tests/browser_smoke.py",
+    "sha256": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\browser_smoke.py"
+  },
+  {
+    "relative": "artifacts/aww-11-browser-review.mjs",
+    "sha256": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-11-browser-review.mjs"
+  },
+  {
+    "relative": "artifacts/aww-11-browser-evidence/results.json",
+    "sha256": "0189f0951b329ba6a096a10269036d17fe70822c721c803ec0530c6911b36966",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-11-browser-evidence\\results.json"
+  },
+  {
+    "relative": "artifacts/browser/result.json",
+    "sha256": "8d5fc6dad23718512df3a0921aa27b4ca8de30cad6b39212a0025b5a4d014012",
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\browser\\result.json"
+  }
+]

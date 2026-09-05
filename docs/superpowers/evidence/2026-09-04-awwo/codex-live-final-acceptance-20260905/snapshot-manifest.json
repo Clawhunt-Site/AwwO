@@ -1,0 +1,295 @@
+{
+  "sourceDirectory": "C:/tmp/awwo-codex-live-20260904/513806c8-269e-4221-a536-b52956f519ce/artifacts/reacceptance-20260905",
+  "reportPath": "E:\\Bobo's Coding cache\\bo-work\\superclaw\\.worktrees\\awwo-agent-canvas\\docs\\superpowers\\evidence\\2026-09-04-awwo\\codex-live-final-acceptance-20260905\\reacceptance-20260905\\acceptance-report-v2.md",
+  "capturedAt": "2026-09-04T16:27:46.0060764Z",
+  "reportSha256": "5aca2ade280669055ad3b28b93501d890b97430fac49d711dce0f870f9063a05",
+  "originalReportCopyVerified": true,
+  "files": [
+    {
+      "sha256": "0eb5423c746725fc7a44e38a15c480b9ed5a84a8d177d2b52269ab1c31098f8e",
+      "bytes": 5213,
+      "relativePath": "acceptance-criteria.md"
+    },
+    {
+      "sha256": "5aca2ade280669055ad3b28b93501d890b97430fac49d711dce0f870f9063a05",
+      "bytes": 6737,
+      "relativePath": "reacceptance-20260905\\acceptance-report-v2.md"
+    },
+    {
+      "sha256": "201bdf3af127c180a25e443281fdcb91d68979685366bdce74f0ef5aeee2cc78",
+      "bytes": 1075,
+      "relativePath": "reacceptance-20260905\\assert-repro.mjs"
+    },
+    {
+      "sha256": "94846c11c66639f4f85db8a661101608f1462e51040da76c6551bfc43d38a5ef",
+      "bytes": 4944,
+      "relativePath": "reacceptance-20260905\\browser-review.md"
+    },
+    {
+      "sha256": "5fb681d2c7375c02c2766ce2616b829732bfdff12cc69f196428a4ac640ecbee",
+      "bytes": 2014,
+      "relativePath": "reacceptance-20260905\\contract-review-repro.json"
+    },
+    {
+      "sha256": "d937165eca07947e5eb966f96ca0243f2fa9d547fcc4e56e6e30a83cc772d48d",
+      "bytes": 3334,
+      "relativePath": "reacceptance-20260905\\contract-review-repro.mjs"
+    },
+    {
+      "sha256": "d97716ebb1f9216e0772b384ef33ac633a758c4f72eed48c733bfaa400111ed5",
+      "bytes": 1877,
+      "relativePath": "reacceptance-20260905\\host-provenance-comment.json"
+    },
+    {
+      "sha256": "e1b21bc289281191fabf4c16fd79b3d4ac9ee4ebd29cb40504a0ba522c568244",
+      "bytes": 1235,
+      "relativePath": "reacceptance-20260905\\issue-readback.json"
+    },
+    {
+      "sha256": "b8daad28427ddc31af399f6e4e8c1c2801f575c4eede35a5917ab5d43dd8360a",
+      "bytes": 1910,
+      "relativePath": "reacceptance-20260905\\modal-focus.tap"
+    },
+    {
+      "sha256": "2742ba5e011a450b5048344221dd039da508942e82445224558e5056ed21b0b9",
+      "bytes": 7330,
+      "relativePath": "reacceptance-20260905\\model-regression.tap"
+    },
+    {
+      "sha256": "5c556a9dfee8589e6d53a3996d4a3986109431ee771e4aab8b8fe1f651f5b41f",
+      "bytes": 6743,
+      "relativePath": "reacceptance-20260905\\previous-acceptance-report.md"
+    },
+    {
+      "sha256": "644a6b7a5d0daf1bdde192b1f8421f541363f212b425b036615bfef50bf8429a",
+      "bytes": 2162,
+      "relativePath": "reacceptance-20260905\\previous-result.json"
+    },
+    {
+      "sha256": "aec994d61bb110c17d8b6f099814497e0aa583cb52180d13744b1801c9bacfc6",
+      "bytes": 327,
+      "relativePath": "reacceptance-20260905\\repro-status.json"
+    },
+    {
+      "sha256": "eee4b7ebbb087dc4380880e029a093dd90e26df1028f143621c904b1cf74b768",
+      "bytes": 2089,
+      "relativePath": "reacceptance-20260905\\repro.log"
+    },
+    {
+      "sha256": "57ef6923b1f3214a89d09fd8716a2dd38c73705593cf49e9a9e1e23f75820fcc",
+      "bytes": 1352,
+      "relativePath": "reacceptance-20260905\\result.json"
+    },
+    {
+      "sha256": "6bf1b95bd7daf79889ab240bfe6316f1aa73b1b5bc7c46f38d49a4f8c48a5649",
+      "bytes": 148,
+      "relativePath": "reacceptance-20260905\\review-child-readback.json"
+    },
+    {
+      "sha256": "1c7d62c070bcaa0340b8fecf3130ed515d4411840ee82d41aab14459b28a592f",
+      "bytes": 157,
+      "relativePath": "reacceptance-20260905\\review-child.json"
+    },
+    {
+      "sha256": "168f7de27940994176427218752767c993aca30f1c2579c1eb97a388c52c06c1",
+      "bytes": 4695,
+      "relativePath": "reacceptance-20260905\\source-before.json"
+    },
+    {
+      "sha256": "c353aed5c394ecfe7e886efa70e99d320e60b6bdb2680fcebf4106fd5e54d22a",
+      "bytes": 1259,
+      "relativePath": "reacceptance-20260905\\ui-dom.tap"
+    },
+    {
+      "sha256": "a5c66c0d5bf0998a16e8bd6f42fdf48f495961d178e9519b59d3fa40d4d910ba",
+      "bytes": 20309,
+      "relativePath": "reacceptance-20260905\\verification.json"
+    },
+    {
+      "sha256": "acd919857a03b129af1bb34016dcb4f250816a66ef3d7e492434d126d878bd7c",
+      "bytes": 6232,
+      "relativePath": "reacceptance-20260905\\verify-evidence.py"
+    },
+    {
+      "sha256": "bae4e465fcddf114ab2765a2c14c6c0128bccd4cec7943b11b75d9ce62b798ef",
+      "bytes": 159074,
+      "relativePath": "reacceptance-20260905\\host-browser\\aww-11-browser-evidence\\fixture-1280.png"
+    },
+    {
+      "sha256": "92952b1a6bff2e90f6a036d593b4fe366e64cce199236e4eec529c991ec87106",
+      "bytes": 245306,
+      "relativePath": "reacceptance-20260905\\host-browser\\aww-11-browser-evidence\\fixture-320-root-font-200.png"
+    },
+    {
+      "sha256": "5dced350963d9e44969ea14f7489277bc77c46d756e2697dc24d4d7734d2a663",
+      "bytes": 152736,
+      "relativePath": "reacceptance-20260905\\host-browser\\aww-11-browser-evidence\\fixture-320.png"
+    },
+    {
+      "sha256": "e5b4ee4c19639fc1cf4ff8a39b88a14c7bc6e7684b2a7d165cb4010a77b34738",
+      "bytes": 152245,
+      "relativePath": "reacceptance-20260905\\host-browser\\aww-11-browser-evidence\\fixture-375.png"
+    },
+    {
+      "sha256": "9a8f83c693c04100cb206df70acbc3d3f66d75a04a8044f14e62bc86c2eeeb6b",
+      "bytes": 154595,
+      "relativePath": "reacceptance-20260905\\host-browser\\aww-11-browser-evidence\\fixture-768.png"
+    },
+    {
+      "sha256": "ab0beac80fdc41d7abb30f951cf5f4089edfc4536d04207f741423c8e8d3ef1c",
+      "bytes": 144197,
+      "relativePath": "reacceptance-20260905\\host-browser\\aww-11-browser-evidence\\forced-colors-current-focus.png"
+    },
+    {
+      "sha256": "9bda4b03a888eecd7ebda126317c590d12282572b5bb3902f0aa5abeea1ddcbf",
+      "bytes": 110897,
+      "relativePath": "reacceptance-20260905\\host-browser\\browser\\documents-320.png"
+    },
+    {
+      "sha256": "8c450857678fd8f1c336e6cd012ef9b960f986af57e9cc6a1caa8ab49729c4e2",
+      "bytes": 119162,
+      "relativePath": "reacceptance-20260905\\host-browser\\browser\\documents-375.png"
+    },
+    {
+      "sha256": "8c9b966ce8a7b6028e0d5dc11bdbc9f1d3d6c350bae53f835ffdeb97483e5c8b",
+      "bytes": 97084,
+      "relativePath": "reacceptance-20260905\\host-browser\\browser\\documents-768.png"
+    },
+    {
+      "sha256": "7aba2b688dd2c0a26f16093cf614286d32be96b479b0c859ab461ce4dee03e64",
+      "bytes": 137400,
+      "relativePath": "reacceptance-20260905\\host-browser\\browser\\documents-desktop.png"
+    },
+    {
+      "sha256": "cc66c6f6e21a1a1d6ea0f7dd79b97fc39492fc7d530e40ec431800454968a9cd",
+      "bytes": 62629,
+      "relativePath": "reacceptance-20260905\\host-browser\\browser\\login-desktop.png"
+    },
+    {
+      "sha256": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295",
+      "bytes": 721,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\index.html"
+    },
+    {
+      "sha256": "7d4a60649afa61b1dcf821c125ac07ab059b7dce99df7725e7dfecb3b8af9989",
+      "bytes": 1873,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\server.py"
+    },
+    {
+      "sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "bytes": 36393,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\styles.css"
+    },
+    {
+      "sha256": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+      "bytes": 6795,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\artifacts\\aww-11-browser-review.mjs"
+    },
+    {
+      "sha256": "0189f0951b329ba6a096a10269036d17fe70822c721c803ec0530c6911b36966",
+      "bytes": 2563,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\artifacts\\aww-11-browser-evidence\\results.json"
+    },
+    {
+      "sha256": "8d5fc6dad23718512df3a0921aa27b4ca8de30cad6b39212a0025b5a4d014012",
+      "bytes": 419,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\artifacts\\browser\\result.json"
+    },
+    {
+      "sha256": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+      "bytes": 4290,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\src\\accessibility.js"
+    },
+    {
+      "sha256": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+      "bytes": 2956,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\src\\api.js"
+    },
+    {
+      "sha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+      "bytes": 47409,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\src\\app.js"
+    },
+    {
+      "sha256": "9d507bcb1091ce6055cb12ea7249e9a896b9e691e523171f195541d175b57a4b",
+      "bytes": 2373,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\src\\copy.js"
+    },
+    {
+      "sha256": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+      "bytes": 41159,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\src\\demo.js"
+    },
+    {
+      "sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "bytes": 5698,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\src\\styles.css"
+    },
+    {
+      "sha256": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+      "bytes": 37445,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\src\\unicode-casefold.js"
+    },
+    {
+      "sha256": "972923c7f09675ccc52f0bec2504934e453dfe550d06575b3cc9a2767d21bd32",
+      "bytes": 6861,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\tests\\accessibility-modal-focus.test.js"
+    },
+    {
+      "sha256": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+      "bytes": 2843,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\tests\\browser_smoke.py"
+    },
+    {
+      "sha256": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+      "bytes": 7858,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\tests\\demo-regressions.test.js"
+    },
+    {
+      "sha256": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+      "bytes": 15090,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\tests\\model.test.js"
+    },
+    {
+      "sha256": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+      "bytes": 10215,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\tests\\ui-dom.test.js"
+    },
+    {
+      "sha256": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+      "bytes": 7724,
+      "relativePath": "reacceptance-20260905\\reviewed-source\\tests\\unicode-casefold.test.js"
+    },
+    {
+      "sha256": "c3f75337ccc8c6d66430e84c2c8969e634f3439d870f5d6ab9483dacf29444c0",
+      "bytes": 4822,
+      "relativePath": "reacceptance-20260905\\upstream-evidence\\aww-15-delivery.md"
+    },
+    {
+      "sha256": "8299ea9fe1d225c7ea68c2184fcc918ab16b051c3255ff46cdc5e4f0f543071c",
+      "bytes": 3528,
+      "relativePath": "reacceptance-20260905\\upstream-evidence\\aww-15-final-verification.json"
+    },
+    {
+      "sha256": "0189f0951b329ba6a096a10269036d17fe70822c721c803ec0530c6911b36966",
+      "bytes": 2563,
+      "relativePath": "reacceptance-20260905\\upstream-evidence\\aww-11-browser-evidence\\results.json"
+    },
+    {
+      "sha256": "5888c5aecaaa6bd2013271f30c7e13ffb6becfd05b72729c5d7999accee36f6a",
+      "bytes": 5334,
+      "relativePath": "reacceptance-20260905\\upstream-evidence\\aww-11-modal-focus\\final-evidence-readback.json"
+    },
+    {
+      "sha256": "994f95bca1b97d80434e761200c17ef30a10e19508766bb066dfded5bdf38b10",
+      "bytes": 3964,
+      "relativePath": "reacceptance-20260905\\upstream-evidence\\aww-11-modal-focus\\final-review.md"
+    },
+    {
+      "sha256": "8d5fc6dad23718512df3a0921aa27b4ca8de30cad6b39212a0025b5a4d014012",
+      "bytes": 419,
+      "relativePath": "reacceptance-20260905\\upstream-evidence\\browser\\result.json"
+    }
+  ],
+  "runId": "cb0e4332-1797-4bb1-8545-18ced4772991"
+}

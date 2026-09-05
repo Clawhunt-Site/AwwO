@@ -1,0 +1,571 @@
+{
+  "schema_version": "0.1.0",
+  "id": "com.superclaw.osiris",
+  "name": "SuperClaw OSIRIS Fusion",
+  "version": "0.1.0",
+  "summary": "Projects OSIRIS passive intelligence and gated RECON capabilities through SuperClaw.",
+  "source": {
+    "type": "first_party",
+    "clawhunt_problem_id": null,
+    "developer_id": "superclaw"
+  },
+  "runtime": {
+    "type": "mcp_sidecar",
+    "entrypoint": "bin/fusion-osiris",
+    "args": [
+      "mcp"
+    ],
+    "transport": "stdio",
+    "mcp_protocol_versions": [
+      "2025-06-18"
+    ],
+    "platforms": [
+      "darwin-arm64",
+      "linux-x64",
+      "win32-x64"
+    ]
+  },
+  "tools": [
+    {
+      "name": "intel_layers",
+      "description": "Return a passive intelligence layer inventory and bounded entity-count summary.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "layers": {
+            "type": "array"
+          },
+          "summary": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "layers",
+          "summary"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "map_snapshot",
+      "description": "Create a recorded map-view snapshot reference for evidence and handoff.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "viewport": {
+            "type": "object"
+          },
+          "active_layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "api_route_catalog",
+      "description": "OSIRIS fusion projection for api route catalog.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "aviation_layer",
+      "description": "OSIRIS fusion projection for aviation layer.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "maritime_layer",
+      "description": "OSIRIS fusion projection for maritime layer.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "cctv_layer",
+      "description": "OSIRIS fusion projection for cctv layer.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "seismic_layer",
+      "description": "OSIRIS fusion projection for seismic layer.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "fires_layer",
+      "description": "OSIRIS fusion projection for fires layer.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "weather_layer",
+      "description": "OSIRIS fusion projection for weather layer.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "space_layer",
+      "description": "OSIRIS fusion projection for space layer.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "news_streams",
+      "description": "OSIRIS fusion projection for news streams.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "telegram_osint",
+      "description": "OSIRIS fusion projection for telegram osint.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "conflict_zones",
+      "description": "OSIRIS fusion projection for conflict zones.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "crypto_wallet_trace",
+      "description": "OSIRIS fusion projection for crypto wallet trace.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "sanctions_search",
+      "description": "OSIRIS fusion projection for sanctions search.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "dns_lookup",
+      "description": "Perform a passive DNS-over-HTTPS lookup summary for a public domain.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "object"
+          },
+          "summary": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "records",
+          "summary"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "whois_lookup",
+      "description": "OSIRIS fusion projection for whois lookup.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "ssl_tls_inspector",
+      "description": "OSIRIS fusion projection for ssl tls inspector.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "ip_intelligence",
+      "description": "OSIRIS fusion projection for ip intelligence.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "cve_lookup",
+      "description": "OSIRIS fusion projection for cve lookup.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "bgp_lookup",
+      "description": "OSIRIS fusion projection for bgp lookup.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "github_osint",
+      "description": "OSIRIS fusion projection for github osint.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "leak_lookup",
+      "description": "OSIRIS fusion projection for leak lookup.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "phone_lookup",
+      "description": "OSIRIS fusion projection for phone lookup.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "mac_lookup",
+      "description": "OSIRIS fusion projection for mac lookup.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "threat_feed",
+      "description": "OSIRIS fusion projection for threat feed.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "ai_briefing",
+      "description": "OSIRIS fusion projection for ai briefing.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "region_dossier",
+      "description": "OSIRIS fusion projection for region dossier.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "port_scan",
+      "description": "Request an active host probe; SuperClaw must require a human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "vulnerability_scan",
+      "description": "Request an active vulnerability probe; SuperClaw must require a human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "scanner_sweep",
+      "description": "OSIRIS fusion projection for scanner sweep. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "service_fingerprint",
+      "description": "OSIRIS fusion projection for service fingerprint. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "shodan_search",
+      "description": "OSIRIS fusion projection for shodan search. Requires SuperClaw human gate before execution.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  ],
+  "permissions": {
+    "filesystem": [
+      {
+        "mode": "write",
+        "scope": "artifact_dir"
+      }
+    ],
+    "network": [
+      {
+        "host": "earthquake.usgs.gov"
+      },
+      {
+        "host": "dns.google"
+      },
+      {
+        "host": "api.opensanctions.org"
+      }
+    ],
+    "environment": []
+  },
+  "acceptance": {
+    "level": "L2",
+    "tests": [
+      "tests/smoke.sh"
+    ],
+    "evidence_fixtures": [
+      "evidence-fixtures/smoke.json"
+    ],
+    "latency_budget_ms": 8000
+  },
+  "limits": {
+    "startup_timeout_ms": 3000,
+    "tool_timeout_ms": 10000,
+    "max_model_output_bytes": 65536,
+    "max_evidence_bytes": 5242880,
+    "max_memory_mb": 256
+  },
+  "resource_profile": {
+    "latency_class": "standard",
+    "expected_p95_latency_ms": 8000,
+    "cpu_class": "medium",
+    "memory_class": "medium",
+    "io_profile": "network"
+  },
+  "commerce": {
+    "pricing_model": "private_beta",
+    "metering": "per_invocation"
+  },
+  "provenance": {
+    "build_type": "first_party",
+    "source_digest": null,
+    "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "signature": "ed25519:fixture-signature"
+  }
+}

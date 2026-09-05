@@ -1,0 +1,73 @@
+import type { MouseEvent } from "react";
+import { Loader2, LogIn, LogOut } from "lucide-react";
+import type { ResourceMembershipState } from "@paperclipai/shared";
+import { Button } from "@/components/ui/button";
+import { cn } from "../lib/utils";
+import { useLocalizedText } from "../i18n/localized";
+
+interface MembershipActionProps {
+  state: ResourceMembershipState;
+  resourceName: string;
+  pending?: boolean;
+  pendingState?: ResourceMembershipState | null;
+  compact?: boolean;
+  onJoin: () => void;
+  onLeave: () => void;
+}
+
+export function MembershipAction({
+  state,
+  resourceName,
+  pending = false,
+  pendingState = null,
+  compact = false,
+  onJoin,
+  onLeave,
+}: MembershipActionProps) {
+  const localize = useLocalizedText();
+  const isLeft = state === "left";
+  const label = pending
+    ? pendingState === "left"
+      ? localize({ en: "Leaving...", zh: "正在离开..." })
+      : localize({ en: "Joining...", zh: "正在加入..." })
+    : isLeft
+      ? localize({ en: "Join", zh: "加入" })
+      : localize({ en: "Leave", zh: "离开" });
+  const ariaLabel = isLeft
+    ? localize({ en: `Join ${resourceName}`, zh: `加入 ${resourceName}` })
+    : localize({ en: `Leave ${resourceName}`, zh: `离开 ${resourceName}` });
+  const Icon = pending ? Loader2 : isLeft ? LogIn : LogOut;
+
+  function handleClick(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (pending) return;
+    if (isLeft) onJoin();
+    else onLeave();
+  }
+
+  return (
+    <span
+      className={cn(
+        "flex w-[78px] shrink-0 justify-end",
+        !isLeft && !compact
+          ? "opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+          : "opacity-100",
+      )}
+    >
+      <Button
+        type="button"
+        size="xs"
+        variant="ghost"
+        aria-label={ariaLabel}
+        aria-busy={pending ? "true" : undefined}
+        disabled={pending}
+        onClick={handleClick}
+        className="w-[78px]"
+      >
+        <Icon className={cn("h-3 w-3", pending && "motion-safe:animate-spin")} />
+        <span>{label}</span>
+      </Button>
+    </span>
+  );
+}

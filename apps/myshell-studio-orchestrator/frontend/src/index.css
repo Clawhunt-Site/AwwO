@@ -1,0 +1,181 @@
+/* ========================================================================
+ * Dreamy MiniApp — Global Styles
+ * ------------------------------------------------------------------------
+ * 真相源 (Single Source of Truth):
+ *   1) src/styles/design-system-v2.new.css  — Fantasia 共享 token (1540 行)
+ *   2) src/styles/dreamy-tokens.css         — Dreamy 专属 token
+ *
+ * 所有颜色 / 尺寸 / 字体必须引用 token，禁止 hex 硬编码。
+ * 本文件仅负责：
+ *   - 引入 Tailwind v4 + token 层
+ *   - 全局 reset / 基础动画
+ * ======================================================================== */
+
+@import './styles/design-system-v2.new.css';
+@import './styles/dreamy-tokens.css';
+@import './styles/dreamy-studio-screen.css';
+@import 'tailwindcss';
+
+/* --- 遗留变量桥接（legacy alias，未迁移的 CSS Module 依赖）---
+ * 全部指向 Fantasia token，保证无 hex / 无魔法数字。
+ * 29 个 CSS Module 迁完后这一整段删除。
+ */
+:root {
+  --bg-primary: var(--color-Cr-Bg-soft-v2);
+  --bg-card: var(--color-Cr-Bg-surface-default-v2);
+  --bg-tab-bar: rgba(14, 14, 15, 0.75);
+  --bg-tab-active: var(--opacity-white-8-v2);
+
+  --text-primary: var(--basic-white-v2);
+  --text-secondary: var(--gray-300-v2);
+  --text-tertiary: var(--color-Cr-text-subtler-v2);
+
+  --accent-pink: var(--color-dreamy-brand-hot-v2);
+  --accent-gradient: var(--gradient-dreamy-brand);
+
+  --tag-cute: var(--hollywood-cerise-500-v2);
+  --tag-playful: var(--crusta-500-v2);
+  --tag-cosplay: var(--malachite-500-v2);
+
+  --energy-yellow: var(--candlelight-500-v2);
+  --energy-bg: var(--candlelight-1000-v2);
+  --energy-btn: var(--candlelight-600-v2);
+
+  --nav-pill-bg: var(--gray-700-v2);
+  --border-subtle: var(--opacity-white-8-v2);
+
+  --page-padding: var(--spacing-spacing-xl-v2);   /* 16px */
+  --card-gap: var(--spacing-spacing-lg-v2);       /* 12px */
+  --card-radius: var(--radius-xl-v2);             /* 12px */
+  --tab-bar-radius: var(--radius-full-v2);
+}
+
+/* --- 全局 reset --- */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body {
+    font-family: -apple-system, 'SF Pro', 'SF Pro Display', system-ui, BlinkMacSystemFont, sans-serif;
+    background-color: var(--color-Cr-Bg-soft-v2);
+    color: var(--basic-white-v2);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+@layer base {
+  button {
+    border: none;
+    background-color: transparent;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
+  }
+}
+
+img {
+  display: block;
+}
+
+input {
+  font-family: inherit;
+}
+
+/* --- 全局动画 keyframes（迁移自老 index.css）--- */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes langSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+/* --- RTL 支持 --- */
+[dir='rtl'] {
+  text-align: right;
+}
+[dir='rtl'] .rtl-flip {
+  transform: scaleX(-1);
+}

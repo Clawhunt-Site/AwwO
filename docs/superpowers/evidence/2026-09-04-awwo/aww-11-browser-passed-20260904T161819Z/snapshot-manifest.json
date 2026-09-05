@@ -1,0 +1,218 @@
+{
+  "runtimeAtCapture": {
+    "issueId": "838f65de-58fa-47ed-a24e-9043b79b6797",
+    "finishedAt": "2026-09-04T16:18:29.585Z",
+    "providerStatus": "succeeded",
+    "startedAt": "2026-09-04T16:13:57.189Z",
+    "runId": "72a25f95-a8ad-486d-85d3-0ab01ba10c6e",
+    "identifier": "AWW-11",
+    "issueStatus": "in_progress",
+    "sessionIdBefore": "01a06d0b-2d7a-7bb2-9ef5-3a683487588b",
+    "sessionIdAfter": "01a06d0b-2d7a-7bb2-9ef5-3a683487588b",
+    "agentId": "a784236e-c48a-468d-b14f-8392297e0452"
+  },
+  "fixtureFailed": 0,
+  "fixturePassed": 14,
+  "fixtureTestCheckedAt": "2026-09-04T16:17:24.473Z",
+  "method": "Frozen host-run browser evidence plus independent actual-app keyboard boundary regression. Red replay uses the exact old helper in the browser only; current green uses the actual current served application.",
+  "capturedAt": "2026-09-04T16:19:19.0312041Z",
+  "files": [
+    {
+      "sha256": "2eca1654ad858da25f8796ae93e26c14178451899e3ef3f46af726989db78411",
+      "bytes": 471,
+      "relativePath": "repair-run-at-capture.json"
+    },
+    {
+      "sha256": "43a1e165554499a75f3ba98681b97fb1ce2d0d3bb5a59b9ab6e246ac0b263a5e",
+      "bytes": 9078,
+      "relativePath": "test-actual-app-dialog-focus.py"
+    },
+    {
+      "sha256": "45f261491f3eff52beb454f974584b756d3be2d181d9e0c7c4d4508f1e415039",
+      "bytes": 13987,
+      "relativePath": "actual-app-current-helper\\results.json"
+    },
+    {
+      "sha256": "6f57c63b5b516231d9293ef3234e74919bc82d3886afd5389d0a4451854b8298",
+      "bytes": 185968,
+      "relativePath": "actual-app-old-helper-replay\\forward_boundary-step-1.png"
+    },
+    {
+      "sha256": "6f57c63b5b516231d9293ef3234e74919bc82d3886afd5389d0a4451854b8298",
+      "bytes": 185968,
+      "relativePath": "actual-app-old-helper-replay\\forward_boundary-step-3.png"
+    },
+    {
+      "sha256": "1058d486ca2960ac0c97c5d4052b5b04942ca662d0c724761f99dc9c3b4f5bc0",
+      "bytes": 16669,
+      "relativePath": "actual-app-old-helper-replay\\results.json"
+    },
+    {
+      "sha256": "04e6219497a032bc7ca2b7d3f4c4383749746bf337280aecf4c4a9df469951af",
+      "bytes": 185918,
+      "relativePath": "actual-app-old-helper-replay\\reverse_boundary-step-1.png"
+    },
+    {
+      "sha256": "bae4e465fcddf114ab2765a2c14c6c0128bccd4cec7943b11b75d9ce62b798ef",
+      "bytes": 159074,
+      "relativePath": "aww-11-browser-evidence\\fixture-1280.png"
+    },
+    {
+      "sha256": "92952b1a6bff2e90f6a036d593b4fe366e64cce199236e4eec529c991ec87106",
+      "bytes": 245306,
+      "relativePath": "aww-11-browser-evidence\\fixture-320-root-font-200.png"
+    },
+    {
+      "sha256": "5dced350963d9e44969ea14f7489277bc77c46d756e2697dc24d4d7734d2a663",
+      "bytes": 152736,
+      "relativePath": "aww-11-browser-evidence\\fixture-320.png"
+    },
+    {
+      "sha256": "e5b4ee4c19639fc1cf4ff8a39b88a14c7bc6e7684b2a7d165cb4010a77b34738",
+      "bytes": 152245,
+      "relativePath": "aww-11-browser-evidence\\fixture-375.png"
+    },
+    {
+      "sha256": "9a8f83c693c04100cb206df70acbc3d3f66d75a04a8044f14e62bc86c2eeeb6b",
+      "bytes": 154595,
+      "relativePath": "aww-11-browser-evidence\\fixture-768.png"
+    },
+    {
+      "sha256": "b1de25ea55354036cb4ca5e521ef2b9c9c2d8b44906c57aa9eb42c9bff53f128",
+      "bytes": 4603,
+      "relativePath": "aww-11-browser-evidence\\fixture-aria.txt"
+    },
+    {
+      "sha256": "ab0beac80fdc41d7abb30f951cf5f4089edfc4536d04207f741423c8e8d3ef1c",
+      "bytes": 144197,
+      "relativePath": "aww-11-browser-evidence\\forced-colors-current-focus.png"
+    },
+    {
+      "sha256": "0189f0951b329ba6a096a10269036d17fe70822c721c803ec0530c6911b36966",
+      "bytes": 2563,
+      "relativePath": "aww-11-browser-evidence\\results.json"
+    },
+    {
+      "sha256": "9bda4b03a888eecd7ebda126317c590d12282572b5bb3902f0aa5abeea1ddcbf",
+      "bytes": 110897,
+      "relativePath": "browser\\documents-320.png"
+    },
+    {
+      "sha256": "8c450857678fd8f1c336e6cd012ef9b960f986af57e9cc6a1caa8ab49729c4e2",
+      "bytes": 119162,
+      "relativePath": "browser\\documents-375.png"
+    },
+    {
+      "sha256": "8c9b966ce8a7b6028e0d5dc11bdbc9f1d3d6c350bae53f835ffdeb97483e5c8b",
+      "bytes": 97084,
+      "relativePath": "browser\\documents-768.png"
+    },
+    {
+      "sha256": "7aba2b688dd2c0a26f16093cf614286d32be96b479b0c859ab461ce4dee03e64",
+      "bytes": 137400,
+      "relativePath": "browser\\documents-desktop.png"
+    },
+    {
+      "sha256": "cc66c6f6e21a1a1d6ea0f7dd79b97fc39492fc7d530e40ec431800454968a9cd",
+      "bytes": 62629,
+      "relativePath": "browser\\login-desktop.png"
+    },
+    {
+      "sha256": "8d5fc6dad23718512df3a0921aa27b4ca8de30cad6b39212a0025b5a4d014012",
+      "bytes": 419,
+      "relativePath": "browser\\result.json"
+    },
+    {
+      "sha256": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295",
+      "bytes": 721,
+      "relativePath": "source\\index.html"
+    },
+    {
+      "sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "bytes": 36393,
+      "relativePath": "source\\styles.css"
+    },
+    {
+      "sha256": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+      "bytes": 6795,
+      "relativePath": "source\\artifacts\\aww-11-browser-review.mjs"
+    },
+    {
+      "sha256": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+      "bytes": 4290,
+      "relativePath": "source\\src\\accessibility.js"
+    },
+    {
+      "sha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+      "bytes": 47409,
+      "relativePath": "source\\src\\app.js"
+    },
+    {
+      "sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "bytes": 5698,
+      "relativePath": "source\\src\\styles.css"
+    },
+    {
+      "sha256": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+      "bytes": 2843,
+      "relativePath": "source\\tests\\browser_smoke.py"
+    },
+    {
+      "sha256": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+      "bytes": 8833,
+      "relativePath": "source\\tests\\responsive-accessibility.html"
+    }
+  ],
+  "sourceChecks": [
+    {
+      "expectedTestedSha256": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+      "sha256": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+      "path": "tests/responsive-accessibility.html",
+      "matchesFixtureTestedSource": true
+    },
+    {
+      "expectedTestedSha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "path": "src/styles.css",
+      "matchesFixtureTestedSource": true
+    },
+    {
+      "expectedTestedSha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "path": "styles.css",
+      "matchesFixtureTestedSource": true
+    },
+    {
+      "expectedTestedSha256": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+      "sha256": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+      "path": "src/accessibility.js",
+      "matchesFixtureTestedSource": true
+    },
+    {
+      "expectedTestedSha256": null,
+      "sha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+      "path": "src/app.js",
+      "matchesFixtureTestedSource": null
+    },
+    {
+      "expectedTestedSha256": null,
+      "sha256": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295",
+      "path": "index.html",
+      "matchesFixtureTestedSource": null
+    },
+    {
+      "expectedTestedSha256": null,
+      "sha256": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+      "path": "tests/browser_smoke.py",
+      "matchesFixtureTestedSource": null
+    },
+    {
+      "expectedTestedSha256": null,
+      "sha256": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+      "path": "artifacts/aww-11-browser-review.mjs",
+      "matchesFixtureTestedSource": null
+    }
+  ],
+  "originalWorkspace": "C:/tmp/awwo-codex-live-20260904/a784236e-c48a-468d-b14f-8392297e0452",
+  "browser": "152.0.7977.82"
+}

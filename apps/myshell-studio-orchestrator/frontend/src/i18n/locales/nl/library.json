@@ -1,0 +1,21 @@
+{
+  "title": "Bibliotheek",
+  "failedToLoad": "Laden mislukt",
+  "noCreationsYet": "Nog geen creaties",
+  "noCreationsDesc": "Kies een personage en begin met genereren — je afbeeldingen en video's verschijnen hier.",
+  "browseCharacters": "Personages bekijken",
+  "generationFailed": "Generatie mislukt",
+  "inQueue": "In wachtrij...",
+  "generatingStatus": "Genereren...",
+  "aiPick": "AI-keuze",
+  "formatNotSupported": "Formaat niet ondersteund",
+  "videoFallbackDesc": "Deze video kan niet worden afgespeeld in Telegram. Tik hieronder om in je browser te bekijken.",
+  "openInBrowser": "Openen in browser",
+  "download": "Downloaden",
+  "like": "Leuk",
+  "dislike": "Niet leuk",
+  "share": "Delen",
+  "shareToTelegram": "Delen op Telegram",
+  "sharePreview": "Wazige preview",
+  "cancel": "Annuleren"
+}

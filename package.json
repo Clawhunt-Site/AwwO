@@ -1,0 +1,17 @@
+{
+  "name": "awwo",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.4",
+  "engines": { "node": "^22.13.0 || >=24.0.0" },
+  "scripts": {
+    "setup": "node scripts/awwo-setup.mjs",
+    "dev": "node scripts/awwo-dev.mjs",
+    "test:scripts": "node --test scripts/awwo-scripts.test.mjs",
+    "test:web": "npm test --prefix apps/web",
+    "test:gateway": "npm test --prefix apps/gateway",
+    "build:web": "npm run build --prefix apps/web",
+    "build:gateway": "npm run build --prefix apps/gateway"
+  }
+}

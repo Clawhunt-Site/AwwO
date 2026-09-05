@@ -1,0 +1,21 @@
+{
+  "title": "Library",
+  "failedToLoad": "Failed to load",
+  "noCreationsYet": "No creations yet",
+  "noCreationsDesc": "Pick a character and start generating — your images and videos will appear here.",
+  "browseCharacters": "Browse Characters",
+  "generationFailed": "Generation failed",
+  "inQueue": "In queue...",
+  "generatingStatus": "Generating...",
+  "aiPick": "AI Pick",
+  "formatNotSupported": "Format not supported",
+  "videoFallbackDesc": "This video can't play in Telegram. Tap below to watch in your browser.",
+  "openInBrowser": "Open in Browser",
+  "download": "Download",
+  "like": "Like",
+  "dislike": "Dislike",
+  "share": "Share",
+  "shareToTelegram": "Share to Telegram",
+  "sharePreview": "Blurred Preview",
+  "cancel": "Cancel"
+}

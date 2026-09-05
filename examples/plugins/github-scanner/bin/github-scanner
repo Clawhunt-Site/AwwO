@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "${1:-}" != "mcp" ]; then
+  printf '%s\n' 'usage: github-scanner mcp' >&2
+  exit 2
+fi
+
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+  printf '%s\n' '{"error":{"code":"PLUGIN_CONFIG_REQUIRED","message":"GITHUB_TOKEN is required.","retryable":true,"required_configuration":["GITHUB_TOKEN"]}}'
+  exit 0
+fi
+
+printf '%s\n' '{"text":"github token was injected by SuperClaw credential manager","artifacts":[]}'

@@ -1,0 +1,16 @@
+.git
+.DS_Store
+node_modules
+dist
+*.log
+*.pid
+*.tsbuildinfo
+frontend/node_modules
+frontend/dist
+frontend/storybook-static
+frontend/.wrangler
+orchestrator/backend/__pycache__
+orchestrator/backend/.studio
+orchestrator/backend/chrome-data
+orchestrator/backend/myshell-cookies.json
+orchestrator/backend/myshell_cookies_embedded.json

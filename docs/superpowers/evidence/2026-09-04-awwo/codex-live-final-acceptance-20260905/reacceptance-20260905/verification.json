@@ -1,0 +1,446 @@
+{
+  "issue": "AWW-12",
+  "run_id": "cb0e4332-1797-4bb1-8545-18ced4772991",
+  "readback_at": "2026-09-04T16:23:54.306888+00:00",
+  "status": "passed",
+  "source_checks": [
+    {
+      "relative": "index.html",
+      "sha256": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\index.html",
+      "after_sha256": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295",
+      "unchanged": true,
+      "snapshot": "reviewed-source/index.html"
+    },
+    {
+      "relative": "styles.css",
+      "sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\styles.css",
+      "after_sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "unchanged": true,
+      "snapshot": "reviewed-source/styles.css"
+    },
+    {
+      "relative": "src/styles.css",
+      "sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\styles.css",
+      "after_sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "unchanged": true,
+      "snapshot": "reviewed-source/src/styles.css"
+    },
+    {
+      "relative": "src/accessibility.js",
+      "sha256": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\accessibility.js",
+      "after_sha256": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+      "unchanged": true,
+      "snapshot": "reviewed-source/src/accessibility.js"
+    },
+    {
+      "relative": "src/app.js",
+      "sha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\app.js",
+      "after_sha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+      "unchanged": true,
+      "snapshot": "reviewed-source/src/app.js"
+    },
+    {
+      "relative": "src/api.js",
+      "sha256": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\api.js",
+      "after_sha256": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+      "unchanged": true,
+      "snapshot": "reviewed-source/src/api.js"
+    },
+    {
+      "relative": "src/demo.js",
+      "sha256": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\demo.js",
+      "after_sha256": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+      "unchanged": true,
+      "snapshot": "reviewed-source/src/demo.js"
+    },
+    {
+      "relative": "src/unicode-casefold.js",
+      "sha256": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\unicode-casefold.js",
+      "after_sha256": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+      "unchanged": true,
+      "snapshot": "reviewed-source/src/unicode-casefold.js"
+    },
+    {
+      "relative": "src/copy.js",
+      "sha256": "9d507bcb1091ce6055cb12ea7249e9a896b9e691e523171f195541d175b57a4b",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\copy.js",
+      "after_sha256": "9d507bcb1091ce6055cb12ea7249e9a896b9e691e523171f195541d175b57a4b",
+      "unchanged": true,
+      "snapshot": "reviewed-source/src/copy.js"
+    },
+    {
+      "relative": "server.py",
+      "sha256": "7d4a60649afa61b1dcf821c125ac07ab059b7dce99df7725e7dfecb3b8af9989",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\server.py",
+      "after_sha256": "7d4a60649afa61b1dcf821c125ac07ab059b7dce99df7725e7dfecb3b8af9989",
+      "unchanged": true,
+      "snapshot": "reviewed-source/server.py"
+    },
+    {
+      "relative": "tests/model.test.js",
+      "sha256": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\model.test.js",
+      "after_sha256": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+      "unchanged": true,
+      "snapshot": "reviewed-source/tests/model.test.js"
+    },
+    {
+      "relative": "tests/ui-dom.test.js",
+      "sha256": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\ui-dom.test.js",
+      "after_sha256": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+      "unchanged": true,
+      "snapshot": "reviewed-source/tests/ui-dom.test.js"
+    },
+    {
+      "relative": "tests/demo-regressions.test.js",
+      "sha256": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\demo-regressions.test.js",
+      "after_sha256": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+      "unchanged": true,
+      "snapshot": "reviewed-source/tests/demo-regressions.test.js"
+    },
+    {
+      "relative": "tests/unicode-casefold.test.js",
+      "sha256": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\unicode-casefold.test.js",
+      "after_sha256": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+      "unchanged": true,
+      "snapshot": "reviewed-source/tests/unicode-casefold.test.js"
+    },
+    {
+      "relative": "tests/accessibility-modal-focus.test.js",
+      "sha256": "972923c7f09675ccc52f0bec2504934e453dfe550d06575b3cc9a2767d21bd32",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\accessibility-modal-focus.test.js",
+      "after_sha256": "972923c7f09675ccc52f0bec2504934e453dfe550d06575b3cc9a2767d21bd32",
+      "unchanged": true,
+      "snapshot": "reviewed-source/tests/accessibility-modal-focus.test.js"
+    },
+    {
+      "relative": "tests/browser_smoke.py",
+      "sha256": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\browser_smoke.py",
+      "after_sha256": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+      "unchanged": true,
+      "snapshot": "reviewed-source/tests/browser_smoke.py"
+    },
+    {
+      "relative": "artifacts/aww-11-browser-review.mjs",
+      "sha256": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-11-browser-review.mjs",
+      "after_sha256": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+      "unchanged": true,
+      "snapshot": "reviewed-source/artifacts/aww-11-browser-review.mjs"
+    },
+    {
+      "relative": "artifacts/aww-11-browser-evidence/results.json",
+      "sha256": "0189f0951b329ba6a096a10269036d17fe70822c721c803ec0530c6911b36966",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-11-browser-evidence\\results.json",
+      "after_sha256": "0189f0951b329ba6a096a10269036d17fe70822c721c803ec0530c6911b36966",
+      "unchanged": true,
+      "snapshot": "reviewed-source/artifacts/aww-11-browser-evidence/results.json"
+    },
+    {
+      "relative": "artifacts/browser/result.json",
+      "sha256": "8d5fc6dad23718512df3a0921aa27b4ca8de30cad6b39212a0025b5a4d014012",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\browser\\result.json",
+      "after_sha256": "8d5fc6dad23718512df3a0921aa27b4ca8de30cad6b39212a0025b5a4d014012",
+      "unchanged": true,
+      "snapshot": "reviewed-source/artifacts/browser/result.json"
+    }
+  ],
+  "repair_source_matches": {
+    "src/app.js": {
+      "recorded": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+      "current": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+      "matches": true
+    },
+    "src/api.js": {
+      "recorded": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+      "current": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+      "matches": true
+    },
+    "src/demo.js": {
+      "recorded": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+      "current": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+      "matches": true
+    },
+    "src/unicode-casefold.js": {
+      "recorded": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+      "current": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+      "matches": true
+    },
+    "data/unicode/17.0.0/CaseFolding.txt": {
+      "recorded": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+      "current": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+      "matches": true
+    },
+    "scripts/generate-unicode-casefold.mjs": {
+      "recorded": "e9fa4c26ac5911c271caf0ebd446e516f62be4354dfb5a76d31c6d3f5d9b5327",
+      "current": "e9fa4c26ac5911c271caf0ebd446e516f62be4354dfb5a76d31c6d3f5d9b5327",
+      "matches": true
+    },
+    "tests/model.test.js": {
+      "recorded": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+      "current": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+      "matches": true
+    },
+    "tests/ui-dom.test.js": {
+      "recorded": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+      "current": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+      "matches": true
+    },
+    "tests/demo-regressions.test.js": {
+      "recorded": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+      "current": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+      "matches": true
+    },
+    "tests/unicode-casefold.test.js": {
+      "recorded": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+      "current": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+      "matches": true
+    },
+    "artifacts/contract-review-repro.mjs": {
+      "recorded": "f7e781e0840f2ff6963d350b900ec4634541e7a57b41fad2c38366aeb97059b5",
+      "current": "f7e781e0840f2ff6963d350b900ec4634541e7a57b41fad2c38366aeb97059b5",
+      "matches": true
+    }
+  },
+  "contract_source_matches": [
+    {
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\e6b90c56-2d1d-412f-9ee6-2758668b6558\\artifacts\\knowledge-saas-boundary-v1.md",
+      "sha256": "91b7624f9cf2c119a8c16bf7f812b067c660ab407f732308e8e4258a4ec1ef2e",
+      "unchanged": true
+    },
+    {
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\49ef2341-a5de-4e56-a82c-c14aa8ce2e1e\\artifacts\\identity-permissions-v1.md",
+      "sha256": "06150c0bdc6136db5a6bcafeaf6b6be904cc6b55d47d21bef69118f7e31c3ee2",
+      "unchanged": true
+    },
+    {
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\376683f0-56ab-45fe-906e-c87d0ae1658e\\artifacts\\knowledge-governance-v1.md",
+      "sha256": "34f6eb320271b20736717bcb3e19acffd1274c5526cf99e57edf3484fb22f136",
+      "unchanged": true
+    },
+    {
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\b9ee56d4-f04a-4dfd-a805-d9f17713f46c\\artifacts\\backend-contract-v1.md",
+      "sha256": "1982adc830675f0131cd30bfba6a32776f3a54026caec1efa2ab13e4cdebdf86",
+      "unchanged": true
+    }
+  ],
+  "tests_independently_run": {
+    "model-regression.tap": {
+      "passed": 31,
+      "failed": 0,
+      "skipped": 0
+    },
+    "ui-dom.tap": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "modal-focus.tap": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "original_defect_probes": {
+    "status": "passed",
+    "observed_at": "2026-09-04T16:23:10.164Z",
+    "R1": "passed",
+    "R2": "passed",
+    "scope": "Independent replay of original acceptance fixture against current demo; no real backend claims",
+    "adaptation": "Only import path adjusted for dated evidence directory; original acceptance fixture preserved"
+  },
+  "browser_evidence": {
+    "mode": "host execution evidence readback; no sandbox browser rerun",
+    "host_comment": "731d2ca9-825d-44fe-8a18-9b243253df0c",
+    "executed_at": "2026-09-04T16:17:24.473Z",
+    "browser": "152.0.7977.82",
+    "fixture_passed": 14,
+    "fixture_total": 14,
+    "application": {
+      "status": "passed",
+      "viewports": [
+        1440,
+        768,
+        375,
+        320
+      ],
+      "checks": [
+        "login",
+        "skip link",
+        "published documents",
+        "native dialog Escape and focus restoration",
+        "mobile navigation Escape and focus",
+        "horizontal overflow",
+        "page errors"
+      ],
+      "does_not_prove": [
+        "real auth",
+        "backend permissions",
+        "screen reader compliance"
+      ]
+    },
+    "source_matches": {
+      "tests/responsive-accessibility.html": {
+        "recorded": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+        "current": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+        "matches": true
+      },
+      "src/styles.css": {
+        "recorded": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+        "current": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+        "matches": true
+      },
+      "styles.css": {
+        "recorded": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+        "current": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+        "matches": true
+      },
+      "src/accessibility.js": {
+        "recorded": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+        "current": "f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748",
+        "matches": true
+      },
+      "artifacts/aww-11-browser-review.mjs": {
+        "recorded": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+        "current": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+        "matches": true
+      },
+      "tests/browser_smoke.py": {
+        "recorded": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+        "current": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+        "matches": true
+      }
+    },
+    "screenshots": [
+      {
+        "path": "artifacts/aww-11-browser-evidence/fixture-1280.png",
+        "width": 1280,
+        "height": 2364,
+        "bytes": 159074,
+        "sha256": "bae4e465fcddf114ab2765a2c14c6c0128bccd4cec7943b11b75d9ce62b798ef",
+        "modified_at_utc": "2026-09-04T16:17:25.901341+00:00",
+        "matches": true,
+        "local_copy": "host-browser/aww-11-browser-evidence/fixture-1280.png"
+      },
+      {
+        "path": "artifacts/aww-11-browser-evidence/fixture-320-root-font-200.png",
+        "width": 320,
+        "height": 4812,
+        "bytes": 245306,
+        "sha256": "92952b1a6bff2e90f6a036d593b4fe366e64cce199236e4eec529c991ec87106",
+        "modified_at_utc": "2026-09-04T16:17:26.004299+00:00",
+        "matches": true,
+        "local_copy": "host-browser/aww-11-browser-evidence/fixture-320-root-font-200.png"
+      },
+      {
+        "path": "artifacts/aww-11-browser-evidence/fixture-320.png",
+        "width": 320,
+        "height": 3706,
+        "bytes": 152736,
+        "sha256": "5dced350963d9e44969ea14f7489277bc77c46d756e2697dc24d4d7734d2a663",
+        "modified_at_utc": "2026-09-04T16:17:25.620224+00:00",
+        "matches": true,
+        "local_copy": "host-browser/aww-11-browser-evidence/fixture-320.png"
+      },
+      {
+        "path": "artifacts/aww-11-browser-evidence/fixture-375.png",
+        "width": 375,
+        "height": 3620,
+        "bytes": 152245,
+        "sha256": "e5b4ee4c19639fc1cf4ff8a39b88a14c7bc6e7684b2a7d165cb4010a77b34738",
+        "modified_at_utc": "2026-09-04T16:17:25.707932+00:00",
+        "matches": true,
+        "local_copy": "host-browser/aww-11-browser-evidence/fixture-375.png"
+      },
+      {
+        "path": "artifacts/aww-11-browser-evidence/fixture-768.png",
+        "width": 768,
+        "height": 2864,
+        "bytes": 154595,
+        "sha256": "9a8f83c693c04100cb206df70acbc3d3f66d75a04a8044f14e62bc86c2eeeb6b",
+        "modified_at_utc": "2026-09-04T16:17:25.798099+00:00",
+        "matches": true,
+        "local_copy": "host-browser/aww-11-browser-evidence/fixture-768.png"
+      },
+      {
+        "path": "artifacts/aww-11-browser-evidence/forced-colors-current-focus.png",
+        "width": 320,
+        "height": 3706,
+        "bytes": 144197,
+        "sha256": "ab0beac80fdc41d7abb30f951cf5f4089edfc4536d04207f741423c8e8d3ef1c",
+        "modified_at_utc": "2026-09-04T16:17:26.257755+00:00",
+        "matches": true,
+        "local_copy": "host-browser/aww-11-browser-evidence/forced-colors-current-focus.png"
+      },
+      {
+        "path": "artifacts/browser/documents-320.png",
+        "width": 320,
+        "height": 2925,
+        "bytes": 110897,
+        "sha256": "9bda4b03a888eecd7ebda126317c590d12282572b5bb3902f0aa5abeea1ddcbf",
+        "modified_at_utc": "2026-09-04T16:17:28.199800+00:00",
+        "matches": true,
+        "local_copy": "host-browser/browser/documents-320.png"
+      },
+      {
+        "path": "artifacts/browser/documents-375.png",
+        "width": 375,
+        "height": 2925,
+        "bytes": 119162,
+        "sha256": "8c450857678fd8f1c336e6cd012ef9b960f986af57e9cc6a1caa8ab49729c4e2",
+        "modified_at_utc": "2026-09-04T16:17:28.083602+00:00",
+        "matches": true,
+        "local_copy": "host-browser/browser/documents-375.png"
+      },
+      {
+        "path": "artifacts/browser/documents-768.png",
+        "width": 768,
+        "height": 1754,
+        "bytes": 97084,
+        "sha256": "8c9b966ce8a7b6028e0d5dc11bdbc9f1d3d6c350bae53f835ffdeb97483e5c8b",
+        "modified_at_utc": "2026-09-04T16:17:27.970801+00:00",
+        "matches": true,
+        "local_copy": "host-browser/browser/documents-768.png"
+      },
+      {
+        "path": "artifacts/browser/documents-desktop.png",
+        "width": 1440,
+        "height": 1493,
+        "bytes": 137400,
+        "sha256": "7aba2b688dd2c0a26f16093cf614286d32be96b479b0c859ab461ce4dee03e64",
+        "modified_at_utc": "2026-09-04T16:17:27.803212+00:00",
+        "matches": true,
+        "local_copy": "host-browser/browser/documents-desktop.png"
+      },
+      {
+        "path": "artifacts/browser/login-desktop.png",
+        "width": 1440,
+        "height": 1000,
+        "bytes": 62629,
+        "sha256": "cc66c6f6e21a1a1d6ea0f7dd79b97fc39492fc7d530e40ec431800454968a9cd",
+        "modified_at_utc": "2026-09-04T16:17:27.520959+00:00",
+        "matches": true,
+        "local_copy": "host-browser/browser/login-desktop.png"
+      }
+    ],
+    "application_provenance_limit": "Application result lacks embedded full source manifest; execution provenance comes from local-board comment, matching original smoke script, current AWW-15 app/api/demo hashes and matching shared accessibility/CSS files."
+  },
+  "limits": [
+    "No real account, deployed service or external integration acceptance",
+    "Browser smoke covers entry/list/navigation/focus/reflow, not full business workflow",
+    "Business workflow executed in JSDOM and in-memory model",
+    "No full WCAG or screen reader compliance claim"
+  ]
+}

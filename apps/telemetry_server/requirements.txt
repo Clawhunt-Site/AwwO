@@ -1,0 +1,13 @@
+# Telemetry collection server dependencies (separate from the superclaw kernel).
+# Local mock needs only the first four (SQLite is stdlib — no driver required).
+fastapi>=0.109
+uvicorn>=0.27
+pydantic>=2.6
+# Validates the configured Tier C public key (RSA / size) so /keys can never
+# advertise private material, a non-RSA key, or junk. The collector still never
+# holds a private key or decrypts anything.
+cryptography>=42.0
+
+# Production only: the PostgreSQL driver. Not needed for the local sqlite:// mock.
+# Install with:  pip install "psycopg[binary]>=3.1"
+# psycopg[binary]>=3.1

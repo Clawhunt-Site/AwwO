@@ -1,0 +1,18 @@
+{
+  "title": "Personalizar cena",
+  "videoQuality": "Qualidade do vídeo",
+  "qualityLow": "Baixa",
+  "qualityMedium": "Média",
+  "qualityHigh": "Alta",
+  "duration": "Duração",
+  "audio": "Áudio",
+  "vipBadge": "VIP",
+  "estTime": "TEMPO EST.",
+  "mins": "min",
+  "energyCost": "CUSTO DE ENERGIA",
+  "createNow": "Criar agora",
+  "unlockVipToCreate": "Desbloquear VIP para criar",
+  "cancel": "Cancelar",
+  "needSubscription": "Compre um pacote de energia para desbloquear recursos VIP",
+  "loadingCost": "Calculando..."
+}

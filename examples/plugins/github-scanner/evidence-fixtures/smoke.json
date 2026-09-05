@@ -1,0 +1,16 @@
+{
+  "run_id": "run_fixture_github",
+  "plugin_id": "dev.superclaw.github-scanner",
+  "plugin_version": "0.1.0",
+  "package_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "tool_name": "github_scan",
+  "started_at": "2026-06-01T00:00:00Z",
+  "finished_at": "2026-06-01T00:00:01Z",
+  "status": "denied",
+  "entitlement_id": "ent_fixture_github",
+  "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+  "output_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+  "evidence_artifact_id": "artifact_github_missing_secret",
+  "policy_decision": "PLUGIN_CONFIG_REQUIRED",
+  "sandbox_exit_status": 0
+}

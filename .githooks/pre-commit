@@ -1,0 +1,36 @@
+#!/bin/sh
+# superclaw-local-guard — keep the PRIMARY checkout on main; develop in worktrees.
+# Installed under BOTH pre-commit AND pre-merge-commit, so a clean (no-conflict)
+# `git merge` on a feature branch in the primary — which auto-commits and would
+# otherwise SKIP pre-commit — is caught too. (cherry-pick's clean auto-commit
+# still bypasses commit hooks; that rare, deliberate case is an accepted residual
+# for a poka-yoke guard, not a security lock — use a worktree.)
+#
+# Fires ONLY when ALL hold, else exits 0 (never blocks unrelated work):
+#   (a) THIS repo  — repo root carries .githooks/.superclaw-guard, so a global
+#       core.hooksPath can't leak the guard into other repos;
+#   (b) PRIMARY working tree — git-dir == git-common-dir (a linked worktree
+#       differs), resolved portably (no git>=2.31 flags → no silent fail-open);
+#   (c) a resolvable HEAD branch — a detached HEAD (incl. an in-progress rebase,
+#       which detaches) returns nothing → allowed, so history maintenance is free;
+#   (d) that branch is not main nor a configured guard.allowBranch pattern.
+set -f   # no pathname expansion — allowBranch patterns must stay literal globs
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -e "$root/.githooks/.superclaw-guard" ] || exit 0
+gd=$(cd "$(git rev-parse --git-dir 2>/dev/null)" 2>/dev/null && pwd) || exit 0
+cd=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd) || exit 0
+[ -n "$gd" ] && [ "$gd" = "$cd" ] || exit 0
+branch=$(git symbolic-ref --short -q HEAD 2>/dev/null) || exit 0   # detached/rebase → allow
+[ "$branch" = "main" ] && exit 0
+for pat in $(git config --get-all guard.allowBranch 2>/dev/null); do
+  case "$branch" in $pat) exit 0 ;; esac
+done
+cat >&2 <<MSG
+✋ Refusing a feature-branch commit in the PRIMARY checkout (branch: $branch).
+   Constitution [parallel work must be worktree-isolated]: the primary checkout
+   stays on main with no business WIP. Do this work in an isolated worktree:
+     git worktree add ~/superclaw-wt/<slug> -b feat/<slug> origin/main
+   Use a local main-mirror branch:  git config --add guard.allowBranch 'work/main-latest-*'
+   Rare, deliberate override:        git commit --no-verify
+MSG
+exit 1

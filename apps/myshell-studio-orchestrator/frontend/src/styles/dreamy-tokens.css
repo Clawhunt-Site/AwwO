@@ -1,0 +1,86 @@
+/* Dreamy MiniApp 专属 token（非 Fantasia 共享）*/
+@theme {
+  /* Dreamy 品牌 hot pink - logo "Porn" 字色、CTA 高亮点缀 */
+  --color-dreamy-brand-hot-v2: #ff195e;
+
+  /* Dreamy 品牌主渐变（粉 → 橙），Logo / 主 CTA / 能量条端点 */
+  --color-dreamy-gradient-brand-from-v2: #ff195e;
+  --color-dreamy-gradient-brand-to-v2: #ff772a;
+
+  /* gradient-color-05 三段色（橙→粉→深粉），用于 HomeNavBar 顶部渐变 / 头像背景渐变 */
+  --color-dreamy-gradient-05-stop-1-v2: #ea6748;
+  --color-dreamy-gradient-05-stop-2-v2: #ec2b65;
+  --color-dreamy-gradient-05-stop-3-v2: #dd114e;
+
+  /* Settings 页能量卡深色底（暖黄/橙）— Fantasia 无此 token */
+  --color-dreamy-energy-card-bg-normal-v2: #1a1500;
+  --color-dreamy-energy-card-bg-low-v2: #1a0f00;
+  --color-dreamy-energy-card-label-normal-v2: #c4a82a;
+  --color-dreamy-energy-card-label-low-v2: #cc7744;
+
+  /* Invite/Earn brand button active state (differs from maroon-flush-600-v2=#911239) */
+  --color-dreamy-brand-button-active-v2: #B60E40;
+
+  /* Neutral button active state alias (primitive gray-700-v2=#313133 doesn't have --color- prefix) */
+  --color-dreamy-neutral-button-active-v2: var(--gray-700-v2);
+
+  /* Upload page example badge (iOS system green, differs from success-500-v2=#17a966) */
+  --color-dreamy-badge-good-v2: #30d158;
+  /* Upload page example badge (iOS system red, close to but not identical to error-500-v2=#ef3b2e) */
+  --color-dreamy-badge-bad-v2: #ff3b30;
+  /* Upload page generate button gradient (inverted from brand: orange → pink-ish) */
+  --color-dreamy-generate-from-v2: #ff6b35;
+  --color-dreamy-generate-to-v2: #ff2d78;
+
+  /* Crimson brand gradient (used by NavBar / NavigationBar logo, Library CTA fallback, bot chat buttons) */
+  --color-dreamy-crimson-from-v2: #ec2b65;
+  --color-dreamy-crimson-to-v2: #c31045;
+
+  /* GetEnergy "Save xx%" badge green - custom discount indicator, different from success-500 */
+  --color-dreamy-discount-green-v2: #54de3f;
+
+  /* Customize Scene: gold VIP indicator (unlocked state crown/dot) + pill gradient */
+  --color-dreamy-vip-gold-v2: #ffc83d;
+  --color-dreamy-vip-pill-from-v2: #ff3d3d;
+  --color-dreamy-vip-pill-to-v2: #c31045;
+  /* ── Check-in Modal ── */
+
+  /* Bottom sheet warm-dark background */
+  --color-dreamy-checkin-bg-v2: #141101;
+
+  /* Gold accent — today card border, energy highlight */
+  --color-dreamy-checkin-gold-v2: #fddf1a;
+  --color-dreamy-checkin-gold-text-v2: #d9ba05;
+
+  /* Card backgrounds (with alpha for layering over gradient) */
+  --color-dreamy-checkin-card-future-v2: #ffffff08;
+  --color-dreamy-checkin-card-today-v2: #fddf1a14;
+  --color-dreamy-checkin-card-claimed-v2: #fddf1a14;
+
+  /* Day 7 red-pink accent */
+  --color-dreamy-checkin-day7-accent-v2: #ff406a;
+  --color-dreamy-checkin-day7-future-v2: #fe204929;
+  --color-dreamy-checkin-day7-today-v2: #ff406a1f;
+
+  /* Bonus tag pill */
+  --color-dreamy-checkin-tag-bg-v2: #5d3b06;
+  --color-dreamy-checkin-tag-text-v2: #fab137;
+
+  /* CTA button */
+  --color-dreamy-checkin-cta-v2: #d5104b;
+
+  /* Disabled / claimed button */
+  --color-dreamy-checkin-disabled-bg-v2: #242426;
+  --color-dreamy-checkin-disabled-text-v2: #68676c;
+
+  /* Close button overlay */
+  --color-dreamy-checkin-close-bg-v2: #0000004d;
+
+  /* Celebration screen */
+  --color-dreamy-checkin-celebrate-bg-v2: #b4e8cd;
+  --color-dreamy-checkin-celebrate-subtitle-v2: #96949c;
+
+  /* 常用整段 gradient 变量（可直接在 Tailwind class 用 bg-[image:var(--xxx)]） */
+  --gradient-dreamy-brand: linear-gradient(90deg, #ff772a 0%, #ff195e 100%);
+  --gradient-dreamy-brand-vertical: linear-gradient(180deg, #ff772a 0%, #ff195e 100%);
+}

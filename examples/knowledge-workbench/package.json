@@ -1,0 +1,20 @@
+{
+  "name": "team-knowledge-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.16.0 || >=24.0.0"
+  },
+  "scripts": {
+    "start": "python server.py",
+    "test": "node --test --experimental-test-isolation=none tests/model.test.js tests/demo-regressions.test.js tests/unicode-casefold.test.js",
+    "test:repro": "node scripts/verify-aww-15-repro.mjs",
+    "test:dom": "node --test --experimental-test-isolation=none tests/ui-dom.test.js",
+    "test:focus": "node --test --experimental-test-isolation=none tests/accessibility-modal-focus.test.js",
+    "test:unicode": "node scripts/generate-unicode-casefold.mjs --check"
+  },
+  "devDependencies": {
+    "jsdom": "29.1.1"
+  }
+}

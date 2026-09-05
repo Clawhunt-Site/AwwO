@@ -1,0 +1,17 @@
+{
+  "searchPlaceholder": "何でも検索…",
+  "clear": "クリア",
+  "searchHint": "ボットを検索…",
+  "noContent": "このカテゴリにはまだコンテンツがありません",
+  "resultCount": "{{count}} 件の結果",
+  "resultCount_other": "{{count}} 件の結果",
+  "personalizedForYou": "あなたへのおすすめ",
+  "basedOnPreferences": "あなたのスタイルや利用傾向に基づいています",
+  "noRecommendations": "まだおすすめはありません",
+  "matchPercent": "{{percent}}% マッチ",
+  "celebritySex": "セレブ\nセックス",
+  "sexyOutfits": "セクシー\n衣装",
+  "classicActs": "クラシック\nアクト",
+  "wildEncounters": "ワイルド\nエンカウント",
+  "lgbtSex": "LGBT\nセックス"
+}

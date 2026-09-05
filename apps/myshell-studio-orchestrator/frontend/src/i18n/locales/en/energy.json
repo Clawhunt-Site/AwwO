@@ -1,0 +1,22 @@
+{
+  "getEnergy": "Get Energy",
+  "getMoreDesc": "Get more energy to keep generating.",
+  "loadingPacks": "Loading packs...",
+  "noPacks": "No energy packs available",
+  "bestValue": "Best Value",
+  "pricePerUnit": "≈ ${{price}} / energy",
+  "savePercent": "Save {{percent}}%",
+  "processing": "Processing...",
+  "buyEnergy": "Buy {{amount}} Energy",
+  "selectAPack": "Select a pack",
+  "energyHistory": "Energy History",
+  "all": "All",
+  "usage": "Usage",
+  "purchases": "Purchases",
+  "noHistoryYet": "No history yet",
+  "loadMore": "Load More",
+  "purchased": "Purchased",
+  "energyAmount": "{{amount}} Energy",
+  "generatedWith": "Generated with",
+  "unknown": "Unknown"
+}

@@ -1,0 +1,21 @@
+{
+  "title": "ライブラリ",
+  "failedToLoad": "読み込みに失敗しました",
+  "noCreationsYet": "作品はまだありません",
+  "noCreationsDesc": "キャラクターを選んで生成を始めましょう。画像や動画はここに表示されます。",
+  "browseCharacters": "キャラクターを見る",
+  "generationFailed": "生成に失敗しました",
+  "inQueue": "キューに入っています…",
+  "generatingStatus": "生成中…",
+  "aiPick": "AIおすすめ",
+  "formatNotSupported": "形式がサポートされていません",
+  "videoFallbackDesc": "この動画はTelegram内で再生できません。下のボタンからブラウザで視聴してください。",
+  "openInBrowser": "ブラウザで開く",
+  "download": "ダウンロード",
+  "like": "いいね",
+  "dislike": "よくない",
+  "share": "共有",
+  "shareToTelegram": "Telegramで共有",
+  "sharePreview": "ぼかしプレビュー",
+  "cancel": "キャンセル"
+}

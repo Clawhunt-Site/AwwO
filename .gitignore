@@ -1,0 +1,67 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+node_modules/
+dist/
+build/
+coverage/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+artifacts/
+runtime/
+!apps/myshell-studio-orchestrator/orchestrator/backend/studio_app/infrastructure/runtime/
+!apps/myshell-studio-orchestrator/orchestrator/backend/studio_app/infrastructure/runtime/*.py
+ledgers/
+screenshots/
+recordings/
+browser-profiles/
+.superclaw/
+.worktrees/
+worktrees/
+
+.gemini-cli-advisor/
+
+# Frozen desktop backend build artifacts
+apps/desktop/backend/dist/
+apps/desktop/backend/build/
+# Pinned Node runtime download cache for build-node-server.mjs
+apps/desktop/backend/.node-cache/
+
+.codex-cli-advisor/
+
+# OS / editor junk
+.DS_Store
+
+# Claude Code local worktrees & launch config (never commit nested git worktrees)
+.claude/
+
+.antigravity-cli-advisor/
+
+.grok-cli-advisor/
+
+# Codex Goal Go local state
+.codex-orchestrator/
+.goalgo/
+# Goal Go workspace scaffold (machine-specific: contains absolute local paths)
+/ORCHESTRATION.md
+
+# Playwright MCP local artifacts (console logs / page snapshots / screenshots)
+.playwright-mcp/
+/.vscode
+/CCimages
+/.local/
+/.grok/
+/.gemini/
+
+# Remotion render artifacts (P3b render lane)
+/out/

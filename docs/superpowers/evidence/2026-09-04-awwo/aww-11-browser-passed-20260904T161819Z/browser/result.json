@@ -1,0 +1,23 @@
+{
+  "status": "passed",
+  "viewports": [
+    1440,
+    768,
+    375,
+    320
+  ],
+  "checks": [
+    "login",
+    "skip link",
+    "published documents",
+    "native dialog Escape and focus restoration",
+    "mobile navigation Escape and focus",
+    "horizontal overflow",
+    "page errors"
+  ],
+  "does_not_prove": [
+    "real auth",
+    "backend permissions",
+    "screen reader compliance"
+  ]
+}

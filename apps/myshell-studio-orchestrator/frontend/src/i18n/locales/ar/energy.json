@@ -1,0 +1,22 @@
+{
+  "getEnergy": "احصل على طاقة",
+  "getMoreDesc": "احصل على المزيد من الطاقة لمواصلة الإنشاء.",
+  "loadingPacks": "جارٍ تحميل الحزم...",
+  "noPacks": "لا توجد حزم طاقة متاحة",
+  "bestValue": "أفضل قيمة",
+  "pricePerUnit": "≈ ${{price}} / طاقة",
+  "savePercent": "وفّر {{percent}}%",
+  "processing": "جارٍ المعالجة...",
+  "buyEnergy": "شراء {{amount}} طاقة",
+  "selectAPack": "اختر حزمة",
+  "energyHistory": "سجل الطاقة",
+  "all": "الكل",
+  "usage": "الاستخدام",
+  "purchases": "المشتريات",
+  "noHistoryYet": "لا يوجد سجل بعد",
+  "loadMore": "تحميل المزيد",
+  "purchased": "تم الشراء",
+  "energyAmount": "{{amount}} طاقة",
+  "generatedWith": "تم الإنشاء باستخدام",
+  "unknown": "غير معروف"
+}

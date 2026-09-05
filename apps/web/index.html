@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AwwO · Agent Workspace</title>
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <style>
+      /* These values MUST stay pixel-identical to the styles.css theme tokens the
+         React splash uses (--bg-base / --text-primary / --text-secondary /
+         --bg-muted / --shadow-soft), so the pre-React static splash and the React
+         StartupLoadingScreen look the same and there is no jump when React mounts
+         while desktopStatus is still 'starting'. */
+      :root {
+        --startup-bg: #ffffff; /* = --bg-base */
+        --startup-text: #111111; /* = --text-primary */
+        --startup-muted: #666666; /* = --text-secondary */
+        --startup-logo-bg: #f2f2f2; /* = --bg-muted */
+        --startup-logo-shadow: 0 18px 52px rgba(0, 0, 0, 0.08); /* = --shadow-soft */
+      }
+
+      :root[data-theme='dark'] {
+        --startup-bg: #050505; /* = --bg-base */
+        --startup-text: #f4f4f4; /* = --text-primary */
+        --startup-muted: #bbbbbb; /* = --text-secondary */
+        --startup-logo-bg: #242424; /* = --bg-muted */
+        --startup-logo-shadow: 0 18px 52px rgba(0, 0, 0, 0.46); /* = --shadow-soft */
+      }
+
+      .startup-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--startup-bg);
+        transition: opacity 220ms ease, visibility 220ms ease;
+      }
+
+      .startup-splash.startup-splash-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .startup-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 22px;
+      }
+
+      .startup-logo-shell {
+        width: 104px;
+        height: 104px;
+        display: grid;
+        place-items: center;
+        border-radius: 26px;
+        overflow: hidden;
+        background: var(--startup-logo-bg);
+        box-shadow: var(--startup-logo-shadow);
+        animation: startup-breathe 2.6s ease-in-out infinite;
+      }
+
+      .startup-logo-shell img {
+        width: 104px;
+        height: 104px;
+        border-radius: 26px;
+        object-fit: cover;
+      }
+
+      .startup-copy {
+        display: grid;
+        gap: 8px;
+        justify-items: center;
+      }
+
+      .startup-product-name {
+        display: block;
+        color: var(--startup-text);
+        font: 700 22px/1.25 "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        letter-spacing: 0.2px;
+      }
+
+      .startup-copy span {
+        color: var(--startup-muted);
+        font: 500 14px/1.4 "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+
+      @keyframes startup-breathe {
+        0%,
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+
+        50% {
+          transform: scale(1.045);
+          opacity: 0.92;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .startup-logo-shell {
+          animation: none;
+        }
+      }
+    </style>
+    <script>
+      (() => {
+        let stored = null;
+        try {
+          stored = localStorage.getItem('superclaw_theme');
+        } catch {
+          stored = null;
+        }
+        // Appearance is a fixed light/dark choice — the "follow system" mode was
+        // removed. A stored light/dark wins; with no stored value (or a legacy
+        // 'system'), seed once from the OS appearance to keep first paint unjarring.
+        // React persists this seed on mount, so later reloads read a concrete value.
+        const theme =
+          stored === 'light' || stored === 'dark'
+            ? stored
+            : window.matchMedia?.('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+    <script>
+      // Startup tracing (P0 diagnostics). The webview cannot write the shell log,
+      // so it relays each startup phase — html parse, first paint, DOMContentLoaded
+      // (and, from the React modules, mount/invoke/connect) — to the Rust shell via
+      // the `desktop_record_startup_mark` command. Every phase then lands on ONE
+      // timeline in desktop-shell.log, which is what lets us measure where the
+      // cold-start seconds actually go and whether the main thread stalls (the gap
+      // between a mark's client wall-clock and the log line's own server timestamp).
+      // Pure instrumentation: fire-and-forget, swallow every error, never block or
+      // alter startup. No-op in browser mode (no Tauri invoke bridge).
+      (function () {
+        // Wall-clock of the page's time origin, so paint `startTime` (relative to it)
+        // converts onto the same epoch axis as the shell timestamps. Older WebKit may
+        // lack `timeOrigin`; fall back to the classic `timing.navigationStart`, then
+        // to `Date.now()`.
+        var perf = typeof performance !== 'undefined' ? performance : null;
+        var origin =
+          (perf && (perf.timeOrigin || (perf.timing && perf.timing.navigationStart))) || Date.now();
+        // Resolve the Tauri invoke bridge the SAME way the app's detectDesktopInvoke
+        // does (`__TAURI__.core.invoke` first, then `__TAURI_INTERNALS__.invoke`), so
+        // startup marks never silently fail to relay in a bridge environment that
+        // only exposes one of the two.
+        function bridgeInvoke() {
+          try {
+            var t = window.__TAURI__;
+            if (t && t.core && typeof t.core.invoke === 'function') return t.core.invoke;
+            var i = window.__TAURI_INTERNALS__;
+            if (i && typeof i.invoke === 'function') return i.invoke;
+          } catch (e) {
+            /* diagnostics must never throw */
+          }
+          return null;
+        }
+        function relay(label, epochMs) {
+          try {
+            var invoke = bridgeInvoke();
+            if (!invoke) return;
+            var p = invoke('desktop_record_startup_mark', { request: { label: label, clientEpochMs: epochMs } });
+            if (p && typeof p.catch === 'function') p.catch(function () {});
+          } catch (e) {
+            /* diagnostics must never throw */
+          }
+        }
+        window.__superclawMark = function (label, epochMs) {
+          var ms = typeof epochMs === 'number' && isFinite(epochMs) ? epochMs : Date.now();
+          try {
+            performance.mark('superclaw:' + label);
+          } catch (e) {
+            /* performance.mark unsupported — ignore */
+          }
+          // Defer the IPC relay off the synchronous parse / layout-effect / first-paint
+          // critical path so the instrumentation never perturbs the very timings it
+          // measures. `ms` already captured the true phase time. Use a macrotask
+          // (setTimeout 0), NOT requestAnimationFrame: rAF only fires when the page
+          // actually paints, so during the very "blank, no-paint" freeze we are here
+          // to diagnose, rAF-deferred relays would starve and the marks would never
+          // be delivered. setTimeout fires on the event loop regardless of paint.
+          setTimeout(function () {
+            relay(label, ms);
+          }, 0);
+        };
+        window.__superclawMark('html-parse');
+        document.addEventListener('DOMContentLoaded', function () {
+          window.__superclawMark('dom-content-loaded');
+        });
+        try {
+          var po = new PerformanceObserver(function (list) {
+            list.getEntries().forEach(function (entry) {
+              // entry.startTime is relative to timeOrigin; convert to wall-clock so
+              // first paint sits on the same epoch axis as the shell timestamps.
+              window.__superclawMark(entry.name, origin + entry.startTime);
+            });
+          });
+          po.observe({ type: 'paint', buffered: true });
+        } catch (e) {
+          /* paint timeline unsupported in this webview — skip */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="superclaw-startup-splash" class="startup-splash" role="status" aria-live="polite">
+      <section class="startup-card" aria-label="AwwO startup">
+        <div class="startup-logo-shell">
+          <span style="font:700 36px/1 system-ui;color:#286454;letter-spacing:-3px">Aw</span>
+        </div>
+        <div class="startup-copy">
+          <span class="startup-product-name">欢迎来到 AwwO</span>
+          <span>正在启动引擎…</span>
+        </div>
+      </section>
+    </div>
+    <div id="root"></div>
+    <script>
+      // Non-React safety net for the desktop shell. If the bundle never boots —
+      // a chunk 404, a top-level import throw, a missing #root — React never
+      // mounts and the splash above would sit forever with no clue (the symptom
+      // the ErrorBoundary can't catch because it lives *inside* React). After a
+      // generous deadline, if #root is still empty (React truly never rendered),
+      // replace the welcome copy with a readable error. A mounted React tree (even
+      // one still showing its own 'starting the engine' state while the backend
+      // boots) leaves #root non-empty, so this never false-positives on a
+      // slow-but-working boot.
+      (function () {
+        window.setTimeout(function () {
+          var root = document.getElementById('root');
+          if (root && root.children.length > 0) return;
+          var splash = document.getElementById('superclaw-startup-splash');
+          if (!splash) return;
+          var logo = splash.querySelector('.startup-logo-shell');
+          if (logo) logo.style.animation = 'none';
+          var copy = splash.querySelector('.startup-copy');
+          if (copy) {
+            copy.innerHTML =
+              '<span class="startup-product-name">AwwO 未能启动</span>' +
+              '<span style="font-size:14px;opacity:.8">界面没有加载出来（脚本未能初始化）。请退出后重试；若反复出现，请反馈这一屏。</span>';
+          }
+        }, 15000);
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

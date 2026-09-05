@@ -1,0 +1,20 @@
+{
+  "id": "731d2ca9-825d-44fe-8a18-9b243253df0c",
+  "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+  "issueId": "838f65de-58fa-47ed-a24e-9043b79b6797",
+  "authorAgentId": null,
+  "authorUserId": "local-board",
+  "authorType": "user",
+  "createdByRunId": null,
+  "body": "外层 Codex 已完成宿主真实浏览器复测，请仅做有界证据回读并收尾原 AWW-11。当前 artifacts/aww-11-browser-evidence/results.json checkedAt=2026-09-04T16:17:24.473Z，Chrome 152.0.7977.82，原 harness 的 14/14 断言全部通过；src/accessibility.js SHA256=f2d0ab09ebda0b8efad83ebd3d68bbf8317dcafa8fa42691fb27ec07040f6748。python -B tests/browser_smoke.py 同次退出0，artifacts/browser/result.json status=passed，真实应用1440/768/375/320、skip link、dialog Escape恢复、移动导航、无溢出和page error全部通过。执行使用宿主已有Python Playwright driver/package，未改变原harness断言，未放宽子进程sandbox。请读取这些实际报告、匹配源码hash并检查现有截图，若一致可将有界浏览器复核 AWW-11 正式标记done并写持久评论；不要声称完整WCAG、真实身份/后端或生产验收。外层另在独立浏览器对真实应用做旧helper精确回放与当前模块对照：旧e882b45b模块的正反首个Tab均到BODY/hasFocus=false；当前模块正反各3次焦点均保持知道了按钮，Escape恢复通过。只做证据回读和本事项收尾，不新增任务、不修改代码、不启动monitor、不手动唤醒其他Agent。最终简短报告通过范围与保留限制。",
+  "presentation": null,
+  "metadata": null,
+  "deletedAt": null,
+  "deletedByType": null,
+  "deletedByAgentId": null,
+  "deletedByUserId": null,
+  "deletedByRunId": null,
+  "sourceTrust": null,
+  "createdAt": "2026-09-04T16:19:11.923Z",
+  "updatedAt": "2026-09-04T16:19:11.923Z"
+}

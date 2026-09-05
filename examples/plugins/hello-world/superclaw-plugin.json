@@ -1,0 +1,77 @@
+{
+  "schema_version": "0.1.0",
+  "id": "dev.superclaw.hello-world",
+  "name": "Hello World",
+  "version": "0.1.0",
+  "summary": "Returns a deterministic hello-world response through the SuperClaw plugin contract.",
+  "source": {
+    "type": "first_party",
+    "clawhunt_problem_id": null,
+    "developer_id": "superclaw"
+  },
+  "runtime": {
+    "type": "mcp_sidecar",
+    "entrypoint": "bin/hello-world",
+    "args": ["mcp"],
+    "transport": "stdio",
+    "mcp_protocol_versions": ["2025-06-18"],
+    "platforms": ["darwin-arm64", "linux-x64"]
+  },
+  "tools": [
+    {
+      "name": "hello_world",
+      "description": "Return a deterministic greeting for plugin contract smoke tests.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "permissions": {
+    "filesystem": [],
+    "network": [],
+    "environment": []
+  },
+  "acceptance": {
+    "level": "L1",
+    "tests": ["tests/smoke.sh"],
+    "evidence_fixtures": ["evidence-fixtures/smoke.json"],
+    "latency_budget_ms": 1000
+  },
+  "limits": {
+    "startup_timeout_ms": 3000,
+    "tool_timeout_ms": 30000,
+    "max_model_output_bytes": 65536,
+    "max_evidence_bytes": 5242880,
+    "max_memory_mb": 128
+  },
+  "resource_profile": {
+    "latency_class": "interactive",
+    "expected_p95_latency_ms": 1000,
+    "cpu_class": "low",
+    "memory_class": "low",
+    "io_profile": "none"
+  },
+  "commerce": {
+    "pricing_model": "free",
+    "metering": "none"
+  },
+  "provenance": {
+    "build_type": "first_party",
+    "source_digest": null,
+    "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "signature": "ed25519:fixture-signature"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "plugin_id": "dev.superclaw.github-scanner",
+  "version_range": ">=0.1.0 <1.0.0",
+  "secrets": [
+    {
+      "name": "GITHUB_TOKEN",
+      "required": true,
+      "allowed_storage": ["local_keychain"],
+      "inject_as": "env",
+      "env_name": "GITHUB_TOKEN",
+      "rotation_hint_days": 90
+    }
+  ],
+  "settings": [
+    {
+      "name": "default_owner",
+      "type": "string",
+      "description": "Default GitHub owner used when a call omits an owner value.",
+      "required": false,
+      "validation": {
+        "pattern": "^[A-Za-z0-9_.-]{1,80}$",
+        "minLength": 1,
+        "maxLength": 80
+      },
+      "ui": {
+        "control": "text",
+        "label": "Default owner",
+        "placeholder": "ClawHunt-Store",
+        "help": "Used only as non-secret local plugin configuration."
+      },
+      "default": "ClawHunt-Store"
+    }
+  ]
+}

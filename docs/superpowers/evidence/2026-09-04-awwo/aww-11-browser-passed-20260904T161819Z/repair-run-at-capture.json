@@ -1,0 +1,12 @@
+{
+  "issueId": "838f65de-58fa-47ed-a24e-9043b79b6797",
+  "finishedAt": "2026-09-04T16:18:29.585Z",
+  "providerStatus": "succeeded",
+  "startedAt": "2026-09-04T16:13:57.189Z",
+  "runId": "72a25f95-a8ad-486d-85d3-0ab01ba10c6e",
+  "identifier": "AWW-11",
+  "issueStatus": "in_progress",
+  "sessionIdBefore": "01a06d0b-2d7a-7bb2-9ef5-3a683487588b",
+  "sessionIdAfter": "01a06d0b-2d7a-7bb2-9ef5-3a683487588b",
+  "agentId": "a784236e-c48a-468d-b14f-8392297e0452"
+}

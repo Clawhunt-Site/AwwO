@@ -1,0 +1,12 @@
+{
+  "name": "myshell-studio-orchestrator",
+  "private": true,
+  "scripts": {
+    "prepare:canvaspro": "bash scripts/prepare-canvaspro-static.sh --optional",
+    "dev": "bash scripts/dev.sh",
+    "dev:studio": "bash scripts/dev.sh",
+    "build": "npm --prefix frontend run build",
+    "smoke:canvaspro": "npm --prefix frontend run smoke:canvaspro",
+    "test:studio-smoke": "npm --prefix frontend run test:studio-smoke"
+  }
+}

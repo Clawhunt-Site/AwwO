@@ -1,0 +1,21 @@
+{
+  "title": "作品库",
+  "failedToLoad": "加载失败",
+  "noCreationsYet": "还没有作品",
+  "noCreationsDesc": "选择一个角色开始生成——你的图片和视频将显示在这里。",
+  "browseCharacters": "浏览角色",
+  "generationFailed": "生成失败",
+  "inQueue": "排队中…",
+  "generatingStatus": "生成中…",
+  "aiPick": "AI 精选",
+  "formatNotSupported": "格式不支持",
+  "videoFallbackDesc": "此视频无法在 Telegram 中播放。点击下方在浏览器中观看。",
+  "openInBrowser": "在浏览器中打开",
+  "download": "下载",
+  "like": "喜欢",
+  "dislike": "不喜欢",
+  "share": "分享",
+  "shareToTelegram": "分享到 Telegram",
+  "sharePreview": "模糊预览",
+  "cancel": "取消"
+}

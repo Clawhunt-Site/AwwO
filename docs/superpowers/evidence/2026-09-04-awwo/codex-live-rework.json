@@ -1,0 +1,1071 @@
+{
+  "verifiedAt": "2026-09-04T15:59:07.698Z",
+  "companyId": "b1056300-e885-4146-b5dc-5489b19d0324",
+  "method": "Read-only server and file audit. Original seven graph runs and the historical root session are excluded from this later rework evidence. Current business issue status is independent from provider success. No tasks, messages or agent runs were triggered by the auditor.",
+  "originalGraphSnapshot": {
+    "path": "E:\\Bobo's Coding cache\\bo-work\\superclaw\\.worktrees\\awwo-agent-canvas\\docs\\superpowers\\evidence\\2026-09-04-awwo\\codex-live-inputs.json",
+    "sha256": "31758e392911c665066f04a74ec52e9844bc057f634e2d8c46a8baa8fac3725b",
+    "runIds": [
+      "5fd4be45-9ac5-4c73-a163-8636bc4c0a00",
+      "62dcab65-053d-481f-b816-21ad92d206d6",
+      "24812df4-2121-450f-8b35-b337ec94a7ed",
+      "d0065c0d-5744-4cd2-8cb0-e18cc5703dd6",
+      "59376352-1dab-4786-b480-6192051ea67a",
+      "e33071e4-2539-4e75-ac91-a7108d08b07d",
+      "6af0e76f-f933-4c03-a886-9934d09b489e"
+    ],
+    "graphExecutionComplete": true,
+    "propagationComplete": true
+  },
+  "originalReview": {
+    "issueId": "1756537d-a6d3-4196-ba34-58bfee64b7da",
+    "identifier": "AWW-12",
+    "title": "对话 · 513806c8",
+    "status": "blocked"
+  },
+  "rework": {
+    "issueId": "54b61477-53d6-4686-b280-a2cc89b6f51d",
+    "identifier": "AWW-15",
+    "title": "F：修复演示检索大小写折叠与治理质检失效",
+    "status": "done",
+    "parentIssueId": "1756537d-a6d3-4196-ba34-58bfee64b7da"
+  },
+  "notificationHandoff": {
+    "source": "Agent-authored handoff comment on completed rework issue",
+    "commentId": "9d1dbce4-ca52-4915-91c7-8c1cbc9d904c",
+    "createdAt": "2026-09-04T15:56:14.761Z",
+    "authorAgentId": "a784236e-c48a-468d-b14f-8392297e0452",
+    "bodySha256": "1f0f0d4a82e6684287bc3cd17df1481ea1e3df30755d223574ec9bbdf5e6b3d2",
+    "reportedError": "Issue is outside this actor's authorization boundary",
+    "targetIssueId": "1756537d-a6d3-4196-ba34-58bfee64b7da",
+    "reportedNotificationSent": false
+  },
+  "auxiliaryRuns": [
+    {
+      "runId": "1308a325-66ef-4e0a-9294-54dc9899d408",
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "providerStatus": "succeeded",
+      "startedAt": "2026-09-04T15:50:49.622Z",
+      "finishedAt": "2026-09-04T15:53:30.512Z",
+      "invocationSource": "assignment",
+      "triggerDetail": "system",
+      "wakeReason": "issue_assigned",
+      "issueId": "05df630c-5627-409c-8992-999fc7ba7695",
+      "issueIdentifier": "AWW-17",
+      "issueTitle": "AWW-16：Unicode 完整折叠独立回归",
+      "issueStatus": "done",
+      "parentIssueId": "887e9b25-b810-4173-aa40-5255062aa7b4",
+      "actualWorkingDirectory": "C:/tmp/awwo-codex-live-20260904/a784236e-c48a-468d-b14f-8392297e0452",
+      "sessionIdBefore": null,
+      "sessionIdAfter": "01a06d1d-92c3-78b3-8a2b-b8cf63945081",
+      "originalReviewRevalidation": false,
+      "excludedFromOriginalGraph": true,
+      "monitor": {
+        "nextCheckAt": null,
+        "state": null,
+        "clearReason": null
+      },
+      "finalMessage": {
+        "chars": 292,
+        "sha256": "07989f378522d9a716bed951a59ed8c09692d53f559f5556707bf3b97dee5707"
+      }
+    },
+    {
+      "runId": "bc7e15cd-4afc-4694-9762-d75a04bf21b5",
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "providerStatus": "succeeded",
+      "startedAt": "2026-09-04T15:49:41.986Z",
+      "finishedAt": "2026-09-04T15:55:37.796Z",
+      "invocationSource": "assignment",
+      "triggerDetail": "system",
+      "wakeReason": "issue_children_completed",
+      "issueId": "887e9b25-b810-4173-aa40-5255062aa7b4",
+      "issueIdentifier": "AWW-16",
+      "issueTitle": "F：AWW-15 Unicode 默认完整大小写折叠与回归",
+      "issueStatus": "done",
+      "parentIssueId": "54b61477-53d6-4686-b280-a2cc89b6f51d",
+      "actualWorkingDirectory": "C:/tmp/awwo-codex-live-20260904/a784236e-c48a-468d-b14f-8392297e0452",
+      "sessionIdBefore": null,
+      "sessionIdAfter": "01a06d1c-8a98-7393-bf6b-801e4abf55b3",
+      "originalReviewRevalidation": false,
+      "excludedFromOriginalGraph": true,
+      "monitor": {
+        "nextCheckAt": null,
+        "state": "cleared",
+        "clearReason": "done"
+      },
+      "finalMessage": {
+        "chars": 287,
+        "sha256": "f93d1c4b89e5fe9b0056c5898f2934a98078612ffa4959fe390a252857627ef8"
+      }
+    },
+    {
+      "runId": "e2557714-857b-4cff-a838-b54402eb6e3a",
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "providerStatus": "succeeded",
+      "startedAt": "2026-09-04T15:49:02.016Z",
+      "finishedAt": "2026-09-04T15:56:32.735Z",
+      "invocationSource": "assignment",
+      "triggerDetail": "system",
+      "wakeReason": "issue_children_completed",
+      "issueId": "54b61477-53d6-4686-b280-a2cc89b6f51d",
+      "issueIdentifier": "AWW-15",
+      "issueTitle": "F：修复演示检索大小写折叠与治理质检失效",
+      "issueStatus": "done",
+      "parentIssueId": "1756537d-a6d3-4196-ba34-58bfee64b7da",
+      "actualWorkingDirectory": "C:/tmp/awwo-codex-live-20260904/a784236e-c48a-468d-b14f-8392297e0452",
+      "sessionIdBefore": null,
+      "sessionIdAfter": "01a06d1b-ee6f-70f2-93e9-fc71a2d54311",
+      "originalReviewRevalidation": false,
+      "excludedFromOriginalGraph": true,
+      "monitor": {
+        "nextCheckAt": null,
+        "state": null,
+        "clearReason": null
+      },
+      "finalMessage": {
+        "chars": 278,
+        "sha256": "243cc5ebcde0d42800450a63be1d4a51f6982ea433a96f15f549fd6e6512dba1"
+      }
+    },
+    {
+      "runId": "0a0ad2b4-e2b7-467e-b2b4-d03eb93d6da9",
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "providerStatus": "succeeded",
+      "startedAt": "2026-09-04T15:45:21.806Z",
+      "finishedAt": "2026-09-04T15:51:10.129Z",
+      "invocationSource": "assignment",
+      "triggerDetail": "system",
+      "wakeReason": "issue_children_completed",
+      "issueId": "85bc6e8f-c1b9-4a5e-b220-913b7fc839a9",
+      "issueIdentifier": "AWW-13",
+      "issueTitle": "V：契约与演示实现独立一致性复核",
+      "issueStatus": "done",
+      "parentIssueId": "1756537d-a6d3-4196-ba34-58bfee64b7da",
+      "actualWorkingDirectory": "C:/tmp/awwo-codex-live-20260904/513806c8-269e-4221-a536-b52956f519ce",
+      "sessionIdBefore": null,
+      "sessionIdAfter": "01a06d18-923e-7943-8f0b-0e990804657b",
+      "originalReviewRevalidation": false,
+      "excludedFromOriginalGraph": true,
+      "monitor": {
+        "nextCheckAt": null,
+        "state": null,
+        "clearReason": null
+      },
+      "finalMessage": {
+        "chars": 223,
+        "sha256": "721d20f806800c5355e69445da90eede87e281d24f6fabc054d09614d0e7f747"
+      }
+    },
+    {
+      "runId": "d3b0eae1-2736-43c4-93ac-472fe3f7b002",
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "providerStatus": "succeeded",
+      "startedAt": "2026-09-04T15:30:44.001Z",
+      "finishedAt": "2026-09-04T15:37:57.375Z",
+      "invocationSource": "assignment",
+      "triggerDetail": "system",
+      "wakeReason": "issue_assigned",
+      "issueId": "838f65de-58fa-47ed-a24e-9043b79b6797",
+      "issueIdentifier": "AWW-11",
+      "issueTitle": "F：响应式与可访问性交付独立复核",
+      "issueStatus": "blocked",
+      "parentIssueId": "6827de67-f894-4c13-95a7-e7b451cfaff5",
+      "actualWorkingDirectory": "C:/tmp/awwo-codex-live-20260904/a784236e-c48a-468d-b14f-8392297e0452",
+      "sessionIdBefore": null,
+      "sessionIdAfter": "01a06d0b-2d7a-7bb2-9ef5-3a683487588b",
+      "originalReviewRevalidation": false,
+      "excludedFromOriginalGraph": true,
+      "monitor": {
+        "nextCheckAt": null,
+        "state": null,
+        "clearReason": null
+      },
+      "finalMessage": {
+        "chars": 285,
+        "sha256": "e9e0e20cf40e666ccafb60063d55cce14767672ed09de611b7c00eff0c29090e"
+      }
+    },
+    {
+      "runId": "f99d781f-16fd-4de1-a549-47247850fbd8",
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "providerStatus": "succeeded",
+      "startedAt": "2026-09-04T15:29:31.582Z",
+      "finishedAt": "2026-09-04T15:40:59.080Z",
+      "invocationSource": "assignment",
+      "triggerDetail": "system",
+      "wakeReason": "issue_assigned",
+      "issueId": "6827de67-f894-4c13-95a7-e7b451cfaff5",
+      "issueIdentifier": "AWW-10",
+      "issueTitle": "F：响应式视觉样式与可访问性",
+      "issueStatus": "blocked",
+      "parentIssueId": "0e9472dc-601b-4e40-b1bf-87e41fc24117",
+      "actualWorkingDirectory": "C:/tmp/awwo-codex-live-20260904/a784236e-c48a-468d-b14f-8392297e0452",
+      "sessionIdBefore": null,
+      "sessionIdAfter": "01a06d0a-12a6-79a2-9ad5-c9c4e07176e1",
+      "originalReviewRevalidation": false,
+      "excludedFromOriginalGraph": true,
+      "monitor": {
+        "nextCheckAt": null,
+        "state": null,
+        "clearReason": null
+      },
+      "finalMessage": {
+        "chars": 243,
+        "sha256": "c137ace904cfa40a010f441462994163b6c8b91e8edf6731862a41a7e7ac9833"
+      }
+    },
+    {
+      "runId": "217c7650-4d2f-40bd-b1ba-9e7d60d8243b",
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "providerStatus": "succeeded",
+      "startedAt": "2026-09-04T15:29:31.540Z",
+      "finishedAt": "2026-09-04T15:40:32.056Z",
+      "invocationSource": "assignment",
+      "triggerDetail": "system",
+      "wakeReason": "issue_assigned",
+      "issueId": "6fc3321f-f85d-4c6d-98e9-6c9539321428",
+      "issueIdentifier": "AWW-9",
+      "issueTitle": "F：接口适配与演示权限模型",
+      "issueStatus": "done",
+      "parentIssueId": "0e9472dc-601b-4e40-b1bf-87e41fc24117",
+      "actualWorkingDirectory": "C:/tmp/awwo-codex-live-20260904/a784236e-c48a-468d-b14f-8392297e0452",
+      "sessionIdBefore": null,
+      "sessionIdAfter": "01a06d0a-1266-7781-81ca-c955f3eee5c5",
+      "originalReviewRevalidation": false,
+      "excludedFromOriginalGraph": true,
+      "monitor": {
+        "nextCheckAt": null,
+        "state": null,
+        "clearReason": null
+      },
+      "finalMessage": {
+        "chars": 201,
+        "sha256": "88ef22b22e1200b5b6060ee7a448eae1b3d87d877eed9829909f8e4acdc4ce4e"
+      }
+    },
+    {
+      "runId": "e0b7aad8-22b0-44be-8e01-435d28235f13",
+      "agentId": "b9ee56d4-f04a-4dfd-a805-d9f17713f46c",
+      "providerStatus": "succeeded",
+      "startedAt": "2026-09-04T15:19:42.561Z",
+      "finishedAt": "2026-09-04T15:25:15.396Z",
+      "invocationSource": "assignment",
+      "triggerDetail": "system",
+      "wakeReason": "issue_assigned",
+      "issueId": "6de35e75-0f53-42a6-9dba-006ee551aeb0",
+      "issueIdentifier": "AWW-7",
+      "issueTitle": "AWW-6 内部契约一致性复核",
+      "issueStatus": "done",
+      "parentIssueId": "49316e34-4301-496a-821a-5c8f32747449",
+      "actualWorkingDirectory": "C:/tmp/awwo-codex-live-20260904/b9ee56d4-f04a-4dfd-a805-d9f17713f46c",
+      "sessionIdBefore": null,
+      "sessionIdAfter": "01a06d01-1590-7391-a185-b12553b0558a",
+      "originalReviewRevalidation": false,
+      "excludedFromOriginalGraph": true,
+      "monitor": {
+        "nextCheckAt": null,
+        "state": null,
+        "clearReason": null
+      },
+      "finalMessage": {
+        "chars": 374,
+        "sha256": "40b62557b93d4e24d3d5cb45dac3906c9adc6e0900d04055f998d020815e0fcc"
+      }
+    }
+  ],
+  "activeAuxiliaryRuns": [],
+  "scheduledAuxiliaryMonitors": [],
+  "revalidationRuns": [],
+  "verification": {
+    "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-final-verification.json",
+    "sha256": "8299ea9fe1d225c7ea68c2184fcc918ab16b051c3255ff46cdc5e4f0f543071c",
+    "claimedStatus": "passed",
+    "scope": "main demo modules; no live backend or browser acceptance",
+    "observedAt": "2026-09-04T15:53:54.879Z",
+    "runtime": {
+      "node": "v22.16.0",
+      "unicode": "16.0",
+      "icu": "77.1"
+    },
+    "reproduction": {
+      "observed_at": "2026-09-04T15:53:54.879Z",
+      "scope": "isolated createDemoService only; no backend/browser claims",
+      "R1_casefold": {
+        "title": "Straße",
+        "exact_query_total": 1,
+        "folded_query": "STRASSE",
+        "expected_folded_query_total": 1,
+        "actual_folded_query_total": 1,
+        "published_view_revision": "demo-published-2"
+      },
+      "R2_quality_invalidation": {
+        "publishFailure": {
+          "status": 422,
+          "code": "QUALITY_FAILED",
+          "details": {
+            "findings": [
+              {
+                "rule_id": "REF_INTEGRITY",
+                "severity": "blocker",
+                "field": "metadata",
+                "passed": false,
+                "message": "关联条目已停用。"
+              }
+            ],
+            "quality_run_id": "quality-104"
+          }
+        },
+        "before_reactivate": {
+          "draft_count": 3,
+          "blocked_draft_count": 1,
+          "unchecked_draft_count": 2,
+          "error_draft_count": 0,
+          "passed_draft_count": 0,
+          "published_findings": {
+            "documents_with_blockers": 0,
+            "documents_with_warnings": 0,
+            "checked_documents": 0,
+            "unchecked_documents": 8,
+            "error_documents": 0,
+            "last_checked_at": null
+          },
+          "rules_not_run": [
+            "STALE_CONTENT"
+          ]
+        },
+        "after_reactivate": {
+          "draft_count": 3,
+          "blocked_draft_count": 0,
+          "unchecked_draft_count": 3,
+          "error_draft_count": 0,
+          "passed_draft_count": 0,
+          "published_findings": {
+            "documents_with_blockers": 0,
+            "documents_with_warnings": 0,
+            "checked_documents": 0,
+            "unchecked_documents": 8,
+            "error_documents": 0,
+            "last_checked_at": null
+          },
+          "rules_not_run": [
+            "STALE_CONTENT"
+          ]
+        },
+        "current_version_quality_status": "unchecked",
+        "expected_after_reactivate": {
+          "blocked_draft_count": 0,
+          "unchecked_draft_count": 3
+        },
+        "actual_after_reactivate": {
+          "blocked_draft_count": 0,
+          "unchecked_draft_count": 3
+        }
+      }
+    },
+    "sourceHashChecks": [
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\app.js",
+        "relative": "src/app.js",
+        "bytes": 47409,
+        "modifiedAt": "2026-09-04T15:43:09.886Z",
+        "expectedSha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+        "sha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\api.js",
+        "relative": "src/api.js",
+        "bytes": 2956,
+        "modifiedAt": "2026-09-04T15:33:58.160Z",
+        "expectedSha256": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+        "sha256": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\demo.js",
+        "relative": "src/demo.js",
+        "bytes": 41159,
+        "modifiedAt": "2026-09-04T15:52:50.406Z",
+        "expectedSha256": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+        "sha256": "6e63d6ee802c674c3854ecedb6679671b7bcfb5aa90a3b0fc0b3dc297a238ec5",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\src\\unicode-casefold.js",
+        "relative": "src/unicode-casefold.js",
+        "bytes": 37445,
+        "modifiedAt": "2026-09-04T15:52:03.721Z",
+        "expectedSha256": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+        "sha256": "d67cfb8b6736b94be40b03145b3d8a21af74e7228cabcaa127eab35bd5f129e5",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\data\\unicode\\17.0.0\\CaseFolding.txt",
+        "relative": "data/unicode/17.0.0/CaseFolding.txt",
+        "bytes": 87539,
+        "modifiedAt": "2026-09-04T15:51:20.891Z",
+        "expectedSha256": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+        "sha256": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\scripts\\generate-unicode-casefold.mjs",
+        "relative": "scripts/generate-unicode-casefold.mjs",
+        "bytes": 3747,
+        "modifiedAt": "2026-09-04T15:52:03.147Z",
+        "expectedSha256": "e9fa4c26ac5911c271caf0ebd446e516f62be4354dfb5a76d31c6d3f5d9b5327",
+        "sha256": "e9fa4c26ac5911c271caf0ebd446e516f62be4354dfb5a76d31c6d3f5d9b5327",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\model.test.js",
+        "relative": "tests/model.test.js",
+        "bytes": 15090,
+        "modifiedAt": "2026-09-04T15:38:54.275Z",
+        "expectedSha256": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+        "sha256": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\ui-dom.test.js",
+        "relative": "tests/ui-dom.test.js",
+        "bytes": 10215,
+        "modifiedAt": "2026-09-04T15:41:15.259Z",
+        "expectedSha256": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+        "sha256": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\demo-regressions.test.js",
+        "relative": "tests/demo-regressions.test.js",
+        "bytes": 7858,
+        "modifiedAt": "2026-09-04T15:53:53.695Z",
+        "expectedSha256": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+        "sha256": "4c0581ad1997522e6e5a24b8a6a1756e98adb1044b7fbb603115dc8408f89e2c",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\tests\\unicode-casefold.test.js",
+        "relative": "tests/unicode-casefold.test.js",
+        "bytes": 7724,
+        "modifiedAt": "2026-09-04T15:52:40.722Z",
+        "expectedSha256": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+        "sha256": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+        "stable": true,
+        "match": true
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\contract-review-repro.mjs",
+        "relative": "artifacts/contract-review-repro.mjs",
+        "bytes": 3329,
+        "modifiedAt": "2026-09-04T15:47:06.601Z",
+        "expectedSha256": "f7e781e0840f2ff6963d350b900ec4634541e7a57b41fad2c38366aeb97059b5",
+        "sha256": "f7e781e0840f2ff6963d350b900ec4634541e7a57b41fad2c38366aeb97059b5",
+        "stable": true,
+        "match": true
+      }
+    ],
+    "allCurrentSourceHashesMatch": true,
+    "testLogs": [
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-final-tests.tap",
+        "sha256": "7abd4c9d2423d83dc9779b224a3877f08d1f4dc5770d53a4f3b7507577ce9b88",
+        "tests": 31,
+        "suites": 0,
+        "pass": 31,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "method": "Read existing TAP produced by the real agent; auditor did not rerun tests."
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-final-dom.tap",
+        "sha256": "41e96c4ad40167cc37ae0e56dc949411600f1b8b27b30167b07faefc77bfd07b",
+        "tests": 3,
+        "suites": 0,
+        "pass": 3,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "method": "Read existing TAP produced by the real agent; auditor did not rerun tests."
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-unicode-tests.tap",
+        "sha256": "1d58749d5c6a3672796212ed8b096826927d5188223583ac868297fc3496f537",
+        "tests": 12,
+        "suites": 0,
+        "pass": 12,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "method": "Read existing TAP produced by the real agent; auditor did not rerun tests."
+      },
+      {
+        "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-17-unicode-regression.tap",
+        "sha256": "f0a9a120bb2ff7bbb2ab42dc04ef6c5e7c2352f4962392fb8294c71018bbf2cc",
+        "tests": 11,
+        "suites": 0,
+        "pass": 11,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "method": "Read existing TAP produced by the real agent; auditor did not rerun tests."
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-delivery.md",
+      "bytes": 4822,
+      "sha256": "c3f75337ccc8c6d66430e84c2c8969e634f3439d870f5d6ab9483dacf29444c0",
+      "modifiedAt": "2026-09-04T15:56:14.450Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-dom.tap",
+      "bytes": 974,
+      "sha256": "5b18c2efc619199d8fa4e338e14606950912222c8f80e2a954d660ace436164c",
+      "modifiedAt": "2026-09-04T15:51:27.640Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-final-dom.tap",
+      "bytes": 1094,
+      "sha256": "41e96c4ad40167cc37ae0e56dc949411600f1b8b27b30167b07faefc77bfd07b",
+      "modifiedAt": "2026-09-04T15:53:56.320Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-final-repro.log",
+      "bytes": 2259,
+      "sha256": "7e76c9cd392acd02e627de4422d4c09f34195ff4224c1280593ee13e439e12e9",
+      "modifiedAt": "2026-09-04T15:53:54.883Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-final-tests.tap",
+      "bytes": 7507,
+      "sha256": "7abd4c9d2423d83dc9779b224a3877f08d1f4dc5770d53a4f3b7507577ce9b88",
+      "modifiedAt": "2026-09-04T15:53:54.978Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-final-verification.json",
+      "bytes": 3528,
+      "sha256": "8299ea9fe1d225c7ea68c2184fcc918ab16b051c3255ff46cdc5e4f0f543071c",
+      "modifiedAt": "2026-09-04T15:53:54.882Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-governance.tap",
+      "bytes": 1598,
+      "sha256": "8ec59c76d8cbe0ad327a96aef8c82b02428cd721de8cd00c05bc4702b370491f",
+      "modifiedAt": "2026-09-04T15:51:15.133Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-hashes-before.json",
+      "bytes": 625,
+      "sha256": "bee94bb389fd9850c0484ee5fea11772f5bd6951969f703057b1ea18ba8d6eb8",
+      "modifiedAt": "2026-09-04T15:51:14.360Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-issue-readback.json",
+      "bytes": 509,
+      "sha256": "c6dcc534d4e074bf74ed6704ba5759a4cf4ac12006aa061d6329f039f7edda6e",
+      "modifiedAt": "2026-09-04T15:56:14.800Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-issue-writeback.json",
+      "bytes": 652,
+      "sha256": "d6b4990290b681331401e24960acfa90e92bb6eeb4491c6b69e45a6cc4b62c38",
+      "modifiedAt": "2026-09-04T15:55:36.132Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-model.tap",
+      "bytes": 3045,
+      "sha256": "54292dab0dd2e6367caf57fc5d9d8931fca02c2945140470b198dbde9e9b4726",
+      "modifiedAt": "2026-09-04T15:51:26.323Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-regressions-after.tap",
+      "bytes": 1848,
+      "sha256": "41a9416e5c007f7473f17dc90a69ad573a5d1076b9d19f73b62edf481c2fb1d4",
+      "modifiedAt": "2026-09-04T15:52:01.843Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-regressions-before.tap",
+      "bytes": 5602,
+      "sha256": "861e6426dd1845d192d06091d6da1b49903886abbd1ef9e73bf925097040e4bf",
+      "modifiedAt": "2026-09-04T15:50:47.368Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-repro-before.json",
+      "bytes": 2011,
+      "sha256": "afe9f70ce53502e97b59e240a022c264e9be71053263df3a7976c2f451959edc",
+      "modifiedAt": "2026-09-04T15:51:14.423Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-repro-before.stdout.json",
+      "bytes": 2011,
+      "sha256": "afe9f70ce53502e97b59e240a022c264e9be71053263df3a7976c2f451959edc",
+      "modifiedAt": "2026-09-04T15:51:14.428Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-unicode-child.json",
+      "bytes": 164,
+      "sha256": "db9650396c03bb1de9e87b692033512cee1b6274318281d0548b8aa3dfc19056",
+      "modifiedAt": "2026-09-04T15:49:42.002Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-15-unicode-generator-check.json",
+      "bytes": 265,
+      "sha256": "65eca09a248128fa125d50cf15ae433fafb9b3c034d8511ca0da3c2f1d8d09fb",
+      "modifiedAt": "2026-09-04T15:53:21.082Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-delivery.md",
+      "bytes": 3305,
+      "sha256": "cb2bb389d60b8d381acc05266df0d612481cdec91c5921a6eeb9e6447fd4343d",
+      "modifiedAt": "2026-09-04T15:53:56.760Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-document-writeback.json",
+      "bytes": 177,
+      "sha256": "7d0c1fe06105b0e504e7f7363545c0456861b8be8183d32c86bb6dfd2a9dc2b6",
+      "modifiedAt": "2026-09-04T15:54:17.644Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-generation-check.json",
+      "bytes": 265,
+      "sha256": "65eca09a248128fa125d50cf15ae433fafb9b3c034d8511ca0da3c2f1d8d09fb",
+      "modifiedAt": "2026-09-04T15:53:04.440Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-issue-readback.json",
+      "bytes": 597,
+      "sha256": "5687f395ef979cb3e567e4a6f85ac3e206188aa6c64587946c6c063b2937cc39",
+      "modifiedAt": "2026-09-04T15:55:23.488Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-local-snapshot\\data\\unicode\\17.0.0\\CaseFolding.txt",
+      "bytes": 87539,
+      "sha256": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+      "modifiedAt": "2026-09-04T15:51:20.891Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-local-snapshot\\data\\unicode\\LICENSE.txt",
+      "bytes": 1995,
+      "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+      "modifiedAt": "2026-09-04T15:50:32.241Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-local-snapshot\\README.md",
+      "bytes": 1415,
+      "sha256": "1c1d11d85b5c28360e8207bd70e500ee8db52cd4cd2834317c9d8676598eb852",
+      "modifiedAt": "2026-09-04T15:54:00.101Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-local-snapshot\\scripts\\generate-unicode-casefold.mjs",
+      "bytes": 2335,
+      "sha256": "f2ea221137f271a16e06b973f019d5ebbae11e19e2716fe5d0231aa823f0b0a7",
+      "modifiedAt": "2026-09-04T15:52:59.840Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-local-snapshot\\src\\unicode-casefold-data.js",
+      "bytes": 35607,
+      "sha256": "66135005f084419e7d114d2704883130a47177c8678365d4b5f24858b60637f2",
+      "modifiedAt": "2026-09-04T15:51:36.744Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-local-snapshot\\src\\unicode-casefold.js",
+      "bytes": 982,
+      "sha256": "3fd1a83b1876da445e3326238336bc3e98032f375a7b248d32d83320b9b9ee7b",
+      "modifiedAt": "2026-09-04T15:52:59.411Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-local-snapshot\\tests\\local-casefold.test.js",
+      "bytes": 3821,
+      "sha256": "32fa5549227020976c5528e77984a37abc3948ed5830833d9a3fe72b951471fd",
+      "modifiedAt": "2026-09-04T15:53:59.829Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-local-snapshot\\tests\\unicode-casefold.test.js",
+      "bytes": 7724,
+      "sha256": "ff86cafa6c92e5d385d7dddc3e49f793c095ea2d4ffd4166c50026c0654be26a",
+      "modifiedAt": "2026-09-04T15:52:40.722Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-parent-handoff.json",
+      "bytes": 152,
+      "sha256": "97fab360f3a1a33f8f066601895140a341f638c614a6ed83b776de49098b36eb",
+      "modifiedAt": "2026-09-04T15:55:11.085Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-regression-child.json",
+      "bytes": 164,
+      "sha256": "7571593982939d216b072b791ed47bc28c6735aa078c8d3d31a67b691d629145",
+      "modifiedAt": "2026-09-04T15:50:49.639Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-regression-comparison.json",
+      "bytes": 815,
+      "sha256": "4f55fffcc81d6bb8864c79e4bbe30a348a22b40de4933e32568f377428eb1f83",
+      "modifiedAt": "2026-09-04T15:53:56.485Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-unicode-casefold-evidence.md",
+      "bytes": 3405,
+      "sha256": "6c666cd3d039493204773837592f650519b08508d863a8ef8677ca897b65639f",
+      "modifiedAt": "2026-09-04T15:53:00.096Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-unicode-tests.tap",
+      "bytes": 2679,
+      "sha256": "1d58749d5c6a3672796212ed8b096826927d5188223583ac868297fc3496f537",
+      "modifiedAt": "2026-09-04T15:53:04.367Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-16-validation.json",
+      "bytes": 2503,
+      "sha256": "b8a85f89531015a2a5c1c6e0156c1d5aaeca5ac7617b07eb97d48f2c6774e6ed",
+      "modifiedAt": "2026-09-04T15:53:57.100Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-17-issue-readback.json",
+      "bytes": 249,
+      "sha256": "6036786238d3aec2659a8bd88d6480642f769f12bdf39241ea7d26933ada4029",
+      "modifiedAt": "2026-09-04T15:53:17.944Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-17-unicode-evidence.json",
+      "bytes": 906,
+      "sha256": "022ea7f92d69aa046210145a19f3d5aafe65a0106b4c5d096d6e461c4b573da5",
+      "modifiedAt": "2026-09-04T15:53:08.501Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-17-unicode-regression.tap",
+      "bytes": 2329,
+      "sha256": "f0a9a120bb2ff7bbb2ab42dc04ef6c5e7c2352f4962392fb8294c71018bbf2cc",
+      "modifiedAt": "2026-09-04T15:52:38.325Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\contract-review-repro.json",
+      "bytes": 2014,
+      "sha256": "c75969cf0aef3080cde2fa246be8131932f1f93b97e9787d332be17d69167245",
+      "modifiedAt": "2026-09-04T15:53:54.880Z"
+    },
+    {
+      "agentId": "a784236e-c48a-468d-b14f-8392297e0452",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\contract-review-repro.mjs",
+      "bytes": 3329,
+      "sha256": "f7e781e0840f2ff6963d350b900ec4634541e7a57b41fad2c38366aeb97059b5",
+      "modifiedAt": "2026-09-04T15:47:06.601Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\acceptance-criteria.md",
+      "bytes": 5213,
+      "sha256": "0eb5423c746725fc7a44e38a15c480b9ed5a84a8d177d2b52269ab1c31098f8e",
+      "modifiedAt": "2026-09-04T15:48:13.878Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\acceptance-dom.tap",
+      "bytes": 410,
+      "sha256": "d45d4a6b2fc0d40650b3d62eb07676c6e4886d95f605a6c719f4d0106f60149b",
+      "modifiedAt": "2026-09-04T15:47:27.455Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\acceptance-dom.test.mjs",
+      "bytes": 4546,
+      "sha256": "8f1706d7644a1cd4d3298f52cb47fd84b5780f1e33c4c17444da66ceee7d1ef3",
+      "modifiedAt": "2026-09-04T15:47:26.243Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\acceptance-report.md",
+      "bytes": 6743,
+      "sha256": "5c556a9dfee8589e6d53a3996d4a3986109431ee771e4aab8b8fe1f651f5b41f",
+      "modifiedAt": "2026-09-04T15:51:09.440Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\browser-error.txt",
+      "bytes": 3527,
+      "sha256": "db038e6254a56a40011fd1e1ba7239adc6a39d5b90cb93fab844d183546fec33",
+      "modifiedAt": "2026-09-04T15:46:09.577Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\contract-review-repro.json",
+      "bytes": 2011,
+      "sha256": "db5e6f759c0fadd357d620bb5073e33d37cb96124a2f6dce9fc8ea2247c67a1b",
+      "modifiedAt": "2026-09-04T15:47:06.913Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\contract-review-repro.mjs",
+      "bytes": 3329,
+      "sha256": "f7e781e0840f2ff6963d350b900ec4634541e7a57b41fad2c38366aeb97059b5",
+      "modifiedAt": "2026-09-04T15:47:06.601Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\contract-review.md",
+      "bytes": 8045,
+      "sha256": "f4e01f8c970901b01ca1d9b922853244bf29b9fc106bf5d3af41c6f367306107",
+      "modifiedAt": "2026-09-04T15:48:07.809Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\finalize-evidence.py",
+      "bytes": 5320,
+      "sha256": "1aa840c67ba05b5a8d35dc99f7c767f0b3012c93937c1298b44c31989f5cd497",
+      "modifiedAt": "2026-09-04T15:50:35.171Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\issue-readback.json",
+      "bytes": 1445,
+      "sha256": "25a3f0767bf5f4a53e03cb9072aec78f804fb6240ad3c16359f43ffbe26c3515",
+      "modifiedAt": "2026-09-04T15:50:51.637Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\remediation-child.json",
+      "bytes": 219,
+      "sha256": "20945e80338d9b4bbdad8582b2ecd7896582d5d3f50f496693fcc4916dcf737f",
+      "modifiedAt": "2026-09-04T15:49:02.025Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\replayed-tests-status.json",
+      "bytes": 73,
+      "sha256": "c4a66c37b5ba1cc5d8470237482ccb14da78970580e5258bf0622dda7423697a",
+      "modifiedAt": "2026-09-04T15:45:41.232Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\replayed-tests.tap",
+      "bytes": 3897,
+      "sha256": "59007855aed3c60ef1b660a81bc3d488ef6acf09d7abac3d9b900cded5ed0654",
+      "modifiedAt": "2026-09-04T15:45:41.202Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\result.json",
+      "bytes": 2162,
+      "sha256": "644a6b7a5d0daf1bdde192b1f8421f541363f212b425b036615bfef50bf8429a",
+      "modifiedAt": "2026-09-04T15:51:09.425Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\review-child.json",
+      "bytes": 164,
+      "sha256": "a0204bf92cf978e005defda696d308cab1279c259328dd7b00641c26bb49d2eb",
+      "modifiedAt": "2026-09-04T15:45:21.809Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\00-knowledge-saas-boundary-v1.md",
+      "bytes": 14637,
+      "sha256": "91b7624f9cf2c119a8c16bf7f812b067c660ab407f732308e8e4258a4ec1ef2e",
+      "modifiedAt": "2026-09-04T15:50:35.518Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\01-identity-permissions-v1.md",
+      "bytes": 22621,
+      "sha256": "06150c0bdc6136db5a6bcafeaf6b6be904cc6b55d47d21bef69118f7e31c3ee2",
+      "modifiedAt": "2026-09-04T15:50:35.519Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\02-knowledge-governance-v1.md",
+      "bytes": 17988,
+      "sha256": "34f6eb320271b20736717bcb3e19acffd1274c5526cf99e57edf3484fb22f136",
+      "modifiedAt": "2026-09-04T15:50:35.520Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\03-index.html",
+      "bytes": 721,
+      "sha256": "0abf5aa0ccf42817fd86bc4043b61b43633e15572a57b06a3fe34faa396d8295",
+      "modifiedAt": "2026-09-04T15:50:35.521Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\04-styles.css",
+      "bytes": 36393,
+      "sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "modifiedAt": "2026-09-04T15:50:35.522Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\05-styles.css",
+      "bytes": 5698,
+      "sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "modifiedAt": "2026-09-04T15:50:35.522Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\06-accessibility.js",
+      "bytes": 2925,
+      "sha256": "e882b45bbeb3e21843fdb6ad319c31e9514885a5ac2b5113d42399d5f298777d",
+      "modifiedAt": "2026-09-04T15:50:35.524Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\07-app.js",
+      "bytes": 47409,
+      "sha256": "267dfa0cb5ed2a08811be7a422b8031623e937f382e19b0ab7a9f43d0e14c90e",
+      "modifiedAt": "2026-09-04T15:50:35.524Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\08-api.js",
+      "bytes": 2956,
+      "sha256": "00553d7fab1bdf160051352bc09b5074ddf8b65c744021e4e4f0437d7f046cd7",
+      "modifiedAt": "2026-09-04T15:50:35.525Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\09-demo.js",
+      "bytes": 38874,
+      "sha256": "779130c31f03fcebd040150a28aae89e3e22e443d708c4cd6b0f80ef4c2a9032",
+      "modifiedAt": "2026-09-04T15:50:35.526Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\10-copy.js",
+      "bytes": 2373,
+      "sha256": "9d507bcb1091ce6055cb12ea7249e9a896b9e691e523171f195541d175b57a4b",
+      "modifiedAt": "2026-09-04T15:50:35.527Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\11-server.py",
+      "bytes": 1873,
+      "sha256": "7d4a60649afa61b1dcf821c125ac07ab059b7dce99df7725e7dfecb3b8af9989",
+      "modifiedAt": "2026-09-04T15:50:35.528Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\12-model.test.js",
+      "bytes": 15090,
+      "sha256": "76a80dd5ca7c0a95f312faddef8cc6209f7377c623063c5fd30d5c332d6e59f2",
+      "modifiedAt": "2026-09-04T15:50:35.529Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\13-ui-dom.test.js",
+      "bytes": 10215,
+      "sha256": "26ec457d932080f9f41cefdaffc588449bc5efd2890ef1bd8477a5bd19cd8af3",
+      "modifiedAt": "2026-09-04T15:50:35.530Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\14-browser_smoke.py",
+      "bytes": 2843,
+      "sha256": "0b543223000de15a3126e08d9471c1aaee9b793f21c4774b1aa2cf32900971bd",
+      "modifiedAt": "2026-09-04T15:50:35.530Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\15-delivery.md",
+      "bytes": 4854,
+      "sha256": "36c97bf21b97fee8811931c8adb780d1481ff3749b9d622b6540afb0d6d512d8",
+      "modifiedAt": "2026-09-04T15:50:35.531Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\16-backend-contract-v1.md",
+      "bytes": 39944,
+      "sha256": "1982adc830675f0131cd30bfba6a32776f3a54026caec1efa2ab13e4cdebdf86",
+      "modifiedAt": "2026-09-04T15:50:35.532Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\reviewed-source\\17-validation-report.json",
+      "bytes": 4869,
+      "sha256": "08a7d1fe242928a549bfbb6a146cab3bb8b3b84c4edf33c5da16a21dc0603024",
+      "modifiedAt": "2026-09-04T15:50:35.533Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\runtime-check.json",
+      "bytes": 1883,
+      "sha256": "266e3b7e9484c54c960577be3c30d179285dbc2558483aea436933bc0cb84762",
+      "modifiedAt": "2026-09-04T15:46:09.999Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\runtime-check.py",
+      "bytes": 3854,
+      "sha256": "db951a6262c20b30d242c826cfed07b2559185e2e864a83f15f3b2caf00b90f3",
+      "modifiedAt": "2026-09-04T15:46:08.997Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\source-manifest.json",
+      "bytes": 4129,
+      "sha256": "6d515bfb165d80813a8fd88e42d5aff8743b5028ab33c2ef19809a4516012eca",
+      "modifiedAt": "2026-09-04T15:46:09.389Z"
+    },
+    {
+      "agentId": "513806c8-269e-4221-a536-b52956f519ce",
+      "path": "C:\\tmp\\awwo-codex-live-20260904\\513806c8-269e-4221-a536-b52956f519ce\\artifacts\\validation.json",
+      "bytes": 8450,
+      "sha256": "58906de65e3ef00e8879ca9798304c104d71c782cae1d3324b311891d21e3535",
+      "modifiedAt": "2026-09-04T15:51:09.439Z"
+    }
+  ]
+}

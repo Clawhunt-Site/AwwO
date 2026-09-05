@@ -1,0 +1,22 @@
+{
+  "getEnergy": "获取能量",
+  "getMoreDesc": "获取更多能量，继续生成内容。",
+  "loadingPacks": "加载套餐中…",
+  "noPacks": "暂无可用能量套餐",
+  "bestValue": "最划算",
+  "pricePerUnit": "≈ ${{price}} / 能量",
+  "savePercent": "省 {{percent}}%",
+  "processing": "处理中…",
+  "buyEnergy": "购买 {{amount}} 能量",
+  "selectAPack": "选择一个套餐",
+  "energyHistory": "能量记录",
+  "all": "全部",
+  "usage": "使用",
+  "purchases": "购买",
+  "noHistoryYet": "暂无记录",
+  "loadMore": "加载更多",
+  "purchased": "已购买",
+  "energyAmount": "{{amount}} 能量",
+  "generatedWith": "使用以下生成",
+  "unknown": "未知"
+}

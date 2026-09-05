@@ -1,0 +1,27 @@
+node_modules
+.DS_Store
+*.local
+count.txt
+.env
+.nitro
+.tanstack
+.wrangler
+.vinxi
+__unconfig*
+todos.json
+.openpencil-tmp/
+.superpowers/
+
+docs/
+
+# Build outputs
+out/
+dist/
+apps/cli/src/commands/skill-bundle.json
+dist-ssr/
+electron-dist/
+dist-electron/
+.claude
+.omx
+.worktrees/
+.omx/

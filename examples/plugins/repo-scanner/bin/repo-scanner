@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "${1:-}" != "mcp" ]; then
+  printf '%s\n' 'usage: repo-scanner mcp <path>' >&2
+  exit 2
+fi
+
+SCAN_PATH="${2:-.}"
+FILE_COUNT="$(find "$SCAN_PATH" -type f | wc -l | tr -d ' ')"
+printf '{"text":"scanned %s files","finding_count":0,"artifacts":[]}\n' "$FILE_COUNT"

@@ -1,0 +1,17 @@
+{
+  "searchPlaceholder": "ابحث عن أي شيء…",
+  "clear": "مسح",
+  "searchHint": "اكتب للبحث عن بوتات…",
+  "noContent": "لا يوجد محتوى في هذه الفئة بعد",
+  "resultCount": "{{count}} نتيجة",
+  "resultCount_other": "{{count}} نتائج",
+  "personalizedForYou": "مخصص لك",
+  "basedOnPreferences": "بناءً على تفضيلاتك واستخدامك",
+  "noRecommendations": "لا توجد توصيات بعد",
+  "matchPercent": "تطابق {{percent}}%",
+  "celebritySex": "مشاهير\nجنس",
+  "sexyOutfits": "ملابس\nمثيرة",
+  "classicActs": "كلاسيكي\nأفعال",
+  "wildEncounters": "لقاءات\nجامحة",
+  "lgbtSex": "LGBT\nجنس"
+}

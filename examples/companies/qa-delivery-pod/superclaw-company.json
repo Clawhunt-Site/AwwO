@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "id": "dev.leon.qa-delivery-pod",
+  "name": "QA Delivery Pod",
+  "version": "1.0.0",
+  "summary": "A small delivery company blueprint: a lead who plans and reviews, an engineer who implements scoped changes, and a QA reviewer who verifies before completion.",
+  "kind": "company",
+  "source": {
+    "type": "developer",
+    "developer_id": "leon"
+  },
+  "commerce": {
+    "pricing_model": "free",
+    "metering": "none"
+  },
+  "roles": [
+    {
+      "name": "lead",
+      "charter": "Break the goal into scoped issues, assign them to the engineer, and review the QA verdict before accepting completion."
+    },
+    {
+      "name": "engineer",
+      "charter": "Implement the scoped issue, write release notes for the change, and hand off to QA.",
+      "reports_to": "lead"
+    },
+    {
+      "name": "qa",
+      "charter": "Verify the engineer's change against the issue's acceptance criteria and return an explicit pass or fail verdict.",
+      "reports_to": "lead"
+    }
+  ],
+  "equipment_requirements": {
+    "engineer": {
+      "skills": ["release-notes-writer"],
+      "plugins": ["dev.leon.text-stats"]
+    }
+  },
+  "policies": {
+    "high_risk_policies": {}
+  },
+  "budgets": {
+    "default_budget_seconds": 120,
+    "default_token_budget": 4000
+  },
+  "provenance": {
+    "build_type": "developer",
+    "package_digest": "",
+    "signature": ""
+  }
+}

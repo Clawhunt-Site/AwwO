@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "${1:-}" = "mcp" ]; then
+  printf '%s\n' '{"text":"hello from SuperClaw"}'
+else
+  printf '%s\n' 'usage: hello-world mcp' >&2
+  exit 2
+fi

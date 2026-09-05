@@ -1,0 +1,118 @@
+{
+  "version": "2026-06-04",
+  "pages": [
+    {
+      "id": "explore",
+      "name": "Explore",
+      "appRoute": "/explore",
+      "capabilities": ["explore", "category-browse", "bot-discovery"],
+      "intentKeywords": ["explore", "discover", "browse bots", "bot discovery", "首页", "探索", "发现"]
+    },
+    {
+      "id": "ai-picks",
+      "name": "AI Picks",
+      "appRoute": "/ai-picks",
+      "capabilities": ["recommendations", "pick-opened", "bot-discovery"],
+      "intentKeywords": ["ai picks", "aipicks", "recommendations", "recommended", "featured", "精选", "推荐"]
+    },
+    {
+      "id": "canvaspro",
+      "name": "AI CanvasPro",
+      "kind": "embedded-static-app",
+      "appRoute": "/dreamy?workspace=canvaspro",
+      "capabilities": ["canvas", "visual-workspace", "node-editor", "storyboard", "local-static-app"],
+      "intentKeywords": ["canvas", "canvaspro", "ai canvas", "visual workspace", "node editor", "storyboard", "画布", "视觉工作台", "节点编辑器", "分镜"]
+    },
+    {
+      "id": "bot-detail",
+      "name": "Bot Detail",
+      "appRoute": "/bot",
+      "routeParams": ["slug_id"],
+      "capabilities": ["get-by-slug", "form-schema", "bot-profile"],
+      "intentKeywords": ["bot detail", "bot details", "bot profile", "agent detail", "agent profile", "详情", "机器人详情"]
+    },
+    {
+      "id": "upload",
+      "name": "Upload",
+      "appRoute": "/upload",
+      "routeParams": ["slug_id"],
+      "capabilities": ["image-upload", "bot-generate", "custom-form"],
+      "intentKeywords": ["upload", "image upload", "upload image", "create with image", "start from image", "上传", "上传图片", "传图"]
+    },
+    {
+      "id": "tag-generator",
+      "name": "Tag Generator",
+      "appRoute": "/tag-generator",
+      "routeParams": ["slug_id", "img"],
+      "capabilities": ["self-director", "prompt-compose", "bot-generate"],
+      "intentKeywords": ["tag generator", "self director", "director", "prompt composer", "compose tags", "标签生成", "标签", "自导演"]
+    },
+    {
+      "id": "library",
+      "name": "Library",
+      "appRoute": "/library",
+      "capabilities": ["library", "task-retry", "task-delete", "task-like", "share"],
+      "intentKeywords": ["library", "generated library", "generated works", "my works", "my creations", "results", "gallery", "history", "作品库", "生成历史", "历史作品", "我的作品", "结果"]
+    },
+    {
+      "id": "library-detail",
+      "name": "Library Detail",
+      "appRoute": "/library/:id",
+      "routeParams": ["id"],
+      "routeDefaults": {
+        "id": "studio-preview"
+      },
+      "capabilities": ["library-detail", "result-view", "media-preview"],
+      "intentKeywords": ["library detail", "generated work detail", "view generated work", "result detail", "media detail", "作品详情", "结果详情", "查看作品"]
+    },
+    {
+      "id": "energy-store",
+      "name": "Energy Store",
+      "appRoute": "/energy",
+      "capabilities": ["energy", "packs", "invoice"],
+      "intentKeywords": ["energy", "energy store", "buy energy", "store", "packs", "credits", "能量", "能量商店", "购买能量", "充值"]
+    },
+    {
+      "id": "energy-history",
+      "name": "Energy History",
+      "appRoute": "/energy-history",
+      "capabilities": ["energy-history", "usage-history", "invoice-history"],
+      "intentKeywords": ["energy history", "usage history", "energy records", "invoice history", "能量记录", "消耗记录", "充值记录"]
+    },
+    {
+      "id": "earn",
+      "name": "Earn",
+      "appRoute": "/earn",
+      "capabilities": ["invite-code", "earn-stats"],
+      "intentKeywords": ["earn", "rewards", "earn stats", "bonus", "赚取", "奖励", "收益"]
+    },
+    {
+      "id": "share-invite",
+      "name": "Share Invite",
+      "appRoute": "/share-invite",
+      "capabilities": ["invite-share", "invite-opened"],
+      "intentKeywords": ["share invite", "invite", "invite friends", "referral", "share link", "邀请", "分享邀请", "推荐链接"]
+    },
+    {
+      "id": "settings",
+      "name": "Settings",
+      "appRoute": "/settings",
+      "capabilities": ["profile", "language", "preferences"],
+      "intentKeywords": ["settings", "preferences", "profile settings", "account settings", "language", "设置", "偏好", "语言", "账号设置"]
+    },
+    {
+      "id": "profile",
+      "name": "Profile",
+      "appRoute": "/profile",
+      "capabilities": ["profile", "account", "preferences"],
+      "intentKeywords": ["profile", "my profile", "account profile", "个人资料", "账户", "账号"]
+    },
+    {
+      "id": "checkin",
+      "name": "Checkin",
+      "appRoute": "/checkin-demo",
+      "capabilities": ["checkin-status", "checkin-claim", "checkin-history"],
+      "intentKeywords": ["checkin", "check in", "daily checkin", "daily claim", "签到", "每日签到", "打卡"]
+    }
+  ]
+}

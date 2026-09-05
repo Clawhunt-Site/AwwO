@@ -1,0 +1,21 @@
+{
+  "title": "Bibliothèque",
+  "failedToLoad": "Échec du chargement",
+  "noCreationsYet": "Pas encore de créations",
+  "noCreationsDesc": "Choisis un personnage et lance la génération — tes images et vidéos apparaîtront ici.",
+  "browseCharacters": "Parcourir les personnages",
+  "generationFailed": "Échec de la génération",
+  "inQueue": "En file d'attente...",
+  "generatingStatus": "Génération...",
+  "aiPick": "Choix AI",
+  "formatNotSupported": "Format non supporté",
+  "videoFallbackDesc": "Cette vidéo ne peut pas être lue dans Telegram. Appuie ci-dessous pour la regarder dans ton navigateur.",
+  "openInBrowser": "Ouvrir dans le navigateur",
+  "download": "Télécharger",
+  "like": "J'aime",
+  "dislike": "Je n'aime pas",
+  "share": "Partager",
+  "shareToTelegram": "Partager sur Telegram",
+  "sharePreview": "Aperçu flouté",
+  "cancel": "Annuler"
+}

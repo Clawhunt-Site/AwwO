@@ -1,0 +1,56 @@
+services:
+  superclaw-api:
+    build: .
+    profiles: ["all", "superclaw"]
+    ports:
+      - "8080:8080"
+    environment:
+      # Two environments only (staging/production); defaults to staging. The localhost
+      # ClawHunt/service URLs below are explicit local-stack overrides, not a third env.
+      APP_ENV: ${APP_ENV:-staging}
+      SUPERCLAW_STATE_PATH: /data/superclaw.db
+      SUPERCLAW_EVAL_ROOT: /data/evals
+      CLAWHUNT_BASE_URL: ${CLAWHUNT_BASE_URL:-http://127.0.0.1:8787}
+      SUPERCLAW_RUNNINGHUB_BASE_URL: ${SUPERCLAW_RUNNINGHUB_BASE_URL:-http://127.0.0.1:8790}
+      SUPERCLAW_FUSION_OSIRIS_URL: ${SUPERCLAW_FUSION_OSIRIS_URL:-http://127.0.0.1:3000}
+      SUPERCLAW_FUSION_OPEN_DESIGN_URL: ${SUPERCLAW_FUSION_OPEN_DESIGN_URL:-http://127.0.0.1:3001}
+      SUPERCLAW_FUSION_OPENPENCIL_URL: ${SUPERCLAW_FUSION_OPENPENCIL_URL:-http://127.0.0.1:3002}
+    volumes:
+      - superclaw-data:/data
+      - superclaw-evals:/data/evals
+      - superclaw-artifacts:/data/artifacts
+
+  fusion-osiris:
+    image: node:22-alpine
+    profiles: ["all", "osiris"]
+    working_dir: /workspace/third_party/osiris
+    command: sh -lc "npm install && npm run dev -- --hostname 0.0.0.0"
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/workspace
+
+  fusion-open-design:
+    image: node:24-slim
+    profiles: ["all", "design"]
+    working_dir: /workspace/third_party/open-design
+    command: sh -lc "corepack enable && pnpm install && pnpm tools-dev"
+    ports:
+      - "3001:3000"
+    volumes:
+      - .:/workspace
+
+  fusion-openpencil:
+    image: oven/bun:1
+    profiles: ["all", "pencil"]
+    working_dir: /workspace/third_party/openpencil
+    command: sh -lc "bun install && bun --bun run dev --host 0.0.0.0"
+    ports:
+      - "3002:3000"
+    volumes:
+      - .:/workspace
+
+volumes:
+  superclaw-data:
+  superclaw-evals:
+  superclaw-artifacts:

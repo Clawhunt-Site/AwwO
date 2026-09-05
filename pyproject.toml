@@ -1,0 +1,64 @@
+[project]
+name = "superclaw"
+version = "0.2.0"
+description = "End-to-end delivery agent harness for ClawHunt"
+requires-python = ">=3.11"
+dependencies = [
+  "anthropic>=0.40",
+  "cryptography>=42.0",
+  "fastapi>=0.109",
+  "httpx>=0.27",
+  "jsonschema>=4.0",
+  "nh3>=0.2",
+  "pydantic>=2.6",
+  "pillow>=10",
+  "prompt-toolkit>=3.0",
+  "pyyaml>=6.0",
+  "textual>=0.67",
+  "typer>=0.12",
+  "uvicorn>=0.27",
+  "websocket-client>=1.8",
+  "websockets>=13,<14",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-xdist==3.8.0", "ruff==0.15.12"]
+# Used to freeze the FastAPI/CLI backend into the self-contained macOS app
+# (apps/desktop/backend). Only needed when building the desktop bundle.
+desktop-build = ["pyinstaller>=6.20"]
+# textual is a default runtime dependency now (origin/main); the extra stays as
+# an empty alias so `pip install superclaw[tui]` keeps working.
+tui = []
+
+[project.scripts]
+superclaw = "superclaw.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["packages/superclaw/src"]
+
+[tool.setuptools.package-data]
+superclaw = ["capability_atlas.json", "node_routes.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["packages/superclaw/src", "."]
+addopts = "-ra"
+filterwarnings = [
+  "ignore:.*TestClient.*:DeprecationWarning",
+]
+
+[tool.ruff]
+# vendored 第三方代码不纳入 lint（open-design/osiris 等，74 个既有错误归上游）。
+# CI 只 lint packages/apps（我们自己的源代码）。
+extend-exclude = ["third_party"]
+
+[tool.ruff.lint.per-file-ignores]
+# Imported MyShell browser/CDP compatibility workers retain their upstream compact style.
+"apps/myshell-studio-orchestrator/orchestrator/backend/bridge_worker.py" = ["E401", "E701", "E722", "F401"]
+"apps/myshell-studio-orchestrator/orchestrator/backend/inject_cookies.py" = ["E401", "E701", "E722"]
+"apps/myshell-studio-orchestrator/orchestrator/backend/myshell_bridge.py" = ["E401", "E701", "E722"]
+"apps/myshell-studio-orchestrator/orchestrator/backend/orchestrator.py" = ["E401", "E701", "E722", "F401", "F541", "F841"]

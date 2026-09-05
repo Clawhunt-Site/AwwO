@@ -1,0 +1,22 @@
+{
+  "getEnergy": "에너지 받기",
+  "getMoreDesc": "에너지를 추가로 받아서 계속 생성해 보세요.",
+  "loadingPacks": "팩 불러오는 중…",
+  "noPacks": "이용 가능한 에너지 팩이 없어요",
+  "bestValue": "최고 가성비",
+  "pricePerUnit": "≈ ${{price}} / 에너지",
+  "savePercent": "{{percent}}% 할인",
+  "processing": "처리 중…",
+  "buyEnergy": "{{amount}} 에너지 구매",
+  "selectAPack": "팩 선택",
+  "energyHistory": "에너지 기록",
+  "all": "전체",
+  "usage": "사용",
+  "purchases": "구매",
+  "noHistoryYet": "아직 기록이 없어요",
+  "loadMore": "더 보기",
+  "purchased": "구매 완료",
+  "energyAmount": "{{amount}} 에너지",
+  "generatedWith": "사용하여 생성",
+  "unknown": "알 수 없음"
+}

@@ -1,0 +1,22 @@
+{
+  "getEnergy": "エナジーを取得",
+  "getMoreDesc": "エナジーを追加して、生成を続けましょう。",
+  "loadingPacks": "パックを読み込み中…",
+  "noPacks": "利用可能なエナジーパックはありません",
+  "bestValue": "お得",
+  "pricePerUnit": "≈ ${{price}} / エナジー",
+  "savePercent": "{{percent}}% お得",
+  "processing": "処理中…",
+  "buyEnergy": "{{amount}} エナジーを購入",
+  "selectAPack": "パックを選択",
+  "energyHistory": "エナジー履歴",
+  "all": "すべて",
+  "usage": "使用",
+  "purchases": "購入",
+  "noHistoryYet": "まだ履歴はありません",
+  "loadMore": "もっと見る",
+  "purchased": "購入済み",
+  "energyAmount": "{{amount}} エナジー",
+  "generatedWith": "使用して生成",
+  "unknown": "不明"
+}

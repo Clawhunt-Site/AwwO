@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SuperClaw Streaming Test</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+         background: #0f1115; color: #d7dae0; }
+  header { padding: 12px 16px; background: #161922; border-bottom: 1px solid #262b36; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  header .sub { color: #8b93a3; font-size: 12px; margin-top: 2px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 16px;
+              background: #12151c; border-bottom: 1px solid #262b36; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; color: #8b93a3; text-transform: uppercase; letter-spacing: .04em; }
+  .check { flex-direction: row; align-items: center; gap: 6px; }
+  .check label { text-transform: none; font-size: 13px; color: #d7dae0; }
+  input, select, textarea { background: #0f1115; color: #d7dae0; border: 1px solid #2b313d;
+            border-radius: 6px; padding: 7px 9px; font: inherit; }
+  textarea { width: 360px; height: 46px; resize: vertical; }
+  button { background: #3b82f6; color: #fff; border: 0; border-radius: 6px; padding: 9px 18px;
+           font: inherit; font-weight: 600; cursor: pointer; }
+  button.secondary { background: #2a3340; }
+  button:disabled { background: #2a3340; color: #6b7280; cursor: not-allowed; }
+  .status { padding: 6px 16px; font-size: 12px; color: #8b93a3; background: #12151c;
+            border-bottom: 1px solid #262b36; }
+  .status b { color: #d7dae0; }
+  main { display: grid; grid-template-columns: 1.2fr 1fr; height: calc(100vh - 188px); }
+  .pane { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid #262b36; }
+  .pane:last-child { border-right: 0; }
+  .pane h2 { margin: 0; font-size: 12px; font-weight: 600; color: #8b93a3; padding: 8px 14px;
+             background: #12151c; border-bottom: 1px solid #262b36; text-transform: uppercase; letter-spacing: .04em; }
+  .scroll { overflow: auto; padding: 12px 14px; flex: 1; }
+  /* rendered output blocks */
+  .blk { white-space: pre-wrap; word-break: break-word; margin: 0 0 6px; }
+  .user { color: #60a5fa; border-top: 1px solid #262b36; padding-top: 8px; margin-top: 8px; }
+  .user::before { content: "🧑 "; }
+  .answer { color: #e6e9ef; }
+  .think { color: #7f8794; font-style: italic; }
+  .think::before { content: "💭 "; font-style: normal; }
+  .cmd { color: #fbbf24; }
+  .cmd::before { content: "$ "; color: #6b7280; }
+  .cmdout { color: #9aa3b2; background: #0b0d12; border-left: 2px solid #2b313d; padding: 4px 8px; }
+  .cmddone { color: #6b7280; }
+  /* raw log */
+  #log .ev { white-space: pre-wrap; word-break: break-word; margin-bottom: 2px; }
+  #log .t { color: #5b6472; }
+  .badge { display: inline-block; min-width: 130px; }
+  .b-message { color: #34d399; } .b-tool { color: #fbbf24; } .b-reason { color: #a78bfa; }
+  .b-run { color: #60a5fa; } .b-err { color: #f87171; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SuperClaw Streaming Test</h1>
+  <div class="sub">Live streaming over SSE — answer text, reasoning, and commands as they happen.</div>
+</header>
+
+<div class="controls">
+  <div class="field">
+    <label>Backend</label>
+    <select id="backend">
+      <option value="codex">codex</option>
+      <option value="claude">claude</option>
+      <option value="bobo">bobo</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>Prompt</label>
+    <textarea id="prompt">你是什么模型？</textarea>
+  </div>
+  <div class="field">
+    <label>Repo path</label>
+    <input id="repo" value="/tmp" size="12" />
+  </div>
+  <div class="field">
+    <label>Budget (s)</label>
+    <input id="budget" type="number" value="120" size="6" />
+  </div>
+  <div class="field check">
+    <input id="deliver" type="checkbox" />
+    <label for="deliver" title="Off = one direct turn (chat). On = full delivery orchestration.">Delivery mode</label>
+  </div>
+  <button id="run">▶ Send</button>
+  <button id="cancel" class="secondary" disabled>■ Cancel</button>
+  <button id="newchat" class="secondary">🗑 New chat</button>
+</div>
+
+<div class="status" id="status">Idle. Default is direct chat — ask anything, get a streamed answer.</div>
+
+<main>
+  <div class="pane">
+    <h2>Output — answer · reasoning · commands</h2>
+    <div class="scroll" id="output"></div>
+  </div>
+  <div class="pane">
+    <h2>Raw event stream (SSE)</h2>
+    <div class="scroll" id="log"></div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+// When served from the API (http/https) use same-origin relative URLs. When the
+// page is rendered in an IDE preview (srcdoc/blob/file — no http base), relative
+// URLs can't be parsed, so fall back to the default server address.
+const API_BASE = /^https?:$/.test(location.protocol) ? "" : "http://127.0.0.1:8077";
+let es = null, runId = null, t0 = 0, curText = null;
+const newSid = () => (crypto.randomUUID ? crypto.randomUUID() : "sid-" + Math.random().toString(36).slice(2) + Date.now());
+let SID = newSid(), turns = 0;
+
+const EVENT_TYPES = [
+  "run.queued","run.started","run.lease.acquired","run.lease.released","task.started","worker.leased",
+  "worker.planned","worker.completed","command.started","command.completed",
+  "message.delta","message.completed","reasoning.started","reasoning.delta","reasoning",
+  "tool.started","tool.delta","tool.completed","tool.failed",
+  "artifact.added","transcript.added","task.completed","run.verifying","verification.completed",
+  "run.completed","run.failed","run.cancelled","run.paused","adapter.diagnostic","approval.request","approval.resolved"
+];
+
+function badgeClass(t){
+  if(t.startsWith("message"))return"b-message"; if(t.startsWith("tool")||t.startsWith("command"))return"b-tool";
+  if(t.startsWith("reason"))return"b-reason"; if(t==="run.failed"||t==="run.cancelled"||t==="adapter.diagnostic")return"b-err";
+  if(t.startsWith("run"))return"b-run"; return"";
+}
+function out(){ return $("output"); }
+function newBlock(cls){ const d=document.createElement("div"); d.className="blk "+cls; out().appendChild(d); out().scrollTop=out().scrollHeight; return d; }
+function appendAnswer(text){ if(!curText) curText=newBlock("answer"); curText.textContent+=text; out().scrollTop=out().scrollHeight; }
+function breakText(){ curText=null; }
+
+function render(type, data){
+  let o={}; try{ o=JSON.parse(data); }catch(e){}
+  if(type==="message.delta"){ appendAnswer(o.text||""); }
+  else if(type==="message.completed"){ breakText(); }
+  else if(type==="reasoning"||type==="reasoning.delta"){ breakText(); const b=newBlock("think"); b.textContent=o.text||""; }
+  else if(type==="reasoning.started"){ /* optional marker */ }
+  else if(type==="tool.started"){ breakText(); const b=newBlock("cmd"); b.textContent=(o.command||o.name||o.tool||"tool"); }
+  else if(type==="tool.delta"){ breakText(); const b=newBlock("cmdout"); b.textContent=o.chunk||""; }
+  else if(type==="tool.completed"){ breakText();
+    if(o.output){ const b=newBlock("cmdout"); b.textContent=o.output; }
+    const d=newBlock("cmddone"); d.textContent="↳ exit "+(o.exit_code!==undefined?o.exit_code:"")+(o.tool&&o.tool!=="command"?(" ("+o.tool+")"):""); }
+  else if(type==="run.failed"||type==="adapter.diagnostic"){ breakText(); const b=newBlock("cmddone"); b.style.color="#f87171"; b.textContent=type+": "+(o.detail||o.status||""); }
+}
+
+function logRaw(type, data){
+  const el=(performance.now()-t0)/1000;
+  let detail=""; try{ const o=JSON.parse(data);
+    if(type==="message.delta")detail=JSON.stringify(o.text);
+    else if(type==="message.completed")detail=JSON.stringify((o.text||"").slice(0,60));
+    else if(type==="reasoning"||type==="reasoning.delta")detail=JSON.stringify((o.text||"").slice(0,60));
+    else if(type==="tool.started")detail=(o.command||o.name||o.tool||"");
+    else if(type==="tool.delta")detail=JSON.stringify((o.chunk||"").slice(0,50));
+    else if(type==="tool.completed")detail=(o.tool||"")+" exit="+o.exit_code;
+    else detail="";
+  }catch(e){ detail=(data||"").slice(0,60); }
+  const row=document.createElement("div"); row.className="ev";
+  row.innerHTML=`<span class="t">+${el.toFixed(2)}s</span> <span class="badge ${badgeClass(type)}">${type}</span> ${detail}`;
+  const log=$("log"); log.appendChild(row); log.scrollTop=log.scrollHeight;
+}
+
+function onEvent(type, data){ render(type,data); logRaw(type,data);
+  if(type==="run.completed"||type==="run.failed"||type==="run.cancelled") finish(type.split(".")[1]); }
+
+function finish(state){ if(es){es.close();es=null;} $("run").disabled=false; $("cancel").disabled=true;
+  const el=((performance.now()-t0)/1000).toFixed(2); setStatus(`Run <b>${runId||""}</b> finished: <b>${state}</b> in ${el}s`); }
+function setStatus(h){ $("status").innerHTML=h; }
+
+async function startRun(){
+  const prompt=$("prompt").value;
+  curText=null; $("run").disabled=true; $("cancel").disabled=false;
+  const deliver=$("deliver").checked;
+  // Conversation continuity: same SID across turns reuses the codex thread, so the
+  // model remembers. Delivery mode is independent per run (no shared thread).
+  const u=newBlock("user"); u.textContent=prompt;
+  turns++;
+  try{
+    const r=await fetch(API_BASE+"/streamtest/run",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({backend:$("backend").value,prompt,repo_path:$("repo").value,
+        budget_seconds:parseInt($("budget").value,10)||120,deliver,session_id:deliver?null:SID})});
+    if(!r.ok) throw new Error(r.status+" "+(await r.text()));
+    const run=await r.json(); runId=run.run_id; t0=performance.now();
+    setStatus(`${deliver?"delivery":"chat"} · session <b>${SID.slice(0,8)}</b> · turn ${turns} · run ${runId}`);
+    es=new EventSource(API_BASE+`/api/runs/${runId}/events`);
+    for(const t of EVENT_TYPES) es.addEventListener(t,(e)=>onEvent(t,e.data));
+    es.onerror=()=>{};
+  }catch(err){ setStatus(`<span style="color:#f87171">Error: ${err.message}</span>`); $("run").disabled=false; $("cancel").disabled=true; }
+}
+async function cancelRun(){ if(!runId)return; setStatus(`Cancelling ${runId}…`);
+  try{ await fetch(API_BASE+`/api/runs/${runId}/cancel`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});}catch(e){} }
+async function newChat(){
+  const old=SID; SID=newSid(); turns=0;
+  out().textContent=""; $("log").innerHTML=""; curText=null;
+  setStatus(`New chat · session <b>${SID.slice(0,8)}</b>`);
+  try{ await fetch(API_BASE+"/streamtest/reset",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({session_id:old})});}catch(e){}
+}
+
+$("run").addEventListener("click",startRun);
+$("cancel").addEventListener("click",cancelRun);
+$("newchat").addEventListener("click",newChat);
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "searchPlaceholder": "Buscar cualquier cosa…",
+  "clear": "Limpiar",
+  "searchHint": "Escribe para buscar bots…",
+  "noContent": "Aún no hay contenido en esta categoría",
+  "resultCount": "{{count}} resultado",
+  "resultCount_other": "{{count}} resultados",
+  "personalizedForYou": "Personalizado para ti",
+  "basedOnPreferences": "Basado en tus preferencias y uso",
+  "noRecommendations": "Aún no hay recomendaciones",
+  "matchPercent": "{{percent}}% coincidencia",
+  "celebritySex": "Famosos\nSexo",
+  "sexyOutfits": "Outfits\nSexy",
+  "classicActs": "Actos\nClásicos",
+  "wildEncounters": "Encuentros\nSalvajes",
+  "lgbtSex": "LGBT\nSexo"
+}

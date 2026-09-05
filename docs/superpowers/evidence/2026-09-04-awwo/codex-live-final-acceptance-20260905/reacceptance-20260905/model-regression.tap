@@ -1,0 +1,196 @@
+TAP version 13
+# Subtest: main demo search folds title, body and query using locale-independent Unicode semantics
+ok 1 - main demo search folds title, body and query using locale-independent Unicode semantics
+  ---
+  duration_ms: 13.5225
+  type: 'test'
+  ...
+# Subtest: tag and collection restoration invalidate failed checks without changing historical runs
+ok 2 - tag and collection restoration invalidate failed checks without changing historical runs
+  ---
+  duration_ms: 1.6339
+  type: 'test'
+  ...
+# Subtest: owner membership restoration invalidates the old failure and rechecks before publication
+ok 3 - owner membership restoration invalidates the old failure and rechecks before publication
+  ---
+  duration_ms: 0.5524
+  type: 'test'
+  ...
+# Subtest: related dictionary revisions, owner role/removal and ruleset changes all invalidate completed checks
+ok 4 - related dictionary revisions, owner role/removal and ruleset changes all invalidate completed checks
+  ---
+  duration_ms: 2.1914
+  type: 'test'
+  ...
+# Subtest: restoring a dependency to the same state cannot resurrect an earlier completed result
+ok 5 - restoring a dependency to the same state cannot resurrect an earlier completed result
+  ---
+  duration_ms: 0.5813
+  type: 'test'
+  ...
+# Subtest: unrelated dictionary, member and workspace changes retain valid checks
+ok 6 - unrelated dictionary, member and workspace changes retain valid checks
+  ---
+  duration_ms: 0.5028
+  type: 'test'
+  ...
+# Subtest: new drafts do not reuse earlier version results and Viewer never sees governance
+ok 7 - new drafts do not reuse earlier version results and Viewer never sees governance
+  ---
+  duration_ms: 0.5555
+  type: 'test'
+  ...
+# Subtest: Viewer published/search/dashboard never include draft content or dictionary names
+ok 8 - Viewer published/search/dashboard never include draft content or dictionary names
+  ---
+  duration_ms: 7.0136
+  type: 'test'
+  ...
+# Subtest: Viewer cannot read drafts/versions, create documents, mutate published content or read members
+ok 9 - Viewer cannot read drafts/versions, create documents, mutate published content or read members
+  ---
+  duration_ms: 0.8488
+  type: 'test'
+  ...
+# Subtest: saving a new draft preserves published bytes/metadata, published revision and valid cursor
+ok 10 - saving a new draft preserves published bytes/metadata, published revision and valid cursor
+  ---
+  duration_ms: 1.1051
+  type: 'test'
+  ...
+# Subtest: optimistic revision conflict cannot create a version or overwrite a newer draft
+ok 11 - optimistic revision conflict cannot create a version or overwrite a newer draft
+  ---
+  duration_ms: 0.8319
+  type: 'test'
+  ...
+# Subtest: workspace and related resource boundaries remain independent from the current role
+ok 12 - workspace and related resource boundaries remain independent from the current role
+  ---
+  duration_ms: 0.4753
+  type: 'test'
+  ...
+# Subtest: publish updates authorized search, archive immediately removes content and invalidates cursors
+ok 13 - publish updates authorized search, archive immediately removes content and invalidates cursors
+  ---
+  duration_ms: 1.0171
+  type: 'test'
+  ...
+# Subtest: quality failures retain draft revision and publishing pointer
+ok 14 - quality failures retain draft revision and publishing pointer
+  ---
+  duration_ms: 0.5637
+  type: 'test'
+  ...
+# Subtest: Editor manages tags only; dictionary rename cannot rewrite frozen published metadata
+ok 15 - Editor manages tags only; dictionary rename cannot rewrite frozen published metadata
+  ---
+  duration_ms: 0.5135
+  type: 'test'
+  ...
+# Subtest: Admin cannot edit Owner, Admin or self, but can manage Editor and invite Viewer
+ok 16 - Admin cannot edit Owner, Admin or self, but can manage Editor and invite Viewer
+  ---
+  duration_ms: 0.5291
+  type: 'test'
+  ...
+# Subtest: retired tags and collections remain manageable and can be reactivated
+ok 17 - retired tags and collections remain manageable and can be reactivated
+  ---
+  duration_ms: 0.4751
+  type: 'test'
+  ...
+# Subtest: adapter transports same-origin credentials and CSRF, handles envelope errors, never retries writes
+ok 18 - adapter transports same-origin credentials and CSRF, handles envelope errors, never retries writes
+  ---
+  duration_ms: 11.2683
+  type: 'test'
+  ...
+# Subtest: adapter/demo expire memory session and return 503 without fabricating a successful empty result
+ok 19 - adapter/demo expire memory session and return 503 without fabricating a successful empty result
+  ---
+  duration_ms: 0.6031
+  type: 'test'
+  ...
+# Subtest: the reference fixture is the complete pinned Unicode 17.0.0 case-folding table
+ok 20 - the reference fixture is the complete pinned Unicode 17.0.0 case-folding table
+  ---
+  duration_ms: 0.2385
+  type: 'test'
+  ...
+# Subtest: every C/F mapping exactly matches the official full default folding
+ok 21 - every C/F mapping exactly matches the official full default folding
+  ---
+  duration_ms: 1.1619
+  type: 'test'
+  ...
+# Subtest: simple and Turkic alternatives never override the C/F mapping
+ok 22 - simple and Turkic alternatives never override the C/F mapping
+  ---
+  duration_ms: 0.1451
+  type: 'test'
+  ...
+# Subtest: every Unicode scalar without a C/F mapping is preserved
+ok 23 - every Unicode scalar without a C/F mapping is preserved
+  ---
+  duration_ms: 50.3858
+  type: 'test'
+  ...
+# Subtest: all isolated UTF-16 surrogates survive without replacement or loss
+ok 24 - all isolated UTF-16 surrogates survive without replacement or loss
+  ---
+  duration_ms: 1.2564
+  type: 'test'
+  ...
+# Subtest: full folding is idempotent for every mapped code point and a mixed string
+ok 25 - full folding is idempotent for every mapped code point and a mixed string
+  ---
+  duration_ms: 0.2458
+  type: 'test'
+  ...
+# Subtest: full folding expands sharp S, Greek decompositions and Armenian ligatures
+ok 26 - full folding expands sharp S, Greek decompositions and Armenian ligatures
+  ---
+  duration_ms: 0.05
+  type: 'test'
+  ...
+# Subtest: non-Latin folding handles sigma, uppercase Cherokee and supplementary scripts
+ok 27 - non-Latin folding handles sigma, uppercase Cherokee and supplementary scripts
+  ---
+  duration_ms: 0.0576
+  type: 'test'
+  ...
+# Subtest: default I folding includes the dot and never selects Turkic mappings
+ok 28 - default I folding includes the dot and never selects Turkic mappings
+  ---
+  duration_ms: 0.0352
+  type: 'test'
+  ...
+# Subtest: folding itself does not perform compatibility or canonical normalization
+ok 29 - folding itself does not perform compatibility or canonical normalization
+  ---
+  duration_ms: 0.0603
+  type: 'test'
+  ...
+# Subtest: folding is independent of JavaScript case and normalization APIs
+ok 30 - folding is independent of JavaScript case and normalization APIs
+  ---
+  duration_ms: 0.0982
+  type: 'test'
+  ...
+# Subtest: nullish and non-string inputs retain String(value ?? empty) semantics
+ok 31 - nullish and non-string inputs retain String(value ?? empty) semantics
+  ---
+  duration_ms: 0.071
+  type: 'test'
+  ...
+1..31
+# tests 31
+# suites 0
+# pass 31
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 127.121

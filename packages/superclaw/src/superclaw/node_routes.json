@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "SINGLE SOURCE OF TRUTH for Node-owned route prefixes in the coexist split.",
+    "Consumed by BOTH apps/web/vite.config.mjs (dev/preview proxy) AND the Python",
+    "front door (apps/api reverse proxy, packages/superclaw/node_routes.py). Keeping",
+    "one neutral checked-in manifest is how dev and production/desktop never drift.",
+    "",
+    "Order is significant: more specific Node prefixes (e.g. /v1/skills) MUST appear",
+    "and be matched before the Python catch-alls (/v1, /api). Consumers preserve this",
+    "array order. Every prefix here is routed to the vendored Node control plane",
+    "(server/server); everything not listed falls through to the Python backend.",
+    "",
+    "Per-entry fields:",
+    "  prefix  (required) URL prefix owned by Node. Matched as a path-prefix.",
+    "  rewrite (optional)  { from: <JS/py regex>, to: <str> } applied to the path",
+    "                      before forwarding (e.g. /paperclip-api -> /api).",
+    "  ws      (optional)  true when the prefix carries a WebSocket upgrade.",
+    "  sse     (optional)  { method, path } of a streaming (text/event-stream)",
+    "                      endpoint under this prefix the front door must not buffer.",
+    "  note    (optional)  human context; ignored by consumers."
+  ],
+  "version": 1,
+  "nodeRoutes": [
+    {
+      "prefix": "/paperclip-api",
+      "rewrite": { "from": "^/paperclip-api", "to": "/api" },
+      "ws": true,
+      "note": "Embedded board control plane + its live-updates WebSocket (Node /api/companies/:id/events/ws)."
+    },
+    {
+      "prefix": "/_plugins",
+      "note": "Plugin UI bytes served by Node at root-level /_plugins/:id/ui/* (plugin-ui-static.ts), not under /api."
+    },
+    {
+      "prefix": "/api/chat",
+      "sse": { "method": "POST", "path": "/api/chat/stream" },
+      "note": "Chat coexistence surface (Node engine). /api/chat/stream is a text/event-stream SSE endpoint."
+    },
+    { "prefix": "/api/workspaces" },
+    { "prefix": "/api/backends", "note": "Semantic cutover: Python also serves this; the front door routes it to Node." },
+    { "prefix": "/api/agents", "note": "Semantic cutover: Node has parity (/agents, /agents/probe, /agents/:backend/models)." },
+    { "prefix": "/v1/skills", "match": "exact", "note": "Node owns GET /v1/skills (composer); Python keeps /v1/skills/build|import|sync." }
+  ]
+}

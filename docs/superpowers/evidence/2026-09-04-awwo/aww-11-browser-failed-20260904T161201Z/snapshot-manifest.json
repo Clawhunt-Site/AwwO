@@ -1,0 +1,104 @@
+{
+  "testCheckedAt": "2026-09-04T16:12:01.217Z",
+  "browser": "152.0.7977.82",
+  "failed": 1,
+  "originalDirectory": "C:\\tmp\\awwo-codex-live-20260904\\a784236e-c48a-468d-b14f-8392297e0452\\artifacts\\aww-11-browser-evidence",
+  "files": [
+    {
+      "sha256": "3103ca71da5c2fe844c53d521ee1b98086eb0ea4ee6d5133eab15c199667087d",
+      "relativePath": "aww-11-browser-review.mjs",
+      "bytes": 6795
+    },
+    {
+      "sha256": "45f9ebaa6e038900683740c909c227af6af17720af2c7123deb4dea9400b8960",
+      "relativePath": "browser-evidence\\fixture-1280.png",
+      "bytes": 159071
+    },
+    {
+      "sha256": "1d8800506e6a4ab853bd69281a7fe2563bef21fcc3a5851b18223e7710df2c36",
+      "relativePath": "browser-evidence\\fixture-320-root-font-200.png",
+      "bytes": 245306
+    },
+    {
+      "sha256": "f62fce8581c27057c58c56240867e828ac13d652818fc516c7c8ba8a5d709a05",
+      "relativePath": "browser-evidence\\fixture-320.png",
+      "bytes": 152727
+    },
+    {
+      "sha256": "cf6ce26894a75a388139e9edfcdb4e2fb47e83091b4013c1fce3f7a81dfc046e",
+      "relativePath": "browser-evidence\\fixture-375.png",
+      "bytes": 152243
+    },
+    {
+      "sha256": "3534d92bf60d99e2372f5735e006c83c69c6c1eafc7e6a68ed8ae3b3dfce47f0",
+      "relativePath": "browser-evidence\\fixture-768.png",
+      "bytes": 154590
+    },
+    {
+      "sha256": "b1de25ea55354036cb4ca5e521ef2b9c9c2d8b44906c57aa9eb42c9bff53f128",
+      "relativePath": "browser-evidence\\fixture-aria.txt",
+      "bytes": 4603
+    },
+    {
+      "sha256": "cc189f54fb4813909fdabeea097b56007b7d632ba09998944f2cd0c0158228d1",
+      "relativePath": "browser-evidence\\forced-colors-current-focus.png",
+      "bytes": 144197
+    },
+    {
+      "sha256": "80de3515803a355266b0f2acbf0b404d8f179f0fb4be528529fc3f42611387e5",
+      "relativePath": "browser-evidence\\results.json",
+      "bytes": 2564
+    },
+    {
+      "sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "relativePath": "source\\styles.css",
+      "bytes": 36393
+    },
+    {
+      "sha256": "e882b45bbeb3e21843fdb6ad319c31e9514885a5ac2b5113d42399d5f298777d",
+      "relativePath": "source\\src\\accessibility.js",
+      "bytes": 2925
+    },
+    {
+      "sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "relativePath": "source\\src\\styles.css",
+      "bytes": 5698
+    },
+    {
+      "sha256": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+      "relativePath": "source\\tests\\responsive-accessibility.html",
+      "bytes": 8833
+    }
+  ],
+  "sourceChecks": [
+    {
+      "matchesTestedSource": true,
+      "path": "tests/responsive-accessibility.html",
+      "expectedSha256": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd",
+      "sha256": "8564496769adf0715af0e1188829776b25b599f524840c25d8e74c3df255c1dd"
+    },
+    {
+      "matchesTestedSource": true,
+      "path": "src/styles.css",
+      "expectedSha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e",
+      "sha256": "504fc2bf162a09bdf40fc5c34584954e792a5e1ff6465979d2571a018caf796e"
+    },
+    {
+      "matchesTestedSource": true,
+      "path": "styles.css",
+      "expectedSha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1",
+      "sha256": "e9a65c0130570c7c52b01d4b85f0185ee10cafac63eabe0219b6c21bec0801a1"
+    },
+    {
+      "matchesTestedSource": true,
+      "path": "src/accessibility.js",
+      "expectedSha256": "e882b45bbeb3e21843fdb6ad319c31e9514885a5ac2b5113d42399d5f298777d",
+      "sha256": "e882b45bbeb3e21843fdb6ad319c31e9514885a5ac2b5113d42399d5f298777d"
+    }
+  ],
+  "failedChecks": [
+    "Modal contains keyboard focus"
+  ],
+  "passed": 13,
+  "capturedAt": "2026-09-04T16:12:56.5875815Z"
+}

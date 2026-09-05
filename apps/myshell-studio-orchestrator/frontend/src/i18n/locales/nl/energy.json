@@ -1,0 +1,22 @@
+{
+  "getEnergy": "Energie ophalen",
+  "getMoreDesc": "Haal meer energie om te blijven genereren.",
+  "loadingPacks": "Pakketten laden...",
+  "noPacks": "Geen energiepakketten beschikbaar",
+  "bestValue": "Beste deal",
+  "pricePerUnit": "≈ ${{price}} / energie",
+  "savePercent": "Bespaar {{percent}}%",
+  "processing": "Verwerken...",
+  "buyEnergy": "Koop {{amount}} Energie",
+  "selectAPack": "Selecteer een pakket",
+  "energyHistory": "Energiegeschiedenis",
+  "all": "Alles",
+  "usage": "Gebruik",
+  "purchases": "Aankopen",
+  "noHistoryYet": "Nog geen geschiedenis",
+  "loadMore": "Meer laden",
+  "purchased": "Gekocht",
+  "energyAmount": "{{amount}} Energie",
+  "generatedWith": "Gegenereerd met",
+  "unknown": "Onbekend"
+}

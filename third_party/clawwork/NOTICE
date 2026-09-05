@@ -1,0 +1,30 @@
+ClawWork — SuperClaw's model-relay coding harness
+=================================================
+
+This directory is a HARD FORK of the Pi coding agent
+(https://github.com/earendil-works/pi), taken at tag v0.79.10.
+
+Upstream is MIT-licensed; see LICENSE (Copyright (c) 2025 Mario Zechner).
+That license and copyright are retained in full and continue to apply to
+the code derived from Pi.
+
+As of this vendoring, ClawWork is maintained INSIDE SuperClaw — it is no
+longer a tracking fork of an external repository:
+
+  - the upstream git history has been dropped (this is a v0.79.10 snapshot,
+    not a branch that rebases onto Pi);
+  - SuperClaw owns and evolves it from here (no automatic upstream pulls);
+  - the bundled harness is gitignored at build time (node_modules/, dist/)
+    and produced by `scripts/build-clawwork.sh`.
+
+SuperClaw additions layered on top of the v0.79.10 snapshot:
+
+  - config-only rebrand in packages/coding-agent/package.json
+    (name "@superclaw/clawwork", bin "clawwork", piConfig dir ".clawwork");
+  - extensions/superclaw-governance.ts — the policy-snapshot governance
+    extension the SuperClaw backend loads via `-e` (fail-closed posture
+    enforcement: denylist > allowlist > pay/scan hard gates > read-only mode);
+  - spikes/ — merge/contract gates run before changes land.
+
+SuperClaw's own code (the Python kernel, backends, surfaces) is licensed
+separately under the SuperClaw repository's terms.

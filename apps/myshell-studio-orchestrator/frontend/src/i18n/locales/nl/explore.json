@@ -1,0 +1,17 @@
+{
+  "searchPlaceholder": "Zoek alles…",
+  "clear": "Wissen",
+  "searchHint": "Typ om bots te zoeken…",
+  "noContent": "Nog geen inhoud in deze categorie",
+  "resultCount": "{{count}} resultaat",
+  "resultCount_other": "{{count}} resultaten",
+  "personalizedForYou": "Gepersonaliseerd voor jou",
+  "basedOnPreferences": "Op basis van je stijlvoorkeuren en gebruik",
+  "noRecommendations": "Nog geen aanbevelingen",
+  "matchPercent": "{{percent}}% match",
+  "celebritySex": "Celebrity\nSeks",
+  "sexyOutfits": "Sexy\nOutfits",
+  "classicActs": "Klassieke\nScènes",
+  "wildEncounters": "Wilde\nOntmoetingen",
+  "lgbtSex": "LGBT\nSeks"
+}

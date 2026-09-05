@@ -1,0 +1,16 @@
+{
+  "run_id": "run_fixture_fusion_openpencil",
+  "plugin_id": "com.superclaw.openpencil",
+  "plugin_version": "0.1.0",
+  "package_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "tool_name": "document_open",
+  "started_at": "2026-06-02T00:00:00Z",
+  "finished_at": "2026-06-02T00:00:01Z",
+  "status": "ok",
+  "entitlement_id": null,
+  "input_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "output_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "evidence_artifact_id": "artifact_fusion_openpencil_smoke",
+  "policy_decision": "allowed",
+  "sandbox_exit_status": 0
+}

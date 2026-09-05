@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+set -eu
+
+# Text Stats plugin sidecar.
+#
+# In `mcp` smoke mode it computes deterministic statistics for a baked sample so
+# the acceptance smoke test is hermetic (no stdin, no network, no filesystem).
+# The same computation path is what a real MCP request would exercise.
+
+if [ "${1:-}" = "mcp" ]; then
+  SAMPLE="the quick brown fox jumps over the lazy dog"
+  WORDS=$(printf '%s' "$SAMPLE" | wc -w | tr -d ' ')
+  CHARS=$(printf '%s' "$SAMPLE" | wc -c | tr -d ' ')
+  printf '{"words":%s,"chars":%s}\n' "$WORDS" "$CHARS"
+else
+  printf '%s\n' 'usage: text-stats mcp' >&2
+  exit 2
+fi

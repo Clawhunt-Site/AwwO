@@ -1,0 +1,5 @@
+{
+  "report": "本轮契约与前端演示验收完成，AWW-12已关闭并回读为done。两项缺陷复验通过，宿主浏览器证据已补齐。范围为设计、内存演示、DOM业务流程及有界浏览器smoke；真实服务及完整浏览器业务端到端未验收。[复验报告](/C:/tmp/awwo-codex-live-20260904/513806c8-269e-4221-a536-b52956f519ce/artifacts/reacceptance-20260905/acceptance-report-v2.md)。",
+  "issues": "R1：Straße与STRASSE均命中1条；R2：标签恢复后blocked=0、unchecked=3，均符合原期望。AWW-15、AWW-11及截图复核AWW-18均done，无本轮范围内阻塞。搜索图标与占位文字轻微叠压、工作区角色尾部截短为非阻塞观察，见[截图复核](/C:/tmp/awwo-codex-live-20260904/513806c8-269e-4221-a536-b52956f519ce/artifacts/reacceptance-20260905/browser-review.md)。",
+  "verification": "独立复跑模型/Unicode31/31、应用DOM4/4、焦点回归8/8，并严格断言原始两项复现通过。宿主夹具14/14、实际应用smoke passed；11张截图与源码/原harness哈希已回读。浏览器为宿主执行证据，本次未在沙箱重跑；不宣称完整WCAG、真实账号、后台授权或生产验收。[验证记录](/C:/tmp/awwo-codex-live-20260904/513806c8-269e-4221-a536-b52956f519ce/artifacts/reacceptance-20260905/verification.json)。"
+}

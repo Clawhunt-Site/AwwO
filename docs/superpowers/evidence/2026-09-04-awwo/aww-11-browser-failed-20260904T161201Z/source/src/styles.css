@@ -1,0 +1,88 @@
+/* Canonical visual design lives in ../styles.css; this entry adds a11y fixes. */
+@import url("../styles.css");
+
+/* Allow translated labels, URLs, and zoomed content to reflow naturally. */
+*, *::before, *::after { box-sizing: border-box; }
+body { min-width: 0; }
+h1, h2, h3, h4, p, a, label, legend, dt, dd, .badge, .tag { overflow-wrap: anywhere; }
+button, input, select, textarea, fieldset { min-width: 0; max-width: 100%; }
+.button, .search-button, .badge { white-space: normal; }
+.app-shell > *, .topbar > *, .page-heading > *, .filters > *,
+.form-grid > *, .stat-grid > *, .dashboard-grid > *, .card-top > * { min-width: 0; }
+.topbar, .topbar-actions label, .dialog-actions { flex-wrap: wrap; }
+.topbar-actions select { min-height: 44px; }
+.table-wrap { min-width: 0; max-width: 100%; }
+/* A form control's outline must remain identifiable against white (3:1). */
+:root { --line-strong: #758279; --muted: #5b6961; }
+input:not([type="checkbox"]):not([type="radio"]), select, textarea, .filters select { border-color: var(--line-strong); }
+input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border: 2px solid var(--danger); }
+input[aria-invalid="true"]:hover, select[aria-invalid="true"]:hover, textarea[aria-invalid="true"]:hover { border-color: var(--danger); }
+:focus-visible { outline: 3px solid #1b6040; outline-offset: 3px; }
+:target, [tabindex="-1"] { scroll-margin-block: 16px; }
+dialog { max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; }
+@media (max-width: 380px) {
+  .stat-grid, .filters { grid-template-columns: minmax(0, 1fr); }
+  .dialog-actions { flex-direction: column; }
+  .dialog-actions > .button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+@media (prefers-contrast: more) {
+  :root { --muted: #394d41; --line: #64796b; --line-strong: #394d41; }
+}
+@media (forced-colors: active) {
+  :focus-visible { outline-color: Highlight; }
+  .panel, .document-card, .stat-card, .button, .notice { border-color: CanvasText; }
+}
+
+/* Fixture-only aliases exercise the same tokens; they never alter app layouts. */
+.a11y-fixture .main { padding: clamp(16px, 3vw, 32px); }
+.a11y-fixture .topbar { padding: 0 0 16px; background: transparent; }
+.a11y-fixture .sidebar { position: static; height: auto; min-height: 0; }
+.a11y-fixture .sidebar nav { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 16px; }
+.a11y-fixture .sidebar nav a { display: flex; align-items: center; min-height: 44px; padding: 8px 12px; border-radius: 7px; }
+.a11y-fixture .sidebar [aria-current="page"] { font-weight: 700; background: var(--green-light); }
+.a11y-fixture .notice { display: block; }
+.a11y-fixture .brand-mark { width: 38px; }
+.a11y-fixture .page-header, .a11y-fixture .toolbar, .a11y-fixture .actions {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+}
+.a11y-fixture .page-header { margin-block: 24px; }
+.a11y-fixture .toolbar { align-items: end; }
+.a11y-fixture .toolbar > .field { flex: 1 1 180px; }
+.a11y-fixture .field { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.a11y-fixture .help-text { color: var(--muted); font-size: 12px; }
+.a11y-fixture .document-list { display: grid; gap: 16px; padding: 0; list-style: none; }
+.a11y-fixture .document-card { padding: 22px; min-height: 0; overflow: visible; }
+.a11y-fixture .document-card h2 { margin-block: 12px; font-size: 18px; }
+.a11y-fixture .document-card p { margin-bottom: 8px; }
+.a11y-fixture .document-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; color: var(--muted); font-size: 12px; }
+.a11y-fixture .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-block: 20px; }
+.a11y-fixture .stats-grid > * { min-width: 0; }
+.a11y-fixture .stat-value, .a11y-fixture .stat-label { display: block; }
+.a11y-fixture .stat-card p { margin-bottom: 0; }
+.a11y-fixture .badge.published { color: #2e6349; background: #edf4e9; border-color: #d5e5d0; }
+.a11y-fixture .alert { padding: 14px; border: 1px solid var(--line); border-radius: 7px; }
+.a11y-fixture .alert.error { color: var(--danger); background: var(--danger-light); }
+.a11y-fixture .loading { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.a11y-fixture .spinner { width: 18px; height: 18px; border: 2px solid var(--line-strong); border-top-color: var(--green); border-radius: 50%; animation: fixture-spin .8s linear infinite; }
+.a11y-fixture table { width: 100%; border-collapse: collapse; text-align: left; }
+.a11y-fixture caption { padding: 12px; text-align: left; font-weight: 650; }
+.a11y-fixture th, .a11y-fixture td { padding: 12px; border-bottom: 1px solid var(--line); }
+.a11y-fixture thead th { background: var(--surface-soft); }
+.a11y-fixture td .actions { flex-wrap: nowrap; }
+.a11y-fixture .form-grid .checkbox-label { display: flex; align-items: center; }
+.a11y-fixture .checkbox-label input { flex-shrink: 0; }
+.a11y-fixture dialog { padding: 24px; }
+.a11y-fixture .dialog-actions { padding: 16px 0 0; margin-top: 20px; }
+@keyframes fixture-spin { to { transform: rotate(360deg); } }
+@media (max-width: 900px) {
+  .a11y-fixture .sidebar { display: block; width: auto; box-shadow: none; border-right: 0; border-bottom: 1px solid var(--line); }
+  .a11y-fixture .sidebar .brand { max-width: none; }
+  .a11y-fixture .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 380px) {
+  .a11y-fixture .stats-grid { grid-template-columns: minmax(0, 1fr); }
+  .a11y-fixture .toolbar > * { width: 100%; }
+}

@@ -1,0 +1,51 @@
+{
+  "_doc": "Cross-repo JCS golden vectors. clawhunt signer MUST reproduce 'expected' byte-for-byte. Source of truth: superclaw.trust_contracts.jcs_canonicalize.",
+  "spec": "RFC8785-JCS + SuperClaw constraints (NFC pre-step, UTF-16 key sort, no floats, ints<2^53 else decimal string)",
+  "vectors": [
+    {
+      "name": "key_sort",
+      "input": {
+        "b": 1,
+        "a": 2
+      },
+      "expected": "{\"a\":2,\"b\":1}"
+    },
+    {
+      "name": "nested_non_bmp",
+      "input": {
+        "x": {
+          "😀": 1,
+          "．": 2
+        }
+      },
+      "expected": "{\"x\":{\"😀\":1,\"．\":2}}"
+    },
+    {
+      "name": "escapes",
+      "input": {
+        "k": "a\"\\\n\u0001"
+      },
+      "expected": "{\"k\":\"a\\\"\\\\\\n\\u0001\"}"
+    },
+    {
+      "name": "big_int_as_string",
+      "input": {
+        "n": 9007199254740991,
+        "big": "9007199254740993"
+      },
+      "expected": "{\"big\":\"9007199254740993\",\"n\":9007199254740991}"
+    },
+    {
+      "name": "array_and_scalars",
+      "input": [
+        "z",
+        "a",
+        {
+          "k": true,
+          "n": null
+        }
+      ],
+      "expected": "[\"z\",\"a\",{\"k\":true,\"n\":null}]"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "title": "Библиотека",
+  "failedToLoad": "Не удалось загрузить",
+  "noCreationsYet": "Пока нет работ",
+  "noCreationsDesc": "Выбери персонажа и начни генерировать — твои изображения и видео появятся здесь.",
+  "browseCharacters": "Смотреть персонажей",
+  "generationFailed": "Ошибка генерации",
+  "inQueue": "В очереди...",
+  "generatingStatus": "Генерация...",
+  "aiPick": "Выбор ИИ",
+  "formatNotSupported": "Формат не поддерживается",
+  "videoFallbackDesc": "Это видео нельзя воспроизвести в Telegram. Нажми ниже, чтобы посмотреть в браузере.",
+  "openInBrowser": "Открыть в браузере",
+  "download": "Скачать",
+  "like": "Нравится",
+  "dislike": "Не нравится",
+  "share": "Поделиться",
+  "shareToTelegram": "Поделиться в Telegram",
+  "sharePreview": "Размытый предпросмотр",
+  "cancel": "Отмена"
+}

@@ -1,0 +1,18 @@
+{
+  "title": "Szene anpassen",
+  "videoQuality": "Videoqualität",
+  "qualityLow": "Niedrig",
+  "qualityMedium": "Mittel",
+  "qualityHigh": "Hoch",
+  "duration": "Dauer",
+  "audio": "Audio",
+  "vipBadge": "VIP",
+  "estTime": "GESCH. ZEIT",
+  "mins": "Min.",
+  "energyCost": "ENERGIEKOSTEN",
+  "createNow": "Jetzt erstellen",
+  "unlockVipToCreate": "VIP freischalten zum Erstellen",
+  "cancel": "Abbrechen",
+  "needSubscription": "Kaufe ein Energiepaket, um VIP-Funktionen freizuschalten",
+  "loadingCost": "Berechne..."
+}

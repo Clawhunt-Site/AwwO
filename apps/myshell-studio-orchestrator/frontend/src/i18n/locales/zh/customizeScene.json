@@ -1,0 +1,18 @@
+{
+  "title": "自定义场景",
+  "videoQuality": "视频质量",
+  "qualityLow": "低",
+  "qualityMedium": "中",
+  "qualityHigh": "高",
+  "duration": "时长",
+  "audio": "音频",
+  "vipBadge": "VIP",
+  "estTime": "预计时间",
+  "mins": "分钟",
+  "energyCost": "能量消耗",
+  "createNow": "立即创建",
+  "unlockVipToCreate": "解锁 VIP 创建",
+  "cancel": "取消",
+  "needSubscription": "购买能量包解锁 VIP 功能",
+  "loadingCost": "计算中..."
+}

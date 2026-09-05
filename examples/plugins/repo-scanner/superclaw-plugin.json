@@ -1,0 +1,95 @@
+{
+  "schema_version": "0.1.0",
+  "id": "dev.superclaw.repo-scanner",
+  "name": "Repository Scanner",
+  "version": "0.1.0",
+  "summary": "Scans a workspace path and returns a structured repository risk summary.",
+  "source": {
+    "type": "developer_upload",
+    "clawhunt_problem_id": null,
+    "developer_id": "dev_fixture"
+  },
+  "runtime": {
+    "type": "mcp_sidecar",
+    "entrypoint": "bin/repo-scanner",
+    "args": ["mcp"],
+    "transport": "stdio",
+    "mcp_protocol_versions": ["2025-06-18"],
+    "platforms": ["darwin-arm64", "linux-x64"]
+  },
+  "tools": [
+    {
+      "name": "repo_scan",
+      "description": "Scan a declared workspace path and return a bounded risk summary.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "finding_count": { "type": "integer" },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "uri": { "type": "string" },
+                "sha256": { "type": "string" }
+              },
+              "required": ["uri", "sha256"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["text", "finding_count", "artifacts"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "permissions": {
+    "filesystem": [
+      {
+        "mode": "read",
+        "scope": "workspace"
+      }
+    ],
+    "network": [],
+    "environment": []
+  },
+  "acceptance": {
+    "level": "L2",
+    "tests": ["tests/smoke.sh"],
+    "evidence_fixtures": ["evidence-fixtures/smoke.json"],
+    "latency_budget_ms": 5000
+  },
+  "limits": {
+    "startup_timeout_ms": 3000,
+    "tool_timeout_ms": 30000,
+    "max_model_output_bytes": 65536,
+    "max_evidence_bytes": 5242880,
+    "max_memory_mb": 256
+  },
+  "resource_profile": {
+    "latency_class": "standard",
+    "expected_p95_latency_ms": 5000,
+    "cpu_class": "medium",
+    "memory_class": "medium",
+    "io_profile": "filesystem_read"
+  },
+  "commerce": {
+    "pricing_model": "private_beta",
+    "metering": "per_invocation"
+  },
+  "provenance": {
+    "build_type": "developer_upload",
+    "source_digest": null,
+    "package_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "signature": "ed25519:fixture-signature"
+  }
+}
