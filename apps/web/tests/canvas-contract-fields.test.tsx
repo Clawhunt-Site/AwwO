@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ContractFields } from '../src/canvas/ContractFields';
+import { canvasText } from '../src/canvas/i18n';
 import type { ContractField } from '../src/canvas/nodeContracts';
 
 afterEach(cleanup);
@@ -45,7 +46,7 @@ describe('node contract field editor', () => {
     expect(screen.getByLabelText('需求的值')).toBeDisabled();
     expect(screen.getByLabelText('字段 1 名称')).not.toBeDisabled();
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.getByText(/来自「数据治理」/)).toBeTruthy();
+    expect(screen.getByText(canvasText('zh', 'contract.sourceResolved', { source: '数据治理' }))).toBeTruthy();
     expect(local.value).toBe('');
   });
 

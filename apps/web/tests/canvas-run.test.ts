@@ -182,8 +182,20 @@ describe('runGraph engine', () => {
       signal: ac.signal,
     });
     expect(execAgent).not.toHaveBeenCalled();
-    expect(statuses.a).toMatchObject({ state: 'blocked', detail: '已停止' });
+    expect(statuses.a).toMatchObject({ state: 'cancelled', detail: '已取消' });
     expect(summary.ok).toBe(false);
+    expect(summary.cancelled).toBe(1);
+  });
+
+  it('keeps partial evidence when native cancellation is confirmed', async () => {
+    const statuses: Record<string, RunNodeStatus> = {};
+    const summary = await runGraph({
+      nodes: [agent('a', 'A')], edges: [],
+      execAgent: async () => ({ ok: false, cancelled: true, output: '取消前的部分输出', detail: '已取消' }),
+      onStatus: (id, status) => { statuses[id] = status; },
+    });
+    expect(statuses.a).toMatchObject({ state: 'cancelled', output: '取消前的部分输出' });
+    expect(summary).toMatchObject({ ok: false, done: 0, failed: 0, blocked: 0, cancelled: 1 });
   });
 
   it('a THROWING transport marks only that node failed instead of rejecting the run', async () => {
@@ -289,10 +301,25 @@ describe('execAgentViaGateway', () => {
 
   it('FIRST terminal wins: a late teardown error cannot flip a real success', async () => {
     streamMock.mockImplementation(emitting([
+      { event: 'delta', text: 'done' },
       { event: 'done', status: 'succeeded' },
       { event: 'error', detail: 'stream teardown' },
     ]));
     expect((await execAgentViaGateway('/gw', agent('a', 'A'), 'msg')).ok).toBe(true);
+  });
+
+  it('seals output and transcript at the first terminal frame', async () => {
+    streamMock.mockImplementation(emitting([
+      { event: 'delta', text: '最终交付' },
+      { event: 'done', status: 'succeeded' },
+      { event: 'delta', text: '不应追加' },
+      { event: 'phase', phase: 'late', message: '不应显示' },
+      { event: 'status', status: 'failed' },
+    ]));
+    const node = agent('a', 'A');
+    const result = await execAgentViaGateway('/gw', node, 'msg');
+    expect(result).toMatchObject({ ok: true, output: '最终交付' });
+    expect(sessions.getSnapshot(node.id).turns[1]?.text).toBe('最终交付');
   });
 
   it('a stream that ends with NO terminal is reported as interrupted, never 成功', async () => {
@@ -353,17 +380,59 @@ describe('execAgentViaGateway', () => {
     expect(sessions.getSnapshot(node.id).turns[1]).toMatchObject({ text: '出错：boom', tone: 'error' });
   });
 
-  // Stopping a run marks the node 已停止 in the timeline; the tile must not contradict that by
-  // rendering the SSE client's internal 'aborted' token as a failure.
-  it('a stopped run mirrors a stop into the tile, not 出错：aborted', async () => {
+  it('a detached stream does not claim native cancellation in the tile', async () => {
     streamMock.mockImplementation(emitting([{ event: 'error', detail: 'aborted' }]));
     const node = agent('a', 'A');
     await execAgentViaGateway('/gw', node, 'msg');
     const turn = sessions.getSnapshot(node.id).turns[1];
     expect(turn.text).not.toContain('aborted');
     expect(turn.text).not.toContain('出错');
-    expect(turn.text).toContain('已停止');
-    expect(turn.tone).toBe('info');
+    expect(turn.text).toContain('核对运行状态');
+    expect(turn.text).not.toContain('已停止');
+    expect(turn.tone).toBe('warn');
+  });
+
+  it('keeps SSE attached until native cancellation is confirmed', async () => {
+    const controller = new AbortController();
+    const cancelRun = vi.fn(async () => ({ confirmed: true, cancelled: true, status: 'cancelled' }));
+    let transportSignal: AbortSignal | undefined;
+    streamMock.mockImplementation(async (...args: unknown[]) => {
+      const onFrame = args[4] as (frame: AgentChatFrame) => void;
+      transportSignal = (args[5] as { signal?: AbortSignal }).signal;
+      onFrame({ event: 'accepted', issueId: 'iss-1', runId: 'run-1', runVisible: true });
+      await new Promise<void>((resolve) => transportSignal?.addEventListener('abort', () => resolve(), { once: true }));
+      onFrame({ event: 'error', detail: 'aborted' });
+    });
+    const pending = execAgentViaGateway('/gw', agent('a', 'A'), 'msg', { signal: controller.signal, cancelRun });
+    await vi.waitFor(() => expect(transportSignal).toBeTruthy());
+    controller.abort();
+    const result = await pending;
+    expect(transportSignal).not.toBe(controller.signal);
+    expect(cancelRun).toHaveBeenCalledWith('/gw', expect.anything(), 'iss-1', 'run-1');
+    expect(result).toMatchObject({ ok: false, cancelled: true, detail: '已取消' });
+  });
+
+  it('does not detach or claim Stop when native cancellation fails', async () => {
+    const controller = new AbortController();
+    const cancelRun = vi.fn(async () => ({ confirmed: false, cancelled: false, status: 'running', detail: 'cancel rejected' }));
+    let emit!: (frame: AgentChatFrame) => void;
+    let finish!: () => void;
+    let transportSignal: AbortSignal | undefined;
+    streamMock.mockImplementation((...args: unknown[]) => {
+      emit = args[4] as (frame: AgentChatFrame) => void;
+      transportSignal = (args[5] as { signal?: AbortSignal }).signal;
+      emit({ event: 'accepted', issueId: 'iss-1', runId: 'run-1', runVisible: true });
+      return new Promise<void>((resolve) => { finish = resolve; });
+    });
+    const pending = execAgentViaGateway('/gw', agent('a', 'A'), 'msg', { signal: controller.signal, cancelRun });
+    await vi.waitFor(() => expect(transportSignal).toBeTruthy());
+    controller.abort();
+    await vi.waitFor(() => expect(cancelRun).toHaveBeenCalled());
+    expect(transportSignal?.aborted).toBe(false);
+    emit({ event: 'delta', text: '仍然完成' });
+    emit({ event: 'done', status: 'succeeded' });
+    finish();
+    await expect(pending).resolves.toMatchObject({ ok: true, output: '仍然完成' });
   });
 
   it('an unbound node is refused up front (defensive; preflight already gates)', async () => {
@@ -381,6 +450,7 @@ describe('createGatewayExecutor', () => {
       inflight += 1;
       seen.max = Math.max(seen.max, inflight);
       await new Promise((r) => setTimeout(r, 5));
+      (_args[4] as (f: AgentChatFrame) => void)({ event: 'delta', text: 'done' });
       (_args[4] as (f: AgentChatFrame) => void)({ event: 'done', status: 'succeeded' });
       inflight -= 1;
     });

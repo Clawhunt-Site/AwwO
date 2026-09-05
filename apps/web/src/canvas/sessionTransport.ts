@@ -23,6 +23,7 @@ import {
   type AgentChatFrame,
 } from '../canvasAgentChat';
 import type { SessionNode } from './canvasDoc';
+import { mergePersistedManualConversations } from './runRecoveryDocument';
 import * as sessions from './sessions';
 import { sessionStoreKey } from './nodeThreads';
 
@@ -65,6 +66,7 @@ export function statusLabel(status: string): string {
 // the same tile supersede each other correctly rather than interleaving.
 
 const activeStream = new Map<string, symbol>();
+const activeRestore = new Map<string, symbol>();
 
 /** Claim the node's stream slot; the returned token identifies this stream. */
 export function beginStream(nodeId: string): symbol {
@@ -100,6 +102,7 @@ export function markLocalSend(nodeId: string): void {
 export function forgetNode(nodeId: string): void {
   localSend.delete(nodeId);
   activeStream.delete(nodeId);
+  activeRestore.delete(nodeId);
 }
 
 // ---- history restore -------------------------------------------------------------------------
@@ -126,29 +129,45 @@ export async function restoreHistory({ gatewayBase, node, signal }: RestoreHisto
     sessions.setHistory(storeKey, 'loaded');
     return;
   }
+  const restoreToken = Symbol('canvas-history-restore');
+  activeRestore.set(storeKey, restoreToken);
   sessions.setHistory(storeKey, 'loading');
 
+  const stillCurrent = () => activeRestore.get(storeKey) === restoreToken;
+  const finish = (state: sessions.HistoryState) => {
+    if (!stillCurrent()) return;
+    activeRestore.delete(storeKey);
+    sessions.setHistory(storeKey, state);
+  };
+
   const index = await fetchConversationIndex(gatewayBase, binding.companyId, signal);
-  if (signal?.aborted) return;
+  if (signal?.aborted) { finish('unloaded'); return; }
+  if (!stillCurrent()) return;
   if (index === null) {
-    sessions.setHistory(storeKey, 'unreadable');
+    finish('unreadable');
     return;
   }
 
   const stored = await fetchConversationMessages(gatewayBase, binding.companyId, node.issueId, signal);
-  if (signal?.aborted) return;
+  if (signal?.aborted) { finish('unloaded'); return; }
+  if (!stillCurrent()) return;
   if (stored === null) {
-    sessions.setHistory(storeKey, 'unreadable');
+    finish('unreadable');
     return;
   }
   // The operator (or a run) already wrote live turns while this was loading — keep them.
   // The stored thread is the same issue, so the next turn still continues it.
   if (localSend.has(storeKey)) {
-    sessions.setHistory(storeKey, 'loaded');
+    finish('loaded');
     return;
   }
-  if (stored.length) sessions.replaceTurns(storeKey, stored.map((m) => ({ role: m.role, text: m.text })));
-  sessions.setHistory(storeKey, 'loaded');
+  const merged = mergePersistedManualConversations(node, stored.map((m) => ({ role: m.role, text: m.text })));
+  if (!merged) {
+    finish('unreadable');
+    return;
+  }
+  if (merged.length) sessions.replaceTurns(storeKey, merged);
+  finish('loaded');
 }
 
 // ---- send ------------------------------------------------------------------------------------
@@ -186,6 +205,7 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
   // NEXT turn must continue this thread, not fork a second conversation with the same agent.
   let issueId: string | undefined = node.issueId ?? undefined;
   let gotText = false;
+  let terminal = false;
   const token = beginStream(storeKey);
 
   const reportIssue = (next: string) => {
@@ -198,7 +218,7 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
     // Drop frames from a SUPERSEDED stream (a newer send, or a graph run took this tile over):
     // a late 'accepted' must not report a stale issueId, and a late error must not append to a
     // conversation that has already moved on.
-    if (signal?.aborted || !isStreamCurrent(storeKey, token)) return;
+    if (signal?.aborted || terminal || !isStreamCurrent(storeKey, token)) return;
     switch (f.event) {
       case 'accepted':
         reportIssue(f.issueId);
@@ -218,14 +238,17 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
         sessions.setStatus(storeKey, f.status);
         break;
       case 'done':
+        terminal = true;
         if (!gotText) sessions.patchTurn(storeKey, agentTurnId, COPY.doneEmpty(statusLabel(f.status)), 'info');
         break;
       case 'no_run':
+        terminal = true;
         // The message DID land on this issue even though no run surfaced — keep the thread.
         reportIssue(f.issueId);
         if (!gotText) sessions.patchTurn(storeKey, agentTurnId, COPY.noRun(f.detail), 'warn');
         break;
       case 'error': {
+        terminal = true;
         // A stop the operator asked for is reported honestly as a stop, not as a failure.
         const aborted = f.detail === 'aborted';
         const text = aborted ? COPY.stopped : COPY.errorPrefix + f.detail;

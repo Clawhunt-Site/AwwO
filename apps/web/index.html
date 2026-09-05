@@ -3,6 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Resolve the persisted language before first paint so the static startup surface and
+      // React use the same copy. Storage can be unavailable in hardened webviews.
+      (function () {
+        var stored = null;
+        try { stored = window.localStorage.getItem('superclaw_locale'); } catch (e) { /* host language fallback */ }
+        var locale = stored === 'zh' || stored === 'en'
+          ? stored
+          : (/^zh(?:-|$)/i.test(window.navigator.language || '') ? 'zh' : 'en');
+        document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+        window.__awwoStartupCopy = locale === 'zh' ? {
+          label: 'AwwO 启动', welcome: '欢迎来到 AwwO', loading: '正在启动引擎…',
+          failed: 'AwwO 未能启动', detail: '界面没有加载出来（脚本未能初始化）。请退出后重试；若反复出现，请反馈这一屏。'
+        } : {
+          label: 'AwwO startup', welcome: 'Welcome to AwwO', loading: 'Starting the engine…',
+          failed: 'AwwO failed to start', detail: 'The interface did not load because its scripts could not initialize. Exit and retry; if this keeps happening, share a screenshot of this screen.'
+        };
+      })();
+    </script>
     <title>AwwO · Agent Workspace</title>
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
@@ -218,11 +237,23 @@
           <span style="font:700 36px/1 system-ui;color:#286454;letter-spacing:-3px">Aw</span>
         </div>
         <div class="startup-copy">
-          <span class="startup-product-name">欢迎来到 AwwO</span>
-          <span>正在启动引擎…</span>
+          <span class="startup-product-name">Welcome to AwwO</span>
+          <span>Starting the engine…</span>
         </div>
       </section>
     </div>
+    <script>
+      (function () {
+        var copy = window.__awwoStartupCopy;
+        var splash = document.getElementById('superclaw-startup-splash');
+        if (!copy || !splash) return;
+        var card = splash.querySelector('.startup-card');
+        if (card) card.setAttribute('aria-label', copy.label);
+        var lines = splash.querySelectorAll('.startup-copy span');
+        if (lines[0]) lines[0].textContent = copy.welcome;
+        if (lines[1]) lines[1].textContent = copy.loading;
+      })();
+    </script>
     <div id="root"></div>
     <script>
       // Non-React safety net for the desktop shell. If the bundle never boots —
@@ -244,9 +275,19 @@
           if (logo) logo.style.animation = 'none';
           var copy = splash.querySelector('.startup-copy');
           if (copy) {
-            copy.innerHTML =
-              '<span class="startup-product-name">AwwO 未能启动</span>' +
-              '<span style="font-size:14px;opacity:.8">界面没有加载出来（脚本未能初始化）。请退出后重试；若反复出现，请反馈这一屏。</span>';
+            var startupCopy = window.__awwoStartupCopy || {
+              failed: 'AwwO failed to start',
+              detail: 'The interface did not load because its scripts could not initialize. Exit and retry.'
+            };
+            copy.textContent = '';
+            var titleLine = document.createElement('span');
+            titleLine.className = 'startup-product-name';
+            titleLine.textContent = startupCopy.failed;
+            var detailLine = document.createElement('span');
+            detailLine.style.cssText = 'font-size:14px;opacity:.8';
+            detailLine.textContent = startupCopy.detail;
+            copy.appendChild(titleLine);
+            copy.appendChild(detailLine);
           }
         }, 15000);
       })();

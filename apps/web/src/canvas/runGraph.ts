@@ -19,10 +19,12 @@ import type { CanvasEdge, CanvasNode, FormNode, SessionNode } from './canvasDoc'
 import { parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
 import { reconcileEdges } from './ports';
 
-export type RunNodeState = 'waiting' | 'running' | 'done' | 'failed' | 'blocked' | 'cached';
+export type RunNodeState = 'waiting' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled' | 'cached';
 
 export interface RunNodeStatus {
   state: RunNodeState;
+  /** Transport ended without proof the native execution ended; recovery still owns the lock. */
+  unconfirmed?: boolean;
   /** Honest context: failure detail, block reason, or the run's final status label. */
   detail?: string;
   /** The node's captured output (form serialization / the agent turn's streamed text). */
@@ -31,6 +33,9 @@ export interface RunNodeStatus {
 
 export interface ExecAgentResult {
   ok: boolean;
+  unconfirmed?: boolean;
+  /** True only after the backing native run (or its not-yet-claimed wake) was confirmed stopped. */
+  cancelled?: boolean;
   /** Streamed text (kept even on failure — a partial output is still evidence). */
   output: string;
   detail: string;
@@ -67,6 +72,7 @@ export interface RunSummary {
   done: number;
   failed: number;
   blocked: number;
+  cancelled: number;
   /** Upstreams that contributed a stored output instead of executing. */
   cached: number;
   /** How many nodes this run was allowed to execute (the scope), not how many exist. */
@@ -100,20 +106,29 @@ export function findCycle(nodes: ReadonlyArray<CanvasNode>, edges: ReadonlyArray
 }
 
 /** Pre-flight problems that make a run impossible — reported up front, never mid-run. */
-export function preflightGraph(
+export type PreflightIssueCode = 'empty_graph' | 'empty_scope' | 'unbound_nodes' | 'multiple_inputs' | 'missing_inputs' | 'cycle';
+export interface PreflightIssue {
+  code: PreflightIssueCode;
+  values: Record<string, string | number | string[]>;
+  /** Backward-compatible localized detail; new UI maps code+values through its locale catalog. */
+  message: string;
+}
+
+export function preflightGraphIssue(
   nodes: ReadonlyArray<CanvasNode>,
   edges: ReadonlyArray<CanvasEdge>,
   scope?: ReadonlyArray<string>,
-): string | null {
-  if (nodes.length === 0) return '画布上还没有节点。';
+): PreflightIssue | null {
+  if (nodes.length === 0) return { code: 'empty_graph', values: {}, message: '画布上还没有节点。' };
   // Only nodes that will actually EXECUTE are validated. Refusing a whole run because an unwired
   // scratch tile in the corner has no agent bound made the canvas unusable as a place to think.
   const inScope = scope ? new Set(scope) : null;
   const runnable = inScope ? nodes.filter((n) => inScope.has(n.id)) : nodes;
-  if (runnable.length === 0) return '没有选中要运行的节点。';
+  if (runnable.length === 0) return { code: 'empty_scope', values: {}, message: '没有选中要运行的节点。' };
   const unbound = runnable.filter((n): n is SessionNode => n.kind === 'session' && !n.binding);
   if (unbound.length) {
-    return `有 ${unbound.length} 个会话节点未绑定真实 Agent：${unbound.map((n) => n.title).join('、')}。先在配置里绑定。`;
+    const titles = unbound.map((n) => n.title);
+    return { code: 'unbound_nodes', values: { count: unbound.length, titles }, message: `有 ${unbound.length} 个会话节点未绑定真实 Agent：${titles.join('、')}。先在配置里绑定。` };
   }
   const validEdges = reconcileEdges(nodes, edges);
   for (const node of runnable) {
@@ -123,19 +138,31 @@ export function preflightGraph(
     const local: ContractField[] = [];
     for (const field of node.contract.inputs) {
       const incoming = validEdges.filter((edge) => edge.toNode === node.id && edge.toPort === `in:${field.id}`);
-      if (incoming.length > 1) return `「${node.title}」输入「${field.label || field.id}」只能连接一个来源。`;
+      if (incoming.length > 1) {
+        const fieldName = field.label || field.id;
+        return { code: 'multiple_inputs', values: { nodeTitle: node.title, field: fieldName }, message: `「${node.title}」输入「${fieldName}」只能连接一个来源。` };
+      }
       if (!incoming.length) local.push(field);
     }
     const errors = validateContractFields(local);
-    if (errors.length) return `「${node.title}」输入未就绪：${errors.join(' ')}`;
+    if (errors.length) return { code: 'missing_inputs', values: { nodeTitle: node.title, errors, fields: local.filter(field => validateContractFields([field]).length).map(field => field.label || field.id) }, message: `「${node.title}」输入未就绪：${errors.join(' ')}` };
   }
   const cyclic = findCycle(nodes, edges);
   if (cyclic.length) {
     // Kahn leftovers include nodes DOWNSTREAM of a cycle, not only its members — say so.
     const names = cyclic.map((id) => nodes.find((n) => n.id === id)?.title ?? id);
-    return `连线存在环，以下节点无法拓扑执行：${names.join('、')}。`;
+    return { code: 'cycle', values: { titles: names }, message: `连线存在环，以下节点无法拓扑执行：${names.join('、')}。` };
   }
   return null;
+}
+
+/** Compatibility helper for callers that still render the original Chinese message. */
+export function preflightGraph(
+  nodes: ReadonlyArray<CanvasNode>,
+  edges: ReadonlyArray<CanvasEdge>,
+  scope?: ReadonlyArray<string>,
+): string | null {
+  return preflightGraphIssue(nodes, edges, scope)?.message ?? null;
 }
 
 /**
@@ -242,7 +269,7 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
   const { nodes, edges, execAgent, onStatus, signal, scope, storedOutput } = opts;
   const inScope = scope ? new Set(scope) : null;
   const scopedNodes = inScope ? nodes.filter((n) => inScope.has(n.id)) : nodes;
-  const summary: RunSummary = { ok: false, done: 0, failed: 0, blocked: 0, cached: 0, total: scopedNodes.length };
+  const summary: RunSummary = { ok: false, done: 0, failed: 0, blocked: 0, cancelled: 0, cached: 0, total: scopedNodes.length };
   if (findCycle(nodes, edges).length) return summary;
 
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
@@ -275,6 +302,7 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
     if (status.state === 'done') summary.done += 1;
     if (status.state === 'failed') summary.failed += 1;
     if (status.state === 'blocked') summary.blocked += 1;
+    if (status.state === 'cancelled') summary.cancelled += 1;
     if (status.state === 'cached') summary.cached += 1;
     onStatus(nodeId, status);
   };
@@ -311,7 +339,7 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
       const deps = dependenciesOf(id);
       const upstreamOk = await Promise.all(deps.map((d) => exec(d.fromNode)));
       if (signal?.aborted) {
-        set(id, { state: 'blocked', detail: '已停止' });
+        set(id, { state: 'cancelled', detail: '已取消' });
         return false;
       }
       if (upstreamOk.some((r) => !r)) {
@@ -346,8 +374,12 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
       } catch (err) {
         result = { ok: false, output: '', detail: err instanceof Error ? err.message : '执行器异常' };
       }
-      if (signal?.aborted) {
-        set(id, { state: 'blocked', detail: '已停止' });
+      if (result.unconfirmed) {
+        set(id, { state: 'running', unconfirmed: true, output: result.output || undefined, detail: result.detail });
+        return false;
+      }
+      if (result.cancelled) {
+        set(id, { state: 'cancelled', output: result.output || undefined, detail: result.detail });
         return false;
       }
       if (result.ok) {

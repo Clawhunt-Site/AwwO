@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
+import { canvasText } from '../src/canvas/i18n';
 
 afterEach(cleanup);
 
@@ -19,7 +20,7 @@ describe('canvas assistant UI', () => {
     expect(screen.getByRole('button', { name: '生成画布' })).toBeDisabled();
     const examples = screen.getByRole('group', { name: '需求示例' }).querySelectorAll('button');
     expect(examples).toHaveLength(3);
-    const example = '做一个有用户登录、权限和数据看板的SaaS产品';
+    const example = canvasText('zh', 'assistant.exampleSaas');
     fireEvent.click(screen.getByRole('button', { name: example }));
     expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveValue(example);
     expect(send).not.toHaveBeenCalled();

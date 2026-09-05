@@ -1,0 +1,26 @@
+.awwo-account-dialog {
+  width: min(800px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  margin: auto;
+  padding: 0;
+  color: var(--text-primary, #20352d);
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-light, #d9e2dc);
+  border-radius: 16px;
+  box-shadow: 0 24px 80px #0003;
+}
+.awwo-account-dialog::backdrop { background: #12251d66; }
+.awwo-account-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-light, #d9e2dc);
+}
+.awwo-account-dialog-header h2 { margin: 0; font-size: 16px; }
+.awwo-account-dialog-body { padding: 20px; overflow: auto; }
+@media (max-width: 480px) {
+  .awwo-account-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .awwo-account-dialog-header, .awwo-account-dialog-body { padding: 12px; }
+}

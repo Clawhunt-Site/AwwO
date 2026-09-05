@@ -1,4 +1,5 @@
 import React from 'react';
+import { readInitialLocale } from './locale';
 
 type ErrorBoundaryProps = {
   children: React.ReactNode;
@@ -26,7 +27,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     // Surface to the console (devtools / Tauri logs) AND keep it on-screen.
     // eslint-disable-next-line no-console
-    console.error('[ClawHunt] startup/render error:', error, info.componentStack);
+    console.error('[AwwO] startup/render error:', error, info.componentStack);
     this.setState({ info: info.componentStack ?? null });
     const splash = typeof document !== 'undefined' ? document.getElementById('superclaw-startup-splash') : null;
     splash?.remove();
@@ -35,12 +36,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     const { error, info } = this.state;
     if (!error) return this.props.children;
-    const isZh = typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('zh');
+    const isZh = readInitialLocale() === 'zh';
     return (
       <main className="startup-screen" role="alert" aria-live="assertive">
         <section
           className="startup-card"
-          aria-label="ClawHunt error"
+          aria-label={isZh ? 'AwwO 启动错误' : 'AwwO startup error'}
           style={{
             // .startup-card is now a transparent, centered splash column; the error
             // card needs its own bordered box + left alignment, so restore those here.
@@ -56,7 +57,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           }}
         >
           <div className="startup-copy" style={{ gap: 8 }}>
-            <span className="startup-product-name">{isZh ? 'ClawHunt 启动失败' : 'ClawHunt failed to start'}</span>
+            <span className="startup-product-name">{isZh ? 'AwwO 启动失败' : 'AwwO failed to start'}</span>
             <span>
               {isZh
                 ? '界面渲染时出错。请把这一屏截图发给支持，下面是错误详情：'

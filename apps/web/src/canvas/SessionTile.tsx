@@ -47,6 +47,9 @@ import { AgentGlyph, AgentTemplateDetails } from './AgentTemplateDetails';
 import { activeNodeThread, getNodeThreads, createNodeThread, selectNodeThread, updateNodeDraft, sessionStoreKey } from './nodeThreads';
 import { prepareNodeConversation, type NodeConversationContext } from './nodeConversation';
 import './awwo-node.css';
+import { canvasText, useCanvasI18n, type CanvasTranslate } from './i18n';
+import { recoveryDetailMessage } from './surfaceMessages';
+import type { UiLocale } from '../locale';
 
 /** Smallest a tile may be dragged to. Below this the head itself stops being readable. */
 /** Below this much travel a press is a click, not a drag (in SCREEN px, before scale). */
@@ -80,18 +83,18 @@ export const TILE_COPY = {
 } as const;
 
 /** "just now" / "3 分钟前" / "2 小时前" — enough to tell a fresh result from a stale one. */
-function relativeAge(at: number, now: number): string {
+function relativeAge(at: number, now: number, locale: UiLocale = 'zh'): string {
   if (!at) return '';
   const secs = Math.max(0, Math.round((now - at) / 1000));
-  if (secs < 45) return '刚刚';
+  if (secs < 45) return canvasText(locale, 'time.justNow');
   const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins} 分钟前`;
+  if (mins < 60) return canvasText(locale, 'time.minutesAgo', { count: mins });
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  return `${Math.round(hours / 24)} 天前`;
+  if (hours < 24) return canvasText(locale, 'time.hoursAgo', { count: hours });
+  return canvasText(locale, 'time.daysAgo', { count: Math.round(hours / 24) });
 }
 
-type DotState = 'idle' | 'running' | 'done' | 'failed' | 'blocked';
+type DotState = 'idle' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled';
 
 function dotStateFor(session: NodeSession, run: RunNodeStatus | null): DotState {
   if (session.streaming) return 'running';
@@ -100,24 +103,31 @@ function dotStateFor(session: NodeSession, run: RunNodeStatus | null): DotState 
   if (run.state === 'done') return 'done';
   if (run.state === 'failed') return 'failed';
   if (run.state === 'blocked') return 'blocked';
+  if ((run.state as string) === 'cancelled') return 'cancelled';
   return 'idle';
 }
 
 /** The run badge's visible text. A blocked node shows its REASON, never the bucket word. */
-export function runBadgeText(run: RunNodeStatus): string {
+export function runBadgeText(
+  run: RunNodeStatus,
+  locale: UiLocale = 'zh',
+  translate: CanvasTranslate = (key, values) => canvasText(locale, key, values),
+): string {
+  const detail = recoveryDetailMessage(translate, run.detail);
+  if ((run.state as string) === 'cancelled') return detail || canvasText(locale, 'tile.cancelled');
   switch (run.state) {
     case 'waiting':
-      return TILE_COPY.runWaiting;
+      return canvasText(locale, 'tile.queued');
     case 'running':
-      return TILE_COPY.runRunning;
+      return canvasText(locale, 'tile.running');
     case 'done':
-      return TILE_COPY.runDone;
+      return canvasText(locale, 'tile.completed');
     case 'failed':
-      return TILE_COPY.runFailed;
+      return canvasText(locale, 'tile.failed');
     case 'blocked':
-      return run.detail || TILE_COPY.runBlocked;
+      return detail || canvasText(locale, 'tile.blocked');
     case 'cached':
-      return '复用产出';
+      return canvasText(locale, 'tile.cached');
     default:
       return '';
   }
@@ -154,10 +164,11 @@ function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<Con
   return '';
 }
 
-function glyphOf(node: CanvasNode): { glyph: string; kindClass: string; label: string } {
-  if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: TILE_COPY.formLabel };
+function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass: string; label: string } {
+  if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: canvasText(locale, 'tile.form') };
   const meta = AGENT_KIND_META[node.agentKind];
-  return { glyph: meta.glyph, kindClass: node.agentKind, label: meta.label };
+  const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : 'node.llm');
+  return { glyph: meta.glyph, kindClass: node.agentKind, label };
 }
 
 export interface SessionTileProps {
@@ -189,7 +200,7 @@ export interface SessionTileProps {
   onFitNode?: (nodeId: string) => void;
   onToggleDeliverables?: (nodeId: string, open: boolean) => void;
   /** Override the send path (tests / a host that owns the transport). */
-  onSend?: (node: SessionNode, text: string) => void;
+  onSend?: (node: SessionNode, text: string, onAccepted?: () => void) => void;
   /** Current graph-resolved inputs; absent uses this node's local contract values only. */
   conversationContext?: NodeConversationContext;
   onMove?: (nodeId: string, x: number, y: number) => void;
@@ -240,6 +251,7 @@ export function SessionTile({
   onUpdateNode,
   onRunNode,
 }: SessionTileProps) {
+  const { locale, t } = useCanvasI18n();
   const nodeId = node.id;
   const frame = geometry ?? node;
   const currentThread = node.kind === 'session' ? activeNodeThread(node) : null;
@@ -249,7 +261,7 @@ export function SessionTile({
   const session = useSyncExternalStore(sub, snap, snap);
   const [inputOpen, setInputOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
-  const template = node.kind === 'session' ? getAgentTemplateForNode(node) : undefined;
+  const template = node.kind === 'session' ? getAgentTemplateForNode(node, locale) : undefined;
   const [deliverablesOpen, setDeliverablesOpen] = useState(node.kind === 'session' && Boolean(node.deliverablesOpen));
   useEffect(() => { setDeliverablesOpen(node.kind === 'session' && Boolean(node.deliverablesOpen)); }, [node.kind, node.kind === 'session' && node.deliverablesOpen]);
   const [sessionsOpen, setSessionsOpen] = useState(true);
@@ -406,7 +418,7 @@ export function SessionTile({
     [node, conversationContext],
   );
   const send = useCallback(
-    (text: string) => {
+    (text: string, onAccepted?: () => void) => {
       if (node.kind !== 'session' || interactionLocked) return;
       if (preparedConversation.error) {
         // The composer normally blocks before clearing. Retain the user's text if readiness
@@ -415,10 +427,10 @@ export function SessionTile({
         return;
       }
       const message = preparedConversation.messagePrefix
-        ? `${preparedConversation.messagePrefix}\n\n【用户消息】\n${text}`
+        ? `${preparedConversation.messagePrefix}\n\n${t('conversation.userMessageHeader')}\n${text}`
         : text;
       if (onSend) {
-        onSend(node, message);
+        onSend(node, message, onAccepted);
         return;
       }
       // Default path: one turn on THIS node's own thread, streamed into the shared store.
@@ -429,35 +441,37 @@ export function SessionTile({
         text: message,
         onIssueId: onIssueId ? (issueId) => onIssueId(nodeId, issueId, currentThread?.id) : undefined,
       });
+      onAccepted?.();
     },
-    [node, nodeId, onSend, gatewayBase, onIssueId, preparedConversation, currentThread?.id, interactionLocked],
+    [node, nodeId, onSend, gatewayBase, onIssueId, preparedConversation, currentThread?.id, interactionLocked, t],
   );
 
-  const { kindClass, label } = glyphOf(node);
+  const { kindClass, label } = glyphOf(node, locale);
   const dot = dotStateFor(session, run);
   const preview = useMemo(() => {
     if (node.kind === 'form') {
       const filled = node.fields.find((f) => f.value.trim());
-      return filled ? `${filled.label || '字段'}: ${filled.value.trim()}` : TILE_COPY.emptyField;
+      return filled ? `${filled.label || t('common.field')}: ${filled.value.trim()}` : t('tile.emptyField');
     }
     return liveTail || node.preview;
-  }, [node, liveTail]);
+  }, [node, liveTail, t]);
 
   const bind =
     node.kind === 'session'
       ? node.bindAttempt === 'unknown'
-        ? { cls: 'pending', text: TILE_COPY.bindPending }
+        ? { cls: 'pending', text: t('tile.bindPending') }
         : node.binding
-          ? { cls: 'bound', text: TILE_COPY.bound }
-          : { cls: 'unbound', text: TILE_COPY.unbound }
+          ? { cls: 'bound', text: t('tile.bound') }
+          : { cls: 'unbound', text: t('tile.draft') }
       : null;
 
   const output = node.lastOutput ?? null;
   // Computed at render rather than ticked: the tile already re-renders on every run status change
   // and on every transcript frame, which is far more often than this string needs to move.
-  const outputAge = output ? relativeAge(output.at, Date.now()) : '';
+  const outputAge = output ? relativeAge(output.at, Date.now(), locale) : '';
 
-  const badge = run ? runBadgeText(run) : '';
+  const runDetail = run ? recoveryDetailMessage(t, run.detail) : undefined;
+  const badge = run ? runBadgeText(run, locale, t) : '';
   const showBody = lod !== 'glance';
   const tail = TAIL_LINES[lod];
   const expanded = !compact && (Boolean(configurationPanel) || lod === 'open' || lod === 'focus');
@@ -483,8 +497,8 @@ export function SessionTile({
   };
   const outputView = output ? <div className="canvas-tile-output" data-testid={`canvas-tile-output-${nodeId}`}>
     <div className="canvas-tile-output-head">
-      <span className="canvas-tile-output-label">{output.partial ? TILE_COPY.outputPartial : '上次发布的产出'}</span>
-      <span className="canvas-tile-output-meta">{output.source === 'manual' ? TILE_COPY.outputManual : ''}{outputAge}</span>
+      <span className="canvas-tile-output-label">{t(output.partial ? 'tile.partialOutput' : 'tile.lastPublished')}</span>
+      <span className="canvas-tile-output-meta">{output.source === 'manual' ? t('tile.manualOutput') : ''}{outputAge}</span>
     </div>
     <div className="canvas-tile-output-body" title={output.text}>{output.text}</div>
   </div> : null;
@@ -531,7 +545,7 @@ export function SessionTile({
           <span
             className={`canvas-tile-badge canvas-tile-badge--${run!.state}`}
             data-testid={`canvas-tile-run-${nodeId}`}
-            title={run!.detail || badge}
+            title={runDetail || badge}
           >
             {badge}
           </span>
@@ -542,29 +556,29 @@ export function SessionTile({
           </span>
         ) : null}
         {expanded && node.kind === 'session' ? <div className="awwo-node-tools">
-          {onConfigure ? <button type="button" aria-label="配置" title="配置" disabled={busy} onClick={() => onConfigure(nodeId)}><Settings2 size={15} /></button> : null}
-          <button type="button" aria-label={deliverablesOpen ? '收起交付物' : '展开交付物'} title="交付物" aria-expanded={deliverablesOpen} disabled={busy} onClick={toggleDeliverables}><PanelRight size={15} /><span>交付物</span></button>
-          {onToggleFocus ? <button type="button" aria-label="收起节点" title="收起节点" disabled={Boolean(configurationPanel) && interactionLocked} onClick={() => onToggleFocus(nodeId)}><X size={15} /></button> : null}
-          <button type="button" aria-label="更多节点操作" title="更多" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
+          {onConfigure ? <button type="button" aria-label={t('tile.configure')} title={t('tile.configure')} disabled={busy} onClick={() => onConfigure(nodeId)}><Settings2 size={15} /></button> : null}
+          <button type="button" aria-label={t(deliverablesOpen ? 'tile.collapseDeliverables' : 'tile.expandDeliverables')} title={t('tile.deliverables')} aria-expanded={deliverablesOpen} disabled={busy} onClick={toggleDeliverables}><PanelRight size={15} /><span>{t('tile.deliverables')}</span></button>
+          {onToggleFocus ? <button type="button" aria-label={t('tile.collapseNode')} title={t('tile.collapseNode')} disabled={Boolean(configurationPanel) && interactionLocked} onClick={() => onToggleFocus(nodeId)}><X size={15} /></button> : null}
+          <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenuOpen(false); } }}>
-            {onToggleFocus ? <button type="button" onClick={() => { onToggleFocus(nodeId); setMenuOpen(false); }}><Maximize2 size={14} />聚焦</button> : null}
-            {onRunNode ? <button type="button" disabled={busy || !node.binding} onClick={() => { onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />运行节点</button> : null}
-            {onDelete ? <button type="button" disabled={busy} onClick={() => onDelete(nodeId)}><Trash2 size={14} />删除</button> : null}
+            {onToggleFocus ? <button type="button" onClick={() => { onToggleFocus(nodeId); setMenuOpen(false); }}><Maximize2 size={14} />{t('tile.focus')}</button> : null}
+            {onRunNode ? <button type="button" disabled={busy || !node.binding} onClick={() => { onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
+            {onDelete ? <button type="button" disabled={busy} onClick={() => onDelete(nodeId)}><Trash2 size={14} />{t('tile.delete')}</button> : null}
           </div> : null}
         </div> : null}
         {compact ? <div className="awwo-node-tools">
-          <button type="button" aria-label="更多节点操作" title="更多" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
+          <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu">
-            {onConfigure ? <button type="button" disabled={busy} onClick={() => { onConfigure(nodeId); setMenuOpen(false); }}><Settings2 size={14} />配置</button> : null}
-            {onRunNode ? <button type="button" disabled={busy || (node.kind === 'session' && !node.binding)} onClick={() => { onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />运行节点</button> : null}
-            {onDelete ? <button type="button" disabled={busy} onClick={() => onDelete(nodeId)}><Trash2 size={14} />删除</button> : null}
+            {onConfigure ? <button type="button" disabled={busy} onClick={() => { onConfigure(nodeId); setMenuOpen(false); }}><Settings2 size={14} />{t('tile.configure')}</button> : null}
+            {onRunNode ? <button type="button" disabled={busy || (node.kind === 'session' && !node.binding)} onClick={() => { onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
+            {onDelete ? <button type="button" disabled={busy} onClick={() => onDelete(nodeId)}><Trash2 size={14} />{t('tile.delete')}</button> : null}
           </div> : null}
         </div> : null}
       </div>
 
-      {compact && node.kind === 'session' ? <button className="awwo-compact-open" style={{ fontSize: Math.min(16, 11 / Math.max(.4, scale)) }} type="button" aria-label={`打开 ${node.title}`} onClick={() => onToggleFocus?.(nodeId)}>
-        <span className="awwo-compact-summary">{preview || (node.lastOutput ? '交付物已更新' : currentThread?.lastOutput ? '可查看历史交付物' : node.contract?.outputs.length ? `交付：${node.contract.outputs.map(field => field.label).join(' / ')}` : '还没有交付物')}</span>
-        <span className="awwo-compact-footer"><span>{getNodeThreads(node).length} Session{node.lastOutput || currentThread?.lastOutput ? ' · 有交付物' : ''}</span><span>打开<ChevronRight size={13} /></span></span>
+      {compact && node.kind === 'session' ? <button className="awwo-compact-open" style={{ fontSize: Math.min(16, 11 / Math.max(.4, scale)) }} type="button" aria-label={t('tile.openSession', { title: node.title })} onClick={() => onToggleFocus?.(nodeId)}>
+        <span className="awwo-compact-summary">{preview || (node.lastOutput ? t('tile.deliveryUpdated') : currentThread?.lastOutput ? t('tile.historicalAvailable') : node.contract?.outputs.length ? t('tile.deliverySummary', { fields: node.contract.outputs.map(field => field.label).join(' / ') }) : t('tile.noDeliverables'))}</span>
+        <span className="awwo-compact-footer"><span>{getNodeThreads(node).length} Session{node.lastOutput || currentThread?.lastOutput ? t('tile.hasDeliverables') : ''}</span><span>{t('tile.open')}<ChevronRight size={13} /></span></span>
       </button> : !showBody && !configurationPanel ? (
         // glance: identity only. The preview line is PERSISTED on the node, so a freshly reloaded
         // canvas reads correctly before any history has been fetched.
@@ -577,55 +591,55 @@ export function SessionTile({
             <div className="canvas-form-fields">
               {node.fields.map((f) => (
                 <div className="canvas-form-field" key={f.id}>
-                  <span className="canvas-form-field-label">{f.label || '字段'}</span>
+                  <span className="canvas-form-field-label">{f.label || t('common.field')}</span>
                   <span className={`canvas-form-field-value${f.value.trim() ? '' : ' canvas-form-field-value--empty'}`}>
-                    {f.value.trim() || TILE_COPY.emptyField}
+                    {f.value.trim() || t('tile.emptyField')}
                   </span>
                 </div>
               ))}
             </div>
           ) : (
             <div className={`awwo-node-workbench${deliverablesOpen || configurationPanel ? ' has-deliverables' : ''}`}>
-              {expanded && sessionsOpen ? <nav className="awwo-session-sidebar" aria-label="Session 管理">
-                <div className="awwo-session-heading"><span>Sessions</span><button type="button" aria-label="收起 Session 列表" title="收起列表" onClick={() => setSessionsOpen(false)}><PanelLeftClose size={14} /></button></div>
-                <button className="awwo-session-new" type="button" aria-label="新建 Session" disabled={readOnly} onClick={() => changeThread()}><Plus size={14} />新建</button>
+              {expanded && sessionsOpen ? <nav className="awwo-session-sidebar" aria-label={t('tile.sessionManagement')}>
+                <div className="awwo-session-heading"><span>{t('tile.sessions')}</span><button type="button" aria-label={t('tile.collapseSessions')} title={t('tile.collapseList')} onClick={() => setSessionsOpen(false)}><PanelLeftClose size={14} /></button></div>
+                <button className="awwo-session-new" type="button" aria-label={t('tile.newSession')} disabled={readOnly} onClick={() => changeThread()}><Plus size={14} />{t('tile.new')}</button>
                 <div className="awwo-session-list">{getNodeThreads(node).map(thread => <button key={thread.id} type="button" className={thread.id === currentThread?.id ? 'is-active' : ''}
-                  aria-label={`打开 ${thread.title}`} aria-current={thread.id === currentThread?.id ? 'page' : undefined}
+                  aria-label={t('tile.openSession', { title: thread.title })} aria-current={thread.id === currentThread?.id ? 'page' : undefined}
                   disabled={readOnly} onClick={() => changeThread(thread.id)} title={thread.preview || thread.title}>
                   <MessageSquare size={13} /><span>{thread.title}</span>
                 </button>)}</div>
-                <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setTemplateOpen(false); }}><ArrowDownToLine size={14} />输入</button>
+                <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setTemplateOpen(false); }}><ArrowDownToLine size={14} />{t('tile.input')}</button>
               </nav> : null}
               <div className="awwo-node-chat">
                 {expanded ? <div className="awwo-chat-heading">
-                  {!sessionsOpen ? <button type="button" aria-label="展开 Session 列表" title="Sessions" onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
+                  {!sessionsOpen ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
                   <span>{currentThread?.title || 'Session 1'}</span>
-                  {template ? <button className="awwo-template-toggle" type="button" aria-label="模板指引" aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />模板</button> : null}
-                  {!sessionsOpen ? <button className="awwo-input-toggle" type="button" aria-label="输入" title="输入表单" aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setTemplateOpen(false); }}><ArrowDownToLine size={14} /></button> : null}
+                  {template ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
+                  {!sessionsOpen ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setTemplateOpen(false); }}><ArrowDownToLine size={14} /></button> : null}
                 </div> : null}
-                {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label="输入表单">
-                  <header><strong>输入</strong><button type="button" aria-label="收起输入" onClick={() => setInputOpen(false)}><X size={14} /></button></header>
-                  <ContractFields fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} label="输入" readOnly={readOnly} onChange={updateFields} />
+                {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
+                  <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={() => setInputOpen(false)}><X size={14} /></button></header>
+                  <ContractFields fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className="awwo-node-panel awwo-node-panel--conversation">
-                  {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label="模板指引">
-                    <header><div><strong>{template.title}</strong><span>模板参考 · 职责可在配置中调整</span></div><button type="button" aria-label="收起模板指引" onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
+                  {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
+                    <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
                     <AgentTemplateDetails template={template} contract={contract} />
                   </section> : session.turns.length === 0 && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming ?
                     <div className="awwo-node-empty" data-template={template?.id}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
-                      <strong>{template?.emptyTitle ?? '从这里开始'}</strong><span>{template?.emptyDescription ?? (node.binding ? '交代任务，开始协作。' : '连接 Agent 后开始对话')}</span>
-                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={busy} title="添加到当前 Session 草稿" onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
+                      <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding ? 'tile.startBound' : 'tile.startUnbound')}</span>
+                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={busy} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
                     : <TileTranscript turns={session.turns} history={session.history} streaming={session.streaming}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} />}
-                  {expanded ? <TileComposer draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
+                  {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     blocked={interactionLocked || !node.binding || (!onSend && !gatewayBase) || Boolean(preparedConversation.error)}
-                    blockedReason={interactionLocked ? '任务执行中，结束后可继续对话。' : !node.binding ? undefined : preparedConversation.error || (!onSend && !gatewayBase ? '对话服务尚未连接。' : undefined)} onSend={send} /> : null}
+                    blockedReason={interactionLocked ? t('tile.taskRunning') : !node.binding ? undefined : preparedConversation.error || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>
               </div>
-              {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={configurationPanel ? '节点配置' : '交付物'}>
-                {configurationPanel || <><header><span><FileText size={14} />交付物</span><button type="button" aria-label="关闭交付物" disabled={busy} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode} /></>}
+              {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
+                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span><button type="button" aria-label={t('tile.closeDeliverables')} disabled={busy} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode} /></>}
               </section> : null}
             </div>
           )}
@@ -644,17 +658,17 @@ export function SessionTile({
             <div className="canvas-tile-actions">
               {onConfigure ? (
                 <button type="button" className="canvas-tile-action" disabled={busy} onClick={() => onConfigure(nodeId)}>
-                  <Settings2 size={14} aria-hidden="true" />{TILE_COPY.configure}
+                  <Settings2 size={14} aria-hidden="true" />{t('tile.configure')}
                 </button>
               ) : null}
               {onToggleFocus ? (
                 <button type="button" className="canvas-tile-action" onClick={() => onToggleFocus(nodeId)}>
-                  <Maximize2 size={14} aria-hidden="true" />{TILE_COPY.focus}
+                  <Maximize2 size={14} aria-hidden="true" />{t('tile.focus')}
                 </button>
               ) : null}
               {onDelete ? (
                 <button type="button" className="canvas-tile-action" disabled={busy} onClick={() => onDelete(nodeId)}>
-                  <Trash2 size={14} aria-hidden="true" />{TILE_COPY.remove}
+                  <Trash2 size={14} aria-hidden="true" />{t('tile.delete')}
                 </button>
               ) : null}
 
@@ -671,7 +685,7 @@ export function SessionTile({
           type="button"
           className="canvas-tile-resize"
           data-testid={`canvas-tile-resize-${nodeId}`}
-          aria-label={`调整 ${node.title} 尺寸`}
+          aria-label={t('tile.resize', { title: node.title })}
           onPointerDown={onResizePointerDown}
           onDoubleClick={(e) => e.stopPropagation()}
         />

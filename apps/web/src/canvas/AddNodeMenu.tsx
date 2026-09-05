@@ -7,13 +7,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AgentKind } from './canvasDoc';
-import { AGENT_TEMPLATES, type AgentTemplateId } from './agentTemplates';
+import { getAgentTemplates, type AgentTemplateId } from './agentTemplates';
 import { AgentGlyph } from './AgentWorkspace';
+import { useCanvasI18n } from './i18n';
 
 /** What the menu can create: a user-authored form, or a session tile of one agent kind. */
 export type AddNodeKind = 'form' | AgentKind | AgentTemplateId;
-
-const ITEMS = AGENT_TEMPLATES;
 
 export interface AddNodeMenuProps {
   /** Position relative to the `.canvas-root` element (already converted by the caller). */
@@ -23,6 +22,8 @@ export interface AddNodeMenuProps {
 }
 
 export function AddNodeMenu({ at, onPick, onClose }: AddNodeMenuProps) {
+  const { locale, t } = useCanvasI18n();
+  const items = getAgentTemplates(locale);
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(at);
 
@@ -58,14 +59,14 @@ export function AddNodeMenu({ at, onPick, onClose }: AddNodeMenuProps) {
       className="canvas-add-menu"
       style={{ left: position.x, top: position.y }}
       role="menu"
-      aria-label="添加节点"
+      aria-label={t('node.add')}
       data-testid="canvas-add-menu"
       ref={ref}
       onPointerDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="canvas-add-menu-title">添加 Agent</div>
-      {ITEMS.map((item) => (
+      <div className="canvas-add-menu-title">{t('node.addAgent')}</div>
+      {items.map((item) => (
         <button
           key={item.id}
           type="button"

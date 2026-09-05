@@ -77,6 +77,9 @@ import {
   X,
 } from 'lucide-react';
 import { CanvasSurface } from './canvas/CanvasSurface';
+import { CanvasAccountControl } from './CanvasAccountControl';
+import { createCanvasRuntimeReader } from './canvasRuntimeReader';
+import { LocaleProvider, LOCALE_STORAGE_KEY, localeHtmlLang, readInitialLocale, type UiLocale } from './i18n';
 import {
   buildDesktopApiUrl,
   buildDesktopEventStreamUrl,
@@ -2095,14 +2098,13 @@ const ACTIVE_RUN_STATUSES = new Set(['created', 'queued', 'running', 'verifying'
 // 与内核 display_contracts.SNAPSHOT_STATES 保持一致。
 const SNAPSHOT_STATES = new Set(['completed', 'failed', 'cancelled', 'WAITING_FOR_HUMAN_GATE']);
 
-export type Locale = 'en' | 'zh';
+export type Locale = UiLocale;
 type AppTheme = 'light' | 'dark';
 // Appearance is a fixed light/dark choice — the "follow system" option was removed,
 // so the preference no longer carries 'system' (DesktopThemePreference still accepts
 // it for the desktop shell, but the web surface only ever sends light/dark).
 export type AppThemePreference = 'light' | 'dark';
 
-const LOCALE_STORAGE_KEY = 'superclaw_locale';
 const THEME_STORAGE_KEY = 'superclaw_theme';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'superclaw_sidebar_collapsed';
 // The initial sidebar-collapsed state depends ONLY on the user's explicit stored preference —
@@ -4181,9 +4183,6 @@ const APP_COPY = {
 
 export type AppCopyKey = keyof typeof APP_COPY.en;
 
-function readInitialLocale(): Locale {
-  return localStorage.getItem(LOCALE_STORAGE_KEY) === 'zh' ? 'zh' : 'en';
-}
 
 function isThemePreference(value: string | null): value is AppThemePreference {
   return THEME_PREFERENCES.includes(value as AppThemePreference);
@@ -5167,6 +5166,7 @@ function NotificationCenter({
 
 export function App() {
   const desktopInvoke = useMemo(() => detectDesktopInvoke(), []);
+  const canvasRuntimeReader = useMemo(() => createCanvasRuntimeReader(), []);
   const desktopMode = Boolean(desktopInvoke);
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
@@ -5820,6 +5820,7 @@ export function App() {
     typeof window === 'undefined' ? CONTEXT_PANEL_MAX_WIDTH * 3 : window.innerWidth,
   );
   const [locale, setLocale] = useState<Locale>(() => readInitialLocale());
+  useEffect(() => { document.documentElement.lang = localeHtmlLang(locale); }, [locale]);
   const [tourOpen, setTourOpen] = useState(false);
   const tourPromptedRef = useRef(false);
   const [themePreference, setThemePreference] = useState<AppThemePreference>(() => readInitialThemePreference());
@@ -6970,16 +6971,20 @@ export function App() {
 	    // eslint-disable-next-line react-hooks/exhaustive-deps
 	  }, [clawHuntRuntimeAccountSignedIn, clawHuntAccountKey, apiReady]);
   useEffect(() => {
-    if (!apiReady) return;
+    if (!apiReady || nodeCanvasMode) return;
     void loadAccountTokenUsage(accountTokenUsageMode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiReady, accountTokenUsageMode]);
+  }, [apiReady, accountTokenUsageMode, nodeCanvasMode]);
   const formatAppCopy = (key: AppCopyKey, values: Record<string, string | number>) =>
     t(key).replace(/\{(\w+)\}/g, (_, name: string) => String(values[name] ?? `{${name}}`));
 
   function switchLocale(nextLocale: Locale) {
     setLocale(nextLocale);
-    localStorage.setItem(LOCALE_STORAGE_KEY, nextLocale);
+    try {
+      localStorage.setItem(LOCALE_STORAGE_KEY, nextLocale);
+    } catch {
+      // A restricted webview can still switch language for the current visit.
+    }
   }
 
   function switchThemePreference(nextPreference: AppThemePreference) {
@@ -7276,7 +7281,7 @@ export function App() {
   // before any token exists), an initial 401 is retried with the new token instead of
   // leaving the Color Scheme panel hidden forever. Mirrors the other authed effects.
   useEffect(() => {
-    if (!apiReady) return;
+    if (!apiReady || nodeCanvasMode) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -7292,7 +7297,7 @@ export function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- readJson identity is per-render; depending on it would loop. controlToken/desktopSession are the auth inputs that gate a retry.
-  }, [apiReady, controlToken, desktopSession]);
+  }, [apiReady, controlToken, desktopSession, nodeCanvasMode]);
 
   useEffect(() => {
     if (!sidebarContextMenu) return;
@@ -11143,11 +11148,11 @@ export function App() {
   }
 
   useEffect(() => {
-    if (!apiReady) return;
+    if (!apiReady || nodeCanvasMode) return;
     void readJson('/api/pay-switch/status')
       .then((data) => setPaySwitch(data))
       .catch(() => setPaySwitch({ mode: 'governed_optional' }));
-  }, [apiReady, desktopSession, effectiveControlToken]);
+  }, [apiReady, desktopSession, effectiveControlToken, nodeCanvasMode]);
 
   useEffect(() => {
     if (!apiReady || nodeCanvasMode) return;
@@ -13503,17 +13508,19 @@ export function App() {
       onPointerCancel={handleMacosWindowDragPointerEnd}
       onContextMenu={handleWorkbenchContextMenu}
     >
-      <div className="macos-window-drag-region" data-tauri-drag-region="" aria-hidden="true" />
+      {desktopMode && workspaceSurface !== 'canvas' ? (
+        <div className="macos-window-drag-region" data-tauri-drag-region="" aria-hidden="true" />
+      ) : null}
       {nodeCanvasMode && startupGateReady && canvasStartupStatus !== 'ready' ? (
         <div
           role={canvasStartupStatus === 'unavailable' ? 'alert' : 'status'}
           style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 1200, maxWidth: 'calc(100vw - 32px)', padding: '12px 16px', borderRadius: 12, background: 'var(--bg-panel, #fff)', color: 'var(--text-primary, #222)', border: '1px solid var(--border-color, #d3d9d6)', boxShadow: '0 4px 20px #0002' }}
         >
           {canvasStartupStatus === 'unavailable'
-            ? '服务尚未就绪：Node 服务或 Agent 网关未连接。请检查本地服务后重试。'
-            : '正在检查 Node 服务与 Agent 网关…'}
+            ? (locale === 'zh' ? '服务尚未就绪：Node 服务或 Agent 网关未连接。请检查本地服务后重试。' : 'Services are not ready. Check the local control plane and Agent gateway, then retry.')
+            : (locale === 'zh' ? '正在检查 Node 服务与 Agent 网关…' : 'Checking the control plane and Agent gateway…')}
           {canvasStartupStatus === 'unavailable' ? (
-            <button type="button" onClick={() => setCanvasStartupAttempt((attempt) => attempt + 1)} style={{ marginLeft: 12 }}>重试连接</button>
+            <button type="button" onClick={() => setCanvasStartupAttempt((attempt) => attempt + 1)} style={{ marginLeft: 12 }}>{locale === 'zh' ? '重试连接' : 'Retry connection'}</button>
           ) : null}
         </div>
       ) : null}
@@ -17594,49 +17601,36 @@ export function App() {
       ) : null}
 
       {workspaceSurface === 'canvas' ? (
+        <LocaleProvider locale={locale}>
         <section
           className="workspace-page canvas-page"
           aria-label={locale === 'zh' ? '画布' : 'Canvas'}
           style={{ display: 'flex', flexDirection: 'column' }}
         >
           <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-            <CanvasSurface runtimeReadJson={readJson} onCreateCompany={() => setWorkspaceSurface('team')}
+            <CanvasSurface runtimeReadJson={nodeCanvasMode ? canvasRuntimeReader : readJson} onCreateCompany={() => setWorkspaceSurface('team')}
               onOpenSettings={() => openSettingsSurface('settings-runtime')}
               accountControl={<><button type="button" className="awwo-icon-button"
-                aria-label={activeTheme === 'dark' ? '切换浅色主题' : '切换深色主题'}
+                aria-label={locale === 'zh' ? 'Switch to English' : '切换为中文'}
+                title={locale === 'zh' ? 'Switch to English' : '切换为中文'}
+                onClick={() => switchLocale(locale === 'zh' ? 'en' : 'zh')}>
+                <span aria-hidden="true">{locale === 'zh' ? 'EN' : '中'}</span>
+              </button><button type="button" className="awwo-icon-button"
+                aria-label={locale === 'zh'
+                  ? (activeTheme === 'dark' ? '切换浅色主题' : '切换深色主题')
+                  : (activeTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme')}
                 onClick={() => switchThemePreference(activeTheme === 'dark' ? 'light' : 'dark')}>
                 {activeTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
               </button><div className="canvas-auth-chip">
-              {clawHuntSsoIdentity ? (
-                <button
-                  type="button"
-                  className="canvas-auth-chip-user"
-                  title={locale === 'zh' ? 'ClawHunt 账号 · 点击查看' : 'ClawHunt account · view'}
-                  onClick={() => openSettingsSurface('settings-clawhunt')}
-                >
-                  {clawHuntSsoIdentity.avatar_url ? (
-                    <img className="canvas-auth-avatar" src={clawHuntSsoIdentity.avatar_url} alt="" />
-                  ) : (
-                    <span className="canvas-auth-avatar canvas-auth-avatar--initial">
-                      {clawHuntSsoIdentity.username.slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-                  <span className="canvas-auth-name">{clawHuntSsoIdentity.username}</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="canvas-auth-login"
-                  onClick={() => startClawHuntAccountShortcutLogin()}
-                  disabled={Boolean(clawHuntBrowserLoginBusy)}
-                >
-                  {clawHuntBrowserLoginBusy ? '…' : t('Login ClawHunt')}
-                </button>
-              )}
+              <CanvasAccountControl locale={locale} identity={clawHuntSsoIdentity}
+                onLogin={() => { if (!clawHuntBrowserLoginBusy) void startClawHuntAccountShortcutLogin(); }}
+                onLogout={() => void logoutClawHunt()}
+                onOpenWorkspaceAuth={() => setWorkspaceSurface('team')} />
             </div></>}
             />
           </div>
         </section>
+        </LocaleProvider>
       ) : null}
 
       {imageLightbox ? (

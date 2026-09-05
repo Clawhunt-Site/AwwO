@@ -9,14 +9,14 @@ import { readSseFrames } from './sse';
 
 export type AgentChatFrame =
   // The turn landed on the agent's dedicated issue and the wake fired.
-  | { event: 'accepted'; issueId: string; runId: string | null; runVisible: boolean }
+  | { event: 'accepted'; issueId: string; runId: string | null; runVisible: boolean; operationId?: string }
   | { event: 'delta'; text: string } // a chunk of the agent's textual output
   | { event: 'phase'; phase: string; message: string | null } // progress note
   | { event: 'status'; status: string } // run status transition
   | { event: 'done'; status: string } // the run ended
   // Message delivered + agent woken, but no live run surfaced (honest, not a fake reply).
   | { event: 'no_run'; issueId: string; detail: string }
-  | { event: 'error'; detail: string };
+  | { event: 'error'; detail: string; code?: string };
 
 function s(v: unknown): string {
   return typeof v === 'string' ? v : '';
@@ -29,7 +29,8 @@ export function normalizeFrame(data: unknown): AgentChatFrame {
   const d = (data ?? {}) as Record<string, unknown>;
   switch (s(d.event)) {
     case 'accepted':
-      return { event: 'accepted', issueId: s(d.issueId), runId: typeof d.runId === 'string' ? d.runId : null, runVisible: d.runVisible === true };
+      return { event: 'accepted', issueId: s(d.issueId), runId: typeof d.runId === 'string' ? d.runId : null, runVisible: d.runVisible === true,
+        ...(s(d.operationId) ? { operationId: s(d.operationId) } : {}) };
     case 'delta':
       return { event: 'delta', text: s(d.text) };
     case 'phase':
@@ -41,7 +42,7 @@ export function normalizeFrame(data: unknown): AgentChatFrame {
     case 'no_run':
       return { event: 'no_run', issueId: s(d.issueId), detail: s(d.detail) };
     case 'error':
-      return { event: 'error', detail: s(d.detail) || 'unknown error' };
+      return { event: 'error', detail: s(d.detail) || 'unknown error', ...(s(d.code) ? { code: s(d.code) } : {}) };
     default:
       return { event: 'error', detail: `unrecognized frame: ${s(d.event) || '(none)'}` };
   }
@@ -50,7 +51,40 @@ export function normalizeFrame(data: unknown): AgentChatFrame {
 export interface StreamOpts {
   /** Reuse the agent's dedicated conversation issue (continuity across turns). */
   issueId?: string;
+  /** Stable identity for exactly one upstream mutation, persisted before POST. */
+  operationId?: string;
   signal?: AbortSignal;
+}
+
+async function responseFailure(res: Response): Promise<{ detail: string; code?: string }> {
+  const failure = typeof res.json === 'function'
+    ? await res.json().catch(() => null) as Record<string, unknown> | null
+    : null;
+  return {
+    detail: s(failure?.detail) || s(failure?.error) || `gateway responded ${res.status}`,
+    ...(s(failure?.error) ? { code: s(failure?.error) } : {}),
+  };
+}
+
+/** Persist an operation identity without sending or waking an Agent. */
+export async function prepareConversationOperation(
+  gatewayBase: string,
+  companyId: string,
+  agentId: string,
+  operationId: string,
+  message: string,
+  issueId?: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const base = (gatewayBase || '').replace(/\/+$/, '');
+  const parts = [companyId, 'agents', agentId, 'operations', operationId, 'prepare'].map(encodeURIComponent).join('/');
+  return fetch(`${base}/conversations/${parts}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ message, ...(issueId ? { issueId } : {}) }),
+    signal,
+  });
 }
 
 /** Stream one conversation turn with a SPECIFIC hired agent. Never throws — a
@@ -67,20 +101,36 @@ export async function streamAgentConversation(
   const base = (gatewayBase || '').replace(/\/+$/, '');
   const url = `${base}/conversations/${encodeURIComponent(companyId)}/agents/${encodeURIComponent(agentId)}/messages`;
   let res: Response;
+  let operationPrepared = !opts.operationId;
   try {
+    if (opts.operationId) {
+      const prepared = await prepareConversationOperation(
+        base, companyId, agentId, opts.operationId, message, opts.issueId, opts.signal,
+      );
+      if (!prepared.ok) {
+        const failure = await responseFailure(prepared);
+        onFrame({ event: 'error', detail: failure.detail, code: 'operation_prepare_failed' });
+        return;
+      }
+      operationPrepared = true;
+    }
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       credentials: 'include',
-      body: JSON.stringify({ message, ...(opts.issueId ? { issueId: opts.issueId } : {}) }),
+      body: JSON.stringify({ message, ...(opts.issueId ? { issueId: opts.issueId } : {}), ...(opts.operationId ? { operationId: opts.operationId } : {}) }),
       signal: opts.signal,
     });
   } catch (err) {
-    onFrame({ event: 'error', detail: isAbort(err) ? 'aborted' : 'network error reaching the gateway' });
+    onFrame({
+      event: 'error', detail: isAbort(err) ? 'aborted' : 'network error reaching the gateway',
+      ...(!operationPrepared ? { code: 'operation_prepare_failed' } : {}),
+    });
     return;
   }
   if (!res.ok || !res.body) {
-    onFrame({ event: 'error', detail: `gateway responded ${res.status}` });
+    const failure = await responseFailure(res);
+    onFrame({ event: 'error', ...failure });
     return;
   }
   try {
@@ -88,6 +138,41 @@ export async function streamAgentConversation(
   } catch (err) {
     onFrame({ event: 'error', detail: isAbort(err) ? 'aborted' : 'stream read error' });
   }
+}
+
+export interface ConversationOperationStatus {
+  operationId: string;
+  state: 'not_started' | 'in_flight' | 'accepted' | 'terminal' | 'rejected' | 'uncertain';
+  issueId: string | null;
+  runId: string | null;
+  terminal: boolean;
+  status: string | null;
+  output: string;
+  outputAvailable: boolean;
+  detail: string | null;
+}
+
+/** Recover an operation without sending a message, comment, or wake. Throws on an
+ * unreadable/invalid response so callers keep the durable run lock. */
+export async function fetchConversationOperation(
+  gatewayBase: string,
+  companyId: string,
+  agentId: string,
+  operationId: string,
+  signal?: AbortSignal,
+): Promise<ConversationOperationStatus> {
+  const base = gatewayBase.replace(/\/+$/, '');
+  const parts = [companyId, 'agents', agentId, 'operations', operationId].map(encodeURIComponent).join('/');
+  const response = await fetch(`${base}/conversations/${parts}`, { headers: { Accept: 'application/json' }, credentials: 'include', signal });
+  if (!response.ok) throw new Error(`operation recovery responded ${response.status}`);
+  const value = await response.json() as Partial<ConversationOperationStatus>;
+  if (value.operationId !== operationId || !['not_started', 'in_flight', 'accepted', 'terminal', 'rejected', 'uncertain'].includes(String(value.state))
+    || (value.issueId !== null && typeof value.issueId !== 'string') || (value.runId !== null && typeof value.runId !== 'string')
+    || typeof value.terminal !== 'boolean' || (value.status !== null && typeof value.status !== 'string')
+    || typeof value.output !== 'string' || typeof value.outputAvailable !== 'boolean' || (value.detail !== null && typeof value.detail !== 'string')) {
+    throw new Error('invalid operation recovery response');
+  }
+  return value as ConversationOperationStatus;
 }
 
 function isAbort(err: unknown): boolean {
@@ -161,8 +246,11 @@ export async function fetchConversationMessages(
       { headers: { Accept: 'application/json' }, credentials: 'include', signal },
     );
     if (!res.ok) return null;
-    const body = (await res.json()) as { messages?: unknown };
-    if (!Array.isArray(body?.messages)) return null;
+    const body = (await res.json()) as { messages?: unknown; complete?: unknown };
+    // A bounded server must explicitly attest that no newer tail was omitted.
+    // Missing/false metadata stays unreadable instead of replacing live UI with
+    // a partial transcript and marking it loaded.
+    if (body?.complete !== true || !Array.isArray(body.messages)) return null;
     return body.messages
       .map((raw): StoredMessage | null => {
         const d = (raw ?? {}) as Record<string, unknown>;

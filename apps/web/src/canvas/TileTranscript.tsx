@@ -14,6 +14,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { HistoryState, Turn } from './sessions';
+import { useCanvasI18n } from './i18n';
 
 export const TRANSCRIPT_COPY = {
   /** Reading the stored transcript FAILED — deliberately distinct from an empty transcript. */
@@ -36,6 +37,7 @@ export interface TileTranscriptProps {
 }
 
 export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false }: TileTranscriptProps) {
+  const { t } = useCanvasI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const shown = Number.isFinite(limit) ? turns.slice(Math.max(0, turns.length - limit)) : turns;
 
@@ -53,16 +55,16 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
     <div className="canvas-transcript">
       {history === 'unreadable' ? (
         <div className="canvas-transcript-notice" data-testid="transcript-unreadable">
-          {TRANSCRIPT_COPY.unreadable}
+          {t('transcript.unreadable')}
         </div>
       ) : null}
       <div className="canvas-transcript-scroll" ref={scrollRef} data-testid="transcript-scroll">
         {shown.length === 0 ? (
           history === 'loading' ? (
-            <div className="canvas-transcript-loading">{TRANSCRIPT_COPY.loading}</div>
+            <div className="canvas-transcript-loading">{t('transcript.loading')}</div>
           ) : history === 'unreadable' ? null : (
             <div className="canvas-transcript-empty" data-testid="transcript-empty">
-              {TRANSCRIPT_COPY.empty}
+              {t('transcript.empty')}
             </div>
           )
         ) : (
@@ -73,7 +75,7 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
             >
               {/* An empty agent turn mid-stream is the placeholder the gateway has not filled yet;
                   saying so is honest, inventing text would not be. */}
-              {turn.text || (turn.role === 'agent' && streaming ? TRANSCRIPT_COPY.thinking : '')}
+              {turn.text || (turn.role === 'agent' && streaming ? t('transcript.thinking') : '')}
             </div>
           ))
         )}

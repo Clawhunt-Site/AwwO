@@ -606,11 +606,11 @@ export function loadDocument(): CanvasDocument {
   return loadDocumentWithStatus().doc;
 }
 
-export function saveDocument(doc: CanvasDocument): void {
+export function saveDocument(doc: CanvasDocument): boolean {
   try {
     localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
+    return true;
   } catch {
-    // Quota / privacy-mode failures must never break the canvas — the doc simply won't
-    // survive the reload, which the UI treats as a fresh document.
+    return false;
   }
 }

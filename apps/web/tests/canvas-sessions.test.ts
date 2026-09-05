@@ -10,6 +10,8 @@ import type { AgentChatFrame } from '../src/canvasAgentChat';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import * as sessions from '../src/canvas/sessions';
 import { restoreHistory, sendMessage } from '../src/canvas/sessionTransport';
+import { persistRecoveredManualConversation } from '../src/canvas/runRecoveryDocument';
+import type { CanvasRunJournal } from '../src/canvas/runJournal';
 
 const streamMock = vi.fn();
 const indexMock = vi.fn();
@@ -46,6 +48,7 @@ function emitting(frames: AgentChatFrame[]) {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   sessions.resetAllSessions();
   streamMock.mockReset();
   indexMock.mockReset();
@@ -158,6 +161,17 @@ describe('restoreHistory', () => {
     expect(sessions.getSnapshot(node.id).history).toBe('unreadable');
   });
 
+  it('an aborted history restore leaves a retryable state instead of loading forever', async () => {
+    const controller = new AbortController();
+    indexMock.mockImplementation(async () => {
+      controller.abort();
+      return [];
+    });
+    const node = boundNode({ issueId: 'iss-1' });
+    await restoreHistory({ gatewayBase: '/gw', node, signal: controller.signal });
+    expect(sessions.getSnapshot(node.id).history).toBe('unloaded');
+  });
+
   it('replays THIS node own thread — the issueId asked for is the node own', async () => {
     indexMock.mockResolvedValue([
       { issueId: 'other-tile', title: '', agentId: 'ag-1', updatedAt: '2026-12-01' },
@@ -173,6 +187,30 @@ describe('restoreHistory', () => {
     await restoreHistory({ gatewayBase: '/gw', node });
     expect(messagesMock.mock.calls[0][2]).toBe('mine');
     expect(sessions.getSnapshot(node.id).turns.map((t) => t.text)).toEqual(['之前问的', '之前答的']);
+    expect(sessions.getSnapshot(node.id).history).toBe('loaded');
+  });
+
+  it('merges locally persisted recovery evidence after every fresh server-history restore', async () => {
+    const node = boundNode({ id: 'durable-manual-node', issueId: 'mine' });
+    const journal: CanvasRunJournal = {
+      version: 1, id: 'journal-1', startedAt: 100, scope: [node.id], manual: true,
+      manualMessage: 'detached question',
+      nodes: {
+        [node.id]: {
+          nodeId: node.id, threadId: 'default', companyId: 'c1', agentId: 'ag-1', issueId: 'mine',
+          runId: 'run-1', operationId: '11111111-1111-4111-8111-111111111111', state: 'done', output: 'stdout-only answer',
+        },
+      },
+    };
+    expect(persistRecoveredManualConversation(node, journal)).toBe(true);
+    indexMock.mockResolvedValue([{ issueId: 'mine', title: '', agentId: 'ag-1', updatedAt: null }]);
+    messagesMock.mockResolvedValue([{ role: 'user', text: 'older question' }]);
+
+    await restoreHistory({ gatewayBase: '/gw', node });
+
+    expect(sessions.getSnapshot(node.id).turns.map(turn => turn.text)).toEqual([
+      'older question', 'detached question', 'stdout-only answer',
+    ]);
     expect(sessions.getSnapshot(node.id).history).toBe('loaded');
   });
 
@@ -246,6 +284,19 @@ describe('sendMessage', () => {
     ]);
     expect(s.streaming).toBe(false);
     expect(s.status).toBeNull();
+  });
+
+  it('ignores every frame after the first terminal event', async () => {
+    streamMock.mockImplementation(emitting([
+      { event: 'delta', text: '最终回复' },
+      { event: 'done', status: 'succeeded' },
+      { event: 'delta', text: '迟到内容' },
+      { event: 'status', status: 'failed' },
+      { event: 'error', detail: 'late teardown' },
+    ]));
+    const node = boundNode({ issueId: 'iss-1' });
+    await sendMessage({ gatewayBase: '/gw', node, text: '在吗' });
+    expect(sessions.getSnapshot(node.id).turns.map((turn) => turn.text)).toEqual(['在吗', '最终回复']);
   });
 
   it('a run with NO text output says so instead of showing an empty reply', async () => {

@@ -18,6 +18,7 @@
 import { useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { MINIMAP, projectMinimap, type Size, type ViewportState } from './viewport';
+import { useCanvasI18n } from './i18n';
 
 const MAP_STYLE: CSSProperties = {
   position: 'fixed',
@@ -42,6 +43,7 @@ export function Minimap({
   onCenter: (wx: number, wy: number) => void;
   style?: CSSProperties;
 }) {
+  const { t } = useCanvasI18n();
   const proj = projectMinimap(boxes, view, size);
   const elRef = useRef<HTMLDivElement>(null);
   // The scrubbing pointer's id, null when idle. Tracking the id (not a boolean) plus the
@@ -67,7 +69,7 @@ export function Minimap({
       ref={elRef}
       className="canvas-minimap"
       style={{ ...MAP_STYLE, width: MINIMAP.w, height: MINIMAP.h, ...style }}
-      aria-label="小地图"
+      aria-label={t('workspace.minimap')}
       data-testid="canvas-minimap"
       onPointerDown={(e) => {
         if (e.button !== 0) return;

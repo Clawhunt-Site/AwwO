@@ -16,6 +16,8 @@
 import type { CSSProperties } from 'react';
 import type { CanvasNode } from './canvasDoc';
 import type { RunNodeStatus } from './runGraph';
+import { useCanvasI18n, type CanvasTextKey } from './i18n';
+import { recoveryDetailMessage } from './surfaceMessages';
 
 /** A node's run status enriched with the wall-clock stamps the surface recorded. */
 export interface RunView extends RunNodeStatus {
@@ -28,15 +30,16 @@ export interface RunView extends RunNodeStatus {
 // (`st-done`, `st-failed`, …) matched nothing in the stylesheet at all, which left every chip and
 // every gantt bar colourless: a failed row was indistinguishable from a completed one, in the one
 // panel whose entire job is telling them apart.
-const STATE_META: Record<RunNodeStatus['state'], { label: string }> = {
-  waiting: { label: '排队' },
-  running: { label: '▶ 运行中' },
-  done: { label: '✓ 完成' },
-  failed: { label: '失败' },
-  blocked: { label: '被阻断' },
+const STATE_META: Record<RunNodeStatus['state'], CanvasTextKey> = {
+  waiting: 'timeline.queued',
+  running: 'timeline.running',
+  done: 'timeline.done',
+  failed: 'timeline.failed',
+  blocked: 'timeline.blocked',
   // An upstream that contributed its stored output instead of executing. Deliberately its own
   // word: calling it 完成 would claim a node ran in a run it never joined.
-  cached: { label: '沿用产出' },
+  cached: 'timeline.cached',
+  cancelled: 'timeline.cancelled',
 };
 
 // Brand kind accents. These used to read `--canvas-llm/coding/image`, which exist nowhere in the
@@ -81,6 +84,7 @@ export function RunTimeline({
   onClose: () => void;
   style?: CSSProperties;
 }) {
+  const { t } = useCanvasI18n();
   const origin = runStartedAt ?? now;
   // A 1s floor keeps the very first frames from dividing by ~0 and drawing a full-width bar for
   // a node that has run for 4ms.
@@ -89,26 +93,27 @@ export function RunTimeline({
     <section
       className="canvas-runline"
       role="region"
-      aria-label="执行时间线"
+      aria-label={t('timeline.label')}
       style={{ ...DRAWER_STYLE, ...style }}
       onPointerDown={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <header className="canvas-runline-head">
-        <span className="canvas-runline-title">执行时间线</span>
-        <span className="canvas-runline-meta">按连线拓扑放行 · 上游完成才启动下游 · 状态只反映真实事件</span>
-        <button type="button" className="canvas-runline-close" aria-label="收起时间线" onClick={onClose}>
+        <span className="canvas-runline-title">{t('timeline.label')}</span>
+        <span className="canvas-runline-meta">{t('timeline.meta')}</span>
+        <button type="button" className="canvas-runline-close" aria-label={t('timeline.close')} onClick={onClose}>
           ✕
         </button>
       </header>
       <div className="canvas-runline-rows">
-        {nodes.map((node) => {
+        {nodes.filter((node) => Object.hasOwn(runs, node.id)).map((node) => {
           const run = runs[node.id];
-          const state = run?.state ?? 'waiting';
-          const meta = STATE_META[state];
+          const state = run.state;
+          const meta = t(STATE_META[state]);
+          const detail = recoveryDetailMessage(t, run.detail);
           // A blocked row says WHY it was blocked; every other state keeps its own label and
           // carries the detail in the tooltip.
-          const label = state === 'blocked' && run?.detail ? run.detail : meta.label;
+          const label = (state === 'blocked' || state === 'cancelled') && detail ? detail : meta;
           const color = KIND_COLOR[node.kind === 'form' ? 'form' : node.agentKind] ?? 'var(--muted, #8a8a8a)';
           const started = run?.startedAt;
           const ended = run?.endedAt;
@@ -117,10 +122,10 @@ export function RunTimeline({
           const elapsed = started != null ? fmtElapsed((ended ?? now) - started) : state === 'done' ? '0:00' : '—';
           const runtime =
             node.kind === 'form'
-              ? '表单'
+              ? t('timeline.form')
               : node.runtime
                 ? `${node.runtime}${node.model ? ` · ${node.model}` : ''}`
-                : '未选运行时';
+                : t('timeline.runtimeUnset');
           return (
             <div key={node.id} className="canvas-runline-row" data-testid={`runline-${node.id}`}>
               <span className="canvas-runline-name">
@@ -129,7 +134,7 @@ export function RunTimeline({
               </span>
               <span
                 className={`canvas-runline-state canvas-runline-state--${state}`}
-                title={run?.detail || undefined}
+                title={detail}
               >
                 {label}
               </span>

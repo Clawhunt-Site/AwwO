@@ -18,7 +18,7 @@ describe('AwwO conversational cards', () => {
     expect(screen.getByTestId('canvas-tile-frontend').dataset.lod).toBe('open');
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '实现登录页' } });
     fireEvent.click(screen.getByTestId('composer-send'));
-    expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ id: 'frontend' }), '实现登录页');
+    expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ id: 'frontend' }), '实现登录页', expect.any(Function));
   });
 
   it('explains the next step for a draft without verbose runtime metadata', () => {
@@ -98,9 +98,18 @@ describe('AwwO conversational cards', () => {
   it('routes a node run to its own id and displays an actual blocked reason', () => {
     const onRunNode = vi.fn();
     render(<SessionTile node={node({ binding: { companyId: 'c', agentId: 'a', agentName: '前端' } })} scale={1} focused run={{ state: 'blocked', detail: '等待后端接口' }} onRunNode={onRunNode} />);
-    expect(screen.getByTestId('canvas-tile-run-frontend').textContent).toBe('等待后端接口');
+    const badge = screen.getByTestId('canvas-tile-run-frontend');
+    expect(badge.textContent).toBe('等待后端接口');
+    expect(badge.getAttribute('title')).toBe('等待后端接口');
     fireEvent.click(screen.getByRole('button', { name: '更多节点操作' }));
     fireEvent.click(within(screen.getByTestId('canvas-tile-frontend')).getByRole('button', { name: '运行节点' }));
     expect(onRunNode).toHaveBeenCalledWith('frontend');
+  });
+
+  it('localizes a persisted recovery code in the run badge and title', () => {
+    render(<SessionTile node={node()} scale={1} focused run={{ state: 'blocked', detail: 'recovery_not_dispatched' }} />);
+    const badge = screen.getByTestId('canvas-tile-run-frontend');
+    expect(badge.textContent).toBe('页面中断前尚未下发。');
+    expect(badge.getAttribute('title')).toBe('页面中断前尚未下发。');
   });
 });

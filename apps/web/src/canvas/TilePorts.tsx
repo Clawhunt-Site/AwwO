@@ -34,6 +34,7 @@ import {
   portsFor,
 } from './ports';
 import type { ViewportState } from './viewport';
+import { useCanvasI18n, type CanvasTextKey } from './i18n';
 
 export interface WireDrag {
   from: PortRef;
@@ -204,7 +205,9 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
   };
 }
 
-const SIDE_LABEL: Record<PortSide, string> = { input: '输入', output: '输出' };
+const TYPE_LABEL: Record<DataType, CanvasTextKey> = {
+  text: 'contract.text', image: 'contract.image', number: 'contract.number', boolean: 'contract.boolean', file: 'contract.file',
+};
 
 export interface TilePortsProps {
   node: CanvasNode;
@@ -217,6 +220,7 @@ export interface TilePortsProps {
  * (`portAnchorWorld` minus the node origin) so a handle can never sit off the line that leaves it.
  */
 export function TilePorts({ node, wiring }: TilePortsProps) {
+  const { t } = useCanvasI18n();
   const interactive = wiring?.interactive ?? false;
   const [expandedLabel, setExpandedLabel] = useState<string | null>(null);
   const hasContract = node.kind === 'session' && Boolean(node.contract);
@@ -232,7 +236,9 @@ export function TilePorts({ node, wiring }: TilePortsProps) {
         // comes out wrong.
         const countLabel = p.multi && wires > 1 ? String(wires) : '';
         // Display names belong to the form; stable IDs remain exclusively in the wire payload.
-        const portLabel = hasContract ? p.label?.trim() || `未命名${SIDE_LABEL[p.side]}字段` : p.id;
+        const sideLabel = t(p.side === 'input' ? 'ports.input' : 'ports.output');
+        const typeLabel = t(TYPE_LABEL[p.dataType]);
+        const portLabel = hasContract ? p.label?.trim() || t('ports.unnamed', { side: sideLabel }) : p.id;
         const portKey = `${p.side}:${p.id}`;
         const expanded = expandedLabel === portKey;
         return (
@@ -246,10 +252,9 @@ export function TilePorts({ node, wiring }: TilePortsProps) {
             }`}
             style={{ left: anchor.x - node.x, top: anchor.y - node.y }}
             data-wires={wires || undefined}
-            title={`${portLabel} · ${p.dataType}${p.multi ? ' · 可多路输入' : ''}${wires ? ` · ${wires} 条连线` : ''}`}
-            aria-label={`${SIDE_LABEL[p.side]}端口 ${portLabel}（${p.dataType}）${
-              wires ? `，已连 ${wires} 条` : '，未连接'
-            }`}
+            title={`${portLabel} · ${typeLabel}${p.multi ? ` · ${t('ports.multi')}` : ''}${wires ? ` · ${t('ports.wireCount', { count: wires })}` : ''}`}
+            aria-label={t('ports.port', { side: sideLabel, label: portLabel, type: typeLabel,
+              connection: wires ? t('ports.connected', { count: wires }) : t('ports.disconnected') })}
             aria-pressed={armed ? true : undefined}
             data-port-id={p.id}
             data-node-id={node.id}

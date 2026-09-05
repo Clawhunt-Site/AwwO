@@ -13,6 +13,7 @@
 
 import { useState, type KeyboardEvent } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
+import { useCanvasI18n } from './i18n';
 
 export const COMPOSER_COPY = {
   notice:
@@ -32,10 +33,13 @@ export interface TileComposerProps {
   /** An optional card-owned draft survives switching its input/output tabs. */
   draft?: string;
   onDraftChange?: (value: string) => void;
-  onSend: (text: string) => void;
+  onSend: (text: string, onAccepted?: () => void) => void;
+  /** The host acknowledges only after the message has a durable execution record. */
+  deferClear?: boolean;
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, draft, onDraftChange, onSend }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, draft, onDraftChange, onSend, deferClear = false }: TileComposerProps) {
+  const { t } = useCanvasI18n();
   const [localInput, setLocalInput] = useState('');
   const input = draft ?? localInput;
   const setInput = (value: string) => { setLocalInput(value); onDraftChange?.(value); };
@@ -44,8 +48,8 @@ export function TileComposer({ streaming, blocked = false, blockedReason, draft,
   const send = () => {
     const message = input.trim();
     if (!message || disabled) return;
-    setInput('');
-    onSend(message);
+    if (deferClear) onSend(message, () => setInput(''));
+    else { setInput(''); onSend(message); }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -60,10 +64,10 @@ export function TileComposer({ streaming, blocked = false, blockedReason, draft,
     <div className="canvas-composer">
       {blocked ? (
         <div className="canvas-composer-blocked" data-testid="composer-blocked">
-          {blockedReason || COMPOSER_COPY.unbound}
+          {blockedReason || t('composer.unbound')}
         </div>
       ) : (
-        <div className="canvas-composer-notice">{COMPOSER_COPY.notice}</div>
+        <div className="canvas-composer-notice">{t('composer.notice')}</div>
       )}
       <div className="canvas-composer-row">
         <textarea
@@ -71,8 +75,8 @@ export function TileComposer({ streaming, blocked = false, blockedReason, draft,
           data-testid="composer-input"
           value={input}
           rows={2}
-          placeholder={COMPOSER_COPY.placeholder}
-          aria-label={COMPOSER_COPY.placeholder}
+          placeholder={t('composer.placeholder')}
+          aria-label={t('composer.placeholder')}
           disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
@@ -85,7 +89,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, draft,
           onClick={send}
         >
           {streaming ? <Loader2 size={16} aria-hidden="true" /> : <ArrowUp size={16} aria-hidden="true" />}
-          <span>{streaming ? COMPOSER_COPY.sending : COMPOSER_COPY.send}</span>
+          <span>{t(streaming ? 'composer.sending' : 'composer.send')}</span>
         </button>
       </div>
     </div>

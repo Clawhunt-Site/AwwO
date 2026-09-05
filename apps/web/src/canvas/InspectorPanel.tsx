@@ -24,9 +24,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { RuntimePicker, type RuntimeValue } from '../RuntimePicker';
+import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import {
-  AGENT_KIND_META,
   type AgentKind,
   type CanvasNode,
   type FormField,
@@ -72,10 +72,14 @@ const KIND_TO_MISSION_ROLE: Record<AgentKind, string> = {
   image: 'review',
 };
 
+type PersonaResult = 'synced' | 'failed' | 'not-written' | 'none';
 type BindState =
   | { phase: 'idle' }
   | { phase: 'binding' }
-  | { phase: 'done'; text: string; tone: 'ok' | 'warn' | 'err' };
+  | { phase: 'done'; kind: 'held'; tone: 'warn'; outcome: 'created' | 'unknown'; status?: string; detail?: string; persona: PersonaResult }
+  | { phase: 'done'; kind: 'unknown'; tone: 'warn'; detail?: string }
+  | { phase: 'done'; kind: 'rejected'; tone: 'err'; detail?: string }
+  | { phase: 'done'; kind: 'bound'; tone: 'ok' | 'warn'; status?: string; persona: PersonaResult };
 
 /** A request already reached the server; keep its real outcome until the graph unlocks. */
 type HeldBinding = {
@@ -84,8 +88,28 @@ type HeldBinding = {
   status?: string;
   detail?: string;
   /** Undefined means not attempted; a defined note records an already-completed write. */
-  personaNote?: string;
+  personaResult?: PersonaResult;
 };
+
+function personaResultText(result: PersonaResult, t: CanvasTranslate): string {
+  if (result === 'synced') return t('inspector.personaSynced');
+  if (result === 'failed') return t('inspector.personaFailed');
+  if (result === 'not-written') return t('inspector.personaNotWritten');
+  return '';
+}
+
+function bindingText(state: Extract<BindState, { phase: 'done' }>, t: CanvasTranslate): string {
+  if (state.kind === 'unknown') return t('inspector.unknownCompleted', { detail: state.detail ?? '' });
+  if (state.kind === 'rejected') return t('inspector.bindRejected', { detail: state.detail ?? '' });
+  if (state.kind === 'bound') return t('inspector.boundSuccess', {
+    status: state.status ?? '', persona: personaResultText(state.persona, t),
+  });
+  const result = state.outcome === 'created'
+    ? t('inspector.createdHeld', { status: state.status ?? '' })
+    : t('inspector.unknownHeld', { detail: state.detail ?? '' });
+  const persona = personaResultText(state.persona, t);
+  return `${result} ${t('inspector.heldSuffix')}${persona ? ` ${persona}` : ''}`;
+}
 
 const DOCK_STYLE: CSSProperties = {
   position: 'fixed',
@@ -118,6 +142,7 @@ export function InspectorPanel({
   onClose,
   style,
 }: InspectorPanelProps) {
+  const { locale, t } = useCanvasI18n();
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   const closeLockCallbackRef = useRef(onCloseLockChange);
@@ -208,10 +233,8 @@ export function InspectorPanel({
     setHeldBinding(result);
     setDraft(result.node);
     bindingRef.current = false;
-    setBind({
-      phase: 'done', tone: 'warn',
-      text: `${result.outcome === 'created' ? `真实 Agent 已创建（${result.status}）` : `绑定结果未知：${result.detail}`}。绑定结果已保留在本面板，请在图运行结束后保存。${result.personaNote ?? (result.node.persona.trim() && result.outcome === 'created' ? '人设尚未写入。' : '')}`,
-    });
+    setBind({ phase: 'done', kind: 'held', tone: 'warn', outcome: result.outcome, status: result.status,
+      detail: result.detail, persona: result.personaResult ?? (result.node.persona.trim() && result.outcome === 'created' ? 'not-written' : 'none') });
   };
 
   const completeBinding = async (result: HeldBinding) => {
@@ -219,22 +242,22 @@ export function InspectorPanel({
     onSave(result.node);
     if (result.outcome === 'unknown') {
       heldBindingRef.current = null; setHeldBinding(null); bindingRef.current = false;
-      setBind({ phase: 'done', tone: 'warn', text: `绑定结果未知（可能已创建，请刷新画布确认）：${result.detail}` });
+      setBind({ phase: 'done', kind: 'unknown', tone: 'warn', detail: result.detail });
       return;
     }
-    let personaNote = result.personaNote;
-    if (personaNote === undefined) {
+    let personaResult = result.personaResult;
+    if (personaResult === undefined) {
       if (readOnlyRef.current) { holdBinding(result); return; }
       if (result.node.persona.trim()) {
         const ok = await syncPersona(apiBase, result.node.binding!.agentId, result.node.persona);
-        personaNote = ok ? ' · 人设已写入 AGENTS.md' : ' · ⚠ 人设写入失败（配置仍保存在本地，可稍后重试）';
-      } else personaNote = '';
+        personaResult = ok ? 'synced' : 'failed';
+      } else personaResult = 'none';
     }
     // A persona request already sent cannot be rolled back. Keep its observed result and
     // withhold callbacks; resuming this held result must not issue the same write again.
-    if (readOnlyRef.current) { holdBinding({ ...result, personaNote }); return; }
+    if (readOnlyRef.current) { holdBinding({ ...result, personaResult }); return; }
     heldBindingRef.current = null; setHeldBinding(null); bindingRef.current = false;
-    setBind({ phase: 'done', tone: personaNote.includes('⚠') ? 'warn' : 'ok', text: `已绑定真实 Agent（${result.status}）${personaNote}` });
+    setBind({ phase: 'done', kind: 'bound', tone: personaResult === 'failed' ? 'warn' : 'ok', status: result.status, persona: personaResult });
     onBound?.(result.node);
   };
 
@@ -263,7 +286,7 @@ export function InspectorPanel({
     // Persist the config FIRST so a mid-bind close never loses the operator's edits.
     onSave(sessionDraft);
     const outcome = await hireAgentIntoCompany(apiBase, companyId, {
-      name: sessionDraft.title || `${AGENT_KIND_META[sessionDraft.agentKind].label} Agent`,
+      name: sessionDraft.title || t(sessionDraft.agentKind === 'coding' ? 'node.coding' : sessionDraft.agentKind === 'image' ? 'node.image' : 'node.llm'),
       missionRole: KIND_TO_MISSION_ROLE[sessionDraft.agentKind],
       adapterType: sessionDraft.runtime,
       model: sessionDraft.model,
@@ -283,7 +306,7 @@ export function InspectorPanel({
       setBind({
         phase: 'done',
         tone: 'err',
-        text: `绑定被拒绝：${outcome.detail}`,
+        kind: 'rejected', detail: outcome.detail,
       });
       return;
     }
@@ -300,28 +323,28 @@ export function InspectorPanel({
     <aside
       className="canvas-inspector"
       role="dialog"
-      aria-label={`节点配置 — ${node.title}`}
+      aria-label={t('inspector.dialog', { title: node.title })}
       style={{ ...DOCK_STYLE, ...style }}
       onPointerDown={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <header className="canvas-inspector-head">
-        <div className="canvas-inspector-title">节点配置 — {node.title}</div>
-        <button type="button" className="canvas-inspector-close" aria-label="关闭配置" disabled={closeLocked}
-          title={closeLocked ? '等待绑定完成并保存结果后即可关闭' : undefined} onClick={close}>
+        <div className="canvas-inspector-title">{t('inspector.dialog', { title: node.title })}</div>
+        <button type="button" className="canvas-inspector-close" aria-label={t('inspector.close')} disabled={closeLocked}
+          title={closeLocked ? t('inspector.closeLocked') : undefined} onClick={close}>
           ✕
         </button>
       </header>
 
       <div className="canvas-inspector-body">
-        {readOnly ? <div className="canvas-inspector-hint" role="status">图运行中，配置只读。运行结束后可继续编辑。</div> : null}
+        {readOnly ? <div className="canvas-inspector-hint" role="status">{t('inspector.readOnly')}</div> : null}
         <label className="canvas-inspector-label" htmlFor="cv-cfg-title">
-          名称
+          {t('inspector.name')}
         </label>
         <input
           id="cv-cfg-title"
           className="canvas-inspector-input"
-          aria-label="名称"
+          aria-label={t('inspector.name')}
           value={draft.title}
           disabled={busy}
           onChange={(e) => editDraft({ ...draft, title: e.target.value })}
@@ -329,8 +352,8 @@ export function InspectorPanel({
 
         {sessionDraft ? (
           <>
-            <div className="canvas-inspector-label">AGENT 类型</div>
-            <div className="canvas-inspector-seg" role="radiogroup" aria-label="Agent 类型">
+            <div className="canvas-inspector-label">{t('inspector.agentType')}</div>
+            <div className="canvas-inspector-seg" role="radiogroup" aria-label={t('inspector.agentType')}>
               {AGENT_KINDS.map((kind) => (
                 <button
                   key={kind}
@@ -341,12 +364,12 @@ export function InspectorPanel({
                   disabled={busy}
                   onClick={() => editDraft({ ...sessionDraft, agentKind: kind })}
                 >
-                  {AGENT_KIND_META[kind].label}
+                  {t(kind === 'coding' ? 'node.coding' : kind === 'image' ? 'node.image' : 'node.llm')}
                 </button>
               ))}
             </div>
 
-            <div className="canvas-inspector-label">运行时 / 模型 / 思考强度</div>
+            <div className="canvas-inspector-label">{t('inspector.runtime')}</div>
             {readJson ? (
               <div className="canvas-inspector-runtime">
                 <RuntimePicker
@@ -356,51 +379,51 @@ export function InspectorPanel({
                     editDraft({ ...sessionDraft, runtime: v.backend, model: v.model, effort: v.effort })
                   }
                   readJson={readJson}
+                  lang={locale}
                   disabled={busy}
                 />
                 {runtimesError ? (
                   <div className="canvas-inspector-outcome canvas-inspector-outcome--err">
-                    运行时清单加载失败 — 请确认内核在运行，重开面板重试。
+                    {t('inspector.runtimeLoadFailed')}
                   </div>
                 ) : null}
               </div>
             ) : (
-              <div className="canvas-inspector-hint">运行时清单不可用（宿主未提供契约读取）。</div>
+              <div className="canvas-inspector-hint">{t('inspector.runtimeUnavailable')}</div>
             )}
 
             <label className="canvas-inspector-label" htmlFor="cv-cfg-persona">
-              人设 / 系统提示词
+              {t('inspector.persona')}
             </label>
             <textarea
               id="cv-cfg-persona"
               className="canvas-inspector-persona"
-              aria-label="人设 / 系统提示词"
+              aria-label={t('inspector.persona')}
               rows={5}
-              placeholder="这个 Agent 是谁、偏好什么、必须遵守什么…（绑定时写入其 AGENTS.md）"
+              placeholder={t('inspector.personaPlaceholder')}
               value={sessionDraft.persona}
               disabled={busy}
               onChange={(e) => editDraft({ ...sessionDraft, persona: e.target.value })}
             />
 
-            <div className="canvas-inspector-label">绑定真实 Agent</div>
+            <div className="canvas-inspector-label">{t('inspector.bindReal')}</div>
             {sessionDraft.bindAttempt === 'unknown' && !sessionDraft.binding ? (
               <div className="canvas-inspector-outcome canvas-inspector-outcome--warn">
-                上次绑定结果未知：真实 Agent 可能已创建。先刷新画布 / 查看公司成员确认，再决定是否重试 —
-                盲目重试可能雇出重复 Agent。
+                {t('inspector.unknownWarning')}
               </div>
             ) : null}
             {sessionDraft.binding ? (
               <div className="canvas-inspector-hint">
-                已绑定：{sessionDraft.binding.agentName}（{boundCompany?.name ?? sessionDraft.binding.companyId}）
+                {t('inspector.bound', { agent: sessionDraft.binding.agentName, company: boundCompany?.name ?? sessionDraft.binding.companyId })}
               </div>
             ) : liveCompanies.length === 0 ? (
               <div className="canvas-inspector-hint">
-                没有可用的 LIVE 公司 — 先创建公司，才能绑定真实 Agent。
+                {t('inspector.noCompanies')}
                 {onCreateCompany ? (
                   <>
                     {' '}
                     <button type="button" className="canvas-inspector-link" onClick={() => { if (!mutationLocked()) onCreateCompany(); }} disabled={busy}>
-                      去创建公司
+                      {t('inspector.createCompany')}
                     </button>
                   </>
                 ) : null}
@@ -409,7 +432,7 @@ export function InspectorPanel({
               <>
                 <select
                   className="canvas-inspector-input"
-                  aria-label="绑定到公司"
+                  aria-label={t('inspector.bindCompany')}
                   value={bindCompanyId || liveCompanies[0]?.id || ''}
                   disabled={busy}
                   onChange={(e) => { if (!mutationLocked()) setBindCompanyId(e.target.value); }}
@@ -424,41 +447,41 @@ export function InspectorPanel({
                   type="button"
                   className="canvas-inspector-bind"
                   disabled={busy || !sessionDraft.runtime.trim()}
-                  title={!sessionDraft.runtime.trim() ? '先选择运行时' : undefined}
+                  title={!sessionDraft.runtime.trim() ? t('inspector.chooseRuntime') : undefined}
                   onClick={() => void bindAgent()}
                 >
                   {isBinding
-                    ? '绑定中…'
+                    ? t('inspector.binding')
                     : sessionDraft.bindAttempt === 'unknown'
-                      ? '重试绑定（已确认未重复）'
-                      : '绑定并创建真实 Agent'}
+                      ? t('inspector.retryBind')
+                      : t('inspector.bindCreate')}
                 </button>
               </>
             )}
             {bind.phase === 'done' ? (
-              <div className={`canvas-inspector-outcome canvas-inspector-outcome--${bind.tone}`}>{bind.text}</div>
+              <div className={`canvas-inspector-outcome canvas-inspector-outcome--${bind.tone}`}>{bindingText(bind, t)}</div>
             ) : null}
             {heldBinding ? <button type="button" className="canvas-inspector-bind" disabled={readOnly || isBinding} onClick={resumeBinding}>
-              保存绑定结果
+              {t('inspector.saveBinding')}
             </button> : null}
           </>
         ) : formDraft ? (
           <>
-            <div className="canvas-inspector-label">表单字段</div>
+            <div className="canvas-inspector-label">{t('inspector.formFields')}</div>
             {formDraft.fields.map((field, index) => (
               <div key={field.id} className="canvas-inspector-field-row">
                 <input
                   className="canvas-inspector-input canvas-inspector-field-label"
-                  aria-label={`字段 ${index + 1} 名称`}
-                  placeholder="字段名"
+                  aria-label={t('inspector.fieldName', { count: index + 1 })}
+                  placeholder={t('inspector.fieldNamePlaceholder')}
                   value={field.label}
                   disabled={busy}
                   onChange={(e) => editDraft(patchField(formDraft, field.id, { label: e.target.value }))}
                 />
                 <input
                   className="canvas-inspector-input canvas-inspector-field-value"
-                  aria-label={`字段 ${index + 1} 值`}
-                  placeholder="值"
+                  aria-label={t('inspector.fieldValue', { count: index + 1 })}
+                  placeholder={t('inspector.valuePlaceholder')}
                   value={field.value}
                   disabled={busy}
                   onChange={(e) => editDraft(patchField(formDraft, field.id, { value: e.target.value }))}
@@ -466,7 +489,7 @@ export function InspectorPanel({
                 <button
                   type="button"
                   className="canvas-inspector-field-remove"
-                  aria-label={`删除字段 ${field.label || index + 1}`}
+                  aria-label={t('inspector.removeField', { name: field.label || index + 1 })}
                   disabled={busy}
                   onClick={() => editDraft({ ...formDraft, fields: formDraft.fields.filter((f) => f.id !== field.id) })}
                 >
@@ -482,7 +505,7 @@ export function InspectorPanel({
                 editDraft({ ...formDraft, fields: [...formDraft.fields, { id: mintFieldId(), label: '', value: '' }] })
               }
             >
-              ＋ 添加字段
+              ＋ {t('inspector.addField')}
             </button>
           </>
         ) : null}
@@ -490,10 +513,10 @@ export function InspectorPanel({
 
       <footer className="canvas-inspector-foot">
         <button type="button" className="canvas-inspector-save" disabled={busy} onClick={save}>
-          保存
+          {t('common.save')}
         </button>
         <button type="button" className="canvas-inspector-cancel" disabled={closeLocked} onClick={close}>
-          取消
+          {t('common.cancel')}
         </button>
       </footer>
     </aside>

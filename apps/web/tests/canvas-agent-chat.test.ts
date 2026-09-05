@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { normalizeFrame, streamAgentConversation, type AgentChatFrame } from '../src/canvasAgentChat';
+import { fetchConversationMessages, normalizeFrame, streamAgentConversation, type AgentChatFrame } from '../src/canvasAgentChat';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -74,6 +74,46 @@ describe('streamAgentConversation', () => {
     expect(body).toEqual({ message: 'next', issueId: 'iss-1' });
   });
 
+  it('durably prepares an operation before opening the streaming request', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const calls: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init.body)) });
+      if (String(url).endsWith('/prepare')) {
+        return new Response(JSON.stringify({ operationId, prepared: true }), { status: 201 });
+      }
+      return { ok: true, status: 200, body: sseBody([{ event: 'done', data: { event: 'done', status: 'succeeded' } }]) } as unknown as Response;
+    }));
+
+    await streamAgentConversation('/gateway-api', 'co-1', 'ag-1', 'next', () => {}, {
+      issueId: 'iss-1', operationId,
+    });
+
+    expect(calls).toEqual([
+      {
+        url: `/gateway-api/conversations/co-1/agents/ag-1/operations/${operationId}/prepare`,
+        body: { message: 'next', issueId: 'iss-1' },
+      },
+      {
+        url: '/gateway-api/conversations/co-1/agents/ag-1/messages',
+        body: { message: 'next', issueId: 'iss-1', operationId },
+      },
+    ]);
+  });
+
+  it('does not open the streaming request when operation preparation fails', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: 'operation_conflict', detail: 'different request' }), { status: 409 }));
+    vi.stubGlobal('fetch', fetcher);
+    const frames: AgentChatFrame[] = [];
+
+    await streamAgentConversation('/gateway-api', 'co-1', 'ag-1', 'next', frame => frames.push(frame), {
+      operationId: '11111111-1111-4111-8111-111111111111',
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(frames).toEqual([{ event: 'error', detail: 'different request', code: 'operation_prepare_failed' }]);
+  });
+
   it('a non-2xx gateway response → a single error frame', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, body: null }) as unknown as Response));
     const frames: AgentChatFrame[] = [];
@@ -86,5 +126,27 @@ describe('streamAgentConversation', () => {
     const frames: AgentChatFrame[] = [];
     await streamAgentConversation('/gateway-api', 'co-1', 'ag-1', 'x', (f) => frames.push(f));
     expect(frames).toEqual([{ event: 'error', detail: 'network error reaching the gateway' }]);
+  });
+});
+
+describe('fetchConversationMessages', () => {
+  it('restores the issue-description first turn only from an explicitly complete transcript', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      complete: true,
+      messages: [
+        { body: 'first prompt', source: 'issue_description', authorAgentId: null },
+        { body: 'agent reply', authorAgentId: 'agent-1' },
+      ],
+    }))));
+
+    await expect(fetchConversationMessages('/gateway-api', 'co-1', 'iss-1')).resolves.toEqual([
+      { role: 'user', text: 'first prompt' },
+      { role: 'agent', text: 'agent reply' },
+    ]);
+  });
+
+  it('keeps a response without completeness proof unreadable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ messages: [{ body: 'old prefix' }] }))));
+    await expect(fetchConversationMessages('/gateway-api', 'co-1', 'iss-1')).resolves.toBeNull();
   });
 });

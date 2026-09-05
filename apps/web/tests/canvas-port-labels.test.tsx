@@ -20,9 +20,9 @@ function wiring(): WiringApi {
 describe('contract port labels', () => {
   it('names contract ports with their field labels, while retaining stable wiring ids', () => {
     render(<TilePorts node={node()} wiring={wiring()} />);
-    const input = screen.getByRole('button', { name: '输入端口 用户需求与交互说明（text），未连接' });
-    const output = screen.getByRole('button', { name: '输出端口 前端页面（file），未连接' });
-    expect(input.getAttribute('title')).toBe('用户需求与交互说明 · text');
+    const input = screen.getByRole('button', { name: '输入端口 用户需求与交互说明（文本），未连接' });
+    const output = screen.getByRole('button', { name: '输出端口 前端页面（文件引用），未连接' });
+    expect(input.getAttribute('title')).toBe('用户需求与交互说明 · 文本');
     expect(input.dataset.portId).toBe('in:private_input_id');
     expect(output.dataset.portId).toBe('out:private_output_id');
     expect(screen.getByText('前端页面')).toBeTruthy();

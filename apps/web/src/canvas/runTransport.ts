@@ -39,7 +39,54 @@ const STATUS_LABEL: Record<string, string> = {
 export interface ExecAgentOptions {
   /** Persist a server-minted issueId onto the node — the next turn must continue this thread. */
   onIssueId?: (issueId: string) => void;
+  /** Persist the native identity as soon as the gateway exposes it (refresh recovery). */
+  onRunAccepted?: (identity: { issueId: string; runId: string | null }) => void;
+  /** A failed Stop remains live/locked; surface the reason without claiming cancellation. */
+  onCancelFailure?: (detail: string) => void;
+  cancelRun?: typeof cancelConversationRunViaGateway;
+  /** Stable identity persisted in the run journal before any upstream mutation. */
+  operationId?: string;
   signal?: AbortSignal;
+}
+
+export interface NativeCancelResult {
+  confirmed: boolean;
+  cancelled: boolean;
+  status: string;
+  detail?: string;
+}
+
+/** Ask the gateway to park this conversation and confirm its native run is terminal. */
+export async function cancelConversationRunViaGateway(
+  gatewayBase: string,
+  binding: NonNullable<SessionNode['binding']>,
+  issueId: string,
+  runId?: string | null,
+): Promise<NativeCancelResult> {
+  try {
+    const base = gatewayBase.replace(/\/+$/, '');
+    const response = await fetch(
+      `${base}/conversations/${encodeURIComponent(binding.companyId)}/agents/${encodeURIComponent(binding.agentId)}/issues/${encodeURIComponent(issueId)}/cancel`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        credentials: 'include',
+        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify(runId ? { runId } : {}),
+      },
+    );
+    const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (!response.ok || body?.confirmed !== true) {
+      return { confirmed: false, cancelled: false, status: 'running', detail: typeof body?.detail === 'string' ? body.detail : `gateway responded ${response.status}` };
+    }
+    return {
+      confirmed: true,
+      cancelled: body.cancelled === true,
+      status: typeof body.status === 'string' && body.status ? body.status : (body.cancelled === true ? 'cancelled' : 'terminal'),
+    };
+  } catch {
+    return { confirmed: false, cancelled: false, status: 'running', detail: 'native stop request failed' };
+  }
 }
 
 export async function execAgentViaGateway(
@@ -48,10 +95,13 @@ export async function execAgentViaGateway(
   message: string,
   opts: ExecAgentOptions = {},
 ): Promise<ExecAgentResult> {
-  const { onIssueId, signal } = opts;
+  const { onIssueId, onRunAccepted, onCancelFailure, operationId, signal } = opts;
   const binding = node.binding;
   const storeKey = sessionStoreKey(node);
   if (!binding) return { ok: false, output: '', detail: '节点未绑定真实 Agent' };
+  // A queued same-Agent execution can reach the executor only after the operator stopped the
+  // graph. Do not append a phantom transcript turn or POST a new upstream mutation.
+  if (signal?.aborted) return { ok: false, cancelled: true, output: '', detail: 'cancelled_before_dispatch' };
 
   // The run turn is a real local turn on this thread: mark it so a later history replay cannot
   // clobber it, and mirror it into the tile exactly as the composer would.
@@ -72,19 +122,68 @@ export async function execAgentViaGateway(
 
   let text = '';
   let gotText = false;
+  let nativeCancelled = false;
   // FIRST terminal frame wins. A late frame must never rewrite an already-decided outcome
   // (e.g. a stream-teardown 'error' after 'done: succeeded' would flip a real success into a
   // failure — or worse, the reverse would fake a success after an error).
   let terminal:
     | { kind: 'done'; status: string }
     | { kind: 'no_run'; detail: string }
-    | { kind: 'error'; detail: string }
+    | { kind: 'error'; detail: string; code?: string }
     | null = null;
 
+  // The graph's signal means "request a real Stop", not "detach this browser fetch". Keep a
+  // separate transport controller so the SSE stays attached until the gateway has confirmed the
+  // native process/wake is terminal. If cancellation fails, the stream remains live and the
+  // canvas stays locked until a real terminal event arrives.
+  const transport = new AbortController();
+  let stopRequested = signal?.aborted === true;
+  let runId: string | null = null;
+  let cancellation: Promise<void> | null = null;
+  const beginCancellation = () => {
+    if (!stopRequested || !issueId || cancellation || terminal) return;
+    const cancel = opts.cancelRun ?? cancelConversationRunViaGateway;
+    cancellation = cancel(gatewayBase, binding, issueId, runId).then((result) => {
+      if (!result.confirmed) {
+        const detail = result.detail || '原生运行取消未确认';
+        onCancelFailure?.(detail);
+        if (mirroring()) sessions.setStatus(storeKey, `停止失败 · ${detail}`);
+        return;
+      }
+      if (terminal?.kind === 'done') return;
+      if (!result.cancelled) {
+        // Stop can observe a run that completed naturally. Its status alone does not prove
+        // the SSE delivered the complete output; recover that output by run ID before success.
+        terminal = { kind: 'error', detail: 'native_terminal_output_unconfirmed' };
+        transport.abort();
+        return;
+      }
+      nativeCancelled = result.cancelled;
+      terminal = { kind: 'done', status: result.status };
+      if (mirroring()) {
+        const note = result.cancelled ? COPY.stopped : COPY.doneEmpty(statusLabel(result.status));
+        if (!gotText) sessions.patchTurn(storeKey, agentTurnId, note, 'info');
+        else sessions.appendTurn(storeKey, { role: 'system', text: note, tone: 'info' });
+      }
+      transport.abort();
+    }).catch(() => {
+      onCancelFailure?.('原生运行取消未确认');
+    });
+  };
+  const requestStop = () => { stopRequested = true; beginCancellation(); };
+  signal?.addEventListener('abort', requestStop, { once: true });
+
   const onFrame = (f: AgentChatFrame) => {
+    // The first terminal closes this transport's state machine. A gateway/socket teardown may
+    // still deliver buffered progress or stdout afterwards; accepting any of it would mutate a
+    // result the UI has already classified and can even make invalid JSON look valid/vice versa.
+    if (terminal) return;
     switch (f.event) {
       case 'accepted':
         reportIssue(f.issueId);
+        runId = f.runId;
+        onRunAccepted?.({ issueId: f.issueId, runId: f.runId });
+        beginCancellation();
         if (mirroring() && !f.runVisible) sessions.patchTurn(storeKey, agentTurnId, COPY.thinking, 'info');
         break;
       case 'delta':
@@ -111,16 +210,17 @@ export async function execAgentViaGateway(
         break;
       case 'no_run':
         reportIssue(f.issueId);
+        beginCancellation();
         if (!terminal) terminal = { kind: 'no_run', detail: f.detail };
         if (mirroring() && !gotText) sessions.patchTurn(storeKey, agentTurnId, COPY.noRun(f.detail), 'warn');
         break;
       case 'error': {
-        if (!terminal) terminal = { kind: 'error', detail: f.detail };
-        // A stop the operator asked for is not a failure: runGraph already marks the node
-        // '已停止' from the abort signal, so the tile must not contradict it with 出错：aborted.
+        if (!terminal) terminal = { kind: 'error', detail: f.detail, ...(f.code ? { code: f.code } : {}) };
+        // Transport loss is not proof of native cancellation. The durable operation remains
+        // recoverable, and only the confirmed cancellation path above may say it stopped.
         const aborted = f.detail === 'aborted';
-        const text = aborted ? COPY.stopped : COPY.errorPrefix + f.detail;
-        const tone = aborted ? 'info' : 'error';
+        const text = aborted ? '连接中断，正在核对运行状态。' : COPY.errorPrefix + f.detail;
+        const tone = aborted ? 'warn' : 'error';
         if (mirroring()) {
           if (!gotText) sessions.patchTurn(storeKey, agentTurnId, text, tone);
           else sessions.appendTurn(storeKey, { role: 'system', text, tone });
@@ -135,9 +235,12 @@ export async function execAgentViaGateway(
   try {
     await streamAgentConversation(gatewayBase, binding.companyId, binding.agentId, message, onFrame, {
       issueId,
-      signal,
+      operationId,
+      signal: transport.signal,
     });
+    if (cancellation) await cancellation;
   } finally {
+    signal?.removeEventListener('abort', requestStop);
     // Only the CURRENT stream may clear the tile's streaming state — a superseded stream
     // finishing late must not stop the spinner of the stream that replaced it.
     if (isStreamCurrent(storeKey, token)) {
@@ -150,19 +253,29 @@ export async function execAgentViaGateway(
   const t = terminal as
     | { kind: 'done'; status: string }
     | { kind: 'no_run'; detail: string }
-    | { kind: 'error'; detail: string }
+    | { kind: 'error'; detail: string; code?: string }
     | null;
-  if (!t) return { ok: false, output: text, detail: '流在完成前中断（未收到终态）' };
-  if (t.kind === 'error') return { ok: false, output: text, detail: t.detail };
-  if (t.kind === 'no_run') return { ok: false, output: text, detail: `已投递但无可见运行${t.detail ? `（${t.detail}）` : ''}` };
+  if (!t) return { ok: false, unconfirmed: true, output: text, detail: '流在完成前中断（未收到终态）' };
+  if (t.kind === 'error') return {
+    ok: false,
+    ...(t.code !== 'operation_prepare_failed' && (issueId || operationId) ? { unconfirmed: true } : {}),
+    output: text,
+    detail: t.detail,
+  };
+  if (t.kind === 'no_run') return { ok: false, unconfirmed: true, output: text, detail: `已投递但无可见运行${t.detail ? `（${t.detail}）` : ''}` };
   const ok = t.status === 'succeeded';
-  return { ok, output: text, detail: STATUS_LABEL[t.status] ?? t.status };
+  if (ok && !text.trim()) return { ok: false, output: '', detail: 'empty_delivery' };
+  return { ok, ...(nativeCancelled || t.status === 'cancelled' ? { cancelled: true } : {}), output: text, detail: STATUS_LABEL[t.status] ?? t.status };
 }
 
 export interface GatewayExecutorArgs {
   gatewayBase: string;
   /** Persist a server-minted issueId onto the given node. */
   onIssueId?: (nodeId: string, issueId: string, threadId?: string) => void;
+  onRunAccepted?: (nodeId: string, identity: { issueId: string; runId: string | null }, threadId?: string) => void;
+  onCancelFailure?: (nodeId: string, detail: string, threadId?: string) => void;
+  /** Read the pre-persisted operation identity for this node/thread. */
+  operationIdForNode?: (nodeId: string, threadId: string) => string | undefined;
   signal?: AbortSignal;
 }
 
@@ -172,7 +285,7 @@ export interface GatewayExecutorArgs {
  * and attaches to its live run, so parallel turns could cross-attribute outputs. Nodes bound to
  * different agents stay fully concurrent.
  */
-export function createGatewayExecutor({ gatewayBase, onIssueId, signal }: GatewayExecutorArgs) {
+export function createGatewayExecutor({ gatewayBase, onIssueId, onRunAccepted, onCancelFailure, operationIdForNode, signal }: GatewayExecutorArgs) {
   // Explicit type args: inference would otherwise take the arg tuple from `keyOf` alone (which
   // ignores `message`) and then reject the two-argument executor.
   return withPerKeySerialization<[SessionNode, string], ExecAgentResult>(
@@ -180,7 +293,10 @@ export function createGatewayExecutor({ gatewayBase, onIssueId, signal }: Gatewa
     (node, message) =>
       execAgentViaGateway(gatewayBase, node, message, {
         signal,
+        operationId: operationIdForNode?.(node.id, activeThreadId(node)),
         onIssueId: onIssueId ? (issueId) => onIssueId(node.id, issueId, activeThreadId(node)) : undefined,
+        onRunAccepted: onRunAccepted ? (identity) => onRunAccepted(node.id, identity, activeThreadId(node)) : undefined,
+        onCancelFailure: onCancelFailure ? (detail) => onCancelFailure(node.id, detail, activeThreadId(node)) : undefined,
       }),
   );
 }

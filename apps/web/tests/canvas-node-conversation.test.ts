@@ -131,7 +131,7 @@ describe('contract-aware tile conversations', () => {
   it('sends local contract context with the user message through the override path', () => {
     const node = agent('local', '# Local brief');
     const messages: string[] = [];
-    render(createElement(SessionTile, { node, scale: 1, focused: true, onSend: (_node, text) => messages.push(text) }));
+    render(createElement(SessionTile, { node, scale: 1, focused: true, onSend: (_node, text, accepted) => { messages.push(text); accepted?.(); } }));
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Please implement it' } });
     fireEvent.click(screen.getByTestId('composer-send'));
     expect(messages).toHaveLength(1);

@@ -303,6 +303,7 @@ describe('RunTimeline', () => {
   it("shows a blocked row's REASON and computes elapsed from the recorded stamps", () => {
     const a = sessionNode({ id: 'a', title: '实现', runtime: 'claude_local', model: 'opus' });
     const b = sessionNode({ id: 'b', title: '审阅' });
+    const absent = sessionNode({ id: 'not-in-run', title: '未参与本次运行' });
     const runStartedAt = 1_000;
     const runs: Record<string, RunView> = {
       a: { state: 'done', startedAt: runStartedAt, endedAt: runStartedAt + 65_000 },
@@ -310,7 +311,7 @@ describe('RunTimeline', () => {
     };
     render(
       <RunTimeline
-        nodes={[a, b]}
+        nodes={[a, b, absent]}
         runs={runs}
         runStartedAt={runStartedAt}
         now={runStartedAt + 70_000}
@@ -325,6 +326,25 @@ describe('RunTimeline', () => {
     expect(rowB.getByText('上游未完成')).toBeTruthy();
     // A node that never started draws no bar and reports no elapsed time.
     expect(rowB.getByText('—')).toBeTruthy();
+    expect(rowB.getByText('上游未完成').getAttribute('title')).toBe('上游未完成');
+    // The graph may contain scratch or out-of-scope nodes. Missing run state is absence of
+    // participation, not evidence that the node was queued.
+    expect(screen.queryByTestId('runline-not-in-run')).toBeNull();
+  });
+
+  it('localizes persisted recovery codes in the state detail', () => {
+    const recovered = sessionNode({ id: 'recovered', title: '恢复节点' });
+    render(
+      <RunTimeline
+        nodes={[recovered]}
+        runs={{ recovered: { state: 'blocked', detail: 'recovery_not_dispatched' } }}
+        runStartedAt={1_000}
+        now={2_000}
+        onClose={vi.fn()}
+      />,
+    );
+    const badge = within(screen.getByTestId('runline-recovered')).getByText('页面中断前尚未下发。');
+    expect(badge.getAttribute('title')).toBe('页面中断前尚未下发。');
   });
 });
 

@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createSessionNode, emptyDocument, sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { activeNodeThread, activeThreadId, createNodeThread, getNodeThreads, preserveThreadRuntime,
+import { activeNodeThread, activeThreadId, boundAgentConfigurationChanged, createNodeThread, getNodeThreads, preserveThreadRuntime,
   rebindNodeThread, selectNodeThread, sessionStoreKey, updateNodeDraft, updateThreadIssueId,
   updateThreadPreview } from '../src/canvas/nodeThreads';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
@@ -113,6 +113,14 @@ it('keeps old conversations addressed to the original agent after rebinding', ()
   const prior = selectNodeThread(rebound, 'default');
   expect(prior.issueId).toBe('server-first');
   expect(prior.binding?.agentId).toBe('agent');
+});
+
+it('recognizes configuration materialized on a bound Agent while allowing display-only title edits', () => {
+  const current = node();
+  expect(boundAgentConfigurationChanged(current, { ...current, title: 'New title' })).toBe(false);
+  expect(boundAgentConfigurationChanged(current, { ...current, persona: 'Changed native instructions' })).toBe(true);
+  expect(boundAgentConfigurationChanged(current, { ...current, model: 'another-model' })).toBe(true);
+  expect(boundAgentConfigurationChanged({ ...current, binding: null }, { ...current, binding: null, persona: 'Draft persona' })).toBe(false);
 });
 
 it('binds a never-connected draft in place without creating another Session row', () => {

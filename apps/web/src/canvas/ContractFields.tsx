@@ -3,13 +3,14 @@ import { Bold, Eye, Heading2, Link2, List, Pencil, Plus, Trash2 } from 'lucide-r
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
+import { useCanvasI18n, type CanvasTextKey } from './i18n';
 
-const FIELD_TYPES: Array<{ value: ContractFieldType; label: string }> = [
-  { value: 'text', label: '文本' },
-  { value: 'markdown', label: '富文本' },
-  { value: 'number', label: '数字' },
-  { value: 'boolean', label: '布尔值' },
-  { value: 'file', label: '文件引用' },
+const FIELD_TYPES: Array<{ value: ContractFieldType; label: CanvasTextKey }> = [
+  { value: 'text', label: 'contract.text' },
+  { value: 'markdown', label: 'contract.markdown' },
+  { value: 'number', label: 'contract.number' },
+  { value: 'boolean', label: 'contract.boolean' },
+  { value: 'file', label: 'contract.file' },
 ];
 
 export interface ContractFieldsProps {
@@ -30,6 +31,7 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
   placeholder?: string;
   describedBy?: string;
 }) {
+  const { locale, t } = useCanvasI18n();
   const [preview, setPreview] = useState(false);
   const editor = useRef<HTMLTextAreaElement>(null);
   const format = (before: string, after = '') => {
@@ -45,30 +47,31 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
     });
   };
   return <div className="awwo-markdown">
-    <div className="awwo-markdown-toolbar" role="toolbar" aria-label={`${name}富文本格式`}>
+    <div className="awwo-markdown-toolbar" role="toolbar" aria-label={t('contract.formatToolbar', { name })}>
       {[
-        { label: '加粗', Icon: Bold, before: '**', after: '**' },
-        { label: '标题', Icon: Heading2, before: '## ', after: '' },
-        { label: '列表', Icon: List, before: '- ', after: '' },
-        { label: '插入链接', Icon: Link2, before: '[', after: '](https://)' },
-      ].map(({ label, Icon, before, after }) => <button key={label} type="button" aria-label={`${name}${label}`} title={label}
+        { label: 'contract.bold' as const, Icon: Bold, before: '**', after: '**' },
+        { label: 'contract.heading' as const, Icon: Heading2, before: '## ', after: '' },
+        { label: 'contract.list' as const, Icon: List, before: '- ', after: '' },
+        { label: 'contract.link' as const, Icon: Link2, before: '[', after: '](https://)' },
+      ].map(({ label, Icon, before, after }) => <button key={label} type="button" aria-label={locale === 'zh' ? `${name}${t(label)}` : `${name} ${t(label)}`} title={t(label)}
         disabled={readOnly || preview} onMouseDown={(e) => e.preventDefault()} onClick={() => format(before, after)}>
         <Icon size={15} aria-hidden="true" />
       </button>)}
-      <button type="button" className="awwo-markdown-preview-toggle" aria-label={`${preview ? '编辑' : '预览'}${name}`}
+      <button type="button" className="awwo-markdown-preview-toggle" aria-label={locale === 'zh' ? `${t(preview ? 'contract.edit' : 'contract.preview')}${name}` : `${t(preview ? 'contract.edit' : 'contract.preview')} ${name}`}
         aria-pressed={preview} onClick={() => setPreview(!preview)}>
         {preview ? <Pencil size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
-        {preview ? '编辑' : '预览'}
+        {t(preview ? 'contract.edit' : 'contract.preview')}
       </button>
     </div>
-    {preview ? <div className="awwo-markdown-preview" aria-label={`${name}预览`} aria-describedby={describedBy}>
-      {field.value ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{field.value}</ReactMarkdown> : <span className="awwo-field-hint">还没有内容</span>}
-    </div> : <textarea ref={editor} className="awwo-field-value" aria-label={`${name}的值`} aria-describedby={describedBy} value={field.value}
-      disabled={readOnly} rows={4} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? '写下内容，支持 Markdown…'} />}
+    {preview ? <div className="awwo-markdown-preview" aria-label={t('contract.previewName', { name })} aria-describedby={describedBy}>
+      {field.value ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{field.value}</ReactMarkdown> : <span className="awwo-field-hint">{t('contract.noContent')}</span>}
+    </div> : <textarea ref={editor} className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={describedBy} value={field.value}
+      disabled={readOnly} rows={4} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? t('contract.placeholder')} />}
   </div>;
 }
 
 export function ContractFields({ fields, resolvedFields, sources, onChange, readOnly = false, label }: ContractFieldsProps) {
+  const { locale, t } = useCanvasI18n();
   const instanceId = useId();
   const nextField = useRef(0);
   const errors = validateContractFields(resolvedFields ?? fields);
@@ -79,48 +82,48 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
     if (readOnly) return;
     let id: string;
     do { id = `field-${instanceId.replace(/[^a-zA-Z0-9]/g, '')}-${++nextField.current}`; } while (fields.some((field) => field.id === id));
-    onChange([...fields, { id, label: `字段 ${fields.length + 1}`, type: 'text', required: false, value: '' }]);
+    onChange([...fields, { id, label: t('contract.defaultField', { count: fields.length + 1 }), type: 'text', required: false, value: '' }]);
   };
-  return <section className="awwo-contract-fields" aria-label={`${label}字段`}>
-    {fields.length === 0 ? <div className="awwo-contract-empty">定义{label}字段，让每次交接都有清晰的内容。</div> : null}
+  return <section className="awwo-contract-fields" aria-label={t('contract.fields', { label })}>
+    {fields.length === 0 ? <div className="awwo-contract-empty">{t('contract.empty', { label })}</div> : null}
     {fields.map((field, index) => {
-      const name = field.label || `字段 ${index + 1}`;
+      const name = field.label || t('contract.defaultField', { count: index + 1 });
       const source = sources?.[field.id];
       const displayed = resolvedFields?.find(item => item.id === field.id) ?? (source ? { ...field, value: '' } : field);
       const valueReadOnly = readOnly || Boolean(source);
       const helpId = field.help ? `${instanceId}-field-${index}-help` : undefined;
       return <div key={field.id} className="awwo-contract-field">
         <div className="awwo-field-header">
-          <input className="awwo-field-name" aria-label={`字段 ${index + 1} 名称`} value={field.label} placeholder="字段名称"
+          <input className="awwo-field-name" aria-label={t('contract.fieldName', { count: index + 1 })} value={field.label} placeholder={t('contract.fieldNamePlaceholder')}
             disabled={readOnly} onChange={(event) => patch(field.id, { label: event.target.value })} />
-          <select aria-label={`${name}的类型`} value={field.type} disabled={readOnly}
+          <select aria-label={t('contract.fieldType', { name })} value={field.type} disabled={readOnly}
             onChange={(event) => patch(field.id, { type: event.target.value as ContractFieldType })}>
-            {FIELD_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+            {FIELD_TYPES.map((type) => <option key={type.value} value={type.value}>{t(type.label)}</option>)}
           </select>
-          <button type="button" className="awwo-field-remove" aria-label={`删除${name}`} disabled={readOnly}
+          <button type="button" className="awwo-field-remove" aria-label={t('contract.removeField', { name })} disabled={readOnly}
             onClick={() => !readOnly && onChange(fields.filter((candidate) => candidate.id !== field.id))}>
             <Trash2 size={15} aria-hidden="true" />
           </button>
         </div>
-        <label className="awwo-field-required"><input type="checkbox" aria-label={`${name}必填`} checked={field.required}
-          disabled={readOnly} onChange={(event) => patch(field.id, { required: event.target.checked })} />必填</label>
+        <label className="awwo-field-required"><input type="checkbox" aria-label={locale === 'zh' ? `${name}${t('contract.required')}` : `${name} ${t('contract.required')}`} checked={field.required}
+          disabled={readOnly} onChange={(event) => patch(field.id, { required: event.target.checked })} />{t('contract.required')}</label>
         {helpId ? <p className="awwo-field-help" id={helpId}>{field.help}</p> : null}
-        {source && <p className="awwo-field-hint">{resolvedFields ? `来自「${source}」的已发布输出` : `等待「${source}」的可用输出`}；断开连线后可手动填写。</p>}
+        {source && <p className="awwo-field-hint">{t(resolvedFields ? 'contract.sourceResolved' : 'contract.sourceWaiting', { source })}</p>}
         {field.type === 'markdown' ? <MarkdownValue field={displayed} name={name} readOnly={valueReadOnly} placeholder={field.placeholder} describedBy={helpId} onChange={(value) => patch(field.id, { value })} />
-          : field.type === 'boolean' ? <select className="awwo-field-value" aria-label={`${name}的值`} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
+          : field.type === 'boolean' ? <select className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
             onChange={(event) => patch(field.id, { value: event.target.value })}>
-            <option value="">{field.placeholder ?? '请选择'}</option><option value="true">是 / true</option><option value="false">否 / false</option>
+            <option value="">{field.placeholder ?? t('contract.choose')}</option><option value="true">{t('contract.yes')}</option><option value="false">{t('contract.no')}</option>
           </select>
-          : <textarea className="awwo-field-value" aria-label={`${name}的值`} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
+          : <textarea className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
             inputMode={field.type === 'number' ? 'decimal' : undefined} rows={field.type === 'text' ? 3 : 2}
-            placeholder={field.placeholder ?? (field.type === 'file' ? '文件路径或 https:// 链接' : field.type === 'number' ? '输入数字' : '输入内容…')}
+            placeholder={field.placeholder ?? t(field.type === 'file' ? 'contract.filePlaceholder' : field.type === 'number' ? 'contract.numberPlaceholder' : 'contract.textPlaceholder')}
             onChange={(event) => patch(field.id, { value: event.target.value })} />}
-        {field.type === 'file' ? <p className="awwo-field-hint">填写文件路径或链接；不会上传文件。</p> : null}
+        {field.type === 'file' ? <p className="awwo-field-hint">{t('contract.fileHint')}</p> : null}
       </div>;
     })}
-    {errors.length > 0 ? <ul className="awwo-contract-errors" role="alert" aria-label={`${label}校验`}>
+    {errors.length > 0 ? <ul className="awwo-contract-errors" role="alert" aria-label={t('contract.validation', { label })}>
       {errors.map((error, index) => <li key={`${index}:${error}`}>{error}</li>)}
     </ul> : null}
-    <button type="button" className="awwo-field-add" disabled={readOnly} onClick={add}><Plus size={15} aria-hidden="true" />添加字段</button>
+    <button type="button" className="awwo-field-add" disabled={readOnly} onClick={add}><Plus size={15} aria-hidden="true" />{t('contract.addField')}</button>
   </section>;
 }

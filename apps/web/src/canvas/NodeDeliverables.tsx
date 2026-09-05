@@ -7,6 +7,7 @@ import { ContractFields } from './ContractFields';
 import { emptyContract, parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
 import { activeNodeThread } from './nodeThreads';
 import { getAgentTemplateForNode } from './agentTemplates';
+import { useCanvasI18n } from './i18n';
 
 /** A display/copy reference only; recognizing a path never reads or opens a file. */
 function localFilePath(value: string, plainFile = false): string | null {
@@ -29,6 +30,7 @@ function localFilePath(value: string, plainFile = false): string | null {
 }
 
 function LocalFileReference({ path, children }: { path: string; children?: ReactNode }) {
+  const { t } = useCanvasI18n();
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyPath = async () => {
     try {
@@ -39,9 +41,9 @@ function LocalFileReference({ path, children }: { path: string; children?: React
   return <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, maxWidth: '100%', verticalAlign: 'top' }}>
     {children ? <span>{children}</span> : null}
     <code style={{ userSelect: 'text', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{path}</code>
-    <button type="button" aria-label={`复制路径 ${path}`} style={{ alignSelf: 'flex-start' }} onClick={() => { void copyPath(); }}>复制路径</button>
-    {copyState === 'copied' ? <span role="status">已复制</span> : null}
-    {copyState === 'failed' ? <span role="alert">复制失败，请选择路径手动复制</span> : null}
+    <button type="button" aria-label={t('deliverable.copyPath', { path })} style={{ alignSelf: 'flex-start' }} onClick={() => { void copyPath(); }}>{t('deliverable.copyPathButton')}</button>
+    {copyState === 'copied' ? <span role="status">{t('deliverable.copied')}</span> : null}
+    {copyState === 'failed' ? <span role="alert">{t('deliverable.copyFailed')}</span> : null}
   </span>;
 }
 
@@ -68,8 +70,9 @@ export interface NodeDeliverablesProps {
 
 /** Only published output is a deliverable. Editing a form never creates one implicitly. */
 export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverablesProps) {
+  const { locale, t } = useCanvasI18n();
   const [publishErrors, setPublishErrors] = useState<string[]>([]);
-  const deliverableTitle = getAgentTemplateForNode(node)?.deliverableTitle;
+  const deliverableTitle = getAgentTemplateForNode(node, locale)?.deliverableTitle;
   const contract = node.contract ?? emptyContract();
   const output = node.lastOutput ?? activeNodeThread(node).lastOutput;
   // Looking at an earlier Session must not publish its historical result downstream.
@@ -103,19 +106,19 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
   return <div className="awwo-deliverables">
     {deliverableTitle ? <h3 className="awwo-deliverables-title">{deliverableTitle}</h3> : null}
     {!output ? <>
-      <p className="awwo-deliverables-empty">还没有{deliverableTitle || '交付物'}</p>
-      {contract.outputs.length ? <ul className="awwo-expected-deliverables" aria-label="待交付内容">
-        {contract.outputs.map(field => <li key={field.id}><span>{field.label || field.id}</span><span>待交付</span></li>)}
+      <p className="awwo-deliverables-empty">{t('deliverable.empty', { title: deliverableTitle || t('deliverable.defaultTitle') })}</p>
+      {contract.outputs.length ? <ul className="awwo-expected-deliverables" aria-label={t('deliverable.expected')}>
+        {contract.outputs.map(field => <li key={field.id}><span>{field.label || field.id}</span><span>{t('deliverable.pending')}</span></li>)}
       </ul> : null}
     </> : <>
       {(historical || output.partial || output.source === 'manual') && <div className="awwo-deliverables-meta">
-        {historical && <span>历史交付 · 未传递给下游</span>}
-        {output.partial && <span>部分结果 · 未完成</span>}
-        {output.source === 'manual' && <span>手动采用</span>}
+        {historical && <span>{t('deliverable.historical')}</span>}
+        {output.partial && <span>{t('deliverable.partial')}</span>}
+        {output.source === 'manual' && <span>{t('deliverable.manual')}</span>}
       </div>}
-      {parsed?.errors.length ? <p className="awwo-contract-errors" role="alert" title={parsed.errors.join(' ')}>输出未通过表单校验</p> : null}
+      {parsed?.errors.length ? <p className="awwo-contract-errors" role="alert" title={parsed.errors.join(' ')}>{t('deliverable.invalid')}</p> : null}
       {showRawOutput ? <article className="awwo-deliverable" data-testid={`canvas-tile-output-${node.id}`}>
-        <h3 className="awwo-deliverable-title">{parsed?.errors.length ? '原始输出' : '运行输出'}</h3>
+        <h3 className="awwo-deliverable-title">{t(parsed?.errors.length ? 'deliverable.raw' : 'deliverable.runOutput')}</h3>
         <div className="awwo-deliverable-body awwo-markdown-preview">
           <DeliverableMarkdown>{output.text}</DeliverableMarkdown>
         </div>
@@ -136,12 +139,12 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
       </div>}
     </>}
     <details className="awwo-deliverables-editor">
-      <summary>编辑输出表单</summary>
-      <ContractFields fields={contract.outputs} label="输出" readOnly={locked} onChange={updateFields} />
+      <summary>{t('deliverable.editForm')}</summary>
+      <ContractFields fields={contract.outputs} label={t('deliverable.outputLabel')} readOnly={locked} onChange={updateFields} />
       <div className="awwo-output-publish">
-        <p>修改字段会使已有产出失效，填写完成后重新发布。</p>
+        <p>{t('deliverable.republishHint')}</p>
         <button type="button" disabled={locked || !contract.outputs.length} onClick={publishOutput}>
-          <ArrowUpFromLine size={14} aria-hidden="true" />发布输出
+          <ArrowUpFromLine size={14} aria-hidden="true" />{t('deliverable.publish')}
         </button>
       </div>
       {publishErrors.length ? <div className="awwo-contract-errors" role="alert">{publishErrors.join(' ')}</div> : null}

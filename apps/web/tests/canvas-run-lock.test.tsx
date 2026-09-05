@@ -31,6 +31,7 @@ function seed(): CanvasDocument {
     title: 'LLM 会话',
     runtime: 'claude_local',
     binding: { companyId: 'c1', agentId: 'a1', agentName: '策划' },
+    issueId: 'iss-1',
   };
   return { version: 2, updatedAt: 1, nodes: [form, agent], edges: [], waypoints: [], view: { x: 0, y: 0, scale: 1 } };
 }
@@ -46,6 +47,12 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: unknown, init?: { signal?: AbortSignal }) => {
+      if (String(input).endsWith('/prepare')) {
+        return Promise.resolve({ ok: true, status: 200 });
+      }
+      if (String(input).includes('/cancel')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ confirmed: true, cancelled: true, status: 'cancelled' }) });
+      }
       if (!String(input).includes('/messages')) {
         return Promise.resolve({ ok: false, status: 503, json: async () => ({}) });
       }

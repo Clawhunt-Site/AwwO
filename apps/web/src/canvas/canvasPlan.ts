@@ -5,6 +5,7 @@ import { normalizeContract, validateContractFields, type ContractField } from '.
 import { arrangeNodePositions } from './nodePresentation';
 import { canConnect, edgeId, portsFor } from './ports';
 import { findCycle } from './runGraph';
+import type { UiLocale } from '../locale';
 
 export type CanvasPlanFieldChanges = Partial<Pick<ContractField, 'label' | 'type' | 'required' | 'help' | 'placeholder'>>;
 export type CanvasPlanOperation =
@@ -205,7 +206,7 @@ function setInput(node: CanvasNode, fieldId: string, value: string): void {
 }
 
 /** Validate against a private clone, then return one complete document. No partial writes. */
-export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan): AppliedCanvasPlan {
+export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh'): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
   const draft = structuredClone(doc);
   const originalIds = new Set(doc.nodes.map(node => node.id));
@@ -220,7 +221,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan): Applied
     switch (op.type) {
       case 'add_node': {
         if (originalIds.has(op.ref) || draft.nodes.some(node => node.id === op.ref)) fail(`新增引用「${op.ref}」与已有节点 ID 冲突。`);
-        const node = createAgentTemplate(op.templateId, { x: 0, y: 0 });
+        const node = createAgentTemplate(op.templateId, { x: 0, y: 0 }, locale);
         if (op.title !== undefined) node.title = op.title;
         if (op.persona !== undefined) node.persona = op.persona;
         for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value);

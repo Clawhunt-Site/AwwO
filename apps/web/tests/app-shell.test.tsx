@@ -2462,7 +2462,9 @@ describe('App shell', () => {
       expect(calls).toContain('/gateway-api/health');
       expect(calls.some((path) => path.startsWith('/api/escalations'))).toBe(false);
       expect(calls).not.toContain('/api/runtime/status');
-      expect(screen.queryByText(/服务尚未就绪/)).not.toBeInTheDocument();
+      // An invisible native window-drag overlay previously swallowed canvas header clicks.
+      expect(document.querySelector('.macos-window-drag-region')).toBeNull();
+      expect(screen.queryByText(/Services are not ready/)).not.toBeInTheDocument();
     } finally {
       splash.remove();
     }
@@ -2491,14 +2493,14 @@ describe('App shell', () => {
       expect(splash.classList.contains('startup-splash-hidden')).toBe(false);
       await React.act(async () => { await vi.advanceTimersByTimeAsync(8000); });
       expect(splash.classList.contains('startup-splash-hidden')).toBe(true);
-      expect(screen.getByRole('alert')).toHaveTextContent('服务尚未就绪');
+      expect(screen.getByRole('alert')).toHaveTextContent('Services are not ready');
       // A late result from the timed-out probe must not erase the failure state.
       await React.act(async () => { resolveHanging?.(Response.json({ ok: true, upstream: { reachable: true } })); });
-      expect(screen.getByRole('alert')).toHaveTextContent('服务尚未就绪');
+      expect(screen.getByRole('alert')).toHaveTextContent('Services are not ready');
       gatewayReady = true;
-      await React.act(async () => { fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: '重试连接' })); });
-      expect(screen.queryByText(/服务尚未就绪/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/正在检查 Node 服务/)).not.toBeInTheDocument();
+      await React.act(async () => { fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry connection' })); });
+      expect(screen.queryByText(/Services are not ready/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Checking Node services/)).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
       splash.remove();
@@ -2533,14 +2535,14 @@ describe('App shell', () => {
         expect(screen.getByRole('button', { name: 'Show pending approvals' })).toBeInTheDocument();
       }
       fireEvent.click(screen.getByRole('button', { name: 'Canvas', exact: true }));
-      await screen.findByRole('button', { name: /工作区设置/ });
+      await screen.findByRole('button', { name: /Workspace settings/ });
       expect(screen.queryByRole('alertdialog', { name: pending.prompt_text })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Show pending approvals' })).not.toBeInTheDocument();
       const previousPolls = escalationCalls.length;
       await React.act(async () => { await vi.advanceTimersByTimeAsync(8000); });
       expect(escalationCalls).toHaveLength(previousPolls);
       // Returning to a legacy surface remounts the real gate and reads the unchanged queue.
-      fireEvent.click(screen.getByRole('button', { name: /工作区设置/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Workspace settings/ }));
       await screen.findByRole('alertdialog', { name: pending.prompt_text });
       expect(escalationCalls.length).toBeGreaterThan(previousPolls);
       expect(escalationCalls.every((call) => call.method === 'GET' && !call.path.includes('/respond'))).toBe(true);

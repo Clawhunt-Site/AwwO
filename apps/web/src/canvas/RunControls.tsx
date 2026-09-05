@@ -19,7 +19,10 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
-import { preflightGraph, type RunNodeStatus, type RunSummary } from './runGraph';
+import { preflightGraphIssue, type RunNodeStatus, type RunSummary } from './runGraph';
+import { canvasText, useCanvasI18n } from './i18n';
+import type { UiLocale } from '../locale';
+import { preflightIssueMessage } from './surfaceMessages';
 
 export interface RunControlsProps {
   /** The graph as it stands NOW — preflight runs against this exact snapshot. */
@@ -54,13 +57,16 @@ const CLUSTER_STYLE: CSSProperties = {
 };
 
 /** The finished-run note. Pure + exported so the wording is testable without a render. */
-export function summaryNote(summary: RunSummary, stopped: boolean): string {
+export function summaryNote(summary: RunSummary, stopped: boolean, locale: UiLocale = 'zh'): string {
   // A scoped run reused upstream results instead of re-running them. Saying so is the difference
   // between "3/3 succeeded" reading as "the whole graph is fresh" and reading as what it is.
-  const reused = summary.cached ? `，沿用 ${summary.cached} 个上游产出` : '';
-  if (stopped) return `已停止：完成 ${summary.done}/${summary.total}${reused}。`;
-  if (summary.ok) return `运行完成：${summary.done}/${summary.total} 节点成功${reused}。`;
-  return `运行结束：成功 ${summary.done} · 失败 ${summary.failed} · 被阻断 ${summary.blocked}（共 ${summary.total}）${reused}。`;
+  const reused = summary.cached ? canvasText(locale, 'run.reusedSummary', { count: summary.cached }) : '';
+  const cancelledCount = 'cancelled' in summary && typeof summary.cancelled === 'number' ? summary.cancelled : 0;
+  const cancelled = cancelledCount ? canvasText(locale, 'run.cancelledSummary', { count: cancelledCount }) : '';
+  const values = { done: summary.done, total: summary.total, failed: summary.failed, blocked: summary.blocked, reused };
+  if (stopped) return canvasText(locale, 'run.stoppedSummary', values);
+  if (summary.ok) return canvasText(locale, 'run.completedSummary', values);
+  return `${canvasText(locale, 'run.failedSummary', values).replace(/\.$/, '')}${cancelled}.`;
 }
 
 export function RunControls({
@@ -76,15 +82,16 @@ export function RunControls({
   timelineOpen = false,
   style,
 }: RunControlsProps) {
+  const { locale, t } = useCanvasI18n();
   // "The operator asked and was refused" — a flag, not the refusal TEXT. The text is re-derived
   // from the CURRENT graph on every render, so a refusal can never outlive the problem it named:
   // bind the missing agent and the message goes away by itself (and if the graph acquires a
   // different problem meanwhile, the operator sees THAT one, not a stale sentence).
   const [refused, setRefused] = useState(false);
-  const problem = refused ? preflightGraph(nodes, edges) : null;
+  const problem = refused ? preflightIssueMessage(t, preflightGraphIssue(nodes, edges), locale) : null;
 
   const start = () => {
-    const found = preflightGraph(nodes, edges);
+    const found = preflightGraphIssue(nodes, edges);
     if (found) {
       setRefused(true);
       return;
@@ -95,19 +102,20 @@ export function RunControls({
 
   const doneNow = Object.values(runs).filter((s) => s.state === 'done').length;
   const hasRuns = Object.keys(runs).length > 0;
+  const runTotal = summary?.total ?? (hasRuns ? Object.values(runs).filter(s => s.state !== 'cached').length : nodes.length);
 
   return (
     <div
       className="canvas-run-ctl"
       role="group"
-      aria-label="运行控制"
+      aria-label={t('run.controls')}
       style={{ ...CLUSTER_STYLE, ...style }}
       onPointerDown={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
       {running ? (
         <button type="button" className="canvas-run-btn canvas-run-btn--stop" onClick={onStop}>
-          ■ 停止
+          ■ {t('run.stop')}
         </button>
       ) : (
         <button
@@ -115,9 +123,9 @@ export function RunControls({
           className="canvas-run-btn"
           onClick={start}
           disabled={nodes.length === 0}
-          title={nodes.length === 0 ? '画布上还没有节点' : undefined}
+          title={nodes.length === 0 ? t('run.emptyTitle') : undefined}
         >
-          ▶ 运行图
+          ▶ {t('run.runGraph')}
         </button>
       )}
 
@@ -129,15 +137,15 @@ export function RunControls({
         </span>
       ) : running ? (
         <span className="canvas-run-note">
-          运行中 · {doneNow}/{nodes.length}
+          {t('run.inProgress', { done: doneNow, total: runTotal })}
         </span>
       ) : summary ? (
-        <span className="canvas-run-note">{summaryNote(summary, stopped)}</span>
+        <span className="canvas-run-note">{summaryNote(summary, stopped, locale)}</span>
       ) : null}
 
       {onToggleTimeline && hasRuns ? (
         <button type="button" className="canvas-run-timeline-toggle" onClick={onToggleTimeline}>
-          {timelineOpen ? '收起时间线' : '时间线'}
+          {t(timelineOpen ? 'run.timelineCollapse' : 'run.timeline')}
         </button>
       ) : null}
     </div>

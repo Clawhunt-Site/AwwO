@@ -46,6 +46,18 @@ export function activeNodeThread(node: SessionNode): NodeThread {
   return getNodeThreads(node).find(thread => thread.id === activeThreadId(node))!;
 }
 
+/** Values baked into a hired Agent at bind time. Changing them locally on an already-bound
+ * thread would make the canvas describe a runtime/persona the native Agent does not have. */
+export function boundAgentConfigurationChanged(current: SessionNode, next: SessionNode): boolean {
+  return Boolean(current.binding) && (
+    current.agentKind !== next.agentKind ||
+    current.runtime !== next.runtime ||
+    current.model !== next.model ||
+    current.effort !== next.effort ||
+    current.persona !== next.persona
+  );
+}
+
 function project(node: SessionNode, threads: NodeThread[], target: NodeThread): SessionNode {
   return {
     ...node,

@@ -22,8 +22,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { AGENT_KIND_META, type AgentKind, type CanvasNode } from './canvasDoc';
+import type { AgentKind, CanvasNode } from './canvasDoc';
 import { getSnapshot, type NodeSession } from './sessions';
+import { canvasText, useCanvasI18n } from './i18n';
+import type { UiLocale } from '../locale';
 
 export type CommandBarMode = 'commands' | 'search';
 
@@ -176,6 +178,10 @@ export function snippetAround(text: string, query: string, radius = 40): string 
 
 export type SearchField = '标题' | '对话' | '人设' | '字段';
 
+const SEARCH_FIELD_KEYS: Record<SearchField, 'command.fieldTitle' | 'command.fieldConversation' | 'command.fieldPersona' | 'command.fieldForm'> = {
+  标题: 'command.fieldTitle', 对话: 'command.fieldConversation', 人设: 'command.fieldPersona', 字段: 'command.fieldForm',
+};
+
 export interface CanvasSearchHit {
   nodeId: string;
   title: string;
@@ -193,10 +199,10 @@ export interface CanvasSearchResult {
   unreadable: number;
 }
 
-function historyNoteFor(session: NodeSession): string | null {
+function historyNoteFor(session: NodeSession, locale: UiLocale): string | null {
   if (session.history === 'loaded') return null;
-  if (session.history === 'unreadable') return '对话读取失败 · 未参与搜索';
-  return '对话尚未载入 · 未参与搜索';
+  if (session.history === 'unreadable') return canvasText(locale, 'command.historyUnreadable');
+  return canvasText(locale, 'command.historyNotLoaded');
 }
 
 /**
@@ -208,6 +214,7 @@ export function searchCanvas(
   nodes: ReadonlyArray<CanvasNode>,
   query: string,
   read: (nodeId: string) => NodeSession,
+  locale: UiLocale = 'zh',
 ): CanvasSearchResult {
   const q = query.trim();
   const result: CanvasSearchResult = { hits: [], notLoaded: 0, unreadable: 0 };
@@ -218,7 +225,7 @@ export function searchCanvas(
       if (session.history === 'unreadable') result.unreadable += 1;
       else if (session.history !== 'loaded') result.notLoaded += 1;
     }
-    const note = session ? historyNoteFor(session) : null;
+    const note = session ? historyNoteFor(session, locale) : null;
     const push = (field: SearchField, text: string) => {
       result.hits.push({ nodeId: node.id, title: node.title, field, snippet: snippetAround(text, q), historyNote: note });
     };
@@ -264,36 +271,39 @@ export function buildCommandRows(
   actions: CanvasCommandActions,
   ctx: CommandContext,
   keyHints: Partial<Record<CanvasCommandId, string>> = {},
+  locale: UiLocale = 'zh',
 ): CommandRow[] {
   const key = (id: CanvasCommandId) => keyHints[id] ?? DEFAULT_KEY_HINTS[id];
+  const text = (key: Parameters<typeof canvasText>[1], values?: Record<string, string | number>) => canvasText(locale, key, values);
+  const kindLabel = (kind: AgentKind) => text(kind === 'coding' ? 'node.coding' : kind === 'image' ? 'node.image' : 'node.llm');
   const rows: CommandRow[] = [];
   if (actions.addSession) {
     (['llm', 'coding', 'image'] as AgentKind[]).forEach((kind) => {
       rows.push({
         id: `add-session-${kind}`,
-        label: `添加${AGENT_KIND_META[kind].label}会话节点`,
+        label: text('command.addSession', { type: kindLabel(kind) }),
         keys: key(`add-session-${kind}` as CanvasCommandId),
         run: () => actions.addSession!(kind),
       });
     });
   }
   if (actions.addForm) {
-    rows.push({ id: 'add-form', label: '添加表单节点', keys: key('add-form'), run: actions.addForm });
+    rows.push({ id: 'add-form', label: text('command.addForm'), keys: key('add-form'), run: actions.addForm });
   }
   // 运行 / 停止 swap by REAL run state — never both, never a run button during a run.
   if (!ctx.running && actions.run) {
-    rows.push({ id: 'run', label: '运行图', keys: key('run'), run: actions.run });
+    rows.push({ id: 'run', label: text('command.run'), keys: key('run'), run: actions.run });
   }
   if (ctx.running && actions.stop) {
-    rows.push({ id: 'stop', label: '停止运行', keys: key('stop'), run: actions.stop });
+    rows.push({ id: 'stop', label: text('command.stop'), keys: key('stop'), run: actions.stop });
   }
   if (actions.fitAll) {
-    rows.push({ id: 'fit', label: '适应全部节点', keys: key('fit'), run: actions.fitAll });
+    rows.push({ id: 'fit', label: text('command.fit'), keys: key('fit'), run: actions.fitAll });
   }
   if (actions.toggleTimeline) {
     rows.push({
       id: 'timeline',
-      label: ctx.timelineOpen ? '收起执行时间线' : '展开执行时间线',
+      label: text(ctx.timelineOpen ? 'command.hideTimeline' : 'command.showTimeline'),
       keys: key('timeline'),
       run: actions.toggleTimeline,
     });
@@ -301,26 +311,26 @@ export function buildCommandRows(
   if (actions.toggleMinimap) {
     rows.push({
       id: 'minimap',
-      label: ctx.minimapOpen ? '隐藏小地图' : '显示小地图',
+      label: text(ctx.minimapOpen ? 'command.hideMinimap' : 'command.showMinimap'),
       keys: key('minimap'),
       run: actions.toggleMinimap,
     });
   }
   if (actions.saveWaypoint) {
-    rows.push({ id: 'waypoint-save', label: '保存视点', keys: key('waypoint-save'), run: actions.saveWaypoint });
+    rows.push({ id: 'waypoint-save', label: text('command.saveWaypoint'), keys: key('waypoint-save'), run: actions.saveWaypoint });
   }
   if (actions.recallWaypoint) {
-    rows.push({ id: 'waypoint-recall', label: '跳转视点', keys: key('waypoint-recall'), run: actions.recallWaypoint });
+    rows.push({ id: 'waypoint-recall', label: text('command.recallWaypoint'), keys: key('waypoint-recall'), run: actions.recallWaypoint });
   }
   if (actions.deleteSelection) {
     rows.push({
       id: 'delete',
-      label: `删除选中（${ctx.selectionCount}）`,
+      label: text('command.deleteSelection', { count: ctx.selectionCount }),
       keys: key('delete'),
       // Offered but inert with an empty selection: hiding it would make the operator wonder
       // whether the canvas can delete at all.
       disabled: ctx.selectionCount === 0,
-      hint: ctx.selectionCount === 0 ? '没有选中的节点' : undefined,
+      hint: ctx.selectionCount === 0 ? text('command.noSelection') : undefined,
       run: actions.deleteSelection,
     });
   }
@@ -333,45 +343,45 @@ export function buildCommandRows(
   if (actions.runSelection) {
     rows.push({
       id: 'run-selection',
-      label: `运行选区及其下游（${ctx.selectionCount}）`,
+      label: text('command.runSelection', { count: ctx.selectionCount }),
       keys: key('run-selection'),
       disabled: ctx.selectionCount === 0 || ctx.running,
-      hint: ctx.selectionCount === 0 ? '没有选中的节点' : ctx.running ? '正在运行' : undefined,
+      hint: ctx.selectionCount === 0 ? text('command.noSelection') : ctx.running ? text('command.running') : undefined,
       run: actions.runSelection,
     });
   }
   if (actions.rerunNode) {
     rows.push({
       id: 'rerun-node',
-      label: '只重跑选中节点',
+      label: text('command.rerunNode'),
       keys: key('rerun-node'),
       disabled: ctx.selectionCount !== 1 || ctx.running,
       hint:
         ctx.selectionCount !== 1
-          ? '请只选中一个节点'
+          ? text('command.selectOne')
           : ctx.running
-            ? '正在运行'
-            : '上游沿用上次产出，不会重跑',
+            ? text('command.running')
+            : text('command.reuseUpstream'),
       run: actions.rerunNode,
     });
   }
   if (actions.undo) {
     rows.push({
       id: 'undo',
-      label: '撤销',
+      label: text('command.undo'),
       keys: key('undo'),
       disabled: actions.canUndo === false,
-      hint: actions.canUndo === false ? '没有可撤销的操作' : undefined,
+      hint: actions.canUndo === false ? text('command.noUndo') : undefined,
       run: actions.undo,
     });
   }
   if (actions.redo) {
     rows.push({
       id: 'redo',
-      label: '重做',
+      label: text('command.redo'),
       keys: key('redo'),
       disabled: actions.canRedo === false,
-      hint: actions.canRedo === false ? '没有可重做的操作' : undefined,
+      hint: actions.canRedo === false ? text('command.noRedo') : undefined,
       run: actions.redo,
     });
   }
@@ -415,14 +425,15 @@ export function CommandBar({
   readSession = getSnapshot,
   style,
 }: CommandBarProps) {
+  const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const search = useMemo(
-    () => (mode === 'search' ? searchCanvas(nodes, query, readSession) : null),
-    [mode, nodes, query, readSession],
+    () => (mode === 'search' ? searchCanvas(nodes, query, readSession, locale) : null),
+    [mode, nodes, query, readSession, locale],
   );
 
   const rows: CommandRow[] = useMemo(() => {
@@ -432,7 +443,7 @@ export function CommandBar({
         label: hit.title,
         // The note rides ON the row: a node that matched on its title while its transcript was
         // never loaded must not read as "searched, matched on title, nothing else there".
-        hint: [`${hit.field}：${hit.snippet}`, hit.historyNote].filter(Boolean).join(' · '),
+        hint: [t('command.hit', { field: t(SEARCH_FIELD_KEYS[hit.field]), snippet: hit.snippet }), hit.historyNote].filter(Boolean).join(' · '),
         run: () => onFocusNode(hit.nodeId),
       }));
     }
@@ -440,11 +451,12 @@ export function CommandBar({
       actions,
       { running, timelineOpen, minimapOpen, selectionCount },
       keyHints,
+      locale,
     );
     const focusRows: CommandRow[] = nodes.map((n) => ({
       id: `focus-${n.id}`,
-      label: `聚焦：${n.title}`,
-      hint: n.kind === 'session' ? AGENT_KIND_META[n.agentKind].label : '表单',
+      label: t('command.focusNode', { title: n.title }),
+      hint: n.kind === 'session' ? t(n.agentKind === 'coding' ? 'node.coding' : n.agentKind === 'image' ? 'node.image' : 'node.llm') : t('node.form'),
       run: () => onFocusNode(n.id),
     }));
     const all = [...commands, ...focusRows];
@@ -462,6 +474,8 @@ export function CommandBar({
     nodes,
     query,
     onFocusNode,
+    locale,
+    t,
   ]);
 
   const shown = rows.slice(0, MAX_ROWS);
@@ -523,7 +537,7 @@ export function CommandBar({
     return () => document.removeEventListener('focusin', onFocusIn);
   }, []);
 
-  const placeholder = mode === 'search' ? '搜索节点、人设、表单与已载入的对话…' : '输入命令或节点名…';
+  const placeholder = t(mode === 'search' ? 'command.searchPlaceholder' : 'command.placeholder');
 
   return (
     <div
@@ -540,7 +554,7 @@ export function CommandBar({
         className="canvas-cmdbar"
         role="dialog"
         aria-modal="true"
-        aria-label={mode === 'search' ? '搜索画布' : '命令面板'}
+        aria-label={t(mode === 'search' ? 'command.searchCanvas' : 'command.palette')}
         style={PANEL_STYLE}
       >
         <input
@@ -549,7 +563,7 @@ export function CommandBar({
           role="combobox"
           aria-expanded
           aria-controls="canvas-cmdbar-list"
-          aria-label={mode === 'search' ? '搜索画布' : '命令面板'}
+          aria-label={t(mode === 'search' ? 'command.searchCanvas' : 'command.palette')}
           placeholder={placeholder}
           value={query}
           spellCheck={false}
@@ -580,21 +594,21 @@ export function CommandBar({
           ))}
           {shown.length === 0 ? (
             <div className="canvas-cmdbar-empty">
-              {mode === 'search' && !query.trim() ? '输入以搜索画布。' : '没有匹配项。'}
+              {t(mode === 'search' && !query.trim() ? 'command.startSearch' : 'command.noMatches')}
             </div>
           ) : null}
         </div>
         <footer className="canvas-cmdbar-foot">
-          {overflow > 0 ? <span className="canvas-cmdbar-note">还有 {overflow} 项未显示 — 继续输入以缩小范围。</span> : null}
+          {overflow > 0 ? <span className="canvas-cmdbar-note">{t('command.overflow', { count: overflow })}</span> : null}
           {/* Standing honesty line: what the search could NOT look at. */}
           {mode === 'search' && search && search.notLoaded > 0 ? (
             <span className="canvas-cmdbar-note canvas-cmdbar-note--warn">
-              {search.notLoaded} 个节点的对话尚未载入 — 未参与搜索（此处不会为搜索而拉取）。
+              {t('command.notLoaded', { count: search.notLoaded })}
             </span>
           ) : null}
           {mode === 'search' && search && search.unreadable > 0 ? (
             <span className="canvas-cmdbar-note canvas-cmdbar-note--err">
-              {search.unreadable} 个节点的对话读取失败 — 未参与搜索。
+              {t('command.unreadable', { count: search.unreadable })}
             </span>
           ) : null}
         </footer>

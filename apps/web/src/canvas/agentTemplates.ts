@@ -1,6 +1,8 @@
 import { createSessionNode, type CanvasEdge, type CanvasNode, type SessionNode } from './canvasDoc';
 import { edgeId } from './ports';
 import type { ContractField, ContractFieldType } from './nodeContracts';
+import type { UiLocale } from '../locale';
+import { EN_AGENT_TEMPLATES } from './agentTemplates.en';
 
 export type AgentTemplateId = 'general' | 'frontend' | 'backend' | 'data' | 'users' | 'materials' | 'review';
 export const AGENT_TEMPLATE_VERSION = 1;
@@ -189,22 +191,38 @@ export const AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
   }),
 ];
 
-const LEGACY_TITLES: Record<AgentTemplateId, string> = {
-  general: '自定义 Agent', frontend: '前端开发', backend: '后端 / 用户系统', data: '数据治理',
-  users: '用户系统', materials: '物料制作', review: '交付验收',
+const LEGACY_TITLES: Record<AgentTemplateId, ReadonlyArray<string>> = {
+  general: ['自定义 Agent', 'Custom Agent'],
+  frontend: ['前端开发', 'Frontend development'],
+  backend: ['后端 / 用户系统', '后端服务', 'Backend services'],
+  data: ['数据治理', 'Data governance'],
+  users: ['用户系统', 'User system'],
+  materials: ['物料制作', 'Content production'],
+  review: ['交付验收', 'Delivery review'],
 };
 
+/** The legacy export remains Chinese so existing callers and saved documents keep their defaults. */
+export function getAgentTemplates(locale: UiLocale): ReadonlyArray<AgentTemplate> {
+  return locale === 'en' ? EN_AGENT_TEMPLATES : AGENT_TEMPLATES;
+}
+
+export function getAgentTemplate(id: AgentTemplateId, locale: UiLocale = 'zh'): AgentTemplate {
+  const templates = getAgentTemplates(locale);
+  return templates.find(item => item.id === id) ?? templates[0];
+}
+
 /** Resolve guidance only. Never migrate or replace the operator's existing contract/persona. */
-export function getAgentTemplateForNode(node: CanvasNode): AgentTemplate | undefined {
+export function getAgentTemplateForNode(node: CanvasNode, locale: UiLocale = 'zh'): AgentTemplate | undefined {
   if (node.kind !== 'session') return undefined;
-  if (node.templateId) return AGENT_TEMPLATES.find(item => item.id === node.templateId);
-  return AGENT_TEMPLATES.find(item => node.title === LEGACY_TITLES[item.id]
+  const templates = getAgentTemplates(locale);
+  if (node.templateId) return templates.find(item => item.id === node.templateId);
+  return templates.find(item => LEGACY_TITLES[item.id].includes(node.title)
     && node.contract?.inputs.some(input => input.id === item.input[0])
     && node.contract?.outputs.some(output => output.id === item.output[0]));
 }
 
-export function createAgentTemplate(id: AgentTemplateId, pos: { x: number; y: number }): SessionNode {
-  const selected = AGENT_TEMPLATES.find(item => item.id === id) ?? AGENT_TEMPLATES[0];
+export function createAgentTemplate(id: AgentTemplateId, pos: { x: number; y: number }, locale: UiLocale = 'zh'): SessionNode {
+  const selected = getAgentTemplate(id, locale);
   const node = createSessionNode(['frontend', 'backend', 'users'].includes(selected.id) ? 'coding' : 'llm', pos);
   return { ...node, title: selected.title, persona: selected.persona, w: 560, h: 420,
     templateId: selected.id, templateVersion: AGENT_TEMPLATE_VERSION,
@@ -213,12 +231,12 @@ export function createAgentTemplate(id: AgentTemplateId, pos: { x: number; y: nu
 }
 
 /** Creates local drafts only. No backend mutation, no messages, no invented outputs. */
-export function createDevelopmentTemplate(pos: { x: number; y: number }): { nodes: SessionNode[]; edges: CanvasEdge[] } {
-  const data = createAgentTemplate('data', pos);
-  const backend = createAgentTemplate('backend', { x: pos.x + 380, y: pos.y });
-  const frontend = createAgentTemplate('frontend', { x: pos.x + 760, y: pos.y });
-  const materials = createAgentTemplate('materials', { x: pos.x + 380, y: pos.y + 240 });
-  const review = createAgentTemplate('review', { x: pos.x + 760, y: pos.y + 240 });
+export function createDevelopmentTemplate(pos: { x: number; y: number }, locale: UiLocale = 'zh'): { nodes: SessionNode[]; edges: CanvasEdge[] } {
+  const data = createAgentTemplate('data', pos, locale);
+  const backend = createAgentTemplate('backend', { x: pos.x + 380, y: pos.y }, locale);
+  const frontend = createAgentTemplate('frontend', { x: pos.x + 760, y: pos.y }, locale);
+  const materials = createAgentTemplate('materials', { x: pos.x + 380, y: pos.y + 240 }, locale);
+  const review = createAgentTemplate('review', { x: pos.x + 760, y: pos.y + 240 }, locale);
   const connect = (from: SessionNode, fromField: string, to: SessionNode, toField: string): CanvasEdge => {
     const start = { nodeId: from.id, portId: `out:${fromField}` };
     const end = { nodeId: to.id, portId: `in:${toField}` };

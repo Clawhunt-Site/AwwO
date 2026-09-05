@@ -1,4 +1,23 @@
 import '@testing-library/jest-dom/vitest';
+import { beforeEach } from 'vitest';
+
+// jsdom does not implement Web Locks. Model exclusive ifAvailable ownership, including release,
+// so all canvas interaction tests exercise the same asynchronous entry gate as a real browser.
+const heldLocks = new Map<string, Promise<void>>();
+beforeEach(() => heldLocks.clear());
+Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+  async request(name: string, options: { ifAvailable?: boolean }, callback: (lock: unknown) => unknown) {
+    while (heldLocks.has(name)) {
+      if (options.ifAvailable) return callback(null);
+      await heldLocks.get(name);
+    }
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    heldLocks.set(name, held);
+    try { return await callback({ name, mode: 'exclusive' }); }
+    finally { if (heldLocks.get(name) === held) heldLocks.delete(name); release(); }
+  },
+} });
 
 function createLocalStorage() {
   const store = new Map<string, string>();

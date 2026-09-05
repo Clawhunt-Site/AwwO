@@ -80,6 +80,28 @@ it('preserves card input when an older inspector draft is saved', () => {
   expect(saved.kind === 'session' && saved.contract?.inputs[0].value).toBe('**保留本次输入**');
 });
 
+it('forks changed native configuration into an unbound Session instead of drifting a bound Agent', () => {
+  const node = createAgentTemplate('data', { x: 0, y: 0 });
+  node.binding = { companyId: 'company', agentId: 'agent', agentName: 'Data agent' };
+  node.issueId = 'bound-thread';
+  node.persona = 'Original native persona';
+  localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes: [node], view: { x: 0, y: 0, scale: 1 } }));
+  render(<CanvasSurface />);
+  fireEvent.click(screen.getByRole('button', { name: '打开 数据治理', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '配置', exact: true }));
+  fireEvent.change(screen.getByRole('textbox', { name: '人设 / 系统提示词' }), { target: { value: 'Changed persona' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
+  const saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
+  expect(saved.binding).toBeNull();
+  expect(saved.issueId).toBeNull();
+  expect(saved.persona).toBe('Changed persona');
+  expect(saved.threads).toHaveLength(2);
+  expect(saved.threads?.find(thread => thread.id === 'default')).toMatchObject({
+    issueId: 'bound-thread', binding: { agentId: 'agent' }, persona: 'Original native persona',
+  });
+  expect(screen.getByRole('alert')).toHaveTextContent('新的 Session');
+});
+
 it('preserves the server thread while undoing a user edit made before graph execution', async () => {
   const node = createAgentTemplate('data', { x: 0, y: 0 });
   node.runtime = 'claude_local';
