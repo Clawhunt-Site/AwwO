@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-05
+
+- Add account/profile and workspace membership management using the existing control-plane APIs, including copied invitation links, role updates and server-enforced last-owner protection. Local trusted mode is identified explicitly.
+- Add Chinese and English canvas interfaces and personalized template text while preserving user content, Session history, field IDs and protocol keys.
+- Persist execution identity before dispatch, recover native run state after disconnection, and use browser ownership locks to prevent duplicate canvas execution across tabs.
+- Confirm Stop against the native Agent before unlocking, preserve uncertain execution for recovery, and continue within the original Session after confirmed cancellation.
+- Validate structured deliveries before downstream execution; preserve historical replies without publishing stale, partial, manual or mismatched results as successful graph outputs.
+- Add isolated authenticated account acceptance and real local Codex planning, binding, Session, file-delivery and repair evidence. This remains a local development release; authenticated multi-tenant canvas isolation and production deployment are not claimed.
+
 ## [0.2.0] - 2026-09-05
 
 - Establish AwwO as an independent private Forgejo repository with a complete current-source snapshot, preserved third-party licenses and documented SuperClaw provenance.
