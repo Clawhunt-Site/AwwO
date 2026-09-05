@@ -20,6 +20,8 @@
  *  with a label an operator would plausibly create by hand. */
 export const CONVERSATION_LABEL = 'superclaw:conversation';
 const CONVERSATION_LABEL_COLOR = '#6366f1';
+const TRANSCRIPT_PAGE_SIZE = 200;
+const MAX_TRANSCRIPT_COMMENTS = 2_000;
 
 type Json = Record<string, unknown>;
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -157,14 +159,54 @@ export class ConversationIndexStore {
       .filter((c): c is ConversationSummary => c !== null);
   }
 
-  /** The stored transcript of one conversation (oldest first), for resuming it in the UI. */
-  async listMessages(issueId: string, limit = 200): Promise<Json[]> {
-    const res = await this.req(
-      `/api/issues/${encodeURIComponent(issueId)}/comments?order=asc&limit=${encodeURIComponent(String(limit))}`,
-    );
-    if (!res.ok || !Array.isArray(res.body)) {
-      throw new Error(res.status === 0 ? 'transcript: upstream unreachable' : `transcript: upstream ${res.status}`);
+  /** The complete bounded transcript of one conversation (oldest first).
+   *
+   * Turn one lives in the issue description; subsequent user turns and Agent
+   * replies live in comments. We page comments with the upstream's stable cursor
+   * and reject an over-limit transcript instead of returning the oldest prefix as
+   * if it were complete. */
+  async listMessages(companyId: string, issueId: string, maxComments = MAX_TRANSCRIPT_COMMENTS): Promise<Json[]> {
+    const issueRes = await this.req(`/api/issues/${encodeURIComponent(issueId)}`);
+    if (!issueRes.ok || !issueRes.body || typeof issueRes.body !== 'object' || Array.isArray(issueRes.body)) {
+      throw new Error(issueRes.status === 0 ? 'transcript issue: upstream unreachable' : `transcript issue: upstream ${issueRes.status}`);
     }
-    return res.body as Json[];
+    const issue = issueRes.body as Json;
+    if (str(issue.id) !== issueId || str(issue.companyId) !== companyId) {
+      throw new Error('transcript issue identity mismatch');
+    }
+
+    const cap = Math.max(1, Math.min(Math.floor(maxComments), MAX_TRANSCRIPT_COMMENTS));
+    const comments: Json[] = [];
+    let after: string | null = null;
+    while (comments.length < cap) {
+      const pageLimit = Math.min(TRANSCRIPT_PAGE_SIZE, cap - comments.length);
+      const query = `order=asc&limit=${pageLimit}${after ? `&after=${encodeURIComponent(after)}` : ''}`;
+      const res = await this.req(`/api/issues/${encodeURIComponent(issueId)}/comments?${query}`);
+      if (!res.ok || !Array.isArray(res.body)) {
+        throw new Error(res.status === 0 ? 'transcript: upstream unreachable' : `transcript: upstream ${res.status}`);
+      }
+      const page = res.body as Json[];
+      comments.push(...page);
+      if (page.length < pageLimit) break;
+      const cursor = str(page.at(-1)?.id);
+      if (!cursor || cursor === after) throw new Error('transcript: invalid comment cursor');
+      after = cursor;
+    }
+
+    if (comments.length === cap) {
+      const probe = await this.req(
+        `/api/issues/${encodeURIComponent(issueId)}/comments?order=asc&limit=1&after=${encodeURIComponent(after ?? '')}`,
+      );
+      if (!probe.ok || !Array.isArray(probe.body)) {
+        throw new Error(probe.status === 0 ? 'transcript: upstream unreachable' : `transcript: upstream ${probe.status}`);
+      }
+      if (probe.body.length) throw new Error(`transcript exceeds the ${cap}-comment recovery limit`);
+    }
+
+    const description = typeof issue.description === 'string' && issue.description.trim() ? issue.description : null;
+    return [
+      ...(description ? [{ id: `issue:${issueId}:description`, body: description, authorAgentId: null, source: 'issue_description' }] : []),
+      ...comments,
+    ];
   }
 }

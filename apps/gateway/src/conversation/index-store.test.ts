@@ -90,13 +90,42 @@ describe('P3f — ConversationIndexStore', () => {
     await expect(s.listConversations('co-1')).rejects.toThrow(/upstream 500/);
   });
 
-  it('reads a transcript oldest-first for resuming a thread', async () => {
-    let commentsUrl = '';
+  it('prepends the exact first user turn and pages every comment oldest-first', async () => {
+    const commentsUrls: string[] = [];
+    const firstPage = Array.from({ length: 200 }, (_, index) => ({ id: `c${index + 1}`, body: `message ${index + 1}` }));
     const { s } = store((url) => {
-      commentsUrl = url;
-      return json([{ id: 'c1', body: 'hello' }]);
+      if (url.endsWith('/api/issues/i-1')) {
+        return json({ id: 'i-1', companyId: 'co-1', description: 'first prompt' });
+      }
+      commentsUrls.push(url);
+      if (!url.includes('after=')) return json(firstPage);
+      if (url.includes('after=c200')) return json([{ id: 'c201', body: 'latest reply' }]);
+      return json([]);
     });
-    await expect(s.listMessages('i-1')).resolves.toHaveLength(1);
-    expect(commentsUrl).toContain('order=asc');
+    const messages = await s.listMessages('co-1', 'i-1', 201);
+    expect(messages).toHaveLength(202);
+    expect(messages[0]).toMatchObject({ body: 'first prompt', source: 'issue_description' });
+    expect(messages.at(-1)).toEqual({ id: 'c201', body: 'latest reply' });
+    expect(commentsUrls[0]).toContain('order=asc&limit=200');
+    expect(commentsUrls[1]).toContain('order=asc&limit=1&after=c200');
+    expect(commentsUrls[2]).toContain('order=asc&limit=1&after=c201');
+  });
+
+  it('refuses an over-limit transcript instead of presenting an incomplete history as loaded', async () => {
+    const { s } = store((url) => {
+      if (url.endsWith('/api/issues/i-1')) return json({ id: 'i-1', companyId: 'co-1', description: 'first' });
+      if (url.includes('after=c2')) return json([{ id: 'c3', body: 'newest omitted turn' }]);
+      return json([{ id: 'c1', body: 'one' }, { id: 'c2', body: 'two' }]);
+    });
+    await expect(s.listMessages('co-1', 'i-1', 2)).rejects.toThrow(/exceeds the 2-comment recovery limit/);
+  });
+
+  it('rejects a cross-company transcript identity before reading comments', async () => {
+    const { s, fetchImpl } = store((url) => {
+      if (url.endsWith('/api/issues/i-1')) return json({ id: 'i-1', companyId: 'other-company', description: 'private' });
+      throw new Error(`unexpected ${url}`);
+    });
+    await expect(s.listMessages('co-1', 'i-1')).rejects.toThrow(/identity mismatch/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

@@ -19,6 +19,7 @@ import { ConversationIndexStore } from "./conversation/index-store.js";
 import { HttpUpstreamCompanyReader } from "./mission/upstream-reader.js";
 import { AgentConversationDispatcher } from "./conversation/dispatcher.js";
 import { createConversationRouter } from "./conversation/routes.js";
+import { ConversationOperationStore } from "./conversation/operation-store.js";
 import { createClawHuntAuthRouter } from "./auth/routes.js";
 import { openCompanyEventSource } from "./conversation/ws-source.js";
 import {
@@ -140,6 +141,7 @@ export async function startGateway(): Promise<GatewayRuntime> {
   // agent + stream its run over the company WS. All over the same loopback upstream.
   const conversationDispatcher = new AgentConversationDispatcher(config.upstreamBaseUrl, {
     timeoutMs: config.upstreamTimeoutMs,
+    operationStore: new ConversationOperationStore(join(superHome(), "conversation-operations")),
   });
   const conversationRouter = createConversationRouter({
     dispatcher: conversationDispatcher,

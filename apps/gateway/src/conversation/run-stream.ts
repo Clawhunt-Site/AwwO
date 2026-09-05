@@ -22,14 +22,19 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
 
-/** Heartbeat run statuses that mean the run is still going. Anything else that
- *  appears in a status event is terminal (succeeded/failed/cancelled/timed_out/…)
- *  — we treat "present and not live" as terminal rather than hardcode the full
- *  terminal set, so a new upstream terminal status can't be misread as ongoing. */
-const LIVE_RUN_STATUSES = new Set(['queued', 'running']);
+/** Mirror the upstream heartbeat state machine. `scheduled_retry` remains live: a later
+ * attempt can still execute real work, so treating it as done would unlock the canvas while
+ * the native Agent is still eligible to resume. Unknown statuses are neither live nor terminal
+ * until this contract is deliberately updated. */
+const LIVE_RUN_STATUSES = new Set(['queued', 'scheduled_retry', 'running']);
+const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timed_out']);
+
+export function isLiveRunStatus(status: string): boolean {
+  return LIVE_RUN_STATUSES.has(status);
+}
 
 export function isTerminalRunStatus(status: string): boolean {
-  return status.length > 0 && !LIVE_RUN_STATUSES.has(status);
+  return TERMINAL_RUN_STATUSES.has(status);
 }
 
 /** Claude-family adapters stream Anthropic stream-json and Codex uses JSONL;

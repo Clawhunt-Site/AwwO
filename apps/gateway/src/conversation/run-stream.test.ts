@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   RunStreamProjector,
+  isLiveRunStatus,
   isStreamJsonAdapter,
   isTerminalRunStatus,
   type LiveEventFrame,
@@ -17,12 +18,18 @@ function streamEventDelta(text: string): string {
 }
 
 describe('isTerminalRunStatus', () => {
-  it('queued/running live; anything else present terminal; empty not', () => {
+  it('uses explicit live and terminal states without guessing unknown statuses', () => {
     expect(isTerminalRunStatus('queued')).toBe(false);
+    expect(isTerminalRunStatus('scheduled_retry')).toBe(false);
     expect(isTerminalRunStatus('running')).toBe(false);
     expect(isTerminalRunStatus('succeeded')).toBe(true);
     expect(isTerminalRunStatus('failed')).toBe(true);
+    expect(isTerminalRunStatus('future_state')).toBe(false);
     expect(isTerminalRunStatus('')).toBe(false);
+    expect(isLiveRunStatus('queued')).toBe(true);
+    expect(isLiveRunStatus('scheduled_retry')).toBe(true);
+    expect(isLiveRunStatus('running')).toBe(true);
+    expect(isLiveRunStatus('succeeded')).toBe(false);
   });
 });
 
@@ -185,6 +192,15 @@ describe('RunStreamProjector — raw (non-claude) adapter', () => {
 });
 
 describe('RunStreamProjector — streams, progress, terminal', () => {
+  it('keeps scheduled retries live and accepts later output from the same run', () => {
+    const p = new RunStreamProjector(CLAUDE);
+    expect(p.handle({ type: 'heartbeat.run.status', payload: { runId: 'r-1', status: 'scheduled_retry' } })).toEqual([
+      { kind: 'status', status: 'scheduled_retry' },
+    ]);
+    expect(p.isDone).toBe(false);
+    expect(p.handle(log('r-1', streamEventDelta('after retry')))).toEqual([{ kind: 'delta', text: 'after retry' }]);
+  });
+
   it('ignores stderr/system streams (not chat text)', () => {
     const p = new RunStreamProjector(CLAUDE);
     expect(p.handle(log('r-1', 'a warning\n', 'stderr'))).toEqual([]);

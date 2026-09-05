@@ -19,13 +19,13 @@ import { RunStreamProjector, type LiveEventFrame } from './run-stream.js';
 /** Frames yielded for a conversation turn — mapped 1:1 to SSE events by the route. */
 export type ConversationFrame =
   // The turn was accepted: the message landed on the issue; runVisible is evidence of a run.
-  | { event: 'accepted'; issueId: string; runId: string | null; runVisible: boolean }
+  | { event: 'accepted'; issueId: string; runId: string | null; runVisible: boolean; operationId?: string }
   | { event: 'delta'; text: string } // a chunk of the agent's textual output
   | { event: 'phase'; phase: string; message: string | null } // progress note
   | { event: 'status'; status: string } // run status transition
   | { event: 'done'; status: string } // the run ended
   // Honest terminal states that are NOT a normal run completion:
-  | { event: 'error'; detail: string } // dispatch failed — nothing delivered
+  | { event: 'error'; detail: string; code?: string } // dispatch failed — nothing delivered
   // Message delivered, but no run became visible before we gave up.
   // NOT a failure of delivery, and NOT a fake "replied" — the operator can re-check.
   | { event: 'no_run'; issueId: string; detail: string };
@@ -36,7 +36,8 @@ export interface CompanyEventSource extends AsyncIterable<LiveEventFrame> {
 }
 
 export interface ConversationStreamDeps {
-  dispatcher: Pick<AgentConversationDispatcher, 'dispatch' | 'findActiveRun'> & Partial<Pick<AgentConversationDispatcher, 'readRunStdout'>>;
+  dispatcher: Pick<AgentConversationDispatcher, 'dispatch' | 'findActiveRun'>
+    & Partial<Pick<AgentConversationDispatcher, 'readRunStdout' | 'recordConversationOperationRun'>>;
   /** Open a BUFFERING event stream for the company (subscribe-before-wake). */
   openEventSource: (companyId: string) => CompanyEventSource;
   /** Sleep (injected for tests). Defaults to a real timer. */
@@ -89,21 +90,30 @@ export async function* streamConversationTurn(
   try {
     const dispatched = await deps.dispatcher.dispatch(input);
     if (dispatched.status === 'error') {
-      yield { event: 'error', detail: dispatched.detail };
+      yield { event: 'error', detail: dispatched.detail, ...(dispatched.code ? { code: dispatched.code } : {}) };
       return;
     }
 
     const issueId = dispatched.issueId;
     let run: ActiveRun | null = dispatched.status === 'dispatched' ? dispatched.run : null;
 
+    // Expose the durable issue identity immediately. The earlier implementation waited through
+    // the whole discovery window first, leaving a multi-second interval where the upstream had
+    // accepted the mutation but a browser disconnect still knew neither issueId nor runId.
+    yield {
+      event: 'accepted', issueId, runId: run?.runId ?? null, runVisible: run !== null,
+      ...(input.operationId ? { operationId: input.operationId } : {}),
+    };
+
     // If the run wasn't visible on dispatch, poll the ISSUE-SCOPED /live-runs for
     // it (reliable attribution) — buffering continues on `events` meanwhile.
-    for (let i = 0; !run && i < attempts; i += 1) {
+    const attribution = dispatched.runAttribution;
+    const discoveryCommentId = attribution?.kind === 'first_turn' ? null
+      : attribution?.kind === 'comment' ? attribution.commentId : undefined;
+    for (let i = 0; !run && attribution?.kind !== 'unattributable' && i < attempts; i += 1) {
       await delay(discoveryDelay);
-      run = await deps.dispatcher.findActiveRun(issueId, input.agentId);
+      run = await deps.dispatcher.findActiveRun(issueId, input.agentId, discoveryCommentId);
     }
-
-    yield { event: 'accepted', issueId, runId: run?.runId ?? null, runVisible: run !== null };
 
     if (!run) {
       // No run surfaced in time. The message DID land on the
@@ -111,6 +121,13 @@ export async function* streamConversationTurn(
       // we just have no live run to stream. Not a fake completion.
       yield { event: 'no_run', issueId, detail: 'message delivered; no live run appeared in time' };
       return;
+    }
+
+    if (input.operationId) await deps.dispatcher.recordConversationOperationRun?.(input.operationId, run.runId);
+    if (dispatched.status !== 'dispatched') {
+      // A second accepted frame refines the same immutable operation identity with its native
+      // run. Clients treat accepted frames as upserts, so this never represents a second send.
+      yield { event: 'accepted', issueId, runId: run.runId, runVisible: true, operationId: input.operationId };
     }
 
     // Project the company firehose down to THIS run, buffered-then-live.

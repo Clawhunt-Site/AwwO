@@ -99,8 +99,74 @@ describe('streamConversationTurn', () => {
     };
     const frames = await collect(streamConversationTurn(deps, INPUT));
     expect(calls).toBe(3);
-    expect(frames[0]).toEqual({ event: 'accepted', issueId: 'iss-1', runId: 'r-1', runVisible: true });
+    expect(frames.slice(0, 2)).toEqual([
+      { event: 'accepted', issueId: 'iss-1', runId: null, runVisible: false },
+      { event: 'accepted', issueId: 'iss-1', runId: 'r-1', runVisible: true },
+    ]);
     expect(frames.at(-1)).toEqual({ event: 'done', status: 'succeeded' });
+  });
+
+  it('emits the operation issue immediately, then durably records a later run identity', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const recordConversationOperationRun = vi.fn(async () => {});
+    const src = fakeSource([status('r-1', 'succeeded')]);
+    const deps: ConversationStreamDeps = {
+      dispatcher: {
+        dispatch: async () => ({ status: 'queued', issueId: 'iss-1', agentId: 'ag-1', detail: 'delivered', runAttribution: { kind: 'first_turn' } }) as any,
+        findActiveRun: async () => RUN,
+        recordConversationOperationRun,
+      },
+      openEventSource: () => src,
+      delay: async () => {},
+    };
+
+    const frames = await collect(streamConversationTurn(deps, { ...INPUT, operationId }));
+
+    expect(frames.slice(0, 2)).toEqual([
+      { event: 'accepted', issueId: 'iss-1', runId: null, runVisible: false, operationId },
+      { event: 'accepted', issueId: 'iss-1', runId: 'r-1', runVisible: true, operationId },
+    ]);
+    expect(recordConversationOperationRun).toHaveBeenCalledWith(operationId, 'r-1');
+  });
+
+  it('polls only the exact continuation comment run for a durable operation', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const findActiveRun = vi.fn(async () => RUN);
+    const deps: ConversationStreamDeps = {
+      dispatcher: {
+        dispatch: async () => ({
+          status: 'queued', issueId: 'iss-1', agentId: 'ag-1', detail: 'delivered',
+          runAttribution: { kind: 'comment', commentId: 'comment-new' },
+        }) as any,
+        findActiveRun,
+      },
+      openEventSource: () => fakeSource([status('r-1', 'succeeded')]),
+      delay: async () => {},
+    };
+
+    await collect(streamConversationTurn(deps, { ...INPUT, issueId: 'iss-1', operationId }));
+
+    expect(findActiveRun).toHaveBeenCalledWith('iss-1', 'ag-1', 'comment-new');
+  });
+
+  it('never falls back to an issue-wide run when a continuation comment id is unavailable', async () => {
+    const findActiveRun = vi.fn(async () => RUN);
+    const deps: ConversationStreamDeps = {
+      dispatcher: {
+        dispatch: async () => ({
+          status: 'queued', issueId: 'iss-1', agentId: 'ag-1', detail: 'unattributable',
+          runAttribution: { kind: 'unattributable' },
+        }) as any,
+        findActiveRun,
+      },
+      openEventSource: () => fakeSource([]),
+      delay: async () => {},
+    };
+
+    const frames = await collect(streamConversationTurn(deps, { ...INPUT, issueId: 'iss-1', operationId: '11111111-1111-4111-8111-111111111111' }));
+
+    expect(findActiveRun).not.toHaveBeenCalled();
+    expect(frames.at(-1)).toMatchObject({ event: 'no_run' });
   });
 
   it('queued but no run ever appears → accepted(runVisible:false) + honest no_run', async () => {

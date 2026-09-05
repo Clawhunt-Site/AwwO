@@ -5,6 +5,7 @@ import { createConversationRouter, type ConversationRouterDeps } from './routes.
 import type { CompanyEventSource } from './stream.js';
 import type { LiveEventFrame } from './run-stream.js';
 import { createGatewayApp } from '../app.js';
+import { ConversationOperationConflictError } from './operation-store.js';
 
 const TOKEN = 'test-token';
 const streamEventDelta = (text: string) =>
@@ -80,6 +81,87 @@ describe('createConversationRouter', () => {
     } finally {
       await s.close();
     }
+  });
+
+  it('claims an operation before opening SSE and returns a real 409 on request mismatch', async () => {
+    const prepareConversationOperation = vi.fn(async () => { throw new ConversationOperationConflictError(); });
+    const d = deps({ dispatcher: { ...deps().dispatcher, prepareConversationOperation } });
+    const source = vi.spyOn(d, 'openEventSource');
+    const s = await serve(d);
+    try {
+      const response = await fetch(url(s.base), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-superclaw-gateway-token': TOKEN },
+        body: JSON.stringify({ message: 'hi', operationId: '11111111-1111-4111-8111-111111111111' }),
+      });
+      expect(response.status).toBe(409);
+      expect(response.headers.get('content-type')).toContain('application/json');
+      expect(await response.json()).toMatchObject({ error: 'operation_conflict' });
+      expect(source).not.toHaveBeenCalled();
+    } finally { await s.close(); }
+  });
+
+  it('prepares a durable operation without opening an event source or dispatching upstream', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const prepareConversationOperation = vi.fn(async () => ({
+      created: true,
+      snapshot: { mutationStarted: false, deliveryConfirmed: false },
+    } as any));
+    const d = deps({ dispatcher: { ...deps().dispatcher, prepareConversationOperation } });
+    const dispatch = vi.spyOn(d.dispatcher, 'dispatch');
+    const source = vi.spyOn(d, 'openEventSource');
+    const s = await serve(d);
+    try {
+      const response = await fetch(`${s.base}/api/conversations/co-1/agents/ag-1/operations/${operationId}/prepare`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-superclaw-gateway-token': TOKEN },
+        body: JSON.stringify({ message: 'hi', issueId: 'iss-1' }),
+      });
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ operationId, prepared: true, mutationStarted: false, deliveryConfirmed: false });
+      expect(prepareConversationOperation).toHaveBeenCalledWith({
+        companyId: 'co-1', agentId: 'ag-1', message: 'hi', issueId: 'iss-1', operationId,
+      });
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(source).not.toHaveBeenCalled();
+    } finally { await s.close(); }
+  });
+
+  it('keeps operation recovery behind the same loopback and token gate', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const readConversationOperation = vi.fn(async () => ({
+      operationId, state: 'accepted' as const, issueId: 'iss-1', runId: null,
+      terminal: false, status: null, output: '', outputAvailable: false, detail: null,
+    }));
+    const s = await serve(deps({ dispatcher: { ...deps().dispatcher, readConversationOperation } }));
+    const operationUrl = `${s.base}/api/conversations/co-1/agents/ag-1/operations/${operationId}`;
+    try {
+      expect((await fetch(operationUrl)).status).toBe(401);
+      const response = await fetch(operationUrl, { headers: { 'x-superclaw-gateway-token': TOKEN } });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ operationId, state: 'accepted', issueId: 'iss-1' });
+      expect(readConversationOperation).toHaveBeenCalledWith({ companyId: 'co-1', agentId: 'ag-1', operationId });
+    } finally { await s.close(); }
+  });
+
+  it('returns only a complete company-scoped transcript from the index store', async () => {
+    const listMessages = vi.fn(async () => ([{ body: 'first prompt', source: 'issue_description' }]));
+    const indexStore = {
+      listMessages,
+      listConversations: vi.fn(async () => []),
+      ensureConversationLabel: vi.fn(async () => null),
+    } as any;
+    const s = await serve(deps({ indexStore }));
+    try {
+      const response = await fetch(`${s.base}/api/conversations/co-1/issues/iss-1/messages`, {
+        headers: { 'x-superclaw-gateway-token': TOKEN },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        issueId: 'iss-1', messages: [{ body: 'first prompt', source: 'issue_description' }], complete: true,
+      });
+      expect(listMessages).toHaveBeenCalledWith('co-1', 'iss-1');
+    } finally { await s.close(); }
   });
 
   const invalidBodies = [
@@ -173,6 +255,35 @@ describe('createConversationRouter', () => {
     } finally {
       await s.close();
     }
+  });
+
+  it('proxies a scoped native stop and returns success only after dispatcher confirmation', async () => {
+    const cancelConversationRun = vi.fn(async () => ({ ok: true as const, confirmed: true as const, cancelled: true, status: 'cancelled', holdId: 'hold-1' }));
+    const d = deps({ dispatcher: { ...deps().dispatcher, cancelConversationRun } });
+    const s = await serve(d);
+    try {
+      const response = await fetch(`${s.base}/api/conversations/co-1/agents/ag-1/issues/iss-1/cancel`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-superclaw-gateway-token': TOKEN },
+        body: JSON.stringify({ runId: 'run-1' }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ confirmed: true, cancelled: true, status: 'cancelled' });
+      expect(cancelConversationRun).toHaveBeenCalledWith({ companyId: 'co-1', agentId: 'ag-1', issueId: 'iss-1', runId: 'run-1' });
+    } finally { await s.close(); }
+  });
+
+  it('does not claim Stop when native cancellation cannot be confirmed', async () => {
+    const cancelConversationRun = vi.fn(async () => ({ ok: false as const, confirmed: false as const, detail: 'native stop timeout' }));
+    const d = deps({ dispatcher: { ...deps().dispatcher, cancelConversationRun } });
+    const s = await serve(d);
+    try {
+      const response = await fetch(`${s.base}/api/conversations/co-1/agents/ag-1/issues/iss-1/cancel`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-superclaw-gateway-token': TOKEN }, body: '{}',
+      });
+      expect(response.status).toBe(502);
+      expect(await response.json()).toMatchObject({ error: 'native_stop_unconfirmed' });
+    } finally { await s.close(); }
   });
 
   it('streams a real turn as SSE: accepted → status → delta → done', async () => {

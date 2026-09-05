@@ -20,6 +20,32 @@ function fakeFetch(routes: Record<string, { status: number; body: unknown }>, ca
 const run = (agentId: string, status = 'running', id = 'run-1', adapterType = 'claude_local') => ({ id, agentId, status, adapterType });
 const issue = (status = 'in_progress') => ({ id: 'iss-9', companyId: 'co-1', assigneeAgentId: 'ag-1', status });
 
+describe('readConversationRun', () => {
+  const identity = { companyId: 'co-1', agentId: 'ag-1', issueId: 'iss-9', runId: 'run-1' };
+  it('recovers terminal Codex output without waking an agent', async () => {
+    const output = JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'verified' } }) + '\n';
+    const { impl, calls } = fakeFetch({
+      'GET /api/issues/iss-9': { status: 200, body: issue() },
+      'GET /api/heartbeat-runs/run-1': { status: 200, body: { ...run('ag-1', 'succeeded', 'run-1', 'codex_local'), companyId: 'co-1', contextSnapshot: { issueId: 'iss-9' } } },
+      'GET /api/heartbeat-runs/run-1/log': { status: 200, body: { runId: 'run-1', content: JSON.stringify({ stream: 'stdout', chunk: output }) + '\n' } },
+    });
+    const result = await new AgentConversationDispatcher(BASE, { fetchImpl: impl }).readConversationRun(identity);
+    expect(result).toEqual({ runId: 'run-1', status: 'succeeded', terminal: true, output: 'verified' });
+    expect(calls.every(call => call.method === 'GET')).toBe(true);
+  });
+  it.each(['companyId', 'agentId', 'issueId'])('rejects mismatched %s before reading output', async key => {
+    const stored = { ...run('ag-1', 'succeeded'), companyId: 'co-1', contextSnapshot: { issueId: 'iss-9' } };
+    if (key === 'issueId') stored.contextSnapshot.issueId = 'other';
+    else Object.assign(stored, { [key]: 'other' });
+    const { impl, calls } = fakeFetch({
+      'GET /api/issues/iss-9': { status: 200, body: issue() },
+      'GET /api/heartbeat-runs/run-1': { status: 200, body: stored },
+    });
+    await expect(new AgentConversationDispatcher(BASE, { fetchImpl: impl }).readConversationRun(identity)).rejects.toThrow('Run identity mismatch');
+    expect(calls.some(call => call.path.endsWith('/log'))).toBe(false);
+  });
+});
+
 describe('AgentConversationDispatcher.dispatch', () => {
   it('first turn: creates a 1:1 issue assigned to the agent (todo+message) and reports dispatched when the run is visible', async () => {
     const { impl, calls } = fakeFetch({
@@ -57,6 +83,41 @@ describe('AgentConversationDispatcher.dispatch', () => {
     expect(calls.some((c) => c.path === '/api/companies/co-1/issues')).toBe(false); // no create
     const comment = calls.find((c) => c.path === '/api/issues/iss-9/comments')!;
     expect(comment.body).toMatchObject({ body: '继续' });
+  });
+
+  it('releases only AwwO stop holds before continuing the same conversation', async () => {
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    let commentCalls = 0;
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      const parsed = new URL(String(url)); const method = (init?.method ?? 'GET').toUpperCase();
+      calls.push({ method, path: parsed.pathname, body: init?.body ? JSON.parse(String(init.body)) : null });
+      const response = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
+      if (method === 'GET' && parsed.pathname === '/api/issues/iss-9') return response(issue());
+      if (method === 'POST' && parsed.pathname === '/api/issues/iss-9/comments') {
+        commentCalls += 1;
+        return commentCalls === 1 ? response({ error: 'Issue follow-up blocked by active subtree pause hold' }, 409) : response({ id: 'cmt-1' }, 201);
+      }
+      if (method === 'GET' && parsed.pathname === '/api/issues/iss-9/tree-holds') return response([
+        { id: 'hold-awwo', status: 'active', mode: 'pause', metadata: { source: 'awwo_agent_canvas' } },
+        { id: 'hold-human', status: 'active', mode: 'pause', metadata: { source: 'manual' } },
+      ]);
+      if (method === 'POST' && parsed.pathname === '/api/issues/iss-9/tree-holds/hold-awwo/release') return response({ id: 'hold-awwo' });
+      if (method === 'GET' && parsed.pathname === '/api/issues/iss-9/live-runs') return response([]);
+      return response({}, 404);
+    }) as typeof fetch;
+    const result = await new AgentConversationDispatcher(BASE, { fetchImpl }).dispatch({
+      companyId: 'co-1', agentId: 'ag-1', message: '继续', issueId: 'iss-9',
+    });
+    expect(result.status).toBe('queued');
+    expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      'GET /api/issues/iss-9',
+      'POST /api/issues/iss-9/comments',
+      'GET /api/issues/iss-9/tree-holds',
+      'POST /api/issues/iss-9/tree-holds/hold-awwo/release',
+      'POST /api/issues/iss-9/comments',
+      'GET /api/issues/iss-9/live-runs',
+    ]);
+    expect(calls.some(call => call.path.includes('hold-human/release'))).toBe(false);
   });
 
   it.each(['done', 'blocked'])('continuing %s work requests the upstream resume gate on the existing issue', async (status) => {
@@ -99,9 +160,10 @@ describe('AgentConversationDispatcher.dispatch', () => {
       companyId: 'co-1', agentId: 'ag-1', message: '继续', issueId: 'iss-9',
     });
     expect(result).toEqual({ status: 'error', detail: `comment failed (upstream 409): ${reason}` });
-    expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
+    expect(calls.map(call => `${call.method} ${call.path}`).slice(0, 2)).toEqual([
       'GET /api/issues/iss-9', 'POST /api/issues/iss-9/comments',
     ]);
+    expect(calls.filter(call => call.path === '/api/issues/iss-9/comments')).toHaveLength(1);
   });
 
   it.each([
@@ -200,7 +262,82 @@ describe('AgentConversationDispatcher.dispatch', () => {
   });
 });
 
+describe('AgentConversationDispatcher.cancelConversationRun', () => {
+  it('does not confirm Stop while the native run is scheduled to retry', async () => {
+    let runReads = 0;
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const response = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
+      if (method === 'GET' && parsed.pathname === '/api/issues/iss-9') return response(issue());
+      if (method === 'GET' && parsed.pathname === '/api/heartbeat-runs/run-1') {
+        runReads += 1;
+        return response({
+          id: 'run-1', companyId: 'co-1', agentId: 'ag-1',
+          status: runReads < 3 ? 'scheduled_retry' : 'cancelled',
+          contextSnapshot: { issueId: 'iss-9' },
+        });
+      }
+      if (method === 'POST' && parsed.pathname === '/api/issues/iss-9/tree-holds') {
+        return response({ hold: { id: 'hold-1' }, preview: { activeRuns: [{ id: 'run-1' }] } }, 201);
+      }
+      return response({}, 404);
+    }) as typeof fetch;
+    const result = await new AgentConversationDispatcher(BASE, {
+      fetchImpl, cancelPollDelayMs: 0, cancelPollAttempts: 4,
+    }).cancelConversationRun({ companyId: 'co-1', agentId: 'ag-1', issueId: 'iss-9', runId: 'run-1' });
+    expect(result).toMatchObject({ ok: true, confirmed: true, cancelled: true, status: 'cancelled' });
+    expect(runReads).toBe(3);
+  });
+
+  it('creates a pause hold and waits until the native run is actually cancelled', async () => {
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    let runReads = 0;
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ method, path: parsed.pathname, body });
+      if (method === 'GET' && parsed.pathname === '/api/issues/iss-9') return { ok: true, status: 200, json: async () => issue() } as Response;
+      if (method === 'GET' && parsed.pathname === '/api/heartbeat-runs/run-1') {
+        runReads += 1;
+        return { ok: true, status: 200, json: async () => ({ id: 'run-1', companyId: 'co-1', agentId: 'ag-1', status: runReads === 1 ? 'running' : 'cancelled', contextSnapshot: { issueId: 'iss-9' } }) } as Response;
+      }
+      if (method === 'POST' && parsed.pathname === '/api/issues/iss-9/tree-holds') return { ok: true, status: 201, json: async () => ({ hold: { id: 'hold-1' }, preview: { activeRuns: [{ id: 'run-1' }] } }) } as Response;
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    }) as typeof fetch;
+    const result = await new AgentConversationDispatcher(BASE, { fetchImpl, cancelPollDelayMs: 0 }).cancelConversationRun({
+      companyId: 'co-1', agentId: 'ag-1', issueId: 'iss-9', runId: 'run-1',
+    });
+    expect(result).toMatchObject({ ok: true, confirmed: true, cancelled: true, status: 'cancelled', holdId: 'hold-1' });
+    expect(calls.find(call => call.path.endsWith('/tree-holds'))?.body).toMatchObject({
+      mode: 'pause', metadata: { source: 'awwo_agent_canvas', runId: 'run-1' },
+    });
+  });
+
+  it('refuses a run that is not owned by the requested conversation', async () => {
+    const { impl, calls } = fakeFetch({
+      'GET /api/issues/iss-9': { status: 200, body: issue() },
+      'GET /api/heartbeat-runs/run-1': { status: 200, body: { id: 'run-1', companyId: 'co-1', agentId: 'ag-1', status: 'running', contextSnapshot: { issueId: 'another' } } },
+    });
+    const result = await new AgentConversationDispatcher(BASE, { fetchImpl: impl }).cancelConversationRun({ companyId: 'co-1', agentId: 'ag-1', issueId: 'iss-9', runId: 'run-1' });
+    expect(result.ok).toBe(false);
+    expect(calls.some(call => call.path.endsWith('/tree-holds'))).toBe(false);
+  });
+});
+
 describe('AgentConversationDispatcher.findActiveRun', () => {
+  it('discovers a scheduled retry as the still-live run for this agent', async () => {
+    const { impl } = fakeFetch({
+      'GET /api/issues/iss-1/live-runs': {
+        status: 200,
+        body: [run('ag-1', 'scheduled_retry', 'run-retry')],
+      },
+    });
+    expect(await new AgentConversationDispatcher(BASE, { fetchImpl: impl }).findActiveRun('iss-1', 'ag-1'))
+      .toEqual({ runId: 'run-retry', status: 'scheduled_retry', agentId: 'ag-1', adapterType: 'claude_local' });
+  });
+
   it('picks the queued/running run for THIS agent, ignoring others and finished runs', async () => {
     const { impl } = fakeFetch({
       'GET /api/issues/iss-1/live-runs': {
