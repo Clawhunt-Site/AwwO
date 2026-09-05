@@ -1,26 +1,24 @@
-<!-- ENG:BEGIN v=1.2.0 type=python managed by .claude/engineering/sync-engineering.mjs — edit BELOW the END marker, not inside -->
-# superclaw — 工程化配置 (python)
+<!-- ENG:BEGIN v=1.2.0 type=node managed by .claude/engineering/sync-engineering.mjs — edit BELOW the END marker, not inside -->
+# AwwO — 工程化配置 (node)
 
-本项目继承 `~/.claude/CLAUDE.md` 的全局**总工程化逻辑**（blocking-rules / work-mode / cache-management）；以下区块由 `sync-engineering` 自动管理，仅可在 `ENG:END` 标记**下方**手动编辑。
+本块继承 `~/.claude/CLAUDE.md` 的全局**总工程化逻辑**（blocking-rules / work-mode / cache-management），由 `sync-engineering` 自动管理——只在 `ENG:END` 标记**下方**手工编辑。
 
-**类型规范**: .claude/engineering/templates/python.md
+**类型规范**: .claude/engineering/templates/node.md
 
 **命令**
 - build: `(none — define here)`
 - test: `(none — define here)`
-- dev: `(none — define here)`
+- dev: `node scripts/awwo-dev.mjs`
 
-**质量门 (python)**
-- 依赖锁定：`requirements.txt` 或 `pyproject.toml`/`uv.lock` 钉死版本，禁止裸 `pip install`
-- 类型注解齐全，`ruff check` + `mypy` 零报错（lint/类型在 CI 阻断）
-- `pytest` 覆盖核心逻辑，关键路径必测；新功能补测试
-- 禁止裸 `except:`／`except Exception: pass`——捕获具体异常，绝不静默吞错（fake-success 反模式）
-- 用 `logging` 结构化日志，禁止 `print` 调试残留入生产
-- 无硬编码凭证/密钥/绝对路径，敏感配置走环境变量或 `.env`（不入库）
-- 脚本入口由 `if __name__ == '__main__':` 守卫，副作用不在 import 期触发
-- 特性增删走 Feature Capsule：移除已验证特性先 `/rgit-capture` 存胶囊再删（不硬删主干），复活旧方案用 `/rgit-recall` 重生到今天代码（不裸 `revert` 丢功能）；实验用 `rgit run` 冻结快照做自检基线。详见 `~/.claude/rules/domain/feature-capsule.md`
+**质量门 (node)**
+- 类型检查通过：`tsc --noEmit`（或 `(none — define here)`）零错误，禁止 `// @ts-ignore` 掩盖真实类型问题。
+- Lint 干净：ESLint/Prettier 无 error，提交前自动 fix。
+- 核心逻辑路径有单元测试覆盖，`(none — define here)` 全绿后才算完成。
+- 杜绝 fake-success：函数只有在真实副作用（写盘/网络/DB）完成后才返回 success（参见 evomap fake-success 反模式）。
+- 无硬编码密钥/IP/token，敏感配置走环境变量（参见 evomap hardcoded-security）。
+- `package.json` 声明 `exports`/`types`，公共 API 类型完整；async 错误被捕获并以结构化错误抛出。
 
-**项目专属**: 项目特定约定、架构说明、注意事项请写在下方 `ENG:END` 标记之后。
+**项目专属**: 项目特有的约定、依赖、注意事项请写在下方 `ENG:END` 标记之后。
 <!-- ENG:END -->
 
 # CLAUDE.md
