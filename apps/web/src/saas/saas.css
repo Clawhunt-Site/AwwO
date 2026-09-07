@@ -95,3 +95,23 @@ button.saas-link { border:0; background:transparent; color:var(--saas-accent); }
 :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog { background:var(--saas-card); border-color:var(--saas-border); }
 :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog-header { background:var(--saas-card); border-color:var(--saas-border); }
 @media(max-width:760px) { .saas-dashboard>header { height:auto; min-height:84px; flex-wrap:wrap; padding:16px 0; }.saas-account-actions { flex-wrap:wrap; }.saas-cloud-status { flex-wrap:wrap; padding:7px 10px; gap:8px; }.account-invite-row { flex-wrap:wrap; } }
+
+@media(max-width:760px) {
+  .saas-canvas-shell .awwo-header { flex-shrink:0; flex-wrap:wrap; gap:8px; padding:8px 12px; }
+  .saas-canvas-shell .awwo-mobile-menu { flex-shrink:0; }
+  .saas-canvas-shell .awwo-page-title { flex:1; min-width:0; }
+  .saas-canvas-shell .awwo-breadcrumb { min-width:0; white-space:nowrap; }
+  .saas-canvas-shell .awwo-breadcrumb>span { overflow:hidden; text-overflow:ellipsis; }
+  .saas-canvas-shell .awwo-header-actions { flex-basis:100%; min-width:0; margin-left:0; }
+  .saas-canvas-shell .awwo-account-controls { flex:1; min-width:0; }
+  .saas-canvas-shell .saas-account-actions { flex:1; min-width:0; gap:6px; }
+  .saas-canvas-shell .saas-account-actions>select { flex:1 1 140px; min-width:0; max-width:100%; }
+  .saas-canvas-shell .saas-account-actions>button,
+  .saas-canvas-shell .saas-account-actions>a,
+  .saas-canvas-shell .saas-preferences>button { flex-shrink:0; min-height:32px; white-space:nowrap; }
+  .saas-canvas-shell .awwo-canvas-bar { flex-shrink:0; align-items:flex-start; padding:8px 12px; }
+  .saas-canvas-shell .awwo-run-slot { flex:1; }
+  /* The shared RunControls sets nowrap inline for its desktop toolbar. */
+  .saas-canvas-shell .awwo-run-slot .canvas-run-ctl { flex-wrap:wrap!important; justify-content:flex-end; }
+  .saas-canvas-shell .awwo-run-slot .canvas-run-note { position:static; inset:auto; order:1; flex-basis:100%; max-width:100%; padding:4px 8px; box-shadow:none; overflow-wrap:anywhere; }
+}

@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — SaaS mobile canvas controls
+
+- **What changed:** Wrap mobile canvas account controls below the workspace title and place run status in the control group flow.
+- **Why:** The 390px browser acceptance viewport showed a vertically compressed workspace name and a run notice overlapping the account controls.
+- **Impact:** The SaaS canvas at widths up to 760px keeps navigation, workspace selection, account, logout and run controls visible. Existing desktop rules and runtime behavior are unchanged.
+- **Verification:** CSS parsing and scoped-rule checks, SaaS build, actual 390×843 CSS viewport screenshots and account dialog interaction pass; desktop canvas was checked afterward. Evidence: `.local/awwo-saas/acceptance-20260908/frontend-mobile-fix-report.md` and screenshots 66–68.
+- **Files:** `apps/web/src/saas/saas.css`.
+
 ### Fixed — cancelled conversation recovery order
 
 - **What changed:** Anchor locally recovered cancelled output after its matching persisted user message; preserve the latest completed reply and avoid duplicate turns across repeated refreshes.
