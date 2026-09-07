@@ -637,10 +637,11 @@ export function AccountWorkspacePanel({
                         <span>{text.role}</span>
                         <select
                           aria-label={text.roleFor(label)}
-                          value={member.membershipRole ?? 'operator'}
+                          value={member.membershipRole ?? ''}
                           disabled={memberBusyId !== null}
                           onChange={(event) => void updateMember(member, { membershipRole: event.target.value as HumanCompanyRole })}
                         >
+                          {member.membershipRole == null && <option value="" disabled>{roleLabel(null, locale)}</option>}
                           {assignableRoles.map((role) => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}
                         </select>
                       </label>

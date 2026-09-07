@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AccountWorkspacePanel } from '../src/account/AccountWorkspacePanel';
 import { AccountApiError, createAccountApi } from '../src/account/accountApi';
@@ -267,6 +267,40 @@ describe('AccountWorkspacePanel', () => {
     await waitFor(() => expect(updateMember).toHaveBeenCalledWith('company-a', 'membership-2', {
       membershipRole: 'admin',
     }));
+  });
+
+  it.each([
+    { locale: 'en' as const, label: 'Role for Lin', placeholder: 'Unassigned' },
+    { locale: 'zh' as const, label: 'Lin 的角色', placeholder: '未设置' },
+  ])('shows an unassigned member role in $locale until a real role is selected', async ({ locale, label, placeholder }) => {
+    const member = { ...MEMBERS.members[1], membershipRole: null };
+    const updateMember = vi.fn(async (_companyId, _memberId, input) => ({ ...member, ...input }));
+    render(
+      <AccountWorkspacePanel
+        locale={locale}
+        api={fakeApi({
+          listMembers: async () => ({ ...MEMBERS, members: [member] }),
+          updateMember,
+        })}
+        clawHuntIdentity={null}
+        selectedCompanyId="company-a"
+        onCompanyChange={vi.fn()}
+        onClawHuntLogin={vi.fn()}
+        onClawHuntLogout={vi.fn()}
+      />,
+    );
+
+    const roles = await screen.findByRole('combobox', { name: label });
+    expect(roles).toHaveValue('');
+    expect(within(roles).getByRole('option', { name: placeholder })).toBeDisabled();
+    expect(updateMember).not.toHaveBeenCalled();
+
+    fireEvent.change(roles, { target: { value: 'operator' } });
+    await waitFor(() => expect(updateMember).toHaveBeenCalledExactlyOnceWith('company-a', 'membership-2', {
+      membershipRole: 'operator',
+    }));
+    await waitFor(() => expect(roles).toHaveValue('operator'));
+    expect(within(roles).queryByRole('option', { name: placeholder })).not.toBeInTheDocument();
   });
 
   it('creates a human invite with the selected role and exposes the server-issued link for copying', async () => {
