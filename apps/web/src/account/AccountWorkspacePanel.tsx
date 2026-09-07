@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, ExternalLink, RefreshCw, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { accountApi, AccountApiError } from './accountApi';
 import type {
@@ -56,6 +56,7 @@ type TeamState = {
   restricted: boolean;
   error: string | null;
   invites: WorkspaceInviteSummary[];
+  inviteNextCursor?: string | null;
 };
 
 const EMPTY_TEAM: TeamState = {
@@ -304,6 +305,7 @@ export function AccountWorkspacePanel({
   const [teamVersion, setTeamVersion] = useState(0);
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [removeTarget, setRemoveTarget] = useState<CompanyMember | null>(null);
+  const [pages, setPages] = useState<{ companyId: string | null; members: Array<string | null>; invites: Array<string | null> }>({ companyId: null, members: [null], invites: [null] });
 
   useEffect(() => {
     let cancelled = false;
@@ -345,10 +347,20 @@ export function AccountWorkspacePanel({
     return bootstrap.companies[0]?.id ?? null;
   }, [bootstrap?.companies, selectedCompanyId]);
 
+  const memberPages = pages.companyId === activeCompanyId ? pages.members : [null];
+  const invitePages = pages.companyId === activeCompanyId ? pages.invites : [null];
+  const memberCursor = memberPages[memberPages.length - 1];
+  const inviteCursor = invitePages[invitePages.length - 1];
+  const activeScope = useRef(activeCompanyId);
+  activeScope.current = activeCompanyId;
+  useEffect(() => { activeScope.current = activeCompanyId; return () => { activeScope.current = null; }; }, [activeCompanyId]);
+  const changePage = (kind: 'members' | 'invites', cursors: Array<string | null>) => {
+    setPages(current => ({ companyId: activeCompanyId, members: current.companyId === activeCompanyId ? current.members : [null], invites: current.companyId === activeCompanyId ? current.invites : [null], [kind]: cursors }));
+  };
+  useEffect(() => { setInvite(null); setInviteCopied(false); setRemoveTarget(null); setNewMemberEmail(''); setMemberBusyId(null); setInviteBusy(false); }, [activeCompanyId]);
+
   useEffect(() => {
     let cancelled = false;
-    setInvite(null);
-    setInviteCopied(false);
     if (!activeCompanyId || !bootstrap?.access) {
       setTeam(EMPTY_TEAM);
       return () => {
@@ -358,8 +370,8 @@ export function AccountWorkspacePanel({
     setTeam({ ...EMPTY_TEAM, loading: true });
     void (async () => {
       const [memberResult, inviteResult] = await Promise.allSettled([
-        api.listMembers(activeCompanyId),
-        api.listInvites(activeCompanyId),
+        memberCursor ? api.listMembers(activeCompanyId, { cursor: memberCursor }) : api.listMembers(activeCompanyId),
+        inviteCursor ? api.listInvites(activeCompanyId, { cursor: inviteCursor }) : api.listInvites(activeCompanyId),
       ]);
       if (cancelled) return;
 
@@ -390,12 +402,13 @@ export function AccountWorkspacePanel({
         restricted,
         error,
         invites: api.revokeInvite && inviteResult.status === 'fulfilled' ? inviteResult.value.invites as WorkspaceInviteSummary[] : [],
+        inviteNextCursor: inviteResult.status === 'fulfilled' ? inviteResult.value.nextCursor : undefined,
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, [activeCompanyId, api, bootstrap?.access, teamVersion]);
+  }, [activeCompanyId, api, bootstrap?.access, teamVersion, memberCursor, inviteCursor]);
 
   const assignableRoles = team.members?.access.assignableRoles ?? (workspaceOnly ? [] : HUMAN_ROLES);
   const roleSignature = assignableRoles.join(',');
@@ -439,10 +452,12 @@ export function AccountWorkspacePanel({
 
   async function updateMember(member: CompanyMember, patch: { membershipRole?: HumanCompanyRole; status?: Exclude<CompanyMembershipStatus, 'archived'> }) {
     if (!activeCompanyId || !team.members?.access.canManageMembers) return;
+    const scope = activeCompanyId;
     setMemberBusyId(member.id);
     setTeam((current) => ({ ...current, error: null }));
     try {
       const updated = await api.updateMember(activeCompanyId, member.id, patch);
+      if (activeScope.current !== scope) return;
       setTeam((current) => current.members ? {
         ...current,
         members: {
@@ -451,45 +466,51 @@ export function AccountWorkspacePanel({
         },
       } : current);
     } catch (error) {
-      setTeam((current) => ({ ...current, error: messageFor(error) }));
+      if (activeScope.current === scope) setTeam((current) => ({ ...current, error: messageFor(error) }));
     } finally {
-      setMemberBusyId(null);
+      if (activeScope.current === scope) setMemberBusyId(null);
     }
   }
 
   async function createInvite() {
     if (!activeCompanyId || !team.canInvite || !assignableRoles.includes(inviteRole)) return;
+    const scope = activeCompanyId;
     setInviteBusy(true);
     setInvite(null);
     setInviteCopied(false);
     setTeam((current) => ({ ...current, error: null }));
     try {
       const created = await api.createHumanInvite(activeCompanyId, inviteRole);
+      if (activeScope.current !== scope) return;
       setInvite(created);
-      if (api.revokeInvite) setTeam(current => ({ ...current, invites: [{ id: created.id, role: created.humanRole || inviteRole, expiresAt: created.expiresAt, status: 'active' }, ...current.invites] }));
+      if (team.inviteNextCursor !== undefined) { changePage('invites', [null]); setTeamVersion(value => value + 1); }
+      else if (api.revokeInvite) setTeam(current => ({ ...current, invites: [{ id: created.id, role: created.humanRole || inviteRole, expiresAt: created.expiresAt, status: 'active' }, ...current.invites] }));
     } catch (error) {
-      setTeam((current) => ({ ...current, error: messageFor(error) }));
+      if (activeScope.current === scope) setTeam((current) => ({ ...current, error: messageFor(error) }));
     } finally {
-      setInviteBusy(false);
+      if (activeScope.current === scope) setInviteBusy(false);
     }
   }
 
   async function memberAction(action: () => Promise<void>) {
+    const scope = activeCompanyId;
     setMemberBusyId('$action'); setTeam(current => ({ ...current, error: null }));
-    try { await action(); setNewMemberEmail(''); setRemoveTarget(null); setTeamVersion(value => value + 1); }
-    catch (error) { setTeam(current => ({ ...current, error: messageFor(error) })); }
-    finally { setMemberBusyId(null); }
+    try { await action(); if (activeScope.current !== scope) return; setNewMemberEmail(''); setRemoveTarget(null); changePage('members', [null]); setTeamVersion(value => value + 1); }
+    catch (error) { if (activeScope.current === scope) setTeam(current => ({ ...current, error: messageFor(error) })); }
+    finally { if (activeScope.current === scope) setMemberBusyId(null); }
   }
 
   async function revokeInvite(id: string) {
     if (!activeCompanyId || !api.revokeInvite) return;
+    const scope = activeCompanyId;
     setInviteBusy(true); setTeam(current => ({ ...current, error: null }));
     try {
       await api.revokeInvite(activeCompanyId, id);
+      if (activeScope.current !== scope) return;
       setTeam(current => ({ ...current, invites: current.invites.map(item => item.id === id ? { ...item, status: 'revoked' } : item) }));
       if (invite?.id === id) { setInvite(null); setInviteCopied(false); }
-    } catch (error) { setTeam(current => ({ ...current, error: messageFor(error) })); }
-    finally { setInviteBusy(false); }
+    } catch (error) { if (activeScope.current === scope) setTeam(current => ({ ...current, error: messageFor(error) })); }
+    finally { if (activeScope.current === scope) setInviteBusy(false); }
   }
 
   if (!bootstrap && !bootstrapError) {
@@ -508,7 +529,7 @@ export function AccountWorkspacePanel({
           className="account-icon-button"
           aria-label={text.retry}
           title={text.retry}
-          onClick={() => setBootstrapVersion((value) => value + 1)}
+          onClick={() => { setPages({ companyId: activeCompanyId, members: [null], invites: [null] }); setBootstrapVersion((value) => value + 1); }}
         >
           <RefreshCw size={17} aria-hidden="true" />
         </button>
@@ -677,6 +698,8 @@ export function AccountWorkspacePanel({
             {!team.loading && members.length === 0 && directory.length === 0 ? <p className="account-empty-state">{text.noMembers}</p> : null}
           </div>
 
+          {(team.members?.nextCursor !== undefined || memberPages.length > 1) && <AccountListPager locale={locale} label={locale === 'zh' ? '成员分页' : 'Member pages'} page={memberPages.length} busy={team.loading || memberBusyId !== null || inviteBusy} previous={memberPages.length > 1 ? () => changePage('members', memberPages.slice(0, -1)) : undefined} next={team.members?.nextCursor ? () => changePage('members', [...memberPages, team.members!.nextCursor!]) : undefined} refresh={() => { changePage('members', [null]); setTeamVersion(value => value + 1); }}/>}
+
           {api.addMember && team.members?.access.canManageMembers && <form className="account-member-add" onSubmit={event => {
             event.preventDefault(); if (activeCompanyId) void memberAction(() => api.addMember!(activeCompanyId, { email: newMemberEmail, role: inviteRole }));
           }}><p>{locale === 'zh' ? '可直接添加已注册邮箱；新用户可使用下方邀请链接。' : 'Add a registered email directly, or invite a new user with a link below.'}</p><label><span>{text.email}</span><input type="email" aria-label={locale === 'zh' ? '成员邮箱' : 'Member email'} required value={newMemberEmail} onChange={event => setNewMemberEmail(event.target.value)} /></label>
@@ -705,6 +728,7 @@ export function AccountWorkspacePanel({
                 </button>
               </div>
             ) : null}
+            {(team.inviteNextCursor !== undefined || invitePages.length > 1) && <AccountListPager locale={locale} label={locale === 'zh' ? '邀请分页' : 'Invitation pages'} page={invitePages.length} busy={team.loading || memberBusyId !== null || inviteBusy} previous={invitePages.length > 1 ? () => changePage('invites', invitePages.slice(0, -1)) : undefined} next={team.inviteNextCursor ? () => changePage('invites', [...invitePages, team.inviteNextCursor!]) : undefined} refresh={() => { changePage('invites', [null]); setTeamVersion(value => value + 1); }}/>}
             {api.revokeInvite && team.invites.length > 0 && <div className="account-invite-list"><h3>{locale === 'zh' ? '已创建的邀请' : 'Created invitations'}</h3><p>{locale === 'zh' ? '完整链接仅在创建时显示，请当时复制；已有链接可撤销。' : 'The full link is shown only when created. Copy it then; existing links can be revoked.'}</p>{team.invites.map(item => <article key={item.id} className="account-invite-row"><span>{roleLabel(item.role, locale)} · {text.expires(new Date(item.expiresAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US'))} · {locale === 'zh' ? ({ active: '有效', expired: '已过期', revoked: '已撤销', accepted: '已领取', unavailable: '已失效', suspended: '工作区暂停' }[item.status] || item.status) : item.status}</span>
               {item.status === 'active' && assignableRoles.includes(item.role) && <button type="button" className="account-secondary-button" disabled={inviteBusy} onClick={() => void revokeInvite(item.id)}>{locale === 'zh' ? '撤销邀请' : 'Revoke invitation'}</button>}</article>)}</div>}
           </div>
@@ -712,6 +736,10 @@ export function AccountWorkspacePanel({
       ) : null}
     </main>
   );
+}
+
+function AccountListPager({ locale, label, page, busy, previous, next, refresh }: { locale: AccountLocale; label: string; page: number; busy: boolean; previous?: () => void; next?: () => void; refresh: () => void }) {
+  return <nav className="account-list-pager" aria-label={label}><button type="button" className="account-secondary-button" disabled={busy || !previous} onClick={previous}>{locale === 'zh' ? '上一页' : 'Previous'}</button><span>{locale === 'zh' ? `第 ${page} 页` : `Page ${page}`}</span><button type="button" className="account-secondary-button" disabled={busy || !next} onClick={next}>{locale === 'zh' ? '下一页' : 'Next'}</button><button type="button" className="account-secondary-button" disabled={busy} onClick={refresh}>{locale === 'zh' ? '刷新列表' : 'Refresh list'}</button></nav>;
 }
 
 export default AccountWorkspacePanel;

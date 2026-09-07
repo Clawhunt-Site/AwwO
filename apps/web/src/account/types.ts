@@ -78,6 +78,8 @@ export type CompanyMember = {
 
 export type CompanyMembersResponse = {
   members: CompanyMember[];
+  /** Omitted by legacy backends that do not support cursor pagination. */
+  nextCursor?: string | null;
   access: {
     currentUserRole: HumanCompanyRole | null;
     canManageMembers: boolean;
@@ -99,7 +101,10 @@ export type CompanyUserDirectoryResponse = {
 export type CompanyInviteListResponse = {
   invites: unknown[];
   nextOffset: number | null;
+  nextCursor?: string | null;
 };
+
+export type AccountPageOptions = { cursor?: string };
 
 export type WorkspaceInviteSummary = { id: string; role: HumanCompanyRole; expiresAt: string; status: string };
 
@@ -119,9 +124,9 @@ export interface AccountApi {
   listCompanies(): Promise<AccountCompany[]>;
   getProfile(): Promise<AccountProfile>;
   updateProfile(input: { name: string; image?: string | null }): Promise<AccountProfile>;
-  listMembers(companyId: string): Promise<CompanyMembersResponse>;
+  listMembers(companyId: string, page?: AccountPageOptions): Promise<CompanyMembersResponse>;
   listUserDirectory(companyId: string): Promise<CompanyUserDirectoryResponse>;
-  listInvites(companyId: string): Promise<CompanyInviteListResponse>;
+  listInvites(companyId: string, page?: AccountPageOptions): Promise<CompanyInviteListResponse>;
   createHumanInvite(companyId: string, role: HumanCompanyRole): Promise<CompanyInviteCreated>;
   updateMember(
     companyId: string,

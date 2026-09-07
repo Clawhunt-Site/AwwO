@@ -5,7 +5,7 @@ import { configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from '.
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
 import { CanvasSurface } from '../canvas/CanvasSurface';
-import { CANVAS_STORAGE_KEY, emptyDocument, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
+import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY } from '../canvas/runJournal';
 import { createCanvasRuntimeReader } from '../canvasRuntimeReader';
 import { CanvasAccountControl } from '../CanvasAccountControl';
@@ -14,6 +14,7 @@ import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls } from 
 import { InviteAcceptance } from './InviteAcceptance';
 import { AdminPanel } from './AdminPanel';
 import { RuntimeSettings } from './RuntimeSettings';
+import { CanvasList } from './CanvasList';
 import { AppearanceScope } from './SaaSAppearance';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
@@ -75,44 +76,29 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
     </form></main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
-  const { locale, t } = useSaaSPreferences();
+  const { t } = useSaaSPreferences();
   const params = new URLSearchParams(window.location.search);
   const requested = params.get('tenant');
   const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
   const canvasId = params.get('canvas');
-  const [error, setError] = useState('');
-  const [list, setList] = useState<CanvasRecord[] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [newName, setNewName] = useState('');
-  useEffect(() => {
-    if (!tenant || tenant.status !== 'active' || canvasId) return;
-    const controller = new AbortController();
-    api<{ items: CanvasRecord[] }>(tenantPath(tenant.id, '/canvases'), { signal: controller.signal })
-      .then(value => setList(value.items)).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
-    return () => controller.abort();
-  }, [tenant?.id, tenant?.status, canvasId]);
-  const controls = <WorkspaceControls identity={identity} tenant={tenant} canvasId={canvasId} onProfile={onProfile} />;
-  if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。请联系工作区所有者添加你的注册邮箱或发送邀请链接。', 'You have not joined a workspace. Ask its owner to add your registered email or send an invitation.')}</p>{identity.user.platformRole === 'admin' && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
+  const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} canvasId={canvasId} onProfile={onProfile} />;
+  if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。可以新建工作区，或请所有者发送邀请链接。', 'You have not joined a workspace. Create one or ask its owner for an invitation.')}</p>{identity.user.platformRole === 'admin' && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
   const readOnly = tenant.role === 'reader';
   if (canvasId) return readOnly ? <ReadOnlyCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} /> : <CloudCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} />;
   return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('选择画布，继续你的团队任务。', 'Choose a canvas to continue your team’s work.')}</p></section>
-    {readOnly && <p className="saas-runtime-note" role="status">{t('只读成员：可以浏览画布、会话和导出副本，不能编辑或运行。', 'Reader: browse canvases and conversations or export a copy. Editing and execution require member access.')}</p>}
-    {!readOnly && <form className="saas-create" onSubmit={async event => {
-      event.preventDefault(); setBusy(true); setError('');
-      try { const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name: newName, document: emptyDocument() }) }); navigate(tenant.id, canvas.id); }
-      catch (error) { setError(message(error)); setBusy(false); }
-    }}><input aria-label={t('新画布名称', 'New canvas name')} placeholder={t('为新画布起个名字', 'Name your new canvas')} value={newName} onChange={event => setNewName(event.target.value)} required maxLength={100}/><button disabled={busy} className="saas-primary"><Plus size={16}/>{t('新建画布', 'Create canvas')}</button></form>}
-    {error && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
-    {list === null ? <p role="status">{error ? t('画布列表加载失败，请重新连接。', 'Could not load canvases. Please reconnect.') : t('正在加载画布…', 'Loading canvases…')}</p> : <div className="saas-canvas-list">{list.map(canvas => <button key={canvas.id} className="saas-canvas-card" onClick={() => navigate(tenant.id, canvas.id)}><span>↗</span><h2>{canvas.name}</h2><p>{new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</p></button>)}{list.length === 0 && <p>{readOnly ? t('工作区还没有画布。', 'This workspace has no canvases yet.') : t('还没有画布。创建后可添加、配置和连接 Agent。', 'No canvases yet. Create one to add, configure and connect agents.')}</p>}</div>}
+    <CanvasList key={identity.user.id + ':' + tenant.id + ':' + tenant.role} tenant={tenant} onOpen={id => navigate(tenant.id, id)} />
   </main>;
 }
 function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity: Identity; tenant?: Tenant; canvasId?: string | null; onProfile: (name: string) => void }) {
   const { locale, t } = useSaaSPreferences();
   const [error, setError] = useState('');
   const [managementTenant, setManagementTenant] = useState<string | null>(tenant?.id || null);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(() => new URLSearchParams(window.location.search).get('createWorkspace') === '1');
   const accountApi = useMemo(() => createSaaSAccountApi(onProfile), [identity.user.id, onProfile]);
   return <div className="saas-account-actions"><PreferenceControls />
     {identity.tenants.length > 0 && <select aria-label={t('切换工作区', 'Switch workspace')} value={tenant?.id || ''} onChange={event => navigate(event.target.value)}>{!tenant && <option value="" disabled>{t('选择工作区', 'Choose a workspace')}</option>}{identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? t('（已暂停）', ' (suspended)') : ''}</option>)}</select>}
+    <button title={t('新建工作区', 'Create workspace')} aria-label={t('新建工作区', 'Create workspace')} onClick={() => setCreatingWorkspace(true)}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
+    {creatingWorkspace && <CreateWorkspaceDialog onClose={() => setCreatingWorkspace(false)} onCreated={id => navigate(id)} />}
     {canvasId && tenant && <button title={t('返回画布列表', 'Back to canvases')} aria-label={t('返回画布列表', 'Back to canvases')} onClick={() => navigate(tenant.id)}><ArrowLeft size={16}/></button>}
     {identity.user.platformRole === 'admin' && <a href="/admin" title={t('平台管理', 'Platform administration')} aria-label={t('平台管理', 'Platform administration')}><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
@@ -120,6 +106,24 @@ function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => { try { await api('/auth/logout', { method: 'POST' }); window.location.reload(); } catch (error) { setError(message(error)); } }}><LogOut size={16}/></button>
     {error && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
   </div>;
+}
+export function CreateWorkspaceDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const { locale, t } = useSaaSPreferences();
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; dialog.current?.showModal(); return () => { alive.current = false; dialog.current?.close(); }; }, []);
+  return <dialog ref={dialog} className="saas-native-dialog" aria-labelledby="saas-create-workspace-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><form className="saas-card" onSubmit={async event => {
+    event.preventDefault(); if (busy || !name.trim()) return;
+    setBusy(true); setError(null);
+    try { const result = await api<Tenant>('/tenants', { method: 'POST', body: JSON.stringify({ name: name.trim() }) }); if (alive.current) onCreated(result.id); }
+    catch (cause) { if (alive.current) setError(cause); }
+    finally { if (alive.current) setBusy(false); }
+  }}><h2 id="saas-create-workspace-title">{t('新建工作区', 'Create workspace')}</h2><p>{t('新工作区与现有工作区的数据和成员独立，你将成为所有者。', 'The new workspace has separate data and members. You will be its owner.')}</p><label>{t('工作区名称', 'Workspace name')}<input autoFocus required maxLength={100} value={name} onChange={event => setName(event.target.value)} disabled={busy}/></label>
+    {error !== null && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}<div className="saas-draft-actions"><button type="button" disabled={busy} onClick={onClose}>{t('取消', 'Cancel')}</button><button className="saas-primary" disabled={busy || !name.trim()}>{busy ? t('正在创建…', 'Creating…') : t('创建工作区', 'Create workspace')}</button></div>
+  </form></dialog>;
 }
 function downloadDocument(value: unknown, name: string) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
@@ -307,7 +311,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
     {runtime && !runtime.available && <div className="saas-runtime-note" role="status">{t('Pi 执行尚未就绪：', 'Pi execution is not ready: ')}{runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('请由服务管理员配置模型。', 'Ask the service administrator to configure a model.')}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
-    <CanvasSurface storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => navigate(tenant.id)} onOpenSettings={() => setSettingsOpen(true)} />
+    <CanvasSurface storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)} />
     {settingsOpen && <RuntimeSettings onClose={() => setSettingsOpen(false)} />}
   </div>;
 }

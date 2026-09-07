@@ -2,6 +2,7 @@ import { AccountApiError } from '../account/accountApi';
 import type { AccountApi, AccountProfile, CompanyMember, HumanCompanyRole, WorkspaceInviteSummary } from '../account/types';
 import { api, SaaSApiError, saasErrorMessage, tenantPath, type Identity, type Tenant } from './api';
 import { readInitialLocale } from '../locale';
+import { listPage } from './listPage';
 
 type Member = { userId: string; name: string; email: string; role: HumanCompanyRole };
 const profile = (user: { id: string; email: string; name: string }): AccountProfile => ({ ...user, image: null });
@@ -11,6 +12,10 @@ const roles = (tenant?: Tenant): HumanCompanyRole[] => canManage(tenant) ? tenan
 /** Translate the existing account panel's data contract at its HTTP boundary. No external identity is used. */
 export function createSaaSAccountApi(onProfile: (name: string) => void): AccountApi {
   let identityRequest: Promise<Identity> | undefined;
+  // Only the last displayed member page per workspace is retained. Role updates
+  // must not search a truncated first page or enumerate the tenant directory.
+  const displayedMembers = new Map<string, Member[]>();
+  const memberRequests = new Map<string, number>();
   const identity = () => identityRequest ||= api<Identity>('/auth/me').catch(error => { identityRequest = undefined; throw error; });
   const request = async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
     try { return await api<T>(path, init); }
@@ -23,10 +28,17 @@ export function createSaaSAccountApi(onProfile: (name: string) => void): Account
       status: 'active', membershipRole: item.role, user: profile({ id: item.userId, name: item.name, email: item.email }), grants: [], editable,
       removal: { canArchive: editable, reason: item.role === 'owner' ? 'protected_owner' : null } };
   };
-  const listMembers: AccountApi['listMembers'] = async id => {
+  const page = async <T,>(path: string, cursor?: string) => {
+    try { return await listPage<T>(path, cursor); }
+    catch (error) { if (error instanceof SaaSApiError) throw new AccountApiError(error.status, saasErrorMessage(error, readInitialLocale())); throw error; }
+  };
+  const listMembers: AccountApi['listMembers'] = async (id, options) => {
+    const generation = (memberRequests.get(id) || 0) + 1;
+    memberRequests.set(id, generation);
     const actor = await tenant(id);
-    const result = await request<{ items: Member[] }>(tenantPath(id, '/members'));
-    return { members: result.items.map(item => member(item, id, actor)), access: {
+    const result = await page<Member>(tenantPath(id, '/members'), options?.cursor);
+    if (memberRequests.get(id) === generation) displayedMembers.set(id, result.items);
+    return { members: result.items.map(item => member(item, id, actor)), nextCursor: result.nextCursor ?? null, access: {
       currentUserRole: actor?.role as HumanCompanyRole || null, canManageMembers: Boolean(canManage(actor)),
       canInviteUsers: Boolean(canManage(actor)), canApproveJoinRequests: false, assignableRoles: roles(actor), canChangeStatus: false,
     } };
@@ -44,7 +56,7 @@ export function createSaaSAccountApi(onProfile: (name: string) => void): Account
     },
     listMembers,
     listUserDirectory: async id => ({ users: (await listMembers(id)).members.map(item => ({ principalId: item.principalId, status: 'active' as const, user: item.user })) }),
-    listInvites: async id => ({ invites: (await request<{ items: WorkspaceInviteSummary[] }>(tenantPath(id, '/invites'))).items, nextOffset: null }),
+    listInvites: async (id, options) => { const result = await page<WorkspaceInviteSummary>(tenantPath(id, '/invites'), options?.cursor); return { invites: result.items, nextOffset: null, nextCursor: result.nextCursor ?? null }; },
     createHumanInvite: async (id, role) => {
       const invite = await request<{ id: string; role: HumanCompanyRole; token: string; inviteUrl: string; expiresAt: string }>(tenantPath(id, '/invites'), { method: 'POST', body: JSON.stringify({ role }) });
       return { ...invite, allowedJoinTypes: 'human', humanRole: invite.role };
@@ -54,10 +66,13 @@ export function createSaaSAccountApi(onProfile: (name: string) => void): Account
     removeMember: async (id, userId) => { await request(tenantPath(id, `/members/${encodeURIComponent(userId)}`), { method: 'DELETE' }); },
     updateMember: async (id, userId, input) => {
       if (!input.membershipRole || input.status !== undefined) throw new AccountApiError(400, 'Unsupported member update');
+      const existing = displayedMembers.get(id)?.find(item => item.userId === userId);
+      if (!existing) throw new AccountApiError(409, readInitialLocale() === 'zh' ? '成员列表已变化，请刷新后重试。' : 'The member list changed. Refresh and retry.');
+      const actor = await tenant(id);
       await request(tenantPath(id, `/members/${encodeURIComponent(userId)}`), { method: 'PATCH', body: JSON.stringify({ role: input.membershipRole }) });
-      const result = (await listMembers(id)).members.find(item => item.principalId === userId);
-      if (!result) throw new AccountApiError(404, 'Member no longer exists');
-      return result;
+      const updated = { ...existing, role: input.membershipRole };
+      displayedMembers.set(id, (displayedMembers.get(id) || []).map(item => item.userId === userId ? updated : item));
+      return member(updated, id, actor);
     },
   };
 }

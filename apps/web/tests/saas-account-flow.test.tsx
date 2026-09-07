@@ -21,7 +21,7 @@ it('uses the original account panel and PATCHes only the current SaaS profile na
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response({ ...owner, user: { ...owner.user, name } });
     if (url.endsWith('/auth/profile')) { name = JSON.parse(init.body as string).name; return response({ id: 'alice', name, email: owner.user.email, isPlatformAdmin: false }); }
-    if (url.endsWith('/members')) return response({ items: members });
+    if (new URL(url, 'http://localhost').pathname.endsWith('/members')) return response({ items: members });
     return response({ items: [] });
   }));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
@@ -39,7 +39,7 @@ it('uses the original account panel and PATCHes only the current SaaS profile na
 });
 
 it('does not show profile success when the backend rejects a save', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner) : url.endsWith('/auth/profile') ? response({ error: { code: 'invalid_input', message: 'Invalid name' } }, 400) : response({ items: url.endsWith('/members') ? members : [] })));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner) : url.endsWith('/auth/profile') ? response({ error: { code: 'invalid_input', message: 'Invalid name' } }, 400) : response({ items: new URL(url, 'http://localhost').pathname.endsWith('/members') ? members : [] })));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
   fireEvent.click(await screen.findByRole('button', { name: '保存资料' }));
   expect(await screen.findByText('输入无效，请检查后重试。')).toBeVisible();
@@ -48,7 +48,7 @@ it('does not show profile success when the backend rejects a save', async () => 
 
 it('limits an admin to member and reader roles and protects owner/admin members', async () => {
   const admin = { ...owner, tenants: [{ ...owner.tenants[0], role: 'admin' }] };
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(admin) : response({ items: url.endsWith('/members') ? [...members, { userId: 'c', name: 'Chris', email: 'c@example.test', role: 'member' }] : [] })));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(admin) : response({ items: new URL(url, 'http://localhost').pathname.endsWith('/members') ? [...members, { userId: 'c', name: 'Chris', email: 'c@example.test', role: 'member' }] : [] })));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
   const roles = await screen.findByRole('combobox', { name: 'Chris 的角色' });
   expect(within(roles).getAllByRole('option').map(item => item.getAttribute('value'))).toEqual(['reader', 'member']);
@@ -61,13 +61,15 @@ it('limits an admin to member and reader roles and protects owner/admin members'
 it('creates, copies and revokes an invitation without storing its token or sending email', async () => {
   const copy = vi.fn().mockResolvedValue(undefined); Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
   const calls: Array<{ url: string; init: RequestInit }> = [];
+  let created = false;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response(owner);
-    if (url.endsWith('/members')) return response({ items: members });
-    if (init.method === 'POST') return response({ id: 'invite-a', role: 'member', token: 'fixture-invite-token', inviteUrl: 'http://localhost/?invite=fixture-invite-token', expiresAt: '2099-01-01T00:00:00Z' }, 201);
-    if (init.method === 'DELETE') return response(null, 204);
+    if (new URL(url, 'http://localhost').pathname.endsWith('/members')) return response({ items: members });
+    if (init.method === 'POST') { created = true; return response({ id: 'invite-a', role: 'member', token: 'fixture-invite-token', inviteUrl: 'http://localhost/?invite=fixture-invite-token', expiresAt: '2099-01-01T00:00:00Z' }, 201); }
+    if (init.method === 'DELETE') { created = false; return response(null, 204); }
+    if (new URL(url, 'http://localhost').pathname.endsWith('/invites')) return response({ items: created ? [{ id: 'invite-a', role: 'member', status: 'active', expiresAt: '2099-01-01T00:00:00Z' }] : [], nextCursor: null });
     return response({ items: [] });
   }));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
@@ -160,7 +162,7 @@ it('uses the server-returned membership role instead of elevating to the invitat
 });
 
 it('translates the original account panel when changing the SaaS language', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner) : response({ items: url.endsWith('/members') ? members : [] })));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner) : response({ items: new URL(url, 'http://localhost').pathname.endsWith('/members') ? members : [] })));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
   expect(await screen.findByRole('heading', { name: '工作区资料' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));

@@ -29,6 +29,8 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     email_exists: ['此邮箱已注册，请登录。', 'This email is already registered. Please sign in.'],
     not_found: ['找不到此资源，或你没有访问权限。', 'This resource was not found or is not accessible.'],
     conflict: ['内容已发生变化，请重新读取后重试。', 'The content has changed. Reload it before retrying.'],
+    version_conflict: ['画布版本已变化，请刷新云端版本后重试；输入仍保留。', 'The canvas version changed. Refresh the cloud version and retry; your input is preserved.'],
+    resource_in_use: ['画布仍有正在执行的运行或规划，请等待结束或先停止运行。', 'The canvas has an active run or plan. Wait for it to finish or stop it first.'],
     invalid_appearance: ['配色文件或颜色无效，请检查后重试。', 'Invalid color scheme or color. Check it and try again.'],
     tenant_suspended: ['工作区已暂停，请联系管理员或切换工作区。', 'This workspace is suspended. Contact an administrator or switch workspaces.'],
     session_busy: ['此会话正在运行，请稍后重试。', 'This session is running. Try again when it finishes.'],
