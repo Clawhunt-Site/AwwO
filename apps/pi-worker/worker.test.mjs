@@ -56,6 +56,10 @@ async function provider(t, { mode = 'success', protocol = 'openai' } = {}) {
       if (mode === 'tool') {
         send({ role: 'assistant', tool_calls: [{ index: 0, id: 'tool_1', type: 'function', function: { name: 'bash', arguments: '{"command":"touch should-never-exist"}' } }] });
         send({}, 'tool_calls');
+      } else if (mode === 'oversize') {
+        // Fewer than 1024 characters, but more than 1024 UTF-8 bytes.
+        send({ role: 'assistant', content: '汉'.repeat(400) });
+        send({}, 'stop');
       } else {
         send({ role: 'assistant', content: 'Hello ' });
         send({ content: 'from Pi' });
@@ -211,6 +215,18 @@ test('deadline forcibly bounds an unresponsive model run', { timeout: 20000 }, a
   assert.throws(() => process.kill(handle.pid, 0), /ESRCH/);
 });
 
+test('the UTF-8 output limit terminates an actual Pi child without returning an oversized success', { timeout: 20000 }, async (t) => {
+  const model = await provider(t, { mode: 'oversize' });
+  const { handle, events } = await run(t, configuration(model.baseURL, { AWWO_PI_MAX_OUTPUT_BYTES: '1024' }));
+  await handle.done;
+  assert.deepEqual(events.at(-1), { type: 'failed', code: 'OUTPUT_LIMIT', message: 'The model output exceeded the configured limit.' });
+  assert.equal(events.some(event => event.type === 'completed'), false);
+  assert.ok(events.filter(event => event.type === 'text_delta').reduce((bytes, event) => bytes + Buffer.byteLength(event.delta), 0) <= 1024);
+  assert.equal(model.requests.length, 1);
+  assert.throws(() => process.kill(handle.pid, 0), /ESRCH/);
+  await assert.rejects(access(handle.directory));
+});
+
 test('different tenants use separate processes/directories even for the same session id', { timeout: 20000 }, async (t) => {
   const model = await provider(t, { mode: 'stall' });
   const a = await run(t, configuration(model.baseURL), REQUEST);
@@ -273,6 +289,52 @@ test('HTTP streaming enforces conversation/run exclusivity, cancellation, and di
     await sleep(10);
   }
   assert.equal((await (await fetch(`${url}/health`)).json()).activeRuns, 0);
+});
+
+test('capacity exhaustion rejects an unaccepted conversation and frees capacity after cancellation', { timeout: 20000 }, async (t) => {
+  const model = await provider(t, { mode: 'stall' });
+  const app = createPiServer(configuration(model.baseURL, { AWWO_PI_MAX_CONCURRENCY: '1' }));
+  const url = await listen(app.server);
+  t.after(() => app.close());
+  const headers = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const first = await fetch(`${url}/internal/runs`, { method: 'POST', headers, body: JSON.stringify(REQUEST) });
+  assert.equal(first.status, 200);
+  await model.received;
+  const other = { ...REQUEST, runId: 'capacity_other', tenantId: 'other_tenant', sessionId: 'other_session' };
+  const rejected = await fetch(`${url}/internal/runs`, { method: 'POST', headers, body: JSON.stringify(other) });
+  assert.equal(rejected.status, 429);
+  assert.equal((await rejected.json()).error.code, 'CAPACITY_EXCEEDED');
+  assert.equal(model.requests.length, 1);
+  assert.equal((await (await fetch(`${url}/health`)).json()).activeRuns, 1);
+  assert.equal((await fetch(`${url}/internal/runs/${REQUEST.runId}`, { method: 'DELETE', headers })).status, 202);
+  assert.match(await first.text(), /"type":"cancelled"/);
+  const accepted = await fetch(`${url}/internal/runs`, { method: 'POST', headers, body: JSON.stringify(other) });
+  assert.equal(accepted.status, 200);
+  assert.equal((await fetch(`${url}/internal/runs/${other.runId}`, { method: 'DELETE', headers })).status, 202);
+  assert.match(await accepted.text(), /"type":"cancelled"/);
+  assert.equal((await (await fetch(`${url}/health`)).json()).activeRuns, 0);
+});
+
+test('service shutdown cancels an active real Pi run and waits for child and directory cleanup', { timeout: 20000 }, async (t) => {
+  const model = await provider(t, { mode: 'stall' });
+  let handle;
+  const app = createPiServer(configuration(model.baseURL), { startRun: async options => {
+    handle = await startIsolatedRun(options);
+    return handle;
+  } });
+  const url = await listen(app.server);
+  t.after(() => app.close());
+  const headers = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const response = await fetch(`${url}/internal/runs`, { method: 'POST', headers, body: JSON.stringify(REQUEST) });
+  assert.equal(response.status, 200);
+  await model.received;
+  assert.equal((await (await fetch(`${url}/health`)).json()).activeRuns, 1);
+  const stream = response.text();
+  await app.close();
+  assert.match(await stream, /"type":"cancelled"/);
+  assert.equal(app.server.listening, false);
+  assert.throws(() => process.kill(handle.pid, 0), /ESRCH/);
+  await assert.rejects(access(handle.directory));
 });
 
 test('HTTP to isolated Pi to model protocol returns the documented SSE completion contract', { timeout: 20000 }, async (t) => {
