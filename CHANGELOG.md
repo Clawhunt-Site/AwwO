@@ -6,6 +6,22 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Added — original frontend SaaS account and administration integration
+
+- **What changed:** Connected the original account/workspace panel to Go profile and membership APIs; added expiring, revocable, single-use invitations with explicit acceptance. Reused the original canvas for readers with mutation boundaries, restored shared language/theme preferences, exposed server-owned Pi runtime status, and added platform quota forms, cursor pagination and complete JSON export. Added an isolated browser protocol fixture and updated API, architecture, development and acceptance documentation.
+- **Why:** The Go/Pi foundation needed the original frontend interactions and role-specific behavior connected to real persisted APIs.
+- **Impact:** Tenant and platform permissions remain distinct. Invitations do not send email or elevate existing members. Reader history stays available while editing/execution is disabled. Export follows a creation-time boundary and is not a consistent database backup. Real provider configuration and public deployment remain separate acceptance gates.
+- **Verification:** 57 frontend files / 552 tests; 18 Go top-level tests plus 5 admission cases with race/vet; complete Go/Pi/PostgreSQL protocol stack; live API smoke; typecheck/build; browser account/invite/preferences/admin export and two-node Pi protocol execution, history, refresh recovery and cancellation. See `docs/awwo-saas-verification.md` for limits and review evidence.
+- **Files:** `backend/internal/app/{invitations,pagination,app,resources,database}.go`, migrations 003/004 and tests; `apps/web/src/{account,canvas,saas}/**`, `CanvasAccountControl.tsx` and related tests; `scripts/awwo-saas-{smoke,browser-fixture}.mjs`; `backend/README.md`; `docs/awwo-saas-*.md`.
+
+### Fixed — saved canvas position and unassigned membership controls
+
+- **What changed:** Retain normalized saved pan/zoom during first layout; show an explicit localized unassigned role so a valid role can be selected directly. Make draft acknowledgement tests wait for the registered real save callback.
+- **Why:** Initial auto-fit overwrote a returning user's position, while a fallback role hid the unassigned state. The draft test had unrelated mount/debounce timing dependencies.
+- **Impact:** Explicit Fit and new-graph auto-fit remain available. No production draft-save or preview logic changed.
+- **Verification:** Added viewport/first-preview component regressions and bilingual null-role assignment tests; draft tests passed three repeated runs; complete 57-file, 552-test regression passed. Codex and Gemini independently passed final remediation review.
+- **Files:** `apps/web/src/canvas/CanvasSurface.tsx`, `apps/web/src/account/AccountWorkspacePanel.tsx`, and related canvas/account/draft tests.
+
 ### Documentation — frontend-driven SaaS delivery standards
 
 - **What changed:** Added AwwO-specific design/development standards and a frontend integration inventory, with the existing canvas as the implementation and acceptance baseline.

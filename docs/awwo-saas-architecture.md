@@ -12,6 +12,8 @@ AwwO 是以独立 Agent Session 为节点的协作画布，已有七种 Agent �
 
 本次建设目标：复用现有画布，为公网产品准备独立用户入口、平台管理入口、真实身份与租户存储、Go API、Pi 执行服务以及可重复的本地验证。历史 Python、Node、桌面代码保留作原运行模式；SaaS 启动不需要启动它们。
 
+当前 SaaS 入口为 `saas.html → saas/main.tsx → SaaSApp`，编辑模式挂载 `CloudCanvas → CanvasSurface`，reader 挂载 `ReadOnlyCanvas → CanvasSurface readOnly`，均复用原 `AgentWorkspace / SessionTile / InspectorPanel`。原 `CanvasAccountControl / AccountWorkspacePanel` 通过 `saas/accountApi.ts` 注入 Go 契约，新增外壳负责登录、租户/画布列表与云端保存；平台页 `AdminPanel`、服务状态页 `RuntimeSettings` 属于 SaaS 新增组件。原画布及账户交互的复用不代表历史外部身份或本机运行配置全部适用于公网。
+
 ## 2. 部署关系与职责
 
 ```mermaid
@@ -44,17 +46,29 @@ flowchart LR
 
 租户角色为 `reader / member / admin / owner`，分别负责读取、常规业务写入、成员管理与租户所有权管理。平台角色独立，普通注册不能产生平台管理员，首位管理员通过服务端 bootstrap 配置建立。平台后台所有端点都重新验证平台角色，UI 隐藏仅改善体验。
 
+### 账户、邀请与只读交互
+
+原账户面板通过可注入 API 连接 Go，SaaS 使用单一工作区身份并隐藏原外部账户身份卡。`PATCH /auth/profile` 只允许当前用户修改显示名称，修改写入审计，前端顶部身份随成功响应更新。成员区域保留列表、已注册邮箱添加、角色修改和移除，按后端提供的角色范围禁用不可编辑对象；owner 不可降级/移除，admin 不能授予或移除 admin。登录 cookie 不与原外部账户 token 混用。
+
+邀请是指向指定租户、指定角色、有期限的单次凭据。数据库只存哈希；创建者复制链接交给受邀人，受邀人登录后明确确认加入。创建、撤销、成员变更和领取在同一租户锁下串行校验，避免与成员降权或租户暂停竞态。邀请发行者失去授权时，未使用邀请不能继续赋权；领取者已有角色保持不变。重复领取不得提升角色，被移除后也不得用旧链接恢复成员资格。邮件投递、邮箱验证、密码找回及 OIDC 是独立能力，不由邀请链接冒充。
+
+reader 使用原 `CanvasSurface` 的显式只读挂载，保留图布局、选择、视图导航、历史会话切换和 JSON 导出。只读约束覆盖快捷键、拖拽、绑定、发布、规划、发送及运行恢复入口，而非只隐藏顶部按钮。服务端仍独立拒绝 reader 写入。只读挂载先读取服务端 document，再放入用户/租户/画布独立的 viewer cache；不启用 autosave，不使用编辑 journal 恢复运行，历史切换仅改变内存中的浏览状态，不覆盖编辑草稿。
+
+语言和主题通过 `SaaSPreferencesProvider` 沿用原 `superclaw_locale`（zh/en）、`superclaw_theme`（light/dark）与画布词条，账户、邀请、运行设置、管理端和 SaaS 外壳共用同一来源并响应跨页 storage 变更。首次无有效偏好时按原语言检测和系统浅深色初始化，此后保存用户选择；不是随系统持续变更的第三种主题模式。模型连接由服务管理员通过环境配置管理，成员在节点中选择可用模型并设置人格、契约；`RuntimeSettings` 查询 `GET /api/v1/runtime` 并允许刷新。它显示服务配置状态、引擎、模型和不可用原因，不提供无效的秘密表单，也不把配置就绪表述为真实推理成功。
+
+`AdminPanel` 的租户、用户、运行、审计列表使用 `limit/cursor`，Go 返回 `items/nextCursor/snapshot`，按 `(createdAt,id)` 降序和首次读取的时间边界分页；界面每页 50 条，JSON 导出每次 200 条遍历完整分页，失败或取消不产生标为完整的文件。游标绑定列表与当前平台管理员，进程重启使旧游标失效，需刷新重新读取。此边界按记录创建时间过滤，但晚提交的较早事务仍可能变为可见，也不会冻结既有记录的后续状态变更，因此导出属于管理查询结果，不等同数据库备份。平台可编辑并发和每日额度，配额修改立即影响后续准入，降低额度不会杀掉已受理运行；暂停租户则有明确的取消语义。
+
 每个租户请求顺序：验证 session → 查询 membership → 检查动作权限与租户状态 → 按 tenant_id 和资源 ID 联合读取/更新。跨租户 ID 返回 404，不返回该对象存在的信息。成员变更和资源变更不能信任浏览器缓存中的角色。平台暂停租户后保留只读历史，禁止业务写入，并在事务中取消活跃任务、记录终态事件，再中止 Pi 执行。SSE 长连接定期重新验证登录和成员资格。
 
 Cookie 为 HttpOnly、SameSite，staging/production 必须 Secure。写请求验证 Origin，生产入口保持前后端同源；不使用任意 CORS。注册/登录有速率限制，请求体和执行有上限。模型密钥、内部服务 token 不发送到浏览器，不写入前端构建变量。
 
 ## 4. 数据与一致性
 
-核心实体：`users`、`tenants`、`memberships`、`auth_sessions`、`canvases`、`agents`、`sessions`、`messages`、`runs`、`run_events`、`audit_events`。具体表名以迁移为准。
+核心实体：`users`、`tenants`、`memberships`、`auth_sessions`、`tenant_invites`、`canvases`、`agents`、`sessions`、`messages`、`runs`、`run_events`、`audit_events`。具体表结构和索引以 `backend/internal/app/migrations/` 为准。
 
 - 租户业务实体包含 tenant_id；跨实体引用采用复合租户外键，防止把 A 租户 session 关联到 B 租户 agent/canvas。
-- 画布保留前端 document JSON；服务器外层提供 id、tenant、version 和更新时间。更新必须携带已读取的 version，冲突返回 409；浏览器停止自动覆盖并提示重新加载。
-- 加载失败不得保存一个空画布覆盖服务器。缓存只用作当前用户/租户/画布的局部副本，服务器为事实来源。
+- 画布保留前端 document JSON；服务器外层提供 id、tenantId、version 和更新时间。更新必须携带已读取的 version，冲突返回 409；浏览器停止自动覆盖，保留可恢复/导出的本地草稿，不自动覆盖较新服务器内容。
+- 加载失败不得保存一个空画布覆盖服务器。已同步数据以服务器为基准；未同步草稿按用户/租户/画布保存 document、baseVersion、dirty 和 revision，409、断网或重载后仍需明确恢复、导出或丢弃。成功响应只清理它确认的精确 revision，不能清掉等待期间产生的新编辑。viewer cache 与写草稿分开。
 - 同一 session 同时至多一个活跃 run；同一租户 operationId 幂等。重复相同请求返回原运行，变更内容复用同一 key 返回冲突。
 - Go 先提交事件再发 SSE。浏览器重连使用事件序号补读，不能通过重连重新执行模型。
 - 对话 history 来自已授权 session 的数据库记录，worker 的临时目录不作为业务存储。
@@ -80,11 +94,13 @@ Go 根据 Pi health 公布的模型输入预算保留最近完整对话轮次，
 
 ## 6. 用户端与平台管理端 API
 
-公共版本前缀为 `/api/v1`。基本分组包括 auth、tenants/members、canvases、agents、sessions/messages、runs/events/cancel、runtime/models、admin summary/tenants/users/runs/audit。精确请求、响应和示例见 `awwo-saas-api.md`。
+公共版本前缀为 `/api/v1`。基本分组包括 auth/profile、tenants/members/invites、invites/accept、canvases、agents、sessions/messages、runs/events/cancel、runtime（含 models）以及 admin summary/tenants/users/runs/audit。精确路径、请求、响应和示例见 `awwo-saas-api.md`。
 
 用户端使用独立 SaaS 入口复用 `CanvasSurface`；新增 transport adapter 将 Go 返回值适配为现有 runGraph/session UI 契约，不引入另一套画布。管理页面通过相同登录会话但独立平台权限访问 Go 管理端点。SaaS 编译不依赖整个历史 `server/ui` 工作区。
 
-原 AI 画布助手通过 `canvases/{id}/plan` 创建受租户配额约束、可审计的规划 run。前端复用原规划上下文、模板 schema、JSON 解析及图结构校验；模型错误、结构错误或过期结果不能应用到当前画布。规划不是临时旁路模型调用。
+原 AI 画布助手通过 `canvases/{id}/plan` 创建受租户配额约束、可审计的规划 run。Go 在完成并验证 JSON/操作后返回规范化计划，前端复用原规划上下文、模板 schema、JSON 解析及图结构校验；合法结果直接应用、显示“已更新画布”并提供“撤销本次更改”，没有第二个应用确认按钮。模型错误、结构错误或过期结果不能应用到当前画布。规划不是临时旁路模型调用。
+
+`scripts/awwo-saas-browser-fixture.mjs --start` 可启动专属临时 Go/Pi/Web 与本地确定性模型协议服务，使用随机数据库 schema 和动态 loopback 端口，供原浏览器 UI 驱动真实 SDK/进程链路。`--self-test` 只检查 fixture 生成规则，不启动进程或服务。二者都不使用真实 provider、不生成工程文件，也不构成真实模型验收；运行方式和清理范围见开发说明，实际执行证据另记验收报告。
 
 ## 7. 实施与验收顺序
 
@@ -99,7 +115,7 @@ Go 根据 Pi health 公布的模型输入预算保留最近完整对话轮次，
 
 这是公网目标的本地开发版本，部署模板不代表已经部署或运维验收。上线前必须完成域名/HTTPS、staging 独立数据库和模型凭据、备份恢复演练、限流与监控告警、日志脱敏、secret 生命周期、真实模型配额/成本策略。自助开放注册还需要邮箱验证/找回、反滥用与邀请策略；付费 SaaS 还需支付账单/订阅/webhook 幂等，这些不以 mock 冒充交付。
 
-下一阶段顺序：后台整图调度 → 对象存储及受控业务工具 → 用户邀请/邮件/OIDC → 使用量与付费额度 → 任务租约及多副本 → 灰度/备份恢复/生产验收。保持 API v1 与执行服务契约独立，避免将本地单实例假设散落到前端。
+下一阶段顺序：后台整图调度 → 对象存储及受控业务工具 → 邮件/账号恢复/OIDC → 使用量与付费额度 → 任务租约及多副本 → 灰度/备份恢复/生产验收。用户邀请链接属于本地前端对接实现，邮件服务另行接入。保持 API v1 与执行服务契约独立，避免将本地单实例假设散落到前端。
 
 ## 官方接口依据
 
