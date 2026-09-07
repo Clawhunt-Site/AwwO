@@ -23,6 +23,12 @@
 
 # CLAUDE.md
 
+## AwwO 分支拓扑 — 2026-09-06 操作者明确要求
+
+独立 `ClawHunt-Store/AwwO` 仓库在本地与远端只保留 `main` 和 `online`；本条覆盖下文继承的 `dev` / `dev/roadmap` / `dev/server-refactor` / 功能分支拓扑要求，不再创建额外命名分支。`main` 为默认源码基线，`online` 为经审查的发布引用；引用存在不等于已经部署。
+
+工作目录隔离、未提交数据保护、精确提交审查、相关测试、环境隔离和发布授权仍保留。进行中的工作可保留在 detached worktree；本次分支清理不等于批准提交或发布未完成验收的增量。以 `docs/awwo-repository.md` 和清理记录为当前仓库说明，旧 SuperClaw 仓库不受本次操作影响。
+
 本文件为 Claude Code（及任何在本仓库工作的 AI 代理）提供项目级指引。**这些约定优先于默认行为，必须严格遵守。**
 
 ## ⚡ 本分支工作模式：`dev/server-refactor` 集成主干本地循环（宪法 §十一，优先级最高）

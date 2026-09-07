@@ -20,6 +20,7 @@ async function store(): Promise<ConversationOperationStore> {
 function fakeUpstream(initialIssue: Record<string, unknown> | null = null) {
   let issue = initialIssue;
   let creates = 0;
+  const comments: Array<Record<string, unknown>> = [];
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> | null }> = [];
   const label = { id: 'label-operation', companyId: 'company-1', name: `awwo:op:${OPERATION_ID}`, color: '#0f766e' };
   const fetchImpl = (async (raw: string | URL, init?: RequestInit) => {
@@ -31,10 +32,18 @@ function fakeUpstream(initialIssue: Record<string, unknown> | null = null) {
     if (method === 'GET' && url.pathname === '/api/companies/company-1/issues') return response(issue ? [issue] : []);
     if (method === 'POST' && url.pathname === '/api/companies/company-1/issues') {
       creates += 1;
-      issue = { id: 'issue-1', companyId: 'company-1', assigneeAgentId: 'agent-1', status: 'todo', labelIds: body?.labelIds };
+      issue = { id: 'issue-1', companyId: 'company-1', assigneeAgentId: 'agent-1', status: body?.status, labelIds: body?.labelIds };
       return response(issue, 201);
     }
     if (method === 'GET' && url.pathname === '/api/issues/issue-1') return response(issue);
+    if (method === 'GET' && url.pathname === '/api/issues/issue-1/tree-holds') return response([]);
+    if (method === 'GET' && url.pathname === '/api/issues/issue-1/tree-control/state') return response({ activePauseHold: null });
+    if (method === 'POST' && url.pathname === '/api/issues/issue-1/comments') {
+      const comment = { ...body, id: 'comment-1', issueId: 'issue-1', companyId: 'company-1' };
+      comments.push(comment);
+      return response(comment, 201);
+    }
+    if (method === 'GET' && url.pathname === '/api/issues/issue-1/comments') return response(comments);
     if (method === 'GET' && url.pathname === '/api/issues/issue-1/live-runs') return response([]);
     if (method === 'GET' && url.pathname === '/api/issues/issue-1/runs') return response([]);
     return response({ error: 'unexpected request' }, 404);
@@ -68,6 +77,8 @@ describe('durable conversation operation dispatch', () => {
     expect(upstream.creates()).toBe(1);
     const create = upstream.calls.find(call => call.method === 'POST' && call.path === '/api/companies/company-1/issues');
     expect(create?.body?.labelIds).toContain('label-operation');
+    expect(create?.body?.status).toBe('backlog');
+    expect(upstream.calls.filter(call => call.method === 'POST' && call.path === '/api/issues/issue-1/comments')).toHaveLength(1);
     expect(await operationStore.read(OPERATION_ID)).toMatchObject({ phase: 'issue_known', issueId: 'issue-1', deliveryConfirmed: true });
   });
 
@@ -124,6 +135,7 @@ describe('durable conversation operation dispatch', () => {
         return response({ id: 'issue-1', companyId: 'company-1', assigneeAgentId: 'agent-1', status: 'in_progress' });
       }
       if (method === 'GET' && url.pathname === '/api/issues/issue-1/tree-holds') return response([]);
+      if (method === 'GET' && url.pathname === '/api/issues/issue-1/tree-control/state') return response({ activePauseHold: null });
       if (method === 'POST' && url.pathname === '/api/issues/issue-1/comments') return response({ id: 'comment-new' }, 201);
       if (method === 'GET' && url.pathname === '/api/issues/issue-1/live-runs') {
         return response([

@@ -29,6 +29,23 @@ beforeEach(() => {
 });
 
 describe('native Stop recovery regressions', () => {
+  it('uses confirmed native cancellation when a buffered success frame races the Stop response', async () => {
+    const controller = new AbortController();
+    let resolveCancel!: (value: { confirmed: true; cancelled: true; status: 'cancelled' }) => void;
+    const cancelRun = vi.fn(() => new Promise<{ confirmed: true; cancelled: true; status: 'cancelled' }>(resolve => { resolveCancel = resolve; }));
+    streamMock.mockImplementation(async (...args: unknown[]) => {
+      const emit = args[4] as (frame: AgentChatFrame) => void;
+      emit({ event: 'accepted', issueId: 'issue-1', runId: 'run-1', runVisible: true });
+      controller.abort();
+      emit({ event: 'delta', text: 'A partial checkpoint before Stop.' });
+      emit({ event: 'done', status: 'succeeded' });
+      resolveCancel({ confirmed: true, cancelled: true, status: 'cancelled' });
+    });
+    const result = await execAgentViaGateway('/gateway', node(), 'Stop the foreground task', { signal: controller.signal, cancelRun });
+    expect(result).toMatchObject({ ok: false, cancelled: true, detail: '已取消', output: 'A partial checkpoint before Stop.' });
+    expect(sessions.getSnapshot('node-1').turns.at(-1)?.text).toContain('已停止');
+  });
+
   it('keeps an early Stop recoverable when the stream detaches before accepted', async () => {
     const controller = new AbortController();
     const fresh = { ...node(), issueId: null };

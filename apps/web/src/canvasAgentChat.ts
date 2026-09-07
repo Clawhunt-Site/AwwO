@@ -6,6 +6,7 @@
 // control token (same as mission planning) — the client never handles the token.
 // Fail-soft: any transport failure yields a single 'error' frame, never a throw.
 import { readSseFrames } from './sse';
+import { nativeConversationOperation } from './canvas/conversationPresentation';
 
 export type AgentChatFrame =
   // The turn landed on the agent's dedicated issue and the wake fired.
@@ -197,6 +198,12 @@ export interface ConversationSummary {
 export interface StoredMessage {
   role: 'user' | 'agent';
   text: string;
+  /** Native comment time, when available, for ordering locally recovered turns. */
+  createdAt?: number;
+  nativeCommentId?: string;
+  nativeOperationId?: string;
+  nativeRunId?: string;
+  nativeSource?: 'issue_description';
 }
 
 /** FAIL-SOFT: null means "could not read the index" — which callers must NOT render as
@@ -258,7 +265,14 @@ export async function fetchConversationMessages(
         if (!text.trim()) return null;
         // An agent-authored comment carries authorAgentId; anything else is the operator's turn.
         const role: StoredMessage['role'] = typeof d.authorAgentId === 'string' && d.authorAgentId ? 'agent' : 'user';
-        return { role, text };
+        const createdAt = typeof d.createdAt === 'string' ? Date.parse(d.createdAt) : NaN;
+        const nativeOperationId = nativeConversationOperation(d.metadata);
+        return { role, text, ...(Number.isFinite(createdAt) ? { createdAt } : {}),
+          ...(typeof d.id === 'string' && d.id ? { nativeCommentId: d.id } : {}),
+          ...(nativeOperationId ? { nativeOperationId } : {}),
+          ...(typeof d.createdByRunId === 'string' && d.createdByRunId ? { nativeRunId: d.createdByRunId } : {}),
+          ...(d.source === 'issue_description' ? { nativeSource: 'issue_description' as const } : {}),
+        };
       })
       .filter((m): m is StoredMessage => m !== null);
   } catch {

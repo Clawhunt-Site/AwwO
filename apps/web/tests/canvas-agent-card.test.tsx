@@ -18,7 +18,7 @@ describe('AwwO conversational cards', () => {
     expect(screen.getByTestId('canvas-tile-frontend').dataset.lod).toBe('open');
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '实现登录页' } });
     fireEvent.click(screen.getByTestId('composer-send'));
-    expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ id: 'frontend' }), '实现登录页', expect.any(Function));
+    expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ id: 'frontend' }), '实现登录页', expect.any(Function), '实现登录页');
   });
 
   it('explains the next step for a draft without verbose runtime metadata', () => {

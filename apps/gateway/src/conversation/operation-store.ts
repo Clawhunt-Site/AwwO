@@ -15,6 +15,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 export type ConversationOperationPhase =
   | 'claimed'
   | 'mutation_started'
+  | 'container_known'
+  | 'comment_started'
   | 'issue_known'
   | 'run_known'
   | 'rejected'
@@ -28,6 +30,8 @@ export interface ConversationOperationRequest {
   issueId: string | null;
   requestDigest: string;
   createdAt: string;
+  /** Absent in old journals, where creating a todo issue itself dispatched the first turn. */
+  deliveryMode?: 'comment';
 }
 
 interface LabelTransition { labelId: string; recordedAt: string }
@@ -41,6 +45,9 @@ export interface ConversationOperationSnapshot {
   phase: ConversationOperationPhase;
   labelId: string | null;
   mutationStarted: boolean;
+  /** A backlog container is not proof that its first message was delivered. */
+  containerId: string | null;
+  commentStarted: boolean;
   /** The upstream accepted this exact mutation. For continuation operations the
    * request's issueId exists before delivery, so issueId alone is not proof. */
   deliveryConfirmed: boolean;
@@ -128,7 +135,10 @@ export class ConversationOperationStore {
   }
 
   private async writeOnce(operationId: string, name: string, value: object): Promise<boolean> {
-    const dir = this.dir(operationId);
+    return this.writeOnceAt(this.dir(operationId), name, value);
+  }
+
+  private async writeOnceAt(dir: string, name: string, value: object): Promise<boolean> {
     await mkdir(dir, { recursive: true });
     const target = join(dir, name);
     const temporary = join(dir, `.${name}.${randomUUID()}.tmp`);
@@ -178,17 +188,26 @@ export class ConversationOperationStore {
       issueId: value.issueId === null ? null : text(value.issueId),
       requestDigest: text(value.requestDigest) ?? '',
       createdAt: text(value.createdAt) ?? '',
+      ...(value.deliveryMode === 'comment' ? { deliveryMode: 'comment' as const } : {}),
     };
     if (request.version !== 1 || request.operationId !== normalized || !request.companyId || !request.agentId
       || (value.issueId !== null && !request.issueId) || !/^[0-9a-f]{64}$/.test(request.requestDigest)
       || !Number.isFinite(Date.parse(request.createdAt))) {
       throw new ConversationOperationCorruptError(normalized);
     }
+    if (value.deliveryMode !== undefined && value.deliveryMode !== 'comment') throw new ConversationOperationCorruptError(normalized);
     const label = await this.readTransition<LabelTransition>(normalized, 'label.json', (v) => {
       const labelId = text(v.labelId); const recordedAt = text(v.recordedAt);
       return labelId && recordedAt ? { labelId, recordedAt } : null;
     });
     const mutation = await this.readTransition<MutationTransition>(normalized, 'mutation-started.json', (v) => {
+      const startedAt = text(v.startedAt); return startedAt ? { startedAt } : null;
+    });
+    const container = await this.readTransition<{ issueId: string; recordedAt: string }>(normalized, 'container.json', (v) => {
+      const issueId = text(v.issueId); const recordedAt = text(v.recordedAt);
+      return issueId && recordedAt ? { issueId, recordedAt } : null;
+    });
+    const commentMutation = await this.readTransition<MutationTransition>(normalized, 'comment-started.json', (v) => {
       const startedAt = text(v.startedAt); return startedAt ? { startedAt } : null;
     });
     const issue = await this.readTransition<IssueTransition>(normalized, 'issue.json', (v) => {
@@ -209,15 +228,21 @@ export class ConversationOperationStore {
       const detail = text(v.detail); const recordedAt = text(v.recordedAt);
       return detail && recordedAt ? { detail, recordedAt } : null;
     });
+    if (request.deliveryMode === 'comment' && issue && (!issue.commentId
+        || (container && container.issueId !== issue.issueId)
+        || (request.issueId && request.issueId !== issue.issueId))) throw new ConversationOperationCorruptError(normalized);
     const phase: ConversationOperationPhase = run ? 'run_known' : issue ? 'issue_known'
-      : rejected ? 'rejected' : uncertain ? 'uncertain' : mutation ? 'mutation_started' : 'claimed';
+      : rejected ? 'rejected' : uncertain ? 'uncertain' : commentMutation ? 'comment_started'
+      : container ? 'container_known' : mutation ? 'mutation_started' : 'claimed';
     return {
       request,
       phase,
       labelId: label?.labelId ?? null,
-      mutationStarted: mutation !== null,
+      mutationStarted: mutation !== null || commentMutation !== null,
+      containerId: container?.issueId ?? null,
+      commentStarted: commentMutation !== null,
       deliveryConfirmed: issue !== null,
-      issueId: issue?.issueId ?? request.issueId,
+      issueId: issue?.issueId ?? container?.issueId ?? request.issueId,
       commentId: issue?.commentId ?? null,
       runId: run?.runId ?? null,
       detail: rejected?.detail ?? uncertain?.detail ?? null,
@@ -232,6 +257,18 @@ export class ConversationOperationStore {
   /** Exactly one concurrent caller may cross the upstream-mutation boundary. */
   async beginMutation(operationId: string): Promise<boolean> {
     return this.writeOnce(operationId, 'mutation-started.json', { startedAt: new Date().toISOString() });
+  }
+
+  async recordContainer(operationId: string, issueId: string): Promise<void> {
+    const wrote = await this.writeOnce(operationId, 'container.json', { issueId, recordedAt: new Date().toISOString() });
+    if (!wrote && (await this.read(operationId)).containerId !== issueId) throw new ConversationOperationCorruptError(operationId);
+  }
+
+  /** Separate no-replay boundary: creating the container never grants two callers a send. */
+  async beginComment(operationId: string): Promise<boolean> {
+    const current = await this.read(operationId);
+    if (!current.issueId || current.request.deliveryMode !== 'comment') throw new ConversationOperationCorruptError(operationId);
+    return this.writeOnce(operationId, 'comment-started.json', { startedAt: new Date().toISOString() });
   }
 
   async recordIssue(operationId: string, issueId: string, commentId: string | null = null): Promise<void> {
@@ -253,5 +290,18 @@ export class ConversationOperationStore {
 
   async recordUncertain(operationId: string, detail: string): Promise<void> {
     await this.writeOnce(operationId, 'uncertain.json', { detail, recordedAt: new Date().toISOString() });
+  }
+
+  /** The upstream hold API has no idempotency key. A lost response permits only readback;
+   * never create another hold for the same terminal run after a process restart. */
+  async beginSettlement(input: { companyId: string; agentId: string; issueId: string; runId: string }): Promise<boolean> {
+    if (!isConversationOperationId(input.runId)) throw new Error('runId must be a UUID');
+    const directory = join(this.rootDir, 'settlements', input.runId.toLowerCase());
+    const created = await this.writeOnceAt(directory, 'request.json', input);
+    const existing = await this.readJson(join(directory, 'request.json'));
+    if (!existing || typeof existing !== 'object' || Object.entries(input).some(([key, value]) => (existing as Record<string, unknown>)[key] !== value)) {
+      throw new ConversationOperationConflictError();
+    }
+    return created;
   }
 }

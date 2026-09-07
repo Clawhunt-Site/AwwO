@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import ts from 'typescript';
+import { unprocessable } from '../../../server/server/src/errors';
 import {
   buildHireBody,
   hireAgentIntoCompany,
@@ -9,6 +13,25 @@ import {
 
 function jsonResponse(body: unknown, ok = true, status = 200) {
   return { ok, status, json: async () => body } as unknown as Response;
+}
+
+// The legacy-field rejection is a private function inside the real native route, not
+// part of its exported Zod schema. Exercise that exact guard rather than a fake HTTP
+// server that accepts every body (which previously missed the real 422 regression).
+function nativeNewAgentGuard() {
+  const filename = resolve(process.cwd(), '../../server/server/src/routes/agents.ts');
+  const source = ts.createSourceFile('agents.ts', readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
+  let guard: ts.FunctionDeclaration | undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === 'assertNoNewAgentLegacyPromptTemplate') guard = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (!guard) throw new Error('Native new-agent guard changed; update this integration contract.');
+  const compiled = ts.transpileModule(guard.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function('adapterSupportsInstructionsBundle', 'unprocessable', `${compiled}\nreturn assertNoNewAgentLegacyPromptTemplate;`)(
+    (adapter: string) => adapter === 'codex_local', unprocessable,
+  ) as (adapter: string, config: Record<string, unknown>) => void;
 }
 afterEach(() => vi.unstubAllGlobals());
 
@@ -115,6 +138,53 @@ describe('hireAgentIntoCompany — guards + tri-state', () => {
     expect((await hireAgentIntoCompany('/paperclip-api', 'co', spec)).outcome).toBe('unknown');
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ agent: { status: 'idle' } }, true, 201))); // no id
     expect((await hireAgentIntoCompany('/paperclip-api', 'co', spec)).outcome).toBe('unknown');
+  });
+
+  it('shows a readable validation error without turning a rejected unreadable body into an unknown hire', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'New agents must use instructionsBundle/AGENTS.md' }, false, 422)));
+    expect(await hireAgentIntoCompany('/paperclip-api', 'co', spec)).toEqual({
+      outcome: 'rejected', detail: 'server 422: New agents must use instructionsBundle/AGENTS.md',
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 422, json: async () => { throw new Error('invalid JSON'); } })));
+    expect(await hireAgentIntoCompany('/paperclip-api', 'co', spec)).toEqual({ outcome: 'rejected', detail: 'server 422' });
+  });
+
+  it('creates a Codex hire through the actual native new-agent guard, while legacy fields still reject', async () => {
+    const assertNative = nativeNewAgentGuard();
+    const codexSpec = { ...spec, adapterType: 'codex_local', model: 'gpt-5.5', effort: 'high' };
+    const body = buildHireBody(codexSpec);
+    expect(body.adapterConfig).not.toHaveProperty('promptTemplate');
+    expect(body.adapterConfig).not.toHaveProperty('bootstrapPromptTemplate');
+    expect(body.instructionsBundle).toBeUndefined(); // Native route materializes its default bundle.
+    for (const legacyField of ['promptTemplate', 'bootstrapPromptTemplate']) {
+      expect(() => assertNative('codex_local', { ...body.adapterConfig as Record<string, unknown>, [legacyField]: '' })).toThrow('New agents must use instructionsBundle/AGENTS.md');
+    }
+    let accepted = 0;
+    const server = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', data => { raw += data; });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(raw);
+          assertNative(parsed.adapterType, parsed.adapterConfig);
+          accepted += 1;
+          res.writeHead(201, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ agent: { id: 'codex-agent', status: 'idle' } }));
+        } catch (error) {
+          res.writeHead(422, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Invalid hire' }));
+        }
+      });
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      expect(await hireAgentIntoCompany(`http://127.0.0.1:${port}/api`, 'company', codexSpec))
+        .toEqual({ outcome: 'created', agentId: 'codex-agent', status: 'idle' });
+      expect(accepted).toBe(1);
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
   });
 
   it('real loopback HTTP round-trip: POSTs the hire body to /companies/:id/agent-hires', async () => {

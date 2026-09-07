@@ -71,6 +71,8 @@ export const DEFAULT_KEY_HINTS: Record<CanvasCommandId, string> = {
 export interface CanvasCommandActions {
   addSession?: (kind: AgentKind) => void;
   addForm?: () => void;
+  /** The host may also lock document edits while recovering or binding a session. */
+  canEdit?: boolean;
   run?: () => void;
   stop?: () => void;
   fitAll?: () => void;
@@ -283,12 +285,13 @@ export function buildCommandRows(
         id: `add-session-${kind}`,
         label: text('command.addSession', { type: kindLabel(kind) }),
         keys: key(`add-session-${kind}` as CanvasCommandId),
+        disabled: ctx.running || actions.canEdit === false,
         run: () => actions.addSession!(kind),
       });
     });
   }
   if (actions.addForm) {
-    rows.push({ id: 'add-form', label: text('command.addForm'), keys: key('add-form'), run: actions.addForm });
+    rows.push({ id: 'add-form', label: text('command.addForm'), keys: key('add-form'), disabled: ctx.running || actions.canEdit === false, run: actions.addForm });
   }
   // 运行 / 停止 swap by REAL run state — never both, never a run button during a run.
   if (!ctx.running && actions.run) {
@@ -317,7 +320,7 @@ export function buildCommandRows(
     });
   }
   if (actions.saveWaypoint) {
-    rows.push({ id: 'waypoint-save', label: text('command.saveWaypoint'), keys: key('waypoint-save'), run: actions.saveWaypoint });
+    rows.push({ id: 'waypoint-save', label: text('command.saveWaypoint'), keys: key('waypoint-save'), disabled: ctx.running || actions.canEdit === false, run: actions.saveWaypoint });
   }
   if (actions.recallWaypoint) {
     rows.push({ id: 'waypoint-recall', label: text('command.recallWaypoint'), keys: key('waypoint-recall'), run: actions.recallWaypoint });
@@ -329,8 +332,8 @@ export function buildCommandRows(
       keys: key('delete'),
       // Offered but inert with an empty selection: hiding it would make the operator wonder
       // whether the canvas can delete at all.
-      disabled: ctx.selectionCount === 0,
-      hint: ctx.selectionCount === 0 ? text('command.noSelection') : undefined,
+      disabled: ctx.running || actions.canEdit === false || ctx.selectionCount === 0,
+      hint: ctx.running ? text('command.running') : ctx.selectionCount === 0 ? text('command.noSelection') : undefined,
       run: actions.deleteSelection,
     });
   }
@@ -370,8 +373,8 @@ export function buildCommandRows(
       id: 'undo',
       label: text('command.undo'),
       keys: key('undo'),
-      disabled: actions.canUndo === false,
-      hint: actions.canUndo === false ? text('command.noUndo') : undefined,
+      disabled: ctx.running || actions.canEdit === false || actions.canUndo === false,
+      hint: ctx.running ? text('command.running') : actions.canUndo === false ? text('command.noUndo') : undefined,
       run: actions.undo,
     });
   }
@@ -380,8 +383,8 @@ export function buildCommandRows(
       id: 'redo',
       label: text('command.redo'),
       keys: key('redo'),
-      disabled: actions.canRedo === false,
-      hint: actions.canRedo === false ? text('command.noRedo') : undefined,
+      disabled: ctx.running || actions.canEdit === false || actions.canRedo === false,
+      hint: ctx.running ? text('command.running') : actions.canRedo === false ? text('command.noRedo') : undefined,
       run: actions.redo,
     });
   }

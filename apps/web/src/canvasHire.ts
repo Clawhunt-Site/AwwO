@@ -87,6 +87,10 @@ export function buildHireBody(spec: HireSpec): Record<string, unknown> {
     adapterConfig.dangerouslyBypassApprovalsAndSandbox = false;
     adapterConfig.dangerouslyBypassSandbox = false;
     adapterConfig.extraArgs = ['--sandbox', 'workspace-write'];
+    // New native agents reject legacy prompt templates. Let the server materialize its
+    // managed instructions bundle; the inspector separately syncs the chosen persona.
+    // Every canvas request, including the first, supplies its actual task/contract in a
+    // comment wake, which the Codex adapter renders independently of its default prompt.
   }
   if (spec.model.trim()) adapterConfig.model = spec.model.trim();
   if (spec.effort.trim()) {
@@ -130,7 +134,15 @@ export async function hireAgentIntoCompany(
     });
     responded = true;
     if (!res.ok) {
-      if (REJECTED_BEFORE_INSERT.has(res.status)) return { outcome: 'rejected', detail: `server ${res.status}` };
+      if (REJECTED_BEFORE_INSERT.has(res.status)) {
+        let reason = '';
+        try {
+          const body = await res.json() as { error?: unknown; message?: unknown } | null;
+          const message = typeof body?.error === 'string' ? body.error : body?.message;
+          if (typeof message === 'string') reason = message.trim().slice(0, 400);
+        } catch { /* The status already proves rejection even if the error body is unreadable. */ }
+        return { outcome: 'rejected', detail: `server ${res.status}${reason ? `: ${reason}` : ''}` };
+      }
       return { outcome: 'unknown', detail: `server ${res.status} (may have hired before failing)` };
     }
     let body: { agent?: { id?: unknown; status?: unknown } };

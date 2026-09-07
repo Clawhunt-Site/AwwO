@@ -6,7 +6,7 @@ import type { CanvasPlannerConfig } from './config.js';
 
 export interface PlanningRequest { prompt: string; context: string }
 export interface CanvasPlanner { status(): Promise<{ available: boolean; provider: string; error?: string }>; plan(request: PlanningRequest, signal?: AbortSignal): Promise<unknown> }
-type ErrorCode = 'unavailable' | 'cancelled' | 'timeout' | 'invalid_output' | 'execution_failed';
+type ErrorCode = 'unavailable' | 'cancelled' | 'timeout' | 'invalid_output' | 'execution_failed' | 'usage_limit_exceeded';
 export class PlannerError extends Error { constructor(public code: ErrorCode) { super(code); } }
 export interface PlannerCommand { executable: string; prefixArgs: string[] }
 interface PlannerDeps {
@@ -60,7 +60,7 @@ export async function resolveCodexCommand(cliPath: string): Promise<PlannerComma
 }
 
 /** Kill the entire wrapper/native process tree so cancellation cannot leave a billed run behind. */
-async function terminateProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
+export async function terminateProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (!child.pid) { child.kill('SIGKILL'); return; }
   if (process.platform === 'win32') {
     await new Promise<void>(resolveKill => {
@@ -77,6 +77,16 @@ async function terminateProcess(child: ChildProcessWithoutNullStreams): Promise<
   try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
 }
 
+function plannerEventFailure(event: Record<string, unknown>): PlannerError {
+  const details = event.error;
+  const message = event.type === 'error' ? event.message
+    : event.type === 'turn.failed' && details && typeof details === 'object' && !Array.isArray(details)
+      ? (details as Record<string, unknown>).message : undefined;
+  // Match only the observed Codex error event, not arbitrary logs or assistant text.
+  const usageLimit = typeof message === 'string' && /^You've hit your usage limit\.(?:\s|$)/.test(message);
+  return new PlannerError(usageLimit ? 'usage_limit_exceeded' : 'execution_failed');
+}
+
 /** Accept a completed final JSON message, never a tool event, partial response or invented fallback. */
 export function parsePlannerOutput(output: string): unknown {
   if (Buffer.byteLength(output) > MAX_OUTPUT_BYTES) throw new PlannerError('invalid_output');
@@ -87,7 +97,7 @@ export function parsePlannerOutput(output: string): unknown {
     let event: Record<string, unknown>;
     try { event = JSON.parse(line) as Record<string, unknown>; } catch { throw new PlannerError('invalid_output'); }
     if (!event || typeof event !== 'object') throw new PlannerError('invalid_output');
-    if (event.type === 'turn.failed' || event.type === 'error') throw new PlannerError('execution_failed');
+    if (event.type === 'turn.failed' || event.type === 'error') throw plannerEventFailure(event);
     if (event.type === 'turn.completed') completed = true;
     const item = event.item as { type?: unknown; text?: unknown } | undefined;
     if (event.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') finalText = item.text;
@@ -160,7 +170,14 @@ export function createCanvasPlanner(config: CanvasPlannerConfig, deps: PlannerDe
           child.once('error', () => finish(new PlannerError('execution_failed')));
           child.once('close', code => {
             if (stopping || settled) return;
-            if (code !== 0) { finish(new PlannerError('execution_failed')); return; }
+            if (code !== 0) {
+              try { parsePlannerOutput(output); }
+              catch (error) {
+                if (error instanceof PlannerError && error.code === 'usage_limit_exceeded') { finish(error); return; }
+              }
+              finish(new PlannerError('execution_failed'));
+              return;
+            }
             try { finish(undefined, parsePlannerOutput(output)); }
             catch (error) { finish(error instanceof PlannerError ? error : new PlannerError('invalid_output')); }
           });

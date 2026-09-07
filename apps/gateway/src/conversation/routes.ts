@@ -22,7 +22,7 @@ const MAX_MESSAGE_LEN = 16_000;
 
 export interface ConversationRouterDeps {
   dispatcher: ConversationStreamDeps['dispatcher'] & Partial<Pick<AgentConversationDispatcher,
-    'cancelConversationRun' | 'readConversationRun' | 'prepareConversationOperation' | 'readConversationOperation'>>;
+    'cancelConversationRun' | 'settleConversationRun' | 'readConversationRun' | 'prepareConversationOperation' | 'readConversationOperation'>>;
   /** Opens a BUFFERING company event source (subscribe-before-wake). */
   openEventSource: (companyId: string) => CompanyEventSource;
   /** Shared secret required as `x-superclaw-gateway-token`. */
@@ -167,6 +167,16 @@ export function createConversationRouter(deps: ConversationRouterDeps): Router {
       }
       res.status(502).json({ error: 'operation_recovery_unconfirmed', detail: error instanceof Error ? error.message : 'Operation could not be read' });
     }
+  });
+
+  router.post('/conversations/:companyId/agents/:agentId/issues/:issueId/settle', json({ limit: '2kb' }), async (req: Request, res: Response) => {
+    const runId = typeof req.body?.runId === 'string' ? req.body.runId.trim() : '';
+    if (!isConversationOperationId(runId)) { res.status(400).json({ confirmed: false, detail: 'a native run UUID is required' }); return; }
+    if (!deps.dispatcher.settleConversationRun) { res.status(503).json({ confirmed: false, detail: 'native settlement is unavailable' }); return; }
+    const result = await deps.dispatcher.settleConversationRun({
+      companyId: String(req.params.companyId), agentId: String(req.params.agentId), issueId: String(req.params.issueId), runId,
+    });
+    res.status(result.confirmed ? 200 : 409).json(result);
   });
 
   router.post(

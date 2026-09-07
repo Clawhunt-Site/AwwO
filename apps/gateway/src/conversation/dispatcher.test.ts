@@ -10,7 +10,8 @@ function fakeFetch(routes: Record<string, { status: number; body: unknown }>, ca
     const method = (init?.method ?? 'GET').toUpperCase();
     const key = `${method} ${u.pathname}`;
     calls.push({ method, path: u.pathname, body: init?.body ? JSON.parse(String(init.body)) : null });
-    const hit = routes[key];
+    const hit = routes[key] ?? (method === 'GET' && u.pathname.endsWith('/tree-holds') ? { status: 200, body: [] }
+      : method === 'GET' && u.pathname.endsWith('/tree-control/state') ? { status: 200, body: { activePauseHold: null } } : undefined);
     if (!hit) return { ok: false, status: 404, json: async () => ({ error: 'no route' }) } as unknown as Response;
     return { ok: hit.status >= 200 && hit.status < 300, status: hit.status, json: async () => hit.body } as unknown as Response;
   }) as unknown as typeof fetch;
@@ -47,22 +48,26 @@ describe('readConversationRun', () => {
 });
 
 describe('AgentConversationDispatcher.dispatch', () => {
-  it('first turn: creates a 1:1 issue assigned to the agent (todo+message) and reports dispatched when the run is visible', async () => {
+  it('first turn: creates a passive backlog then dispatches only its exact comment run', async () => {
     const { impl, calls } = fakeFetch({
       'POST /api/companies/co-1/issues': { status: 201, body: { id: 'iss-1' } },
-      'GET /api/issues/iss-1/live-runs': { status: 200, body: [run('ag-1')] },
+      'GET /api/issues/iss-1': { status: 200, body: { ...issue('backlog'), id: 'iss-1' } },
+      'POST /api/issues/iss-1/comments': { status: 201, body: { id: 'comment-1' } },
+      'GET /api/issues/iss-1/live-runs': { status: 200, body: [run('ag-1', 'running', 'unrelated'), { ...run('ag-1'), contextCommentId: 'comment-1' }] },
     });
     const d = new AgentConversationDispatcher(BASE, { fetchImpl: impl });
     const r = await d.dispatch({ companyId: 'co-1', agentId: 'ag-1', message: '帮我看下登录' });
-    expect(r).toEqual({ status: 'dispatched', issueId: 'iss-1', agentId: 'ag-1', run: { runId: 'run-1', status: 'running', agentId: 'ag-1', adapterType: 'claude_local' } });
-    // create body: assigned to the agent, status todo, message as description
+    expect(r).toEqual({ status: 'dispatched', issueId: 'iss-1', agentId: 'ag-1', run: { runId: 'run-1', status: 'running', agentId: 'ag-1', adapterType: 'claude_local' }, runAttribution: { kind: 'comment', commentId: 'comment-1' } });
     const create = calls.find((c) => c.path === '/api/companies/co-1/issues')!;
-    expect(create.body).toMatchObject({ assigneeAgentId: 'ag-1', status: 'todo', description: '帮我看下登录' });
+    expect(create.body).toMatchObject({ assigneeAgentId: 'ag-1', status: 'backlog', description: '帮我看下登录' });
+    expect(calls.filter(call => call.method === 'POST').map(call => call.path)).toEqual(['/api/companies/co-1/issues', '/api/issues/iss-1/comments']);
   });
 
   it('first turn: run not visible yet → queued (honest, message delivered)', async () => {
     const { impl } = fakeFetch({
       'POST /api/companies/co-1/issues': { status: 201, body: { id: 'iss-2' } },
+      'GET /api/issues/iss-2': { status: 200, body: { ...issue('backlog'), id: 'iss-2' } },
+      'POST /api/issues/iss-2/comments': { status: 201, body: { id: 'comment-2' } },
       'GET /api/issues/iss-2/live-runs': { status: 200, body: [] },
     });
     const d = new AgentConversationDispatcher(BASE, { fetchImpl: impl });
@@ -75,7 +80,7 @@ describe('AgentConversationDispatcher.dispatch', () => {
     const { impl, calls } = fakeFetch({
       'GET /api/issues/iss-9': { status: 200, body: issue() },
       'POST /api/issues/iss-9/comments': { status: 201, body: { id: 'cmt-1' } },
-      'GET /api/issues/iss-9/live-runs': { status: 200, body: [run('ag-1', 'queued')] },
+      'GET /api/issues/iss-9/live-runs': { status: 200, body: [{ ...run('ag-1', 'queued'), contextCommentId: 'cmt-1' }] },
     });
     const d = new AgentConversationDispatcher(BASE, { fetchImpl: impl });
     const r = await d.dispatch({ companyId: 'co-1', agentId: 'ag-1', message: '继续', issueId: 'iss-9' });
@@ -85,9 +90,43 @@ describe('AgentConversationDispatcher.dispatch', () => {
     expect(comment.body).toMatchObject({ body: '继续' });
   });
 
-  it('releases only AwwO stop holds before continuing the same conversation', async () => {
+  it.each([false, true])('legacy continuation keeps its comment identity when the new run is visible=%s', async visible => {
+    const oldRun = { ...run('ag-1', 'running', 'old-run'), contextCommentId: 'old-comment' };
+    const newRun = { ...run('ag-1', 'running', 'new-run'), contextCommentId: 'accepted-comment' };
+    const { impl, calls } = fakeFetch({
+      'GET /api/issues/iss-9': { status: 200, body: issue() },
+      'POST /api/issues/iss-9/comments': { status: 201, body: { id: 'accepted-comment' } },
+      'GET /api/issues/iss-9/live-runs': { status: 200, body: visible ? [oldRun, newRun] : [oldRun] },
+    });
+    const result = await new AgentConversationDispatcher(BASE, { fetchImpl: impl }).dispatch({
+      companyId: 'co-1', agentId: 'ag-1', message: 'Next user request', issueId: 'iss-9',
+    });
+    expect(result).toMatchObject({ status: visible ? 'dispatched' : 'queued', runAttribution: { kind: 'comment', commentId: 'accepted-comment' } });
+    if (visible) expect(result).toMatchObject({ run: { runId: 'new-run' } });
+    else expect(result).not.toHaveProperty('run');
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
+  });
+
+  it('legacy continuation with a missing comment identity never selects an older live run', async () => {
+    const { impl, calls } = fakeFetch({
+      'GET /api/issues/iss-9': { status: 200, body: issue() },
+      'POST /api/issues/iss-9/comments': { status: 201, body: {} },
+      'GET /api/issues/iss-9/live-runs': { status: 200, body: [run('ag-1', 'running', 'old-run')] },
+    });
+    expect(await new AgentConversationDispatcher(BASE, { fetchImpl: impl }).dispatch({
+      companyId: 'co-1', agentId: 'ag-1', message: 'Next user request', issueId: 'iss-9',
+    })).toMatchObject({ status: 'error', detail: 'comment response omitted its identity' });
+    expect(calls.some(call => call.path.endsWith('/live-runs'))).toBe(false);
+  });
+
+  it.each([
+    { metadata: { source: 'awwo_agent_canvas' } },
+    { releasePolicy: { strategy: 'manual', note: 'awwo_agent_canvas:stop:old-run' } },
+    { reason: 'Stopped by AwwO Agent canvas' },
+  ])('discovers an owned Stop hold before a successful native comment: %j', async marker => {
     const calls: Array<{ method: string; path: string; body: unknown }> = [];
     let commentCalls = 0;
+    let held = true;
     const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
       const parsed = new URL(String(url)); const method = (init?.method ?? 'GET').toUpperCase();
       calls.push({ method, path: parsed.pathname, body: init?.body ? JSON.parse(String(init.body)) : null });
@@ -95,13 +134,14 @@ describe('AgentConversationDispatcher.dispatch', () => {
       if (method === 'GET' && parsed.pathname === '/api/issues/iss-9') return response(issue());
       if (method === 'POST' && parsed.pathname === '/api/issues/iss-9/comments') {
         commentCalls += 1;
-        return commentCalls === 1 ? response({ error: 'Issue follow-up blocked by active subtree pause hold' }, 409) : response({ id: 'cmt-1' }, 201);
+        return response({ id: 'cmt-1' }, 201);
       }
-      if (method === 'GET' && parsed.pathname === '/api/issues/iss-9/tree-holds') return response([
-        { id: 'hold-awwo', status: 'active', mode: 'pause', metadata: { source: 'awwo_agent_canvas' } },
-        { id: 'hold-human', status: 'active', mode: 'pause', metadata: { source: 'manual' } },
-      ]);
-      if (method === 'POST' && parsed.pathname === '/api/issues/iss-9/tree-holds/hold-awwo/release') return response({ id: 'hold-awwo' });
+      if (method === 'GET' && parsed.pathname === '/api/issues/iss-9/tree-holds') return response(held ? [
+        { id: 'hold-awwo', companyId: 'co-1', rootIssueId: 'iss-9', status: 'active', mode: 'pause', ...marker },
+      ] : []);
+      if (method === 'GET' && parsed.pathname === '/api/issues/iss-9/tree-control/state') return response({ activePauseHold: held
+        ? { holdId: 'hold-awwo', rootIssueId: 'iss-9', issueId: 'iss-9', mode: 'pause' } : null });
+      if (method === 'POST' && parsed.pathname === '/api/issues/iss-9/tree-holds/hold-awwo/release') { held = false; return response({ id: 'hold-awwo' }); }
       if (method === 'GET' && parsed.pathname === '/api/issues/iss-9/live-runs') return response([]);
       return response({}, 404);
     }) as typeof fetch;
@@ -111,20 +151,23 @@ describe('AgentConversationDispatcher.dispatch', () => {
     expect(result.status).toBe('queued');
     expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'GET /api/issues/iss-9',
-      'POST /api/issues/iss-9/comments',
       'GET /api/issues/iss-9/tree-holds',
+      'GET /api/issues/iss-9/tree-control/state',
       'POST /api/issues/iss-9/tree-holds/hold-awwo/release',
+      'GET /api/issues/iss-9/tree-holds',
+      'GET /api/issues/iss-9/tree-control/state',
       'POST /api/issues/iss-9/comments',
       'GET /api/issues/iss-9/live-runs',
     ]);
     expect(calls.some(call => call.path.includes('hold-human/release'))).toBe(false);
+    expect(commentCalls).toBe(1);
   });
 
   it.each(['done', 'blocked'])('continuing %s work requests the upstream resume gate on the existing issue', async (status) => {
     const { impl, calls } = fakeFetch({
       'GET /api/issues/iss-9': { status: 200, body: issue(status) },
       'POST /api/issues/iss-9/comments': { status: 201, body: { id: 'cmt-1' } },
-      'GET /api/issues/iss-9/live-runs': { status: 200, body: [run('ag-1')] },
+      'GET /api/issues/iss-9/live-runs': { status: 200, body: [{ ...run('ag-1'), contextCommentId: 'cmt-1' }] },
     });
     const result = await new AgentConversationDispatcher(BASE, { fetchImpl: impl }).dispatch({
       companyId: 'co-1', agentId: 'ag-1', message: '  请复核\n', issueId: 'iss-9',
@@ -160,8 +203,8 @@ describe('AgentConversationDispatcher.dispatch', () => {
       companyId: 'co-1', agentId: 'ag-1', message: '继续', issueId: 'iss-9',
     });
     expect(result).toEqual({ status: 'error', detail: `comment failed (upstream 409): ${reason}` });
-    expect(calls.map(call => `${call.method} ${call.path}`).slice(0, 2)).toEqual([
-      'GET /api/issues/iss-9', 'POST /api/issues/iss-9/comments',
+    expect(calls.map(call => `${call.method} ${call.path}`).slice(0, 4)).toEqual([
+      'GET /api/issues/iss-9', 'GET /api/issues/iss-9/tree-holds', 'GET /api/issues/iss-9/tree-control/state', 'POST /api/issues/iss-9/comments',
     ]);
     expect(calls.filter(call => call.path === '/api/issues/iss-9/comments')).toHaveLength(1);
   });

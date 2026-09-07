@@ -2,6 +2,42 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCanvasRuntimeReader } from '../src/canvasRuntimeReader';
 
 describe('standalone canvas runtime discovery', () => {
+  it('marks Codex for live discovery without trusting its static model count or fetching a company', async () => {
+    const fetcher = vi.fn(async () => Response.json([{ type: 'codex_local', loaded: true, modelsCount: 0 }]));
+    const read = createCanvasRuntimeReader('/paperclip-api', fetcher);
+    expect(await read('/api/agents')).toEqual({ agents: [{
+      name: 'codex_local', supports_model_selection: true, supports_effort_selection: true, model_catalog_source: 'codex_app_server',
+    }] });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('gets Codex models and their effort levels from the same-origin gateway, not Node fallback lists', async () => {
+    const fetcher = vi.fn(async () => Response.json({ source: 'codex_app_server', models: [
+      { id: 'live-model-a', reasoningEfforts: ['low', 'ultra'], defaultReasoningEffort: 'low' },
+      { id: 'live-model-b', reasoningEfforts: ['high'], defaultReasoningEffort: 'high' },
+    ] }));
+    const read = createCanvasRuntimeReader('/paperclip-api', fetcher);
+    expect(await read('/api/agents/codex_local/models')).toEqual({
+      source: 'codex_app_server', models: ['live-model-a', 'live-model-b'], model_capabilities: {
+        'live-model-a': { effort_levels: ['low', 'ultra'], default_effort: 'low' },
+        'live-model-b': { effort_levels: ['high'], default_effort: 'high' },
+      },
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledWith('/gateway-api/canvas/runtimes/codex_local/models', expect.objectContaining({ credentials: 'include' }));
+  });
+  it('does not fall back to old Codex models when live discovery is unavailable', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: 'SECRET remote diagnostics' }), { status: 503 }));
+    await expect(createCanvasRuntimeReader('/paperclip-api', fetcher)('/api/agents/codex_local/models')).rejects.toThrow('Runtime registry request failed (503)');
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it.each([
+    { source: 'static', models: [{ id: 'old-model' }] },
+    { source: 'codex_app_server', models: [] },
+    { source: 'codex_app_server', models: [{ id: 'live-model', reasoningEfforts: ['low'], defaultReasoningEffort: 'unsupported' }] },
+    { source: 'codex_app_server', models: [{ id: 'live-model', reasoningEfforts: [1], defaultReasoningEffort: 'low' }] },
+  ])('rejects malformed live metadata instead of inventing capabilities', async payload => {
+    await expect(createCanvasRuntimeReader('/paperclip-api', vi.fn(async () => Response.json(payload)))('/api/agents/codex_local/models')).rejects.toThrow('Codex model catalog unavailable');
+  });
   it('discovers selectable models for an adapter with an empty static catalog', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json([{ type: 'pi_local', loaded: true, modelsCount: 0 }]))

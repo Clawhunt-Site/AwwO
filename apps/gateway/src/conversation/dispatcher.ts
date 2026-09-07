@@ -4,9 +4,9 @@
 // NON-local_trusted-gated upstream /api primitives — NOT /chat/stream (which binds
 // a synthetic per-adapter "Chat Assistant" and is fail-closed to chat-eligible
 // adapters). Mechanism:
-//   1. ensure a DEDICATED 1:1 issue assigned to the target agent (assigneeAgentId);
-//      creating it with status:'todo' auto-wakes the agent with the message as body.
-//   2. subsequent turns verify the issue binding, then POST a comment; finished
+//   1. ensure a DEDICATED backlog issue assigned to the target agent (assigneeAgentId);
+//      creation alone does not wake a worker or count as message delivery.
+//   2. every turn verifies the issue binding, then POSTs one comment; finished
 //      or blocked issues use the upstream's guarded explicit resume intent.
 //   3. discover the agent's active run (id) via GET /issues/:id/live-runs.
 //
@@ -24,7 +24,23 @@ import {
   type ConversationOperationSnapshot,
   type ConversationOperationStore,
   conversationRequestDigest,
+  isConversationOperationId,
 } from './operation-store.js';
+
+// One Gateway process serializes mutation gates. The agent scope also covers the interval
+// before a first conversation has an issue ID; unrelated agents remain independent.
+const conversationMutations = new Map<string, Promise<void>>();
+async function withConversationMutation<T>(companyId: string, agentId: string, action: () => Promise<T>): Promise<T> {
+  const key = JSON.stringify([companyId.trim(), agentId.trim()]);
+  const previous = conversationMutations.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const tail = previous.then(() => held);
+  conversationMutations.set(key, tail);
+  await previous;
+  try { return await action(); }
+  finally { release(); if (conversationMutations.get(key) === tail) conversationMutations.delete(key); }
+}
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
@@ -102,6 +118,10 @@ export type CancelConversationRunResult =
   | { ok: true; confirmed: true; cancelled: boolean; status: string; holdId: string | null }
   | { ok: false; confirmed: false; detail: string; holdId?: string | null };
 
+export type SettleConversationRunResult =
+  | { confirmed: true; status: string; holdId: string; stoppedAutomaticRunIds: string[] }
+  | { confirmed: false; detail: string };
+
 export class AgentConversationDispatcher {
   private readonly base: string;
   private readonly timeoutMs: number;
@@ -111,7 +131,7 @@ export class AgentConversationDispatcher {
   private readonly operationStore: ConversationOperationStore | null;
   private readonly operationDiscoveryAttempts: number;
   private readonly operationDiscoveryDelayMs: number;
-  private readonly canvasStopHolds = new Map<string, string>();
+  private readonly latestCommentByIssue = new Map<string, string>();
 
   constructor(
     upstreamBaseUrl: string,
@@ -204,6 +224,7 @@ export class AgentConversationDispatcher {
       companyId,
       agentId,
       issueId: str(input.issueId),
+      deliveryMode: 'comment',
       requestDigest: conversationRequestDigest({
         companyId,
         agentId,
@@ -265,7 +286,11 @@ export class AgentConversationDispatcher {
     for (let attempt = 0; attempt < this.operationDiscoveryAttempts; attempt += 1) {
       const found = await this.findOperationIssue(snapshot.request.companyId, snapshot.request.agentId, snapshot.labelId);
       if (found) {
-        await this.operationStore?.recordIssue(snapshot.request.operationId, str(found.id)!);
+        if (snapshot.request.deliveryMode === 'comment') {
+          await this.operationStore?.recordContainer(snapshot.request.operationId, str(found.id)!);
+        } else {
+          await this.operationStore?.recordIssue(snapshot.request.operationId, str(found.id)!);
+        }
         return found;
       }
       if (attempt + 1 < this.operationDiscoveryAttempts && this.operationDiscoveryDelayMs > 0) {
@@ -273,6 +298,43 @@ export class AgentConversationDispatcher {
       }
     }
     return null;
+  }
+
+  private commentMetadata(snapshot: ConversationOperationSnapshot): Record<string, unknown> {
+    return { version: 1, sections: [{ title: 'AwwO conversation', rows: [
+      { type: 'key_value', label: 'Operation', value: snapshot.request.operationId },
+      { type: 'key_value', label: 'Request digest', value: snapshot.request.requestDigest },
+    ] }] };
+  }
+
+  /** Read back a committed comment after a lost response. Metadata identifies the operation
+   * without changing the user's message or selecting an unrelated recent run. */
+  private async recoverOperationComment(snapshot: ConversationOperationSnapshot): Promise<boolean> {
+    if (snapshot.request.deliveryMode !== 'comment' || !snapshot.commentStarted || !snapshot.issueId) return false;
+    await this.readBoundIssue(snapshot.request.companyId, snapshot.request.agentId, snapshot.issueId);
+    for (let attempt = 0; attempt < this.operationDiscoveryAttempts; attempt += 1) {
+      const comments = await this.getJson(`/api/issues/${encodeURIComponent(snapshot.issueId)}/comments?order=desc&limit=200`);
+      if (!Array.isArray(comments)) throw new Error('invalid operation comment search response');
+      const matches = comments.filter(raw => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+        const comment = raw as Record<string, unknown>;
+        if (comment.issueId !== snapshot.issueId || comment.companyId !== snapshot.request.companyId || !str(comment.id)) return false;
+        const metadata = comment.metadata as { version?: unknown; sections?: Array<{ title?: unknown; rows?: Array<{ type?: unknown; label?: unknown; value?: unknown }> }> } | null;
+        if (metadata?.version !== 1 || !Array.isArray(metadata.sections)) return false;
+        return metadata.sections.some(section => section?.title === 'AwwO conversation' && Array.isArray(section.rows)
+          && section.rows.some(row => row?.type === 'key_value' && row.label === 'Operation' && row.value === snapshot.request.operationId)
+          && section.rows.some(row => row?.type === 'key_value' && row.label === 'Request digest' && row.value === snapshot.request.requestDigest));
+      }) as Array<Record<string, unknown>>;
+      if (matches.length > 1) throw new Error('operation marker matched multiple comments');
+      if (matches.length === 1) {
+        await this.operationStore!.recordIssue(snapshot.request.operationId, snapshot.issueId, str(matches[0]!.id)!);
+        return true;
+      }
+      if (attempt + 1 < this.operationDiscoveryAttempts && this.operationDiscoveryDelayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, this.operationDiscoveryDelayMs));
+      }
+    }
+    return false;
   }
 
   /** Bind run identity to the durable operation as soon as discovery succeeds. */
@@ -297,7 +359,7 @@ export class AgentConversationDispatcher {
         ? run.contextSnapshot as Record<string, unknown> : null;
       if (str(run.companyId) !== snapshot.request.companyId || str(run.agentId) !== snapshot.request.agentId
         || str(context?.issueId) !== issueId) return false;
-      if (snapshot.request.issueId === null) return !str(context?.commentId) && !str(context?.wakeCommentId);
+      if (snapshot.request.issueId === null && snapshot.request.deliveryMode !== 'comment') return !str(context?.commentId) && !str(context?.wakeCommentId);
       if (!snapshot.commentId) return false;
       const ids = Array.isArray(context?.wakeCommentIds)
         ? context.wakeCommentIds.filter((value): value is string => typeof value === 'string') : [];
@@ -322,6 +384,21 @@ export class AgentConversationDispatcher {
         terminal: false, status: null, output: '', outputAvailable: false, detail: snapshot.detail };
     }
     if (!snapshot.deliveryConfirmed) {
+      if (snapshot.request.deliveryMode === 'comment') {
+        if (!snapshot.issueId && snapshot.mutationStarted) await this.recoverOperationIssue(snapshot);
+        snapshot = await this.operationStore.read(snapshot.request.operationId);
+        if (snapshot.commentStarted) {
+          await this.recoverOperationComment(snapshot);
+          snapshot = await this.operationStore.read(snapshot.request.operationId);
+        }
+        if (!snapshot.deliveryConfirmed) {
+          return { operationId: snapshot.request.operationId, state: snapshot.commentStarted || (!snapshot.issueId && snapshot.mutationStarted) ? 'uncertain' : 'not_started',
+            issueId: snapshot.issueId, runId: null, terminal: false, status: null, output: '', outputAvailable: false,
+            detail: snapshot.commentStarted ? 'comment mutation started but its result is not yet attributable' : 'conversation message has not been sent' };
+        }
+      }
+    }
+    if (!snapshot.deliveryConfirmed) {
       if (!snapshot.mutationStarted) {
         return { operationId: snapshot.request.operationId, state: 'not_started', issueId: snapshot.request.issueId,
           runId: null, terminal: false, status: null, output: '', outputAvailable: false, detail: null };
@@ -344,8 +421,9 @@ export class AgentConversationDispatcher {
       // fallback could bind a continuation to an older run.
       runId = await this.findHistoricalOperationRun(snapshot, issueId);
       if (!runId) {
-        const commentId = snapshot.request.issueId === null ? null : snapshot.commentId;
-        const active = snapshot.request.issueId !== null && !commentId
+        const usesComment = snapshot.request.deliveryMode === 'comment' || snapshot.request.issueId !== null;
+        const commentId = usesComment ? snapshot.commentId : null;
+        const active = usesComment && !commentId
           ? null
           : await this.findActiveRun(issueId, input.agentId, commentId);
         runId = active?.runId ?? null;
@@ -487,45 +565,66 @@ export class AgentConversationDispatcher {
     return { runId, status, terminal, output };
   }
 
-  /** Release only the pause holds this canvas created for an earlier Stop. Manual/operator holds
-   * remain authoritative. Discovery is fail-soft: the guarded comment endpoint will still
-   * reject a send if a hold cannot be read or released. */
-  private async releaseCanvasStopHolds(issueId: string, discover = false): Promise<'released' | 'none' | 'failed'> {
-    const remembered = this.canvasStopHolds.get(issueId);
-    if (remembered) {
-      const released = await this.postJson(
-        `/api/issues/${encodeURIComponent(issueId)}/tree-holds/${encodeURIComponent(remembered)}/release`,
-        { reason: 'AwwO conversation resumed by the operator' },
-      );
-      if (!released.ok) return 'failed';
-      this.canvasStopHolds.delete(issueId);
-      return 'released';
-    }
-    if (!discover) return 'none';
-    let raw: unknown;
-    try {
-      raw = await this.getJson(`/api/issues/${encodeURIComponent(issueId)}/tree-holds?status=active&mode=pause`);
-    } catch {
-      return 'none';
-    }
-    if (!Array.isArray(raw)) return 'failed';
-    let releasedAny = false;
-    for (const value of raw) {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-      const hold = value as Record<string, unknown>;
+  /** Ordinary native comments may wake an in_progress issue through a pause hold. Therefore
+   * every explicit send must discover persisted holds and confirm their release first, even
+   * after a Gateway restart. A remembered ID or a successful comment is never that proof. */
+  private async releaseCanvasStopHolds(issueId: string, companyId: string): Promise<'released' | 'none' | 'blocked' | 'failed'> {
+    const issuePath = `/api/issues/${encodeURIComponent(issueId)}`;
+    const owned = (hold: Record<string, unknown>) => {
       const metadata = hold.metadata && typeof hold.metadata === 'object' && !Array.isArray(hold.metadata)
         ? hold.metadata as Record<string, unknown> : null;
-      const holdId = str(hold.id);
-      if (!holdId || metadata?.source !== 'awwo_agent_canvas') continue;
-      const released = await this.postJson(
-        `/api/issues/${encodeURIComponent(issueId)}/tree-holds/${encodeURIComponent(holdId)}/release`,
-        { reason: 'AwwO conversation resumed by the operator' },
-      );
-      if (!released.ok) return 'failed';
-      this.canvasStopHolds.delete(issueId);
-      releasedAny = true;
+      const releasePolicy = hold.releasePolicy && typeof hold.releasePolicy === 'object' && !Array.isArray(hold.releasePolicy)
+        ? hold.releasePolicy as Record<string, unknown> : null;
+      return metadata?.source === 'awwo_agent_canvas'
+        || (typeof releasePolicy?.note === 'string' && /^awwo_agent_canvas:(stop|settle):[A-Za-z0-9_-]+$/.test(releasePolicy.note))
+        || hold.reason === 'Stopped by AwwO Agent canvas';
+    };
+    const readHolds = async () => {
+      const raw = await this.getJson(`${issuePath}/tree-holds?status=active&mode=pause`);
+      if (!Array.isArray(raw)) throw new Error('pause holds unavailable');
+      const ids = new Set<string>();
+      return raw.map(value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid pause hold');
+        const hold = value as Record<string, unknown>;
+        const id = str(hold.id);
+        if (!id || ids.has(id) || hold.companyId !== companyId || hold.rootIssueId !== issueId
+            || hold.status !== 'active' || hold.mode !== 'pause') throw new Error('pause hold scope mismatch');
+        ids.add(id);
+        return hold;
+      });
+    };
+    const readGate = async () => {
+      const raw = await this.getJson(`${issuePath}/tree-control/state`);
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Object.hasOwn(raw, 'activePauseHold')) throw new Error('pause state unavailable');
+      const gate = (raw as Record<string, unknown>).activePauseHold;
+      if (gate === null) return null;
+      if (!gate || typeof gate !== 'object' || Array.isArray(gate)) throw new Error('invalid pause state');
+      const value = gate as Record<string, unknown>;
+      if (!str(value.holdId) || !str(value.rootIssueId) || value.issueId !== issueId || value.mode !== 'pause') throw new Error('pause state scope mismatch');
+      return value;
+    };
+    try {
+      const holds = await readHolds();
+      const gate = await readGate();
+      // Inherited holds have another root and cannot be released through this conversation.
+      // Check all root holds too: the effective-state API only returns one of them.
+      if (gate && gate.rootIssueId !== issueId) return 'blocked';
+      if (holds.some(hold => !owned(hold))) return 'blocked';
+      if (gate && !holds.some(hold => hold.id === gate.holdId)) return 'failed';
+      for (const hold of holds) {
+        const released = await this.postJson(`${issuePath}/tree-holds/${encodeURIComponent(String(hold.id))}/release`,
+          { reason: 'AwwO conversation resumed by the operator' });
+        if (!released.ok) return 'failed';
+      }
+      if (holds.length === 0) return 'none';
+      // Confirm all persisted owned holds are gone, then also check inherited pause state.
+      // Neither a 2xx release response nor the in-memory process state is sufficient.
+      if ((await readHolds()).length > 0) return 'failed';
+      if (await readGate()) return 'blocked';
+      return 'released';
+    } catch {
+      return 'failed';
     }
-    return releasedAny ? 'released' : 'none';
   }
 
   /** Stop one canvas conversation without triggering the upstream's automatic cancellation
@@ -568,7 +667,7 @@ export class AgentConversationDispatcher {
     const created = await this.postJson(`/api/issues/${encodeURIComponent(issueId)}/tree-holds`, {
       mode: 'pause',
       reason: 'Stopped by AwwO Agent canvas',
-      releasePolicy: { strategy: 'manual' },
+      releasePolicy: { strategy: 'manual', note: `awwo_agent_canvas:stop:${runId ?? 'pending'}` },
       metadata: { source: 'awwo_agent_canvas', ...(runId ? { runId } : {}) },
     });
     if (!created.ok || !created.body || typeof created.body !== 'object' || Array.isArray(created.body)) {
@@ -578,7 +677,6 @@ export class AgentConversationDispatcher {
     const hold = body.hold && typeof body.hold === 'object' && !Array.isArray(body.hold) ? body.hold as Record<string, unknown> : null;
     const holdId = str(hold?.id);
     if (!holdId) return { ok: false, confirmed: false, detail: 'native stop hold was not confirmed' };
-    this.canvasStopHolds.set(issueId, holdId);
     const preview = body.preview && typeof body.preview === 'object' && !Array.isArray(body.preview) ? body.preview as Record<string, unknown> : null;
     const active = Array.isArray(preview?.activeRuns) ? preview.activeRuns : [];
     const targetIds = new Set<string>(runId ? [runId] : []);
@@ -614,11 +712,156 @@ export class AgentConversationDispatcher {
     return { ok: false, confirmed: false, detail: 'native stop was not confirmed before timeout', holdId };
   }
 
-  private async operationDispatchResult(issueId: string, agentId: string, operationId?: string): Promise<DispatchResult> {
+  /** Park this completed user turn without marking its task done. Native tree holds lack CAS:
+   * this protects one Gateway's user mutations; direct concurrent native writes are excluded.
+   * Known system continuations of the same turn may be interrupted, never a newer user turn. */
+  async settleConversationRun(input: CancelConversationRunInput): Promise<SettleConversationRunResult> {
+    return withConversationMutation(input.companyId, input.agentId, async () => {
+      try {
+        const { companyId, agentId, issueId } = input;
+        const runId = str(input.runId);
+        if (!runId || !isConversationOperationId(runId)) return { confirmed: false, detail: 'a native run UUID is required' };
+        if (!this.operationStore) return { confirmed: false, detail: 'durable settlement storage is unavailable' };
+        await this.readBoundIssue(companyId, agentId, issueId);
+        const readRun = async (id: string): Promise<Record<string, unknown>> => {
+          const raw = await this.getJson(`/api/heartbeat-runs/${encodeURIComponent(id)}`);
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid native run');
+          const run = raw as Record<string, unknown>;
+          const context = run.contextSnapshot as Record<string, unknown> | null;
+          if (run.id !== id || run.companyId !== companyId || run.agentId !== agentId || context?.issueId !== issueId) throw new Error('Run identity mismatch');
+          return run;
+        };
+        const sourceRun = await readRun(runId);
+        const status = str(sourceRun.status);
+        if (!status || !isTerminalRunStatus(status)) return { confirmed: false, detail: 'requested native run is not terminal' };
+        const sourceContext = sourceRun.contextSnapshot as Record<string, unknown>;
+        const sourceTime = Date.parse(String(sourceRun.createdAt ?? ''));
+        if (!Number.isFinite(sourceTime)) return { confirmed: false, detail: 'native run ordering is unavailable' };
+        const sourceCommentId = str(sourceContext.commentId) ?? str(sourceContext.wakeCommentId);
+        if (!sourceCommentId) return { confirmed: false, detail: 'source comment anchor is unavailable for this native run' };
+        const latestComment = this.latestCommentByIssue.get(issueId);
+        if (latestComment && latestComment !== sourceCommentId) return { confirmed: false, detail: 'a newer user turn already owns this conversation' };
+
+        const history = await this.getJson(`/api/companies/${encodeURIComponent(companyId)}/heartbeat-runs?agentId=${encodeURIComponent(agentId)}&limit=1000&summary=1`);
+        if (!Array.isArray(history)) throw new Error('native run history is unavailable');
+        const issueRuns = history.filter(raw => raw && typeof raw === 'object'
+          && (raw as { contextSnapshot?: { issueId?: unknown } }).contextSnapshot?.issueId === issueId) as Array<Record<string, unknown>>;
+        if (!issueRuns.some(run => run.id === runId)) throw new Error('source run is outside the verified history window');
+        if (issueRuns.some(run => !str(run.id) || !Number.isFinite(Date.parse(String(run.createdAt ?? ''))))) throw new Error('native run ordering is unavailable');
+        const automaticRunIds = new Set<string>();
+        const autoReasons = new Set(['finish_successful_run_handoff', 'issue_continuation_needed', 'run_liveness_continuation', 'missing_issue_comment']);
+        const acceptAutomaticRun = async (id: string): Promise<boolean> => {
+          const run = await readRun(id);
+          const context = run.contextSnapshot as Record<string, unknown>;
+          const parent = str(context.sourceRunId) ?? str(context.retryOfRunId) ?? str(context.livenessContinuationSourceRunId) ?? str(context.resumeFromRunId);
+          if (!autoReasons.has(String(context.wakeReason)) || !parent || (parent !== runId && !automaticRunIds.has(parent))) return false;
+          automaticRunIds.add(id);
+          return true;
+        };
+        const later = issueRuns.filter(run => run.id !== runId && Date.parse(String(run.createdAt ?? '')) >= sourceTime)
+          .sort((left, right) => Date.parse(String(left.createdAt)) - Date.parse(String(right.createdAt)));
+        for (const row of later) {
+          const id = str(row.id);
+          if (!id) throw new Error('native run identity is unavailable');
+          if (!await acceptAutomaticRun(id)) {
+            return { confirmed: false, detail: 'a newer user turn or unattributed run owns this conversation' };
+          }
+        }
+        // A comment can already be accepted while its native wake is not visible yet.
+        const comments = await this.getJson(`/api/issues/${encodeURIComponent(issueId)}/comments?order=desc&limit=200`);
+        if (!Array.isArray(comments)) throw new Error('conversation comment ordering is unavailable');
+        const scopedComments = comments.map(raw => {
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid conversation comment');
+          const comment = raw as Record<string, unknown>;
+          if (comment.companyId !== companyId || comment.issueId !== issueId) throw new Error('conversation comment scope mismatch');
+          return comment;
+        });
+        const sourceComments = scopedComments.filter(comment => comment.id === sourceCommentId);
+        if (sourceComments.length !== 1) return { confirmed: false, detail: 'exact source comment anchor is unavailable' };
+        const sourceCommentTime = Date.parse(String(sourceComments[0]!.createdAt ?? ''));
+        if (!Number.isFinite(sourceCommentTime) || sourceCommentTime > sourceTime) {
+          return { confirmed: false, detail: 'source comment ordering is unavailable' };
+        }
+        for (const comment of scopedComments) {
+          if (comment.id === sourceCommentId || comment.createdByRunId === runId
+              || automaticRunIds.has(String(comment.createdByRunId))) continue;
+          const createdAt = Date.parse(String(comment.createdAt ?? ''));
+          // UUID ordering and array position cannot establish chronology when timestamps tie.
+          // Compare against the actual wake comment, not the later-created native run row.
+          if (!Number.isFinite(createdAt) || createdAt >= sourceCommentTime) return { confirmed: false, detail: 'a newer user comment or unknown comment prevents settlement' };
+        }
+
+        const note = `awwo_agent_canvas:settle:${runId}`;
+        const interruptedByHold = new Set<string>();
+        const matchingHold = async (): Promise<string | null> => {
+          const holds = await this.getJson(`/api/issues/${encodeURIComponent(issueId)}/tree-holds?status=active&mode=pause&includeMembers=true`);
+          if (!Array.isArray(holds)) throw new Error('native pause holds are unavailable');
+          const matched = holds.filter(raw => raw && typeof raw === 'object' && raw.companyId === companyId && raw.rootIssueId === issueId
+            && raw.status === 'active' && raw.mode === 'pause' && raw.releasePolicy?.note === note);
+          if (matched.length > 1) throw new Error('multiple settlement holds require review');
+          if (matched.length === 1) {
+            if (!Array.isArray(matched[0].members) || matched[0].members.some((member: { issueId?: unknown }) => member.issueId !== issueId)) {
+              throw new Error('settlement hold scope could not be verified');
+            }
+            for (const member of matched[0].members) if (str(member.activeRunId)) interruptedByHold.add(str(member.activeRunId)!);
+          }
+          return matched.length === 1 ? str(matched[0].id) : null;
+        };
+        let holdId = await matchingHold();
+        if (!holdId) {
+          const previewed = await this.postJson(`/api/issues/${encodeURIComponent(issueId)}/tree-control/preview`, { mode: 'pause' });
+          const preview = previewed.body as { companyId?: unknown; rootIssueId?: unknown; issues?: Array<{ id?: unknown }>; activeRuns?: Array<{ id?: unknown; issueId?: unknown; agentId?: unknown }> } | null;
+          if (!previewed.ok || preview?.companyId !== companyId || preview.rootIssueId !== issueId
+              || !Array.isArray(preview.issues) || preview.issues.length !== 1 || preview.issues[0]?.id !== issueId
+              || !Array.isArray(preview.activeRuns)) return { confirmed: false, detail: 'settlement requires one isolated conversation issue' };
+          if (preview.activeRuns.some(run => run.issueId !== issueId || run.agentId !== agentId || !automaticRunIds.has(String(run.id)))) {
+            return { confirmed: false, detail: 'unattributed active execution prevents settlement' };
+          }
+          if (!await this.operationStore.beginSettlement({ companyId, agentId, issueId, runId })) {
+            return { confirmed: false, detail: 'settlement outcome is uncertain; duplicate hold creation was refused' };
+          }
+          await this.postJson(`/api/issues/${encodeURIComponent(issueId)}/tree-holds`, {
+            mode: 'pause', reason: 'AwwO conversation waiting for the next user request',
+            releasePolicy: { strategy: 'manual', note },
+          });
+          // Confirm the persisted hold even when the POST response was lost. Never infer
+          // success from an HTTP status alone, and never repeat an uncertain creation.
+          holdId = await matchingHold();
+          if (!holdId) return { confirmed: false, detail: 'native settlement hold could not be confirmed' };
+        }
+        // A system continuation may start between preview and native hold creation. The
+        // persisted member snapshot records exactly what that hold interrupted, including
+        // after a lost response. Preserve that evidence in the receipt.
+        for (const id of interruptedByHold) {
+          if (!automaticRunIds.has(id) && !await acceptAutomaticRun(id)) return { confirmed: false, detail: 'hold encountered an execution outside the verified turn' };
+        }
+        const stoppedAutomaticRunIds: string[] = [];
+        for (let attempt = 0; attempt < this.cancelPollAttempts; attempt += 1) {
+          const live = await this.getJson(`/api/issues/${encodeURIComponent(issueId)}/live-runs`);
+          if (!Array.isArray(live)) throw new Error('native execution status is unavailable');
+          if (live.some(run => !automaticRunIds.has(String(run?.id)))) return { confirmed: false, detail: 'unexpected execution appeared during settlement' };
+          if (live.length === 0) {
+            for (const id of automaticRunIds) {
+              const automaticStatus = str((await readRun(id)).status);
+              if (!automaticStatus || !isTerminalRunStatus(automaticStatus)) return { confirmed: false, detail: 'automatic continuation terminal status is unconfirmed' };
+              if (automaticStatus === 'cancelled') stoppedAutomaticRunIds.push(id);
+            }
+            return { confirmed: true, status, holdId, stoppedAutomaticRunIds };
+          }
+          if (this.cancelPollDelayMs > 0) await new Promise(resolve => setTimeout(resolve, this.cancelPollDelayMs));
+        }
+        return { confirmed: false, detail: 'automatic continuation has not yet stopped' };
+      } catch (error) {
+        return { confirmed: false, detail: error instanceof Error ? error.message : 'native settlement is unconfirmed' };
+      }
+    });
+  }
+
+  private async operationDispatchResult(issueId: string, agentId: string, operationId?: string, firstCommentId?: string): Promise<DispatchResult> {
     const operation = operationId ? await this.operationStore?.read(operationId) : null;
     const runAttribution: RunAttribution | undefined = !operation
-      ? undefined
-      : operation.request.issueId === null
+      ? firstCommentId ? { kind: 'comment', commentId: firstCommentId } : undefined
+      : operation.request.issueId === null && operation.request.deliveryMode !== 'comment'
         ? { kind: 'first_turn' }
         : operation.commentId
           ? { kind: 'comment', commentId: operation.commentId }
@@ -656,7 +899,17 @@ export class AgentConversationDispatcher {
   ): Promise<DispatchResult> {
     let snapshot = operation;
     if (!snapshot.deliveryConfirmed) {
-      if (!snapshot.request.issueId) {
+      if (snapshot.request.deliveryMode === 'comment') {
+        try {
+          if (!snapshot.issueId) await this.recoverOperationIssue(snapshot);
+          snapshot = await this.waitForConfirmedOperation(snapshot.request.operationId);
+          if (!snapshot.deliveryConfirmed) await this.recoverOperationComment(snapshot);
+          snapshot = await this.operationStore!.read(snapshot.request.operationId);
+        } catch (error) {
+          await this.operationStore!.recordUncertain(snapshot.request.operationId,
+            error instanceof Error ? error.message : 'comment recovery failed');
+        }
+      } else if (!snapshot.request.issueId) {
         try {
           await this.recoverOperationIssue(snapshot);
           snapshot = await this.operationStore!.read(snapshot.request.operationId);
@@ -681,11 +934,132 @@ export class AgentConversationDispatcher {
     return this.operationDispatchResult(issueId, agentId, snapshot.request.operationId);
   }
 
+  /** A new conversation is a passive container followed by exactly one comment wake. Each
+   * upstream mutation has its own durable boundary; recovering a container never confirms or
+   * replays a comment whose outcome is unknown. Old todo-creation journals keep their path below. */
+  private async dispatchCommentTurn(input: DispatchInput, initial: ConversationOperationSnapshot | null): Promise<DispatchResult> {
+    const companyId = input.companyId.trim();
+    const agentId = input.agentId.trim();
+    let operation = initial;
+    const operationId = operation?.request.operationId;
+    if (operation?.deliveryConfirmed || operation?.commentStarted) return this.recoverStartedOperation(operation, companyId, agentId);
+    let issueId = operation?.issueId ?? str(input.issueId);
+    if (!issueId) {
+      if (operation?.mutationStarted) {
+        await this.recoverOperationIssue(operation);
+        operation = await this.operationStore!.read(operationId!);
+        issueId = operation.issueId;
+        if (!issueId) return this.recoverStartedOperation(operation, companyId, agentId);
+      } else {
+        let labelIds = input.labelIds;
+        if (operation) {
+          const labelId = operation.labelId ?? await this.ensureOperationLabel(companyId, operationId!);
+          if (!labelId) {
+            await this.operationStore!.recordRejected(operationId!, 'operation label unavailable before mutation');
+            return { status: 'error', detail: 'operation label unavailable before mutation' };
+          }
+          await this.operationStore!.recordLabel(operationId!, labelId);
+          labelIds = [...new Set([...(labelIds ?? []), labelId])];
+          if (!await this.operationStore!.beginMutation(operationId!)) {
+            return this.dispatchCommentTurn(input, await this.operationStore!.read(operationId!));
+          }
+        }
+        const created = await this.postJson(`/api/companies/${encodeURIComponent(companyId)}/issues`, {
+          title: str(input.title) ?? `对话 · ${agentId.slice(0, 8)}`,
+          description: input.message,
+          assigneeAgentId: agentId,
+          status: 'backlog',
+          ...(labelIds?.length ? { labelIds } : {}),
+        });
+        const body = created.body && typeof created.body === 'object' && !Array.isArray(created.body)
+          ? created.body as Record<string, unknown> : null;
+        const nested = body?.issue && typeof body.issue === 'object' ? body.issue as Record<string, unknown> : null;
+        issueId = created.ok ? str(body?.id) ?? str(nested?.id) : null;
+        if (issueId) {
+          await this.readBoundIssue(companyId, agentId, issueId);
+          if (operation) await this.operationStore!.recordContainer(operationId!, issueId);
+        } else if (operation) {
+          await this.recoverOperationIssue(await this.operationStore!.read(operationId!));
+          operation = await this.operationStore!.read(operationId!);
+          issueId = operation.issueId;
+        }
+        if (!issueId) {
+          const detail = created.ok ? 'create issue: no issue id in response'
+            : created.status === 0 ? 'create issue failed (upstream unreachable)' : `create issue failed (upstream ${created.status})`;
+          if (operation) {
+            if (created.status >= 400 && created.status < 500) await this.operationStore!.recordRejected(operationId!, detail);
+            else await this.operationStore!.recordUncertain(operationId!, detail);
+          }
+          return { status: 'error', ...(operation && !(created.status >= 400 && created.status < 500) ? { code: 'operation_uncertain' as const } : {}), detail };
+        }
+      }
+    }
+    const issue = await this.readBoundIssue(companyId, agentId, issueId);
+    if (issue.status === 'cancelled') {
+      if (operation) await this.operationStore!.recordRejected(operationId!, 'cancelled conversation requires the dedicated restore flow');
+      return { status: 'error', detail: 'cancelled conversation requires the dedicated restore flow' };
+    }
+    if (!['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done'].includes(String(issue.status))) {
+      return { status: 'error', detail: 'invalid conversation issue status' };
+    }
+    const holdRelease = await this.releaseCanvasStopHolds(issueId, companyId);
+    if (holdRelease === 'failed' || holdRelease === 'blocked') return { status: 'error', detail: holdRelease === 'blocked'
+      ? 'conversation is paused by an operator hold' : 'canvas pause state or release could not be confirmed' };
+    if (operation) {
+      if (!await this.operationStore!.beginComment(operationId!)) {
+        return this.recoverStartedOperation(await this.operationStore!.read(operationId!), companyId, agentId);
+      }
+      operation = await this.operationStore!.read(operationId!);
+    }
+    const commentBody = {
+      body: input.message,
+      ...(issue.status === 'done' || issue.status === 'blocked' ? { resume: true } : {}),
+      ...(operation ? { metadata: this.commentMetadata(operation) } : {}),
+    };
+    let commented = await this.postJson(`/api/issues/${encodeURIComponent(issueId)}/comments`, commentBody);
+    const firstReason = commented.body && typeof commented.body === 'object'
+      ? str((commented.body as Record<string, unknown>).error) : null;
+    // This explicit upstream 409 precedes comment insertion. It is the sole safe resend:
+    // release only our own hold, then retry the same operation once.
+    if (!commented.ok && commented.status === 409 && firstReason?.includes('active subtree pause hold')) {
+      if (await this.releaseCanvasStopHolds(issueId, companyId) === 'released') {
+        commented = await this.postJson(`/api/issues/${encodeURIComponent(issueId)}/comments`, commentBody);
+      }
+    }
+    const commentId = commented.ok && commented.body && typeof commented.body === 'object' && !Array.isArray(commented.body)
+      ? str((commented.body as Record<string, unknown>).id) : null;
+    if (commentId) {
+      this.latestCommentByIssue.set(issueId, commentId);
+      if (operation) await this.operationStore!.recordIssue(operationId!, issueId, commentId);
+      return this.operationDispatchResult(issueId, agentId, operationId, commentId);
+    }
+    if (operation) {
+      try {
+        if (await this.recoverOperationComment(operation)) return this.operationDispatchResult(issueId, agentId, operationId);
+      } catch { /* No mutation is repeated when readback is unavailable or ambiguous. */ }
+    }
+    const reason = commented.body && typeof commented.body === 'object'
+      ? str((commented.body as Record<string, unknown>).error)?.slice(0, 500) : null;
+    const detail = commented.ok ? 'comment response omitted its identity'
+      : commented.status === 0 ? 'comment failed (upstream unreachable)'
+        : `comment failed (upstream ${commented.status})${reason ? `: ${reason}` : ''}`;
+    const rejected = commented.status >= 400 && commented.status < 500;
+    if (operation) {
+      if (rejected) await this.operationStore!.recordRejected(operationId!, detail);
+      else await this.operationStore!.recordUncertain(operationId!, detail);
+    }
+    return { status: 'error', ...(operation && !rejected ? { code: 'operation_uncertain' as const } : {}), detail };
+  }
+
   /** Ensure the conversation issue + deliver the message to the target agent.
    *  Never throws — returns an honest tri-state outcome. Does NOT block on the
    *  run appearing (a 'queued' result means the message landed, not that it ran;
    *  the caller streams the run via WS or re-polls findActiveRun). */
   async dispatch(input: DispatchInput): Promise<DispatchResult> {
+    return withConversationMutation(input.companyId, input.agentId, () => this.dispatchUnlocked(input));
+  }
+
+  private async dispatchUnlocked(input: DispatchInput): Promise<DispatchResult> {
     const companyId = str(input.companyId);
     const agentId = str(input.agentId);
     // Validate emptiness on the trimmed form, but SEND the original message
@@ -707,12 +1081,27 @@ export class AgentConversationDispatcher {
       }
       if (!operation) return { status: 'error', detail: 'operation claim failed' };
       if (operation.phase === 'rejected') return { status: 'error', detail: operation.detail ?? 'upstream rejected the operation' };
+      if (operation.request.deliveryMode === 'comment') {
+        try { return await this.dispatchCommentTurn(input, operation); }
+        catch (error) {
+          const snapshot = await this.operationStore!.read(operation.request.operationId);
+          const detail = error instanceof Error ? error.message : 'conversation dispatch could not be confirmed';
+          if (snapshot.mutationStarted) await this.operationStore!.recordUncertain(operation.request.operationId, detail);
+          return { status: 'error', ...(snapshot.mutationStarted ? { code: 'operation_uncertain' as const } : {}), detail };
+        }
+      }
       if (operation.deliveryConfirmed || operation.mutationStarted) {
         return this.recoverStartedOperation(operation, companyId, agentId);
       }
     }
 
+    if (!operation && !str(input.issueId)) {
+      try { return await this.dispatchCommentTurn(input, null); }
+      catch (error) { return { status: 'error', detail: error instanceof Error ? error.message : 'conversation issue could not be read' }; }
+    }
+
     let issueId = str(input.issueId);
+    let acceptedCommentId: string | undefined;
     if (issueId) {
       // Read before writing: never continue a reassigned or cross-company issue.
       let issue: Record<string, unknown>;
@@ -733,8 +1122,10 @@ export class AgentConversationDispatcher {
         if (operation) await this.operationStore!.recordRejected(operation.request.operationId, 'invalid conversation issue status');
         return { status: 'error', detail: 'invalid conversation issue status' };
       }
-      if ((await this.releaseCanvasStopHolds(issueId)) === 'failed') {
-        return { status: 'error', detail: 'canvas stop hold could not be released' };
+      const holdRelease = await this.releaseCanvasStopHolds(issueId, companyId);
+      if (holdRelease === 'failed' || holdRelease === 'blocked') {
+        return { status: 'error', detail: holdRelease === 'blocked'
+          ? 'conversation is paused by an operator hold' : 'canvas pause state or release could not be confirmed' };
       }
       if (operation) {
         const reserved = await this.operationStore!.beginMutation(operation.request.operationId);
@@ -753,8 +1144,8 @@ export class AgentConversationDispatcher {
       // retry the mutation once. Manual/operator holds are never bypassed.
       const firstReason = commented.body && typeof commented.body === 'object'
         ? str((commented.body as Record<string, unknown>).error) : null;
-      if (!commented.ok && firstReason?.includes('active subtree pause hold')) {
-        const released = await this.releaseCanvasStopHolds(issueId, true);
+      if (!commented.ok && commented.status === 409 && firstReason?.includes('active subtree pause hold')) {
+        const released = await this.releaseCanvasStopHolds(issueId, companyId);
         if (released === 'released') {
           commented = await this.postJson(`/api/issues/${encodeURIComponent(issueId)}/comments`, {
             body: message,
@@ -778,10 +1169,12 @@ export class AgentConversationDispatcher {
           detail,
         };
       }
+      acceptedCommentId = commented.body && typeof commented.body === 'object' && !Array.isArray(commented.body)
+        ? str((commented.body as Record<string, unknown>).id) ?? undefined : undefined;
+      if (acceptedCommentId) this.latestCommentByIssue.set(issueId, acceptedCommentId);
+      else if (!operation) return { status: 'error', detail: 'comment response omitted its identity' };
       if (operation) {
-        const commentId = commented.body && typeof commented.body === 'object' && !Array.isArray(commented.body)
-          ? str((commented.body as Record<string, unknown>).id) : null;
-        await this.operationStore!.recordIssue(operation.request.operationId, issueId, commentId);
+        await this.operationStore!.recordIssue(operation.request.operationId, issueId, acceptedCommentId ?? null);
         operation = await this.operationStore!.read(operation.request.operationId);
       }
     } else {
@@ -849,6 +1242,6 @@ export class AgentConversationDispatcher {
       }
     }
 
-    return this.operationDispatchResult(issueId, agentId, operation?.request.operationId);
+    return this.operationDispatchResult(issueId, agentId, operation?.request.operationId, acceptedCommentId);
   }
 }

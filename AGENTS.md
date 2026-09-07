@@ -1,5 +1,11 @@
 # AGENTS.md instructions
 
+## AwwO branch policy — operator decision 2026-09-06
+
+For the independent `ClawHunt-Store/AwwO` repository, the operator explicitly requested only `main` and `online` locally and remotely. This supersedes inherited branch-topology requirements below: do not recreate `dev`, `dev/roadmap`, `dev/server-refactor`, `codex/*`, or `feat/*` branches here. `main` is the default source baseline; `online` is the reviewed release reference. A reference named `online` does not prove deployment or production acceptance.
+
+Preserve isolated work directories and uncommitted work. Detached worktrees may retain in-progress changes while only the two named branches exist. Keep exact-SHA review, relevant tests, environment separation and explicit remote/deployment authorization. Do not infer permission to publish unfinished acceptance changes from branch cleanup. See `docs/awwo-repository.md` and the dated cleanup record for actual ref state. These rules do not alter the separate legacy SuperClaw repository.
+
 > **⚡ 本分支（`dev/server-refactor`）请直接以下方「本分支工作模式（宪法 §十一）」节为准——它对本分支优先于一切工作流条款，包括紧接其下的这段 Goal Go / `dev/roadmap` 默认 main 流程。** 正常 main 推进流程的完整版备份在 `main-md/`。
 
 SuperClaw's project-specific workflow is Goal Go style: develop in a dedicated

@@ -200,7 +200,7 @@ export interface SessionTileProps {
   onFitNode?: (nodeId: string) => void;
   onToggleDeliverables?: (nodeId: string, open: boolean) => void;
   /** Override the send path (tests / a host that owns the transport). */
-  onSend?: (node: SessionNode, text: string, onAccepted?: () => void) => void;
+  onSend?: (node: SessionNode, text: string, onAccepted?: () => void, displayText?: string) => void;
   /** Current graph-resolved inputs; absent uses this node's local contract values only. */
   conversationContext?: NodeConversationContext;
   onMove?: (nodeId: string, x: number, y: number) => void;
@@ -430,7 +430,7 @@ export function SessionTile({
         ? `${preparedConversation.messagePrefix}\n\n${t('conversation.userMessageHeader')}\n${text}`
         : text;
       if (onSend) {
-        onSend(node, message, onAccepted);
+        onSend(node, message, onAccepted, text);
         return;
       }
       // Default path: one turn on THIS node's own thread, streamed into the shared store.
@@ -489,9 +489,12 @@ export function SessionTile({
     onUpdateNode?.(id ? selectNodeThread(withDraft, id) : createNodeThread(withDraft));
   };
   const toggleDeliverables = () => {
-    if (node.kind !== 'session' || busy) return;
+    if (node.kind !== 'session') return;
     const next = !deliverablesOpen;
     setDeliverablesOpen(next);
+    // Reading a prior delivery does not alter execution. During a run, keep disclosure
+    // local so opening the drawer cannot write the locked document or resize its node.
+    if (busy) return;
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
@@ -557,7 +560,7 @@ export function SessionTile({
         ) : null}
         {expanded && node.kind === 'session' ? <div className="awwo-node-tools">
           {onConfigure ? <button type="button" aria-label={t('tile.configure')} title={t('tile.configure')} disabled={busy} onClick={() => onConfigure(nodeId)}><Settings2 size={15} /></button> : null}
-          <button type="button" aria-label={t(deliverablesOpen ? 'tile.collapseDeliverables' : 'tile.expandDeliverables')} title={t('tile.deliverables')} aria-expanded={deliverablesOpen} disabled={busy} onClick={toggleDeliverables}><PanelRight size={15} /><span>{t('tile.deliverables')}</span></button>
+          <button type="button" aria-label={t(deliverablesOpen ? 'tile.collapseDeliverables' : 'tile.expandDeliverables')} title={t('tile.deliverables')} aria-expanded={deliverablesOpen} onClick={toggleDeliverables}><PanelRight size={15} /><span>{t('tile.deliverables')}</span></button>
           {onToggleFocus ? <button type="button" aria-label={t('tile.collapseNode')} title={t('tile.collapseNode')} disabled={Boolean(configurationPanel) && interactionLocked} onClick={() => onToggleFocus(nodeId)}><X size={15} /></button> : null}
           <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenuOpen(false); } }}>
@@ -639,7 +642,7 @@ export function SessionTile({
                 </div>
               </div>
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
-                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span><button type="button" aria-label={t('tile.closeDeliverables')} disabled={busy} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode} /></>}
+                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span><button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode} /></>}
               </section> : null}
             </div>
           )}

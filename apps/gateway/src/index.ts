@@ -9,6 +9,7 @@ import { createGatewayApp } from "./app.js";
 import { loadCanvasPlannerConfig } from "./canvas/config.js";
 import { createCanvasPlanner } from "./canvas/provider.js";
 import { createCanvasPlannerRouter } from "./canvas/routes.js";
+import { createCodexModelCatalog, loadCodexCatalogConfig } from "./canvas/model-catalog.js";
 import { UpstreamChatTurnDispatcher } from "./automation/fire.js";
 import { createAutomationRouter } from "./automation/routes.js";
 import { JsonFileAutomationStore } from "./automation/store.js";
@@ -127,6 +128,7 @@ export async function startGateway(): Promise<GatewayRuntime> {
   const controlToken = resolveControlToken();
   const canvasPlannerRouter = createCanvasPlannerRouter({
     provider: createCanvasPlanner(loadCanvasPlannerConfig()),
+    modelCatalog: createCodexModelCatalog(loadCodexCatalogConfig()),
     controlToken,
   });
   const automationRouter = createAutomationRouter({ store: automationStore, controlToken });

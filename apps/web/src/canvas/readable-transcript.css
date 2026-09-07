@@ -1,0 +1,88 @@
+.canvas-root .canvas-transcript-details {
+  margin-top: 8px;
+  white-space: normal;
+  font-size: 12px;
+}
+.canvas-root .canvas-transcript-details:first-child { margin-top: 0; }
+.canvas-root .canvas-transcript-details > summary {
+  cursor: pointer;
+  width: fit-content;
+  max-width: 100%;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.canvas-root .canvas-transcript-details > summary:focus-visible {
+  outline: 2px solid var(--awwo-teal, var(--accent));
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+.canvas-root .canvas-transcript-raw {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.canvas-root .canvas-transcript-fields {
+  display: grid;
+  gap: 16px;
+  white-space: normal;
+  min-width: 0;
+}
+.canvas-root .canvas-transcript-field { min-width: 0; }
+.canvas-root .canvas-transcript-field > h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: inherit;
+}
+.canvas-root .canvas-transcript-field-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.canvas-root .canvas-transcript-markdown {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  min-width: 0;
+}
+.canvas-root .canvas-transcript-markdown > :first-child { margin-top: 0; }
+.canvas-root .canvas-transcript-markdown > :last-child { margin-bottom: 0; }
+.canvas-root .canvas-transcript-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+  line-height: 1.6;
+  color: inherit;
+  margin: 12px 0 6px;
+  letter-spacing: normal;
+}
+.canvas-root .canvas-transcript-markdown p { margin: 8px 0; }
+.canvas-root .canvas-transcript-markdown :is(ul, ol) { padding-left: 1.5em; margin: 8px 0; }
+.canvas-root .canvas-transcript-markdown :is(pre, code) { font-size: 0.92em; }
+.canvas-root .canvas-transcript-markdown pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--awwo-soft, var(--soft));
+  padding: 8px;
+  border-radius: 6px;
+}
+.canvas-root .canvas-transcript-markdown a { color: var(--awwo-teal, var(--accent)); text-decoration: underline; }
+.canvas-root .canvas-transcript-image-reference {
+  display: inline-block;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--awwo-line, var(--line));
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.canvas-root .canvas-transcript-table { overflow-x: auto; max-width: 100%; }
+.canvas-root .canvas-transcript-markdown table { border-collapse: collapse; width: 100%; }
+.canvas-root .canvas-transcript-markdown :is(th, td) {
+  padding: 5px 8px;
+  border: 1px solid var(--awwo-line, var(--line));
+  text-align: left;
+}
+.canvas-root .canvas-transcript-format-notice {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--warn);
+}

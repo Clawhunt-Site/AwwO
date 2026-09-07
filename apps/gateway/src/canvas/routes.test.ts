@@ -4,17 +4,18 @@ import express from 'express';
 import { createGatewayApp } from '../app.js';
 import { createCanvasPlannerRouter } from './routes.js';
 import { PlannerError, type CanvasPlanner } from './provider.js';
+import type { CodexModelCatalog } from './model-catalog.js';
 
 const TOKEN = 'canvas-test-token';
 const plan = { version: 1, summary: 'ready', operations: [] };
 const headers = { 'Content-Type': 'application/json', 'x-superclaw-gateway-token': TOKEN };
 const closers: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of closers.splice(0)) await close(); });
-async function serve(provider: CanvasPlanner, peer?: string) {
+async function serve(provider: CanvasPlanner, peer?: string, modelCatalog?: CodexModelCatalog) {
   const upstream = { health: vi.fn(async () => { throw new Error('must not use upstream'); }) };
   const app = express();
   if (peer) app.use((req, _res, next) => { Object.defineProperty(req.socket, 'remoteAddress', { value: peer }); next(); });
-  app.use(createGatewayApp({ upstream, canvasPlannerRouter: createCanvasPlannerRouter({ provider, controlToken: TOKEN }) }));
+  app.use(createGatewayApp({ upstream, canvasPlannerRouter: createCanvasPlannerRouter({ provider, controlToken: TOKEN, modelCatalog }) }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   closers.push(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
@@ -24,6 +25,34 @@ function provider(): CanvasPlanner {
   return { status: vi.fn(async () => ({ available: true, provider: 'codex' })), plan: vi.fn(async () => plan) };
 }
 describe('canvas planning HTTP API', () => {
+  it('protects model discovery with loopback and the existing control token', async () => {
+    const catalog = { read: vi.fn() };
+    const path = '/api/canvas/runtimes/codex_local/models';
+    const { base } = await serve(provider(), undefined, catalog);
+    expect((await fetch(base + path)).status).toBe(401);
+    const remote = await serve(provider(), '203.0.113.20', catalog);
+    expect((await fetch(remote.base + path, { headers: { ...headers, 'x-forwarded-for': '127.0.0.1' } })).status).toBe(403);
+    expect(catalog.read).not.toHaveBeenCalled();
+  });
+  it('returns only live catalog fields and disables HTTP caching', async () => {
+    const models = [{ id: 'actual-model', reasoningEfforts: ['low'], defaultReasoningEffort: 'low' }];
+    const catalog: CodexModelCatalog = { read: vi.fn(async () => ({ source: 'codex_app_server' as const, models })) };
+    const p = provider();
+    const { base } = await serve(p, undefined, catalog);
+    const response = await fetch(`${base}/api/canvas/runtimes/codex_local/models`, { headers });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toEqual({ source: 'codex_app_server', models });
+    expect(p.plan).not.toHaveBeenCalled();
+    expect(p.status).not.toHaveBeenCalled();
+  });
+  it('returns a safe explicit unavailable result, never a static model fallback', async () => {
+    const catalog = { read: async () => { throw new Error('SECRET auth path'); } };
+    const { base } = await serve(provider(), undefined, catalog);
+    const response = await fetch(`${base}/api/canvas/runtimes/codex_local/models`, { headers });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ code: 'codex_catalog_unavailable', error: '暂时无法读取服务器 Codex 模型目录，请确认运行环境后重试。' });
+  });
   it('rejects a non-loopback peer even with the token and forged proxy headers', async () => {
     const p = provider(); const { base } = await serve(p, '203.0.113.20');
     expect((await fetch(`${base}/api/canvas/planner`, { headers: { ...headers, 'x-forwarded-for': '127.0.0.1' } })).status).toBe(403);
@@ -64,6 +93,20 @@ describe('canvas planning HTTP API', () => {
       expect(response.status).toBe(status);
       expect(await response.text()).not.toContain('SECRET');
     }
+  });
+  it('returns a stable code and safe quota guidance without suggesting another login', async () => {
+    const p = provider();
+    p.plan = async () => { throw new PlannerError('usage_limit_exceeded'); };
+    const { base } = await serve(p);
+    const response = await fetch(`${base}/api/canvas/plan`, { method: 'POST', headers, body: '{"prompt":"x","context":"y"}' });
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      code: 'usage_limit_exceeded',
+      error: '当前 Codex 账户的使用额度已耗尽，请在额度恢复或补充额度后重试。',
+    });
+    p.plan = async () => plan;
+    const retry = await fetch(`${base}/api/canvas/plan`, { method: 'POST', headers, body: '{"prompt":"x","context":"y"}' });
+    expect(retry.status).toBe(200);
   });
   it('bounds concurrency and aborts planning when the browser disconnects', async () => {
     let started!: () => void; const began = new Promise<void>(resolve => { started = resolve; });

@@ -69,6 +69,36 @@ async function serve(d: ConversationRouterDeps, peer?: string): Promise<{ base: 
 const url = (base: string) => `${base}/api/conversations/co-1/agents/ag-1/messages`;
 
 describe('createConversationRouter', () => {
+  it('guards settlement by the existing auth boundary and passes the exact native run identity', async () => {
+    const runId = '55555555-5555-4555-8555-555555555555';
+    const receipt = { confirmed: true as const, status: 'failed', holdId: 'hold-1', stoppedAutomaticRunIds: [] };
+    const settleConversationRun = vi.fn(async () => receipt);
+    const s = await serve(deps({ dispatcher: { ...deps().dispatcher, settleConversationRun } }));
+    const endpoint = `${s.base}/api/conversations/co-1/agents/ag-1/issues/iss-1/settle`;
+    try {
+      expect((await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ runId }) })).status).toBe(401);
+      expect(settleConversationRun).not.toHaveBeenCalled();
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', 'x-superclaw-gateway-token': TOKEN }, body: JSON.stringify({ runId }) });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(receipt);
+      expect(settleConversationRun).toHaveBeenCalledWith({ companyId: 'co-1', agentId: 'ag-1', issueId: 'iss-1', runId });
+    } finally { await s.close(); }
+  });
+
+  it('rejects invalid settlement IDs and surfaces an unconfirmed native hold as 409', async () => {
+    const settleConversationRun = vi.fn(async () => ({ confirmed: false as const, detail: 'newer user turn' }));
+    const s = await serve(deps({ dispatcher: { ...deps().dispatcher, settleConversationRun } }));
+    const endpoint = `${s.base}/api/conversations/co-1/agents/ag-1/issues/iss-1/settle`;
+    const headers = { 'content-type': 'application/json', 'x-superclaw-gateway-token': TOKEN };
+    try {
+      expect((await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ runId: 'arbitrary' }) })).status).toBe(400);
+      expect(settleConversationRun).not.toHaveBeenCalled();
+      const response = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ runId: '55555555-5555-4555-8555-555555555555' }) });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ confirmed: false, detail: 'newer user turn' });
+    } finally { await s.close(); }
+  });
+
   it('refuses to construct without a control token', () => {
     expect(() => createConversationRouter(deps({ controlToken: '' }))).toThrow(/controlToken/);
   });

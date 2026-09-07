@@ -126,10 +126,28 @@ describe('scoped execution', () => {
 
     // No turn fired, and nothing pretended to succeed.
     expect(ran).toEqual([]);
-    expect(summary.ok).toBe(false);
-    expect(statuses['plan'].at(-1)!.state).toBe('blocked');
-    expect(statuses['plan'].at(-1)!.detail).toContain('节点-plan');
+    expect(summary).toMatchObject({ ok: false, total: 1, blocked: 1, done: 0, failed: 0 });
+    expect(statuses['plan']).toBeUndefined();
     expect(statuses['build'].at(-1)!.state).toBe('blocked');
+    expect(statuses['build'].at(-1)!.detail).toContain('上游「节点-plan」还没有产出');
+  });
+
+  it('counts only scoped dependents when several nodes share a missing cached prerequisite', async () => {
+    const statuses: Record<string, RunNodeStatus> = {};
+    const summary = await runGraph({
+      nodes: [agent('source'), agent('left'), agent('right')],
+      edges: [wire('source', 'left'), wire('source', 'right')],
+      scope: ['left', 'right'],
+      storedOutput: () => null,
+      execAgent: async () => { throw new Error('Blocked nodes must not dispatch'); },
+      onStatus: (id, status) => { statuses[id] = status; },
+    });
+    expect(summary).toMatchObject({ ok: false, total: 2, blocked: 2, failed: 0, done: 0 });
+    expect(statuses.source).toBeUndefined();
+    for (const id of ['left', 'right']) {
+      expect(statuses[id].state).toBe('blocked');
+      expect(statuses[id].detail).toContain('上游「节点-source」还没有产出');
+    }
   });
 
   it('only badges the nodes the run will touch', async () => {

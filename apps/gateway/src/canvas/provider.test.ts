@@ -10,6 +10,11 @@ import { createCanvasPlanner, parsePlannerOutput, resolveCodexCommand } from './
 const plan = { version: 1, summary: 'Create a frontend node', operations: [{ type: 'add_node', ref: 'web', templateId: 'frontend' }] };
 const output = (text: string) => `${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } })}\n${JSON.stringify({ type: 'turn.completed' })}\n`;
 const config = { provider: 'codex' as const, cliPath: 'codex', timeoutMs: 1000 };
+const usageLimitMessage = "You've hit your usage limit. Visit https://example.invalid/private-usage to purchase more credits or try again later. SECRET diagnostics";
+const usageLimitEvents = [
+  { type: 'error', message: usageLimitMessage },
+  { type: 'turn.failed', error: { message: usageLimitMessage } },
+];
 function harness() {
   const child = Object.assign(new EventEmitter(), { pid: 12345, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn() });
   const launch = vi.fn(() => child as unknown as ChildProcessWithoutNullStreams);
@@ -28,6 +33,22 @@ describe('planning output', () => {
     for (const raw of ['', output('not JSON'), output('[]'), output('{"version":2,"operations":[]}'), output('{"version":1,"operations":{}}'), output('x'.repeat(120001)), JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify(plan) } })]) {
       expect(() => parsePlannerOutput(raw)).toThrow();
     }
+  });
+  it.each(usageLimitEvents)('recognizes the known Codex usage-limit event: $type', event => {
+    expect(() => parsePlannerOutput(JSON.stringify(event))).toThrow(expect.objectContaining({ code: 'usage_limit_exceeded', message: 'usage_limit_exceeded' }));
+  });
+  it('does not classify arbitrary errors or assistant content as a usage limit', () => {
+    for (const event of [
+      { type: 'error', message: 'HTTP 429, retry request later' },
+      { type: 'error', message: `Quoted text: ${usageLimitMessage}` },
+      { type: 'turn.failed', error: { message: 'Authentication required' } },
+      { type: 'turn.failed', error: { message: { text: usageLimitMessage } } },
+    ]) {
+      expect(() => parsePlannerOutput(JSON.stringify(event))).toThrow(expect.objectContaining({ code: 'execution_failed' }));
+    }
+    expect(() => parsePlannerOutput(usageLimitMessage)).toThrow(expect.objectContaining({ code: 'invalid_output' }));
+    const quotedPlan = { ...plan, summary: usageLimitMessage };
+    expect(parsePlannerOutput(output(JSON.stringify(quotedPlan)))).toEqual(quotedPlan);
   });
 });
 
@@ -76,6 +97,31 @@ describe('isolated Codex planning process', () => {
     expect((await missing.status()).available).toBe(false);
     await expect(missing.plan({ prompt: 'x', context: 'y' })).rejects.toThrow();
     expect(deps.launch).not.toHaveBeenCalled();
+  });
+  it.each(usageLimitEvents)('keeps the usage-limit classification when $type exits nonzero', async event => {
+    const deps = harness();
+    const result = createCanvasPlanner(config, deps).plan({ prompt: 'x', context: 'y' });
+    const rejected = expect(result).rejects.toMatchObject({ code: 'usage_limit_exceeded', message: 'usage_limit_exceeded' });
+    await vi.waitFor(() => expect(deps.launch).toHaveBeenCalledOnce());
+    deps.child.stderr.write('SECRET authentication diagnostics');
+    deps.child.stdout.write(`${JSON.stringify(event)}\n`);
+    deps.child.emit('close', 1);
+    await rejected;
+  });
+  it.each([
+    output(JSON.stringify(plan)),
+    usageLimitMessage,
+    JSON.stringify({ type: 'error', message: 'HTTP 429, retry request later' }),
+    JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: usageLimitMessage } }),
+  ])('never accepts a plan or infers quota from other output after a failed exit', async raw => {
+    const deps = harness();
+    const result = createCanvasPlanner(config, deps).plan({ prompt: 'x', context: 'y' });
+    const rejected = expect(result).rejects.toMatchObject({ code: 'execution_failed', message: 'execution_failed' });
+    await vi.waitFor(() => expect(deps.launch).toHaveBeenCalledOnce());
+    deps.child.stderr.write(JSON.stringify(usageLimitEvents[0]));
+    deps.child.stdout.write(raw);
+    deps.child.emit('close', 1);
+    await rejected;
   });
   it('aborting kills the child and keeps cancellation distinct', async () => {
     const deps = harness(); const controller = new AbortController();

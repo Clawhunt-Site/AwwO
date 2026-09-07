@@ -298,6 +298,9 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
         return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
       });
   const outputs = new Map<string, string>();
+  // Missing cached prerequisites explain why an in-scope node cannot run; they are not
+  // themselves executions and must not add blocked badges or inflate the scoped summary.
+  const dependencyFailures = new Map<string, string>();
   const set = (nodeId: string, status: RunNodeStatus) => {
     if (status.state === 'done') summary.done += 1;
     if (status.state === 'failed') summary.failed += 1;
@@ -323,13 +326,13 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
         const stored = storedOutput?.(id) ?? null;
         if (stored === null) {
           const title = nodeById.get(id)?.title ?? id;
-          set(id, { state: 'blocked', detail: `上游「${title}」还没有产出，无法只跑选中的节点` });
+          dependencyFailures.set(id, `上游「${title}」还没有产出，无法只跑选中的节点`);
           return false;
         }
         const cachedNode = nodeById.get(id);
         const errors = cachedNode ? validateNodeOutput(cachedNode, stored) : ['上游节点不存在'];
         if (errors.length) {
-          set(id, { state: 'blocked', detail: `上游「${cachedNode?.title ?? id}」的已有产出不符合输出格式：${errors.join(' ')}` });
+          dependencyFailures.set(id, `上游「${cachedNode?.title ?? id}」的已有产出不符合输出格式：${errors.join(' ')}`);
           return false;
         }
         outputs.set(id, stored);
@@ -343,7 +346,11 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
         return false;
       }
       if (upstreamOk.some((r) => !r)) {
-        set(id, { state: 'blocked', detail: '上游未完成' });
+        const reasons = deps.flatMap((dep, index) => !upstreamOk[index] && dependencyFailures.has(dep.fromNode)
+          ? [dependencyFailures.get(dep.fromNode)!] : []);
+        const detail = [...new Set(reasons)].join('；') || '上游未完成';
+        dependencyFailures.set(id, detail);
+        set(id, { state: 'blocked', detail });
         return false;
       }
       const node = nodeById.get(id);

@@ -130,6 +130,19 @@ describe('streamAgentConversation', () => {
 });
 
 describe('fetchConversationMessages', () => {
+  it('keeps valid native comment times without inventing times for legacy or invalid messages', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      complete: true, messages: [
+        { body: 'native', createdAt: '2026-09-06T11:17:26.820Z' },
+        { body: 'legacy' }, { body: 'invalid', createdAt: 'not-a-date' },
+      ],
+    }))));
+    await expect(fetchConversationMessages('/gateway-api', 'company', 'issue')).resolves.toEqual([
+      { role: 'user', text: 'native', createdAt: Date.parse('2026-09-06T11:17:26.820Z') },
+      { role: 'user', text: 'legacy' }, { role: 'user', text: 'invalid' },
+    ]);
+  });
+
   it('restores the issue-description first turn only from an explicitly complete transcript', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       complete: true,
@@ -140,8 +153,22 @@ describe('fetchConversationMessages', () => {
     }))));
 
     await expect(fetchConversationMessages('/gateway-api', 'co-1', 'iss-1')).resolves.toEqual([
-      { role: 'user', text: 'first prompt' },
+      { role: 'user', text: 'first prompt', nativeSource: 'issue_description' },
       { role: 'agent', text: 'agent reply' },
+    ]);
+  });
+
+  it('preserves explicit context provenance without removing an identical real comment or guessing unknown sources', async () => {
+    const body = '【工作流节点】会员后台\n完整的输入与输出约束';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ complete: true, messages: [
+      { body, source: 'issue_description' },
+      { id: 'comment-1', body, source: 'comment' },
+      { id: 'comment-2', body, source: 'unknown' },
+    ] }))));
+    await expect(fetchConversationMessages('/gateway-api', 'company', 'issue')).resolves.toEqual([
+      { role: 'user', text: body, nativeSource: 'issue_description' },
+      { role: 'user', text: body, nativeCommentId: 'comment-1' },
+      { role: 'user', text: body, nativeCommentId: 'comment-2' },
     ]);
   });
 

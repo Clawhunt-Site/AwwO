@@ -1,5 +1,9 @@
 # SuperClaw Coordination
 
+## Current AwwO override — 2026-09-06
+
+The operator requested only `main` and `online` in the independent AwwO repository, locally and in Forgejo. This replaces the inherited branch topology below. Do not recreate worker/integration branches from those historical instructions. Preserve worktree contents; detached worktrees are allowed for unfinished work. `main` is the default source baseline and `online` is the reviewed release reference; neither a branch name nor cleanup proves runtime deployment. Tests, review, environment boundaries and release authorization remain required. See `docs/awwo-repository.md` for current usage; the remainder describes the legacy SuperClaw workflow.
+
 ## Branch Roles
 
 - `main` is a mirror of `origin/main` only. Do not stack local development on

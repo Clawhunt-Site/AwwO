@@ -13,8 +13,77 @@
 // operator that nothing was ever said when the truth is that we could not find out.
 
 import { useEffect, useRef } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { HistoryState, Turn } from './sessions';
 import { useCanvasI18n } from './i18n';
+import { collapseHistoricalInput, readableOutput } from './readableTranscript';
+import './readable-transcript.css';
+
+const markdownComponents: Components = {
+  table: ({ node: _node, ...props }) => <div className="canvas-transcript-table"><table {...props} /></div>,
+  // Agent-authored image URLs are references, not permission to contact a remote host.
+  // ReactMarkdown applies its existing safe URL transform before passing src here.
+  img: ({ alt, src, title }) => typeof src === 'string' && src
+    ? <a className="canvas-transcript-image-reference" href={src} title={title} target="_blank" rel="noopener noreferrer">{alt || src}</a>
+    : <span className="canvas-transcript-image-reference">{alt}</span>,
+};
+
+function RawDetails({ label, text }: { label: string; text: string }) {
+  return <details className="canvas-transcript-details">
+    <summary>{label}</summary>
+    <pre className="canvas-transcript-raw">{text}</pre>
+  </details>;
+}
+
+function TurnContent({ turn, streaming }: { turn: Turn; streaming: boolean }) {
+  const { t } = useCanvasI18n();
+  if (turn.role === 'user') {
+    if (turn.nativeSource === 'issue_description') {
+      return <RawDetails label={t('transcript.conversationContext')} text={turn.text} />;
+    }
+    const presentation = turn.presentation;
+    if (presentation?.inputKind === 'legacy-execution') {
+      return <RawDetails label={t('transcript.legacyExecution')} text={turn.text} />;
+    }
+    if (collapseHistoricalInput(turn)) {
+      return <RawDetails label={t('transcript.historyMessage')} text={turn.text} />;
+    }
+    if (presentation?.inputKind === 'workflow') {
+      return <>
+        <div>{presentation.displayText || t('transcript.workflowRequest')}</div>
+        <RawDetails label={t('transcript.executionDetails')} text={turn.text} />
+      </>;
+    }
+    if (presentation?.displayText !== undefined && presentation.displayText !== turn.text) {
+      return <>
+        <div>{presentation.displayText}</div>
+        <RawDetails label={t('transcript.executionDetails')} text={turn.text} />
+      </>;
+    }
+  }
+  const output = readableOutput(turn);
+  if (output.fields.length) {
+    return <>
+      <div className="canvas-transcript-fields">
+        {output.fields.map(({ field, value }) => <section className="canvas-transcript-field" key={field.id}>
+          <h3>{field.label || field.id}</h3>
+          {field.type === 'markdown'
+            ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{value}</ReactMarkdown></div>
+            : field.type === 'file'
+              ? <code className="canvas-transcript-field-value">{value}</code>
+              : <div className="canvas-transcript-field-value">{value}</div>}
+        </section>)}
+      </div>
+      <RawDetails label={t('transcript.rawResponse')} text={turn.text} />
+    </>;
+  }
+  return <>
+    {output.invalid ? <div className="canvas-transcript-format-notice" role="status">{t('transcript.invalidOutput')}</div> : null}
+    {/* Only an actual empty in-flight agent turn receives the waiting placeholder. */}
+    {turn.text || (turn.role === 'agent' && streaming ? t('transcript.thinking') : '')}
+  </>;
+}
 
 export const TRANSCRIPT_COPY = {
   /** Reading the stored transcript FAILED — deliberately distinct from an empty transcript. */
@@ -73,9 +142,7 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
               key={turn.id}
               className={`canvas-transcript-turn canvas-transcript-turn--${turn.role}${turn.tone ? ` is-${turn.tone}` : ''}`}
             >
-              {/* An empty agent turn mid-stream is the placeholder the gateway has not filled yet;
-                  saying so is honest, inventing text would not be. */}
-              {turn.text || (turn.role === 'agent' && streaming ? t('transcript.thinking') : '')}
+              <TurnContent turn={turn} streaming={streaming} />
             </div>
           ))
         )}

@@ -3,6 +3,7 @@ import { invalidateOutputs } from './invalidateOutputs';
 import type { CanvasRunJournal } from './runJournal';
 import { activeThreadId, updateThreadIssueId } from './nodeThreads';
 import { reconcileEdges } from './ports';
+import type { TurnPresentation } from './sessions';
 
 export type FingerprintedRunJournal = CanvasRunJournal & { inputFingerprint: string };
 
@@ -14,6 +15,12 @@ export interface RecoveredConversationTurn {
    *  turns are replaced, while renderers continue to use role/text/tone only. */
   recoveryOperationId?: string;
   recoveryRunId?: string;
+  createdAt?: number;
+  nativeCommentId?: string;
+  nativeOperationId?: string;
+  nativeRunId?: string;
+  nativeSource?: 'issue_description';
+  presentation?: TurnPresentation;
 }
 
 interface DurableManualTurn {
@@ -26,6 +33,10 @@ interface DurableManualTurn {
 }
 
 type RecoveryStorage = Pick<Storage, 'getItem' | 'setItem'>;
+export interface NativeManualHistoryProof {
+  complete: boolean;
+  turns: ReadonlyArray<RecoveredConversationTurn>;
+}
 const MANUAL_RECOVERY_PREFIX = 'awwo.canvas.manual-recovery.v1';
 const MAX_MANUAL_RECOVERIES_PER_SESSION = 50;
 const MAX_MANUAL_RECOVERY_CHARS = 1_000_000;
@@ -88,24 +99,72 @@ function readManualRecords(node: SessionNode, storage: Pick<Storage, 'getItem'>)
   }
 }
 
-/** Persist confirmed manual stdout before its journal is deleted. A full/corrupt
- * store fails closed so the durable journal remains the recovery source. */
+function nativeHistoryContains(record: DurableManualTurn, proof?: NativeManualHistoryProof | null): boolean {
+  if (proof?.complete !== true) return false;
+  const matches = (turn: RecoveredConversationTurn, role: 'user' | 'agent', text: string) => {
+    if (turn.role !== role || turn.text !== text || turn.nativeSource === 'issue_description') return false;
+    if (record.operationId && turn.nativeOperationId && turn.nativeOperationId !== record.operationId) return false;
+    if (record.runId && turn.nativeRunId && turn.nativeRunId !== record.runId) return false;
+    return Boolean((record.operationId && turn.nativeOperationId === record.operationId)
+      || (record.runId && turn.nativeRunId === record.runId));
+  };
+  // No text-only fallback and no locally attached recovery IDs count as native proof.
+  return (!record.userText.trim() || proof.turns.some(turn => matches(turn, 'user', record.userText)))
+    && (!record.agentText.trim() || proof.turns.some(turn => matches(turn, 'agent', record.agentText)));
+}
+
+/** Remove only records whose complete role/text pair is independently stored natively. */
+export function pruneNativeBackedManualConversations(
+  node: SessionNode, proof: NativeManualHistoryProof, storage: RecoveryStorage = localStorage,
+): boolean {
+  const key = manualRecoveryKey(node);
+  const records = readManualRecords(node, storage);
+  if (!key || !records || proof.complete !== true) return false;
+  const retained = records.filter(record => !nativeHistoryContains(record, proof));
+  if (retained.length === records.length) return true;
+  try { storage.setItem(key, JSON.stringify({ version: 1, records: retained })); return true; }
+  catch { return false; }
+}
+
+/** Known capacity gate before dispatch; future output size remains unknown until execution. */
+export function hasManualRecoveryCapacity(
+  node: SessionNode, userText: string, storage: Pick<Storage, 'getItem'> = localStorage,
+): boolean {
+  const records = readManualRecords(node, storage);
+  if (!records || records.length >= MAX_MANUAL_RECOVERIES_PER_SESSION) return false;
+  const minimum: DurableManualTurn = { operationId: '0'.repeat(36), runId: '0'.repeat(36), userText,
+    agentText: '', state: 'failed', startedAt: Date.now() };
+  return JSON.stringify({ version: 1, records: [...records, minimum] }).length <= MAX_MANUAL_RECOVERY_CHARS;
+}
+
+/** Persist fallback only when native history cannot prove the complete turn. A full/corrupt
+ * store still fails closed; unverified local evidence is never evicted to create room. */
 export function persistRecoveredManualConversation(
   node: SessionNode,
   journal: CanvasRunJournal,
   storage: RecoveryStorage = localStorage,
+  nativeHistory?: NativeManualHistoryProof | null,
 ): boolean {
   const key = manualRecoveryKey(node);
   const record = manualRecord(node, journal);
   if (!key || !record) return !journal.manual;
-  if (record.userText.length + record.agentText.length > MAX_MANUAL_RECOVERY_CHARS) return false;
   const records = readManualRecords(node, storage);
   if (!records) return false;
-  if (records.some(existing => sameManualIdentity(existing, record))) return true;
-  if (records.length >= MAX_MANUAL_RECOVERIES_PER_SESSION) return false;
-  const encoded = JSON.stringify({ version: 1, records: [...records, record] });
+  const retained = records.filter(existing => !nativeHistoryContains(existing, nativeHistory));
+  const nativeComplete = nativeHistoryContains(record, nativeHistory);
+  const alreadyRetained = retained.some(existing => sameManualIdentity(existing, record)
+    && existing.userText === record.userText && existing.agentText === record.agentText);
+  if (!nativeComplete && !alreadyRetained) {
+    if (retained.some(existing => sameManualIdentity(existing, record))) return false;
+    if (retained.length >= MAX_MANUAL_RECOVERIES_PER_SESSION) return false;
+    retained.push(record);
+  }
+  if (nativeComplete && retained.length === records.length) return true;
+  if (alreadyRetained && retained.length === records.length) return true;
+  const encoded = JSON.stringify({ version: 1, records: retained });
   if (encoded.length > MAX_MANUAL_RECOVERY_CHARS) return false;
-  try { storage.setItem(key, encoded); return true; } catch { return false; }
+  try { storage.setItem(key, encoded); return true; }
+  catch { return nativeComplete || alreadyRetained; } // Existing durable evidence stays intact.
 }
 
 function mergeManualRecord(
@@ -113,29 +172,62 @@ function mergeManualRecord(
   record: DurableManualTurn,
   consumedPairs: Set<number>,
 ): RecoveredConversationTurn[] {
-  if (existing.some(turn => (record.operationId && turn.recoveryOperationId === record.operationId)
-    || (record.runId && turn.recoveryRunId === record.runId))) return existing;
+  const hasExecutionIdentity = (turn: RecoveredConversationTurn) => Boolean(turn.nativeOperationId
+    || turn.recoveryOperationId || turn.nativeRunId || turn.recoveryRunId);
+  const matchesIdentity = (turn: RecoveredConversationTurn) => {
+    const operations = [turn.nativeOperationId, turn.recoveryOperationId].filter(Boolean);
+    const runs = [turn.nativeRunId, turn.recoveryRunId].filter(Boolean);
+    // One matching identifier must not hide a conflicting identifier on the same turn.
+    if (record.operationId && operations.some(id => id !== record.operationId)) return false;
+    if (record.runId && runs.some(id => id !== record.runId)) return false;
+    return Boolean((record.operationId && operations.includes(record.operationId))
+      || (record.runId && runs.includes(record.runId)));
+  };
+  const userIndex = existing.findIndex(turn => turn.role === 'user' && turn.text === record.userText && matchesIdentity(turn));
+  const agentIndex = existing.findIndex(turn => turn.role === 'agent' && turn.text === record.agentText && matchesIdentity(turn));
+  const userPresent = !record.userText.trim() || userIndex >= 0;
+  const agentPresent = !record.agentText.trim() || agentIndex >= 0;
+  if (userIndex >= 0) consumedPairs.add(userIndex);
+  if (agentIndex >= 0) consumedPairs.add(agentIndex);
+  // A native user comment can exist before the Agent's stdout reaches stored history.
+  // Deduplicate each required side independently, so that comment cannot erase the reply.
+  if (userPresent && agentPresent) return existing;
   const visible = existing.map((turn, index) => ({ turn, index })).filter(item => item.turn.role !== 'system');
-  for (let index = 0; index < visible.length; index += 1) {
+  for (let index = 0; userIndex < 0 && agentIndex < 0 && index < visible.length; index += 1) {
     const user = visible[index];
     const agent = visible[index + 1];
     if (consumedPairs.has(user.index) || user.turn.role !== 'user' || user.turn.text !== record.userText) continue;
-    if (record.agentText && (!agent || agent.turn.role !== 'agent' || agent.turn.text !== record.agentText)) continue;
+    // Only pre-identity history may use the old exact-text pair fallback. Repeated prompts
+    // and replies belonging to distinct operations are distinct conversation rounds.
+    if (hasExecutionIdentity(user.turn) || (agent?.turn.role === 'agent' && hasExecutionIdentity(agent.turn))) continue;
+    if (record.agentText && (!agent || consumedPairs.has(agent.index) || agent.turn.role !== 'agent'
+      || agent.turn.text !== record.agentText)) continue;
     consumedPairs.add(user.index);
-    if (agent) consumedPairs.add(agent.index);
+    if (record.agentText && agent) consumedPairs.add(agent.index);
     return existing;
   }
   const identity = {
     ...(record.operationId ? { recoveryOperationId: record.operationId } : {}),
     ...(record.runId ? { recoveryRunId: record.runId } : {}),
+    createdAt: record.startedAt,
   };
-  const merged = [...existing];
-  if (record.userText.trim()) merged.push({ role: 'user', text: record.userText, ...identity });
-  if (record.agentText.trim()) merged.push({
+  const recovered: RecoveredConversationTurn[] = [];
+  if (!userPresent) recovered.push({ role: 'user', text: record.userText, ...identity });
+  if (!agentPresent) recovered.push({
     role: 'agent', text: record.agentText,
     ...(record.state === 'done' ? {} : { tone: 'warn' as const }),
     ...identity,
   });
+  // A blocked local request may never become a native comment. Preserve it before later
+  // native replies, instead of appending it as the apparent latest turn/preview. Native
+  // order is authoritative; absent/equal timestamps are not a reason to reorder it.
+  const later = existing.findIndex(turn => Number.isFinite(turn.createdAt) && turn.createdAt! > record.startedAt);
+  const insertion = userIndex >= 0 ? userIndex + 1 : agentIndex >= 0 ? agentIndex : later < 0 ? existing.length : later;
+  const merged = [...existing.slice(0, insertion), ...recovered, ...existing.slice(insertion)];
+  const shiftedPairs = [...consumedPairs].map(index => index >= insertion ? index + recovered.length : index);
+  consumedPairs.clear();
+  shiftedPairs.forEach(index => consumedPairs.add(index));
+  for (let index = 0; index < recovered.length; index += 1) consumedPairs.add(insertion + index);
   return merged;
 }
 

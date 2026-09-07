@@ -23,6 +23,15 @@ type AgentInfo = {
   suggested_models?: unknown;
   uses_relay_packages?: boolean;
   default_model?: string;
+  model_catalog_source?: string;
+};
+type ModelCapability = { effort_levels: string[]; default_effort: string };
+type ModelCatalog = {
+  backend: string;
+  status: 'loading' | 'ready' | 'error';
+  models: string[];
+  source?: string;
+  capabilities: Record<string, ModelCapability>;
 };
 // `locked` (issue #452): the package exceeds the account's unlock ceiling — the
 // kernel (`is_tier_locked`, surfaced by GET /api/relay/packages) decides this; the
@@ -32,12 +41,26 @@ type RelayPackages = { available?: boolean; packages?: RelayPackage[]; tier_ceil
 type ReadJson = (path: string, init?: RequestInit & { headers?: Record<string, string> }) => Promise<any>;
 
 const COPY = {
-  zh: { runtime: 'Runtime', model: '模型', effort: '思考强度', effortDefault: '继续（runtime 默认）', modelDefault: '默认模型', inherit: '跟随 lead', lockedBadge: '需升级', pickRuntime: '选择 Runtime…' },
-  en: { runtime: 'Runtime', model: 'Model', effort: 'Effort', effortDefault: 'Inherit (runtime default)', modelDefault: 'Default model', inherit: 'Use lead', lockedBadge: 'Upgrade', pickRuntime: 'Select a runtime…' },
+  zh: { runtime: 'Runtime', model: '模型', effort: '思考强度', effortDefault: '继续（runtime 默认）', modelDefault: '默认模型', inherit: '跟随 lead', lockedBadge: '需升级', pickRuntime: '选择 Runtime…', catalogUnavailable: 'Codex 模型目录暂不可用，请重试。', catalogRetry: '重试模型目录', savedModel: '已保存，当前目录未列出' },
+  en: { runtime: 'Runtime', model: 'Model', effort: 'Effort', effortDefault: 'Inherit (runtime default)', modelDefault: 'Default model', inherit: 'Use lead', lockedBadge: 'Upgrade', pickRuntime: 'Select a runtime…', catalogUnavailable: 'The Codex model catalog is unavailable. Please retry.', catalogRetry: 'Retry model catalog', savedModel: 'Saved; not listed in the current catalog' },
 } as const;
 
 function toOptions(values: string[]): DropdownOption[] {
   return values.map((v) => ({ value: v, label: v }));
+}
+
+function stringValues(values: unknown): string[] {
+  return Array.isArray(values) ? [...new Set(values.filter((v): v is string => typeof v === 'string' && v.trim().length > 0))] : [];
+}
+
+function modelCapabilities(value: unknown): Record<string, ModelCapability> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([model, capability]) => {
+    if (!capability || typeof capability !== 'object' || Array.isArray(capability)) return [];
+    const entry = capability as Record<string, unknown>;
+    const levels = stringValues(entry.effort_levels);
+    return [[model, { effort_levels: levels, default_effort: typeof entry.default_effort === 'string' && levels.includes(entry.default_effort) ? entry.default_effort : '' }]];
+  }));
 }
 
 export function RuntimePicker({
@@ -61,9 +84,12 @@ export function RuntimePicker({
 }) {
   const t = COPY[lang];
   const { backend, model, effort } = value;
-  const [agentInfo, setAgentInfo] = useState<AgentInfo | null>(null);
-  const [modelCatalog, setModelCatalog] = useState<string[]>([]);
+  const [runtimeContract, setRuntimeContract] = useState<{ backend: string; info: AgentInfo | null } | null>(null);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [relayPackages, setRelayPackages] = useState<RelayPackages | null>(null);
+  const agentInfo = runtimeContract?.backend === backend ? runtimeContract.info : null;
+  const modelCatalog = catalog?.backend === backend ? catalog.models : [];
 
   // readJson is a fresh identity each parent render; hold it in a ref so the
   // per-backend fetch effect keys only on `backend`, never on identity churn.
@@ -74,28 +100,39 @@ export function RuntimePicker({
 
   useEffect(() => {
     if (!backend) {
-      setAgentInfo(null);
-      setModelCatalog([]);
+      setRuntimeContract(null);
+      setCatalog(null);
       setRelayPackages(null);
       return;
     }
     let stale = false;
-    setAgentInfo(null); // fail-closed during the async gap (no prior-runtime contract)
-    setModelCatalog([]);
+    const controller = new AbortController();
+    // Keep the same runtime's contract while retrying, so its controls stay visible
+    // and disabled; never expose a previous runtime's contract in the async gap.
+    setRuntimeContract((current) => current?.backend === backend ? current : null);
+    setCatalog({ backend, status: 'loading', models: [], capabilities: {} });
     setRelayPackages(null);
-    void readJsonRef.current(`/api/agents/${encodeURIComponent(backend)}/models`)
+    void readJsonRef.current(`/api/agents/${encodeURIComponent(backend)}/models`, { signal: controller.signal })
       .then((d) => {
-        if (!stale) setModelCatalog(Array.isArray(d?.models) ? d.models.map(String) : []);
+        if (!stale) setCatalog({
+          backend,
+          status: Array.isArray(d?.models) ? 'ready' : 'error',
+          models: stringValues(d?.models),
+          source: typeof d?.source === 'string' ? d.source : undefined,
+          capabilities: modelCapabilities(d?.model_capabilities),
+        });
       })
-      .catch(() => {});
-    void readJsonRef.current('/api/agents')
+      .catch(() => {
+        if (!stale) setCatalog({ backend, status: 'error', models: [], capabilities: {} });
+      });
+    void readJsonRef.current('/api/agents', { signal: controller.signal })
       .then((d) => {
         if (stale) return;
         const list: AgentInfo[] = Array.isArray(d?.agents) ? d.agents : [];
         const info = list.find((a) => a?.name === backend) ?? null;
-        setAgentInfo(info);
+        setRuntimeContract({ backend, info });
         if (info?.uses_relay_packages) {
-          void readJsonRef.current('/api/relay/packages')
+          void readJsonRef.current('/api/relay/packages', { signal: controller.signal })
             .then((p) => {
               if (!stale) setRelayPackages(p && typeof p === 'object' ? (p as RelayPackages) : {});
             })
@@ -105,19 +142,29 @@ export function RuntimePicker({
         }
       })
       .catch(() => {
-        if (!stale) setAgentInfo(null);
+        if (!stale) setRuntimeContract(null);
       });
     return () => {
       stale = true;
+      controller.abort();
     };
-  }, [backend]);
+  }, [backend, catalogAttempt]);
 
   const usesRelay = agentInfo?.uses_relay_packages === true;
   const supportsModel = agentInfo?.supports_model_selection === true;
   const supportsEffort = agentInfo?.supports_effort_selection === true;
-  const effortMode = agentInfo?.effort_input_mode ?? null;
-  const effortLevels = Array.isArray(agentInfo?.effort_levels) ? agentInfo!.effort_levels!.map(String) : [];
-  const modelSuggestions = modelCatalog.length
+  const usesLiveCatalog = agentInfo?.model_catalog_source === 'codex_app_server';
+  const liveCatalogReady = catalog?.backend === backend && catalog.status === 'ready' && catalog.source === 'codex_app_server' && modelCatalog.length > 0;
+  const liveCatalogBlocked = usesLiveCatalog && !liveCatalogReady;
+  const liveCatalogFailed = liveCatalogBlocked && catalog?.backend === backend && catalog.status !== 'loading';
+  const capabilityFor = (selectedModel: string) => liveCatalogReady && modelCatalog.includes(selectedModel) && Object.prototype.hasOwnProperty.call(catalog.capabilities, selectedModel)
+    ? catalog.capabilities[selectedModel]
+    : undefined;
+  const capability = usesLiveCatalog ? capabilityFor(model) : undefined;
+  const effortMode = usesLiveCatalog ? 'select' : agentInfo?.effort_input_mode ?? null;
+  const effortLevels = usesLiveCatalog ? capability?.effort_levels ?? [] : Array.isArray(agentInfo?.effort_levels) ? agentInfo!.effort_levels!.map(String) : [];
+  const effortDefault = usesLiveCatalog && capability?.default_effort ? `${t.effortDefault} · ${capability.default_effort}` : t.effortDefault;
+  const modelSuggestions = usesLiveCatalog ? modelCatalog : modelCatalog.length
     ? modelCatalog
     : Array.isArray(agentInfo?.suggested_models)
       ? agentInfo!.suggested_models!.map(String)
@@ -125,6 +172,15 @@ export function RuntimePicker({
 
   // Switching the runtime resets model + effort (neither is portable across runtimes).
   const setBackend = (next: string) => onChange({ backend: next, model: '', effort: '' });
+  const setModel = (next: string) => {
+    if (disabled || liveCatalogBlocked || (usesLiveCatalog && next !== '' && !modelCatalog.includes(next))) return;
+    onChange({ ...value, model: next, effort: usesLiveCatalog && !capabilityFor(next)?.effort_levels.includes(effort) ? '' : effort });
+  };
+  const setEffort = (next: string) => {
+    if (disabled || liveCatalogBlocked || (usesLiveCatalog && (!capability || (next !== '' && !effortLevels.includes(next))))) return;
+    onChange({ ...value, effort: next });
+  };
+  const effortDisabled = disabled || liveCatalogBlocked || (usesLiveCatalog && effortLevels.length === 0);
 
   return (
     <>
@@ -162,12 +218,26 @@ export function RuntimePicker({
           ]}
           onChange={(m) => onChange({ ...value, model: m })}
         />
+      ) : backend && supportsModel && usesLiveCatalog ? (
+        <Dropdown
+          key={`${backend}:model`}
+          ariaLabel={t.model}
+          value={model}
+          options={[
+            ...(model && !modelCatalog.includes(model) ? [{ value: model, label: model, description: t.savedModel, disabled: true }] : []),
+            { value: '', label: t.modelDefault },
+            ...toOptions(modelCatalog),
+          ]}
+          onChange={setModel}
+          disabled={disabled || liveCatalogBlocked}
+        />
       ) : backend && supportsModel ? (
         <ComboInput
+          key={`${backend}:model`}
           ariaLabel={t.model}
           value={model}
           suggestions={toOptions(modelSuggestions)}
-          onChange={(m) => onChange({ ...value, model: m })}
+          onChange={setModel}
           placeholder={t.modelDefault}
           disabled={disabled}
         />
@@ -175,21 +245,29 @@ export function RuntimePicker({
       {backend && supportsEffort ? (
         effortMode === 'text' ? (
           <ComboInput
+            key={`${backend}:effort`}
             ariaLabel={t.effort}
             value={effort}
             suggestions={toOptions(effortLevels)}
-            onChange={(e) => onChange({ ...value, effort: e })}
-            disabled={disabled}
+            onChange={setEffort}
+            disabled={effortDisabled}
           />
         ) : (
           <Dropdown
+            key={`${backend}:effort`}
             ariaLabel={t.effort}
             value={effort}
-            options={[{ value: '', label: t.effortDefault }, ...toOptions(effortLevels)]}
-            onChange={(e) => onChange({ ...value, effort: e })}
-            disabled={disabled}
+            options={[{ value: '', label: effortDefault }, ...toOptions(effortLevels)]}
+            onChange={setEffort}
+            disabled={effortDisabled}
           />
         )
+      ) : null}
+      {liveCatalogFailed ? (
+        <span role="status">
+          {t.catalogUnavailable}{' '}
+          <button type="button" disabled={disabled} onClick={() => setCatalogAttempt((attempt) => attempt + 1)}>{t.catalogRetry}</button>
+        </span>
       ) : null}
     </>
   );

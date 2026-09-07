@@ -43,6 +43,7 @@ import {
   createSessionNode,
   loadDocumentWithStatus,
   migrateFromLegacy,
+  sanitizeDocument,
   saveDocument,
   type CanvasDocument,
   type CanvasEdge,
@@ -54,13 +55,16 @@ import { boundsOfNodes, canConnect, edgeId, portsFor, reconcileEdges, type PortR
 import { nextIn, orderNodes, type WorldRect } from './spatialOrder';
 import { preflightGraphIssue, runGraph, validateNodeOutput, type RunNodeStatus } from './runGraph';
 import { createGatewayExecutor, cancelConversationRunViaGateway } from './runTransport';
+import { settleExecutionResult, settleRecoveredJournal } from './runSettlement';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal, clearRunJournal, patchRunJournalNode, reconcileRunJournal, journalSummary, type CanvasRunJournal } from './runJournal';
-import { applyRecoveredDocument, prepareRunDocument, runInputFingerprint, recoveryJournalForDocument, mergeRecoveredManualConversation, persistRecoveredManualConversation } from './runRecoveryDocument';
+import { applyRecoveredDocument, prepareRunDocument, runInputFingerprint, recoveryJournalForDocument, mergeRecoveredManualConversation } from './runRecoveryDocument';
+import { prepareManualHistoryCapacity, persistManualHistoryWithNativeProof } from './manualHistoryRetention';
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
 import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage } from './surfaceMessages';
-import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns } from './sessions';
+import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns, patchPresentation } from './sessions';
 import { forgetNode, restoreHistory } from './sessionTransport';
+import { projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
 import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserveThreadRuntime, rebindNodeThread, sessionStoreKey,
   updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
 import { arrangeNodePositions, presentationNodes } from './nodePresentation';
@@ -177,6 +181,15 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   //    node starts a new one.
   const docRef = useRef(doc);
   docRef.current = doc;
+  // Compare revisions in the same normalized shape the loader returns. The last successful
+  // local save is also the base of an edit whose autosave effect has not committed yet.
+  const lastSavedRevision = useRef<string | null>(null);
+  if (lastSavedRevision.current === null) lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(doc));
+  const saveLocalDocument = useCallback((next: CanvasDocument): boolean => {
+    if (!saveDocument(next)) return false;
+    lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(next));
+    return true;
+  }, []);
   const undoStack = useRef<CanvasDocument[]>([]);
   const redoStack = useRef<CanvasDocument[]>([]);
   const lastCommit = useRef<{ label: string; at: number } | null>(null);
@@ -224,6 +237,13 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     [syncHistory],
   );
 
+  // User callbacks can outlive their idle render. The journal/ref checks also cover
+  // acceptance before React commits `running`, waiting nodes, and terminal settlement.
+  const canEditStructure = useCallback((allowBindingSave = false) => !(
+    runAbort.current || journal.current || loadRunJournal() || recoveringRef.current
+    || (inspectorCloseLocked.current && !allowBindingSave) || hasStreamingConversation(docRef.current.nodes)
+  ), []);
+
   /** Step to a stored document without recording it as a new edit. */
   const restoreDoc = useCallback((target: CanvasDocument) => {
     if (loadRunJournal()) return;
@@ -239,29 +259,29 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   }, []);
 
   const undo = useCallback(() => {
-    if (inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes) || loadRunJournal()) return;
+    if (!canEditStructure()) return;
     const prevDoc = undoStack.current.at(-1);
     if (!prevDoc) return;
     undoStack.current = undoStack.current.slice(0, -1);
     redoStack.current = [...redoStack.current, docRef.current].slice(-HISTORY_LIMIT);
     restoreDoc(prevDoc);
     syncHistory();
-  }, [restoreDoc, syncHistory]);
+  }, [canEditStructure, restoreDoc, syncHistory]);
 
   const redo = useCallback(() => {
-    if (inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes) || loadRunJournal()) return;
+    if (!canEditStructure()) return;
     const nextDoc = redoStack.current.at(-1);
     if (!nextDoc) return;
     redoStack.current = redoStack.current.slice(0, -1);
     undoStack.current = [...undoStack.current, docRef.current].slice(-HISTORY_LIMIT);
     restoreDoc(nextDoc);
     syncHistory();
-  }, [restoreDoc, syncHistory]);
+  }, [canEditStructure, restoreDoc, syncHistory]);
 
   useEffect(() => {
     if (!runAbort.current && loadRunJournal()) return;
-    saveDocument({ ...doc, edges });
-  }, [doc, edges]);
+    saveLocalDocument({ ...doc, edges });
+  }, [doc, edges, saveLocalDocument]);
 
   // ---- viewport / selection / focus ----------------------------------------------------------
   const [view, setView] = useState<ViewportState>(() => doc.view ?? { x: 0, y: 0, scale: 1 });
@@ -331,14 +351,14 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   );
 
   const arrangeNodes = useCallback(() => {
-    if (runAbort.current || inspectorCloseLocked.current) return;
+    if (!canEditStructure()) return;
     const arranged = arrangeNodePositions(docRef.current.nodes, docRef.current.edges);
     patchDoc(previous => ({ ...previous, nodes: arranged }), { label: 'arrange:nodes' });
     setInspectorId(null);
     setFocusedId(null);
     const box = viewportSize();
     if (box) setView(fitNodeOverview(arranged, box));
-  }, [patchDoc, viewportSize]);
+  }, [canEditStructure, patchDoc, viewportSize]);
 
   const unfocus = useCallback(() => {
     if (inspectorCloseLocked.current) return;
@@ -382,12 +402,13 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   // ---- waypoints ----------------------------------------------------------------------------
   const saveWaypoint = useCallback(
     (slot: number) => {
+      if (!canEditStructure()) return;
       patchDoc((prev) => ({
         ...prev,
         waypoints: [...prev.waypoints.filter((w) => w.slot !== slot), { slot, view: viewRef.current } as Waypoint],
       }), { label: `waypoint:${slot}` });
     },
-    [patchDoc],
+    [canEditStructure, patchDoc],
   );
   const recallWaypoint = useCallback(
     (slot: number) => {
@@ -401,6 +422,8 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   const [initialJournal] = useState(loadRunJournal);
   const journal = useRef<CanvasRunJournal | null>(initialJournal);
   const [recovering, setRecovering] = useState(Boolean(initialJournal));
+  const recoveringRef = useRef(recovering);
+  recoveringRef.current = recovering;
   const [runs, setRuns] = useState<Record<string, RunView>>(() => initialJournal?.nodes ?? {});
   const [running, setRunning] = useState(Boolean(initialJournal));
   const [runSummary, setRunSummary] = useState<Parameters<typeof RunControls>[0]['summary']>(null);
@@ -430,15 +453,46 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     if (!recovering) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    const refreshedHistories = new Set<string>();
     setHandoffNote(surfaceNotice(t, 'recovering_run'));
     const poll = () => withCanvasRunOwnership(async () => {
       if (controller.signal.aborted) return;
       const durable = loadRunJournal();
       if (!durable) {
         // The tab that owned execution already persisted its final document and cleared the
-        // journal. Do not recreate that journal from this tab's stale in-memory snapshot.
+        // journal. Its transcript store is not shared with this tab: even a loaded history
+        // here may have been fetched before the final reply. Refresh only the observed
+        // execution's exact sessions, without recreating a journal or dispatching a turn.
+        const observed = journal.current;
+        const retry = () => {
+          setHandoffNote(surfaceNotice(t, 'recovery_pending'));
+          timer = setTimeout(() => void poll(), 2500);
+        };
         const current = loadDocumentWithStatus();
-        if (current.status === 'ok') { docRef.current = current.doc; setDoc(current.doc); }
+        if (current.status !== 'ok') { retry(); return; }
+        for (const node of current.doc.nodes) {
+          const entry = observed?.nodes[node.id];
+          if (node.kind !== 'session' || !entry || entry.threadId !== activeThreadId(node)
+              || entry.companyId !== node.binding?.companyId || entry.agentId !== node.binding?.agentId
+              || !node.issueId || (entry.issueId && entry.issueId !== node.issueId)) continue;
+          const storeKey = sessionStoreKey(node);
+          if (getSessionSnapshot(storeKey).streaming) { retry(); return; }
+          const identity = JSON.stringify([observed!.id, storeKey, entry.companyId, entry.agentId, node.issueId]);
+          if (!refreshedHistories.has(identity)) {
+            forgetNode(storeKey);
+            await restoreHistory({ gatewayBase: gatewayApiBase(), node,
+              signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+            if (controller.signal.aborted) return;
+            if (journal.current !== observed || loadRunJournal()) { retry(); return; }
+            if (getSessionSnapshot(storeKey).history !== 'loaded') { retry(); return; }
+            refreshedHistories.add(identity);
+          }
+        }
+        // Structural/session edits in another tab are possible after it clears the journal.
+        // Do not publish our pre-fetch document over those edits or unlock a newer run.
+        if (journal.current !== observed || loadRunJournal()
+            || JSON.stringify(loadDocumentWithStatus().doc) !== JSON.stringify(current.doc)) { retry(); return; }
+        docRef.current = current.doc; setDoc(current.doc);
         journal.current = null; setRecovering(false); setRunning(false); setRuns({});
         setHandoffNote(surfaceNotice(t, 'recovery_complete'));
         return;
@@ -454,7 +508,12 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         timer = setTimeout(() => void poll(), 2500);
         return;
       }
-      const next = recoveryJournalForDocument(docRef.current, reconciled);
+      const next = await settleRecoveredJournal(gatewayApiBase(), recoveryJournalForDocument(docRef.current, reconciled), controller.signal);
+      if (controller.signal.aborted) return;
+      if (journal.current !== observed || JSON.stringify(loadRunJournal()) !== JSON.stringify(observed)) {
+        timer = setTimeout(() => void poll(), 2500);
+        return;
+      }
       journal.current = next;
       saveRunJournal(next);
       setRuns(next.nodes);
@@ -463,7 +522,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       const recovered = applyRecoveredDocument(docRef.current, { ...next, inputFingerprint: next.inputFingerprint ?? '' });
       docRef.current = recovered; setDoc(recovered);
       // Persist the complete batch before deleting its recovery journal.
-      const persisted = saveDocument(recovered);
+      const persisted = saveLocalDocument(recovered);
       const unresolved = Object.values(next.nodes).some(node => node.state === 'running');
       if (unresolved) {
         const missing = Object.values(next.nodes).some(node => node.detail === 'recovery_identity_missing');
@@ -477,7 +536,12 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
           const entry = next.nodes[node.id];
           if (node.kind === 'session' && entry?.threadId === activeThreadId(node) && node.issueId
               && entry.companyId === node.binding?.companyId && entry.agentId === node.binding?.agentId) {
-            if (next.manual && !persistRecoveredManualConversation(node, next)) {
+            if (entry.operationId) updateConversationPresentation(node, entry.operationId, {
+              issueId: node.issueId, runId: entry.runId, outputText: entry.output ?? '',
+              outputState: entry.state === 'done' ? 'final' : 'failed',
+            });
+            if (next.manual && !await persistManualHistoryWithNativeProof(gatewayApiBase(), node, next, controller.signal)) {
+              if (controller.signal.aborted) return;
               setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
               timer = setTimeout(() => void poll(), 2500);
               return;
@@ -487,7 +551,8 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
             await restoreHistory({ gatewayBase: gatewayApiBase(), node,
               signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
             if (controller.signal.aborted) return;
-            if (next.manual) replaceTurns(storeKey, mergeRecoveredManualConversation(getSessionSnapshot(storeKey).turns, next, node.id));
+            if (next.manual) replaceTurns(storeKey, projectConversationTurns(node,
+              mergeRecoveredManualConversation(getSessionSnapshot(storeKey).turns, next, node.id)));
           }
         }
         clearRunJournal(next.id); journal.current = null;
@@ -502,7 +567,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     });
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [recovering, patchDoc, t]);
+  }, [recovering, patchDoc, saveLocalDocument, t]);
   useEffect(() => {
     if (!running) return undefined;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -515,7 +580,16 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     * `scope` names the nodes allowed to EXECUTE; anything upstream of them contributes its stored
     * output instead of re-running. Omitted = the whole canvas, which is what 运行图 still does.
     */
-  const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void) => withCanvasRunOwnership(async () => {
+  const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string) => {
+    // Ownership can arrive after another edit. A manual send belongs to the exact Session
+    // and draft that initiated it, never whichever Session happens to be selected later.
+    const submittedNode = manualMessage && scope?.length === 1
+      ? docRef.current.nodes.find((node): node is SessionNode => node.id === scope[0] && node.kind === 'session')
+      : undefined;
+    const submittedThread = submittedNode
+      ? getNodeThreads(submittedNode).find(thread => thread.id === activeThreadId(submittedNode))
+      : undefined;
+    return withCanvasRunOwnership(async () => {
     // Synchronous re-entrancy guard on the REF: React state commits asynchronously, so a double
     // click could otherwise start two overlapping runs whose callbacks interleave into one map.
     if (runAbort.current || journal.current) return;
@@ -525,11 +599,37 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       setRuns(durable.nodes); setRunning(true); setRecovering(true);
       return;
     }
+    if (manualMessage && submittedNode && !await prepareManualHistoryCapacity(
+      gatewayApiBase(), submittedNode, manualMessage, () => {
+        const live = docRef.current.nodes.find(node => node.id === submittedNode.id);
+        return live?.kind === 'session' && activeThreadId(live) === activeThreadId(submittedNode)
+          && live.issueId === submittedNode.issueId && live.binding?.companyId === submittedNode.binding?.companyId
+          && live.binding?.agentId === submittedNode.binding?.agentId && !runAbort.current && !journal.current && !loadRunJournal();
+      },
+    )) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
+    // A capacity read may yield while another tab acquires or restores a durable run.
+    if (runAbort.current || journal.current || loadRunJournal()) return;
     const persistedCanvas = loadDocumentWithStatus();
-    if (persistedCanvas.status === 'ok' && canvasPlanRevision(persistedCanvas.doc) !== canvasPlanRevision(docRef.current)) {
+    const persistedRevision = canvasPlanRevision(persistedCanvas.doc);
+    if (persistedCanvas.status === 'ok'
+        && persistedRevision !== canvasPlanRevision(sanitizeDocument(docRef.current))
+        && persistedRevision !== lastSavedRevision.current) {
       docRef.current = persistedCanvas.doc; setDoc(persistedCanvas.doc);
+      lastSavedRevision.current = persistedRevision;
       setHandoffNote(surfaceNotice(t, 'canvas_changed_elsewhere'));
       return;
+    }
+    // Freeze the current ref after acquiring ownership: a drag/edit may be newer than the
+    // render that supplied this callback, even when its persistence base is still current.
+    const nodes = docRef.current.nodes;
+    const edges = reconcileEdges(nodes, docRef.current.edges);
+    const manualNode = submittedNode && nodes.find(node => node.id === submittedNode.id);
+    if (manualMessage && (!submittedNode || manualNode?.kind !== 'session'
+        || activeThreadId(manualNode) !== submittedThread?.id
+        || manualNode.issueId !== submittedNode.issueId
+        || manualNode.binding?.companyId !== submittedNode.binding?.companyId
+        || manualNode.binding?.agentId !== submittedNode.binding?.agentId)) {
+      setHandoffNote(surfaceNotice(t, 'canvas_changed_elsewhere')); return;
     }
     if (inspectorCloseLocked.current) { setHandoffNote(surfaceNotice(t, 'bind_before_run')); return; }
     if (hasStreamingConversation(docRef.current.nodes)) { setHandoffNote(surfaceNotice(t, 'wait_conversation')); return; }
@@ -541,16 +641,28 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     const executing = new Set(scope ?? nodes.map(n => n.id));
     const pending: CanvasRunJournal = { version: 1, id: crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(docRef.current, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(nodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
     const prepared = prepareRunDocument(docRef.current, [...executing], Boolean(manualMessage));
-    if (!saveDocument(prepared)) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
+    if (!saveLocalDocument(prepared)) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
     if (!saveRunJournal(pending)) {
       // No dispatch happened: preserve the previous published results on a quota failure.
-      saveDocument(docRef.current);
+      saveLocalDocument(docRef.current);
       setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return;
     }
-    docRef.current = prepared; setDoc(prepared);
+    // Draft consumption is part of durable acceptance, not a generic composer edit (which
+    // is correctly blocked once running). Save only after the journal succeeds, so neither
+    // storage failure can discard a request that has not been accepted or dispatched.
+    const consumeDraft = manualNode?.kind === 'session' && submittedThread
+      && getNodeThreads(manualNode).find(thread => thread.id === submittedThread.id)?.draft === submittedThread.draft;
+    const acceptedDocument = consumeDraft ? { ...prepared, nodes: prepared.nodes.map(node =>
+      node.id === manualNode.id && node.kind === 'session'
+        ? updateNodeDraft(node, '', submittedThread.id) : node) } : prepared;
+    if (acceptedDocument !== prepared && !saveLocalDocument(acceptedDocument)) {
+      clearRunJournal(pending.id);
+      setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return;
+    }
+    docRef.current = acceptedDocument; setDoc(acceptedDocument);
     journal.current = pending;
     runAbort.current = ac;
-    onAccepted?.();
+    if (consumeDraft) onAccepted?.();
     setRunning(true);
     setStopped(false);
     setRunSummary(null);
@@ -563,10 +675,20 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     // concurrently — the gateway wakes one worker per agent, so parallel turns would
     // cross-attribute their output), and it is the version the tests exercise. A local copy
     // drifted from it once already, keying on agentId alone instead of company+agent.
-    const exec = createGatewayExecutor({
+    const nativeExec = createGatewayExecutor({
       gatewayBase: gatewayApiBase(),
       signal: ac.signal,
+      deferFinalPresentation: true,
       operationIdForNode: nodeId => pending.nodes[nodeId]?.operationId ?? undefined,
+      // Display metadata is captured separately; the Agent receives the complete execution
+      // request, including the inputs and output contract, without any display substitutions.
+      presentationForNode: node => ({
+        inputKind: manualMessage ? 'manual' : 'workflow',
+        ...(manualMessage && manualDisplayText !== undefined ? { displayText: manualDisplayText } : {}),
+        outputState: 'streaming',
+        outputContract: node.contract ? { version: 1, inputs: [],
+          outputs: node.contract.outputs.map(field => ({ ...field, value: '' })) } : undefined,
+      }),
       onIssueId: (nodeId: string, issueId: string, threadId?: string) => {
         updateJournal(nodeId, { issueId });
         // The server minted this node's thread: persist it so the NEXT turn continues the same
@@ -580,6 +702,24 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       onRunAccepted: (nodeId, identity) => updateJournal(nodeId, identity),
       onCancelFailure: (_nodeId, detail) => setHandoffNote(stopUnconfirmedMessage(t, detail)),
     });
+    const exec = async (node: SessionNode, message: string) => {
+      const result = await nativeExec(node, message);
+      const entry = journal.current?.nodes[node.id];
+      const settled = await settleExecutionResult(gatewayApiBase(), entry, result);
+      const operationId = pending.nodes[node.id]?.operationId;
+      const outputState = settled.ok && !settled.unconfirmed ? 'final' : 'failed';
+      if (operationId) {
+        updateConversationPresentation(node, operationId, { issueId: entry?.issueId, runId: entry?.runId,
+          outputText: settled.output, outputState });
+        const key = sessionStoreKey(node);
+        for (const turn of getSessionSnapshot(key).turns) {
+          if (turn.role === 'agent' && turn.recoveryOperationId === operationId && turn.text === settled.output) {
+            patchPresentation(key, turn.id, { ...turn.presentation, outputState });
+          }
+        }
+      }
+      return settled;
+    };
     const onStatus = (nodeId: string, status: RunNodeStatus) => {
         updateJournal(nodeId, status);
         if (runAbort.current !== ac) return;
@@ -625,11 +765,11 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         setDoc(docRef.current); setRuns(historical.nodes); finalSummary = journalSummary(historical);
         setHandoffNote(surfaceNotice(t, 'recovery_input_changed'));
       }
-      if (!saveDocument(docRef.current)) { setRecovering(true); return; }
+      if (!saveLocalDocument(docRef.current)) { setRecovering(true); return; }
       if (journal.current?.manual) {
         for (const node of docRef.current.nodes) {
           if (node.kind === 'session' && pending.scope.includes(node.id)
-              && !persistRecoveredManualConversation(node, journal.current)) {
+              && !await persistManualHistoryWithNativeProof(gatewayApiBase(), node, journal.current)) {
             setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
             setRecovering(true); return;
           }
@@ -640,7 +780,8 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       setStopped(finalSummary.cancelled > 0);
       setRunSummary(finalSummary);
     }
-  }, () => setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere'))), [nodes, edges, patchDoc, updateJournal, t]);
+    }, () => setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere')));
+  }, [patchDoc, saveLocalDocument, updateJournal, locale, t]);
 
   const stopRun = useCallback(() => {
     if (runAbort.current && !runAbort.current.signal.aborted) { runAbort.current.abort(); return; }
@@ -709,6 +850,9 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   // real change so it never re-saves the document on an identical value.
   const persistPreview = useCallback(
     (nodeId: string, preview: string, threadId?: string) => {
+      // Recovery can briefly display a previously loaded transcript while another tab has
+      // already saved the final document. Never write that stale tail back into its preview.
+      if (recovering || (journal.current && !runAbort.current)) return;
       patchDoc((prev) => {
         const target = prev.nodes.find((n) => n.id === nodeId);
         if (!target || target.kind !== 'session') return prev;
@@ -720,7 +864,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         };
       }, { silent: true });
     },
-    [patchDoc],
+    [patchDoc, recovering],
   );
 
   const persistDraft = useCallback((nodeId: string, threadId: string, draft: string) => {
@@ -734,7 +878,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   }, [patchDoc]);
 
   const toggleDeliverables = useCallback((nodeId: string, open: boolean) => {
-    if (runAbort.current || inspectorCloseLocked.current) return;
+    if (!canEditStructure()) return;
     const target = docRef.current.nodes.find(node => node.id === nodeId);
     if (!target || target.kind !== 'session' || Boolean(target.deliverablesOpen) === open || hasStreamingConversation([target])) return;
     patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => {
@@ -743,11 +887,11 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       return { ...node, deliverablesOpen: open, w, x: node.x - (w - node.w) / 2 };
     }) }), { silent: true });
     requestAnimationFrame(() => focusNode(nodeId));
-  }, [patchDoc, focusNode]);
+  }, [canEditStructure, patchDoc, focusNode]);
 
   const addNode = useCallback(
     (kind: AddNodeKind, world: { x: number; y: number }) => {
-      if (inspectorCloseLocked.current) return;
+      if (!canEditStructure()) return;
       const node = kind === 'form' ? createFormNode(world)
         : kind === 'llm' || kind === 'coding' || kind === 'image'
           ? { ...createAgentTemplate('general', world, locale), agentKind: kind }
@@ -758,7 +902,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       setInspectorId(node.id);
       return node;
     },
-    [patchDoc, focusNode, locale],
+    [patchDoc, focusNode, locale, canEditStructure],
   );
 
   /**
@@ -770,6 +914,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
    */
   const moveNode = useCallback(
     (nodeId: string, x: number, y: number) => {
+      if (!canEditStructure()) return;
       patchDoc(
         (prev) => {
           const target = prev.nodes.find((n) => n.id === nodeId);
@@ -791,7 +936,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         { label: `move:${nodeId}` },
       );
     },
-    [patchDoc],
+    [canEditStructure, patchDoc],
   );
 
   /** Selection change from a tile press — see SessionTile's SelectMode. */
@@ -810,20 +955,20 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
 
   const resizeNode = useCallback(
     (nodeId: string, w: number, h: number) => {
+      if (!canEditStructure()) return;
       patchDoc((prev) => ({ ...prev, nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, w, h } : n)) }), {
         label: `resize:${nodeId}`,
       });
     },
-    [patchDoc],
+    [canEditStructure, patchDoc],
   );
 
   const deleteNodes = useCallback(
     (ids: ReadonlyArray<string>) => {
-      if (inspectorCloseLocked.current) return;
+      if (!canEditStructure()) return;
       if (!ids.length) return;
       const kill = new Set(ids);
       const removed = docRef.current.nodes.filter(node => kill.has(node.id));
-      if (hasStreamingConversation(removed)) return;
       patchDoc((prev) => ({
         ...prev,
         nodes: prev.nodes.filter((n) => !kill.has(n.id)),
@@ -839,13 +984,12 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       setFocusedId((prev) => (prev && kill.has(prev) ? null : prev));
       setInspectorId((prev) => (prev && kill.has(prev) ? null : prev));
     },
-    [patchDoc],
+    [canEditStructure, patchDoc],
   );
 
   const saveNode = useCallback(
     (next: CanvasNode, allowBindingSave = false) => {
-      if (runAbort.current) return;
-      if (inspectorCloseLocked.current && !allowBindingSave) return;
+      if (!canEditStructure(allowBindingSave)) return;
       const current = docRef.current.nodes.find(n => n.id === next.id);
       if (current?.kind === 'session' && next.kind === 'session' &&
         activeThreadId(current) !== activeThreadId(next) && hasStreamingConversation([current])) return;
@@ -859,13 +1003,13 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         : n) }), { label: `config:${next.id}` });
       setHandoffNote('');
     },
-    [patchDoc],
+    [canEditStructure, patchDoc],
   );
 
   // The inspector owns configuration, while cards own contracts and the transport owns thread IDs.
   const saveInspector = useCallback((draft: CanvasNode) => {
     const live = docRef.current.nodes.find(n => n.id === draft.id);
-    if (!live || runAbort.current) return;
+    if (!live || !canEditStructure(true)) return;
     if (live.kind === 'session' && draft.kind === 'session') {
       const bindingChanged = live.binding?.companyId !== draft.binding?.companyId || live.binding?.agentId !== draft.binding?.agentId;
       const configChanged = !bindingChanged && boundAgentConfigurationChanged(live, draft);
@@ -883,9 +1027,10 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     } else if (live.kind === 'form' && draft.kind === 'form') {
       saveNode({ ...live, title: draft.title, fields: draft.fields });
     }
-  }, [saveNode]);
+  }, [canEditStructure, saveNode]);
   const onConnect = useCallback(
     (from: PortRef, to: PortRef, dataType: DataType) => {
+      if (!canEditStructure()) return;
       patchDoc((prev) => {
         const id = edgeId(from, to);
         if (prev.edges.some((e) => e.id === id)) return prev;
@@ -900,15 +1045,17 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         return { ...prev, edges: [...prev.edges, edge] };
       }, { label: `connect:${edgeId(from, to)}` });
     },
-    [patchDoc],
+    [canEditStructure, patchDoc],
   );
 
   const disconnect = useCallback(
-    (edge: CanvasEdge) =>
+    (edge: CanvasEdge) => {
+      if (!canEditStructure()) return;
       patchDoc((prev) => ({ ...prev, edges: prev.edges.filter((e) => e.id !== edge.id) }), {
         label: `disconnect:${edge.id}`,
-      }),
-    [patchDoc],
+      });
+    },
+    [canEditStructure, patchDoc],
   );
 
   // ---- overlays -----------------------------------------------------------------------------
@@ -970,9 +1117,11 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     [addNode],
   );
 
+  const canEdit = !running && !recovering && canEditStructure();
   const commandActions: CanvasCommandActions = useMemo(
     () => ({
       addSession: (kind) => addAtViewCenter(kind),
+      canEdit,
       run: () => void startRun(),
       stop: stopRun,
       fitAll,
@@ -989,24 +1138,25 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       },
       undo,
       redo,
-      canUndo: history.undo > 0,
-      canRedo: history.redo > 0,
+      canUndo: canEdit && history.undo > 0,
+      canRedo: canEdit && history.redo > 0,
     }),
-    [addAtViewCenter, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection],
+    [addAtViewCenter, canEdit, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo],
   );
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
   const createTemplate = useCallback(() => {
-    if (running || inspectorCloseLocked.current) return;
-    const world = nodes.length ? { x: boundsOfNodes(presentationNodes(nodes, null)).maxX + 160, y: 60 } : { x: 0, y: 0 };
+    if (!canEditStructure()) return;
+    const currentNodes = docRef.current.nodes;
+    const world = currentNodes.length ? { x: boundsOfNodes(presentationNodes(currentNodes, null)).maxX + 160, y: 60 } : { x: 0, y: 0 };
     const template = createDevelopmentTemplate(world, locale);
     patchDoc(prev => ({ ...prev, nodes: [...prev.nodes, ...template.nodes], edges: [...prev.edges, ...template.edges] }), { label: 'template:development' });
     setSelection([template.nodes[0].id]);
     setFocusedId(null);
     fitted.current = true;
     const box = viewportSize();
-    if (box) setView(fitNodeOverview([...nodes, ...template.nodes], box));
-  }, [running, nodes, patchDoc, viewportSize, locale]);
+    if (box) setView(fitNodeOverview([...currentNodes, ...template.nodes], box));
+  }, [canEditStructure, patchDoc, viewportSize, locale]);
 
   const zoomBy = (factor: number) => {
     const box = viewportSize();
@@ -1199,7 +1349,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
             selected={selection.includes(node.id)}
             run={runs[node.id] ?? null}
             gatewayBase={gatewayApiBase()}
-            onSend={(node, message, accepted) => { void startRun([node.id], message, accepted); }}
+            onSend={(node, message, accepted, displayText) => { void startRun([node.id], message, accepted, displayText); }}
             conversationContext={node.kind === 'session' ? prepareNodeConversation(node, nodes, edges) : undefined}
             onIssueId={(nodeId, issueId, threadId) =>
               // Server-minted, not a user edit — never an undo step.

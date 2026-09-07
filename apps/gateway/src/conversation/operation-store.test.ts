@@ -75,4 +75,27 @@ describe('ConversationOperationStore', () => {
     await a.recordIssue(OPERATION_ID, 'issue-recovered');
     expect(await a.read(OPERATION_ID)).toMatchObject({ phase: 'issue_known', issueId: 'issue-recovered' });
   });
+
+  it('keeps container creation separate from the comment delivery boundary across restarts', async () => {
+    const { a, b } = await stores();
+    await a.claim({ ...request(), deliveryMode: 'comment' });
+    await a.beginMutation(OPERATION_ID);
+    await a.recordContainer(OPERATION_ID, 'issue-1');
+    expect(await b.read(OPERATION_ID)).toMatchObject({ phase: 'container_known', issueId: 'issue-1', deliveryConfirmed: false, commentStarted: false });
+    const starts = await Promise.all([a.beginComment(OPERATION_ID), b.beginComment(OPERATION_ID)]);
+    expect(starts.sort()).toEqual([false, true]);
+    expect(await b.read(OPERATION_ID)).toMatchObject({ phase: 'comment_started', deliveryConfirmed: false });
+    await a.recordIssue(OPERATION_ID, 'issue-1', 'comment-1');
+    expect(await b.read(OPERATION_ID)).toMatchObject({ phase: 'issue_known', deliveryConfirmed: true, commentId: 'comment-1' });
+  });
+
+  it('retains old journal semantics when a new client claims the same existing operation', async () => {
+    const { a, b } = await stores();
+    await a.claim(request());
+    await a.beginMutation(OPERATION_ID);
+    await a.recordIssue(OPERATION_ID, 'legacy-todo-issue');
+    const claimed = await b.claim({ ...request(), deliveryMode: 'comment' });
+    expect(claimed.snapshot.request.deliveryMode).toBeUndefined();
+    expect(claimed.snapshot).toMatchObject({ deliveryConfirmed: true, commentId: null, issueId: 'legacy-todo-issue' });
+  });
 });

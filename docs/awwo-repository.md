@@ -1,6 +1,6 @@
 # AwwO repository
 
-The operator requested a new Forgejo repository on 2026-09-05 to carry forward all current AwwO work. The repository is `ClawHunt-Store/AwwO`, private like its source project. `dev` is the default development integration branch. The first version is `v0.2.0`; production deployment is separate.
+The operator requested a new Forgejo repository on 2026-09-05 to carry forward all current AwwO work. The repository is `ClawHunt-Store/AwwO`, private like its source project. On 2026-09-06 the operator requested that local and remote branches be reduced to `main` and `online`. `main` is the default source baseline; `online` is the reviewed release reference. The first version was `v0.2.0`; production deployment is separate.
 
 ## Import provenance
 
@@ -15,9 +15,11 @@ The operator requested a new Forgejo repository on 2026-09-05 to carry forward a
 
 ## Iteration workflow
 
-Clone the repository and branch from `origin/dev` into a dedicated `codex/*` or `feat/*` worktree. Preserve shared work, validate affected tests/builds and independently review changes before committing and proposing integration into `dev`. Keep commits focused. Use the same feature branch for review rather than treating the integration branch as an unrelated PR source.
+Use `main` as the default source baseline and maintain only `main` and `online` as named branches. Do not recreate `dev` or named worker branches. Preserve isolated work directories and use an exact-SHA detached worktree where unfinished work must stay isolated. Review a specific commit/diff, validate affected tests/builds, and keep commits focused before the authorized integration/release step.
 
-The inherited SuperClaw instructions mention branches and hosts that belong to the original repository. This AwwO bootstrap creates `dev` as the actual integration baseline; it does not create or deploy a production `main`, change branch protection, rewrite shared history or grant broader remote-action permission. Approval, secret separation and independent-review requirements remain in force.
+The inherited SuperClaw instructions mention branches and hosts belonging to the original repository. The operator's 2026-09-06 two-branch decision supersedes those topology rules for AwwO only. Approval, secret separation, independent review and relevant verification remain in force. Initializing `online` from an existing release commit is not a production deployment. Historical acceptance documents retain their original branch names as provenance.
+
+The 2026-09-06 cleanup preserves in-progress server acceptance changes in their existing worktree. Neither branch creation nor deletion publishes those uncommitted changes. Consult the dated cleanup record for remote readback, metadata repairs and any remaining operational blocker.
 
 ## Verification records
 

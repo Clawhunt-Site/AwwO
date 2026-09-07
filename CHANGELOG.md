@@ -6,6 +6,24 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-07
+
+- Keep natural-language requests readable with expandable execution details; display confirmed structured replies using their original output-field labels while preserving raw responses and failed or interrupted output.
+- Restore conversation display metadata through exact operation/run identities, with isolated Session caches and safe raw-history fallback when optional display storage is unavailable.
+- Consume only the durably accepted draft and allow read-only delivery inspection during execution; keep structural and output mutations locked.
+- Verify complete native conversation history before pruning local recovery copies, and check known capacity limits before dispatching another manual turn.
+- Treat Agent-authored Markdown images as explicit links, avoiding automatic third-party requests while retaining the original response.
+- Complete the operator-approved local and Forgejo branch consolidation to `main` and `online`, preserving recovery bundles and all unfinished worktrees.
+- Add a private Ubuntu/systemd acceptance installer with independent state, loopback-only services, SSH access, staging configuration and failure-preserving installation checks.
+- Repair four missing optional Web lockfile entries required by npm 11.19.0 without changing existing dependency resolutions; verify actual clean Linux installation and Web build.
+- Distinguish native Codex usage-limit failures from login/model errors in canvas planning, returning a stable error code and a fixed message without exposing CLI authentication diagnostics.
+- Read the available Codex models and reasoning efforts from the authenticated native CLI, with bounded requests and explicit unavailable states.
+- Include the actual canvas task in newly bound native Agents, and deliver each new Session through one attributable user comment with durable replay protection.
+- Park completed conversation turns using verified native pause holds, retain uncertain runs for recovery, and recover owned Stop/settlement holds after Gateway restarts.
+- Preserve confirmed cancellation against buffered completion, correct scoped dependency counts, and avoid treating the current tab's unsaved canvas edits as foreign revisions.
+- Refresh Session history after another tab completes recovery, preserve earlier failed local messages in chronological position, and protect the latest preview while history is loading.
+- Verify real remote AI graph creation/editing, two-node file delivery, scoped correction, native Stop/resume, continuation after Gateway restart, manual pause protection, in-flight refresh and cross-tab history recovery, alongside startup and 14 isolated authenticated account checks; final execution and orphan-process counts are zero.
+
 ## [0.3.0] - 2026-09-05
 
 - Add account/profile and workspace membership management using the existing control-plane APIs, including copied invitation links, role updates and server-enforced last-owner protection. Local trusted mode is identified explicitly.

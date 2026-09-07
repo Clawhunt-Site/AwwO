@@ -28,6 +28,7 @@ import {
 } from './sessionTransport';
 import * as sessions from './sessions';
 import { activeThreadId, sessionStoreKey } from './nodeThreads';
+import { beginConversationPresentation, updateConversationPresentation } from './conversationPresentation';
 
 const STATUS_LABEL: Record<string, string> = {
   succeeded: '已完成',
@@ -46,6 +47,9 @@ export interface ExecAgentOptions {
   cancelRun?: typeof cancelConversationRunViaGateway;
   /** Stable identity persisted in the run journal before any upstream mutation. */
   operationId?: string;
+  presentation?: sessions.TurnPresentation;
+  /** Canvas settlement must confirm the native terminal state before showing a final result. */
+  deferFinalPresentation?: boolean;
   signal?: AbortSignal;
 }
 
@@ -108,8 +112,11 @@ export async function execAgentViaGateway(
   markLocalSend(storeKey);
   const token = beginStream(storeKey);
   const mirroring = () => isStreamCurrent(storeKey, token);
-  sessions.appendTurn(storeKey, { role: 'user', text: message });
-  const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '' });
+  const presentation = opts.presentation ? JSON.parse(JSON.stringify(opts.presentation)) as sessions.TurnPresentation : undefined;
+  if (operationId && presentation) beginConversationPresentation(node, operationId, message, presentation);
+  const identity = operationId ? { recoveryOperationId: operationId } : {};
+  sessions.appendTurn(storeKey, { role: 'user', text: message, ...identity, ...(presentation ? { presentation: { displayText: presentation.displayText, inputKind: presentation.inputKind } } : {}) });
+  const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '', ...identity, ...(presentation ? { presentation: { outputContract: presentation.outputContract, outputState: 'streaming' } } : {}) });
   sessions.setStreaming(storeKey, true);
   sessions.setStatus(storeKey, 'queued');
 
@@ -126,11 +133,12 @@ export async function execAgentViaGateway(
   // FIRST terminal frame wins. A late frame must never rewrite an already-decided outcome
   // (e.g. a stream-teardown 'error' after 'done: succeeded' would flip a real success into a
   // failure — or worse, the reverse would fake a success after an error).
-  let terminal:
+  type Terminal =
     | { kind: 'done'; status: string }
     | { kind: 'no_run'; detail: string }
     | { kind: 'error'; detail: string; code?: string }
-    | null = null;
+    | null;
+  let terminal: Terminal = null;
 
   // The graph's signal means "request a real Stop", not "detach this browser fetch". Keep a
   // separate transport controller so the SSE stays attached until the gateway has confirmed the
@@ -150,7 +158,10 @@ export async function execAgentViaGateway(
         if (mirroring()) sessions.setStatus(storeKey, `停止失败 · ${detail}`);
         return;
       }
-      if (terminal?.kind === 'done') return;
+      // A persisted native cancellation is authoritative over a buffered success
+      // event emitted while the process was shutting down. We already await the
+      // in-flight Stop before returning, so no published result is rewritten.
+      if (terminal?.kind === 'done' && !result.cancelled) return;
       if (!result.cancelled) {
         // Stop can observe a run that completed naturally. Its status alone does not prove
         // the SSE delivered the complete output; recover that output by run ID before success.
@@ -182,6 +193,7 @@ export async function execAgentViaGateway(
       case 'accepted':
         reportIssue(f.issueId);
         runId = f.runId;
+        if (operationId && presentation) updateConversationPresentation(node, operationId, { issueId: f.issueId, runId: f.runId });
         onRunAccepted?.({ issueId: f.issueId, runId: f.runId });
         beginCancellation();
         if (mirroring() && !f.runVisible) sessions.patchTurn(storeKey, agentTurnId, COPY.thinking, 'info');
@@ -241,6 +253,14 @@ export async function execAgentViaGateway(
     if (cancellation) await cancellation;
   } finally {
     signal?.removeEventListener('abort', requestStop);
+    const final = terminal as Terminal;
+    const outputState = final?.kind === 'done' && final.status === 'succeeded' && text.trim()
+      ? opts.deferFinalPresentation ? 'streaming' : 'final' : 'failed';
+    if (presentation) {
+      if (operationId) updateConversationPresentation(node, operationId, { issueId: issueId ?? null, runId, outputText: text, outputState });
+      // Finalize while this stream still owns its turn, before endStream releases ownership.
+      if (mirroring()) sessions.patchPresentation(storeKey, agentTurnId, { outputContract: presentation.outputContract, outputState });
+    }
     // Only the CURRENT stream may clear the tile's streaming state — a superseded stream
     // finishing late must not stop the spinner of the stream that replaced it.
     if (isStreamCurrent(storeKey, token)) {
@@ -250,11 +270,7 @@ export async function execAgentViaGateway(
     }
   }
 
-  const t = terminal as
-    | { kind: 'done'; status: string }
-    | { kind: 'no_run'; detail: string }
-    | { kind: 'error'; detail: string; code?: string }
-    | null;
+  const t = terminal as Terminal;
   if (!t) return { ok: false, unconfirmed: true, output: text, detail: '流在完成前中断（未收到终态）' };
   if (t.kind === 'error') return {
     ok: false,
@@ -276,6 +292,8 @@ export interface GatewayExecutorArgs {
   onCancelFailure?: (nodeId: string, detail: string, threadId?: string) => void;
   /** Read the pre-persisted operation identity for this node/thread. */
   operationIdForNode?: (nodeId: string, threadId: string) => string | undefined;
+  presentationForNode?: (node: SessionNode) => sessions.TurnPresentation | undefined;
+  deferFinalPresentation?: boolean;
   signal?: AbortSignal;
 }
 
@@ -285,7 +303,7 @@ export interface GatewayExecutorArgs {
  * and attaches to its live run, so parallel turns could cross-attribute outputs. Nodes bound to
  * different agents stay fully concurrent.
  */
-export function createGatewayExecutor({ gatewayBase, onIssueId, onRunAccepted, onCancelFailure, operationIdForNode, signal }: GatewayExecutorArgs) {
+export function createGatewayExecutor({ gatewayBase, onIssueId, onRunAccepted, onCancelFailure, operationIdForNode, presentationForNode, deferFinalPresentation, signal }: GatewayExecutorArgs) {
   // Explicit type args: inference would otherwise take the arg tuple from `keyOf` alone (which
   // ignores `message`) and then reject the two-argument executor.
   return withPerKeySerialization<[SessionNode, string], ExecAgentResult>(
@@ -294,6 +312,8 @@ export function createGatewayExecutor({ gatewayBase, onIssueId, onRunAccepted, o
       execAgentViaGateway(gatewayBase, node, message, {
         signal,
         operationId: operationIdForNode?.(node.id, activeThreadId(node)),
+        presentation: presentationForNode?.(node),
+        deferFinalPresentation,
         onIssueId: onIssueId ? (issueId) => onIssueId(node.id, issueId, activeThreadId(node)) : undefined,
         onRunAccepted: onRunAccepted ? (identity) => onRunAccepted(node.id, identity, activeThreadId(node)) : undefined,
         onCancelFailure: onCancelFailure ? (detail) => onCancelFailure(node.id, detail, activeThreadId(node)) : undefined,

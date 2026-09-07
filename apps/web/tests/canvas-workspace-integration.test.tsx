@@ -7,9 +7,10 @@ import { resetAllSessions } from '../src/canvas/sessions';
 
 const hire = vi.fn();
 vi.mock('../src/canvas/runTransport', () => ({
-  createGatewayExecutor: (options: { onIssueId: (nodeId: string, issueId: string) => void }) =>
+  createGatewayExecutor: (options: { onIssueId: (nodeId: string, issueId: string) => void; onRunAccepted: (nodeId: string, identity: { issueId: string; runId: string }) => void }) =>
     async (node: SessionNode) => {
       options.onIssueId(node.id, 'server-owned-thread');
+      options.onRunAccepted(node.id, { issueId: 'server-owned-thread', runId: 'native-run' });
       const values = Object.fromEntries((node.contract?.outputs ?? []).map(field => [
         field.id, field.type === 'number' ? 1 : field.type === 'boolean' ? false : `Validated ${field.id}`,
       ]));
@@ -103,6 +104,9 @@ it('forks changed native configuration into an unbound Session instead of drifti
 });
 
 it('preserves the server thread while undoing a user edit made before graph execution', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown) => String(url).endsWith('/settle')
+    ? new Response(JSON.stringify({ confirmed: true, status: 'succeeded', holdId: 'native-hold' }))
+    : new Response('{}', { status: 503 })));
   const node = createAgentTemplate('data', { x: 0, y: 0 });
   node.runtime = 'claude_local';
   node.binding = { companyId: 'company', agentId: 'agent', agentName: 'Data agent' };
@@ -120,6 +124,27 @@ it('preserves the server thread while undoing a user edit made before graph exec
   expect(restored.title).toBe('数据治理');
   expect(restored.kind === 'session' && restored.issueId).toBe('server-owned-thread');
   expect(screen.getByRole('button', { name: '撤销', exact: true })).toBeDisabled();
+});
+
+it('waits for native settlement before publishing output or enabling edits', async () => {
+  const node = createAgentTemplate('data', { x: 0, y: 0 });
+  node.runtime = 'claude_local';
+  node.binding = { companyId: 'company', agentId: 'agent', agentName: 'Data agent' };
+  node.contract!.inputs[0].value = 'A ready brief';
+  localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes: [node], view: { x: 0, y: 0, scale: 1 } }));
+  let resolveSettlement!: (response: Response) => void;
+  const fetcher = vi.fn(async (url: unknown) => String(url).endsWith('/settle')
+    ? new Promise<Response>(resolve => { resolveSettlement = resolve; }) : new Response('{}', { status: 503 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<CanvasSurface />);
+  fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+  await waitFor(() => expect(resolveSettlement).toBeTypeOf('function'));
+  expect(screen.getByRole('button', { name: '添加 Agent', exact: true })).toBeDisabled();
+  expect(loadDocumentWithStatus().doc.nodes[0].lastOutput).toBeFalsy();
+  resolveSettlement(new Response(JSON.stringify({ confirmed: true, status: 'succeeded', holdId: 'native-hold' })));
+  await screen.findByText(/运行完成：1\/1/);
+  expect(screen.getByRole('button', { name: '添加 Agent', exact: true })).not.toBeDisabled();
+  expect(loadDocumentWithStatus().doc.nodes[0].lastOutput?.source).toBe('run');
 });
 
 it('explains missing input when the operator runs one configured node', () => {

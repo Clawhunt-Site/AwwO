@@ -214,8 +214,9 @@ describe('contract execution', () => {
       onStatus: (id, status) => { statuses[id] = status; },
     });
     expect(executed).toEqual([]);
-    expect(summary).toMatchObject({ ok: false, cached: 0 });
-    expect(statuses.source.detail).toContain('字段 count');
+    expect(summary).toMatchObject({ ok: false, cached: 0, total: 1, blocked: 1 });
+    expect(statuses.source).toBeUndefined();
+    expect(statuses.sink.detail).toContain('字段 count');
     expect(statuses.sink.state).toBe('blocked');
   });
 

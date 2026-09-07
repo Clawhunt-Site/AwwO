@@ -26,6 +26,7 @@ import type { SessionNode } from './canvasDoc';
 import { mergePersistedManualConversations } from './runRecoveryDocument';
 import * as sessions from './sessions';
 import { sessionStoreKey } from './nodeThreads';
+import { projectConversationTurns } from './conversationPresentation';
 
 export const COPY = {
   thinking: '已投递，等待 agent 启动…',
@@ -161,12 +162,12 @@ export async function restoreHistory({ gatewayBase, node, signal }: RestoreHisto
     finish('loaded');
     return;
   }
-  const merged = mergePersistedManualConversations(node, stored.map((m) => ({ role: m.role, text: m.text })));
+  const merged = mergePersistedManualConversations(node, stored);
   if (!merged) {
     finish('unreadable');
     return;
   }
-  if (merged.length) sessions.replaceTurns(storeKey, merged);
+  if (merged.length) sessions.replaceTurns(storeKey, projectConversationTurns(node, merged));
   finish('loaded');
 }
 

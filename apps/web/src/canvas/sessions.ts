@@ -20,14 +20,32 @@
 //
 // No React, no DOM, no transport: pure state + notification, fully unit-testable.
 
+import type { NodeContract } from './nodeContracts';
+
 export type TurnRole = 'user' | 'agent' | 'system';
 export type TurnTone = 'info' | 'warn' | 'error';
+
+/** Display metadata never replaces the exact execution text or publishes a delivery. */
+export interface TurnPresentation {
+  displayText?: string;
+  inputKind?: 'manual' | 'workflow' | 'legacy-execution';
+  outputContract?: NodeContract;
+  outputState?: 'streaming' | 'final' | 'failed';
+}
 
 export interface Turn {
   id: number;
   role: TurnRole;
   text: string;
   tone?: TurnTone;
+  presentation?: TurnPresentation;
+  nativeCommentId?: string;
+  nativeOperationId?: string;
+  nativeRunId?: string;
+  nativeSource?: 'issue_description';
+  recoveryOperationId?: string;
+  recoveryRunId?: string;
+  createdAt?: number;
 }
 
 /**
@@ -149,6 +167,13 @@ export function patchTurn(nodeId: string, turnId: number, text: string, tone?: T
     const turns = session.turns.slice();
     turns[idx] = { ...turn, text, tone };
     return { ...session, turns };
+  });
+}
+
+export function patchPresentation(nodeId: string, turnId: number, presentation: TurnPresentation): void {
+  update(nodeId, session => {
+    if (!session.turns.some(turn => turn.id === turnId)) return null;
+    return { ...session, turns: session.turns.map(turn => turn.id === turnId ? { ...turn, presentation } : turn) };
   });
 }
 

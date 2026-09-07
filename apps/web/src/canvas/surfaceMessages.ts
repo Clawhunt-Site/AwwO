@@ -49,6 +49,7 @@ const RECOVERY_DETAIL_KEYS = {
   recovery_invalid_output: 'surface.recoveryInvalidOutput',
   recovery_input_changed: 'surface.recoveryInputChanged',
   recovery_unconfirmed: 'surface.recoveryUnconfirmed',
+  recovery_settlement_unconfirmed: 'surface.settlementUnconfirmed',
   succeeded: 'session.succeeded',
   failed: 'session.failed',
   cancelled: 'session.cancelled',
