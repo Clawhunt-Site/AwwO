@@ -1,3 +1,4 @@
+import { appearanceFixture } from './saas-appearance-fixture';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -35,6 +36,7 @@ afterEach(() => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); v
 it('reload_after_409 retains the local draft, blocks the editor and never overwrites the newer cloud version', async () => {
   let cloud = record(); let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { writes++; cloud = record(documentWith('其他页面的新内容'), 8); return response({ error: { code: 'conflict', message: 'Changed elsewhere' } }, 409); }
@@ -60,6 +62,7 @@ it('reload_after_409 retains the local draft, blocks the editor and never overwr
 it('network_failure preserves an exportable draft across reload even while the cloud remains unreachable', async () => {
   let offline = false;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { offline = true; throw new TypeError('network unavailable'); }
@@ -80,6 +83,7 @@ it('network_failure preserves an exportable draft across reload even while the c
 it('successful_save_clears_draft and StrictMode reload of a saved document does not report a recovery or write a duplicate', async () => {
   let cloud = record(); let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { const body = JSON.parse(init.body as string); cloud = record(body.document, body.version + 1); writes++; }
@@ -109,6 +113,7 @@ it('explicitly restores a same-version draft and only removes its source after t
   persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('待恢复的真实内容'));
   let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { writes++; const body = JSON.parse(init.body as string); expect(body.document.nodes[0].title).toBe('待恢复的真实内容'); expect(body.version).toBe(7); return response(record(body.document, 8)); }
@@ -127,6 +132,7 @@ it('retains edits made during an in-flight save when the older revision is ackno
   let resolveSave!: (value: Response) => void;
   let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { writes++; if (writes === 1) return new Promise<Response>(resolve => { resolveSave = resolve; }); throw new TypeError('network interrupted'); }
@@ -173,7 +179,7 @@ it('isolates draft writers and user/tenant/canvas scopes, including a late ackno
 it('protects a divergent legacy cache without a run journal and requires explicit confirmation to discard it', async () => {
   canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(documentWith('旧缓存中未同步的修改')));
   canvasStorage().setItem('awwo.cloud.version', '7');
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(identity) : url.endsWith('/runtime') ? response({ available: false, models: [] }) : response(record(documentWith('更新的云端内容'), 8))));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(identity) : url.endsWith('/runtime') ? response({ available: false, models: [] }) : response(record(documentWith('更新的云端内容'), 8))));
   render(<SaaSApp />);
   expect(await screen.findByRole('heading', { name: '发现未同步的本机草稿' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '丢弃这份本机草稿' }));
@@ -216,6 +222,7 @@ it.each(['completed', 'changed-inputs', 'unreachable'] as const)('opens the clou
   const read = new Promise<Response>(resolve => { resolveRead = resolve; });
   const requests: { url: string; method: string; body?: string }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     requests.push({ url, method: init.method || 'GET', body: init.body as string | undefined });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
@@ -263,7 +270,7 @@ it.each(['completed', 'changed-inputs', 'unreachable'] as const)('opens the clou
 
 it('keeps the recovery page, active cache and journal when its independent cache backup cannot be persisted', async () => {
   const { cloud, cached, oldDraft, journalBytes } = seedDetachedRun();
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(identity)
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(identity)
     : url.endsWith('/runtime') ? response({ available: false, models: [] }) : response(cloud)));
   render(<SaaSApp />);
   const enter = await screen.findByRole('button', { name: '使用云端版本并核对运行（保留草稿）' });

@@ -1,3 +1,4 @@
+import { appearanceFixture } from './saas-appearance-fixture';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SaaSApp } from '../src/saas/SaaSApp';
@@ -16,6 +17,7 @@ afterEach(() => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); v
 it('uses the original account panel and PATCHes only the current SaaS profile name', async () => {
   let name = 'Alice'; const calls: Array<{ url: string; init: RequestInit }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response({ ...owner, user: { ...owner.user, name } });
     if (url.endsWith('/auth/profile')) { name = JSON.parse(init.body as string).name; return response({ id: 'alice', name, email: owner.user.email, isPlatformAdmin: false }); }
@@ -37,7 +39,7 @@ it('uses the original account panel and PATCHes only the current SaaS profile na
 });
 
 it('does not show profile success when the backend rejects a save', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(owner) : url.endsWith('/auth/profile') ? response({ error: { code: 'invalid_input', message: 'Invalid name' } }, 400) : response({ items: url.endsWith('/members') ? members : [] })));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner) : url.endsWith('/auth/profile') ? response({ error: { code: 'invalid_input', message: 'Invalid name' } }, 400) : response({ items: url.endsWith('/members') ? members : [] })));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
   fireEvent.click(await screen.findByRole('button', { name: '保存资料' }));
   expect(await screen.findByText('输入无效，请检查后重试。')).toBeVisible();
@@ -46,7 +48,7 @@ it('does not show profile success when the backend rejects a save', async () => 
 
 it('limits an admin to member and reader roles and protects owner/admin members', async () => {
   const admin = { ...owner, tenants: [{ ...owner.tenants[0], role: 'admin' }] };
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(admin) : response({ items: url.endsWith('/members') ? [...members, { userId: 'c', name: 'Chris', email: 'c@example.test', role: 'member' }] : [] })));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(admin) : response({ items: url.endsWith('/members') ? [...members, { userId: 'c', name: 'Chris', email: 'c@example.test', role: 'member' }] : [] })));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
   const roles = await screen.findByRole('combobox', { name: 'Chris 的角色' });
   expect(within(roles).getAllByRole('option').map(item => item.getAttribute('value'))).toEqual(['reader', 'member']);
@@ -60,6 +62,7 @@ it('creates, copies and revokes an invitation without storing its token or sendi
   const copy = vi.fn().mockResolvedValue(undefined); Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
   const calls: Array<{ url: string; init: RequestInit }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response(owner);
     if (url.endsWith('/members')) return response({ items: members });
@@ -83,6 +86,7 @@ it('preserves an invitation through login and joins only after explicit confirma
   window.history.replaceState({}, '', '/?invite=fixture-token'); let authenticated = false;
   const calls: Array<{ url: string; init: RequestInit }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return authenticated ? response(owner) : response({ error: { code: 'unauthenticated' } }, 401);
     if (url.endsWith('/auth/login')) { authenticated = true; return response(owner); }
@@ -103,7 +107,7 @@ it('preserves an invitation through login and joins only after explicit confirma
 
 it.each(['expired', 'revoked', 'suspended', 'unavailable'])('blocks confirmation for a %s invitation', async status => {
   window.history.replaceState({}, '', '/?invite=fixture-token');
-  const fetch = vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(owner) : response({ tenantId: 'team-a', tenantName: 'Team A', role: 'admin', status, expiresAt: '2000-01-01T00:00:00Z' })); vi.stubGlobal('fetch', fetch);
+  const fetch = vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner) : response({ tenantId: 'team-a', tenantName: 'Team A', role: 'admin', status, expiresAt: '2000-01-01T00:00:00Z' })); vi.stubGlobal('fetch', fetch);
   render(<SaaSApp />);
   expect(await screen.findByRole('button', { name: '确认加入' })).toBeDisabled();
   expect(fetch.mock.calls.some(([url]) => url.endsWith('/accept'))).toBe(false);
@@ -113,6 +117,7 @@ it('keeps an invitation across registration and does not consume it when creatin
   window.history.replaceState({}, '', '/?invite=registration-invite');
   const calls: Array<{ url: string; init: RequestInit }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response({ error: { code: 'unauthenticated' } }, 401);
     if (url.endsWith('/auth/register')) return response(owner, 201);
@@ -134,6 +139,7 @@ it('keeps an invitation across registration and does not consume it when creatin
 it('shows a consumed-invite conflict and never claims that membership was created', async () => {
   window.history.replaceState({}, '', '/?invite=used-invite');
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     if (url.endsWith('/auth/me')) return response(owner);
     if (url.endsWith('/accept')) return response({ error: { code: 'invite_used', message: 'Already used' } }, 409);
     return response({ tenantId: 'team-a', tenantName: 'Team A', role: 'admin', status: 'accepted', expiresAt: '2099-01-01T00:00:00Z' });
@@ -146,7 +152,7 @@ it('shows a consumed-invite conflict and never claims that membership was create
 
 it('uses the server-returned membership role instead of elevating to the invitation role', async () => {
   window.history.replaceState({}, '', '/?invite=admin-invite');
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(owner)
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner)
     : url.endsWith('/accept') ? response({ tenantId: 'team-a', role: 'reader' })
     : response({ tenantId: 'team-a', tenantName: 'Team A', role: 'admin', status: 'active', expiresAt: '2099-01-01T00:00:00Z' })));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '确认加入' }));
@@ -154,7 +160,7 @@ it('uses the server-returned membership role instead of elevating to the invitat
 });
 
 it('translates the original account panel when changing the SaaS language', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(owner) : response({ items: url.endsWith('/members') ? members : [] })));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner) : response({ items: url.endsWith('/members') ? members : [] })));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
   expect(await screen.findByRole('heading', { name: '工作区资料' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));

@@ -42,7 +42,7 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if _, e = tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS awwo_schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"); e != nil {
 		return e
 	}
-	for index, path := range []string{"migrations/001_initial.sql", "migrations/002_planning.sql", "migrations/003_invitations.sql", "migrations/004_admin_pagination.sql", "migrations/005_tenant_pagination.sql"} {
+	for index, path := range []string{"migrations/001_initial.sql", "migrations/002_planning.sql", "migrations/003_invitations.sql", "migrations/004_admin_pagination.sql", "migrations/005_tenant_pagination.sql", "migrations/006_user_appearance.sql"} {
 		var exists bool
 		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM awwo_schema_migrations WHERE version=$1)", index+1).Scan(&exists); e != nil {
 			return e

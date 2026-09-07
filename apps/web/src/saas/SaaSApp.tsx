@@ -14,6 +14,7 @@ import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls } from 
 import { InviteAcceptance } from './InviteAcceptance';
 import { AdminPanel } from './AdminPanel';
 import { RuntimeSettings } from './RuntimeSettings';
+import { AppearanceScope } from './SaaSAppearance';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
 const navigate = (tenant?: string, canvas?: string) => {
@@ -41,9 +42,10 @@ function AuthenticatedApp() {
   if (failure) return <Notice text={saasErrorMessage(failure, locale)} retry />;
   if (!identity) return <Login invited={Boolean(inviteToken)} onAuthenticated={setIdentity} />;
   const controls = <WorkspaceControls identity={identity} onProfile={onProfile} />;
-  if (inviteToken) return <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />;
-  if (window.location.pathname === '/admin') return <AdminPanel identity={identity} controls={controls} />;
-  return <Workspace identity={identity} onProfile={onProfile} />;
+  const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
+    : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
+    : <Workspace identity={identity} onProfile={onProfile} />;
+  return <AppearanceScope key={identity.user.id} userId={identity.user.id}>{content}</AppearanceScope>;
 }
 function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
   const { locale, t } = useSaaSPreferences();

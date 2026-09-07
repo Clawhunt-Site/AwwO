@@ -1,3 +1,4 @@
+import { appearanceFixture } from './saas-appearance-fixture';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SaaSApp } from '../src/saas/SaaSApp';
@@ -44,6 +45,7 @@ it('hydrates an equal legacy cache and ignores cache-write events that only reor
   const local = documentWithThreads(); const cloud = record(reordered(local)); let puts = 0;
   canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(local)); canvasStorage().setItem('awwo.cloud.version', '7');
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') puts++;
@@ -62,6 +64,7 @@ it('restores a same-version draft once and stays synced after a reordered server
   persistCanvasDraft(canvasStorage(), 'old-phantom', 7, local);
   canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(local)); canvasStorage().setItem('awwo.cloud.version', '7');
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { const body = JSON.parse(init.body as string); puts++; cloud = record(reordered(body.document), body.version + 1); }
@@ -91,6 +94,7 @@ it('does not archive a second equal cache when opening the cloud to reconcile a 
   canvasStorage().setItem(CANVAS_RUN_JOURNAL_KEY, JSON.stringify(journal));
   const calls: Array<{ url: string; method: string }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
     calls.push({ url, method: init.method || 'GET' });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });

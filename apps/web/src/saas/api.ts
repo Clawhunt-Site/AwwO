@@ -29,6 +29,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     email_exists: ['此邮箱已注册，请登录。', 'This email is already registered. Please sign in.'],
     not_found: ['找不到此资源，或你没有访问权限。', 'This resource was not found or is not accessible.'],
     conflict: ['内容已发生变化，请重新读取后重试。', 'The content has changed. Reload it before retrying.'],
+    invalid_appearance: ['配色文件或颜色无效，请检查后重试。', 'Invalid color scheme or color. Check it and try again.'],
     tenant_suspended: ['工作区已暂停，请联系管理员或切换工作区。', 'This workspace is suspended. Contact an administrator or switch workspaces.'],
     session_busy: ['此会话正在运行，请稍后重试。', 'This session is running. Try again when it finishes.'],
     context_limit: ['输入超出模型上下文限制，请缩短输入或减少历史内容。', 'The input exceeds the model context limit. Shorten it or reduce the history.'],

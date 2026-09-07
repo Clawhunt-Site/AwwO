@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { LOCALE_STORAGE_KEY, localeHtmlLang, readInitialLocale, type UiLocale } from '../locale';
 import { LocaleProvider } from '../canvas/i18n';
-import { applyCachedScheme } from '../appearance';
 
 export const SAAS_THEME_STORAGE_KEY = 'superclaw_theme';
 type ThemePreference = 'light' | 'dark';
@@ -21,7 +20,6 @@ export function SaaSPreferencesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.theme = themePreference;
     document.documentElement.style.colorScheme = themePreference;
-    applyCachedScheme(themePreference);
     try { localStorage.setItem(SAAS_THEME_STORAGE_KEY, themePreference); } catch { /* Keep the current page usable. */ }
   }, [themePreference]);
   useEffect(() => {
