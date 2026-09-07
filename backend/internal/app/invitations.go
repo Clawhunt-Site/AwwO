@@ -48,17 +48,24 @@ func grantAllowed(actor, role string) bool {
 	return actor == "owner" || (actor == "admin" && (role == "reader" || role == "member"))
 }
 
-// All membership and invitation mutations take the tenant lock first. This
-// serializes acceptance against suspension and issuer demotion/removal.
-func (a *App) lockTenant(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string) bool {
+// Every tenant mutation takes this lock before resource locks. Revocation,
+// suspension, quota changes and admission therefore have a single order.
+func (a *App) lockTenantRow(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string) (string, bool) {
 	var status string
 	e := tx.QueryRow(r.Context(), "SELECT status FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&status)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Workspace not found")
-		return false
+		return "", false
 	}
 	if e != nil {
 		a.dbError(w, e)
+		return "", false
+	}
+	return status, true
+}
+func (a *App) lockTenant(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string) bool {
+	status, ok := a.lockTenantRow(w, r, tx, tid)
+	if !ok {
 		return false
 	}
 	if status != "active" {
@@ -68,7 +75,15 @@ func (a *App) lockTenant(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid 
 	return true
 }
 func (a *App) managementRole(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string) (string, bool) {
-	if !a.lockTenant(w, r, tx, tid) {
+	return a.mutationRole(w, r, tx, tid, 3)
+}
+
+// Middleware rejects unauthorized requests early, but bodies and lock waits can
+// outlive that decision. Recheck membership after locking, in the transaction
+// that performs the write; never acquire the tenant lock while reading a body.
+func (a *App) mutationRole(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string, minRole int) (string, bool) {
+	status, ok := a.lockTenantRow(w, r, tx, tid)
+	if !ok {
 		return "", false
 	}
 	var role string
@@ -81,8 +96,12 @@ func (a *App) managementRole(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		a.dbError(w, e)
 		return "", false
 	}
-	if roleLevel(role) < 3 {
-		fail(w, 403, "forbidden", "Workspace administrator required")
+	if roleLevel(role) < minRole {
+		fail(w, 403, "forbidden", "Insufficient workspace permissions")
+		return "", false
+	}
+	if status != "active" {
+		fail(w, 403, "tenant_suspended", "Workspace is suspended")
 		return "", false
 	}
 	return role, true

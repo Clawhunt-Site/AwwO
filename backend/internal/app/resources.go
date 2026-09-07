@@ -222,6 +222,9 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
 	var version int64
+	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+		return
+	}
 	e = tx.QueryRow(r.Context(), "SELECT version FROM canvases WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, id).Scan(&version)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Canvas not found")
@@ -331,6 +334,9 @@ func (a *App) mutateObject(w http.ResponseWriter, r *http.Request, action, id st
 		return
 	}
 	defer tx.Rollback(r.Context())
+	if _, ok := a.mutationRole(w, r, tx, r.PathValue("tenantId"), 2); !ok {
+		return
+	}
 	v, e := f(tx, id)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Resource not found")
@@ -359,6 +365,9 @@ func (a *App) deleteObject(w http.ResponseWriter, r *http.Request, table, action
 	defer tx.Rollback(r.Context())
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
 	var exists string
+	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+		return
+	}
 	filter := ""
 	if table == "agents" {
 		filter = " AND NOT internal"
@@ -429,6 +438,9 @@ func (a *App) createSession(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	tid := r.PathValue("tenantId")
 	var exists bool
+	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+		return
+	}
 	e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM canvases c JOIN agents a ON a.tenant_id=c.tenant_id WHERE c.tenant_id=$1 AND c.id=$2 AND a.id=$3 AND EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=$4))", tid, b.CanvasID, b.AgentID, b.NodeID).Scan(&exists)
 	if e != nil {
 		a.dbError(w, e)

@@ -33,6 +33,9 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
+	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+		return
+	}
 	var canvas string
 	e = tx.QueryRow(r.Context(), "SELECT id FROM canvases WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, cid).Scan(&canvas)
 	if noRows(e) {

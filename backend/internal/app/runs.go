@@ -92,9 +92,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	var tenantStatus string
+	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+		return
+	}
 	var concurrent, daily int
-	if e = tx.QueryRow(r.Context(), "SELECT status,max_concurrent_runs,max_runs_per_day FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&tenantStatus, &concurrent, &daily); e != nil {
+	if e = tx.QueryRow(r.Context(), "SELECT max_concurrent_runs,max_runs_per_day FROM tenants WHERE id=$1", tid).Scan(&concurrent, &daily); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -111,10 +113,6 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if !noRows(e) {
 		a.dbError(w, e)
-		return
-	}
-	if tenantStatus != "active" {
-		fail(w, 403, "tenant_suspended", "Workspace is suspended")
 		return
 	}
 	var active, today int
@@ -395,8 +393,17 @@ func (a *App) finish(tid, id, status, output, code string) {
 }
 func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
+	tx, e := a.db.Begin(r.Context())
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+		return
+	}
 	var exists bool
-	e := a.db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM runs WHERE tenant_id=$1 AND id=$2)", tid, id).Scan(&exists)
+	e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM runs WHERE tenant_id=$1 AND id=$2)", tid, id).Scan(&exists)
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -405,22 +412,26 @@ func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Run not found")
 		return
 	}
-	a.finish(tid, id, "cancelled", "", "")
-	a.cancelExecution(id)
-	tx, e := a.db.Begin(r.Context())
+	tag, e := tx.Exec(r.Context(), "UPDATE runs SET status='cancelled',error='',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status IN ('queued','running')", tid, id)
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
-	defer tx.Rollback(r.Context())
-	if e = audit(r.Context(), tx, currentUser(r).ID, tid, "run.cancelled", id); e != nil {
-		a.dbError(w, e)
-		return
+	if tag.RowsAffected() > 0 {
+		if _, e = tx.Exec(r.Context(), "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, `{"type":"cancelled"}`); e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if e = audit(r.Context(), tx, currentUser(r).ID, tid, "run.cancelled", id); e != nil {
+			a.dbError(w, e)
+			return
+		}
 	}
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
 	}
+	a.cancelExecution(id)
 	a.getRun(w, r)
 }
 func (a *App) cancelExecution(id string) {
