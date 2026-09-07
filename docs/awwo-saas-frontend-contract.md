@@ -6,6 +6,8 @@
 
 项目约束、分工与交付门见 [设计与开发规范](awwo-saas-design-standards.md)。
 
+2026-09-07 Fable 整改更新：当前分支为 `feat/awwo-computer-use-acceptance-20260907`，整改基准 `a83d2acee3732e95c2f115b107f31af25c335c13`。新增列表分页、工作区创建、画布生命周期、账号配色及运行错误本地化；本轮证据与未通过边界以 [整改记录](awwo-fable-remediation-20260907.md) 为准，下面历史证据不自动代表新增功能完成 GUI 验收。
+
 ## 1. 现役入口与复用原则
 
 ### 1.1 两个实际入口
@@ -31,6 +33,7 @@
 - 下表 `T` 表示 `/api/v1/tenants/{tenantId}`；其余 `/api/v1` 路径完整写出。所有源码路径均相对仓库根目录。
 - **已接**：当前源码存在对应链路；并不表示真实 provider 已验收。**部分**：已有可用子集或替代视图，但未覆盖原交互或完整产品要求。**未接**：当前 SaaS 没有对应入口或服务端契约。纯前端行为在状态中另行注明。
 - 集合通常返回 `{items:[]}`，错误为 `{error:{code,message}}`。401、403、404、409、413、429、503 分别需要显示登录、权限、资源、冲突、上下文、配额、运行服务问题；失败不得显示已保存或已完成。
+- 六类租户资源和四类平台管理列表返回 `{items,nextCursor,snapshot}`。分页必须保留资源范围及过滤条件，切换用户/租户后重置并忽略旧响应；快照字段只是创建时间边界。
 - 使用 HttpOnly `awwo_session` cookie；不将 token 写入 localStorage。节点、会话、运行、规划和成员操作都在 Go 校验租户关系及权限。
 - 数据库列只描述逻辑实体，实际表结构以 Go 迁移为准。完整字段、状态与错误约定见 [API v1](awwo-saas-api.md)。
 
@@ -62,10 +65,13 @@
 | --- | --- | --- | --- | --- | --- |
 | 注册、登录、退出、身份显示 | 原 `apps/web/src/CanvasAccountControl.tsx`，SaaS 登录页与 WorkspaceControls | `POST /api/v1/auth/register`、`login`、`logout`，`GET /api/v1/auth/me`；Pi 无职责 | Go 用户、会话、成员关系；HttpOnly cookie | 已接；新增认证壳并复用原账户面板 | 注册后可进工作区；登录失败有错误；logout 后旧 cookie 失效；无租户的平台管理员仍可进管理端或退出。 |
 | 租户切换与暂停提示 | `apps/web/src/saas/SaaSApp.tsx` 的 Workspace / WorkspaceControls | `/auth/me` 返回 memberships；租户 API 再授权；Pi 无职责 | Go tenant/member；URL 选择与缓存 scope | 已接；新增 SaaS 壳 | 多租户用户可切到其他 active 租户；suspended 页面保留切换/退出；不显示另一租户草稿或消息。 |
+| 新建工作区、画布列表与改名/删除 | `SaaSApp.tsx`、`saas/CanvasList.tsx`、`ListPager.tsx` | `POST /api/v1/tenants`；`GET T/canvases?limit=50&cursor=...`；原 canvas PUT/DELETE | Go tenants/memberships/canvases；签名游标与 CAS | 已接；本轮新增 | 第 201 项可达；新建工作区后进入新 owner 范围；改名保留最新文档；409 不覆盖；删除确认后才提交，活动节点/规划 run 阻止删除，reader 无写按钮。 |
 | 工作区资料编辑 | 原 `AccountWorkspacePanel` / `CanvasAccountControl`，注入 `saas/accountApi.ts` | `PATCH /api/v1/auth/profile {name}`；Pi 无职责 | Go user.name；profile.updated 审计 | 已接原资料交互 | 修改显示名称后顶部身份更新，刷新仍一致；空值/超长/未登录失败；不接受他人 ID。 |
 | 成员列表、添加、角色变更、移除 | 原 `AccountWorkspacePanel` 的 SaaS 权限/角色注入 | `GET/POST T/members`、`PATCH/DELETE T/members/{userId}`；Pi 无职责 | Go memberships 与审计 | 已接；原入口统一管理 | owner/admin 管理授权范围；owner 不可移除或降级；admin 不可授予/移除 admin；reader 直接写 API 403。添加已注册邮箱与邀请链接分别命名。 |
 | 邀请链接创建与加入 | 原 `AccountWorkspacePanel` 邀请区域；`saas/InviteAcceptance.tsx` | `GET/POST T/invites`、`DELETE T/invites/{id}`；`GET /api/v1/invites/{token}`、`POST .../accept` | tenant_invites 哈希凭据、角色、有效期、撤销/领取状态与审计 | 已接；复制链接，无邮件投递 | 创建/复制→登录或注册→明确确认加入→成员表可见；过期、撤销、他人已领、发行者失权均拒绝，现有成员不改角色。 |
+| 成员及邀请分页 | 原 `AccountWorkspacePanel` → `saas/accountApi.ts` / `listPage.ts` | members/invites 的 limit/cursor；原管理 API | 当前页记录、nextCursor、历史页游标；切换范围清空 | 已接；本轮新增 | 超过 200 条仍能查看/操作后续页，角色更新合并当前页；翻页失败保留明确错误，不回退首 200 条伪装完整结果。 |
 | 语言与主题切换 | `saas/preferences.tsx` 复用 `locale.ts` / `appearance.ts` 及原画布 i18n | 前端偏好，无需 Pi 或新增服务端 API | superclaw_locale / superclaw_theme；同页共享 Context | 已接原偏好机制 | 中英及浅深主题可见、刷新保留；画布、账户、只读、管理外壳一致；已知 API 错误本地化，未知服务错误保留原文。 |
+| 原配色预设、自定义、导入导出 | 运行设置 → `saas/SaaSAppearance.tsx` → 原 `ColorSchemeDialog` | `GET/PUT /api/v1/appearance`；GET export 兼容同一 bundle；Pi 无职责 | Go user_appearance，按登录用户和 version；不用跨用户全局配色缓存 | 已接；本轮新增 | 11 预设、10 token、浅深色；保存后重载一致；账号切换不串色；连续修改串行；导入版本冲突明确指向配色；无效文件/下载失败可见；一次只有一个模态弹窗。 |
 | 工作区运行设置 | 原设置按钮→`saas/RuntimeSettings.tsx`；原节点 `RuntimePicker/InspectorPanel` | `GET /api/v1/runtime`，可刷新；节点选择来自服务端 models | 服务管理员配置连接，节点保存实际 model/persona/contract | 已接 SaaS 运行设置边界 | 显示真实引擎、可用模型和原因；刷新配置状态；节点配置对执行有效；没有无效的秘密输入表单，配置就绪不冒充推理成功。 |
 | reader 浏览与导出 | `ReadOnlyCanvas` → 原 `CanvasSurface readOnly` / `SessionTile` | 读取 canvas/session/messages；Go 独立拒绝 reader 业务写 | Go document/messages；独立 viewer cache，不覆盖写草稿 | 已接原画布布局与只读保护 | 原节点/边可见，历史可切换，JSON 可导出；快捷键、拖拽、绑定、规划、发送、发布和恢复不触发写入/执行。 |
 | 平台管理、暂停/恢复租户 | `apps/web/src/saas/AdminPanel.tsx` | `GET /api/v1/admin/{tenants,users,runs,audit}`；`PATCH /api/v1/admin/tenants/{id}` 改 status；Go 鉴权并取消暂停租户活跃 run，Pi 响应取消 | Go tenant/user/run/audit | 已接基础管理；新增页面 | 普通用户/租户 owner 直接访问 API 403；管理员列表是真实数据；暂停/恢复状态和审计一致，恢复不自动重跑。 |
@@ -97,7 +103,7 @@ Pi 当前承担模型对话与规划输出，服务端控制 provider/model、�
 
 ## 5. 本轮完成项与剩余工作
 
-此前列为 P2 的原账户、邀请、偏好、只读和管理入口现已实施。下表保留每项完成标准；具体测试及浏览器结果统一引用验收记录，避免把源码接入扩大为真实 provider 或生产验收。
+此前列为 P2 的原账户、邀请、偏好、只读和管理入口现已实施。本轮进一步修复普通列表截断、管理入口与原配色遗漏、运行错误未本地化的问题，见上表新增行。下表保留每项完成标准；具体测试及浏览器结果统一引用验收记录，避免把源码接入扩大为真实 provider 或生产验收。
 
 | 顺序 / 当前状态 | 范围 | 当前实现或下一步 | DoD / 验收要求 |
 | --- | --- | --- | --- |
@@ -132,6 +138,6 @@ npm run typecheck:saas --prefix apps/web
 npm run build:saas --prefix apps/web
 ```
 
-原画布相关回归的精确命令及文件清单保留在 [本地验收记录](awwo-saas-verification.md)。历史默认 `npm test --prefix apps/web` 在独立 SaaS 安装环境因未安装的 `server/ui` MDX 依赖而启动失败；这与 SaaS 配置下的通过结果分别记录，不能替换为“前端全量通过”。
+原画布相关回归的精确命令及文件清单保留在 [本地验收记录](awwo-saas-verification.md)。历史默认 `npm test --prefix apps/web` 曾因未安装的 `server/ui` MDX 依赖启动失败；本轮实际原 Web 测试已通过 91 文件、1,005 项及 static-ui，详见 [整改记录](awwo-fable-remediation-20260907.md)。这仍不是所有工程、实际模型与浏览器验收的总通过结论。
 
 每项工作按以下顺序关闭：先更新本表契约和状态 → 在原入口实施最小适配 → 补行为/权限/失败路径测试 → 真实浏览器按该行可观察验收执行 → 涉及模型的再做实际 provider 验收 → 更新证据及剩余差距。文档、代码提交、合并、推送与公网部署分别记录；本文不授权后几项操作。

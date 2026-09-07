@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — Fable acceptance gaps in the Go/Pi SaaS integration
+
+- **What changed:** Add signed pagination to all six tenant resource lists and page controls to the original workspace panel; expose additional workspace creation and canvas rename/delete with version and active-run guards. Restore the original appearance catalog, custom colors and import/export with per-user PostgreSQL persistence. Localize run errors and make history/active-run lookups independent of the old 200-row window. Add isolated HTTP fault controls and an explicit real-provider acceptance entry.
+- **Why:** Acceptance found inaccessible records beyond 200, missing frontend actions/settings, untranslated failure states and insufficient repeatable negative test conditions.
+- **Impact:** Existing canvas documents and account boundaries remain authoritative. Concurrent canvas/appearance writes use CAS; unknown save outcomes require reload. Test fault controls stay outside the application API. No merge, remote publication or external inference is included.
+- **Verification:** Real PostgreSQL/race/vet (26 top-level + 22 subtests), SaaS/legacy component suites, typecheck/build, 21 script tests and 14 real HTTP negative-flow checks. Computer Use stopped after the registration form because Chrome returned empty accessibility state and no screenshot. Real provider configuration, remaining GUI scenarios and container/runtime acceptance are still open. Independent review results and exact evidence are recorded in `docs/awwo-fable-remediation-20260907.md`.
+- **Files:** `backend/internal/app/{tenant_pagination,appearance}.go`, migrations 005/006 and lifecycle handlers; `apps/web/src/{saas,account,settings}/**`, canvas conversation adapters and regressions; `scripts/awwo-saas-{browser-fixture,acceptance-faults,fixture-control,real-provider-acceptance}*`; backend and SaaS documentation.
+
 ### Fixed — Computer Use acceptance findings
 
 - **What changed:** Persist consumed send drafts with the run snapshot; preserve structured login errors for localization; count blocked nodes within the selected run scope; allow cloud run reconciliation while retaining conflict drafts and detached-run snapshots; compare canvas documents independently of JSON object key order.

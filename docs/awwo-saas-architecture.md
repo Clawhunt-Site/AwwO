@@ -68,7 +68,11 @@ Cookie 为 HttpOnly、SameSite，staging/production 必须 Secure。写请求验
 
 ## 4. 数据与一致性
 
-核心实体：`users`、`tenants`、`memberships`、`auth_sessions`、`tenant_invites`、`canvases`、`agents`、`sessions`、`messages`、`runs`、`run_events`、`audit_events`。具体表结构和索引以 `backend/internal/app/migrations/` 为准。
+核心实体：`users`、`tenants`、`memberships`、`auth_sessions`、`tenant_invites`、`canvases`、`agents`、`sessions`、`messages`、`runs`、`run_events`、`audit_events`、`user_appearance`。具体表结构和索引以 `backend/internal/app/migrations/` 为准。
+
+六类租户资源列表使用与管理列表相同的签名游标机制，并绑定账号、租户及规范化查询过滤。成员在迁移 005 中增加不可变创建时间，列表按创建时间与 ID 排序，避免画布改名改变页次。前端每页 50 条并在范围切换时中止旧读取；会话恢复可以按 sessionId 精确查询。创建时间边界不是数据库一致性快照。
+
+账号配色由迁移 006 的 `user_appearance` 持久化，使用版本 CAS，与租户业务文档分开。前端复用原配色弹窗与固定预设/token 目录，只应用当前登录账号返回的配置；切换账号清除旧样式。连续颜色输入串行写入，冲突提示重新加载，原 JSON 导入导出格式不包含身份、版本、秘密或自定义 CSS。语言与浅深主题仍属于浏览器偏好。
 
 - 租户业务实体包含 tenant_id；跨实体引用采用复合租户外键，防止把 A 租户 session 关联到 B 租户 agent/canvas。
 - 画布保留前端 document JSON；服务器外层提供 id、tenantId、version 和更新时间。更新必须携带已读取的 version，冲突返回 409；浏览器停止自动覆盖，保留可恢复/导出的本地草稿，不自动覆盖较新服务器内容。

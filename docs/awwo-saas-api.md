@@ -2,7 +2,7 @@
 
 实现：`backend/internal/app/`。本地前端同源代理 `/api/v1`；直接访问 Go 默认为 `http://127.0.0.1:8087/api/v1`。所有受保护端点使用 `awwo_session` HttpOnly cookie；health、注册和登录不要求已有会话。JSON 写请求使用 `Content-Type: application/json`，未声明的字段会被拒绝。请求携带 Origin 时必须与 `AWWO_PUBLIC_ORIGIN` 一致，跨站 Fetch 请求被拒绝；非浏览器客户端可省略 Origin，仍需有效登录 cookie。不会通过 JSON 返回模型密钥或原始登录 session token；邀请创建响应单独返回一次邀请凭据。
 
-集合响应通常为 `{"items":[]}`，单对象直接返回。错误结构为 `{"error":{"code":"not_found","message":"Resource not found"}}`。跨租户资源返回 404；权限不足 403；未登录 401；CAS/幂等/会话占用冲突 409；当前提示词和指令超过模型保守上下文预算时返回 413 / context_limit；配额或限流 429；模型不可用 503。租户资源列表首版仍有条数上限。平台管理列表的分页契约见下文；不能把其他上限列表当作全量导出接口。
+集合响应保留 `{"items":[]}`；六类租户资源列表和四类平台管理列表增加 `nextCursor`、`snapshot`，客户端必须翻页才能取得后续记录。单对象直接返回。错误结构为 `{"error":{"code":"not_found","message":"Resource not found"}}`。跨租户资源返回 404；权限不足 403；未登录 401；CAS/幂等/会话占用冲突 409；当前提示词和指令超过模型保守上下文预算时返回 413 / context_limit；配额或限流 429；模型不可用 503。分页契约见下文，其他未声明分页的集合不自动获得此契约。
 
 ## 当前用户资料与邀请
 
@@ -11,7 +11,7 @@
 | 方法与路径（省略 /api/v1） | 输入 | 结果与权限 |
 | --- | --- | --- |
 | PATCH /auth/profile | `{name}`，trim 后 1–120 Unicode 字符 | 200，当前登录者资料 `{id,email,name,isPlatformAdmin}`；不接受其他用户 ID；写入审计 |
-| GET /tenants/{tenantId}/invites | 无 | admin/owner 可查 `{items:[{id,role,createdBy,createdAt,expiresAt,status,acceptedBy,acceptedAt,revokedAt}]}`；后三项未发生时为 null；不返回 token/hash |
+| GET /tenants/{tenantId}/invites | limit?, cursor? | admin/owner 可查 `{items:[{id,role,createdBy,createdAt,expiresAt,status,acceptedBy,acceptedAt,revokedAt}],nextCursor,snapshot}`；后三项未发生时为 null；不返回 token/hash |
 | POST /tenants/{tenantId}/invites | `{role,expiresInHours?}` | role=reader/member/admin；仅 owner 可授 admin；默认 72 小时，整数 1–168；201 `{id,role,expiresAt,inviteUrl,token}` |
 | DELETE /tenants/{tenantId}/invites/{id} | 无 | 204，admin/owner 撤销邀请；只有 owner 可撤销 admin 邀请；已撤销重试幂等，已消费返回 409 / invite_used |
 | GET /invites/{token} | 登录态 | `{tenantId,tenantName,role,expiresAt,status}`，供加入前确认；不通过 GET 消费 |
@@ -22,6 +22,22 @@
 邀请 URL 为 `AWWO_PUBLIC_ORIGIN + /?invite=TOKEN`。注册或登录保留 URL 参数，但不会自动领取。新用户注册仍创建自己的工作区，之后再确认加入受邀工作区。数据库仅保存 token 哈希，明文只在创建响应及复制链接中出现，列表不能重新找回原链接；浏览器不将邀请码写入 localStorage。没有邮件投递。
 
 预览 GET 不消费凭据：已知 token 返回 200 与 `status=active|expired|revoked|accepted|unavailable|suspended`；未知 token 返回 404。`unavailable` 表示发行者当前已无权授予该角色。领取 POST 对未消费的过期/撤销邀请分别返回 410 / invite_expired、invite_revoked，他人已领取返回 409 / invite_used，发行者失权返回 403 / invite_unavailable，暂停租户返回 403 / tenant_suspended。有效领取返回数据库中的当前 role，已有成员不被提升或降级。同领取者仍有成员资格时重试幂等，即使邀请后来已过期；若该用户已被移出工作区则返回 409 / invite_membership_removed，旧链接不能重新赋权。
+
+## 租户列表分页
+
+`/tenants/{tenantId}/{members,canvases,agents,sessions,runs,invites}` 接受 `limit`（整数 1–200，默认 200）与不透明 `cursor`，返回 `{items,nextCursor,snapshot}`；末页 `nextCursor=null`。首次省略 cursor，后续保留同一过滤条件。游标签名绑定当前账号、租户、资源、规范化过滤条件和首次创建时间边界。空值、重复、伪造、跨范围或 API 重启后的 cursor 返回 400 / invalid_cursor；非法 limit 返回 400 / invalid_pagination。每页重新检查当前权限，不能凭旧游标绕过成员撤销。
+
+记录按不可变创建时间与 ID 降序，成员使用 membership.createdAt/userId；改名不改变分页位置。sessions 可同时使用 `canvasId`、精确 `sessionId`；runs 可使用 `sessionId`、`operationId` 与 `active=true`（queued/running），`active=false` 不限制运行状态。活动 run 若在翻页期间结束，将不再满足后续页的活动过滤。`snapshot` 是创建时间边界，不会冻结更新，也不隔离晚提交的旧事务，因此不是数据库一致性快照。画布、成员与邀请 UI 每页 50 条；历史恢复优先查询确切 session，不依赖首 200 条。
+
+## 当前账号配色
+
+| 方法与路径（省略 /api/v1） | 输入 | 结果与权限 |
+| --- | --- | --- |
+| GET /appearance | 登录态 | 原配色目录（11 预设、10 token）及 active_preset、custom、version；仅当前账号 |
+| PUT /appearance | `{active_preset,custom:{light:{},dark:{}},version}` | 成功返回完整状态且 version 加一；初始为 0，陈旧值 409 / version_conflict；非法值 400 / invalid_appearance |
+| GET /appearance/export | 登录态 | `{kind:'superclaw.appearance',schema_version:'0.1.0',active_preset,custom}`，无身份和版本 |
+
+迁移 006 按 user_id 保存到 PostgreSQL。仅目录中的预设、token 和合法 hex 色值可写，不接受自定义 CSS、其他用户 ID 或额外字段。SaaS 复用原配色弹窗，按登录用户载入、切换账号清除旧配色，连续操作串行保存；冲突由用户重新加载后决定下一次修改。导入原格式 bundle 后用当前已加载 version 调用 PUT。浏览器导出已确认的服务端状态，网络响应丢失时不得断言保存未发生。语言与浅深主题仍为浏览器偏好，配色为账号级状态。
 
 ## 平台列表分页
 
@@ -40,7 +56,7 @@
 | GET /auth/me | 无 | user{id,email,name,platformRole}, tenants[] |
 | GET /tenants | 无 | 当前用户的租户列表 |
 | POST /tenants | name | 201，创建租户，当前用户成为 owner |
-| GET /tenants/{tenantId}/members | 无 | 成员列表；reader 以上 |
+| GET /tenants/{tenantId}/members | limit?, cursor? | `{items,nextCursor,snapshot}`；reader 以上 |
 | POST /tenants/{tenantId}/members | 已注册用户 email, role | admin 以上；只有 owner 可任命 admin |
 | PATCH /tenants/{tenantId}/members/{userId} | role | 204；不允许通过此 API 改动 owner |
 | DELETE /tenants/{tenantId}/members/{userId} | 无 | 204；受保护角色不能被低权限成员移除 |
@@ -53,13 +69,13 @@
 
 | 方法与后缀 | 请求 | 说明 |
 | --- | --- | --- |
-| GET /canvases | 无 | 当前租户画布 |
+| GET /canvases | limit?, cursor? | 当前租户画布，`{items,nextCursor,snapshot}` |
 | POST /canvases | name, document | 创建画布，201 |
 | GET /canvases/{id} | 无 | id, tenantId, name, document, version, createdAt, updatedAt |
 | PUT /canvases/{id} | name, document, version | version 必须是上次读取值；成功递增，陈旧值 409 |
-| DELETE /canvases/{id} | 无 | 活跃关联运行阻止删除 |
+| DELETE /canvases/{id} | 无 | 成功 204；关联节点或规划 run 为 queued/running 时 409 / resource_in_use，拒绝时不改运行、事件或审计 |
 | POST /canvases/{id}/plan | prompt, context, operationId | 202，创建持久规划 run；空画布也可使用，共享运行限额和 SSE |
-| GET /agents | 无 | Pi Agent 列表 |
+| GET /agents | limit?, cursor? | Pi Agent 列表，`{items,nextCursor,snapshot}` |
 | POST /agents | name, role?, title?, model?, adapterConfig?:{model}, instructions?, adapterType? | adapterType 省略或为 pi；model 非空时优先，否则取 adapterConfig.model；role 是 Agent 工作角色文本，不是用户权限 |
 | GET /agents/{id} | 无 | 已保存的 Agent 定义 |
 | PUT /agents/{id} | 同创建字段 | 更新定义 |
@@ -97,12 +113,12 @@ Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructi
 
 | 方法与后缀 | 请求 / 查询 | 说明 |
 | --- | --- | --- |
-| GET /sessions | 可选 canvasId | 会话列表 |
+| GET /sessions | 可选 canvasId、sessionId、limit、cursor | 会话列表；两个身份过滤可联合使用 |
 | POST /sessions | canvasId, nodeId, agentId, title? | 三者必须在同一租户且节点确实存在于已保存画布 |
 | GET /sessions/{id} | 无 | 会话元数据 |
 | GET /sessions/{id}/messages | 无 | items[{id,sessionId,role,content,createdAt}] |
 | POST /runs | sessionId, prompt, operationId | 202；operationId 必须 8–200 字节，也可用 Idempotency-Key header |
-| GET /runs | 可选 sessionId, operationId | 运行列表，用于恢复受理结果不确定的请求 |
+| GET /runs | 可选 sessionId、operationId、active、limit、cursor | 运行列表，用于恢复受理结果不确定的请求与查询活动运行 |
 | GET /runs/{id} | 无 | status/output/terminal/error 等 |
 | GET /runs/{id}/events | Last-Event-ID 或 after 查询参数 | text/event-stream，持久事件重放 |
 | POST /runs/{id}/cancel | 无 | 幂等取消；状态以回读运行记录为准 |
@@ -126,6 +142,6 @@ SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、
 
 以上全部要求 platformRole=admin。租户 owner 并不能访问平台后台。配额影响后续运行准入，每日限额按 UTC 日期计算，降低额度不终止已受理 run。暂停租户禁止新增业务写入，并取消当前活跃运行、记录事件；Go 保留历史读取权限，当前 SaaS 暂停页提供切换工作区与退出。恢复不自动重新执行取消过的任务。
 
-reader 可读取原画布、会话及历史；业务写入由 Go 独立拒绝，原 CanvasSurface 的只读模式不发起保存、绑定、运行、规划或恢复写入。语言和浅深主题是浏览器偏好，无服务端偏好 API。
+reader 可读取原画布、会话及历史；业务写入由 Go 独立拒绝，原 CanvasSurface 的只读模式不发起保存、绑定、运行、规划或恢复写入。reader 仍可保存自己的账号配色；语言和浅深主题是浏览器偏好。
 
 首版不提供支付、邮箱验证/找回、OIDC、文件上传下载或工具/工程文件执行，也没有独立长期后台图调度接口。页面关闭只允许已接收的 Go run 继续，尚未提交的下游 DAG 节点不会自动调度。真实 provider 尚未验收；本地协议 fixture 不替代真实模型或生产验收。
