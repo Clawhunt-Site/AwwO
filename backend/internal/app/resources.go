@@ -54,8 +54,7 @@ func (a *App) createTenant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, v)
 }
 func (a *App) members(w http.ResponseWriter, r *http.Request) {
-	v, e := rowsJSON(r.Context(), a.db, "SELECT jsonb_build_object('id',u.id,'userId',u.id,'email',u.email,'name',u.name,'role',m.role) FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1 ORDER BY u.created_at LIMIT 200", r.PathValue("tenantId"))
-	a.replyList(w, v, e)
+	a.tenantList(w, r, "members")
 }
 func (a *App) addMember(w http.ResponseWriter, r *http.Request) {
 	var b struct {
@@ -174,8 +173,7 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 }
 
 func (a *App) listCanvases(w http.ResponseWriter, r *http.Request) {
-	v, e := rowsJSON(r.Context(), a.db, "SELECT "+canvasJSON+" FROM canvases WHERE tenant_id=$1 ORDER BY updated_at DESC LIMIT 200", r.PathValue("tenantId"))
-	a.replyList(w, v, e)
+	a.tenantList(w, r, "canvases")
 }
 func (a *App) getCanvas(w http.ResponseWriter, r *http.Request) {
 	v, e := oneJSON(r.Context(), a.db, "SELECT "+canvasJSON+" FROM canvases WHERE tenant_id=$1 AND id=$2", r.PathValue("tenantId"), r.PathValue("id"))
@@ -276,8 +274,7 @@ func (b *agentInput) valid() bool {
 	return cleanName(b.Name) && len(b.Role) <= 200 && len(b.Title) <= 200 && len(b.Model) <= 200 && len(b.Instructions) <= 32000 && (b.AdapterType == "" || b.AdapterType == "pi")
 }
 func (a *App) listAgents(w http.ResponseWriter, r *http.Request) {
-	v, e := rowsJSON(r.Context(), a.db, "SELECT "+agentJSON+" FROM agents WHERE tenant_id=$1 AND NOT internal ORDER BY created_at LIMIT 200", r.PathValue("tenantId"))
-	a.replyList(w, v, e)
+	a.tenantList(w, r, "agents")
 }
 func (a *App) getAgent(w http.ResponseWriter, r *http.Request) {
 	v, e := oneJSON(r.Context(), a.db, "SELECT "+agentJSON+" FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", r.PathValue("tenantId"), r.PathValue("id"))
@@ -409,8 +406,7 @@ func (a *App) deleteObject(w http.ResponseWriter, r *http.Request, table, action
 	w.WriteHeader(204)
 }
 func (a *App) listSessions(w http.ResponseWriter, r *http.Request) {
-	v, e := rowsJSON(r.Context(), a.db, "SELECT "+sessionJSON+" FROM node_sessions WHERE tenant_id=$1 AND kind='node' AND ($2='' OR canvas_id=$2) ORDER BY created_at DESC LIMIT 200", r.PathValue("tenantId"), r.URL.Query().Get("canvasId"))
-	a.replyList(w, v, e)
+	a.tenantList(w, r, "sessions")
 }
 func (a *App) getSession(w http.ResponseWriter, r *http.Request) {
 	v, e := oneJSON(r.Context(), a.db, "SELECT "+sessionJSON+" FROM node_sessions WHERE tenant_id=$1 AND id=$2", r.PathValue("tenantId"), r.PathValue("id"))

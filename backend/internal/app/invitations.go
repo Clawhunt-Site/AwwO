@@ -114,8 +114,7 @@ func (a *App) mutationRole(w http.ResponseWriter, r *http.Request, tx pgx.Tx, ti
 const inviteStatusSQL = `CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.revoked_at IS NOT NULL THEN 'revoked' WHEN i.expires_at<=clock_timestamp() THEN 'expired' WHEN t.status<>'active' THEN 'suspended' WHEN COALESCE(m.role='owner' OR (m.role='admin' AND i.role IN ('reader','member')),false)=false THEN 'unavailable' ELSE 'active' END`
 
 func (a *App) listInvites(w http.ResponseWriter, r *http.Request) {
-	v, e := rowsJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',i.id,'role',i.role,'createdBy',i.created_by,'createdAt',i.created_at,'expiresAt',i.expires_at,'status',`+inviteStatusSQL+`,'acceptedBy',i.accepted_by,'acceptedAt',i.accepted_at,'revokedAt',i.revoked_at) FROM tenant_invites i JOIN tenants t ON t.id=i.tenant_id LEFT JOIN memberships m ON m.tenant_id=i.tenant_id AND m.user_id=i.created_by WHERE i.tenant_id=$1 ORDER BY i.created_at DESC,i.id DESC`, r.PathValue("tenantId"))
-	a.replyList(w, v, e)
+	a.tenantList(w, r, "invites")
 }
 func (a *App) createInvite(w http.ResponseWriter, r *http.Request) {
 	var b struct {

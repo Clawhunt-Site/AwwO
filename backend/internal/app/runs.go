@@ -57,8 +57,7 @@ func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, v)
 }
 func (a *App) listRuns(w http.ResponseWriter, r *http.Request) {
-	v, e := rowsJSON(r.Context(), a.db, "SELECT "+runJSON+" FROM runs WHERE tenant_id=$1 AND ($2='' OR operation_id=$2) AND ($3='' OR session_id=$3) ORDER BY created_at DESC LIMIT 200", r.PathValue("tenantId"), r.URL.Query().Get("operationId"), r.URL.Query().Get("sessionId"))
-	a.replyList(w, v, e)
+	a.tenantList(w, r, "runs")
 }
 func (a *App) getRun(w http.ResponseWriter, r *http.Request) {
 	v, e := oneJSON(r.Context(), a.db, "SELECT "+runJSON+" FROM runs WHERE tenant_id=$1 AND id=$2", r.PathValue("tenantId"), r.PathValue("id"))
