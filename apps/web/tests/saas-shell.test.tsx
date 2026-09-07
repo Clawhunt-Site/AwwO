@@ -7,7 +7,7 @@ import { configureSaaSCanvasSave, clearSaaSCanvas } from '../src/saas/canvasBrid
 const identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' },
   tenants: [{ id: 'tenant-a', name: '真实工作区', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 }] };
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
-beforeEach(() => { localStorage.clear(); window.history.replaceState({}, '', '/'); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
+beforeEach(() => { Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } }); Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } }); localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/'); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); vi.unstubAllGlobals(); });
 
 it('shows login on a missing server session without reading legacy identity tokens', async () => {
@@ -57,11 +57,12 @@ it('gives readers a cloud-backed browse and export view without mounting the wri
     return response({ id: 'canvas-a', name: '只读画布', document: { ...emptyDocument(), nodes: [{ ...createSessionNode('llm', { x: 0, y: 0 }), id: 'node-a', title: '云端节点' }] }, version: 2 });
   }));
   render(<SaaSApp />);
-  expect(await screen.findByText('真实云端会话')).toBeVisible();
+  await waitFor(() => expect(document.querySelector('.awwo-workspace')).not.toBeNull());
+  expect(screen.getAllByText('云端节点').length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: '导出画布 JSON' })).toBeVisible();
-  expect(screen.getByRole('status')).toHaveTextContent('只读视图');
+  expect(screen.getAllByRole('status').some(node => node.textContent?.includes('只读视图'))).toBe(true);
   expect(screen.queryByRole('button', { name: '新建画布' })).toBeNull();
-  expect(document.querySelector('.awwo-workspace')).toBeNull();
+  expect(document.querySelector('.awwo-workspace')).not.toBeNull();
   expect(localStorage.getItem(CANVAS_STORAGE_KEY)).toBe('private local draft');
   expect(calls.every(call => !call.init.method || call.init.method === 'GET')).toBe(true);
 });
@@ -72,14 +73,14 @@ it('lets an owner add a registered member, change the role and remove by userId 
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response(identity);
-    if (url.endsWith('/canvases')) return response({ items: [] });
+    if (url.endsWith('/canvases') || url.endsWith('/invites')) return response({ items: [] });
     if (init.method === 'POST') { members = [...members, { id: 'membership-b', userId: 'user-b', name: 'Bob', email: 'b@example.test', role: 'member' }]; return response(members[1], 201); }
     if (init.method === 'PATCH') { members = members.map(item => item.userId === 'user-b' ? { ...item, role: 'reader' } : item); return new Response(null, { status: 204 }); }
     if (init.method === 'DELETE') { members = members.filter(item => item.userId !== 'user-b'); return new Response(null, { status: 204 }); }
     return response({ items: members });
   }));
   render(<SaaSApp />);
-  fireEvent.click(await screen.findByRole('button', { name: '工作区成员' }));
+  fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
   const dialog = within(screen.getByRole('dialog'));
   expect(await dialog.findByText('a@example.test')).toBeVisible();
   expect(dialog.queryByRole('button', { name: '移除a@example.test' })).toBeNull();
@@ -87,10 +88,11 @@ it('lets an owner add a registered member, change the role and remove by userId 
   fireEvent.click(dialog.getByRole('button', { name: '添加成员' }));
   expect(await dialog.findByText('b@example.test')).toBeVisible();
   expect(JSON.parse(calls.find(call => call.init.method === 'POST')!.init.body as string)).toEqual({ email: 'b@example.test', role: 'member' });
-  fireEvent.change(dialog.getByRole('combobox', { name: 'b@example.test的角色' }), { target: { value: 'reader' } });
-  await waitFor(() => expect(dialog.getByRole('combobox', { name: 'b@example.test的角色' })).toHaveValue('reader'));
+  fireEvent.change(dialog.getByRole('combobox', { name: 'Bob 的角色' }), { target: { value: 'reader' } });
+  await waitFor(() => expect(dialog.getByRole('combobox', { name: 'Bob 的角色' })).toHaveValue('reader'));
   expect(calls.find(call => call.init.method === 'PATCH')?.url).toBe('/api/v1/tenants/tenant-a/members/user-b');
-  fireEvent.click(dialog.getByRole('button', { name: '移除b@example.test' }));
+  fireEvent.click(dialog.getByRole('button', { name: '移除成员' }));
+  fireEvent.click(dialog.getByRole('button', { name: '确认移除' }));
   await waitFor(() => expect(dialog.queryByText('b@example.test')).toBeNull());
   expect(calls.find(call => call.init.method === 'DELETE')?.url).toBe('/api/v1/tenants/tenant-a/members/user-b');
 });

@@ -16,6 +16,7 @@ import type {
   CompanyUserDirectoryResponse,
   CurrentWorkspaceAccess,
   HumanCompanyRole,
+  WorkspaceInviteSummary,
 } from './types';
 import './account.css';
 
@@ -33,6 +34,8 @@ export interface AccountWorkspacePanelProps {
   onOpenTeam?: (companyId: string) => void;
   /** Injectable only at the HTTP boundary so the panel can be tested without a live service. */
   api?: AccountApi;
+  /** SaaS uses its own cookie identity and never exposes an external-account login. */
+  workspaceOnly?: boolean;
 }
 
 type Copy = ReturnType<typeof accountCopy>;
@@ -52,6 +55,7 @@ type TeamState = {
   loading: boolean;
   restricted: boolean;
   error: string | null;
+  invites: WorkspaceInviteSummary[];
 };
 
 const EMPTY_TEAM: TeamState = {
@@ -61,6 +65,7 @@ const EMPTY_TEAM: TeamState = {
   loading: false,
   restricted: false,
   error: null,
+  invites: [],
 };
 
 const HUMAN_ROLES: HumanCompanyRole[] = ['owner', 'admin', 'operator', 'viewer'];
@@ -203,6 +208,8 @@ function roleLabel(role: HumanCompanyRole | null, locale: AccountLocale): string
     admin: '管理员',
     operator: '操作员',
     viewer: '只读成员',
+    member: '成员',
+    reader: '只读成员',
   };
   return locale === 'zh' ? zh[role] : role[0].toUpperCase() + role.slice(1);
 }
@@ -228,8 +235,8 @@ async function copyToClipboard(value: string): Promise<void> {
   textarea.style.opacity = '0';
   document.body.appendChild(textarea);
   textarea.select();
-  document.execCommand('copy');
-  textarea.remove();
+  try { if (!document.execCommand('copy')) throw new Error('Clipboard is unavailable'); }
+  finally { textarea.remove(); }
 }
 
 function IdentityAvatar({ label, image }: { label: string; image?: string | null }) {
@@ -278,6 +285,7 @@ export function AccountWorkspacePanel({
   onOpenWorkspaceAuth,
   onOpenTeam,
   api = accountApi,
+  workspaceOnly = false,
 }: AccountWorkspacePanelProps) {
   const text = accountCopy(locale);
   const [bootstrap, setBootstrap] = useState<BootstrapState | null>(null);
@@ -289,10 +297,13 @@ export function AccountWorkspacePanel({
   const [identityBusy, setIdentityBusy] = useState(false);
   const [team, setTeam] = useState<TeamState>(EMPTY_TEAM);
   const [memberBusyId, setMemberBusyId] = useState<string | null>(null);
-  const [inviteRole, setInviteRole] = useState<HumanCompanyRole>('operator');
+  const [inviteRole, setInviteRole] = useState<HumanCompanyRole>(workspaceOnly ? 'member' : 'operator');
   const [inviteBusy, setInviteBusy] = useState(false);
   const [invite, setInvite] = useState<CompanyInviteCreated | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [teamVersion, setTeamVersion] = useState(0);
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [removeTarget, setRemoveTarget] = useState<CompanyMember | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -369,6 +380,7 @@ export function AccountWorkspacePanel({
         error = messageFor(memberResult.reason);
       }
       if (cancelled) return;
+      if (inviteResult.status === 'rejected' && !isForbidden(inviteResult.reason) && !error) error = messageFor(inviteResult.reason);
       setTeam({
         members,
         directory,
@@ -377,12 +389,19 @@ export function AccountWorkspacePanel({
         loading: false,
         restricted,
         error,
+        invites: api.revokeInvite && inviteResult.status === 'fulfilled' ? inviteResult.value.invites as WorkspaceInviteSummary[] : [],
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, [activeCompanyId, api, bootstrap?.access]);
+  }, [activeCompanyId, api, bootstrap?.access, teamVersion]);
+
+  const assignableRoles = team.members?.access.assignableRoles ?? (workspaceOnly ? [] : HUMAN_ROLES);
+  const roleSignature = assignableRoles.join(',');
+  useEffect(() => {
+    if (assignableRoles.length && !assignableRoles.includes(inviteRole)) setInviteRole(assignableRoles.includes('member') ? 'member' : assignableRoles[0]);
+  }, [roleSignature, inviteRole]);
 
   const members = team.members?.members ?? [];
   const directory = team.directory?.users ?? [];
@@ -439,17 +458,38 @@ export function AccountWorkspacePanel({
   }
 
   async function createInvite() {
-    if (!activeCompanyId || !team.canInvite) return;
+    if (!activeCompanyId || !team.canInvite || !assignableRoles.includes(inviteRole)) return;
     setInviteBusy(true);
     setInvite(null);
+    setInviteCopied(false);
     setTeam((current) => ({ ...current, error: null }));
     try {
-      setInvite(await api.createHumanInvite(activeCompanyId, inviteRole));
+      const created = await api.createHumanInvite(activeCompanyId, inviteRole);
+      setInvite(created);
+      if (api.revokeInvite) setTeam(current => ({ ...current, invites: [{ id: created.id, role: created.humanRole || inviteRole, expiresAt: created.expiresAt, status: 'active' }, ...current.invites] }));
     } catch (error) {
       setTeam((current) => ({ ...current, error: messageFor(error) }));
     } finally {
       setInviteBusy(false);
     }
+  }
+
+  async function memberAction(action: () => Promise<void>) {
+    setMemberBusyId('$action'); setTeam(current => ({ ...current, error: null }));
+    try { await action(); setNewMemberEmail(''); setRemoveTarget(null); setTeamVersion(value => value + 1); }
+    catch (error) { setTeam(current => ({ ...current, error: messageFor(error) })); }
+    finally { setMemberBusyId(null); }
+  }
+
+  async function revokeInvite(id: string) {
+    if (!activeCompanyId || !api.revokeInvite) return;
+    setInviteBusy(true); setTeam(current => ({ ...current, error: null }));
+    try {
+      await api.revokeInvite(activeCompanyId, id);
+      setTeam(current => ({ ...current, invites: current.invites.map(item => item.id === id ? { ...item, status: 'revoked' } : item) }));
+      if (invite?.id === id) { setInvite(null); setInviteCopied(false); }
+    } catch (error) { setTeam(current => ({ ...current, error: messageFor(error) })); }
+    finally { setInviteBusy(false); }
   }
 
   if (!bootstrap && !bootstrapError) {
@@ -461,7 +501,7 @@ export function AccountWorkspacePanel({
       <header className="account-workspace-header">
         <div>
           <h1 id="account-workspace-title">{text.title}</h1>
-          <p>{text.subtitle}</p>
+          <p>{workspaceOnly ? (locale === 'zh' ? 'AwwO 账号、工作区权限与邀请由服务端管理。' : 'Your AwwO account, workspace access and invitations are managed by the server.') : text.subtitle}</p>
         </div>
         <button
           type="button"
@@ -477,7 +517,7 @@ export function AccountWorkspacePanel({
       {bootstrapError ? <div className="account-notice account-notice-error" role="alert">{bootstrapError}</div> : null}
 
       <div className="account-identity-grid">
-        <AccountStatusCard
+        {!workspaceOnly && <AccountStatusCard
           eyebrow={text.externalAccount}
           label={clawHuntIdentity ? text.externalConnected(clawHuntIdentity.username) : text.externalDisconnected}
           detail={clawHuntIdentity?.email || text.externalPurpose}
@@ -492,7 +532,7 @@ export function AccountWorkspacePanel({
               {clawHuntIdentity ? text.disconnect : text.connect}
             </button>
           }
-        />
+        />}
 
         {isLocalTrusted ? (
           <AccountStatusCard
@@ -582,7 +622,7 @@ export function AccountWorkspacePanel({
           <div className="account-member-list">
             {members.map((member) => {
               const label = identityLabel(member.user, member.principalId || text.unknownUser);
-              const editable = Boolean(team.members?.access.canManageMembers);
+              const editable = Boolean(team.members?.access.canManageMembers) && member.editable !== false;
               return (
                 <article className="account-member-row" key={member.id}>
                   <IdentityAvatar label={label} image={member.user?.image} />
@@ -598,13 +638,13 @@ export function AccountWorkspacePanel({
                         <select
                           aria-label={text.roleFor(label)}
                           value={member.membershipRole ?? 'operator'}
-                          disabled={memberBusyId === member.id}
+                          disabled={memberBusyId !== null}
                           onChange={(event) => void updateMember(member, { membershipRole: event.target.value as HumanCompanyRole })}
                         >
-                          {HUMAN_ROLES.map((role) => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}
+                          {assignableRoles.map((role) => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}
                         </select>
                       </label>
-                      <label>
+                      {team.members?.access.canChangeStatus !== false && <label>
                         <span>{text.status}</span>
                         <select
                           aria-label={text.statusFor(label)}
@@ -614,7 +654,8 @@ export function AccountWorkspacePanel({
                         >
                           {EDITABLE_STATUSES.map((status) => <option key={status} value={status}>{statusLabel(status, locale)}</option>)}
                         </select>
-                      </label>
+                      </label>}
+                      {api.removeMember && member.removal?.canArchive && <button type="button" className="account-secondary-button" disabled={memberBusyId !== null} onClick={() => setRemoveTarget(member)}>{locale === 'zh' ? '移除成员' : 'Remove member'}</button>}
                     </div>
                   ) : (
                     <div className="account-member-summary"><strong>{roleLabel(member.membershipRole, locale)}</strong><span>{statusLabel(member.status, locale)}</span></div>
@@ -635,15 +676,22 @@ export function AccountWorkspacePanel({
             {!team.loading && members.length === 0 && directory.length === 0 ? <p className="account-empty-state">{text.noMembers}</p> : null}
           </div>
 
+          {api.addMember && team.members?.access.canManageMembers && <form className="account-member-add" onSubmit={event => {
+            event.preventDefault(); if (activeCompanyId) void memberAction(() => api.addMember!(activeCompanyId, { email: newMemberEmail, role: inviteRole }));
+          }}><p>{locale === 'zh' ? '可直接添加已注册邮箱；新用户可使用下方邀请链接。' : 'Add a registered email directly, or invite a new user with a link below.'}</p><label><span>{text.email}</span><input type="email" aria-label={locale === 'zh' ? '成员邮箱' : 'Member email'} required value={newMemberEmail} onChange={event => setNewMemberEmail(event.target.value)} /></label>
+            <label><span>{text.role}</span><select aria-label={locale === 'zh' ? '新成员角色' : 'New member role'} value={inviteRole} onChange={event => setInviteRole(event.target.value as HumanCompanyRole)}>{assignableRoles.map(role => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}</select></label>
+            <button type="submit" className="account-primary-button" disabled={memberBusyId !== null}>{locale === 'zh' ? '添加成员' : 'Add member'}</button></form>}
+          {removeTarget && <div className="account-notice" role="alert"><p>{locale === 'zh' ? `确认移除 ${identityLabel(removeTarget.user, removeTarget.principalId)}？` : `Remove ${identityLabel(removeTarget.user, removeTarget.principalId)}?`}</p><button type="button" disabled={memberBusyId !== null} onClick={() => void memberAction(() => api.removeMember!(activeCompanyId!, removeTarget.principalId))}>{locale === 'zh' ? '确认移除' : 'Confirm removal'}</button><button type="button" onClick={() => setRemoveTarget(null)}>{locale === 'zh' ? '取消' : 'Cancel'}</button></div>}
+
           <div className="account-invite-panel">
             <div className="account-invite-heading"><UserPlus size={18} aria-hidden="true" /><strong>{text.invite}</strong></div>
             <label>
               <span>{text.inviteRole}</span>
               <select aria-label={text.inviteRole} value={inviteRole} onChange={(event) => setInviteRole(event.target.value as HumanCompanyRole)} disabled={!team.canInvite || inviteBusy}>
-                {HUMAN_ROLES.map((role) => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}
+                {assignableRoles.map((role) => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}
               </select>
             </label>
-            <button type="button" className="account-primary-button" disabled={!team.canInvite || inviteBusy} onClick={() => void createInvite()}>
+            <button type="button" className="account-primary-button" disabled={!team.canInvite || inviteBusy || !assignableRoles.includes(inviteRole)} onClick={() => void createInvite()}>
               {inviteBusy ? text.inviting : text.createInvite}
             </button>
             {!team.loading && !team.canInvite ? <p className="account-permission-note">{text.inviteRestricted}</p> : null}
@@ -656,6 +704,8 @@ export function AccountWorkspacePanel({
                 </button>
               </div>
             ) : null}
+            {api.revokeInvite && team.invites.length > 0 && <div className="account-invite-list"><h3>{locale === 'zh' ? '已创建的邀请' : 'Created invitations'}</h3><p>{locale === 'zh' ? '完整链接仅在创建时显示，请当时复制；已有链接可撤销。' : 'The full link is shown only when created. Copy it then; existing links can be revoked.'}</p>{team.invites.map(item => <article key={item.id} className="account-invite-row"><span>{roleLabel(item.role, locale)} · {text.expires(new Date(item.expiresAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US'))} · {locale === 'zh' ? ({ active: '有效', expired: '已过期', revoked: '已撤销', accepted: '已领取', unavailable: '已失效', suspended: '工作区暂停' }[item.status] || item.status) : item.status}</span>
+              {item.status === 'active' && assignableRoles.includes(item.role) && <button type="button" className="account-secondary-button" disabled={inviteBusy} onClick={() => void revokeInvite(item.id)}>{locale === 'zh' ? '撤销邀请' : 'Revoke invitation'}</button>}</article>)}</div>}
           </div>
         </section>
       ) : null}

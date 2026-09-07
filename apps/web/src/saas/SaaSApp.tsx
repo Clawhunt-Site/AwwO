@@ -1,27 +1,34 @@
-import { useEffect, useRef, useState } from 'react';
-import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, RefreshCw, Users } from 'lucide-react';
-import { api, tenantPath, SaaSApiError, type Identity, type Tenant, type CanvasRecord } from './api';
-import { configureSaaSCanvas, configureSaaSCanvasSave } from './canvasBridge';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LogOut, Plus, ArrowLeft, ShieldCheck, Save } from 'lucide-react';
+import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
+import { configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, isKnownSyncedCache, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
 import { CanvasSurface } from '../canvas/CanvasSurface';
-import { LocaleProvider } from '../canvas/i18n';
 import { CANVAS_STORAGE_KEY, emptyDocument, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY } from '../canvas/runJournal';
 import { createCanvasRuntimeReader } from '../canvasRuntimeReader';
+import { CanvasAccountControl } from '../CanvasAccountControl';
+import { createSaaSAccountApi } from './accountApi';
+import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls } from './preferences';
+import { InviteAcceptance } from './InviteAcceptance';
+import { AdminPanel } from './AdminPanel';
+import { RuntimeSettings } from './RuntimeSettings';
 
-const message = (error: unknown) => error instanceof Error ? error.message : '请求失败，请重试。';
+const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
 const navigate = (tenant?: string, canvas?: string) => {
   const query = new URLSearchParams();
   if (tenant) query.set('tenant', tenant);
   if (canvas) query.set('canvas', canvas);
-  window.location.assign(`/${query.size ? `?${query}` : ''}`);
+  window.location.assign('/' + (query.size ? '?' + query : ''));
 };
-
-export function SaaSApp() {
+export function SaaSApp() { return <SaaSPreferencesProvider><AuthenticatedApp /></SaaSPreferencesProvider>; }
+function AuthenticatedApp() {
+  const { locale, t } = useSaaSPreferences();
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState('');
+  const onProfile = useCallback((name: string) => setIdentity(current => current ? { ...current, user: { ...current.user, name } } : current), []);
   useEffect(() => {
     let live = true;
     api<Identity>('/auth/me').then(value => { if (live) setIdentity(value); })
@@ -29,40 +36,44 @@ export function SaaSApp() {
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
   }, []);
-  if (loading) return <Notice text="正在验证会话…" />;
-  if (failure) return <Notice text={failure} retry />;
-  if (!identity) return <Login onAuthenticated={setIdentity} />;
-  if (window.location.pathname === '/admin') return <Admin identity={identity} />;
-  return <Workspace identity={identity} />;
+  const inviteToken = new URLSearchParams(window.location.search).get('invite');
+  if (loading) return <Notice text={t('正在验证会话…', 'Checking your session…')} />;
+  if (failure) return <Notice text={saasErrorMessage(failure, locale)} retry />;
+  if (!identity) return <Login invited={Boolean(inviteToken)} onAuthenticated={setIdentity} />;
+  const controls = <WorkspaceControls identity={identity} onProfile={onProfile} />;
+  if (inviteToken) return <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />;
+  if (window.location.pathname === '/admin') return <AdminPanel identity={identity} controls={controls} />;
+  return <Workspace identity={identity} onProfile={onProfile} />;
 }
-
 function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
-  return <main className="saas-notice"><strong>AwwO</strong><p role={retry ? 'alert' : 'status'}>{text}</p>{retry && <button onClick={() => window.location.reload()}>重新连接</button>}</main>;
+  const { locale, t } = useSaaSPreferences();
+  return <main className="saas-notice"><PreferenceControls /><strong>AwwO</strong><p role={retry ? 'alert' : 'status'}>{text}</p>{retry && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</main>;
 }
-
-function Login({ onAuthenticated }: { onAuthenticated: (identity: Identity) => void }) {
+function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Identity) => void; invited: boolean }) {
+  const { locale, t } = useSaaSPreferences();
   const [register, setRegister] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  return <main className="saas-login"><div className="saas-login-brand"><span>AwwO</span><h1>让 Agent 在同一张画布上协作。</h1><p>独立工作区、持久会话与实时执行。你的团队，从这里开始。</p></div>
+  return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p></div>
     <form className="saas-card" onSubmit={async event => {
       event.preventDefault(); setBusy(true); setError('');
       const values = Object.fromEntries(new FormData(event.currentTarget));
       try { onAuthenticated(await api<Identity>(register ? '/auth/register' : '/auth/login', { method: 'POST', body: JSON.stringify(values) })); }
       catch (error) { setError(message(error)); } finally { setBusy(false); }
     }}>
-      <span className="saas-eyebrow">AGENT WORKSPACE</span><h2>{register ? '创建你的工作区' : '欢迎回来'}</h2>
-      {register && <><label>姓名<input name="name" autoComplete="name" required maxLength={100} /></label><label>工作区名称<input name="tenantName" required maxLength={100} /></label></>}
-      <label>邮箱<input name="email" type="email" autoComplete="email" required /></label>
-      <label>密码<input name="password" type="password" minLength={12} autoComplete={register ? 'new-password' : 'current-password'} required /></label>
-      {register && <small>密码至少 12 位。</small>}
-      {error && <p className="saas-error" role="alert">{error}</p>}
-      <button className="saas-primary" disabled={busy}>{busy ? '请稍候…' : register ? '注册并创建工作区' : '登录'}</button>
-      <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(''); }}>{register ? '已有账号？登录' : '创建账号和工作区'}</button>
+      <span className="saas-eyebrow">{t('AGENT 工作区', 'AGENT WORKSPACE')}</span><h2>{register ? t('创建你的工作区', 'Create your workspace') : t('欢迎回来', 'Welcome back')}</h2>
+      {invited && <p role="status">{t('请先登录或注册。邀请会保留，登录后由你确认加入；注册时也会建立你自己的工作区。', 'Sign in or register first. Your invitation is preserved for confirmation after sign-in. Registration also creates your own workspace.')}</p>}
+      {register && <><label>{t('姓名', 'Name')}<input name="name" autoComplete="name" required maxLength={100} /></label><label>{t('工作区名称', 'Workspace name')}<input name="tenantName" required maxLength={100} /></label></>}
+      <label>{t('邮箱', 'Email')}<input name="email" type="email" autoComplete="email" required /></label>
+      <label>{t('密码', 'Password')}<input name="password" type="password" minLength={12} autoComplete={register ? 'new-password' : 'current-password'} required /></label>
+      {register && <small>{t('密码至少 12 位。', 'Use at least 12 characters.')}</small>}
+      {error && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
+      <button className="saas-primary" disabled={busy}>{busy ? t('请稍候…', 'Please wait…') : register ? t('注册并创建工作区', 'Register and create workspace') : t('登录', 'Sign in')}</button>
+      <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(''); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
     </form></main>;
 }
-
-function Workspace({ identity }: { identity: Identity }) {
+function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
+  const { locale, t } = useSaaSPreferences();
   const params = new URLSearchParams(window.location.search);
   const requested = params.get('tenant');
   const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
@@ -78,100 +89,66 @@ function Workspace({ identity }: { identity: Identity }) {
       .then(value => setList(value.items)).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => controller.abort();
   }, [tenant?.id, tenant?.status, canvasId]);
-  const controls = <WorkspaceControls identity={identity} tenant={tenant} canvasId={canvasId} />;
-  if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{tenant ? '工作区已暂停' : '选择工作区'}</h1><p role="status">{tenant ? '你可以切换其他工作区，或联系工作区管理员恢复访问。' : requested ? '你无权访问这个工作区，请切换其他工作区。' : '账号尚未加入工作区。请联系工作区所有者添加你的注册邮箱。'}</p>{identity.user.platformRole === 'admin' && <a href="/admin">进入平台管理</a>}</section></main>;
+  const controls = <WorkspaceControls identity={identity} tenant={tenant} canvasId={canvasId} onProfile={onProfile} />;
+  if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。请联系工作区所有者添加你的注册邮箱或发送邀请链接。', 'You have not joined a workspace. Ask its owner to add your registered email or send an invitation.')}</p>{identity.user.platformRole === 'admin' && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
   const readOnly = tenant.role === 'reader';
-  if (canvasId) return readOnly ? <ReadOnlyCanvas tenant={tenant} canvasId={canvasId} controls={controls} /> : <CloudCanvas identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} />;
-  return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><span className="saas-eyebrow">WORKSPACE</span><h1>{tenant.name}</h1><p>选择画布，继续你的团队任务。</p></section>
-    {readOnly && <p className="saas-runtime-note" role="status">只读成员：可以浏览画布、会话和导出副本，不能编辑或运行。</p>}
+  if (canvasId) return readOnly ? <ReadOnlyCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} /> : <CloudCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} />;
+  return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('选择画布，继续你的团队任务。', 'Choose a canvas to continue your team’s work.')}</p></section>
+    {readOnly && <p className="saas-runtime-note" role="status">{t('只读成员：可以浏览画布、会话和导出副本，不能编辑或运行。', 'Reader: browse canvases and conversations or export a copy. Editing and execution require member access.')}</p>}
     {!readOnly && <form className="saas-create" onSubmit={async event => {
       event.preventDefault(); setBusy(true); setError('');
       try { const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name: newName, document: emptyDocument() }) }); navigate(tenant.id, canvas.id); }
       catch (error) { setError(message(error)); setBusy(false); }
-    }}><input aria-label="新画布名称" placeholder="为新画布起个名字" value={newName} onChange={event => setNewName(event.target.value)} required maxLength={100}/><button disabled={busy} className="saas-primary"><Plus size={16}/>新建画布</button></form>}
-    {error && <p role="alert" className="saas-error">{error}</p>}
-    {list === null ? <p role="status">{error ? '画布列表加载失败，请重新连接。' : '正在加载画布…'}</p> : <div className="saas-canvas-list">{list.map(canvas => <button key={canvas.id} className="saas-canvas-card" onClick={() => navigate(tenant.id, canvas.id)}><span>↗</span><h2>{canvas.name}</h2><p>{new Date(canvas.updatedAt).toLocaleString('zh-CN')}</p></button>)}{list.length === 0 && <p>{readOnly ? '工作区还没有画布。' : '还没有画布。创建后可添加、配置和连接 Agent。'}</p>}</div>}
+    }}><input aria-label={t('新画布名称', 'New canvas name')} placeholder={t('为新画布起个名字', 'Name your new canvas')} value={newName} onChange={event => setNewName(event.target.value)} required maxLength={100}/><button disabled={busy} className="saas-primary"><Plus size={16}/>{t('新建画布', 'Create canvas')}</button></form>}
+    {error && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
+    {list === null ? <p role="status">{error ? t('画布列表加载失败，请重新连接。', 'Could not load canvases. Please reconnect.') : t('正在加载画布…', 'Loading canvases…')}</p> : <div className="saas-canvas-list">{list.map(canvas => <button key={canvas.id} className="saas-canvas-card" onClick={() => navigate(tenant.id, canvas.id)}><span>↗</span><h2>{canvas.name}</h2><p>{new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</p></button>)}{list.length === 0 && <p>{readOnly ? t('工作区还没有画布。', 'This workspace has no canvases yet.') : t('还没有画布。创建后可添加、配置和连接 Agent。', 'No canvases yet. Create one to add, configure and connect agents.')}</p>}</div>}
   </main>;
 }
-
-function WorkspaceControls({ identity, tenant, canvasId }: { identity: Identity; tenant?: Tenant; canvasId?: string | null }) {
-  const [membersOpen, setMembersOpen] = useState(false);
+function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity: Identity; tenant?: Tenant; canvasId?: string | null; onProfile: (name: string) => void }) {
+  const { locale, t } = useSaaSPreferences();
   const [error, setError] = useState('');
-  return <div className="saas-account-actions">
-    {identity.tenants.length > 0 && <select aria-label="切换工作区" value={tenant?.id || ''} onChange={event => navigate(event.target.value)}>{!tenant && <option value="" disabled>选择工作区</option>}{identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? '（已暂停）' : ''}</option>)}</select>}
-    {canvasId && tenant && <button title="返回画布列表" aria-label="返回画布列表" onClick={() => navigate(tenant.id)}><ArrowLeft size={16}/></button>}
-    {tenant?.status === 'active' && ['owner', 'admin'].includes(tenant.role) && <button title="工作区成员" aria-label="工作区成员" onClick={() => setMembersOpen(true)}><Users size={17}/></button>}
-    {identity.user.platformRole === 'admin' && <a href="/admin" title="平台管理" aria-label="平台管理"><ShieldCheck size={17}/>平台管理</a>}
-    <span>{identity.user.name}</span><button title="退出登录" aria-label="退出登录" onClick={async () => { try { await api('/auth/logout', { method: 'POST' }); window.location.assign('/'); } catch (error) { setError(message(error)); } }}><LogOut size={16}/></button>
-    {error && <p role="alert" className="saas-error">{error}</p>}
-    {membersOpen && tenant && <Members tenant={tenant} onClose={() => setMembersOpen(false)} />}
+  const [managementTenant, setManagementTenant] = useState<string | null>(tenant?.id || null);
+  const accountApi = useMemo(() => createSaaSAccountApi(onProfile), [identity.user.id, onProfile]);
+  return <div className="saas-account-actions"><PreferenceControls />
+    {identity.tenants.length > 0 && <select aria-label={t('切换工作区', 'Switch workspace')} value={tenant?.id || ''} onChange={event => navigate(event.target.value)}>{!tenant && <option value="" disabled>{t('选择工作区', 'Choose a workspace')}</option>}{identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? t('（已暂停）', ' (suspended)') : ''}</option>)}</select>}
+    {canvasId && tenant && <button title={t('返回画布列表', 'Back to canvases')} aria-label={t('返回画布列表', 'Back to canvases')} onClick={() => navigate(tenant.id)}><ArrowLeft size={16}/></button>}
+    {identity.user.platformRole === 'admin' && <a href="/admin" title={t('平台管理', 'Platform administration')} aria-label={t('平台管理', 'Platform administration')}><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
+    <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
+      workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi }} />
+    <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => { try { await api('/auth/logout', { method: 'POST' }); window.location.reload(); } catch (error) { setError(message(error)); } }}><LogOut size={16}/></button>
+    {error && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
   </div>;
 }
-
-type Member = { id: string; userId: string; email: string; name: string; role: string };
-const memberRoles: Record<string, string> = { owner: '所有者', admin: '管理员', member: '成员', reader: '只读成员' };
-function Members({ tenant, onClose }: { tenant: Tenant; onClose: () => void }) {
-  const [members, setMembers] = useState<Member[] | null>(null);
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('member');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [revision, setRevision] = useState(0);
-  const roles = tenant.role === 'owner' ? ['reader', 'member', 'admin'] : ['reader', 'member'];
-  useEffect(() => {
-    const controller = new AbortController();
-    api<{ items: Member[] }>(tenantPath(tenant.id, '/members'), { signal: controller.signal }).then(value => setMembers(value.items))
-      .catch(error => { if (!controller.signal.aborted) setError(message(error)); });
-    return () => controller.abort();
-  }, [tenant.id, revision]);
-  const mutate = async (suffix: string, method: string, body?: unknown) => {
-    setBusy(true); setError('');
-    try { await api(tenantPath(tenant.id, `/members${suffix}`), { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); setRevision(value => value + 1); if (method === 'POST') setEmail(''); }
-    catch (error) { setError(message(error)); } finally { setBusy(false); }
-  };
-  return <div className="saas-dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="saas-members-title" className="saas-card saas-members"><div className="saas-panel-heading"><h2 id="saas-members-title">工作区成员</h2><button onClick={onClose} aria-label="关闭成员管理">关闭</button></div><p>输入已注册的邮箱添加成员。只读成员可以查看与导出；成员可以编辑与运行。</p>
-    <form className="saas-create" onSubmit={event => { event.preventDefault(); void mutate('', 'POST', { email, role }); }}><input type="email" aria-label="成员邮箱" value={email} onChange={event => setEmail(event.target.value)} placeholder="已注册的邮箱" required/><select aria-label="新成员角色" value={role} onChange={event => setRole(event.target.value)}>{roles.map(item => <option key={item} value={item}>{memberRoles[item]}</option>)}</select><button disabled={busy} className="saas-primary">添加成员</button></form>
-    {error && <p className="saas-error" role="alert">{error}</p>}
-    {!members ? <p role="status">{error ? '成员列表暂不可用。' : '正在加载成员…'}</p> : <div className="saas-table-wrap"><table><thead><tr><th>成员</th><th>邮箱</th><th>角色</th><th>操作</th></tr></thead><tbody>{members.map(member => {
-      const canChange = member.role !== 'owner' && (tenant.role === 'owner' || member.role !== 'admin');
-      return <tr key={member.userId}><td>{member.name}</td><td>{member.email}</td><td>{canChange ? <select aria-label={`${member.email}的角色`} value={member.role} disabled={busy} onChange={event => void mutate(`/${encodeURIComponent(member.userId)}`, 'PATCH', { role: event.target.value })}>{roles.map(item => <option key={item} value={item}>{memberRoles[item]}</option>)}</select> : memberRoles[member.role] || member.role}</td><td>{canChange && <button disabled={busy} aria-label={`移除${member.email}`} onClick={() => void mutate(`/${encodeURIComponent(member.userId)}`, 'DELETE')}>移除</button>}</td></tr>;
-    })}</tbody></table></div>}
-  </section></div>;
-}
-
 function downloadDocument(value: unknown, name: string) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url);
 }
-
-function ReadOnlyCanvas({ tenant, canvasId, controls }: { tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
+function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
+  const { locale, t } = useSaaSPreferences();
   const [record, setRecord] = useState<CanvasRecord | null>(null);
-  const [sessions, setSessions] = useState<Array<{ id: string; nodeId: string; title: string }>>([]);
-  const [sessionId, setSessionId] = useState('');
-  const [messages, setMessages] = useState<Array<{ id: string; role: string; content: string }> | null>(null);
   const [error, setError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const runtimeReader = useRef(createCanvasRuntimeReader()).current;
   useEffect(() => {
-    const controller = new AbortController();
-    Promise.all([api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }), api<{ items: typeof sessions }>(tenantPath(tenant.id, `/sessions?canvasId=${encodeURIComponent(canvasId)}`), { signal: controller.signal })])
-      .then(([canvas, history]) => { setRecord(canvas); setSessions(history.items); setSessionId(history.items[0]?.id || ''); })
-      .catch(error => { if (!controller.signal.aborted) setError(message(error)); });
-    return () => controller.abort();
-  }, [tenant.id, canvasId]);
-  useEffect(() => {
-    if (!sessionId) return;
-    const controller = new AbortController(); setMessages(null);
-    api<{ items: NonNullable<typeof messages> }>(tenantPath(tenant.id, `/sessions/${encodeURIComponent(sessionId)}/messages`), { signal: controller.signal }).then(value => setMessages(value.items))
-      .catch(error => { if (!controller.signal.aborted) setError(message(error)); });
-    return () => controller.abort();
-  }, [tenant.id, sessionId]);
-  const doc = record ? sanitizeDocument(record.document) : null;
-  return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{record?.name || '云端画布'}</h1><p role="status">只读视图：浏览节点、依赖和会话；编辑及运行需要成员权限。</p>{record && <button onClick={() => downloadDocument(record.document, `${record.name}.json`)}>导出画布 JSON</button>}</section>
-    {error && <p role="alert" className="saas-error">{error}</p>}
-    {!doc ? <p>{error ? '画布加载失败。' : '正在加载云端画布…'}</p> : <><div className="saas-readonly-nodes">{doc.nodes.map(node => <article className="saas-card" key={node.id}><h2>{node.title}</h2>{node.kind === 'form' ? node.fields.map(field => <div key={field.id}><strong>{field.label}</strong><pre>{field.value || '未填写'}</pre></div>) : <><p>{node.persona || '未设置角色说明'}</p>{node.contract && <details><summary>输入输出契约</summary><pre>{JSON.stringify(node.contract, null, 2)}</pre></details>}{node.lastOutput && <><strong>{node.lastOutput.partial ? '部分输出（运行未成功）' : '最近输出'}</strong><pre>{node.lastOutput.text}</pre></>}</>}</article>)}</div><section className="saas-readonly-history"><h2>节点依赖</h2>{doc.edges.length ? <ul>{doc.edges.map(edge => <li key={edge.id}>{doc.nodes.find(node => node.id === edge.fromNode)?.title || edge.fromNode} · {edge.fromPort} → {doc.nodes.find(node => node.id === edge.toNode)?.title || edge.toNode} · {edge.toPort}</li>)}</ul> : <p>暂无连线。</p>}<h2>历史会话</h2>{sessions.length ? <><select aria-label="浏览会话" value={sessionId} onChange={event => setSessionId(event.target.value)}>{sessions.map(session => <option key={session.id} value={session.id}>{doc.nodes.find(node => node.id === session.nodeId)?.title || '节点'} / {session.title}</option>)}</select>{messages === null ? <p>正在加载会话…</p> : messages.map(item => <article className="saas-readonly-message" key={item.id}><strong>{item.role === 'user' ? '用户' : 'Agent'}</strong><pre>{item.content}</pre></article>)}</> : <p>暂无历史会话。</p>}</section></>}
-  </main>;
+    const controller = new AbortController(); configureSaaSCanvasSave(null);
+    api<CanvasRecord>(tenantPath(tenant.id, '/canvases/' + encodeURIComponent(canvasId)), { signal: controller.signal }).then(value => {
+      if (controller.signal.aborted) return;
+      // A separate viewer cache never overwrites the same user's editable draft after a role change.
+      configureCanvasStorage(identity.user.id, tenant.id, canvasId + '/read-only');
+      canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(sanitizeDocument(value.document)));
+      configureSaaSCanvas({ tenant, canvasId }); setRecord(value);
+    }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
+    return () => { controller.abort(); clearSaaSCanvas(); configureSaaSCanvasSave(null); };
+  }, [identity.user.id, tenant.id, canvasId]);
+  if (!record) return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
+  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><span role="status">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span><button onClick={() => downloadDocument(record.document, record.name + '.json')}>{t('导出画布 JSON', 'Export canvas JSON')}</button></div>
+    <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)} />
+    {settingsOpen && <RuntimeSettings onClose={() => setSettingsOpen(false)} />}
+  </div>;
 }
 
 function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
+  const { locale, t } = useSaaSPreferences();
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
   const [saveState, setSaveState] = useState('正在加载…');
@@ -303,16 +280,16 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       const remaining = readCanvasDrafts(storage);
       if (remaining.length) setRecovery(remaining); else useCloud();
     }} />;
-  if (!record) return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><p role={error ? 'alert' : 'status'}>{error || '正在加载云端画布…'}</p>{error && <button onClick={() => window.location.reload()}>重新连接</button>}</section></main>;
+  if (!record) return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p>{error && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</section></main>;
   const exportLocal = () => {
     const url = URL.createObjectURL(new Blob([scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}'], { type: 'application/json' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-canvas-recovery.json'; anchor.click(); URL.revokeObjectURL(url);
   };
-  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><span role="status"><Save size={13}/>{saveState}</span></div>
-    {error && <div className="saas-error-banner" role="alert">{error}<button onClick={exportLocal}>导出本地副本</button><button onClick={() => window.location.reload()}>重新加载</button></div>}
-    {runtime && !runtime.available && <div className="saas-runtime-note" role="status">Pi 执行尚未就绪：{runtime.reason || '请由服务管理员配置模型。'} 画布编辑仍可使用。</div>}
-    <LocaleProvider locale="zh"><CanvasSurface workspaceName={tenant.name} workspaceCaption="云端工作区" runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => navigate(tenant.id)} onOpenSettings={() => setSettingsOpen(true)} /></LocaleProvider>
-    {settingsOpen && <div className="saas-dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="saas-runtime-title" className="saas-card"><h2 id="saas-runtime-title">工作区运行设置</h2><p>执行引擎：Pi</p><p>{runtime?.available ? '运行服务已就绪。模型可在节点配置中选择。' : runtime?.reason || '运行服务尚未配置。'}</p><p>凭据和模型由服务管理员配置；成员可在各节点选择可用模型。</p><button autoFocus onClick={() => setSettingsOpen(false)}>关闭</button></section></div>}
+  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
+    {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
+    {runtime && !runtime.available && <div className="saas-runtime-note" role="status">{t('Pi 执行尚未就绪：', 'Pi execution is not ready: ')}{runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('请由服务管理员配置模型。', 'Ask the service administrator to configure a model.')}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
+    <CanvasSurface storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => navigate(tenant.id)} onOpenSettings={() => setSettingsOpen(true)} />
+    {settingsOpen && <RuntimeSettings onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
 
@@ -320,45 +297,23 @@ function DraftRecovery({ controls, record, drafts, error, hasJournal, onRestore,
   controls: React.ReactNode; record: CanvasRecord | null; drafts: SavedCanvasDraft[]; error: string; hasJournal: boolean;
   onRestore: (saved: SavedCanvasDraft) => void; onDiscard: (saved: SavedCanvasDraft) => void; onUseCloud: () => void;
 }) {
+  const { locale, t } = useSaaSPreferences();
   const [selectedKey, setSelectedKey] = useState(drafts[0]?.key || '');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const selected = drafts.find(saved => saved.key === selectedKey) || drafts[0];
   const canRestore = Boolean(record && selected?.draft && selected.draft.baseVersion === record.version);
-  return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>发现未同步的本机草稿</h1><p role="status">本机修改已保留。确认如何处理后才会打开编辑器；重新加载不会丢弃草稿。</p></section>
-    {error && <p className="saas-error" role="alert">{error}</p>}
-    <section className="saas-card saas-draft-recovery"><label>选择本机草稿<select aria-label="选择本机草稿" value={selected?.key || ''} onChange={event => { setSelectedKey(event.target.value); setConfirmDiscard(false); }}>{drafts.map((saved, index) => <option key={saved.key} value={saved.key}>草稿 {index + 1}{saved.draft ? ` · ${new Date(saved.draft.updatedAt).toLocaleString('zh-CN')}` : ' · 需要人工检查'}</option>)}</select></label>
-      {selected?.draft ? <><p>草稿基于云端版本 {selected.draft.baseVersion}；当前云端版本 {record?.version ?? '读取中'}。</p><p>包含节点：{selected.draft.document.nodes.map(node => node.title).join('、') || '空画布'}</p>{record && !canRestore && <p className="saas-error">云端版本已有变化。请导出草稿后核对，当前草稿不会自动覆盖较新的云端内容。</p>}</> : <p className="saas-error">草稿格式无法自动恢复。原始内容仍可导出，尚未删除。</p>}
-      {hasJournal && <p>本机还保存着待恢复运行记录。请保留草稿并核对运行；版本一致时可恢复编辑器继续处理。</p>}
+  return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{t('发现未同步的本机草稿', 'Unsynced local drafts found')}</h1><p role="status">{t('本机修改已保留。确认如何处理后才会打开编辑器；重新加载不会丢弃草稿。', 'Your local changes are preserved. Choose how to handle them before opening the editor. Reloading will not discard drafts.')}</p></section>
+    {error && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
+    <section className="saas-card saas-draft-recovery"><label>{t('选择本机草稿', 'Choose a local draft')}<select aria-label={t('选择本机草稿', 'Choose a local draft')} value={selected?.key || ''} onChange={event => { setSelectedKey(event.target.value); setConfirmDiscard(false); }}>{drafts.map((saved, index) => <option key={saved.key} value={saved.key}>{t('草稿', 'Draft')} {index + 1}{saved.draft ? ' · ' + new Date(saved.draft.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : t(' · 需要人工检查', ' · Manual inspection required')}</option>)}</select></label>
+      {selected?.draft ? <><p>{t('草稿基于云端版本', 'Draft base version:')} {selected.draft.baseVersion}{t('；当前云端版本', '; current cloud version:')} {record?.version ?? t('读取中', 'loading')}。</p><p>{t('包含节点：', 'Nodes: ')}{selected.draft.document.nodes.map(node => node.title).join(', ') || t('空画布', 'Empty canvas')}</p>{record && !canRestore && <p className="saas-error">{t('云端版本已有变化。请导出草稿后核对，当前草稿不会自动覆盖较新的云端内容。', 'The cloud version has changed. Export and review your draft. It will not automatically overwrite newer cloud content.')}</p>}</> : <p className="saas-error">{t('草稿格式无法自动恢复。原始内容仍可导出，尚未删除。', 'This draft format cannot be restored automatically. Its original content is preserved and can be exported.')}</p>}
+      {hasJournal && <p>{t('本机还保存着待恢复运行记录。请保留草稿并核对运行；版本一致时可恢复编辑器继续处理。', 'A local run recovery record also exists. Keep your draft and review the run. You can restore the editor when the versions match.')}</p>}
       <div className="saas-draft-actions"><button onClick={() => {
         const url = URL.createObjectURL(new Blob([selected.draft ? JSON.stringify(selected.draft.document, null, 2) : selected.raw], { type: 'application/json' }));
         const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-unsynced-draft.json'; anchor.click(); URL.revokeObjectURL(url);
-      }}>导出未同步草稿</button><button disabled={!canRestore} onClick={() => onRestore(selected)}>恢复草稿并继续同步</button>
-      {!hasJournal && record && <><button onClick={onUseCloud}>使用云端版本，保留草稿</button><button onClick={() => setConfirmDiscard(true)}>丢弃这份本机草稿</button></>}</div>
-      {confirmDiscard && <div role="alert"><p>确定丢弃所选草稿？该草稿中尚未同步的修改将被删除。</p><button onClick={() => { onDiscard(selected); setConfirmDiscard(false); }}>确认丢弃</button><button onClick={() => setConfirmDiscard(false)}>保留草稿</button></div>}
-      <button onClick={() => window.location.reload()}>重新连接云端</button>
+      }}>{t('导出未同步草稿', 'Export unsynced draft')}</button><button disabled={!canRestore} onClick={() => onRestore(selected)}>{t('恢复草稿并继续同步', 'Restore draft and resume syncing')}</button>
+      {!hasJournal && record && <><button onClick={onUseCloud}>{t('使用云端版本，保留草稿', 'Use cloud version and keep draft')}</button><button onClick={() => setConfirmDiscard(true)}>{t('丢弃这份本机草稿', 'Discard this local draft')}</button></>}</div>
+      {confirmDiscard && <div role="alert"><p>{t('确定丢弃所选草稿？该草稿中尚未同步的修改将被删除。', 'Discard this draft? Its unsynced changes will be deleted.')}</p><button onClick={() => { onDiscard(selected); setConfirmDiscard(false); }}>{t('确认丢弃', 'Confirm discard')}</button><button onClick={() => setConfirmDiscard(false)}>{t('保留草稿', 'Keep draft')}</button></div>}
+      <button onClick={() => window.location.reload()}>{t('重新连接云端', 'Reconnect to cloud')}</button>
     </section>
-  </main>;
-}
-
-function Admin({ identity }: { identity: Identity }) {
-  const [tab, setTab] = useState('tenants');
-  const [rows, setRows] = useState<any[] | null>(null);
-  const [error, setError] = useState('');
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    if (identity.user.platformRole !== 'admin') return;
-    const controller = new AbortController(); setRows(null); setError('');
-    api<any>(`/admin/${tab}`, { signal: controller.signal }).then(value => setRows(value.items))
-      .catch(error => { if (!controller.signal.aborted) setError(message(error)); });
-    return () => controller.abort();
-  }, [tab, revision, identity.user.platformRole]);
-  if (identity.user.platformRole !== 'admin') return <main className="saas-notice"><h1>无平台管理权限</h1><p>请联系平台管理员。</p><a href="/">返回工作区</a></main>;
-  const tabs = { tenants: '租户', users: '用户', runs: '运行', audit: '审计日志' };
-  return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a><a href="/">返回工作区</a><WorkspaceControls identity={identity} /></header><section className="saas-page-intro"><span className="saas-eyebrow">ADMINISTRATION</span><h1>平台管理</h1><p>租户状态、成员与执行记录。</p></section>
-    <nav className="saas-tabs">{Object.entries(tabs).map(([key, name]) => <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{name}</button>)}<button aria-label="刷新数据" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16}/></button></nav>
-    {error && <p role="alert" className="saas-error">{error}</p>}
-    {!rows ? <p role="status">正在加载…</p> : <div className="saas-table-wrap"><table><thead><tr>{tab === 'tenants' ? <><th>工作区</th><th>状态</th><th>并发 / 每日次数</th><th>操作</th></> : tab === 'users' ? <><th>用户</th><th>邮箱</th><th>平台角色</th></> : tab === 'runs' ? <><th>运行</th><th>租户</th><th>状态</th><th>创建时间</th></> : <><th>操作</th><th>操作者</th><th>租户</th><th>时间</th></>}</tr></thead><tbody>{rows.map((row, index) => <tr key={row.id || index}>{tab === 'tenants' ? <><td>{row.name}</td><td>{row.status === 'active' ? '正常' : '已暂停'}</td><td>{row.maxConcurrentRuns} / {row.maxRunsPerDay}</td><td><button onClick={async () => {
-      try { await api(`/admin/tenants/${encodeURIComponent(row.id)}`, { method: 'PATCH', body: JSON.stringify({ status: row.status === 'active' ? 'suspended' : 'active' }) }); setRevision(value => value + 1); } catch (error) { setError(message(error)); }
-    }}>{row.status === 'active' ? '暂停工作区' : '恢复工作区'}</button></td></> : tab === 'users' ? <><td>{row.name}</td><td>{row.email}</td><td>{row.platformRole}</td></> : tab === 'runs' ? <><td>{row.id}</td><td>{row.tenantId}</td><td>{row.status}</td><td>{row.createdAt}</td></> : <><td>{row.action}</td><td>{row.actorId || row.userId}</td><td>{row.tenantId || '—'}</td><td>{row.createdAt}</td></>}</tr>)}</tbody></table>{rows.length === 0 && <p>暂无记录。</p>}</div>}
   </main>;
 }

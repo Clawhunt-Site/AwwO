@@ -1,7 +1,7 @@
 export type AccountLocale = 'en' | 'zh';
 
 export type WorkspaceDeploymentMode = 'local_trusted' | 'authenticated';
-export type HumanCompanyRole = 'owner' | 'admin' | 'operator' | 'viewer';
+export type HumanCompanyRole = 'owner' | 'admin' | 'operator' | 'viewer' | 'member' | 'reader';
 export type CompanyMembershipStatus = 'pending' | 'active' | 'suspended' | 'archived';
 
 export type ClawHuntIdentity = {
@@ -73,6 +73,7 @@ export type CompanyMember = {
   user: AccountProfile | null;
   grants: CompanyMemberGrant[];
   removal?: { canArchive: boolean; reason: string | null };
+  editable?: boolean;
 };
 
 export type CompanyMembersResponse = {
@@ -82,6 +83,8 @@ export type CompanyMembersResponse = {
     canManageMembers: boolean;
     canInviteUsers: boolean;
     canApproveJoinRequests: boolean;
+    assignableRoles?: HumanCompanyRole[];
+    canChangeStatus?: boolean;
   };
 };
 
@@ -97,6 +100,8 @@ export type CompanyInviteListResponse = {
   invites: unknown[];
   nextOffset: number | null;
 };
+
+export type WorkspaceInviteSummary = { id: string; role: HumanCompanyRole; expiresAt: string; status: string };
 
 export type CompanyInviteCreated = {
   id: string;
@@ -123,4 +128,7 @@ export interface AccountApi {
     memberId: string,
     input: { membershipRole?: HumanCompanyRole; status?: Exclude<CompanyMembershipStatus, 'archived'> },
   ): Promise<CompanyMember>;
+  addMember?(companyId: string, input: { email: string; role: HumanCompanyRole }): Promise<void>;
+  removeMember?(companyId: string, userId: string): Promise<void>;
+  revokeInvite?(companyId: string, inviteId: string): Promise<void>;
 }
