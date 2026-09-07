@@ -207,17 +207,31 @@ export async function fetchConversationIndex(
   gatewayBase: string,
   companyId: string,
   signal?: AbortSignal,
+  issueId?: string,
 ): Promise<ConversationSummary[] | null> {
   try {
-    const res = await canvasFetch(`${gatewayBase}/conversations/${encodeURIComponent(companyId)}`, {
+    const records: unknown[] = [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    do {
+    const query = new URLSearchParams();
+    if (issueId) query.set('issueId', issueId);
+    if (cursor) query.set('cursor', cursor);
+    const res = await canvasFetch(`${gatewayBase}/conversations/${encodeURIComponent(companyId)}${query.size ? `?${query}` : ''}`, {
       headers: { Accept: 'application/json' },
       credentials: 'include',
       signal,
     });
     if (!res.ok) return null;
-    const body = (await res.json()) as { conversations?: unknown };
+    const body = (await res.json()) as { conversations?: unknown; nextCursor?: unknown };
     if (!Array.isArray(body?.conversations)) return null;
-    return body.conversations
+    records.push(...body.conversations);
+    if (body.nextCursor != null && typeof body.nextCursor !== 'string') return null;
+    cursor = body.nextCursor || undefined;
+    if (cursor && (cursors.has(cursor) || cursors.size >= 1000)) return null;
+    if (cursor) cursors.add(cursor);
+    } while (cursor);
+    return records
       .map((raw): ConversationSummary | null => {
         const d = (raw ?? {}) as Record<string, unknown>;
         const issueId = typeof d.issueId === 'string' ? d.issueId : '';

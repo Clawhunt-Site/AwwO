@@ -98,6 +98,7 @@ describe('SaaS tenant boundary', () => {
   });
 
   it('rejects invalid model planning output without changing the canvas', async () => {
+    window.document.documentElement.lang = 'zh-CN';
     configureSaaSCanvas({ tenant, canvasId: 'canvas-a' }); configureSaaSCanvasSave(async () => {});
     const document = { ...emptyDocument(), updatedAt: 1234 };
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')

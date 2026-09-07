@@ -140,7 +140,7 @@ export async function restoreHistory({ gatewayBase, node, signal }: RestoreHisto
     sessions.setHistory(storeKey, state);
   };
 
-  const index = await fetchConversationIndex(gatewayBase, binding.companyId, signal);
+  const index = await fetchConversationIndex(gatewayBase, binding.companyId, signal, node.issueId);
   if (signal?.aborted) { finish('unloaded'); return; }
   if (!stillCurrent()) return;
   if (index === null) {

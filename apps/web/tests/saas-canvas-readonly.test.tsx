@@ -23,7 +23,7 @@ const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
   if (init?.method && init.method !== 'GET') throw new Error('Unexpected write request');
   const url = String(input);
   if (url.endsWith('/messages')) return { ok: true, json: async () => ({ complete: true, messages: [{ authorAgentId: 'bound-agent', body: url.includes('old-issue') ? '从服务端读取的历史回复' : '本次服务端回复' }] }) };
-  if (url.endsWith('/conversations/tenant')) return { ok: true, json: async () => ({ conversations: [] }) };
+  if (new URL(url, 'http://localhost').pathname.endsWith('/conversations/tenant')) return { ok: true, json: async () => ({ conversations: [] }) };
   return { ok: true, json: async () => ({ companies: [], available: false }) };
 });
 beforeEach(() => {
