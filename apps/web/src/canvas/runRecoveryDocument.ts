@@ -112,31 +112,50 @@ export function persistRecoveredManualConversation(
 function mergeManualRecord(
   existing: RecoveredConversationTurn[],
   record: DurableManualTurn,
-  consumedPairs: Set<number>,
+  consumedUsers: Set<RecoveredConversationTurn>,
 ): RecoveredConversationTurn[] {
-  if (existing.some(turn => (record.operationId && turn.recoveryOperationId === record.operationId)
-    || (record.runId && turn.recoveryRunId === record.runId))) return existing;
-  const visible = existing.map((turn, index) => ({ turn, index })).filter(item => item.turn.role !== 'system');
-  for (let index = 0; index < visible.length; index += 1) {
-    const user = visible[index];
-    const agent = visible[index + 1];
-    if (consumedPairs.has(user.index) || user.turn.role !== 'user' || user.turn.text !== record.userText) continue;
-    if (record.agentText && (!agent || agent.turn.role !== 'agent' || agent.turn.text !== record.agentText)) continue;
-    consumedPairs.add(user.index);
-    if (agent) consumedPairs.add(agent.index);
-    return existing;
-  }
   const identity = {
     ...(record.operationId ? { recoveryOperationId: record.operationId } : {}),
     ...(record.runId ? { recoveryRunId: record.runId } : {}),
   };
-  const merged = [...existing];
-  if (record.userText.trim()) merged.push({ role: 'user', text: record.userText, ...identity });
-  if (record.agentText.trim()) merged.push({
+  const reply: RecoveredConversationTurn | null = record.agentText.trim() ? {
     role: 'agent', text: record.agentText,
     ...(record.state === 'done' ? {} : { tone: 'warn' as const }),
     ...identity,
-  });
+  } : null;
+  const visible = existing.map((turn, index) => ({ turn, index })).filter(item => item.turn.role !== 'system');
+  const recoveredIndex = visible.findIndex(({ turn }) => (record.operationId && turn.recoveryOperationId === record.operationId)
+    || (record.runId && turn.recoveryRunId === record.runId));
+  if (recoveredIndex >= 0) {
+    const recovered = visible[recoveredIndex].turn;
+    const user = recovered.role === 'user' ? recovered : visible[recoveredIndex - 1]?.turn;
+    if (user?.role === 'user') consumedUsers.add(user);
+    return existing;
+  }
+  for (let index = 0; index < visible.length; index += 1) {
+    const user = visible[index];
+    const agent = visible[index + 1];
+    if (consumedUsers.has(user.turn) || user.turn.role !== 'user' || user.turn.text !== record.userText) continue;
+    if (agent?.turn.role === 'agent' && record.agentText && agent.turn.text !== record.agentText
+      && !(record.state !== 'done' && agent.turn.text.startsWith(record.agentText))) continue;
+    // A cancelled run may persist its user message but keep partial stdout only
+    // in the recovery cache. Anchor that output here, before any later exchange.
+    // Track the user object: inserting replies shifts array indexes between records.
+    consumedUsers.add(user.turn);
+    if (reply && agent?.turn.role !== 'agent') {
+      const merged = [...existing];
+      merged.splice(user.index + 1, 0, reply);
+      return merged;
+    }
+    return existing;
+  }
+  const merged = [...existing];
+  if (record.userText.trim()) {
+    const user: RecoveredConversationTurn = { role: 'user', text: record.userText, ...identity };
+    merged.push(user);
+    consumedUsers.add(user);
+  }
+  if (reply) merged.push(reply);
   return merged;
 }
 
@@ -151,9 +170,9 @@ export function mergePersistedManualConversations(
   const records = readManualRecords(node, storage);
   if (!records) return null;
   let merged = [...serverTurns];
-  const consumedPairs = new Set<number>();
+  const consumedUsers = new Set<RecoveredConversationTurn>();
   for (const record of records.slice().sort((a, b) => a.startedAt - b.startedAt)) {
-    merged = mergeManualRecord(merged, record, consumedPairs);
+    merged = mergeManualRecord(merged, record, consumedUsers);
   }
   return merged;
 }

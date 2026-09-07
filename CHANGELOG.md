@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — cancelled conversation recovery order
+
+- **What changed:** Anchor locally recovered cancelled output after its matching persisted user message; preserve the latest completed reply and avoid duplicate turns across repeated refreshes.
+- **Why:** Real Go/Pi/GPT-5.6 browser acceptance reproduced an old cancelled response appearing after a newer successful response and replacing its card preview.
+- **Impact:** Session history and card previews keep chronological order, including repeated prompts and server replies longer than cached partial output. No API or database schema change.
+- **Verification:** Three regression cases failed before the fix and passed afterward; four new regressions and related tests pass. Full SaaS suite: 65 files / 612 tests; original Web suite: 91 files / 1,009 tests (overlapping suites), static checks, typecheck and SaaS build pass. Browser refresh/repeated refresh and a subsequent real two-node graph succeeded. Evidence: `.local/awwo-saas/acceptance-20260908/frontend-recovery-fix-report.md`.
+- **Files:** `apps/web/src/canvas/runRecoveryDocument.ts`, `apps/web/tests/canvas-recovery-document.test.ts`, `apps/web/tests/canvas-tile-history.test.tsx`.
+
 ### Fixed — Fable acceptance gaps in the Go/Pi SaaS integration
 
 - **What changed:** Add signed pagination to all six tenant resource lists and page controls to the original workspace panel; expose additional workspace creation and canvas rename/delete with version and active-run guards. Restore the original appearance catalog, custom colors and import/export with per-user PostgreSQL persistence. Localize run errors and make history/active-run lookups independent of the old 200-row window. Add isolated HTTP fault controls and an explicit real-provider acceptance entry.

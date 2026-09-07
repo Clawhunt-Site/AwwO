@@ -12,6 +12,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { SessionTile } from '../src/canvas/SessionTile';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { sessionStoreKey } from '../src/canvas/nodeThreads';
+import { persistRecoveredManualConversation } from '../src/canvas/runRecoveryDocument';
+import { forgetNode } from '../src/canvas/sessionTransport';
 import * as sessions from '../src/canvas/sessions';
 
 const indexMock = vi.fn();
@@ -38,6 +41,7 @@ function bound(over: Partial<SessionNode> = {}): SessionNode {
 
 beforeEach(() => {
   cleanup();
+  localStorage.clear();
   sessions.resetAllSessions();
   indexMock.mockReset();
   messagesMock.mockReset();
@@ -130,6 +134,41 @@ describe('SessionTile compact contract preview', () => {
     { id: 'result', label: 'Result', type: 'markdown' as const, required: true, value: '' },
     { id: 'followups', label: 'Followups', type: 'text' as const, required: false, value: '' },
   ];
+
+  it('restores cancellation before the newer result and keeps that result as the Session 2 preview across reloads', async () => {
+    const onPreview = vi.fn();
+    const node = bound({ activeThreadId: 'second', contract: { version: 1, inputs: [], outputs } });
+    const storeKey = sessionStoreKey(node);
+    expect(persistRecoveredManualConversation(node, {
+      version: 1, id: 'cancelled-manual', startedAt: 100, scope: [node.id],
+      manual: true, manualMessage: 'Write a long explanation',
+      nodes: { [node.id]: {
+        nodeId: node.id, threadId: 'second', companyId: 'c1', agentId: 'a1',
+        issueId: 'issue-1', runId: 'cancelled-run', state: 'cancelled', output: '{"result":"Partial',
+      } },
+    })).toBe(true);
+    indexMock.mockResolvedValue([{ issueId: 'issue-1' }]);
+    messagesMock.mockResolvedValue([
+      { role: 'user', text: 'Write a long explanation' },
+      { role: 'user', text: 'Reply with RESUME_OK' },
+      { role: 'agent', text: '{"result":"RESUME_OK"}' },
+    ]);
+
+    for (let reload = 0; reload < 2; reload += 1) {
+      cleanup();
+      sessions.resetAllSessions();
+      forgetNode(storeKey);
+      onPreview.mockClear();
+      render(<SessionTile node={node} scale={1} focused={false} compact gatewayBase="/gw" onPreview={onPreview} />);
+      await waitFor(() => expect(sessions.getSnapshot(storeKey).history).toBe('loaded'));
+      expect(sessions.getSnapshot(storeKey).turns.map(turn => turn.text)).toEqual([
+        'Write a long explanation', '{"result":"Partial', 'Reply with RESUME_OK', '{"result":"RESUME_OK"}',
+      ]);
+      expect(sessions.getSnapshot(storeKey).turns[1].tone).toBe('warn');
+      await waitFor(() => expect(onPreview).toHaveBeenCalledWith(node.id, 'RESUME_OK', 'second'));
+      expect(screen.getByTestId('canvas-tile-s1').querySelector('.awwo-compact-summary')?.textContent).toBe('RESUME_OK');
+    }
+  });
 
   it.each([false, true])('shows and persists the first declared JSON result (fenced=%s)', async (fenced) => {
     const onPreview = vi.fn();
