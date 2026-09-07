@@ -67,6 +67,9 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	if !a.workerAvailable(w) {
+		return
+	}
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return

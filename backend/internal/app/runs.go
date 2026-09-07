@@ -175,6 +175,12 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// Provider health and database waits may outlive the worker's lease. Refuse
+	// known loss before committing admission; this is not a distributed fence
+	// against an undetected physical loss in the remaining commit interval.
+	if !a.workerAvailable(w) {
+		return
+	}
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return

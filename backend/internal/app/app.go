@@ -202,17 +202,24 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("PATCH /api/v1/admin/tenants/{id}", a.admin(a.adminTenant))
 	return a.security(m)
 }
+
+func (a *App) workerAvailable(w http.ResponseWriter) bool {
+	a.mu.Lock()
+	closed := a.closed
+	a.mu.Unlock()
+	if closed {
+		fail(w, 503, "worker_unavailable", "API worker is shutting down")
+		return false
+	}
+	if a.leaseLost.Load() {
+		fail(w, 503, "worker_unavailable", "Database worker lock was lost; restart required")
+		return false
+	}
+	return true
+}
 func (a *App) security(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		a.mu.Lock()
-		closed := a.closed
-		a.mu.Unlock()
-		if closed {
-			fail(w, 503, "worker_unavailable", "API worker is shutting down")
-			return
-		}
-		if a.leaseLost.Load() {
-			fail(w, 503, "worker_unavailable", "Database worker lock was lost; restart required")
+		if !a.workerAvailable(w) {
 			return
 		}
 		if !strings.HasSuffix(r.URL.Path, "/events") {

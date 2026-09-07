@@ -61,6 +61,9 @@ func (a *App) lockTenantRow(w http.ResponseWriter, r *http.Request, tx pgx.Tx, t
 		a.dbError(w, e)
 		return "", false
 	}
+	if !a.workerAvailable(w) {
+		return "", false
+	}
 	return status, true
 }
 func (a *App) lockTenant(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string) bool {
