@@ -24,6 +24,7 @@ type App struct {
 	log         *slog.Logger
 	client      *http.Client
 	dummyHash   string
+	cursorKey   []byte
 	mu          sync.Mutex
 	running     map[string]context.CancelFunc
 	limits      map[string]rateEntry
@@ -44,7 +45,7 @@ func New(db *pgxpool.Pool, c Config) *App {
 	if c.PIAdmissionWait == 0 {
 		c.PIAdmissionWait = 5 * time.Second
 	}
-	return &App{db: db, cfg: c, log: slog.Default(), client: &http.Client{Timeout: c.RunTimeout}, dummyHash: hashPassword(randomID()), running: map[string]context.CancelFunc{}, limits: map[string]rateEntry{}, authSlots: make(chan struct{}, 4), reauthEvery: 15 * time.Second}
+	return &App{db: db, cfg: c, log: slog.Default(), client: &http.Client{Timeout: c.RunTimeout}, dummyHash: hashPassword(randomID()), cursorKey: []byte(randomID() + randomID()), running: map[string]context.CancelFunc{}, limits: map[string]rateEntry{}, authSlots: make(chan struct{}, 4), reauthEvery: 15 * time.Second}
 }
 
 // A dedicated advisory lock makes the first release explicitly single-worker.

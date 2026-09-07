@@ -9,18 +9,6 @@ func (a *App) adminSummary(w http.ResponseWriter, r *http.Request) {
 	v, e := oneJSON(r.Context(), a.db, `SELECT jsonb_build_object('tenantCount',(SELECT count(*) FROM tenants),'userCount',(SELECT count(*) FROM users),'activeRuns',(SELECT count(*) FROM runs WHERE status IN ('queued','running')),'completedRuns',(SELECT count(*) FROM runs WHERE status='completed'),'failedRuns',(SELECT count(*) FROM runs WHERE status IN ('failed','interrupted')))`)
 	a.replyOne(w, v, e, 200)
 }
-func (a *App) adminList(kind string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		sql := map[string]string{
-			"tenants": "SELECT " + tenantJSON + " FROM tenants t ORDER BY t.created_at DESC LIMIT 200",
-			"users":   "SELECT jsonb_build_object('id',id,'email',email,'name',name,'platformRole',platform_role,'createdAt',created_at) FROM users ORDER BY created_at DESC LIMIT 200",
-			"runs":    "SELECT " + runJSON + " FROM runs ORDER BY created_at DESC LIMIT 200",
-			"audit":   "SELECT jsonb_build_object('id',id,'actorId',actor_id,'tenantId',tenant_id,'action',action,'resourceId',resource_id,'createdAt',created_at) FROM audit_events ORDER BY id DESC LIMIT 200",
-		}[kind]
-		v, e := rowsJSON(r.Context(), a.db, sql)
-		a.replyList(w, v, e)
-	}
-}
 func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Status     *string `json:"status"`
