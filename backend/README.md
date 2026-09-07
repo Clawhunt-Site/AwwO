@@ -1,0 +1,35 @@
+# Awwo Go API
+
+Go 1.27.1, PostgreSQL, and the private Pi sidecar form the SaaS backend. The API owns identity, tenant authorization, canvas persistence, sessions, messages, quotas, runs and audit events. Pi executes only the validated model request prepared by this API.
+
+Run from this directory with `go run ./cmd/api`. For the complete local stack use the repository's Awwo SaaS scripts. The service applies embedded SQL migrations in order on startup. It never creates an in-memory production store.
+
+Configuration is read from `APP_ENV` and `AWWO_DATABASE_URL`, `AWWO_LISTEN_ADDR`, `AWWO_PUBLIC_ORIGIN`, `AWWO_PI_URL`, `AWWO_PI_TOKEN`, and optional `AWWO_BOOTSTRAP_ADMIN_EMAIL` / `AWWO_BOOTSTRAP_ADMIN_PASSWORD`. Development defaults bind the API to `127.0.0.1:8087`, public origin to `http://127.0.0.1:5189`, and Pi to `http://127.0.0.1:8097`. The database URL is required; sidecar tokens must have at least 32 characters when configured. Without a Pi token or ready sidecar, execution requests return 503.
+
+Optional controls: `AWWO_SESSION_TTL=24h`, `AWWO_RUN_TIMEOUT=180s`, `AWWO_PI_SESSION_WAIT=5s`, `AWWO_AUTH_REQUESTS_PER_MINUTE=10`, and `AWWO_TRUSTED_PROXY_CIDRS` (comma-separated CIDRs, empty by default). Only requests received from an explicitly trusted proxy may use X-Forwarded-For; the chain is evaluated from right to left. Do not put arbitrary clients in the trusted proxy list. Authentication has a global four-request password-hashing concurrency limit in addition to the per-IP limit.
+
+Public API paths begin `/api/v1`. Authentication uses an HttpOnly, SameSite=Lax session cookie; the server stores only its SHA-256 digest. Passwords use salted Argon2id (64 MiB, three iterations, two lanes). Cookies are Secure and the public origin must be HTTPS outside development. Every state-changing browser request must originate from the configured origin. Browser requests with a cross-site Fetch Metadata header are denied; JSON endpoints require application/json and reject unknown fields.
+
+A registration creates a normal user and a tenant owner membership. The owner role does not confer platform administration. Only explicit bootstrap configuration can create an initial platform admin, and bootstrap refuses to promote an existing customer account. Bootstrap does not rotate an existing administrator password. Member management supports existing registered accounts; invitation mail is not implemented. Owners cannot be removed or demoted through the basic membership API.
+
+Tenant foreign keys are composite and queries filter by tenant ID. Access to foreign-tenant objects returns 404. Readers may read, members may edit/run, admins may manage ordinary memberships, and owners may appoint tenant admins. Suspension freezes tenant writes and cancels its active runs while leaving reads available. Platform administration is separate from tenant membership.
+
+Canvas updates require the current `version` and return 409 on conflict. Each run has a tenant-scoped `operationId`; repeating the same operation returns the original run, while changed parameters return 409. Node runs must reference a saved canvas node and an agent in the same tenant. A session can have only one active run. Concurrent and daily UTC run quotas are checked under a tenant row lock.
+
+Run state, text deltas and terminal events are durable PostgreSQL records. SSE supports `Last-Event-ID` and `?after=`, and revalidates the authenticated session and membership every 15 seconds. Cancellation and suspension persist terminal state before cancelling the sidecar request. If immediate follow-up execution meets Pi session cleanup, the API retries only an explicit pre-admission `409 SESSION_BUSY` for at most the configured session wait, using the same run ID and payload. Network failures, duplicate run IDs, capacity errors and already accepted streams are never retried. A restarted process marks unfinished rows interrupted and adds durable interruption events. A dedicated PostgreSQL advisory lock prevents multiple API workers for the same schema; loss of its connection causes the API to fail closed and cancel current execution. This release requires one API instance. Horizontal scaling requires durable worker leases and a shared rate limiter before lifting this constraint.
+
+Conversation history consists of up to the most recent 100 messages in complete user/assistant pairs from completed runs. Entire oldest pairs are discarded to fit the lesser of the Pi transport budget (262144 text bytes) and the effective model context budget reported by Pi health, including current prompt, instructions and message framing. A message above 32768 UTF-16 code units excludes that pair and earlier history. Planner runs use their supplied graph/context snapshot without accumulating prior planner requests. The current prompt is never truncated. A current prompt/instructions pair exceeding the model context budget is rejected with HTTP 413 `context_limit`; Pi also enforces the same budget at its boundary. Provider availability is configuration readiness until an actual upstream call succeeds.
+
+Canvas planning uses `/tenants/{tenantId}/canvases/{id}/plan`, accepting `{prompt,context,operationId}` and returning a standard asynchronous run. A private planner session supports empty canvases. The server validates the returned JSON operation schema and rejects execution state mutations. The frontend must still validate graph references, port types and cycles, and explicitly persist the applied proposal with canvas CAS. Planning does not modify the saved graph by itself.
+
+Verification:
+
+```sh
+go test ./...
+go vet ./...
+AWWO_TEST_DATABASE_URL='<dedicated local PostgreSQL DSN>' go test -race ./... -count=1 -v
+```
+
+The database tests create and drop only their own randomly named PostgreSQL schema. Without `AWWO_TEST_DATABASE_URL`, integration tests explicitly skip. Tests exercise real PostgreSQL transactions and an in-process HTTP sidecar fixture; they do not demonstrate a real provider/model call. Runtime provider acceptance is a separate stack smoke test.
+
+This foundation does not implement payments, email delivery, OAuth, password recovery, file uploads, tool execution, distributed workers or production rollout. Lists currently return at most 200 objects without cursor pagination. Object/document retention and migration rollback policies must be decided before large-scale production use.
