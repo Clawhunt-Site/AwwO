@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Documentation — frontend-driven SaaS delivery standards
+
+- **What changed:** Added AwwO-specific design/development standards and a frontend integration inventory, with the existing canvas as the implementation and acceptance baseline.
+- **Why:** The SaaS foundation and its new shell do not yet cover every original account, invitation, language, theme or settings interaction. The inherited SuperClaw workflow also needs an explicit applicability check against AwwO's actual branches.
+- **Impact:** Documents ownership, API/data/runtime boundaries, environment configuration, review and human merge gates, remaining integration work and evidence levels. No runtime behavior or release version changed.
+- **Verification:** Documentation is checked against the recorded implementation snapshot and existing acceptance evidence; links and formatting are checked separately. This entry does not claim any additional frontend or real-provider capability passed.
+- **Files:** `docs/awwo-saas-design-standards.md`, `docs/awwo-saas-frontend-contract.md`, `docs/awwo-saas-architecture.md`, `README.md`, and `CHANGELOG.md`.
+
 ### Added — Go + Pi multi-tenant SaaS foundation
 
 - **What changed:** Added an independent Go/PostgreSQL API for accounts, tenant membership and roles, versioned canvas documents, agents, persistent sessions, idempotent runs, durable SSE, cancellation, quotas, platform administration and audit. Added a private Pi 0.85.1 execution service with isolated per-run processes, bounded input/history and server-owned model configuration. Added a SaaS user/admin entrypoint that reuses the existing canvas, templates and planner, plus local setup/start/test scripts and a four-service deployment template.

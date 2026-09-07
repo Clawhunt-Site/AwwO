@@ -2,6 +2,8 @@
 
 设计日期：2026-09-07。代码基线：Forgejo `ClawHunt-Store/AwwO` 的 `main@6e1dc158a79e2f18c7bdf82610a353883b883f31`（0.3.0）。工作分支：`feat/awwo-go-pi-saas`。本文中的目标架构、当前实现与后续工作分别标明；测试结果见 `awwo-saas-verification.md`。
 
+执行约束见 [设计与开发规范](awwo-saas-design-standards.md)；原页面功能、接口映射、实际覆盖与待补差距见 [前端逐项对接清单](awwo-saas-frontend-contract.md)。后端交付以现有前端的操作和数据契约为验收依据。
+
 ## 1. 产品范围与现状
 
 AwwO 是以独立 Agent Session 为节点的协作画布，已有七种 Agent 模板、节点输入输出契约、连线、会话、对话规划、图运行、取消与恢复界面。现役路径为 `apps/web/src/main.tsx → App.tsx → canvas/CanvasSurface.tsx → AgentWorkspace`。原链路依赖 `apps/gateway` 和 vendored `server/`，运行引擎为本机 Codex。
