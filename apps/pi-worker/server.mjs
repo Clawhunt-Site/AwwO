@@ -32,7 +32,12 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
   const sessions = new Set();
   let shuttingDown = false;
   const server = createServer(async (request, response) => {
-    const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+    let pathname;
+    try {
+      pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+    } catch {
+      return json(response, 400, { error: { code: 'INVALID_REQUEST_TARGET', message: 'Invalid HTTP request target.' } });
+    }
     if (request.method === 'GET' && pathname === '/health') {
       const health = publicHealth(config, active.size);
       if (shuttingDown) { health.ready = false; health.status = 'stopping'; }
