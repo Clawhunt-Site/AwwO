@@ -20,6 +20,16 @@ imports keep their original README, lockfiles, and license files under
 - `examples/knowledge-workbench/data/unicode/` contains Unicode data used by the generated example; preserve the accompanying Unicode licenses and source hashes.
 - AwwO's own code has not been assigned a new open-source license by this migration. Third-party licenses apply to their respective components only.
 
+## AwwO SaaS runtime dependencies
+
+The independent `apps/pi-worker` service uses `@earendil-works/pi-coding-agent`
+and `@earendil-works/pi-ai`, both pinned to `0.85.1` in its manifest and lockfile.
+Their package metadata declares MIT; preserve the installed packages' license
+files when distributing a runtime image. Source reference:
+`earendil-works/pi@d981de1229ef899957bbe968bc8dcda02a21f477`.
+This runtime dependency is distinct from the older Pi code attributed under
+`third_party/clawwork/`; it does not change that attribution or AwwO's own license.
+
 ## Existing fusion boundary
 
 The first fusion release keeps each upstream runtime isolated. SuperClaw exposes
