@@ -263,6 +263,7 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
   try {
     await streamAgentConversation(gatewayBase, binding.companyId, binding.agentId, message, onFrame, {
       issueId,
+      nodeId: node.id,
       signal,
     });
   } finally {

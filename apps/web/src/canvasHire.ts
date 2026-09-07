@@ -1,3 +1,4 @@
+import { canvasFetch } from './saas/canvasBridge';
 // P2c hire data layer — found the proposed roster into a company the canvas just
 // created. POST /companies/:id/agent-hires is a real, non-idempotent mutation, so
 // it reuses the SAME tri-state outcome contract the P2b company-founding path
@@ -121,7 +122,7 @@ export async function hireAgentIntoCompany(
   const timer = setTimeout(() => ctrl.abort(), HIRE_TIMEOUT_MS);
   let responded = false;
   try {
-    const res = await fetch(`${base}/companies/${encodeURIComponent(companyId)}/agent-hires`, {
+    const res = await canvasFetch(`${base}/companies/${encodeURIComponent(companyId)}/agent-hires`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       credentials: 'include',

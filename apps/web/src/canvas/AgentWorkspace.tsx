@@ -9,6 +9,8 @@ export { AgentGlyph } from './AgentTemplateDetails';
 import './awwo-workspace.css';
 
 export interface AgentWorkspaceProps {
+  workspaceName?: string;
+  workspaceCaption?: string;
   nodes: ReadonlyArray<CanvasNode>;
   edges: ReadonlyArray<CanvasEdge>;
   selectedIds: ReadonlyArray<string>;
@@ -28,7 +30,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ nodes, edges, selectedIds, runs, running, onFocusNode, onAddAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, welcome, assistantOpen, onToggleAssistant, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, nodes, edges, selectedIds, runs, running, onFocusNode, onAddAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, welcome, assistantOpen, onToggleAssistant, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -64,7 +66,7 @@ export function AgentWorkspace({ nodes, edges, selectedIds, runs, running, onFoc
     {sidebarOpen && <button className="awwo-sidebar-scrim" aria-label={t('workspace.closeNavigation')} onClick={() => setSidebarOpen(false)} />}
     <aside className="awwo-sidebar" aria-label={t('workspace.navigation')}>
       <div className="awwo-brand"><button className="awwo-brand-mark" aria-label={t(navExpanded ? 'workspace.collapseNavigation' : 'workspace.expandNavigation')} title={t('workspace.navigationTitle')} onClick={() => setNavExpanded(!navExpanded)}><GitBranch size={23} /></button><span>AwwO</span><span className="awwo-brand-caption">{t('workspace.caption')}</span></div>
-      <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{t('workspace.name')}</strong><small>{t('workspace.local')}</small></div></div>
+      <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{workspaceName || t('workspace.name')}</strong><small>{workspaceCaption || t('workspace.local')}</small></div></div>
       <div className="awwo-nav-active" aria-current="page"><Layers3 size={17} /><span>{t('workspace.canvas')}</span><span className="awwo-nav-badge">{nodes.length}</span></div>
       <button className="awwo-new-agent" aria-label={t('workspace.addAgent')} title={t('workspace.addAgent')} disabled={running} onClick={() => setLibraryOpen(true)}><Plus size={17} />{t('workspace.addAgent')}</button>
       <div className="awwo-list-heading"><span>{t('workspace.canvasAgents')}</span><span>{nodes.length.toString().padStart(2, '0')}</span></div>
@@ -86,7 +88,7 @@ export function AgentWorkspace({ nodes, edges, selectedIds, runs, running, onFoc
     <main className="awwo-main">
       <header className="awwo-header">
         <button className="awwo-mobile-menu awwo-icon-button" aria-label={t('workspace.openNavigation')} onClick={() => setSidebarOpen(true)}><Menu size={19} /></button>
-        <div className="awwo-page-title"><div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{t('workspace.name')}</span></div></div>
+        <div className="awwo-page-title"><div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{workspaceName || t('workspace.name')}</span></div></div>
         <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{accountControl}</div>
       </header>
       <div className="awwo-canvas-bar">{onToggleAssistant && nodes.length > 0 ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}<div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div><span className="awwo-canvas-meta">{t('workspace.agentCount', { count: nodes.length })}<span>·</span>{t('workspace.connectionCount', { count: edges.length })}</span><div className="awwo-run-slot">{toolbar}</div></div>

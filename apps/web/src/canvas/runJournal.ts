@@ -1,3 +1,5 @@
+import { canvasStorage } from './canvasStorage';
+import { canvasFetch } from '../saas/canvasBridge';
 import type { RunNodeState, RunNodeStatus } from './runGraph';
 import { validateNodeOutput, type RunSummary } from './runGraph';
 import type { CanvasNode } from './canvasDoc';
@@ -36,7 +38,7 @@ const states = new Set<RunNodeState>(['waiting', 'running', 'done', 'failed', 'b
 const text = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value : null;
 
 /** Invalid/torn storage never becomes an active lock. */
-export function loadRunJournal(storage: Pick<Storage, 'getItem'> = localStorage): CanvasRunJournal | null {
+export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage()): CanvasRunJournal | null {
   let raw: unknown;
   try { raw = JSON.parse(storage.getItem(CANVAS_RUN_JOURNAL_KEY) || 'null'); } catch { return null; }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -63,7 +65,7 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = localStorage)
   return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes, ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
 }
 
-export function saveRunJournal(journal: CanvasRunJournal, storage: Pick<Storage, 'setItem'> = localStorage): boolean {
+export function saveRunJournal(journal: CanvasRunJournal, storage: Pick<Storage, 'setItem'> = canvasStorage()): boolean {
   try { storage.setItem(CANVAS_RUN_JOURNAL_KEY, JSON.stringify(journal)); return true; } catch { return false; }
 }
 
@@ -71,9 +73,9 @@ type JournalClearStorage = Pick<Storage, 'removeItem'> & Partial<Pick<Storage, '
 
 /** Delete only the journal the caller finished. Passing an expected id prevents a stale tab or
  * recovery callback from clearing a newer run. Existing `clearRunJournal(storage)` calls remain
- * supported; `clearRunJournal(expectedId)` uses localStorage. */
-export function clearRunJournal(storageOrExpected: JournalClearStorage | string = localStorage, expectedId?: string): boolean {
-  const storage = typeof storageOrExpected === 'string' ? localStorage : storageOrExpected;
+ * supported; `clearRunJournal(expectedId)` uses canvasStorage(). */
+export function clearRunJournal(storageOrExpected: JournalClearStorage | string = canvasStorage(), expectedId?: string): boolean {
+  const storage = typeof storageOrExpected === 'string' ? canvasStorage() : storageOrExpected;
   const expected = typeof storageOrExpected === 'string' ? storageOrExpected : expectedId;
   try {
     if (expected) {
@@ -164,7 +166,7 @@ export async function reconcileRunJournal(journal: CanvasRunJournal, nodes: Read
         data = { runId, ...recovered };
       } else {
         const path = [item.companyId!, 'agents', item.agentId!, 'issues', issueId!, 'runs', runId!].map(encodeURIComponent).join('/');
-        const response = await fetch(`${base.replace(/\/+$/, '')}/conversations/${path}`, { credentials: 'include', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
+        const response = await canvasFetch(`${base.replace(/\/+$/, '')}/conversations/${path}`, { credentials: 'include', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
         if (!response.ok) throw new Error('read failed');
         data = await response.json() as { runId?: unknown; status?: unknown; terminal?: unknown; output?: unknown; outputAvailable?: unknown };
       }

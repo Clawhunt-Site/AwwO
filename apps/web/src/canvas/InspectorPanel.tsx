@@ -1,3 +1,4 @@
+import { canvasFetch } from '../saas/canvasBridge';
 // InspectorPanel — the per-node configuration dock for the session canvas.
 //
 // Ported from the verified WorkflowConfigPanel (since-deleted apps/web/src/studio/WorkflowConfigPanel.tsx),
@@ -537,7 +538,7 @@ async function syncPersona(apiBase: string, agentId: string, persona: string): P
   try {
     const base = normalizeBase(apiBase);
     if (!isAllowedBase(base)) return false;
-    const res = await fetch(`${base}/agents/${encodeURIComponent(agentId)}/instructions-bundle/file`, {
+    const res = await canvasFetch(`${base}/agents/${encodeURIComponent(agentId)}/instructions-bundle/file`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       credentials: 'include',

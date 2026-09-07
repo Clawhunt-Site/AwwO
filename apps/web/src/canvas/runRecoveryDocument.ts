@@ -1,3 +1,4 @@
+import { canvasStorage } from './canvasStorage';
 import type { CanvasDocument, CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
 import type { CanvasRunJournal } from './runJournal';
@@ -93,7 +94,7 @@ function readManualRecords(node: SessionNode, storage: Pick<Storage, 'getItem'>)
 export function persistRecoveredManualConversation(
   node: SessionNode,
   journal: CanvasRunJournal,
-  storage: RecoveryStorage = localStorage,
+  storage: RecoveryStorage = canvasStorage(),
 ): boolean {
   const key = manualRecoveryKey(node);
   const record = manualRecord(node, journal);
@@ -145,7 +146,7 @@ function mergeManualRecord(
 export function mergePersistedManualConversations(
   node: SessionNode,
   serverTurns: ReadonlyArray<RecoveredConversationTurn>,
-  storage: Pick<Storage, 'getItem'> = localStorage,
+  storage: Pick<Storage, 'getItem'> = canvasStorage(),
 ): RecoveredConversationTurn[] | null {
   const records = readManualRecords(node, storage);
   if (!records) return null;

@@ -1,3 +1,5 @@
+import { canvasStorageKey } from './canvasStorage';
+import { canvasFetch } from '../saas/canvasBridge';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
 // One infinite canvas whose nodes ARE agent sessions: each tile holds a live conversation that
@@ -89,6 +91,8 @@ function hasStreamingConversation(nodes: ReadonlyArray<CanvasNode>): boolean {
 }
 
 export interface CanvasSurfaceProps {
+  workspaceName?: string;
+  workspaceCaption?: string;
   /** Injectable planner transport; graph edits always pass the same validation pipeline. */
   planRequest?: typeof requestCanvasPlan;
   accountControl?: ReactNode;
@@ -108,7 +112,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   useEffect(() => {
     let stale = false;
     const base = apiBase.replace(/\/+$/, '');
-    void fetch(`${base}/companies`, { credentials: 'include', headers: { accept: 'application/json' } })
+    void canvasFetch(`${base}/companies`, { credentials: 'include', headers: { accept: 'application/json' } })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (stale || !d) return;
@@ -139,7 +143,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   const inspectorCloseLocked = useRef(false);
@@ -411,7 +415,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   const runAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     const observeOtherTab = (event: StorageEvent) => {
-      if (event.key !== CANVAS_RUN_JOURNAL_KEY || runAbort.current) return;
+      if (event.key !== canvasStorageKey(CANVAS_RUN_JOURNAL_KEY) || runAbort.current) return;
       const active = loadRunJournal();
       if (active) {
         journal.current = active; setRuns(active.nodes); setRunning(true); setRecovering(true);
@@ -1148,7 +1152,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   );
 
   return (
-    <AgentWorkspace nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
+    <AgentWorkspace workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
       onFocusNode={focusNode} onAddAgent={addAgent} onCreateTemplate={createTemplate}
       onSearch={() => setBarMode('search')}
       assistant={nodes.length && assistantOpen ? <CanvasAssistant mode="panel" {...assistantProps} onClose={() => setAssistantOpen(false)} /> : undefined}

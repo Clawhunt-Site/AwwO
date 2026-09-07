@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "moduleResolution": "Bundler" },
+  "include": ["src/saas", "src/vendor-shims.d.ts"]
+}

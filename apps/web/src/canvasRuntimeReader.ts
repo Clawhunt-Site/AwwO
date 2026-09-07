@@ -1,10 +1,11 @@
+import { canvasFetch } from './saas/canvasBridge';
 import { paperclipApiBase } from './paperclipBridge';
 
 /** Adapt the live Node registry to RuntimePicker's existing inventory contract.
  * Registered adapters are not a claim that their CLI is logged in or executable.
  * The registry does not advertise effort levels, so those controls stay hidden.
  */
-export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: typeof fetch = fetch) {
+export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: typeof fetch = canvasFetch) {
   const apiBase = base.replace(/\/+$/, '');
   async function get(path: string, signal?: AbortSignal | null): Promise<unknown> {
     const timeout = AbortSignal.timeout(10_000);

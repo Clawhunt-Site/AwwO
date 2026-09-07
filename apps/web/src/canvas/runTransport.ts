@@ -1,3 +1,4 @@
+import { canvasFetch } from '../saas/canvasBridge';
 // Gateway transport for graph runs — a thin adapter turning ONE session-node execution into ONE
 // turn on that node's own gateway conversation, riding the exact SSE client the tile composers
 // use (streamAgentConversation).
@@ -65,7 +66,7 @@ export async function cancelConversationRunViaGateway(
 ): Promise<NativeCancelResult> {
   try {
     const base = gatewayBase.replace(/\/+$/, '');
-    const response = await fetch(
+    const response = await canvasFetch(
       `${base}/conversations/${encodeURIComponent(binding.companyId)}/agents/${encodeURIComponent(binding.agentId)}/issues/${encodeURIComponent(issueId)}/cancel`,
       {
         method: 'POST',
@@ -235,6 +236,7 @@ export async function execAgentViaGateway(
   try {
     await streamAgentConversation(gatewayBase, binding.companyId, binding.agentId, message, onFrame, {
       issueId,
+      nodeId: node.id,
       operationId,
       signal: transport.signal,
     });

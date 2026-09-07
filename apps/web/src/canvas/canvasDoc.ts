@@ -1,3 +1,4 @@
+import { canvasStorage } from './canvasStorage';
 // The persisted canvas document.
 //
 // Product model (owner, 2026-08): THE NODE IS THE AGENT SESSION. Each tile on the infinite
@@ -448,7 +449,7 @@ export type CanvasLoadStatus = 'ok' | 'empty' | 'corrupt';
 
 function preserveCorrupt(raw: string, err: unknown, source: string): void {
   try {
-    localStorage.setItem(CANVAS_BACKUP_KEY, raw);
+    canvasStorage().setItem(CANVAS_BACKUP_KEY, raw);
   } catch {
     /* backup best-effort — the log below still names the loss */
   }
@@ -515,8 +516,8 @@ export function migrateFromLegacy(): CanvasDocument | null {
   let current: string | null = null;
   let legacy: string | null = null;
   try {
-    current = localStorage.getItem(CANVAS_STORAGE_KEY);
-    legacy = localStorage.getItem(LEGACY_WORKFLOW_STORAGE_KEY);
+    current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
+    legacy = canvasStorage().getItem(LEGACY_WORKFLOW_STORAGE_KEY);
   } catch {
     return null;
   }
@@ -551,7 +552,7 @@ function describeNonDocument(raw: unknown): string | null {
 export function loadDocumentWithStatus(): { doc: CanvasDocument; status: CanvasLoadStatus } {
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(CANVAS_STORAGE_KEY);
+    raw = canvasStorage().getItem(CANVAS_STORAGE_KEY);
   } catch {
     // Storage itself unreadable (privacy mode / policy): nothing to back up.
     return { doc: emptyDocument(), status: 'corrupt' };
@@ -608,7 +609,7 @@ export function loadDocument(): CanvasDocument {
 
 export function saveDocument(doc: CanvasDocument): boolean {
   try {
-    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
     return true;
   } catch {
     return false;

@@ -1,3 +1,4 @@
+import { canvasFetch } from './saas/canvasBridge';
 // P3d part 3 — apps/web client for a REAL per-agent conversation, streamed from
 // the gateway BFF (which orchestrates the zero-server issue+wake+WS pipeline).
 //
@@ -49,6 +50,7 @@ export function normalizeFrame(data: unknown): AgentChatFrame {
 }
 
 export interface StreamOpts {
+  nodeId?: string;
   /** Reuse the agent's dedicated conversation issue (continuity across turns). */
   issueId?: string;
   /** Stable identity for exactly one upstream mutation, persisted before POST. */
@@ -78,7 +80,7 @@ export async function prepareConversationOperation(
 ): Promise<Response> {
   const base = (gatewayBase || '').replace(/\/+$/, '');
   const parts = [companyId, 'agents', agentId, 'operations', operationId, 'prepare'].map(encodeURIComponent).join('/');
-  return fetch(`${base}/conversations/${parts}`, {
+  return canvasFetch(`${base}/conversations/${parts}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     credentials: 'include',
@@ -114,9 +116,9 @@ export async function streamAgentConversation(
       }
       operationPrepared = true;
     }
-    res = await fetch(url, {
+    res = await canvasFetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(opts.nodeId ? { 'X-Awwo-Node-Id': opts.nodeId } : {}) },
       credentials: 'include',
       body: JSON.stringify({ message, ...(opts.issueId ? { issueId: opts.issueId } : {}), ...(opts.operationId ? { operationId: opts.operationId } : {}) }),
       signal: opts.signal,
@@ -163,7 +165,7 @@ export async function fetchConversationOperation(
 ): Promise<ConversationOperationStatus> {
   const base = gatewayBase.replace(/\/+$/, '');
   const parts = [companyId, 'agents', agentId, 'operations', operationId].map(encodeURIComponent).join('/');
-  const response = await fetch(`${base}/conversations/${parts}`, { headers: { Accept: 'application/json' }, credentials: 'include', signal });
+  const response = await canvasFetch(`${base}/conversations/${parts}`, { headers: { Accept: 'application/json' }, credentials: 'include', signal });
   if (!response.ok) throw new Error(`operation recovery responded ${response.status}`);
   const value = await response.json() as Partial<ConversationOperationStatus>;
   if (value.operationId !== operationId || !['not_started', 'in_flight', 'accepted', 'terminal', 'rejected', 'uncertain'].includes(String(value.state))
@@ -207,7 +209,7 @@ export async function fetchConversationIndex(
   signal?: AbortSignal,
 ): Promise<ConversationSummary[] | null> {
   try {
-    const res = await fetch(`${gatewayBase}/conversations/${encodeURIComponent(companyId)}`, {
+    const res = await canvasFetch(`${gatewayBase}/conversations/${encodeURIComponent(companyId)}`, {
       headers: { Accept: 'application/json' },
       credentials: 'include',
       signal,
@@ -241,7 +243,7 @@ export async function fetchConversationMessages(
   signal?: AbortSignal,
 ): Promise<StoredMessage[] | null> {
   try {
-    const res = await fetch(
+    const res = await canvasFetch(
       `${gatewayBase}/conversations/${encodeURIComponent(companyId)}/issues/${encodeURIComponent(issueId)}/messages`,
       { headers: { Accept: 'application/json' }, credentials: 'include', signal },
     );
