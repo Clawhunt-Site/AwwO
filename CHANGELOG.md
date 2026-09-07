@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — SaaS acceptance authorization and lifecycle failures
+
+- **What changed:** Normalize graph revisions before the first run; recheck tenant mutation authorization inside transactions; commit cancellation state/events/audit together; enforce timed SSE authorization during historical replay; reject admission after detected worker lease loss; return 400 for malformed Pi HTTP targets; honor local-launcher shutdown across asynchronous startup phases.
+- **Why:** Adversarial acceptance reproduced false cross-tab conflicts, late writes after revocation, continued private event replay, stranded queued runs, a Pi process crash, and services launching after cancellation.
+- **Impact:** Existing canvas and API contracts remain usable with stricter admission and lifecycle handling. Single Go worker, periodic SSE revocation and explicit local-provider fixture boundaries remain in force. No merge, release, external inference or deployment is included.
+- **Verification:** 58 SaaS-related frontend files/554 cases and original 91 files/1003 cases (47 overlapping files); Gateway 36 files/389 cases; Go 22 top-level plus 16 subcases with real PostgreSQL/race/vet; Pi 22, SaaS scripts 8 and original scripts 12; final-binary API smoke and Go/Pi/SDK/PostgreSQL stack; both Web builds/typecheck, browser protocol acceptance and dependency/config checks. Full findings, evidence and remaining gates are recorded in `docs/awwo-saas-acceptance-20260907.md`.
+- **Files:** `apps/web/src/canvas/CanvasSurface.tsx` and first-run regressions; `backend/internal/app/{app,invitations,resources,planning,runs}.go` and authorization/lease regressions; `apps/pi-worker/{server,worker.test,http-boundary.test}.mjs`; `scripts/awwo-saas-{dev,scripts.test}.mjs`; SaaS architecture and acceptance documents.
+
 ### Added — original frontend SaaS account and administration integration
 
 - **What changed:** Connected the original account/workspace panel to Go profile and membership APIs; added expiring, revocable, single-use invitations with explicit acceptance. Reused the original canvas for readers with mutation boundaries, restored shared language/theme preferences, exposed server-owned Pi runtime status, and added platform quota forms, cursor pagination and complete JSON export. Added an isolated browser protocol fixture and updated API, architecture, development and acceptance documentation.

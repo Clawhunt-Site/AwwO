@@ -1,5 +1,7 @@
 # AwwO SaaS 本地验收记录
 
+> 本文保留初轮实施的历史结果。用户随后要求全面验收，补跑默认 Web、Gateway 并修复六类问题；最终结果以 [2026-09-07 全面验收报告](awwo-saas-acceptance-20260907.md) 为准，不将下表旧数量当作最新数量。
+
 日期：2026-09-07（Asia/Shanghai）。范围：现有画布 + Go/PostgreSQL 多租户 API + Pi 内部执行服务的本地基础版本。
 
 ## 基线与工作区
@@ -80,7 +82,7 @@ npx vitest run --config vitest.saas.config.mjs tests/saas- tests/canvas- tests/a
 
 - **最新 Forgejo 前端同步：等待本次精确合并授权。** 收尾时 `git fetch origin main` 成功，远端主干变为 `fc5cbda9e4028837009369471ec2d54b94a985a5`（`feat(awwo): release reliable Codex sessions and private deployment`，82 个文件）。上表测试针对当前 SaaS 工作树，没有吸收该新增提交，不能作为最新主干整合后的测试结果。原主仓库本地 `main` 仍为 `6e1dc158a79e2f18c7bdf82610a353883b883f31` 且干净。
 - **真实模型账号调用：未执行。** 开发环境没有指定 provider/model/API key；实际 Pi SDK 的测试使用本地协议 fixture。`ready` 只说明服务端配置齐备，不证明账号、余额、模型可用或任务交付质量。
-- **历史默认前端全量入口：环境阻塞。** `npm test --prefix apps/web` 在加载历史 `vitest.config.mjs` 时失败：`Cannot find module '@mdxeditor/editor/style.css'`，来自未安装的 `server/ui` 继承工作区。独立 SaaS 安装不安装该历史运行时。复用画布的相关测试使用独立 SaaS 配置执行，不把历史默认全量测试计为通过。
+- **历史默认前端全量入口：初轮阻塞，后续已解除。** 初轮缺少 `@mdxeditor/editor/style.css`。全面验收时按既有 lockfile 从本地缓存补齐 UI 依赖，默认 91 文件/1003 项及静态检查、原 Web 构建均通过；详见上方全面验收报告。
 - **容器运行：环境阻塞。** Docker Compose CLI 可用，Docker daemon 的版本探测超时；未启动或重启系统 Docker 服务。镜像构建、容器健康、HTTPS 入口及公网部署未验证。
 - **历史 Python/桌面/其他继承应用：本次未执行。** 未用系统 Python 冒充项目运行时，也没有把旧模块的静态存在作为 SaaS 验收证据。
 
