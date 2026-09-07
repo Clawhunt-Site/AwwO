@@ -488,33 +488,68 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 	defer tick.Stop()
 	heartbeat := time.NewTicker(a.reauthEvery)
 	defer heartbeat.Stop()
+	nextAuth := time.Now().Add(a.reauthEvery)
+	checkAccess := func() bool {
+		if time.Now().Before(nextAuth) {
+			return true
+		}
+		var valid bool
+		c, _ := r.Cookie("awwo_session")
+		if c == nil {
+			return false
+		}
+		e := a.db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM memberships m JOIN auth_sessions s ON s.user_id=m.user_id WHERE m.tenant_id=$1 AND m.user_id=$2 AND s.token_hash=$3 AND s.expires_at>now())", tid, currentUser(r).ID, tokenHash(c.Value)).Scan(&valid)
+		nextAuth = time.Now().Add(a.reauthEvery)
+		return e == nil && valid
+	}
 	for {
+		if !checkAccess() {
+			return
+		}
 		rows, e := a.db.Query(r.Context(), "SELECT id,data FROM run_events WHERE tenant_id=$1 AND run_id=$2 AND id>$3 ORDER BY id LIMIT 100", tid, id, cursor)
 		if e != nil {
 			return
 		}
-		count := 0
+		type replayEvent struct {
+			id   int64
+			data []byte
+		}
+		batch := []replayEvent{}
 		for rows.Next() {
-			var data []byte
-			if e = rows.Scan(&cursor, &data); e != nil {
+			var event replayEvent
+			if e = rows.Scan(&event.id, &event.data); e != nil {
 				rows.Close()
 				return
 			}
-			_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
-			if _, e = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", cursor, data); e != nil {
-				rows.Close()
-				return
-			}
-			count++
+			batch = append(batch, event)
 		}
 		rows.Close()
 		if rows.Err() != nil {
+			return
+		}
+		// Release the database connection before network writes or reauthorization.
+		// Backlog replay must obey the same deadline as an idle/live stream.
+		for _, event := range batch {
+			if !checkAccess() {
+				return
+			}
+			cursor = event.id
+			_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
+			if _, e = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", cursor, event.data); e != nil {
+				return
+			}
+		}
+		count := len(batch)
+		if !checkAccess() {
 			return
 		}
 		if count > 0 {
 			if e = controller.Flush(); e != nil {
 				return
 			}
+		}
+		if !checkAccess() {
+			return
 		}
 		if count == 100 {
 			continue
@@ -534,13 +569,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-tick.C:
 		case <-heartbeat.C:
-			var valid bool
-			c, _ := r.Cookie("awwo_session")
-			if c == nil {
-				return
-			}
-			e = a.db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM memberships m JOIN auth_sessions s ON s.user_id=m.user_id WHERE m.tenant_id=$1 AND m.user_id=$2 AND s.token_hash=$3 AND s.expires_at>now())", tid, currentUser(r).ID, tokenHash(c.Value)).Scan(&valid)
-			if e != nil || !valid {
+			if !checkAccess() {
 				return
 			}
 			_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))

@@ -127,6 +127,64 @@ func TestPostgresMutationRechecksAuthorizationAfterBodyWait(t *testing.T) {
 	}
 }
 
+type gatedReplayWriter struct {
+	*httptest.ResponseRecorder
+	gate *requestGate
+}
+
+func (w *gatedReplayWriter) Write(p []byte) (int, error) {
+	if strings.HasPrefix(string(p), "id: ") {
+		w.gate.wait()
+	}
+	return w.ResponseRecorder.Write(p)
+}
+
+func TestPostgresSSEReplayRechecksRevokedAccess(t *testing.T) {
+	for _, revocation := range []string{"membership_removed", "session_logout", "session_expired"} {
+		t.Run(revocation, func(t *testing.T) { assertReplayRevocation(t, revocation) })
+	}
+}
+
+func assertReplayRevocation(t *testing.T, revocation string) {
+	h := newHarness(t, "")
+	h.a.reauthEvery = 20 * time.Millisecond
+	owner, tid, _ := h.register(t, "replay-owner@example.test")
+	member, _, mid := h.register(t, "replay-member@example.test")
+	h.request(t, owner, "POST", "/tenants/"+tid+"/members", map[string]string{"email": "replay-member@example.test", "role": "reader"}, 201)
+	_, _, sid := h.fixture(t, owner, tid)
+	rid := randomID()
+	ctx := context.Background()
+	if _, e := h.db.Exec(ctx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status) VALUES($1,$2,$3,'replay-operation','hash','test','completed')", rid, tid, sid); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := h.db.Exec(ctx, `INSERT INTO run_events(tenant_id,run_id,data) SELECT $1,$2,'{"type":"text_delta","delta":"private"}'::jsonb FROM generate_series(1,201)`, tid, rid); e != nil {
+		t.Fatal(e)
+	}
+	g := newRequestGate(t)
+	w := &gatedReplayWriter{httptest.NewRecorder(), g}
+	r := httptest.NewRequest("GET", "/api/v1/tenants/"+tid+"/runs/"+rid+"/events", nil)
+	r.AddCookie(member)
+	done := make(chan struct{})
+	go func() { defer close(done); h.a.Handler().ServeHTTP(w, r) }()
+	awaitTestSignal(t, g.reached)
+	switch revocation {
+	case "membership_removed":
+		h.request(t, owner, "DELETE", "/tenants/"+tid+"/members/"+mid, nil, 204)
+	case "session_logout":
+		h.request(t, member, "POST", "/auth/logout", nil, 204)
+	case "session_expired":
+		if _, e := h.db.Exec(ctx, "UPDATE auth_sessions SET expires_at=now()-interval '1 second' WHERE token_hash=$1", tokenHash(member.Value)); e != nil {
+			t.Fatal(e)
+		}
+	}
+	time.Sleep(2 * h.a.reauthEvery)
+	g.open()
+	awaitTestSignal(t, done)
+	if n := strings.Count(w.Body.String(), "data: "); n > 1 {
+		t.Fatalf("replayed %d events after revocation instead of closing at the next authorization interval", n)
+	}
+}
+
 func TestPostgresBodylessMutationRechecksAuthorization(t *testing.T) {
 	for _, revocation := range []string{"membership_removed", "membership_downgraded", "tenant_suspended"} {
 		t.Run(revocation, func(t *testing.T) {
