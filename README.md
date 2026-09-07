@@ -2,9 +2,24 @@
 
 AwwO 是以独立 Agent Session 为节点的协作画布。用户先描述目标，由 AI 规划节点、输入输出表单与连接；随后既可以通过对话调整画布，也可以人工编辑结构。每个节点内包含 Session 管理、对话与交付物，画布默认以紧凑卡片展示，展开一个节点进入工作台。
 
-当前版本：**0.2.0**。主仓库：[ClawHunt-Store/AwwO](https://git.clawhunt.store/ClawHunt-Store/AwwO)，默认迭代分支为 `dev`。
+当前已发布版本：**0.3.0**（见 `VERSION`）。主仓库：[ClawHunt-Store/AwwO](https://git.clawhunt.store/ClawHunt-Store/AwwO)。Go + Pi SaaS 建设在独立功能分支上进行。
 
-## 开始使用
+## Go + Pi 多租户 SaaS
+
+新增的 SaaS 入口复用本项目画布，由 Go API 管理身份、租户成员、画布、Agent、持久会话、运行事件与平台后台，PostgreSQL 存储业务数据，Pi 提供独立进程中的模型执行。
+
+```sh
+npm run setup:saas
+npm run dev:saas
+```
+
+本地用户入口 `http://127.0.0.1:5189/`，平台管理入口 `/admin`。需要 Node >=22.19、Go 自动工具链和 PostgreSQL 工具。首次启动生成独立的本地数据库与管理员配置；秘密保存在忽略的 `.local/awwo-saas/.env`。模型需配置服务端提供商，未配置时可使用账号和画布功能。
+
+[架构与实施路线](docs/awwo-saas-architecture.md) · [API 契约](docs/awwo-saas-api.md) · [启动与部署](docs/awwo-saas-development.md) · [实际验收记录](docs/awwo-saas-verification.md)
+
+这是本地 SaaS 基础版本，公网发布、付费、邮件、工程执行沙箱与后台整图调度的后续范围在架构文档中列明。
+
+## 原本地 Codex 模式
 
 需要 Node.js 22.13+（22.x）或 24+、npm、pnpm 9.15.4，以及可运行的本地 Codex CLI。首次安装和启动：
 
@@ -30,9 +45,9 @@ npm run dev
 
 ## 仓库与迭代
 
-从 `dev` 建立独立 `codex/*` 或 `feat/*` 工作分支，修改后执行相关检查并记录实际结果，再通过审核合入 `dev`。版本说明见 [CHANGELOG](CHANGELOG.md)，迁移来源与首版验证见 [仓库说明](docs/awwo-repository.md)。凭据、数据库、依赖安装目录和本机日志不入库。
+本次实际远端基线为 `main@6e1dc158a79e2f18c7bdf82610a353883b883f31`，没有 `dev` 分支；SaaS 改动位于独立 `feat/awwo-go-pi-saas` worktree。修改后执行相关检查并记录实际结果，合并须取得业主对确切源/目标分支及 SHA 的批准。版本说明见 [CHANGELOG](CHANGELOG.md)，迁移来源与首版验证见 [仓库说明](docs/awwo-repository.md)。凭据、数据库、依赖安装目录和本机日志不入库。
 
-原有集成源码及说明保留在下面，作为继承功能的资料。AwwO Agent 画布的现役入口以本页前面的 Node 开发指南为准。第三方代码保留各自许可，见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md)；本仓库没有为自有代码新增开源授权。
+原有集成源码及说明保留在下面，作为继承功能的资料。Go/Pi SaaS 与原本地 Codex 模式分别使用本页前面的独立启动命令。第三方代码保留各自许可，见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md)；本仓库没有为自有代码新增开源授权。
 
 ---
 
@@ -206,4 +221,4 @@ superclaw clawhunt subtasks <problem_id>
 
 ## Versioning
 
-SuperClaw uses SemVer in the `VERSION` file and keeps ongoing work in `CHANGELOG.md` under `## [Unreleased]`. Every push-ready change should be recorded in the changelog before it is published.
+AwwO uses SemVer in the `VERSION` file and keeps ongoing work in `CHANGELOG.md` under `## [Unreleased]`. Every push-ready change should be recorded in the changelog before it is published.

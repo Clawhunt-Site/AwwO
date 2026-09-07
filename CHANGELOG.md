@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Added — Go + Pi multi-tenant SaaS foundation
+
+- **What changed:** Added an independent Go/PostgreSQL API for accounts, tenant membership and roles, versioned canvas documents, agents, persistent sessions, idempotent runs, durable SSE, cancellation, quotas, platform administration and audit. Added a private Pi 0.85.1 execution service with isolated per-run processes, bounded input/history and server-owned model configuration. Added a SaaS user/admin entrypoint that reuses the existing canvas, templates and planner, plus local setup/start/test scripts and a four-service deployment template.
+- **Why:** AwwO's local Codex workflow assumed one trusted machine. A public SaaS needs server-owned identity, data isolation, execution state and provider credentials while retaining the existing product interface.
+- **Impact:** SaaS uses `setup:saas` / `dev:saas`; the original local mode remains separately available. This foundation supports one Go API instance. Real provider acceptance, background whole-graph scheduling, engineering execution sandboxes, attachments, email, billing and public deployment remain explicit subsequent work.
+- **Verification:** Real PostgreSQL/race and authorization tests, real Pi SDK with local protocol providers, complete Go/Pi/PostgreSQL integration, canvas/type/build tests and local browser acceptance. Exact results, corrected findings and unavailable checks are recorded in `docs/awwo-saas-verification.md`; configured health is not a real model inference result.
+- **Files:** `backend/**`, `apps/pi-worker/**`, `apps/web/src/saas/**`, scoped adapters in `apps/web/src/canvas/**`, `apps/web/tests/saas-*`, `scripts/awwo-saas-*`, `deploy/saas/**`, and `docs/awwo-saas-*.md`.
+
 ## [0.3.0] - 2026-09-05
 
 - Add account/profile and workspace membership management using the existing control-plane APIs, including copied invitation links, role updates and server-enforced last-owner protection. Local trusted mode is identified explicitly.
