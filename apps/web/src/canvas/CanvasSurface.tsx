@@ -314,7 +314,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setView(fitNodeOverview(nodes, box));
   }, [nodes, viewportSize]);
 
-  const fitted = useRef(false);
+  // A valid saved view owns the initial position. Only an unpositioned graph auto-fits once
+  // its first real size is known; explicit Fit and newly generated plans still fit on request.
+  const fitted = useRef(doc.view !== null);
   useEffect(() => {
     if (fitted.current || size.w === 0 || nodes.length === 0) return;
     fitted.current = true;
