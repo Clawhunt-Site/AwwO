@@ -9,6 +9,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseEnv, root, stateDir } from './awwo-saas-lib.mjs';
+import { createAcceptanceFaults } from './awwo-saas-acceptance-faults.mjs';
 
 export const MODEL = 'awwo-protocol-fixture';
 const forbiddenPorts = new Set([5189, 8087, 8097, 55483]);
@@ -19,6 +20,16 @@ function content(message) {
     : Array.isArray(message?.content) ? message.content.map(part => part?.text ?? '').join('') : '';
 }
 function visibleMessages(messages) { return Array.isArray(messages) ? messages.filter(m => m && typeof m.role === 'string') : []; }
+
+export function withFixtureHosts({ fixtureHost, webHost }, handler) {
+  return (req, res) => {
+    // Vite preserves the original Web Host. Only the application API proxy may
+    // accept that exact owned host; provider/control/evidence stay fixture-only.
+    const allowedWebAPI = req.url?.startsWith('/api/v1/') && req.headers.host === webHost;
+    if (req.headers.host !== fixtureHost() && !allowedWebAPI) { res.writeHead(403).end(); return; }
+    return handler(req, res);
+  };
+}
 
 export function summarizeRequest(body, index) {
   const messages = visibleMessages(body.messages);
@@ -34,6 +45,7 @@ export function fixtureOutput(body) {
   const systems = messages.filter(m => m.role === 'system' || m.role === 'developer').map(content).join('\n');
   const prompt = content(messages.filter(m => m.role === 'user').at(-1));
   if (systems.includes('Awwo canvas planner')) {
+    if (prompt.includes('[fixture:invalid-plan]')) return JSON.stringify({ version: 1, summary: 'Explicit invalid plan fixture', operations: [{ type: 'exec', command: 'never-execute-fixture' }] });
     return JSON.stringify({ version: 1, summary: '本地协议 fixture：添加两个通用节点及一条依赖，需绑定 awwo-protocol-fixture 后运行；无外部模型推理。', operations: [
       { type: 'add_node', ref: 'fixture_first', templateId: 'general', title: 'Fixture A · 协议输出',
         persona: 'PROTOCOL_FIXTURE_PERSONA_A。仅用于本地协议验收，内容由确定性 fixture 生成，不代表真实推理或业务交付。',
@@ -65,6 +77,30 @@ export function fixtureOutput(body) {
     }
   }
   return proof;
+}
+
+export function streamFixtureResponse(res, body, index, record) {
+  const output = fixtureOutput(body), prompt = content(visibleMessages(body.messages).filter(m => m.role === 'user').at(-1));
+  if (prompt.includes('[fixture:provider-503]')) {
+    record({ type: 'provider_503', index, at: new Date().toISOString() });
+    res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: 'Explicit fixture provider failure', type: 'fixture_error' } })); return;
+  }
+  const duration = prompt.includes('[fixture:slow]') ? 15000 : 4000;
+  const hold = prompt.includes('[fixture:hold]'), disconnect = prompt.includes('[fixture:provider-disconnect]');
+  const letters = Array.from(output), chunkSize = Math.ceil(letters.length / 20);
+  let position = chunkSize, completed = false, injectedDisconnect = false;
+  const send = (delta, finish_reason = null) => res.write(`data: ${JSON.stringify({ id: `fixture_${index}`, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: MODEL, choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
+  res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' }); res.flushHeaders();
+  send({ role: 'assistant', content: letters.slice(0, chunkSize).join('') });
+  const timer = setInterval(() => {
+    if (res.destroyed || res.writableEnded) { clearInterval(timer); return; }
+    if (disconnect) { injectedDisconnect = true; record({ type: 'provider_disconnected', index, at: new Date().toISOString() }); res.destroy(); return; }
+    if (hold) { res.write(': waiting for explicit UI cancellation\n\n'); return; }
+    if (position < letters.length) { send({ content: letters.slice(position, position + chunkSize).join('') }); position += chunkSize; return; }
+    completed = true; clearInterval(timer); send({}, 'stop'); res.end('data: [DONE]\n\n');
+    record({ type: 'completed', index, at: new Date().toISOString(), outputBytes: Buffer.byteLength(output), outputSHA256: digest(output) });
+  }, duration / 20);
+  res.once('close', () => { clearInterval(timer); if (!completed && !injectedDisconnect) record({ type: 'cancelled_connection', index, at: new Date().toISOString() }); });
 }
 
 export function selfTest() {
@@ -186,9 +222,13 @@ export async function start() {
     const [api, pi, web] = reservations;
     const apiURL = `http://127.0.0.1:${api.port}`, piURL = `http://127.0.0.1:${pi.port}`, webURL = `http://127.0.0.1:${web.port}`;
     const fixtureKey = randomBytes(32).toString('base64url');
-    fixture = createServer(async (req, res) => {
+    const controlToken = randomBytes(32).toString('base64url');
+    const bootstrapAdmin = { email: `fixture-admin-${randomBytes(6).toString('hex')}@example.invalid`, password: randomBytes(32).toString('base64url') };
+    const faults = createAcceptanceFaults({ target: apiURL, token: controlToken, record });
+    fixture = createServer(withFixtureHosts({ fixtureHost: () => `127.0.0.1:${fixture.address().port}`, webHost: new URL(webURL).host }, async (req, res) => {
       try {
-        if (req.headers.host !== `127.0.0.1:${fixture.address().port}`) { res.writeHead(403).end(); return; }
+        if (req.url === '/__fixture/control') { await faults.control(req, res); return; }
+        if (req.url?.startsWith('/api/v1/')) { await faults.proxy(req, res); return; }
         if (req.method === 'GET' && req.url === '/__fixture/requests') {
           res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
           res.end(JSON.stringify({ model: MODEL, externalInference: false, items: summaries })); return;
@@ -201,32 +241,20 @@ export async function start() {
         if (body.model !== MODEL || (body.tools?.length ?? 0) !== 0) { res.writeHead(400).end(); return; }
         const index = ++requestIndex;
         record({ type: 'request', ...summarizeRequest(body, index) });
-        const output = fixtureOutput(body), prompt = content(visibleMessages(body.messages).filter(m => m.role === 'user').at(-1));
-        const duration = prompt.includes('[fixture:slow]') ? 15_000 : 4_000;
-        const hold = prompt.includes('[fixture:hold]');
-        const letters = Array.from(output), chunkSize = Math.ceil(letters.length / 20);
-        let position = 0, completed = false;
-        const send = (delta, finish_reason = null) => res.write(`data: ${JSON.stringify({ id: `fixture_${index}`, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: MODEL, choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
-        res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' }); res.flushHeaders();
-        send({ role: 'assistant', content: letters.slice(0, chunkSize).join('') }); position = chunkSize;
-        const timer = setInterval(() => {
-          if (res.destroyed || res.writableEnded) { clearInterval(timer); return; }
-          if (hold) { res.write(': waiting for explicit UI cancellation\n\n'); return; }
-          if (position < letters.length) { send({ content: letters.slice(position, position + chunkSize).join('') }); position += chunkSize; return; }
-          completed = true; clearInterval(timer); send({}, 'stop'); res.end('data: [DONE]\n\n');
-          record({ type: 'completed', index, at: new Date().toISOString(), outputBytes: Buffer.byteLength(output), outputSHA256: digest(output) });
-        }, duration / 20);
-        res.once('close', () => { clearInterval(timer); if (!completed) record({ type: 'cancelled_connection', index, at: new Date().toISOString() }); });
+        streamFixtureResponse(res, body, index, record);
       } catch { if (!res.destroyed && !res.writableEnded) res.destroy(); }
-    });
+    }));
     fixture.listen(0, '127.0.0.1'); await once(fixture, 'listening');
     assert.ok(!forbiddenPorts.has(fixture.address().port));
+    const browserApiProxyURL = `http://127.0.0.1:${fixture.address().port}`;
+    const credentialsFile = path.join(dir, 'acceptance-credentials.json');
+    await writeFile(credentialsFile, JSON.stringify({ controlURL: `${browserApiProxyURL}/__fixture/control`, controlToken, bootstrapAdmin }, null, 2), { mode: 0o600 });
     const env = { ...process.env, APP_ENV: 'development', AWWO_DATABASE_URL: scoped.href, AWWO_LISTEN_ADDR: `127.0.0.1:${api.port}`,
-      AWWO_PUBLIC_ORIGIN: webURL, AWWO_API_TARGET: apiURL, AWWO_PI_URL: piURL, AWWO_PI_HOST: '127.0.0.1', AWWO_PI_PORT: String(pi.port),
+      AWWO_PUBLIC_ORIGIN: webURL, AWWO_API_TARGET: browserApiProxyURL, AWWO_PI_URL: piURL, AWWO_PI_HOST: '127.0.0.1', AWWO_PI_PORT: String(pi.port),
       AWWO_PI_TOKEN: randomBytes(32).toString('base64url'), AWWO_PI_PROVIDER: 'openai', AWWO_PI_MODEL: MODEL, AWWO_PI_API_KEY: fixtureKey,
       AWWO_PI_BASE_URL: `http://127.0.0.1:${fixture.address().port}/v1`, AWWO_PI_TIMEOUT_MS: '120000', AWWO_PI_CANCEL_GRACE_MS: '100',
       AWWO_PI_CONTEXT_WINDOW: '262144', AWWO_PI_MAX_TOKENS: '4096', AWWO_PI_MAX_CONCURRENCY: '4', AWWO_RUN_TIMEOUT: '150s',
-      AWWO_AUTH_REQUESTS_PER_MINUTE: '100', AWWO_BOOTSTRAP_ADMIN_EMAIL: '', AWWO_BOOTSTRAP_ADMIN_PASSWORD: '',
+      AWWO_AUTH_REQUESTS_PER_MINUTE: '100', AWWO_BOOTSTRAP_ADMIN_EMAIL: bootstrapAdmin.email, AWWO_BOOTSTRAP_ADMIN_PASSWORD: bootstrapAdmin.password,
       VITE_AWWO_WEB_HOST: '127.0.0.1', VITE_AWWO_WEB_PORT: String(web.port), AWWO_TRUSTED_PROXY_CIDRS: '127.0.0.1/32',
       TMPDIR: dir,
     };
@@ -246,10 +274,12 @@ export async function start() {
     }
     if (shuttingDown || workers.some(worker => worker.exitCode !== null || worker.signalCode !== null || worker.startError)) throw new Error('Fixture startup interrupted');
     startupFinished = true;
-    console.log(JSON.stringify({ fixture: MODEL, externalInference: false, webURL, apiURL, piURL,
+    console.log(JSON.stringify({ fixture: MODEL, externalInference: false, webURL, apiURL, piURL, browserApiProxyURL, credentialsFile,
       requestSummaryURL: `http://127.0.0.1:${fixture.address().port}/__fixture/requests`, requestSummaryFile: summaryFile, schema, pid: process.pid }, null, 2));
     console.log('仅本地协议验收：在此 URL 注册新的测试账号；先规划添加两节点，应用后分别绑定模型 awwo-protocol-fixture，再运行整图。');
     console.log('单节点聊天：first-turn → second-turn；[fixture:slow] 给约15秒刷新窗口；[fixture:hold] 发出部分内容后等待你取消，可立即重跑。');
+    console.log('负向标记：[fixture:invalid-plan]（规划拒绝）、[fixture:provider-503]、[fixture:provider-disconnect]。标记会保留在规划上下文中，请使用专用测试画布。');
+    console.log('随机测试管理员和故障控制token仅写入上述600 credentialsFile；node scripts/awwo-saas-fixture-control.mjs --credentials <file> --rules <json-file> 配置一次性精确API故障。默认无故障。');
     console.log('Persona/history证据：查看requestSummaryURL或临时requests.jsonl（仅测试文本摘要，无headers/API keys）。无需改用户模型配置。');
     console.log('边界：确定性协议文本与现有【输出格式】字段类型；不支持任意JSON schema推理，不创建交付文件。请勿输入真实业务秘密。Ctrl-C清理本实例。');
   } catch (error) { await cleanup(); throw error; }
