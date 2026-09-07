@@ -160,6 +160,9 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/register", a.authRate(a.register))
 	m.HandleFunc("POST /api/v1/auth/login", a.authRate(a.login))
 	m.HandleFunc("POST /api/v1/auth/logout", a.auth(a.logout))
+	m.HandleFunc("PATCH /api/v1/auth/profile", a.auth(a.updateProfile))
+	m.HandleFunc("GET /api/v1/invites/{token}", a.auth(a.previewInvite))
+	m.HandleFunc("POST /api/v1/invites/{token}/accept", a.auth(a.acceptInvite))
 	m.HandleFunc("GET /api/v1/auth/me", a.auth(func(w http.ResponseWriter, r *http.Request) { a.meResponse(w, r, currentUser(r), 200) }))
 	m.HandleFunc("GET /api/v1/tenants", a.auth(a.tenants))
 	m.HandleFunc("POST /api/v1/tenants", a.auth(a.createTenant))
@@ -167,6 +170,9 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/members", a.tenant(a.addMember, 3))
 	m.HandleFunc("PATCH /api/v1/tenants/{tenantId}/members/{id}", a.tenant(a.updateMember, 3))
 	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/members/{id}", a.tenant(a.removeMember, 3))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/invites", a.tenant(a.listInvites, 3))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/invites", a.tenant(a.createInvite, 3))
+	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/invites/{id}", a.tenant(a.revokeInvite, 3))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases", a.tenant(a.listCanvases, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases", a.tenant(a.createCanvas, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/plan", a.tenant(a.planCanvas, 2))
@@ -237,7 +243,7 @@ func (a *App) security(next http.Handler) http.Handler {
 		}
 		defer func() {
 			if x := recover(); x != nil {
-				a.log.Error("request panic", "path", r.URL.Path)
+				a.log.Error("request panic", "route", r.Pattern)
 				fail(w, 500, "internal_error", "Request failed")
 			}
 		}()

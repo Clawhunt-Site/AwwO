@@ -76,9 +76,8 @@ func (a *App) addMember(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	tid := r.PathValue("tenantId")
-	var actorRole string
-	if e = tx.QueryRow(r.Context(), "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2", tid, currentUser(r).ID).Scan(&actorRole); e != nil {
-		a.dbError(w, e)
+	actorRole, ok := a.managementRole(w, r, tx, tid)
+	if !ok {
 		return
 	}
 	if b.Role == "admin" && actorRole != "owner" {
@@ -134,17 +133,17 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 	}
 	defer tx.Rollback(r.Context())
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
-	var old, actor string
+	actor, ok := a.managementRole(w, r, tx, tid)
+	if !ok {
+		return
+	}
+	var old string
 	e = tx.QueryRow(r.Context(), "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2 FOR UPDATE", tid, id).Scan(&old)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Member not found")
 		return
 	}
 	if e != nil {
-		a.dbError(w, e)
-		return
-	}
-	if e = tx.QueryRow(r.Context(), "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2", tid, currentUser(r).ID).Scan(&actor); e != nil {
 		a.dbError(w, e)
 		return
 	}
