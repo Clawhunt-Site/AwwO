@@ -15,15 +15,28 @@ export type CanvasDraft = {
 };
 export type SavedCanvasDraft = { key: string; raw: string; draft: CanvasDraft | null };
 
+/** Object key order is transport metadata; array order and every document value remain significant. */
+export function canonicalCanvasDocumentJSON(document: unknown): string {
+  return JSON.stringify(sanitizeDocument(document), (_key, value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]));
+  });
+}
+
 export function rememberCanvasBaseline(storage: ScopedStorage, version: number, document: unknown): void {
   let previousVersion = 0;
   try { previousVersion = JSON.parse(storage.getItem(CANVAS_BASELINE_KEY) || '{}').version || 0; } catch { /* Replace a corrupt clean marker, never draft data. */ }
   if (previousVersion > version) return; // A late response cannot roll a newer acknowledgement backwards.
-  storage.setItem(CANVAS_BASELINE_KEY, JSON.stringify({ version, document: JSON.stringify(sanitizeDocument(document)) }));
+  storage.setItem(CANVAS_BASELINE_KEY, JSON.stringify({ version, document: canonicalCanvasDocumentJSON(document) }));
 }
 
 export function isKnownSyncedCache(storage: ScopedStorage, document: CanvasDocument): boolean {
-  try { return JSON.parse(storage.getItem(CANVAS_BASELINE_KEY) || '{}').document === JSON.stringify(sanitizeDocument(document)); }
+  try {
+    // Existing clean markers used insertion order, so normalize them while reading too.
+    const baseline = JSON.parse(JSON.parse(storage.getItem(CANVAS_BASELINE_KEY) || '{}').document);
+    if (baseline?.version !== 2 || !Array.isArray(baseline.nodes) || !Array.isArray(baseline.edges)) return false;
+    return canonicalCanvasDocumentJSON(baseline) === canonicalCanvasDocumentJSON(document);
+  }
   catch { return false; }
 }
 

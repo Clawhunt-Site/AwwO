@@ -3,7 +3,7 @@ import { LogOut, Plus, ArrowLeft, ShieldCheck, Save } from 'lucide-react';
 import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
-import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, isKnownSyncedCache, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
+import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
 import { CanvasSurface } from '../canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, emptyDocument, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY } from '../canvas/runJournal';
@@ -183,7 +183,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
         if (!saved.length && cached) {
           let document: CanvasDocument | null = null;
           try { const parsed = JSON.parse(cached); if (parsed?.version === 2 && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) document = sanitizeDocument(parsed); } catch { /* Preserve the raw payload below. */ }
-          if (!document || (!isKnownSyncedCache(storage, document) && JSON.stringify(document) !== JSON.stringify(sanitizeDocument(value.document))) || (hasJournal && baseVersion !== value.version)) {
+          if (!document || (!isKnownSyncedCache(storage, document) && canonicalCanvasDocumentJSON(document) !== canonicalCanvasDocumentJSON(value.document)) || (hasJournal && baseVersion !== value.version)) {
             if (document && baseVersion > 0) persistCanvasDraft(storage, writerId, baseVersion, document);
             else storage.setItem(`${CANVAS_DRAFT_PREFIX}${writerId}`, JSON.stringify({ unrecognizedCache: cached, baseVersion }));
             saved = readCanvasDrafts(storage);
@@ -241,7 +241,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       if ((event as CustomEvent).detail?.storageKey !== cacheKey) return;
       try {
         const document: CanvasDocument = JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}');
-        if (!saving.current && !pending.current && !draft.current && JSON.stringify(sanitizeDocument(document)) === JSON.stringify(sanitizeDocument(current.current!.document))) return;
+        if (!saving.current && !pending.current && !draft.current && canonicalCanvasDocumentJSON(document) === canonicalCanvasDocumentJSON(current.current!.document)) return;
         pending.current = document;
         draft.current = persistCanvasDraft(storage, writerId, current.current!.version, pending.current!);
       } catch (error) {
@@ -260,15 +260,17 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     try {
       const cloud = JSON.stringify(sanitizeDocument(current.current!.document));
       const cached = storage.getItem(CANVAS_STORAGE_KEY);
-      if (storage.getItem(CANVAS_RUN_JOURNAL_KEY) && cached && cached !== cloud) {
+      if (storage.getItem(CANVAS_RUN_JOURNAL_KEY) && cached) {
         // An older conflicting draft may coexist with a newer detached run's local snapshot.
         // Archive that snapshot under its actual local base before replacing the working cache.
         const baseVersion = Number(storage.getItem('awwo.cloud.version'));
         let document: CanvasDocument | null = null;
         try { const parsed = JSON.parse(cached); if (parsed?.version === 2 && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) document = parsed; } catch { /* Preserve the raw cache instead. */ }
-        const backupWriter = crypto.randomUUID();
-        if (document && Number.isInteger(baseVersion) && baseVersion > 0) persistCanvasDraft(storage, backupWriter, baseVersion, document);
-        else storage.setItem(`${CANVAS_DRAFT_PREFIX}${backupWriter}`, JSON.stringify({ unrecognizedCache: cached, baseVersion }));
+        if (!document || canonicalCanvasDocumentJSON(document) !== canonicalCanvasDocumentJSON(current.current!.document)) {
+          const backupWriter = crypto.randomUUID();
+          if (document && Number.isInteger(baseVersion) && baseVersion > 0) persistCanvasDraft(storage, backupWriter, baseVersion, document);
+          else storage.setItem(`${CANVAS_DRAFT_PREFIX}${backupWriter}`, JSON.stringify({ unrecognizedCache: cached, baseVersion }));
+        }
       }
       storage.setItem(CANVAS_STORAGE_KEY, cloud);
       storage.setItem('awwo.cloud.version', String(current.current!.version));
