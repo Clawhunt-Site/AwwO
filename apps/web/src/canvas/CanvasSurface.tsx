@@ -557,7 +557,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // A failed or stopped retry must never leave its previous success available to downstream nodes.
     const executing = new Set(scope ?? nodes.map(n => n.id));
     const pending: CanvasRunJournal = { version: 1, id: crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(docRef.current, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(nodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
-    const prepared = prepareRunDocument(docRef.current, [...executing], Boolean(manualMessage));
+    let prepared = prepareRunDocument(docRef.current, [...executing], Boolean(manualMessage));
+    const manualNode = manualMessage ? nodes.find(node => executing.has(node.id)) : undefined;
+    if (manualNode?.kind === 'session') {
+      // Persist consumption with the accepted run snapshot. The composer callback only clears
+      // its local view: normal draft edits are locked once runAbort is set, including on reload.
+      prepared = { ...prepared, nodes: prepared.nodes.map(node => node.id === manualNode.id && node.kind === 'session'
+        ? updateNodeDraft(node, '', pending.nodes[node.id].threadId) : node) };
+    }
     if (!saveDocument(prepared)) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
     if (!saveRunJournal(pending)) {
       // No dispatch happened: preserve the previous published results on a quota failure.
