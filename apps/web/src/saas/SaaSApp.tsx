@@ -257,10 +257,25 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   }, [record, recovery, tenant.id, canvasId, writerId]);
   const useCloud = () => {
     const storage = scopedStorage.current!;
-    storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(sanitizeDocument(current.current!.document)));
-    storage.setItem('awwo.cloud.version', String(current.current!.version));
-    rememberCanvasBaseline(storage, current.current!.version, current.current!.document);
-    setRecovery(null); setError(''); setSaveState('已同步');
+    try {
+      const cloud = JSON.stringify(sanitizeDocument(current.current!.document));
+      const cached = storage.getItem(CANVAS_STORAGE_KEY);
+      if (storage.getItem(CANVAS_RUN_JOURNAL_KEY) && cached && cached !== cloud) {
+        // An older conflicting draft may coexist with a newer detached run's local snapshot.
+        // Archive that snapshot under its actual local base before replacing the working cache.
+        const baseVersion = Number(storage.getItem('awwo.cloud.version'));
+        let document: CanvasDocument | null = null;
+        try { const parsed = JSON.parse(cached); if (parsed?.version === 2 && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) document = parsed; } catch { /* Preserve the raw cache instead. */ }
+        const backupWriter = crypto.randomUUID();
+        if (document && Number.isInteger(baseVersion) && baseVersion > 0) persistCanvasDraft(storage, backupWriter, baseVersion, document);
+        else storage.setItem(`${CANVAS_DRAFT_PREFIX}${backupWriter}`, JSON.stringify({ unrecognizedCache: cached, baseVersion }));
+      }
+      storage.setItem(CANVAS_STORAGE_KEY, cloud);
+      storage.setItem('awwo.cloud.version', String(current.current!.version));
+      rememberCanvasBaseline(storage, current.current!.version, current.current!.document);
+      // Keep the journal: CanvasSurface reconciles accepted runs by GET and blocks unsent nodes.
+      setRecovery(null); setError(''); setSaveState('已同步');
+    } catch (error) { setError(message(error)); }
   };
   if (recovery) return <DraftRecovery controls={controls} record={record} drafts={recovery} error={error}
     hasJournal={Boolean(scopedStorage.current?.getItem(CANVAS_RUN_JOURNAL_KEY))} onUseCloud={useCloud}
@@ -306,12 +321,13 @@ function DraftRecovery({ controls, record, drafts, error, hasJournal, onRestore,
     {error && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
     <section className="saas-card saas-draft-recovery"><label>{t('选择本机草稿', 'Choose a local draft')}<select aria-label={t('选择本机草稿', 'Choose a local draft')} value={selected?.key || ''} onChange={event => { setSelectedKey(event.target.value); setConfirmDiscard(false); }}>{drafts.map((saved, index) => <option key={saved.key} value={saved.key}>{t('草稿', 'Draft')} {index + 1}{saved.draft ? ' · ' + new Date(saved.draft.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : t(' · 需要人工检查', ' · Manual inspection required')}</option>)}</select></label>
       {selected?.draft ? <><p>{t('草稿基于云端版本', 'Draft base version:')} {selected.draft.baseVersion}{t('；当前云端版本', '; current cloud version:')} {record?.version ?? t('读取中', 'loading')}。</p><p>{t('包含节点：', 'Nodes: ')}{selected.draft.document.nodes.map(node => node.title).join(', ') || t('空画布', 'Empty canvas')}</p>{record && !canRestore && <p className="saas-error">{t('云端版本已有变化。请导出草稿后核对，当前草稿不会自动覆盖较新的云端内容。', 'The cloud version has changed. Export and review your draft. It will not automatically overwrite newer cloud content.')}</p>}</> : <p className="saas-error">{t('草稿格式无法自动恢复。原始内容仍可导出，尚未删除。', 'This draft format cannot be restored automatically. Its original content is preserved and can be exported.')}</p>}
-      {hasJournal && <p>{t('本机还保存着待恢复运行记录。请保留草稿并核对运行；版本一致时可恢复编辑器继续处理。', 'A local run recovery record also exists. Keep your draft and review the run. You can restore the editor when the versions match.')}</p>}
+      {hasJournal && <p>{t('本机还保存着待恢复运行记录。可保留草稿并使用云端版本核对已接收的运行；尚未下发的下游不会自动执行。', 'A local run recovery record also exists. Keep your drafts and use the cloud version to check accepted runs. Downstream nodes that were not submitted will not run automatically.')}</p>}
       <div className="saas-draft-actions"><button onClick={() => {
         const url = URL.createObjectURL(new Blob([selected.draft ? JSON.stringify(selected.draft.document, null, 2) : selected.raw], { type: 'application/json' }));
         const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-unsynced-draft.json'; anchor.click(); URL.revokeObjectURL(url);
       }}>{t('导出未同步草稿', 'Export unsynced draft')}</button><button disabled={!canRestore} onClick={() => onRestore(selected)}>{t('恢复草稿并继续同步', 'Restore draft and resume syncing')}</button>
-      {!hasJournal && record && <><button onClick={onUseCloud}>{t('使用云端版本，保留草稿', 'Use cloud version and keep draft')}</button><button onClick={() => setConfirmDiscard(true)}>{t('丢弃这份本机草稿', 'Discard this local draft')}</button></>}</div>
+      {record && <button onClick={onUseCloud}>{hasJournal ? t('使用云端版本并核对运行（保留草稿）', 'Use cloud version to check runs and keep drafts') : t('使用云端版本，保留草稿', 'Use cloud version and keep draft')}</button>}
+      {!hasJournal && record && <button onClick={() => setConfirmDiscard(true)}>{t('丢弃这份本机草稿', 'Discard this local draft')}</button>}</div>
       {confirmDiscard && <div role="alert"><p>{t('确定丢弃所选草稿？该草稿中尚未同步的修改将被删除。', 'Discard this draft? Its unsynced changes will be deleted.')}</p><button onClick={() => { onDiscard(selected); setConfirmDiscard(false); }}>{t('确认丢弃', 'Confirm discard')}</button><button onClick={() => setConfirmDiscard(false)}>{t('保留草稿', 'Keep draft')}</button></div>}
       <button onClick={() => window.location.reload()}>{t('重新连接云端', 'Reconnect to cloud')}</button>
     </section>

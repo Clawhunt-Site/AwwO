@@ -2,11 +2,13 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SaaSApp } from '../src/saas/SaaSApp';
-import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, saveDocument } from '../src/canvas/canvasDoc';
+import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, sanitizeDocument, saveDocument } from '../src/canvas/canvasDoc';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { clearSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
 import * as canvasBridge from '../src/saas/canvasBridge';
 import { acknowledgeCanvasDraft, persistCanvasDraft, readCanvasDrafts } from '../src/saas/canvasDraft';
+import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
+import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 
 const identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' }, tenants: [{ id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 }] };
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
@@ -180,4 +182,100 @@ it('protects a divergent legacy cache without a run journal and requires explici
   await writerReady();
   expect(readCanvasDrafts(canvasStorage())).toHaveLength(0);
   expect(canvasStorage().getItem(CANVAS_STORAGE_KEY)).toContain('更新的云端内容');
+});
+
+function seedDetachedRun(changedInputs = false) {
+  const nodes = ['a', 'b'].map(id => ({ ...createSessionNode('llm', { x: 0, y: id === 'a' ? 0 : 400 }),
+    id, title: `云端节点 ${id}`, runtime: 'pi',
+    binding: { companyId: 'tenant-a', agentId: `agent-${id}`, agentName: id },
+    issueId: id === 'a' ? 'session-a' : null,
+  }));
+  const cloud = record(sanitizeDocument({ ...emptyDocument(), updatedAt: 84, nodes, edges: [
+    { id: 'a-b', fromNode: 'a', fromPort: 'result', toNode: 'b', toPort: 'context', dataType: 'text' },
+  ] }), 84);
+  const cached = { ...cloud.document, nodes: cloud.document.nodes.map(node => node.id === 'a'
+    ? { ...node, title: changedInputs ? '断线前节点 a' : node.title, preview: '关闭页面前的本机运行快照' } : node) };
+  persistCanvasDraft(canvasStorage(), 'old-conflicting-tab', 70, documentWith('旧冲突草稿必须保留'));
+  const oldDraft = readCanvasDrafts(canvasStorage())[0];
+  canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(cached));
+  canvasStorage().setItem('awwo.cloud.version', '83');
+  const journal: CanvasRunJournal = { version: 1, id: 'detached-dag', startedAt: 1, scope: ['a', 'b'],
+    inputFingerprint: runInputFingerprint(cached, ['a', 'b']), nodes: {
+      a: { nodeId: 'a', threadId: 'default', companyId: 'tenant-a', agentId: 'agent-a', issueId: 'session-a', runId: 'run-a', operationId: 'operation-a', state: 'running' },
+      b: { nodeId: 'b', threadId: 'default', companyId: 'tenant-a', agentId: 'agent-b', issueId: null, runId: null, state: 'waiting' },
+    } };
+  const journalBytes = JSON.stringify(journal);
+  canvasStorage().setItem(CANVAS_RUN_JOURNAL_KEY, journalBytes);
+  return { cloud, cached, oldDraft, journalBytes };
+}
+
+it.each(['completed', 'changed-inputs', 'unreachable'] as const)('opens the cloud to reconcile a detached run despite an older conflicting draft: %s', async outcome => {
+  const { cloud: initialCloud, cached, oldDraft, journalBytes } = seedDetachedRun(outcome === 'changed-inputs');
+  let cloud = initialCloud;
+  let resolveRead!: (value: Response) => void;
+  const read = new Promise<Response>(resolve => { resolveRead = resolve; });
+  const requests: { url: string; method: string; body?: string }[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    requests.push({ url, method: init.method || 'GET', body: init.body as string | undefined });
+    if (url.endsWith('/auth/me')) return response(identity);
+    if (url.endsWith('/runtime')) return response({ available: false, models: [] });
+    if (url.includes('/runs?operationId=')) return read.then(value => value.clone());
+    if (url.endsWith('/runs/run-a')) return response({ error: { code: 'unavailable', message: 'offline' } }, 503);
+    if (url.endsWith('/sessions/session-a/messages')) return response({ items: [] });
+    if (init.method === 'PUT') { const body = JSON.parse(init.body as string); expect(body.version).toBe(cloud.version); cloud = record(body.document, body.version + 1); return response(cloud); }
+    return response(cloud);
+  }));
+  render(<StrictMode><SaaSApp /></StrictMode>);
+  const enter = await screen.findByRole('button', { name: '使用云端版本并核对运行（保留草稿）' });
+  expect(screen.getByRole('button', { name: '恢复草稿并继续同步' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '丢弃这份本机草稿' })).toBeNull();
+  fireEvent.click(enter);
+  const flush = await writerReady();
+  await waitFor(() => expect(requests.some(request => request.url.includes('/runs?operationId=operation-a'))).toBe(true));
+  // Entering the editor must not discard either durable source before the GET can confirm a run.
+  expect(canvasStorage().getItem(CANVAS_RUN_JOURNAL_KEY)).toBe(journalBytes);
+  expect(canvasStorage().getItem(oldDraft.key)).toBe(oldDraft.raw);
+  const backup = readCanvasDrafts(canvasStorage()).find(saved => saved.key !== oldDraft.key)!;
+  expect(backup.draft).toMatchObject({ baseVersion: 83, dirty: true, document: cached });
+  expect(backup.draft!.writerId).not.toBe('old-conflicting-tab');
+  expect(requests.filter(request => request.method !== 'GET')).toEqual([]);
+  resolveRead(outcome === 'unreachable' ? response({ error: { code: 'unavailable', message: 'offline' } }, 503)
+    : response({ items: [{ id: 'run-a', sessionId: 'session-a', status: 'completed', terminal: true, outputAvailable: true, output: '已确认的 A 产出' }] }));
+  if (outcome === 'unreachable') {
+    await waitFor(() => expect(loadRunJournal()?.nodes.b.state).toBe('blocked'));
+    expect(loadRunJournal()?.nodes.a.state).toBe('running');
+    expect(screen.getByRole('button', { name: /停止/ })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '▶ 运行图' })).toBeNull();
+  } else {
+    await waitFor(() => expect(loadRunJournal()).toBeNull());
+    expect(screen.getByText(/成功 [01] · 失败 [01] · 被阻断 1（共 2）/)).toBeVisible();
+  }
+  await act(async () => { await flush(); });
+  expect(cloud.document.nodes.map(node => node.title)).toEqual(['云端节点 a', '云端节点 b']);
+  expect(cloud.document.edges).toHaveLength(1);
+  expect(cloud.document.nodes[0].lastOutput?.text ?? null).toBe(outcome === 'completed' ? '已确认的 A 产出' : null);
+  expect(cloud.document.nodes[1].lastOutput ?? null).toBeNull();
+  expect(canvasStorage().getItem(oldDraft.key)).toBe(oldDraft.raw);
+  expect(canvasStorage().getItem(backup.key)).toBe(backup.raw);
+  expect(requests.filter(request => request.method === 'POST')).toEqual([]);
+  expect(requests.filter(request => request.url.includes('operation-b'))).toEqual([]);
+});
+
+it('keeps the recovery page, active cache and journal when its independent cache backup cannot be persisted', async () => {
+  const { cloud, cached, oldDraft, journalBytes } = seedDetachedRun();
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(identity)
+    : url.endsWith('/runtime') ? response({ available: false, models: [] }) : response(cloud)));
+  render(<SaaSApp />);
+  const enter = await screen.findByRole('button', { name: '使用云端版本并核对运行（保留草稿）' });
+  const setItem = localStorage.setItem;
+  vi.spyOn(localStorage, 'setItem').mockImplementation(function (key, value) {
+    if (key.includes('awwo.cloud.draft.v1:')) throw new Error('disk full');
+    setItem.call(this, key, value);
+  });
+  fireEvent.click(enter);
+  expect(screen.getByRole('alert')).toHaveTextContent('disk full');
+  expect(document.querySelector('.awwo-workspace')).toBeNull();
+  expect(canvasStorage().getItem(CANVAS_STORAGE_KEY)).toBe(JSON.stringify(cached));
+  expect(canvasStorage().getItem(CANVAS_RUN_JOURNAL_KEY)).toBe(journalBytes);
+  expect(canvasStorage().getItem(oldDraft.key)).toBe(oldDraft.raw);
 });
