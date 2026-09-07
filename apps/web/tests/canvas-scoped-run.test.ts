@@ -15,6 +15,7 @@
 //      an empty precondition downstream, which the agent could not detect.
 import { describe, expect, it } from 'vitest';
 import { preflightGraph, runGraph, type RunNodeStatus } from '../src/canvas/runGraph';
+import { summaryNote } from '../src/canvas/RunControls';
 import {
   createFormNode,
   createSessionNode,
@@ -146,6 +147,39 @@ describe('scoped execution', () => {
     // 'parked' is neither in the scope nor upstream of it — it must not be repainted at all.
     expect(touched.has('parked')).toBe(false);
     expect(touched.has('build')).toBe(true);
+  });
+
+  it.each([
+    { reason: 'missing', stored: null },
+    { reason: 'invalid', stored: '' },
+  ])('counts only B as blocked when out-of-scope A has $reason output', async ({ stored }) => {
+    const upstream: SessionNode = {
+      ...agent('A'),
+      contract: { version: 1, inputs: [], outputs: [
+        { id: 'result', label: 'Result', type: 'text', required: true, value: '' },
+      ] },
+    };
+    const statuses: Record<string, RunNodeStatus> = {};
+    const dispatched: string[] = [];
+    const summary = await runGraph({
+      nodes: [upstream, agent('B')],
+      edges: [wire('A', 'B', 'out:result')],
+      scope: ['B'],
+      storedOutput: () => stored,
+      execAgent: async (node) => {
+        dispatched.push(node.id);
+        return { ok: true, output: 'Unexpected execution', detail: '' };
+      },
+      onStatus: (id, status) => { statuses[id] = status; },
+    });
+
+    expect(dispatched).toEqual([]);
+    // The external cause must remain visible in the timeline without enlarging this run.
+    expect(statuses.A).toMatchObject({ state: 'blocked', detail: expect.stringContaining('节点-A') });
+    expect(statuses.B).toMatchObject({ state: 'blocked', detail: '上游未完成' });
+    expect(summary).toEqual({ ok: false, done: 0, failed: 0, blocked: 1, cancelled: 0, cached: 0, total: 1 });
+    expect(summaryNote(summary, false, 'zh')).toContain('成功 0 · 失败 0 · 被阻断 1（共 1）');
+    expect(summaryNote(summary, false, 'en')).toContain('0 succeeded · 0 failed · 1 blocked (1 total)');
   });
 
   it('counts success against the SCOPE, not the canvas', async () => {

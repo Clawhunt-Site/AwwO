@@ -301,7 +301,8 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
   const set = (nodeId: string, status: RunNodeStatus) => {
     if (status.state === 'done') summary.done += 1;
     if (status.state === 'failed') summary.failed += 1;
-    if (status.state === 'blocked') summary.blocked += 1;
+    // External upstreams still report their blocking reason, but summary counts share total's scope.
+    if (status.state === 'blocked' && (!inScope || inScope.has(nodeId))) summary.blocked += 1;
     if (status.state === 'cancelled') summary.cancelled += 1;
     if (status.state === 'cached') summary.cached += 1;
     onStatus(nodeId, status);
