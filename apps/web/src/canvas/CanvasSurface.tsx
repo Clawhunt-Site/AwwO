@@ -45,6 +45,7 @@ import {
   createSessionNode,
   loadDocumentWithStatus,
   migrateFromLegacy,
+  sanitizeDocument,
   saveDocument,
   type CanvasDocument,
   type CanvasEdge,
@@ -540,7 +541,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       return;
     }
     const persistedCanvas = loadDocumentWithStatus();
-    if (persistedCanvas.status === 'ok' && canvasPlanRevision(persistedCanvas.doc) !== canvasPlanRevision(docRef.current)) {
+    // Loading fills optional defaults (for example a new node's absent lastOutput becomes
+    // null). Compare the same representation so this page's own save is not an external edit.
+    if (persistedCanvas.status === 'ok' && canvasPlanRevision(persistedCanvas.doc) !== canvasPlanRevision(sanitizeDocument(docRef.current))) {
       docRef.current = persistedCanvas.doc; setDoc(persistedCanvas.doc);
       setHandoffNote(surfaceNotice(t, 'canvas_changed_elsewhere'));
       return;
