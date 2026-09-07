@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — Computer Use acceptance findings
+
+- **What changed:** Persist consumed send drafts with the run snapshot; preserve structured login errors for localization; count blocked nodes within the selected run scope; allow cloud run reconciliation while retaining conflict drafts and detached-run snapshots; compare canvas documents independently of JSON object key order.
+- **Why:** Real browser actions reproduced sent prompts returning after refresh, English errors on the Chinese login page, a blocked count larger than the selected graph, inaccessible completed runs when an older draft remained, and repeated same-version draft warnings after undoing a plan.
+- **Impact:** The original canvas, tenant/account controls and Go/Pi contracts are preserved. Recovery keeps unsent drafts and does not dispatch waiting downstream nodes. Object-key normalization retains actual value, timestamp and array-order differences. No merge, push, external inference or deployment is included.
+- **Verification:** Five defects have focused regressions and original-scenario Computer Use verification. The final combined Web suites, builds and independent reviews are recorded in `docs/awwo-computer-use-acceptance-20260907.md`. The GUI exercised 16 Go/Pi SDK/local-provider runs: 13 completed and 3 intentionally cancelled, with database and provider evidence. The report distinguishes covered flows, unexecuted branches, Chrome automation limitations and production gates.
+- **Files:** `apps/web/src/canvas/CanvasSurface.tsx`, `apps/web/src/canvas/runGraph.ts`, `apps/web/src/saas/{SaaSApp.tsx,canvasDraft.ts}`, related canvas/API/draft tests, and the Computer Use acceptance report and coverage matrix.
+
 ### Fixed — SaaS acceptance authorization and lifecycle failures
 
 - **What changed:** Normalize graph revisions before the first run; recheck tenant mutation authorization inside transactions; commit cancellation state/events/audit together; enforce timed SSE authorization during historical replay; reject admission after detected worker lease loss; return 400 for malformed Pi HTTP targets; honor local-launcher shutdown across asynchronous startup phases.
