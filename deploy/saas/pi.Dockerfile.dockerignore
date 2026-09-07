@@ -1,0 +1,6 @@
+**
+!apps/
+!apps/pi-worker/
+!apps/pi-worker/*.mjs
+!apps/pi-worker/package.json
+!apps/pi-worker/package-lock.json

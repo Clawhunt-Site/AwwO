@@ -62,6 +62,9 @@ apps/desktop/backend/.node-cache/
 /.local/
 /.grok/
 /.gemini/
+/apps/web/dist-saas/
 
 # Remotion render artifacts (P3b render lane)
 /out/
+
+.agy-advisor/
