@@ -53,13 +53,13 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   const { locale, t } = useSaaSPreferences();
   const [register, setRegister] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<unknown>(null);
   return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p></div>
     <form className="saas-card" onSubmit={async event => {
-      event.preventDefault(); setBusy(true); setError('');
+      event.preventDefault(); setBusy(true); setError(null);
       const values = Object.fromEntries(new FormData(event.currentTarget));
       try { onAuthenticated(await api<Identity>(register ? '/auth/register' : '/auth/login', { method: 'POST', body: JSON.stringify(values) })); }
-      catch (error) { setError(message(error)); } finally { setBusy(false); }
+      catch (error) { setError(error); } finally { setBusy(false); }
     }}>
       <span className="saas-eyebrow">{t('AGENT 工作区', 'AGENT WORKSPACE')}</span><h2>{register ? t('创建你的工作区', 'Create your workspace') : t('欢迎回来', 'Welcome back')}</h2>
       {invited && <p role="status">{t('请先登录或注册。邀请会保留，登录后由你确认加入；注册时也会建立你自己的工作区。', 'Sign in or register first. Your invitation is preserved for confirmation after sign-in. Registration also creates your own workspace.')}</p>}
@@ -67,9 +67,9 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       <label>{t('邮箱', 'Email')}<input name="email" type="email" autoComplete="email" required /></label>
       <label>{t('密码', 'Password')}<input name="password" type="password" minLength={12} autoComplete={register ? 'new-password' : 'current-password'} required /></label>
       {register && <small>{t('密码至少 12 位。', 'Use at least 12 characters.')}</small>}
-      {error && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
+      {error !== null && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
       <button className="saas-primary" disabled={busy}>{busy ? t('请稍候…', 'Please wait…') : register ? t('注册并创建工作区', 'Register and create workspace') : t('登录', 'Sign in')}</button>
-      <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(''); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
+      <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
     </form></main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
