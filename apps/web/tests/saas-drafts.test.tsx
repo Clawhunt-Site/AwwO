@@ -5,6 +5,7 @@ import { SaaSApp } from '../src/saas/SaaSApp';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, saveDocument } from '../src/canvas/canvasDoc';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { clearSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
+import * as canvasBridge from '../src/saas/canvasBridge';
 import { acknowledgeCanvasDraft, persistCanvasDraft, readCanvasDrafts } from '../src/saas/canvasDraft';
 
 const identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' }, tenants: [{ id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 }] };
@@ -12,13 +13,22 @@ const response = (data: unknown, status = 200) => new Response(JSON.stringify(da
 const documentWith = (title: string) => ({ ...emptyDocument(), updatedAt: 1, view: { x: 0, y: 0, scale: 1 }, nodes: [{ ...createSessionNode('llm', { x: 0, y: 0 }), id: 'node-a', title }] });
 const record = (document = documentWith('云端原文'), version = 7) => ({ id: 'canvas-a', tenantId: 'tenant-a', name: '团队画布', document, version, createdAt: '', updatedAt: '' });
 const reconnect = () => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); render(<SaaSApp />); };
-const writerReady = async () => waitFor(() => expect(document.querySelector('.awwo-workspace')).not.toBeNull());
+const writerReady = async () => {
+  // DOM visibility precedes passive effects. CloudCanvas registers this real
+  // flush only after installing its cache-write listener; spy without replacing it.
+  await waitFor(() => {
+    expect(document.querySelector('.awwo-workspace')).not.toBeNull();
+    expect(vi.mocked(canvasBridge.configureSaaSCanvasSave).mock.lastCall?.[0]).toBeTypeOf('function');
+  });
+  return vi.mocked(canvasBridge.configureSaaSCanvasSave).mock.lastCall![0]!;
+};
 beforeEach(() => {
-  localStorage.clear(); configureCanvasStorage('user-a', 'tenant-a', 'canvas-a');
+  vi.spyOn(canvasBridge, 'configureSaaSCanvasSave');
+  localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); configureCanvasStorage('user-a', 'tenant-a', 'canvas-a');
   window.history.replaceState({}, '', '/?tenant=tenant-a&canvas=canvas-a');
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });
-afterEach(() => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('reload_after_409 retains the local draft, blocks the editor and never overwrites the newer cloud version', async () => {
   let cloud = record(); let writes = 0;
@@ -120,12 +130,23 @@ it('retains edits made during an in-flight save when the older revision is ackno
     if (init.method === 'PUT') { writes++; if (writes === 1) return new Promise<Response>(resolve => { resolveSave = resolve; }); throw new TypeError('network interrupted'); }
     return response(record());
   }));
-  render(<SaaSApp />); await writerReady();
+  render(<SaaSApp />); const flush = await writerReady();
   const first = documentWith('已发出的版本');
-  act(() => { saveDocument(first); });
-  await waitFor(() => expect(writes).toBe(1));
+  let inFlight!: Promise<void>;
+  act(() => {
+    expect(saveDocument(first)).toBe(true);
+    // Exercise acknowledgement ordering, independently of the autosave debounce.
+    // This is the registered production flush, including its actual HTTP request.
+    inFlight = flush();
+  });
+  expect(writes).toBe(1);
+  expect(readCanvasDrafts(canvasStorage())[0].draft?.document.nodes[0].title).toBe('已发出的版本');
   act(() => { saveDocument(documentWith('请求期间继续编辑的新版本')); });
-  await act(async () => { resolveSave(response(record(first, 8))); });
+  await act(async () => {
+    resolveSave(response(record(first, 8)));
+    await expect(inFlight).rejects.toThrow('画布未同步');
+  });
+  expect(writes).toBe(2);
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('保存失败'));
   expect(readCanvasDrafts(canvasStorage())[0].draft).toMatchObject({ baseVersion: 8, dirty: true, document: { nodes: [{ title: '请求期间继续编辑的新版本' }] } });
 });
