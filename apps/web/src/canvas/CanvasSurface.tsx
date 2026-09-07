@@ -91,8 +91,12 @@ function hasStreamingConversation(nodes: ReadonlyArray<CanvasNode>): boolean {
 }
 
 export interface CanvasSurfaceProps {
+  /** View the cloud snapshot without editing, persistence, planning, or run recovery. */
+  readOnly?: boolean;
   workspaceName?: string;
   workspaceCaption?: string;
+  /** Storage destination shown in the footer; the host owns cloud sync status. */
+  storageMode?: 'local' | 'cloud';
   /** Injectable planner transport; graph edits always pass the same validation pipeline. */
   planRequest?: typeof requestCanvasPlan;
   accountControl?: ReactNode;
@@ -143,9 +147,11 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const inspectorCloseLocked = useRef(false);
   const [bindingLocked, setBindingLocked] = useState(false);
   const onInspectorLockChange = useCallback((locked: boolean) => {
@@ -154,6 +160,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   }, []);
   // ---- document -----------------------------------------------------------------------------
   const [doc, setDoc] = useState<CanvasDocument>(() => {
+    if (readOnly) return loadDocumentWithStatus({ readOnly: true }).doc;
     const migrated = migrateFromLegacy();
     if (migrated) return migrated;
     return loadDocumentWithStatus().doc;
@@ -203,7 +210,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
    */
   const patchDoc = useCallback(
     (mut: (prev: CanvasDocument) => CanvasDocument, opts?: { label?: string; silent?: boolean; serverIdentity?: boolean }) => {
-      if (!runAbort.current && loadRunJournal()) return;
+      if (readOnlyRef.current || (!runAbort.current && loadRunJournal())) return;
       const prev = docRef.current;
       const proposed = mut(prev);
       const next = opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed);
@@ -230,7 +237,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
 
   /** Step to a stored document without recording it as a new edit. */
   const restoreDoc = useCallback((target: CanvasDocument) => {
-    if (loadRunJournal()) return;
+    if (readOnlyRef.current || loadRunJournal()) return;
     lastCommit.current = null;
     const live = docRef.current;
     const restored = invalidateOutputs(live, { ...target, nodes: target.nodes.map(node => {
@@ -243,7 +250,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   }, []);
 
   const undo = useCallback(() => {
-    if (inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes) || loadRunJournal()) return;
+    if (readOnlyRef.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes) || loadRunJournal()) return;
     const prevDoc = undoStack.current.at(-1);
     if (!prevDoc) return;
     undoStack.current = undoStack.current.slice(0, -1);
@@ -253,7 +260,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   }, [restoreDoc, syncHistory]);
 
   const redo = useCallback(() => {
-    if (inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes) || loadRunJournal()) return;
+    if (readOnlyRef.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes) || loadRunJournal()) return;
     const nextDoc = redoStack.current.at(-1);
     if (!nextDoc) return;
     redoStack.current = redoStack.current.slice(0, -1);
@@ -263,9 +270,9 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   }, [restoreDoc, syncHistory]);
 
   useEffect(() => {
-    if (!runAbort.current && loadRunJournal()) return;
+    if (readOnlyRef.current || (!runAbort.current && loadRunJournal())) return;
     saveDocument({ ...doc, edges });
-  }, [doc, edges]);
+  }, [doc, edges, readOnly]);
 
   // ---- viewport / selection / focus ----------------------------------------------------------
   const [view, setView] = useState<ViewportState>(() => doc.view ?? { x: 0, y: 0, scale: 1 });
@@ -307,7 +314,6 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     setView(fitNodeOverview(nodes, box));
   }, [nodes, viewportSize]);
 
-  // Fit once, after the first real size + nodes are known.
   const fitted = useRef(false);
   useEffect(() => {
     if (fitted.current || size.w === 0 || nodes.length === 0) return;
@@ -335,7 +341,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   );
 
   const arrangeNodes = useCallback(() => {
-    if (runAbort.current || inspectorCloseLocked.current) return;
+    if (readOnlyRef.current || runAbort.current || inspectorCloseLocked.current) return;
     const arranged = arrangeNodePositions(docRef.current.nodes, docRef.current.edges);
     patchDoc(previous => ({ ...previous, nodes: arranged }), { label: 'arrange:nodes' });
     setInspectorId(null);
@@ -402,7 +408,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   );
 
   // ---- run state ----------------------------------------------------------------------------
-  const [initialJournal] = useState(loadRunJournal);
+  const [initialJournal] = useState(() => readOnly ? null : loadRunJournal());
   const journal = useRef<CanvasRunJournal | null>(initialJournal);
   const [recovering, setRecovering] = useState(Boolean(initialJournal));
   const [runs, setRuns] = useState<Record<string, RunView>>(() => initialJournal?.nodes ?? {});
@@ -414,7 +420,9 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   const [now, setNow] = useState(() => Date.now());
   const runAbort = useRef<AbortController | null>(null);
   useEffect(() => {
+    if (readOnly) return;
     const observeOtherTab = (event: StorageEvent) => {
+      if (readOnlyRef.current) return;
       if (event.key !== canvasStorageKey(CANVAS_RUN_JOURNAL_KEY) || runAbort.current) return;
       const active = loadRunJournal();
       if (active) {
@@ -423,15 +431,15 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     };
     window.addEventListener('storage', observeOtherTab);
     return () => window.removeEventListener('storage', observeOtherTab);
-  }, []);
+  }, [readOnly]);
   // A page reload detaches observation; only an explicit Stop cancels native execution.
   const updateJournal = useCallback((nodeId: string, patch: Parameters<typeof patchRunJournalNode>[2]) => {
-    if (!journal.current) return;
+    if (readOnlyRef.current || !journal.current) return;
     journal.current = patchRunJournalNode(journal.current, nodeId, patch);
     if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
   }, []);
   useEffect(() => {
-    if (!recovering) return;
+    if (readOnly || !recovering) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     setHandoffNote(surfaceNotice(t, 'recovering_run'));
@@ -506,7 +514,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     });
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [recovering, patchDoc, t]);
+  }, [readOnly, recovering, patchDoc, t]);
   useEffect(() => {
     if (!running) return undefined;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -519,10 +527,10 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     * `scope` names the nodes allowed to EXECUTE; anything upstream of them contributes its stored
     * output instead of re-running. Omitted = the whole canvas, which is what 运行图 still does.
     */
-  const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void) => withCanvasRunOwnership(async () => {
+  const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void) => readOnlyRef.current ? Promise.resolve() : withCanvasRunOwnership(async () => {
     // Synchronous re-entrancy guard on the REF: React state commits asynchronously, so a double
     // click could otherwise start two overlapping runs whose callbacks interleave into one map.
-    if (runAbort.current || journal.current) return;
+    if (readOnlyRef.current || runAbort.current || journal.current) return;
     const durable = loadRunJournal();
     if (durable) {
       journal.current = durable;
@@ -647,6 +655,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   }, () => setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere'))), [nodes, edges, patchDoc, updateJournal, t]);
 
   const stopRun = useCallback(() => {
+    if (readOnlyRef.current) return;
     if (runAbort.current && !runAbort.current.signal.aborted) { runAbort.current.abort(); return; }
     // Also works after a refresh or a previous Stop failure; never invent an ID.
     const requestedJournal = journal.current;
@@ -728,7 +737,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   );
 
   const persistDraft = useCallback((nodeId: string, threadId: string, draft: string) => {
-    if (runAbort.current || inspectorCloseLocked.current) return;
+    if (readOnlyRef.current || runAbort.current || inspectorCloseLocked.current) return;
     patchDoc(prev => {
       const target = prev.nodes.find(node => node.id === nodeId);
       if (!target || target.kind !== 'session') return prev;
@@ -738,7 +747,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   }, [patchDoc]);
 
   const toggleDeliverables = useCallback((nodeId: string, open: boolean) => {
-    if (runAbort.current || inspectorCloseLocked.current) return;
+    if (readOnlyRef.current || runAbort.current || inspectorCloseLocked.current) return;
     const target = docRef.current.nodes.find(node => node.id === nodeId);
     if (!target || target.kind !== 'session' || Boolean(target.deliverablesOpen) === open || hasStreamingConversation([target])) return;
     patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => {
@@ -751,7 +760,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
 
   const addNode = useCallback(
     (kind: AddNodeKind, world: { x: number; y: number }) => {
-      if (inspectorCloseLocked.current) return;
+      if (readOnlyRef.current || inspectorCloseLocked.current) return;
       const node = kind === 'form' ? createFormNode(world)
         : kind === 'llm' || kind === 'coding' || kind === 'image'
           ? { ...createAgentTemplate('general', world, locale), agentKind: kind }
@@ -823,7 +832,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
 
   const deleteNodes = useCallback(
     (ids: ReadonlyArray<string>) => {
-      if (inspectorCloseLocked.current) return;
+      if (readOnlyRef.current || inspectorCloseLocked.current) return;
       if (!ids.length) return;
       const kill = new Set(ids);
       const removed = docRef.current.nodes.filter(node => kill.has(node.id));
@@ -848,7 +857,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
 
   const saveNode = useCallback(
     (next: CanvasNode, allowBindingSave = false) => {
-      if (runAbort.current) return;
+      if (readOnlyRef.current || runAbort.current) return;
       if (inspectorCloseLocked.current && !allowBindingSave) return;
       const current = docRef.current.nodes.find(n => n.id === next.id);
       if (current?.kind === 'session' && next.kind === 'session' &&
@@ -868,6 +877,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
 
   // The inspector owns configuration, while cards own contracts and the transport owns thread IDs.
   const saveInspector = useCallback((draft: CanvasNode) => {
+    if (readOnlyRef.current) return;
     const live = docRef.current.nodes.find(n => n.id === draft.id);
     if (!live || runAbort.current) return;
     if (live.kind === 'session' && draft.kind === 'session') {
@@ -928,7 +938,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   // SNAPSHOT of the graph, so a wire cut mid-run would not change what is executing — the user
   // would be shown a graph that no longer matches the timeline describing the run. Omitting
   // onConnect leaves the ports visible but inert (they are the graph's structure, not a control).
-  const wiring = useWiring({ nodes: renderNodes, edges, onConnect: running ? undefined : onConnect, rootRef, view });
+  const wiring = useWiring({ nodes: renderNodes, edges, onConnect: readOnly || running ? undefined : onConnect, rootRef, view });
   const marquee = useMarquee({
     nodes: renderNodes,
     rootRef,
@@ -943,13 +953,13 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     onPalette: () => setBarMode('commands'),
     onSearch: () => setBarMode('search'),
     onFitAll: fitAll,
-    onDeleteSelection: running ? undefined : () => deleteNodes(selection),
+    onDeleteSelection: readOnly || running ? undefined : () => deleteNodes(selection),
     // Undo/redo are locked during a run for the same reason every other structural edit is: the
     // run executes a SNAPSHOT, so rewinding the graph under it would show the operator a document
     // that does not match the timeline describing what is executing.
-    onUndo: running || !history.undo ? undefined : undo,
-    onRedo: running || !history.redo ? undefined : redo,
-    onSaveWaypoint: saveWaypoint,
+    onUndo: readOnly || running || !history.undo ? undefined : undo,
+    onRedo: readOnly || running || !history.redo ? undefined : redo,
+    onSaveWaypoint: readOnly ? undefined : saveWaypoint,
     onRecallWaypoint: recallWaypoint,
     onEscape: () => {
       // Unwind outermost-first so one Escape never closes two things at once.
@@ -975,7 +985,10 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   );
 
   const commandActions: CanvasCommandActions = useMemo(
-    () => ({
+    () => readOnly ? ({
+      fitAll, toggleTimeline: () => setTimelineOpen(o => !o),
+      toggleMinimap: () => setMinimapOpen(o => !o), recallWaypoint: () => recallWaypoint(1),
+    }) : ({
       addSession: (kind) => addAtViewCenter(kind),
       run: () => void startRun(),
       stop: stopRun,
@@ -996,12 +1009,12 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
       canUndo: history.undo > 0,
       canRedo: history.redo > 0,
     }),
-    [addAtViewCenter, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection],
+    [readOnly, addAtViewCenter, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection],
   );
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
   const createTemplate = useCallback(() => {
-    if (running || inspectorCloseLocked.current) return;
+    if (readOnlyRef.current || running || inspectorCloseLocked.current) return;
     const world = nodes.length ? { x: boundsOfNodes(presentationNodes(nodes, null)).maxX + 160, y: 60 } : { x: 0, y: 0 };
     const template = createDevelopmentTemplate(world, locale);
     patchDoc(prev => ({ ...prev, nodes: [...prev.nodes, ...template.nodes], edges: [...prev.edges, ...template.edges] }), { label: 'template:development' });
@@ -1024,6 +1037,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
 
   // Persist the viewport so the canvas reopens where it was left (debounced by the doc save).
   useEffect(() => {
+    if (readOnly) return;
     // The viewport is not an edit: panning is navigation, and letting it clear the redo stack
     // would silently destroy a redo the user was about to reach for.
     const t = setTimeout(
@@ -1031,10 +1045,10 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
       400,
     );
     return () => clearTimeout(t);
-  }, [view, patchDoc]);
+  }, [view, patchDoc, readOnly]);
 
   // The planning conversation is local UI history, separate from node execution Sessions.
-  const [planning, setPlanning] = useState(loadPlanningConversation);
+  const [planning, setPlanning] = useState(() => readOnly ? { draft: '', messages: [] } as ReturnType<typeof loadPlanningConversation> : loadPlanningConversation());
   const [assistantOpen, setAssistantOpen] = useState(true);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState('');
@@ -1050,18 +1064,20 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     const box = viewportSize();
     if (box) setView(fitNodeOverview(docRef.current.nodes, box));
   }, [planningFitId, viewportSize]);
-  useEffect(() => { savePlanningConversation(planning); }, [planning]);
+  useEffect(() => { if (!readOnly) savePlanningConversation(planning); }, [planning, readOnly]);
   useEffect(() => {
     const controller = new AbortController();
+    if (readOnly) return;
     void readPlannerStatus(controller.signal, locale).then(status => { if (!controller.signal.aborted) setPlannerStatus(status); });
     return () => controller.abort();
-  }, [locale]);
+  }, [locale, readOnly]);
   useEffect(() => () => { planningRequest.current?.controller.abort(); planningRequest.current = null; }, []);
   const appendPlanningMessage = (id: string, content: string, status?: 'applied' | 'error' | 'stale') => {
     setPlanning(previous => ({ ...previous, messages: [...previous.messages,
       { id, role: 'assistant' as const, content, ...(status ? { status } : {}) }].slice(-60) }));
   };
   const sendPlanningMessage = async () => {
+    if (readOnlyRef.current) return;
     const prompt = planning.draft.trim();
     if (!prompt || planningRequest.current) return;
     if (journal.current || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
@@ -1078,7 +1094,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     setPlanning(previous => ({ draft: '', messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt }].slice(-60) }));
     try {
       const plan = await planRequest(prompt, snapshot, planning.messages, controller.signal, locale);
-      if (controller.signal.aborted || planningRequest.current?.id !== id) return;
+      if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (canvasPlanRevision(docRef.current) !== revision || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale');
         setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
@@ -1098,7 +1114,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
       appendPlanningMessage(`${id}-assistant`, applied.summary, plan.operations.length ? 'applied' : undefined);
       setPlannerStatus(previous => ({ available: true, provider: previous?.provider || 'AI' }));
     } catch (error) {
-      if (controller.signal.aborted || planningRequest.current?.id !== id) return;
+      if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       const message = planFailureMessage(t, error);
       setPlanningError(message);
       appendPlanningMessage(`${id}-assistant`, message, 'error');
@@ -1108,6 +1124,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     }
   };
   const cancelPlanning = () => {
+    if (readOnlyRef.current) return;
     const request = planningRequest.current;
     if (!request) return;
     planningRequest.current = null;
@@ -1117,12 +1134,12 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
     appendPlanningMessage(`${request.id}-cancelled`, surfaceNotice(t, 'plan_cancelled'));
     setPlanning(previous => ({ ...previous, draft: previous.draft || request.prompt }));
   };
-  const canUndoPlan = !planningBusy && !running && !bindingLocked && history.undo > 0
+  const canUndoPlan = !readOnly && !planningBusy && !running && !bindingLocked && history.undo > 0
     && lastPlanRevision !== null && canvasPlanRevision(doc) === lastPlanRevision
     && Boolean(lastCommit.current?.label.startsWith('ai:'));
   const assistantProps = {
     messages: planning.messages, draft: planning.draft, busy: planningBusy, error: planningError,
-    onDraftChange: (draft: string) => setPlanning(previous => ({ ...previous, draft })),
+    onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
     onSend: () => { void sendPlanningMessage(); }, onCancel: cancelPlanning,
     onUndo: () => {
       if (!canUndoPlan) return;
@@ -1137,9 +1154,9 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
 
   const renderInspector = (node: CanvasNode, inline = false) => (
     <InspectorPanel key={node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
-      readJson={runtimeReadJson} onSave={saveInspector} readOnly={running}
+      readJson={runtimeReadJson} onSave={saveInspector} readOnly={readOnly || running} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
-      onCreateCompany={onCreateCompany ? () => {
+      onCreateCompany={!readOnly && onCreateCompany ? () => {
         if (inspectorCloseLocked.current) return;
         setInspectorId(null);
         onCreateCompany();
@@ -1152,20 +1169,20 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
   );
 
   return (
-    <AgentWorkspace workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
+    <AgentWorkspace readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
       onFocusNode={focusNode} onAddAgent={addAgent} onCreateTemplate={createTemplate}
       onSearch={() => setBarMode('search')}
-      assistant={nodes.length && assistantOpen ? <CanvasAssistant mode="panel" {...assistantProps} onClose={() => setAssistantOpen(false)} /> : undefined}
-      welcome={<CanvasAssistant mode="welcome" {...assistantProps} />}
+      assistant={!readOnly && nodes.length && assistantOpen ? <CanvasAssistant mode="panel" {...assistantProps} onClose={() => setAssistantOpen(false)} /> : undefined}
+      welcome={readOnly ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} />}
       assistantOpen={assistantOpen}
-      onToggleAssistant={() => setAssistantOpen(value => !value)}
+      onToggleAssistant={readOnly ? undefined : () => setAssistantOpen(value => !value)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked}>{accountControl}</div>}
-      toolbar={<RunControls nodes={nodes} edges={edges} running={running} runs={runs} summary={runSummary}
+      toolbar={<RunControls readOnly={readOnly} nodes={nodes} edges={edges} running={running} runs={runs} summary={runSummary}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} />}>
-    <div className="canvas-root" ref={rootRef}>
+    <div className="canvas-root" data-read-only={readOnly || undefined} ref={rootRef}>
       <CanvasViewport
         view={view}
         onViewChange={setView}
@@ -1178,9 +1195,9 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
           setSelection([]);
           return undefined;
         }}
-        onBackgroundDoubleClick={running ? undefined : (world) => addNode('llm', world)}
+        onBackgroundDoubleClick={readOnly || running ? undefined : (world) => addNode('llm', world)}
         onBackgroundContextMenu={
-          running
+          readOnly || running
             ? undefined
             : (world, client) => {
                 const rect = rootRef.current?.getBoundingClientRect();
@@ -1191,11 +1208,12 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
               }
         }
       >
-        <WirePlane nodes={renderNodes} edges={edges} preview={wiring.wireDrag} onDisconnect={running ? undefined : disconnect} />
+        <WirePlane nodes={renderNodes} edges={edges} preview={wiring.wireDrag} onDisconnect={readOnly || running ? undefined : disconnect} />
         {nodes.map((node) => (
           <SessionTile
             key={node.id}
             node={node}
+            readOnly={readOnly}
             geometry={renderNodeById.get(node.id)}
             compact={node.kind === 'session' && focusedId !== node.id}
             scale={view.scale}
@@ -1216,20 +1234,20 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
                 { silent: true },
               )
             }
-            onPreview={persistPreview}
-            onDraftChange={persistDraft}
-            onToggleDeliverables={toggleDeliverables}
+            onPreview={readOnly ? undefined : persistPreview}
+            onDraftChange={readOnly ? undefined : persistDraft}
+            onToggleDeliverables={readOnly ? undefined : toggleDeliverables}
             interactionLocked={running || bindingLocked}
-            onMove={running ? undefined : moveNode}
-            onResizeNode={running || (node.kind === 'session' && focusedId !== node.id) ? undefined : resizeNode}
+            onMove={readOnly || running ? undefined : moveNode}
+            onResizeNode={readOnly || running || (node.kind === 'session' && focusedId !== node.id) ? undefined : resizeNode}
             onSelect={selectNode}
             onToggleFocus={toggleFocus}
             onFitNode={focusNode}
             onConfigure={(id) => { if (!inspectorCloseLocked.current) { setInspectorId(id); focusNode(id); } }}
             configurationPanel={node.kind === 'session' && focusedId === node.id && inspectorId === node.id ? renderInspector(node, true) : null}
-            onUpdateNode={running || bindingLocked ? undefined : saveNode}
-            onRunNode={running ? undefined : rerunNode}
-            onDelete={running ? undefined : (id) => deleteNodes([id])}
+            onUpdateNode={readOnly || running || bindingLocked ? undefined : saveNode}
+            onRunNode={readOnly || running ? undefined : rerunNode}
+            onDelete={readOnly || running ? undefined : (id) => deleteNodes([id])}
             wiring={wiring}
           />
         ))}
@@ -1243,12 +1261,12 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
         <button aria-label={viewText.zoomIn} title={viewText.zoomIn} onClick={() => zoomBy(1.2)}><Plus size={16} /></button>
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.fitAll} title={viewText.fitAll} disabled={!nodes.length} onClick={fitAll}><Maximize2 size={16} /></button>
-        <button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={running || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
+        <button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={readOnly || running || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
         <button aria-label={viewText.showMinimap} title={viewText.showMinimap} aria-pressed={minimapOpen} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
         <span className="awwo-tool-separator" />
-        <button aria-label={viewText.undo} title={viewText.undo} disabled={running || !history.undo} onClick={undo}><Undo2 size={16} /></button>
-        <button aria-label={viewText.redo} title={viewText.redo} disabled={running || !history.redo} onClick={redo}><Redo2 size={16} /></button>
-        {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={viewText.runSelection} disabled={running} onClick={runFromSelection}><Play size={15} /></button></>}
+        <button aria-label={viewText.undo} title={viewText.undo} disabled={readOnly || running || !history.undo} onClick={undo}><Undo2 size={16} /></button>
+        <button aria-label={viewText.redo} title={viewText.redo} disabled={readOnly || running || !history.redo} onClick={redo}><Redo2 size={16} /></button>
+        {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={viewText.runSelection} disabled={readOnly || running} onClick={runFromSelection}><Play size={15} /></button></>}
       </div>
 
       {minimapOpen && nodes.length > 0 ? (
@@ -1272,7 +1290,7 @@ export function CanvasSurface({ workspaceName, workspaceCaption, runtimeReadJson
 
       {inspectorNode?.kind === 'form' ? renderInspector(inspectorNode) : null}
 
-      {addMenu ? (
+      {!readOnly && addMenu ? (
         <AddNodeMenu
           at={addMenu.at}
           onPick={(kind) => {

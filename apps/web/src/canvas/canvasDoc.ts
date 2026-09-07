@@ -549,7 +549,7 @@ function describeNonDocument(raw: unknown): string | null {
   return null;
 }
 
-export function loadDocumentWithStatus(): { doc: CanvasDocument; status: CanvasLoadStatus } {
+export function loadDocumentWithStatus({ readOnly = false }: { readOnly?: boolean } = {}): { doc: CanvasDocument; status: CanvasLoadStatus } {
   let raw: string | null = null;
   try {
     raw = canvasStorage().getItem(CANVAS_STORAGE_KEY);
@@ -558,7 +558,7 @@ export function loadDocumentWithStatus(): { doc: CanvasDocument; status: CanvasL
     return { doc: emptyDocument(), status: 'corrupt' };
   }
   if (!raw) {
-    const migrated = migrateFromLegacy();
+    const migrated = readOnly ? null : migrateFromLegacy();
     if (migrated) return { doc: migrated, status: 'ok' };
     return { doc: emptyDocument(), status: 'empty' };
   }
@@ -566,7 +566,7 @@ export function loadDocumentWithStatus(): { doc: CanvasDocument; status: CanvasL
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    preserveCorrupt(raw, err, 'canvas document');
+    if (!readOnly) preserveCorrupt(raw, err, 'canvas document');
     return { doc: emptyDocument(), status: 'corrupt' };
   }
 
@@ -581,20 +581,20 @@ export function loadDocumentWithStatus(): { doc: CanvasDocument; status: CanvasL
   // document, and must not be laundered into "you have an empty canvas".
   const shape = describeNonDocument(parsed);
   if (shape) {
-    preserveCorrupt(raw, new Error(`not a canvas document (${shape})`), 'canvas document');
+    if (!readOnly) preserveCorrupt(raw, new Error(`not a canvas document (${shape})`), 'canvas document');
     return { doc: emptyDocument(), status: 'corrupt' };
   }
   const declaredNodes = ((parsed as { nodes: unknown[] }).nodes).length;
   const doc = sanitizeDocument(parsed);
   if (declaredNodes > 0 && doc.nodes.length === 0) {
-    preserveCorrupt(raw, new Error(`all ${declaredNodes} stored node(s) failed sanitisation`), 'canvas document');
+    if (!readOnly) preserveCorrupt(raw, new Error(`all ${declaredNodes} stored node(s) failed sanitisation`), 'canvas document');
     return { doc: emptyDocument(), status: 'corrupt' };
   }
   // PARTIAL loss is still loss: the surviving nodes are kept (dropping them too would turn a
   // small defect into a total wipe), but the original payload is preserved so the dropped ones
   // remain recoverable rather than vanishing silently.
   if (declaredNodes > doc.nodes.length) {
-    preserveCorrupt(
+    if (!readOnly) preserveCorrupt(
       raw,
       new Error(`${declaredNodes - doc.nodes.length} of ${declaredNodes} stored node(s) failed sanitisation`),
       'canvas document',

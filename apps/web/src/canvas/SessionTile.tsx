@@ -197,6 +197,8 @@ export interface SessionTileProps {
   onDraftChange?: (nodeId: string, threadId: string, draft: string) => void;
   configurationPanel?: ReactNode;
   interactionLocked?: boolean;
+  /** Viewing history does not grant edit, send, or publication permission. */
+  readOnly?: boolean;
   onFitNode?: (nodeId: string) => void;
   onToggleDeliverables?: (nodeId: string, open: boolean) => void;
   /** Override the send path (tests / a host that owns the transport). */
@@ -225,7 +227,7 @@ export interface SessionTileProps {
 }
 
 export function SessionTile({
-  node,
+  node: sourceNode,
   geometry,
   compact = false,
   scale,
@@ -239,6 +241,7 @@ export function SessionTile({
   onDraftChange,
   configurationPanel,
   interactionLocked = false,
+  readOnly: viewOnly = false,
   onToggleDeliverables,
   onSend,
   conversationContext,
@@ -252,6 +255,12 @@ export function SessionTile({
   onRunNode,
 }: SessionTileProps) {
   const { locale, t } = useCanvasI18n();
+  const viewOnlyRef = useRef(viewOnly);
+  viewOnlyRef.current = viewOnly;
+  // History selection is an in-memory projection, never a document or draft write.
+  const [viewThreadId, setViewThreadId] = useState<string | null>(null);
+  const node = useMemo(() => viewOnly && sourceNode.kind === 'session' && viewThreadId
+    ? selectNodeThread(sourceNode, viewThreadId) : sourceNode, [sourceNode, viewOnly, viewThreadId]);
   const nodeId = node.id;
   const frame = geometry ?? node;
   const currentThread = node.kind === 'session' ? activeNodeThread(node) : null;
@@ -269,6 +278,7 @@ export function SessionTile({
   const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
   const composerDraft = localDrafts[storeKey] ?? currentThread?.draft ?? '';
   const setComposerDraft = (value: string) => {
+    if (viewOnlyRef.current) return;
     setLocalDrafts(previous => ({ ...previous, [storeKey]: value }));
     if (node.kind !== 'session' || !currentThread) return;
     if (onDraftChange) onDraftChange(nodeId, currentThread.id, value);
@@ -309,7 +319,7 @@ export function SessionTile({
       if (e.button === 0) e.stopPropagation();
       const additive = e.shiftKey || e.metaKey || e.ctrlKey;
       onSelect?.(nodeId, additive ? 'additive' : 'preserve');
-      if (e.button !== 0 || !onMove) return;
+      if (viewOnlyRef.current || e.button !== 0 || !onMove) return;
       // A press that lands on a control or a scrollable region is that control's, not a drag.
       const t = e.target as HTMLElement | null;
       if (t?.closest?.('button, textarea, input, select, a, summary, .canvas-transcript-scroll, .awwo-contract-fields, .awwo-deliverables, .canvas-inspector')) return;
@@ -325,7 +335,7 @@ export function SessionTile({
         if (!dragged && (Math.abs(pe.clientX - px) > DRAG_THRESHOLD_PX || Math.abs(pe.clientY - py) > DRAG_THRESHOLD_PX)) {
           dragged = true;
         }
-        if (!dragged) return;
+        if (viewOnlyRef.current || !dragged) return;
         const s = scaleRef.current || 1;
         onMove(nodeId, ox + (pe.clientX - px) / s, oy + (pe.clientY - py) / s);
       };
@@ -345,12 +355,13 @@ export function SessionTile({
   const onResizePointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.stopPropagation();
-      if (e.button !== 0 || !onResizeNode) return;
+      if (viewOnlyRef.current || e.button !== 0 || !onResizeNode) return;
       const px = e.clientX;
       const py = e.clientY;
       const ow = frame.w;
       const oh = frame.h;
       const move = (pe: PointerEvent) => {
+        if (viewOnlyRef.current) return;
         const s = scaleRef.current || 1;
         onResizeNode(
           nodeId,
@@ -405,7 +416,7 @@ export function SessionTile({
   const liveTail = livePreview(session.turns, sessionNode?.contract?.outputs);
   const storedPreview = sessionNode?.preview ?? null;
   useEffect(() => {
-    if (storedPreview === null || !onPreview) return;
+    if (viewOnlyRef.current || storedPreview === null || !onPreview) return;
     if (session.streaming) return;
     if (!liveTail || liveTail === storedPreview) return;
     onPreview(nodeId, liveTail, currentThread?.id);
@@ -419,7 +430,7 @@ export function SessionTile({
   );
   const send = useCallback(
     (text: string, onAccepted?: () => void) => {
-      if (node.kind !== 'session' || interactionLocked) return;
+      if (viewOnlyRef.current || node.kind !== 'session' || interactionLocked) return;
       if (preparedConversation.error) {
         // The composer normally blocks before clearing. Retain the user's text if readiness
         // changes at the send boundary or a host invokes the callback directly.
@@ -476,15 +487,20 @@ export function SessionTile({
   const tail = TAIL_LINES[lod];
   const expanded = !compact && (Boolean(configurationPanel) || lod === 'open' || lod === 'focus');
   const busy = interactionLocked || session.streaming || run?.state === 'running' || run?.state === 'waiting';
-  const readOnly = busy || !onUpdateNode;
+  const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
   const NodeIcon = node.kind === 'form' ? FileText : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : Bot;
   const updateFields = (fields: ContractField[]) => {
-    if (node.kind !== 'session' || readOnly) return;
+    if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
     onUpdateNode?.({ ...node, contract: { ...contract, inputs: fields } });
   };
   const changeThread = (id?: string) => {
-    if (node.kind !== 'session' || readOnly) return;
+    if (node.kind !== 'session' || busy) return;
+    if (viewOnlyRef.current) {
+      if (id && getNodeThreads(node).some(thread => thread.id === id)) setViewThreadId(id);
+      return;
+    }
+    if (readOnly) return;
     const withDraft = updateNodeDraft(node, composerDraft);
     onUpdateNode?.(id ? selectNodeThread(withDraft, id) : createNodeThread(withDraft));
   };
@@ -492,6 +508,7 @@ export function SessionTile({
     if (node.kind !== 'session' || busy) return;
     const next = !deliverablesOpen;
     setDeliverablesOpen(next);
+    if (viewOnlyRef.current) return;
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
@@ -562,16 +579,16 @@ export function SessionTile({
           <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenuOpen(false); } }}>
             {onToggleFocus ? <button type="button" onClick={() => { onToggleFocus(nodeId); setMenuOpen(false); }}><Maximize2 size={14} />{t('tile.focus')}</button> : null}
-            {onRunNode ? <button type="button" disabled={busy || !node.binding} onClick={() => { onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
-            {onDelete ? <button type="button" disabled={busy} onClick={() => onDelete(nodeId)}><Trash2 size={14} />{t('tile.delete')}</button> : null}
+            {onRunNode ? <button type="button" disabled={viewOnly || busy || !node.binding} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
+            {onDelete ? <button type="button" disabled={viewOnly || busy} onClick={() => { if (!viewOnlyRef.current) onDelete(nodeId); }}><Trash2 size={14} />{t('tile.delete')}</button> : null}
           </div> : null}
         </div> : null}
         {compact ? <div className="awwo-node-tools">
           <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu">
             {onConfigure ? <button type="button" disabled={busy} onClick={() => { onConfigure(nodeId); setMenuOpen(false); }}><Settings2 size={14} />{t('tile.configure')}</button> : null}
-            {onRunNode ? <button type="button" disabled={busy || (node.kind === 'session' && !node.binding)} onClick={() => { onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
-            {onDelete ? <button type="button" disabled={busy} onClick={() => onDelete(nodeId)}><Trash2 size={14} />{t('tile.delete')}</button> : null}
+            {onRunNode ? <button type="button" disabled={viewOnly || busy || (node.kind === 'session' && !node.binding)} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
+            {onDelete ? <button type="button" disabled={viewOnly || busy} onClick={() => { if (!viewOnlyRef.current) onDelete(nodeId); }}><Trash2 size={14} />{t('tile.delete')}</button> : null}
           </div> : null}
         </div> : null}
       </div>
@@ -605,7 +622,7 @@ export function SessionTile({
                 <button className="awwo-session-new" type="button" aria-label={t('tile.newSession')} disabled={readOnly} onClick={() => changeThread()}><Plus size={14} />{t('tile.new')}</button>
                 <div className="awwo-session-list">{getNodeThreads(node).map(thread => <button key={thread.id} type="button" className={thread.id === currentThread?.id ? 'is-active' : ''}
                   aria-label={t('tile.openSession', { title: thread.title })} aria-current={thread.id === currentThread?.id ? 'page' : undefined}
-                  disabled={readOnly} onClick={() => changeThread(thread.id)} title={thread.preview || thread.title}>
+                  disabled={busy || (!viewOnly && !onUpdateNode)} onClick={() => changeThread(thread.id)} title={thread.preview || thread.title}>
                   <MessageSquare size={13} /><span>{thread.title}</span>
                 </button>)}</div>
                 <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setTemplateOpen(false); }}><ArrowDownToLine size={14} />{t('tile.input')}</button>
@@ -629,13 +646,13 @@ export function SessionTile({
                     <div className="awwo-node-empty" data-template={template?.id}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
                       <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding ? 'tile.startBound' : 'tile.startUnbound')}</span>
-                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={busy} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
+                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
                     : <TileTranscript turns={session.turns} history={session.history} streaming={session.streaming}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
-                    blocked={interactionLocked || !node.binding || (!onSend && !gatewayBase) || Boolean(preparedConversation.error)}
-                    blockedReason={interactionLocked ? t('tile.taskRunning') : !node.binding ? undefined : preparedConversation.error || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
+                    blocked={viewOnly || interactionLocked || !node.binding || (!onSend && !gatewayBase) || Boolean(preparedConversation.error)}
+                    blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding ? undefined : preparedConversation.error || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>
               </div>
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
@@ -667,7 +684,7 @@ export function SessionTile({
                 </button>
               ) : null}
               {onDelete ? (
-                <button type="button" className="canvas-tile-action" disabled={busy} onClick={() => onDelete(nodeId)}>
+                <button type="button" className="canvas-tile-action" disabled={viewOnly || busy} onClick={() => { if (!viewOnlyRef.current) onDelete(nodeId); }}>
                   <Trash2 size={14} aria-hidden="true" />{t('tile.delete')}
                 </button>
               ) : null}
@@ -678,9 +695,9 @@ export function SessionTile({
         </div>
       )}
 
-      <TilePorts node={geometry ? { ...node, ...geometry } : node} wiring={wiring} />
+      <TilePorts node={geometry ? { ...node, ...geometry } : node} wiring={viewOnly ? undefined : wiring} />
 
-      {onResizeNode && !compact ? (
+      {!viewOnly && onResizeNode && !compact ? (
         <button
           type="button"
           className="canvas-tile-resize"

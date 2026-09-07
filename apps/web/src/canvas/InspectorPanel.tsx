@@ -47,6 +47,8 @@ export interface InspectorPanelProps {
   readJson?: ReadJson;
   /** The canvas is executing a graph snapshot. Configuration mutations must wait. */
   readOnly?: boolean;
+  /** Permission locks can explain themselves without claiming a graph is running. */
+  readOnlyMessage?: string;
   /** Persist the edited node into the canvas document. */
   onSave: (next: CanvasNode) => void;
   /** A binding landed — the surface can re-project the live world so the new agent appears. */
@@ -136,6 +138,7 @@ export function InspectorPanel({
   apiBase,
   readJson,
   readOnly = false,
+  readOnlyMessage,
   onSave,
   onBound,
   onCreateCompany,
@@ -338,7 +341,7 @@ export function InspectorPanel({
       </header>
 
       <div className="canvas-inspector-body">
-        {readOnly ? <div className="canvas-inspector-hint" role="status">{t('inspector.readOnly')}</div> : null}
+        {readOnly ? <div className="canvas-inspector-hint" role="status">{readOnlyMessage || t('inspector.readOnly')}</div> : null}
         <label className="canvas-inspector-label" htmlFor="cv-cfg-title">
           {t('inspector.name')}
         </label>

@@ -29,6 +29,7 @@ export interface RunControlsProps {
   nodes: ReadonlyArray<CanvasNode>;
   edges: ReadonlyArray<CanvasEdge>;
   running: boolean;
+  readOnly?: boolean;
   /** Live per-node states (RAW node ids), for the in-flight progress count. */
   runs: Readonly<Record<string, RunNodeStatus>>;
   /** The finished run's summary; null while none has finished in this session. */
@@ -73,6 +74,7 @@ export function RunControls({
   nodes,
   edges,
   running,
+  readOnly = false,
   runs,
   summary = null,
   stopped = false,
@@ -91,6 +93,7 @@ export function RunControls({
   const problem = refused ? preflightIssueMessage(t, preflightGraphIssue(nodes, edges), locale) : null;
 
   const start = () => {
+    if (readOnly) return;
     const found = preflightGraphIssue(nodes, edges);
     if (found) {
       setRefused(true);
@@ -114,7 +117,7 @@ export function RunControls({
       onDoubleClick={(e) => e.stopPropagation()}
     >
       {running ? (
-        <button type="button" className="canvas-run-btn canvas-run-btn--stop" onClick={onStop}>
+        <button type="button" className="canvas-run-btn canvas-run-btn--stop" disabled={readOnly} onClick={() => { if (!readOnly) onStop(); }}>
           ■ {t('run.stop')}
         </button>
       ) : (
@@ -122,8 +125,8 @@ export function RunControls({
           type="button"
           className="canvas-run-btn"
           onClick={start}
-          disabled={nodes.length === 0}
-          title={nodes.length === 0 ? t('run.emptyTitle') : undefined}
+          disabled={readOnly || nodes.length === 0}
+          title={readOnly ? t('common.readOnly') : nodes.length === 0 ? t('run.emptyTitle') : undefined}
         >
           ▶ {t('run.runGraph')}
         </button>

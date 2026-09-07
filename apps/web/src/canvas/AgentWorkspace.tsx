@@ -11,11 +11,13 @@ import './awwo-workspace.css';
 export interface AgentWorkspaceProps {
   workspaceName?: string;
   workspaceCaption?: string;
+  storageMode?: 'local' | 'cloud';
   nodes: ReadonlyArray<CanvasNode>;
   edges: ReadonlyArray<CanvasEdge>;
   selectedIds: ReadonlyArray<string>;
   runs: Readonly<Record<string, RunNodeStatus>>;
   running: boolean;
+  readOnly?: boolean;
   onFocusNode: (id: string) => void;
   onAddAgent: (id: AgentTemplateId) => void;
   onCreateTemplate: () => void;
@@ -30,7 +32,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, nodes, edges, selectedIds, runs, running, onFocusNode, onAddAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, welcome, assistantOpen, onToggleAssistant, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, welcome, assistantOpen, onToggleAssistant, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -60,7 +62,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, nodes, edges, 
   }, [libraryOpen]);
   const visible = nodes.filter(n => n.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const connected = nodes.filter(n => n.kind === 'session' && n.binding).length;
-  const pick = (id: AgentTemplateId) => { onAddAgent(id); setLibraryOpen(false); setSidebarOpen(false); };
+  const pick = (id: AgentTemplateId) => { if (readOnly) return; onAddAgent(id); setLibraryOpen(false); setSidebarOpen(false); };
 
   return <div className={`awwo-workspace${sidebarOpen ? ' is-sidebar-open' : ''}${navExpanded ? '' : ' is-nav-compact'}`}>
     {sidebarOpen && <button className="awwo-sidebar-scrim" aria-label={t('workspace.closeNavigation')} onClick={() => setSidebarOpen(false)} />}
@@ -68,7 +70,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, nodes, edges, 
       <div className="awwo-brand"><button className="awwo-brand-mark" aria-label={t(navExpanded ? 'workspace.collapseNavigation' : 'workspace.expandNavigation')} title={t('workspace.navigationTitle')} onClick={() => setNavExpanded(!navExpanded)}><GitBranch size={23} /></button><span>AwwO</span><span className="awwo-brand-caption">{t('workspace.caption')}</span></div>
       <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{workspaceName || t('workspace.name')}</strong><small>{workspaceCaption || t('workspace.local')}</small></div></div>
       <div className="awwo-nav-active" aria-current="page"><Layers3 size={17} /><span>{t('workspace.canvas')}</span><span className="awwo-nav-badge">{nodes.length}</span></div>
-      <button className="awwo-new-agent" aria-label={t('workspace.addAgent')} title={t('workspace.addAgent')} disabled={running} onClick={() => setLibraryOpen(true)}><Plus size={17} />{t('workspace.addAgent')}</button>
+      <button className="awwo-new-agent" aria-label={t('workspace.addAgent')} title={t('workspace.addAgent')} disabled={readOnly || running} onClick={() => setLibraryOpen(true)}><Plus size={17} />{t('workspace.addAgent')}</button>
       <div className="awwo-list-heading"><span>{t('workspace.canvasAgents')}</span><span>{nodes.length.toString().padStart(2, '0')}</span></div>
       <label className="awwo-search"><Search size={15} /><input type="search" aria-label={t('workspace.findAgent')} placeholder={t('workspace.findAgentPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></label>
       <div className="awwo-agent-list">
@@ -108,12 +110,12 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, nodes, edges, 
             <div className="awwo-example-node"><span><Code2 size={19} /></span><strong>{t('workspace.exampleFrontend')}</strong><small>{t('workspace.exampleFrontendDetail')}</small></div>
           </div>
           </>}
-          <div className="awwo-empty-actions"><button className="awwo-primary" onClick={onCreateTemplate} disabled={running}><GitBranch size={17} />{t('workspace.createProductCanvas')}<ArrowRight size={16} /></button><button className="awwo-secondary" onClick={() => pick('general')} disabled={running}><Plus size={16} />{t('workspace.startBlank')}</button></div>
+          <div className="awwo-empty-actions"><button className="awwo-primary" onClick={() => { if (!readOnly) onCreateTemplate(); }} disabled={readOnly || running}><GitBranch size={17} />{t('workspace.createProductCanvas')}<ArrowRight size={16} /></button><button className="awwo-secondary" onClick={() => pick('general')} disabled={readOnly || running}><Plus size={16} />{t('workspace.startBlank')}</button></div>
           <span className="awwo-empty-note">{welcome ? t('workspace.templateHint') : t('workspace.draftHint')}</span>
         </div>}
         </div>
       </section>
-      <footer className="awwo-statusbar"><span><span className="awwo-status-dot is-draft" />{connected ? t('workspace.connectedCount', { count: connected }) : t('workspace.noneConnected')}</span><span>{t('workspace.panHint')}<span className="awwo-status-divider">/</span>{t('workspace.zoomHint')}<span className="awwo-status-divider">/</span>{t('workspace.focusHint')}</span><span className="awwo-local-tag">{t('workspace.localCanvas')}</span></footer>
+      <footer className="awwo-statusbar"><span><span className="awwo-status-dot is-draft" />{connected ? t('workspace.connectedCount', { count: connected }) : t('workspace.noneConnected')}</span><span>{t('workspace.panHint')}<span className="awwo-status-divider">/</span>{t('workspace.zoomHint')}<span className="awwo-status-divider">/</span>{t('workspace.focusHint')}</span><span className="awwo-local-tag">{storageMode === 'cloud' ? `${t('workspace.cloudCanvas')}${readOnly ? ` · ${t('common.readOnly')}` : ''}` : t(readOnly ? 'common.readOnly' : 'workspace.localCanvas')}</span></footer>
     </main>
     {libraryOpen && <div className="awwo-library-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) setLibraryOpen(false); }} onKeyDown={e => { if (e.key === 'Escape') setLibraryOpen(false); }}>
       <section ref={libraryRef} className="awwo-agent-library" role="dialog" aria-modal="true" aria-label={t('workspace.addAgent')}>
@@ -129,7 +131,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, nodes, edges, 
             <AgentTemplateDetails template={template} />
           </div>
         </div>
-        <footer className="awwo-template-library-footer"><span>{t('workspace.libraryFooter')}</span><button className="awwo-primary" type="button" disabled={running} onClick={() => pick(template.id)}><Plus size={16} />{t('workspace.addTemplate', { title: template.title })}</button></footer>
+        <footer className="awwo-template-library-footer"><span>{t('workspace.libraryFooter')}</span><button className="awwo-primary" type="button" disabled={readOnly || running} onClick={() => pick(template.id)}><Plus size={16} />{t('workspace.addTemplate', { title: template.title })}</button></footer>
       </section>
     </div>}
   </div>;
