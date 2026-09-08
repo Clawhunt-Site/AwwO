@@ -1,5 +1,7 @@
+import { htmlDocumentSource, isCompleteHtmlDocument } from './htmlDeliverable';
+
 /** Versioned, local input/output forms for an Agent session. File values are references. */
-export type ContractFieldType = 'text' | 'markdown' | 'number' | 'boolean' | 'file';
+export type ContractFieldType = 'text' | 'markdown' | 'html' | 'number' | 'boolean' | 'file';
 
 export interface ContractField {
   id: string;
@@ -22,7 +24,7 @@ export function emptyContract(): NodeContract {
   return { version: 1, inputs: [], outputs: [] };
 }
 
-const FIELD_TYPES: ReadonlyArray<ContractFieldType> = ['text', 'markdown', 'number', 'boolean', 'file'];
+const FIELD_TYPES: ReadonlyArray<ContractFieldType> = ['text', 'markdown', 'html', 'number', 'boolean', 'file'];
 
 /** Reject unknown versions and ambiguous field identities; never coerce a declared type. */
 export function normalizeContract(value: unknown): NodeContract | undefined {
@@ -70,6 +72,7 @@ export function validateContractFields(fields: ReadonlyArray<ContractField>): st
     }
     if (field.type === 'number' && !Number.isFinite(Number(value))) errors.push(`「${label}」需要有效数字。`);
     if (field.type === 'boolean' && value !== 'true' && value !== 'false') errors.push(`「${label}」需要 true 或 false。`);
+    if (field.type === 'html' && !isCompleteHtmlDocument(value)) errors.push(`「${label}」需要包含 html、head 和 body 的完整 HTML 文档。`);
   }
   return errors;
 }
@@ -80,12 +83,12 @@ export interface ContractOutputResult {
   errors: string[];
 }
 
-/** One text/Markdown field may be plain text; all other schemas use a keyed JSON object. */
+/** One text/Markdown/HTML field may be its source; all other schemas use a keyed JSON object. */
 export function parseContractOutput(contract: NodeContract, output: string): ContractOutputResult {
   const values: Record<string, string> = Object.create(null);
   if (!contract.outputs.length) return { values, errors: [] };
   const single = contract.outputs.length === 1 ? contract.outputs[0] : undefined;
-  const acceptsText = single && (single.type === 'text' || single.type === 'markdown');
+  const acceptsText = single && (single.type === 'text' || single.type === 'markdown' || single.type === 'html');
   const trimmed = output.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   let parsed: unknown;
@@ -102,8 +105,9 @@ export function parseContractOutput(contract: NodeContract, output: string): Con
   // JSON examples are valid plain Markdown too. A single text field is wrapped only when
   // the object actually names that field; otherwise preserve the user's whole text.
   if (acceptsText && (!object || !Object.hasOwn(object, single.id))) {
-    values[single.id] = output;
-    return { values, errors: validateContractFields([{ ...single, value: output }]) };
+    const value = single.type === 'html' ? htmlDocumentSource(output) : output;
+    values[single.id] = value;
+    return { values, errors: validateContractFields([{ ...single, value }]) };
   }
   if (!object) {
     return { values, errors: [`输出须为以字段 ID 为键的 JSON 对象：${contract.outputs.map((f) => f.label || f.id).join('、')}。`] };
@@ -121,7 +125,8 @@ export function parseContractOutput(contract: NodeContract, output: string): Con
       errors.push(`输出「${field.label || field.id}」需要 ${field.type} 类型。`);
       continue;
     }
-    const serialized = typeof value === 'string' ? value : String(value);
+    const serialized = field.type === 'html' && typeof value === 'string' ? htmlDocumentSource(value)
+      : typeof value === 'string' ? value : String(value);
     values[field.id] = serialized;
     errors.push(...validateContractFields([{ ...field, value: serialized }]));
   }

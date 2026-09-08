@@ -67,11 +67,11 @@ export function portsFor(node: CanvasNode): PortSpec[] {
     return [
       ...node.contract.inputs.map((field): PortSpec => ({
         id: `in:${field.id}`, side: 'input', label: field.label,
-        dataType: field.type === 'markdown' ? 'text' : field.type,
+        dataType: field.type === 'markdown' || field.type === 'html' ? 'text' : field.type,
       })),
       ...node.contract.outputs.map((field): PortSpec => ({
         id: `out:${field.id}`, side: 'output', label: field.label,
-        dataType: field.type === 'markdown' ? 'text' : field.type,
+        dataType: field.type === 'markdown' || field.type === 'html' ? 'text' : field.type,
       })),
     ];
   }

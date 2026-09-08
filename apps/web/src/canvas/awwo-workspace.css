@@ -123,7 +123,7 @@
   color-scheme: dark; --awwo-bg: #191f1c; --awwo-surface: #222925; --awwo-ink: #e7eee9; --awwo-muted: #a2b0a7;
   --awwo-border: #37443b; --awwo-accent: #83c6b0; --awwo-accent-soft: #2c3d34;
 }
-:root[data-theme='dark'] .awwo-workspace .canvas-root { --page: #1b221e; --grid: #35443b; --text: #e7eee9; --muted: #a2b0a7; --faint: #809187; --line: #3d4a41; --soft: #29332c; --strong: #83c6b0; --strong-text: #152c23; --blue: #83c6b0; --teal: #83c6b0; }
+:root[data-theme='dark'] .awwo-workspace .canvas-root { --page: #1b221e; --panel: #222925; --grid: #35443b; --text: #e7eee9; --muted: #a2b0a7; --faint: #809187; --line: #3d4a41; --soft: #29332c; --strong: #83c6b0; --strong-text: #152c23; --blue: #83c6b0; --teal: #83c6b0; }
 :root[data-theme='dark'] .awwo-sidebar, :root[data-theme='dark'] .awwo-statusbar { background: #202722; }
 :root[data-theme='dark'] .awwo-canvas-bar { border-top-color: var(--awwo-border); }
 :root[data-theme='dark'] .awwo-new-agent { border-color: var(--awwo-border); }

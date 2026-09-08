@@ -8,6 +8,7 @@ import { useCanvasI18n, type CanvasTextKey } from './i18n';
 const FIELD_TYPES: Array<{ value: ContractFieldType; label: CanvasTextKey }> = [
   { value: 'text', label: 'contract.text' },
   { value: 'markdown', label: 'contract.markdown' },
+  { value: 'html', label: 'contract.html' },
   { value: 'number', label: 'contract.number' },
   { value: 'boolean', label: 'contract.boolean' },
   { value: 'file', label: 'contract.file' },
@@ -115,8 +116,9 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
             <option value="">{field.placeholder ?? t('contract.choose')}</option><option value="true">{t('contract.yes')}</option><option value="false">{t('contract.no')}</option>
           </select>
           : <textarea className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
-            inputMode={field.type === 'number' ? 'decimal' : undefined} rows={field.type === 'text' ? 3 : 2}
-            placeholder={field.placeholder ?? t(field.type === 'file' ? 'contract.filePlaceholder' : field.type === 'number' ? 'contract.numberPlaceholder' : 'contract.textPlaceholder')}
+            inputMode={field.type === 'number' ? 'decimal' : undefined} rows={field.type === 'html' ? 6 : field.type === 'text' ? 3 : 2}
+            spellCheck={field.type === 'html' ? false : undefined}
+            placeholder={field.placeholder ?? t(field.type === 'html' ? 'contract.htmlPlaceholder' : field.type === 'file' ? 'contract.filePlaceholder' : field.type === 'number' ? 'contract.numberPlaceholder' : 'contract.textPlaceholder')}
             onChange={(event) => patch(field.id, { value: event.target.value })} />}
         {field.type === 'file' ? <p className="awwo-field-hint">{t('contract.fileHint')}</p> : null}
       </div>;

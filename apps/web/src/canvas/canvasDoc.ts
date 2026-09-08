@@ -142,6 +142,15 @@ export interface CanvasEdge {
   toNode: string;
   toPort: string;
   dataType: DataType;
+  /** Feedback is read only from the previous completed review round. */
+  kind?: 'data' | 'feedback';
+}
+
+export interface ReviewGraphPolicy {
+  mode: 'review';
+  maxRounds: number;
+  reviewerNodeId: string;
+  verdictFieldId: string;
 }
 
 /** A saved viewport the operator can jump back to (number-key slots 1–9). */
@@ -159,6 +168,8 @@ export interface CanvasDocument {
   waypoints: Waypoint[];
   /** Last viewport, restored on reload. null = never saved one; the surface fits instead. */
   view: ViewportState | null;
+  /** Absent on legacy documents, which keep their single-pass workflow semantics. */
+  execution?: ReviewGraphPolicy;
 }
 
 export const CANVAS_STORAGE_KEY = 'superclaw.canvas.v2';
@@ -383,6 +394,7 @@ function sanitizeEdge(raw: unknown, nodeIds: ReadonlySet<string>): CanvasEdge | 
     toNode: str(r.toNode),
     toPort: str(r.toPort),
     dataType,
+    ...(r.kind === 'feedback' || r.kind === 'data' ? { kind: r.kind } : {}),
   };
   if (!edge.id || !edge.fromNode || !edge.toNode || !edge.fromPort || !edge.toPort) return null;
   // An edge whose endpoint node no longer exists is dropped — a dangling wire must never
@@ -434,6 +446,11 @@ export function sanitizeDocument(raw: unknown): CanvasDocument {
   const edges = Array.isArray(r.edges)
     ? r.edges.map((e) => sanitizeEdge(e, nodeIds)).filter((e): e is CanvasEdge => e !== null)
     : [];
+  // A declared but damaged execution policy stays visibly invalid and cannot fall back to
+  // an unrestricted single pass. Preflight explains the missing/invalid policy fields.
+  const execution = r.execution != null
+    ? typeof r.execution === 'object' && !Array.isArray(r.execution) ? r.execution as Record<string, unknown> : {}
+    : null;
   return {
     version: 2,
     updatedAt: num(r.updatedAt, Date.now()),
@@ -441,6 +458,12 @@ export function sanitizeDocument(raw: unknown): CanvasDocument {
     edges: reconcileEdges(nodes, edges),
     waypoints: sanitizeWaypoints(r.waypoints),
     view: sanitizeView(r.view),
+    ...(execution ? { execution: {
+      mode: 'review' as const,
+      maxRounds: execution.mode === 'review' ? num(execution.maxRounds, 0) : 0,
+      reviewerNodeId: str(execution.reviewerNodeId),
+      verdictFieldId: str(execution.verdictFieldId),
+    } } : {}),
   };
 }
 

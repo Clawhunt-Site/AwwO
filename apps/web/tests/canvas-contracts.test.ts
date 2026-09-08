@@ -4,7 +4,7 @@ import { canConnect, portsFor } from '../src/canvas/ports';
 import { buildNodeMessage, preflightGraph, runGraph, validateNodeOutput, type RunNodeStatus } from '../src/canvas/runGraph';
 import { emptyContract, normalizeContract, parseContractOutput, validateContractFields } from '../src/canvas/nodeContracts';
 
-function field(id: string, type: 'text' | 'markdown' | 'number' | 'boolean' | 'file' = 'text', value = '', required = true) {
+function field(id: string, type: 'text' | 'markdown' | 'html' | 'number' | 'boolean' | 'file' = 'text', value = '', required = true) {
   return { id, label: `字段 ${id}`, type, required, value };
 }
 
@@ -101,6 +101,66 @@ describe('node contract persistence and ports', () => {
 });
 
 describe('contract execution', () => {
+  const html = '<!doctype html>\n<html lang="zh"><head><title>交付</title></head><body><main>已完成</main></body></html>';
+
+  it('preserves complete HTML through persistence, validation and named text ports', () => {
+    const source = agent('html', [], [field('page', 'html')]);
+    const parsed = parseContractOutput(source.contract!, html);
+    expect(parsed).toEqual({ values: { page: html }, errors: [] });
+    expect(parseContractOutput(source.contract!, `\u0060\u0060\u0060html\n${html}\n\u0060\u0060\u0060`)).toEqual(parsed);
+    expect(parseContractOutput(source.contract!, JSON.stringify({ page: html }))).toEqual(parsed);
+    expect(normalizeContract(source.contract)).toEqual(source.contract);
+    expect(portsFor(source)).toEqual([{ id: 'out:page', side: 'output', label: '字段 page', dataType: 'text' }]);
+    const restored = sanitizeDocument(JSON.parse(JSON.stringify({ ...emptyDocument(), nodes: [source] })));
+    expect((restored.nodes[0] as SessionNode).contract?.outputs[0].type).toBe('html');
+  });
+
+  it.each([
+    '已生成 index.html', '/workspace/index.html', '[网页](index.html)', '<main>只有片段</main>',
+    '<html><head></head><body>未闭合', '<!-- <html><head></head><body>伪造</body></html> -->',
+    '下面是网页：\n<html><head></head><body>好</body></html>',
+    '<html><head></head><body><script>"</body></html>"</script>',
+    '<html data-example="<head></head>"><body>伪造 head</body></html>',
+    '<html><head></head><body>好</body></html>额外说明',
+  ])('rejects a non-document HTML result: %s', output => {
+    const source = agent('html', [], [field('page', 'html')]);
+    expect(parseContractOutput(source.contract!, output).errors.join(' ')).toContain('完整 HTML');
+    expect(validateContractFields([field('page', 'html', output)])).toHaveLength(1);
+  });
+
+  it('accepts scripts and tag-like strings only as inert document source', () => {
+    const source = agent('html', [], [field('page', 'html')]);
+    const output = '<html><head><style>body::before { content: "<body>" }</style></head><body><script>const sample = "</body></html>";</script><p title="<head>">完成</p></body></html>';
+    expect(parseContractOutput(source.contract!, output)).toEqual({ values: { page: output }, errors: [] });
+    expect(buildNodeMessage(source, [])).toContain('不能用文件路径');
+    expect(validateNodeOutput(agent('md', [], [field('report', 'markdown')]), '普通文字也是合法的 Markdown。')).toEqual([]);
+  });
+
+  it('blocks downstream dispatch when a successful Agent supplies a path instead of HTML', async () => {
+    const source = agent('source', [], [field('result', 'html')]);
+    const sink = agent('sink');
+    const execAgent = vi.fn(async () => ({ ok: true, output: '/tmp/index.html' }));
+    const summary = await runGraph({ nodes: [source, sink], edges: [wire('source', 'sink')], execAgent, onStatus: () => {} });
+    expect(summary).toMatchObject({ ok: false, failed: 1, blocked: 1 });
+    expect(execAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes HTML document source without its fence to downstream and rejects invalid cached HTML', async () => {
+    const source = agent('source', [], [field('result', 'html')]);
+    const sink = agent('sink');
+    const execAgent = vi.fn(async (node: SessionNode, message: string) => ({ ok: true, output: node.id === 'source' ? `\u0060\u0060\u0060html\n${html}\n\u0060\u0060\u0060` : message }));
+    const summary = await runGraph({ nodes: [source, sink], edges: [wire('source', 'sink')], execAgent, onStatus: () => {} });
+    expect(summary.ok).toBe(true);
+    const message = execAgent.mock.calls.find(([node]) => node.id === 'sink')![1];
+    expect(message).toContain(html);
+    expect(message).not.toContain('\u0060\u0060\u0060html');
+    execAgent.mockClear();
+    const cached = await runGraph({ nodes: [source, sink], edges: [wire('source', 'sink')],
+      scope: ['sink'], storedOutput: () => '/tmp/page.html', execAgent, onStatus: () => {} });
+    expect(cached.ok).toBe(false);
+    expect(execAgent).not.toHaveBeenCalled();
+  });
+
   it('validates typed local values without treating false and zero as missing', () => {
     expect(validateContractFields([field('zero', 'number', '0'), field('false', 'boolean', 'false'), field('optional', 'number', '', false)])).toEqual([]);
     const errors = validateContractFields([field('amount', 'number', 'Infinity'), field('enabled', 'boolean', 'yes'), field('brief', 'markdown', '  ')]);

@@ -18,6 +18,57 @@ const node = (over: Partial<SessionNode> = {}): SessionNode => ({
 });
 
 describe('node deliverables', () => {
+  const html = '<!doctype html><html><head><title>页面</title></head><body><script>window.__unsafe = true</script><img src="https://example.com/private.png"><h1>交付页面</h1></body></html>';
+
+  it('renders HTML as escaped source without creating executable or fetching elements', () => {
+    const { container } = render(<NodeDeliverables node={node({
+      contract: { version: 1, inputs: [], outputs: [field({ type: 'html', value: '' })] },
+      lastOutput: { text: html, at: 1, source: 'run' },
+    })} readOnly />);
+    expect(screen.getByLabelText('HTML 源码')).toHaveTextContent(html);
+    expect(container.querySelector('script, img, iframe')).toBeNull();
+    expect(screen.getByRole('button', { name: '下载 .html' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '交付页面' })).toBeNull();
+  });
+
+  it.each(['html', 'markdown'] as const)('downloads exactly the published %s source with matching file type', async type => {
+    const source = type === 'html' ? html : '# 文档\n\n源文本 **不改变**。';
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.fn((blob: Blob) => { blobs.push(blob); return 'blob:awwo-delivery'; });
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+    let savedName = '';
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () { savedName = this.download; });
+    try {
+      render(<NodeDeliverables node={node({
+        contract: { version: 1, inputs: [], outputs: [field({ type, label: 'report', value: '' })] },
+        lastOutput: { text: type === 'html' ? `\u0060\u0060\u0060html\n${source}\n\u0060\u0060\u0060` : source, at: 1, source: 'run' },
+      })} readOnly />);
+      fireEvent.click(screen.getByRole('button', { name: `下载 .${type === 'html' ? 'html' : 'md'}` }));
+      expect(savedName).toBe(type === 'html' ? 'report.html' : 'report.md');
+      expect(blobs).toHaveLength(1);
+      const downloaded = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsText(blobs[0]);
+      });
+      expect(downloaded).toBe(source);
+      expect(blobs[0].type).toContain(type === 'html' ? 'text/html' : 'text/markdown');
+      expect(document.querySelector('a[download]')).toBeNull();
+    } finally { click.mockRestore(); }
+  });
+
+  it('does not publish or offer an HTML download for a file path or malformed source', () => {
+    const update = vi.fn();
+    render(<NodeDeliverables node={node({
+      contract: { version: 1, inputs: [], outputs: [field({ type: 'html', value: '/tmp/report.html' })] },
+      lastOutput: { text: '/tmp/report.html', at: 1, source: 'run' },
+    })} readOnly={false} onUpdateNode={update} />);
+    expect(screen.queryByRole('button', { name: '下载 .html' })).toBeNull();
+    fireEvent.click(screen.getByText('编辑输出表单'));
+    fireEvent.click(screen.getByRole('button', { name: '发布输出' }));
+    expect(update).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('alert').some(alert => alert.textContent?.includes('完整 HTML'))).toBe(true);
+  });
+
   it.each(['frontend', 'data'] as const)('shows the %s role title and truthful empty state without creating a delivery', role => {
     const current = createAgentTemplate(role, { x: 0, y: 0 });
     const title = getAgentTemplateForNode(current)!.deliverableTitle;

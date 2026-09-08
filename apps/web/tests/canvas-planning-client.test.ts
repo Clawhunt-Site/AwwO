@@ -40,6 +40,26 @@ function privateRuntimeDocument(): CanvasDocument {
 }
 
 describe('canvas planner context', () => {
+  it('exposes the editable review policy and data/feedback distinction without any runtime state', () => {
+    const doc = privateRuntimeDocument();
+    doc.execution = { mode: 'review', maxRounds: 3, reviewerNodeId: 'frontend-node', verdictFieldId: 'approved' };
+    doc.edges = [
+      { id: 'data', fromNode: 'source', fromPort: 'out:page', toNode: 'frontend-node', toPort: 'in:brief', dataType: 'text' },
+      { id: 'feedback', fromNode: 'frontend-node', fromPort: 'out:review', toNode: 'source', toPort: 'in:feedback', dataType: 'text', kind: 'feedback' },
+    ];
+    (doc.nodes[0] as SessionNode).contract!.outputs[0].type = 'html';
+    const context = buildPlanningContext(doc, []);
+    const graph = contextSection(context, '当前画布：') as { execution: unknown; edges: unknown[] };
+    expect(graph.execution).toEqual(doc.execution);
+    expect(graph.edges).toMatchObject([{ id: 'data', kind: 'data' }, { id: 'feedback', kind: 'feedback' }]);
+    expect(context).toContain('set_execution');
+    expect(context).toContain('set_edge_kind');
+    expect(context).toContain('"html"');
+    expect(context).not.toContain('PRIVATE_');
+    const legacy = contextSection(buildPlanningContext(emptyDocument(), []), '当前画布：') as { execution: unknown };
+    expect(legacy.execution).toEqual({ mode: 'workflow' });
+  });
+
   it('includes real template schemas and editable graph inputs while excluding runtime identities, transcripts and output values', () => {
     const doc = privateRuntimeDocument();
     const context = buildPlanningContext(doc, []);
@@ -74,6 +94,18 @@ describe('canvas planner context', () => {
 });
 
 describe('canvas planner client requests', () => {
+  it('accepts an AI proposal for bounded review and HTML edits through the normal request gate', async () => {
+    const proposal = { version: 1, summary: '添加互审与 HTML 交付约束', operations: [
+      { type: 'update_field', nodeId: 'frontend-node', side: 'output', fieldId: 'delivery', changes: { type: 'html' } },
+      { type: 'set_edge_kind', edgeId: 'existing-feedback', kind: 'feedback' },
+      { type: 'set_execution', mode: 'review', maxRounds: 3, reviewerNodeId: 'reviewer', verdictFieldId: 'approved' },
+    ] };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: proposal }) });
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await requestCanvasPlan('让两个 Agent 相互验证，交付 HTML', privateRuntimeDocument(), [], requestSignal())).toEqual(proposal);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('sends the prompt and bounded context to the configured gateway and parses a valid plan', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: `\`\`\`json\n${JSON.stringify(validPlan)}\n\`\`\`` }) });
     vi.stubGlobal('fetch', fetchMock);

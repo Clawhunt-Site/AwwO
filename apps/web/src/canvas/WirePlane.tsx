@@ -16,9 +16,19 @@
 //    dblclick to the background (real-browser UI Events behavior) — the disconnect would never
 //    fire and the background's own double-click gesture would run instead.
 
+import { useId } from 'react';
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
 import { edgeBezierPath, portAnchorWorld } from './ports';
+import { useCanvasI18n, type CanvasTextKey } from './i18n';
+import type { RunNodeStatus } from './runGraph';
 import type { WireDrag } from './TilePorts';
+import { wirePath, wireState, type WireState } from './wireState';
+import './wire-state.css';
+
+const STATE_TEXT: Record<WireState, CanvasTextKey> = {
+  idle: 'wire.idle', waiting: 'wire.waiting', flowing: 'wire.flowing', delivered: 'wire.delivered',
+  failed: 'wire.failed', blocked: 'wire.blocked', cancelled: 'wire.cancelled',
+};
 
 export interface WirePlaneProps {
   nodes: ReadonlyArray<CanvasNode>;
@@ -27,9 +37,19 @@ export interface WirePlaneProps {
   preview?: WireDrag | null;
   /** Omitted → wires render without a disconnect affordance. */
   onDisconnect?: (edge: CanvasEdge) => void;
+  runs?: Readonly<Record<string, RunNodeStatus>>;
+  running?: boolean;
+  round?: number;
+  /** World zoom; keeps directional arrowheads readable at fit-to-canvas scale. */
+  scale?: number;
+  selectedEdgeId?: string;
+  onSelectEdge?: (edgeId: string) => void;
 }
 
-export function WirePlane({ nodes, edges, preview = null, onDisconnect }: WirePlaneProps) {
+export function WirePlane({ nodes, edges, preview = null, onDisconnect, runs = {}, running = false, round = 1, scale = 1, selectedEdgeId, onSelectEdge }: WirePlaneProps) {
+  const { t } = useCanvasI18n();
+  const markerPrefix = useId().replace(/:/g, '');
+  const markerSize = 12 / (Number.isFinite(scale) && scale > 0 ? scale : 1);
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   return (
     <svg
@@ -37,29 +57,63 @@ export function WirePlane({ nodes, edges, preview = null, onDisconnect }: WirePl
       width={1}
       height={1}
       style={{ position: 'absolute', overflow: 'visible' }}
-      aria-hidden="true"
+      role="group"
+      aria-label={t('workspace.connectionCount', { count: edges.length })}
     >
-      {edges.map((e) => {
+      {edges.map((e, index) => {
         const from = nodeById.get(e.fromNode);
         const to = nodeById.get(e.toNode);
         if (!from || !to) return null;
         const a = portAnchorWorld(from, e.fromPort);
         const b = portAnchorWorld(to, e.toPort);
         if (!a || !b) return null; // unresolvable endpoint → draw nothing, invent nothing
-        const d = edgeBezierPath(a, b);
+        const feedback = e.kind === 'feedback';
+        const d = wirePath(a, b, feedback, Math.min(from.y, to.y));
+        const state = wireState({ kind: e.kind, from: runs[e.fromNode], to: runs[e.toNode], running, round });
+        const markerId = `${markerPrefix}-wire-arrow-${index}`;
+        const selected = selectedEdgeId === e.id;
+        const interactive = Boolean(onSelectEdge || onDisconnect);
+        const label = t('wire.connection', { from: from.title, to: to.title, kind: t(feedback ? 'wire.feedback' : 'wire.data'), state: t(STATE_TEXT[state]) });
+        const hint = [onSelectEdge ? t('wire.selectHint') : '', onDisconnect ? t('wire.disconnectHint') : ''].filter(Boolean).join(' · ');
         return (
-          <g key={e.id}>
-            <path className={`canvas-wire canvas-wire--${e.dataType}`} d={d} data-testid={`canvas-wire-${e.id}`} />
-            {onDisconnect ? (
+          <g
+            key={e.id}
+            className={`canvas-wire-link canvas-wire-link--${state}${feedback ? ' canvas-wire-link--feedback' : ''}${selected ? ' canvas-wire-link--selected' : ''}`}
+            role={onSelectEdge ? 'button' : interactive ? 'group' : 'img'}
+            tabIndex={interactive ? 0 : undefined}
+            aria-label={label}
+            aria-pressed={onSelectEdge ? selected : undefined}
+            aria-describedby={hint ? `${markerId}-hint` : undefined}
+            data-wire-state={state}
+            data-wire-kind={feedback ? 'feedback' : 'data'}
+            onPointerDown={interactive ? (ev) => ev.stopPropagation() : undefined}
+            onClick={onSelectEdge ? (ev) => { ev.stopPropagation(); onSelectEdge(e.id); } : undefined}
+            onDoubleClick={interactive ? (ev) => { ev.stopPropagation(); onDisconnect?.(e); } : undefined}
+            onKeyDown={interactive ? (ev) => {
+              if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault(); ev.stopPropagation(); onSelectEdge?.(e.id);
+              } else if (ev.key === 'Delete' || ev.key === 'Backspace') {
+                ev.preventDefault(); ev.stopPropagation(); onDisconnect?.(e);
+              }
+            } : undefined}
+          >
+            <title>{label}</title>
+            {hint ? <desc id={`${markerId}-hint`}>{hint}</desc> : null}
+            <defs>
+              <marker id={markerId} markerWidth={markerSize} markerHeight={markerSize} viewBox="0 0 12 12" refX="11" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+                <path className="canvas-wire-arrow" d="M 1 1 L 11 6 L 1 11 Z" />
+              </marker>
+            </defs>
+            <path className="canvas-wire-selection" d={d} vectorEffect="non-scaling-stroke" aria-hidden="true" />
+            <path className={`canvas-wire canvas-wire--${e.dataType}`} d={d} markerEnd={`url(#${markerId})`} vectorEffect="non-scaling-stroke" data-testid={`canvas-wire-${e.id}`} aria-hidden="true" />
+            {state === 'flowing' ? <path className="canvas-wire-flow" d={d} vectorEffect="non-scaling-stroke" data-testid={`canvas-wire-flow-${e.id}`} aria-hidden="true" /> : null}
+            {interactive ? (
               <path
                 className="canvas-wire-hit"
                 d={d}
+                vectorEffect="non-scaling-stroke"
                 data-testid={`canvas-wire-hit-${e.id}`}
-                onPointerDown={(ev) => ev.stopPropagation()}
-                onDoubleClick={(ev) => {
-                  ev.stopPropagation();
-                  onDisconnect(e);
-                }}
+                aria-hidden="true"
               />
             ) : null}
           </g>

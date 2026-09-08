@@ -33,4 +33,9 @@ describe('AwwO locale foundation', () => {
     expect(result.current.locale).toBe('en');
     expect(result.current.t('common.cancel')).toBe('Cancel');
   });
+
+  it.each(['zh', 'en'] as const)('names required output formats explicitly in %s', locale => {
+    expect(canvasText(locale, 'contract.html')).toBe('HTML (.html)');
+    expect(canvasText(locale, 'contract.markdown')).toBe('Markdown (.md)');
+  });
 });

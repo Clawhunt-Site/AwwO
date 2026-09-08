@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { canvasText, type CanvasTranslate } from '../src/canvas/i18n';
 import type { PreflightIssue } from '../src/canvas/runGraph';
+import { preflightReviewGraphIssue, type ReviewPreflightReason } from '../src/canvas/reviewGraph';
 import {
   preflightIssueMessage,
   recoveryDetailMessage,
@@ -11,6 +12,36 @@ const translate = (locale: 'zh' | 'en'): CanvasTranslate =>
   (key, values) => canvasText(locale, key, values);
 
 describe('canvas surface messages', () => {
+  it.each([
+    'full_graph_required', 'invalid_round_limit', 'duplicate_nodes', 'duplicate_edges', 'invalid_edges',
+    'missing_feedback', 'missing_reviewer', 'invalid_verdict_field', 'reviewer_not_terminal',
+    'missing_reviewer_feedback', 'invalid_feedback_input', 'conflicting_feedback_input', 'invalid_feedback_path',
+  ] satisfies ReviewPreflightReason[])('localizes the review preflight reason %s without leaking legacy Chinese fields', reviewReason => {
+    const issue: PreflightIssue = { code: 'missing_inputs', values: {
+      reviewReason, nodeTitle: 'Agent Graph', fields: ['旧中文错误'], errors: ['旧中文错误'],
+    }, message: '旧中文错误' };
+    const english = preflightIssueMessage(translate('en'), issue, 'en');
+    const chinese = preflightIssueMessage(translate('zh'), issue, 'zh');
+    expect(english).toBeTruthy();
+    expect(english).not.toMatch(/[\u3400-\u9fff]/);
+    expect(english).not.toContain(reviewReason);
+    expect(chinese).toMatch(/[\u3400-\u9fff]/);
+    expect(chinese).not.toContain('旧中文错误');
+  });
+
+  it('preserves legacy engine messages while translating its new stable review reason', () => {
+    const issue = preflightReviewGraphIssue([], [], { mode: 'review', maxRounds: 9, reviewerNodeId: '', verdictFieldId: '' });
+    expect(issue?.values.reviewReason).toBe('invalid_round_limit');
+    expect(issue?.message).toBe('评审轮次必须是 1 到 5 之间的整数。');
+    expect(preflightIssueMessage(translate('en'), issue, 'en')).toBe('Choose a round limit from 1 to 5.');
+  });
+
+  it.each(['review_invalid_verdict', 'review_exhausted'])('translates persisted review status %s in both languages', detail => {
+    expect(recoveryDetailMessage(translate('en'), detail)).not.toMatch(/[\u3400-\u9fff]/);
+    expect(recoveryDetailMessage(translate('en'), detail)).not.toBe(detail);
+    expect(recoveryDetailMessage(translate('zh'), detail)).toMatch(/[\u3400-\u9fff]/);
+  });
+
   it('localizes storage and known recovery evidence without rewriting unknown detail', () => {
     const en = translate('en');
     const zh = translate('zh');

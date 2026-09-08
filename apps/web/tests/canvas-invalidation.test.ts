@@ -128,6 +128,39 @@ describe('execution output invalidation', () => {
     const next = changeNode(prev, 'a', (node) => ({ ...node, lastOutput: output('New manual', 'manual', 2) }));
     expect(outputs(invalidateOutputs(prev, next))).toEqual({ a: 'New manual', b: null, c: null, independent: 'Old independent' });
   });
+
+  it('preserves cached upstream and current output when Workflow retains a feedback cycle', () => {
+    const prev = graph(); prev.edges.push({ ...wire('c', 'a'), kind: 'feedback' });
+    const next = changeNode(prev, 'c', node => ({ ...node, lastOutput: output('Reviewed current result', 'run', 2) }));
+    expect(outputs(invalidateOutputs(prev, next))).toEqual({ a: 'Old a', b: 'Old b', c: 'Reviewed current result', independent: 'Old independent' });
+    expect(invalidateOutputs(prev, next)).toBe(next);
+  });
+
+  it.each(['add', 'remove', 'change'] as const)('ignores %s of an inactive Workflow feedback edge when comparing dependency counts', action => {
+    const prev = graph();
+    const feedback: CanvasEdge = { ...wire('c', 'a'), kind: 'feedback' };
+    if (action !== 'add') prev.edges.push(feedback);
+    const next = { ...prev, edges: action === 'add' ? [...prev.edges, feedback]
+      : action === 'remove' ? prev.edges.filter(edge => edge.kind !== 'feedback')
+        : prev.edges.map(edge => edge.kind === 'feedback' ? { ...edge, toNode: 'independent' } : edge) };
+    expect(invalidateOutputs(prev, next)).toBe(next);
+  });
+
+  it.each(['publish', 'remove-feedback'] as const)('keeps review feedback invalidation strict after %s', action => {
+    const prev = graph(); prev.edges.push({ ...wire('c', 'a'), kind: 'feedback' });
+    prev.execution = { mode: 'review', maxRounds: 3, reviewerNodeId: 'c', verdictFieldId: 'approved' };
+    const next = action === 'publish' ? changeNode(prev, 'c', node => ({ ...node, lastOutput: output('Unapproved revision', 'run', 2) }))
+      : { ...prev, edges: prev.edges.filter(edge => edge.kind !== 'feedback') };
+    expect(outputs(invalidateOutputs(prev, next))).toEqual({ a: null, b: null, c: null, independent: 'Old independent' });
+  });
+
+  it.each(['workflow-to-review', 'review-to-workflow'] as const)('invalidates the whole graph when switching %s even with unchanged saved feedback', direction => {
+    const prev = graph(); prev.edges.push({ ...wire('c', 'a'), kind: 'feedback' });
+    const policy = { mode: 'review' as const, maxRounds: 3, reviewerNodeId: 'c', verdictFieldId: 'approved' };
+    if (direction === 'review-to-workflow') prev.execution = policy;
+    const next = { ...prev, execution: direction === 'workflow-to-review' ? policy : undefined };
+    expect(outputs(invalidateOutputs(prev, next))).toEqual({ a: null, b: null, c: null, independent: null });
+  });
 });
 
 

@@ -16,7 +16,10 @@ export type CanvasPlanOperation =
   | { type: 'update_field'; nodeId: string; side: 'input' | 'output'; fieldId: string; changes: CanvasPlanFieldChanges }
   | { type: 'remove_field'; nodeId: string; side: 'input' | 'output'; fieldId: string }
   | { type: 'remove_node'; nodeId: string }
-  | { type: 'connect'; fromNode: string; fromField: string; toNode: string; toField: string }
+  | { type: 'connect'; fromNode: string; fromField: string; toNode: string; toField: string; kind?: 'data' | 'feedback' }
+  | { type: 'set_edge_kind'; edgeId: string; kind: 'data' | 'feedback' }
+  | { type: 'set_execution'; mode: 'workflow' }
+  | { type: 'set_execution'; mode: 'review'; maxRounds: number; reviewerNodeId: string; verdictFieldId: string }
   | { type: 'disconnect'; edgeId: string };
 
 export interface CanvasPlan { version: 1; summary: string; operations: CanvasPlanOperation[] }
@@ -28,21 +31,24 @@ export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行�
 add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review",title?:string,persona?:string,inputValues?:{[已有输入字段ID]:string}}
 update_node: {type:"update_node",nodeId:string,title?:string,persona?:string}
 set_input: {type:"set_input",nodeId:string,fieldId:string,value:string}
-add_field: {type:"add_field",nodeId:string,side:"input"|"output",field:{id:string,label:string,type:"text"|"markdown"|"number"|"boolean"|"file",required:boolean,value:"",help?:string,placeholder?:string}}
+add_field: {type:"add_field",nodeId:string,side:"input"|"output",field:{id:string,label:string,type:"text"|"markdown"|"html"|"number"|"boolean"|"file",required:boolean,value:"",help?:string,placeholder?:string}}
 update_field: {type:"update_field",nodeId:string,side:"input"|"output",fieldId:string,changes:{label?:string,type?:上述字段类型,required?:boolean,help?:string,placeholder?:string}}
 remove_field: {type:"remove_field",nodeId:string,side:"input"|"output",fieldId:string}
 remove_node: {type:"remove_node",nodeId:string}
-connect: {type:"connect",fromNode:string,fromField:string,toNode:string,toField:string}
+connect: {type:"connect",fromNode:string,fromField:string,toNode:string,toField:string,kind?:"data"|"feedback"}
+set_edge_kind: {type:"set_edge_kind",edgeId:string,kind:"data"|"feedback"}
+set_execution: {type:"set_execution",mode:"workflow"} 或 {type:"set_execution",mode:"review",maxRounds:1到5的整数,reviewerNodeId:string,verdictFieldId:string}
 disconnect: {type:"disconnect",edgeId:string}
-nodeId/fromNode/toNode 必须为当前画布中提供的真实节点ID，或前面 add_node 的唯一 ref；不允许前向引用。ref 不得与既有ID重名。
-connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源，全图不得成环。
+nodeId/fromNode/toNode/reviewerNodeId 必须为当前画布中提供的真实节点ID，或前面 add_node 的唯一 ref；不允许前向引用。ref 不得与既有ID重名。
+connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源。kind默认data，本轮data连线不得成环。feedback将上一轮反馈传回上游，可构成跨轮闭环；workflow模式保留但不执行feedback。
+互审Graph使用set_execution mode:review，maxRounds/reviewerNodeId/verdictFieldId必填；最终评审节点必须已存在且verdictFieldId指向其boolean输出，true通过、false继续。先创建节点和判定字段，再设置互审。工作流模式禁止携带互审额外字段。反馈环路和Agent绑定在用户启动时校验，此协议仅编辑结构，不启动运行。
 新增节点完整使用对应角色模板。字段值都是字符串；布尔值用"true"/"false"，数字用数字字符串，file为引用字符串。add_field.value必须为空；输入内容通过set_input填写。严禁生成或填写任何输出值。
 改变已连接字段类型或删除字段前必须显式disconnect；不会静默丢弃连线。remove_node 明确删除该节点及其关联连线。
 只能修改白名单：禁止binding/runtime/model/effort/threads/issueId/preview/lastOutput/templateId等执行状态修改；禁止命令执行、创建真实Agent、发消息、运行节点、文件写入、部署、付款等副作用。布局由应用安排新增节点，不能提交x/y/w/h。
 最多100个操作、JSON最多120000字符、summary最多1000字符；ID/ref最多128字符，title/label最多200字符，persona最多8000字符，输入value最多16000字符，help/placeholder最多2000字符；每个节点每侧最多64字段。`;
 
 const LIMITS = { raw: 120000, operations: 100, id: 128, title: 200, persona: 8000, value: 16000, help: 2000, fields: 64 } as const;
-const FIELD_TYPES = ['text', 'markdown', 'number', 'boolean', 'file'];
+const FIELD_TYPES = ['text', 'markdown', 'html', 'number', 'boolean', 'file'];
 const RESERVED = new Set(['__proto__', 'prototype', 'constructor']);
 
 function fail(message: string): never { throw new Error(`画布方案：${message}`); }
@@ -66,6 +72,10 @@ function id(value: unknown, location: string): string {
 }
 function side(value: unknown, location: string): 'input' | 'output' {
   if (value !== 'input' && value !== 'output') fail(`${location}必须是 input 或 output。`);
+  return value;
+}
+function edgeKind(value: unknown, location: string): 'data' | 'feedback' {
+  if (value !== 'data' && value !== 'feedback') fail(`${location}必须是 data 或 feedback。`);
   return value;
 }
 function optionalText(raw: Record<string, unknown>, key: string, max: number, location: string, empty = true): Record<string, string> {
@@ -160,8 +170,22 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
         keys(op, ['type', 'nodeId'], location);
         return { type: 'remove_node', nodeId: nodeId() };
       case 'connect':
-        keys(op, ['type', 'fromNode', 'fromField', 'toNode', 'toField'], location);
-        return { type: 'connect', fromNode: id(op.fromNode, '来源节点'), fromField: id(op.fromField, '来源字段'), toNode: id(op.toNode, '目标节点'), toField: id(op.toField, '目标字段') };
+        keys(op, ['type', 'fromNode', 'fromField', 'toNode', 'toField', 'kind'], location);
+        return { type: 'connect', fromNode: id(op.fromNode, '来源节点'), fromField: id(op.fromField, '来源字段'), toNode: id(op.toNode, '目标节点'), toField: id(op.toField, '目标字段'),
+          ...(Object.hasOwn(op, 'kind') ? { kind: edgeKind(op.kind, `${location}.kind`) } : {}) };
+      case 'set_edge_kind':
+        keys(op, ['type', 'edgeId', 'kind'], location);
+        return { type: 'set_edge_kind', edgeId: text(op.edgeId, '连线 ID', 600, false), kind: edgeKind(op.kind, `${location}.kind`) };
+      case 'set_execution':
+        if (op.mode === 'workflow') {
+          keys(op, ['type', 'mode'], location);
+          return { type: 'set_execution', mode: 'workflow' };
+        }
+        keys(op, ['type', 'mode', 'maxRounds', 'reviewerNodeId', 'verdictFieldId'], location);
+        if (op.mode !== 'review') fail(`${location}.mode必须是 workflow 或 review。`);
+        if (typeof op.maxRounds !== 'number' || !Number.isInteger(op.maxRounds) || op.maxRounds < 1 || op.maxRounds > 5) fail(`${location}.maxRounds必须是 1 到 5 之间的整数。`);
+        return { type: 'set_execution', mode: 'review', maxRounds: op.maxRounds,
+          reviewerNodeId: id(op.reviewerNodeId, `${location}.reviewerNodeId`), verdictFieldId: id(op.verdictFieldId, `${location}.verdictFieldId`) };
       case 'disconnect':
         keys(op, ['type', 'edgeId'], location);
         return { type: 'disconnect', edgeId: text(op.edgeId, '连线 ID', 600, false) };
@@ -191,7 +215,20 @@ function checkGraph(doc: CanvasDocument): void {
     if (!canConnect(doc.nodes, checked, { nodeId: edge.fromNode, portId: edge.fromPort }, { nodeId: edge.toNode, portId: edge.toPort })) fail(`连线「${edge.id}」重复、自连接或目标输入已被占用。`);
     checked.push(edge);
   }
-  if (findCycle(doc.nodes, doc.edges).length) fail('连线产生回环，无法应用。');
+  if (findCycle(doc.nodes, doc.edges.filter(edge => edge.kind !== 'feedback')).length) fail('本轮数据连线产生回环，无法应用。');
+}
+
+function checkExecution(doc: CanvasDocument): void {
+  if (!doc.execution) return;
+  if (doc.execution.mode !== 'review' || !Number.isInteger(doc.execution.maxRounds) || doc.execution.maxRounds < 1 || doc.execution.maxRounds > 5) {
+    fail('互审策略必须限制为 1 到 5 轮。');
+  }
+  const { reviewerNodeId, verdictFieldId } = doc.execution;
+  const node = doc.nodes.find(node => node.id === reviewerNodeId);
+  if (node?.kind !== 'session') fail('最终评审必须引用当前画布中的 Agent 节点。');
+  if (!node.contract?.outputs.some(field => field.id === verdictFieldId && field.type === 'boolean')) {
+    fail('最终评审的判定字段必须是已声明的 boolean 输出。');
+  }
 }
 
 function setInput(node: CanvasNode, fieldId: string, value: string): void {
@@ -272,24 +309,42 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         draft.edges = draft.edges.filter(edge => edge.id !== op.edgeId);
         break;
       }
+      case 'set_execution': {
+        if (op.mode === 'workflow') delete draft.execution;
+        else {
+          const reviewer = resolve(op.reviewerNodeId);
+          draft.execution = { mode: 'review', maxRounds: op.maxRounds, reviewerNodeId: reviewer.id, verdictFieldId: op.verdictFieldId };
+          checkExecution(draft);
+        }
+        break;
+      }
+      case 'set_edge_kind': {
+        const edge = draft.edges.find(edge => edge.id === op.edgeId);
+        if (!edge) fail(`连线「${op.edgeId}」不在当前画布。`);
+        edge.kind = op.kind;
+        checkGraph(draft);
+        break;
+      }
       case 'connect': {
         const from = resolve(op.fromNode); const to = resolve(op.toNode);
         const fromPort = from.kind === 'session' && from.contract ? `out:${op.fromField}` : op.fromField;
         const toPort = to.kind === 'session' && to.contract ? `in:${op.toField}` : op.toField;
         if (!canConnect(draft.nodes, draft.edges, { nodeId: from.id, portId: fromPort }, { nodeId: to.id, portId: toPort })) fail('无法连接：字段不存在、类型不匹配、输入已占用或连线重复。');
         const output = portsFor(from).find(port => port.id === fromPort && port.side === 'output')!;
-        draft.edges.push({ id: edgeId({ nodeId: from.id, portId: fromPort }, { nodeId: to.id, portId: toPort }), fromNode: from.id, fromPort, toNode: to.id, toPort, dataType: output.dataType });
+        draft.edges.push({ id: edgeId({ nodeId: from.id, portId: fromPort }, { nodeId: to.id, portId: toPort }), fromNode: from.id, fromPort, toNode: to.id, toPort, dataType: output.dataType,
+          ...(op.kind ? { kind: op.kind } : {}) });
         checkGraph(draft);
         break;
       }
     }
   }
   checkGraph(draft);
+  checkExecution(draft);
   const added = new Set(addedNodeIds);
   const survivors = draft.nodes.filter(node => added.has(node.id));
   const oldNodes = draft.nodes.filter(node => !added.has(node.id));
   const right = oldNodes.length ? Math.max(...oldNodes.map(node => node.x + node.w)) + 100 : 80;
-  const arranged = arrangeNodePositions(survivors, draft.edges.filter(edge => added.has(edge.fromNode) && added.has(edge.toNode)));
+  const arranged = arrangeNodePositions(survivors, draft.edges.filter(edge => edge.kind !== 'feedback' && added.has(edge.fromNode) && added.has(edge.toNode)));
   const positions = new Map(arranged.map(node => [node.id, { x: node.x + right - 80, y: node.y }]));
   draft.nodes = draft.nodes.map(node => positions.has(node.id) ? { ...node, ...positions.get(node.id)! } : node);
   draft.updatedAt = Date.now();
@@ -304,7 +359,7 @@ function canonical(value: unknown): string {
 
 /** Compact deterministic conflict fingerprint. Viewport/navigation changes are intentionally free. */
 export function canvasPlanRevision(doc: CanvasDocument): string {
-  const serialized = canonical({ version: doc.version, nodes: doc.nodes, edges: doc.edges });
+  const serialized = canonical({ version: doc.version, nodes: doc.nodes, edges: doc.edges, execution: doc.execution });
   let hash = 0xcbf29ce484222325n;
   for (let index = 0; index < serialized.length; index += 1) hash = BigInt.asUintN(64, (hash ^ BigInt(serialized.charCodeAt(index))) * 0x100000001b3n);
   return `cp1-${serialized.length}-${hash.toString(16).padStart(16, '0')}`;

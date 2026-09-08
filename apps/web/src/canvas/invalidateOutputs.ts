@@ -24,11 +24,16 @@ function outputKey(output: NodeOutput | null | undefined): string {
   return JSON.stringify(output ? [output.text, output.source, output.at, output.partial === true] : null);
 }
 
+/** Saved feedback is inactive in Workflow, so it cannot invalidate same-turn outputs. */
+function executionEdges(doc: CanvasDocument): CanvasEdge[] {
+  return doc.edges.filter(edge => edge.kind !== 'feedback' || doc.execution?.mode === 'review');
+}
+
 /** Multiplicity matters to prompt input, while storage ids and wire-list order do not. */
 function edgeCounts(edges: ReadonlyArray<CanvasEdge>): Map<string, { count: number; toNode: string }> {
   const counts = new Map<string, { count: number; toNode: string }>();
   for (const edge of edges) {
-    const key = JSON.stringify([edge.fromNode, edge.fromPort, edge.toNode, edge.toPort, edge.dataType]);
+    const key = JSON.stringify([edge.fromNode, edge.fromPort, edge.toNode, edge.toPort, edge.dataType, edge.kind ?? 'data']);
     counts.set(key, { count: (counts.get(key)?.count ?? 0) + 1, toNode: edge.toNode });
   }
   return counts;
@@ -46,14 +51,17 @@ function edgeCounts(edges: ReadonlyArray<CanvasEdge>): Map<string, { count: numb
 export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): CanvasDocument {
   const before = new Map(prev.nodes.map((node) => [node.id, node]));
   const after = new Map(next.nodes.map((node) => [node.id, node]));
+  const previousEdges = executionEdges(prev);
+  const nextEdges = executionEdges(next);
   const downstream = new Map<string, Set<string>>();
-  for (const edge of [...prev.edges, ...next.edges]) {
+  for (const edge of [...previousEdges, ...nextEdges]) {
     const targets = downstream.get(edge.fromNode) ?? new Set<string>();
     targets.add(edge.toNode);
     downstream.set(edge.fromNode, targets);
   }
 
   const invalid = new Set<string>();
+  if (JSON.stringify(prev.execution) !== JSON.stringify(next.execution)) next.nodes.forEach(node => invalid.add(node.id));
   const published = new Set<string>();
   for (const node of prev.nodes) {
     if (!after.has(node.id)) invalid.add(node.id);
@@ -67,8 +75,8 @@ export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): C
     }
   }
 
-  const oldEdges = edgeCounts(prev.edges);
-  const newEdges = edgeCounts(next.edges);
+  const oldEdges = edgeCounts(previousEdges);
+  const newEdges = edgeCounts(nextEdges);
   for (const key of new Set([...oldEdges.keys(), ...newEdges.keys()])) {
     const old = oldEdges.get(key);
     const current = newEdges.get(key);

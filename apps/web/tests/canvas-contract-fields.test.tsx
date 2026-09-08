@@ -13,7 +13,7 @@ function Editor({ initial, readOnly = false }: { initial: ContractField[]; readO
 const field = (over: Partial<ContractField> = {}): ContractField => ({ id: 'brief', label: '需求', type: 'markdown', required: true, value: '# 登录页\n\n**可访问**的表单。', ...over });
 
 describe('node contract field editor', () => {
-  it.each(['text', 'markdown', 'number', 'boolean', 'file'] as const)('describes the %s editor without treating help or placeholder as its value', type => {
+  it.each(['text', 'markdown', 'html', 'number', 'boolean', 'file'] as const)('describes the %s editor without treating help or placeholder as its value', type => {
     const hinted = field({ type, value: '', help: '只填写已确认的内容。', placeholder: '角色专属填写提示' });
     render(<Editor initial={[hinted]} />);
     const editor = screen.getByLabelText('需求的值');
@@ -25,6 +25,15 @@ describe('node contract field editor', () => {
     else expect(editor).toHaveAttribute('placeholder', '角色专属填写提示');
     expect(screen.getByRole('alert')).toHaveTextContent('必填');
     expect(JSON.parse(screen.getByTestId('raw').textContent!)[0]).toEqual(hinted);
+  });
+
+  it('lets the operator require an HTML document while keeping its source inert', () => {
+    render(<Editor initial={[field({ type: 'text', value: '' })]} />);
+    fireEvent.change(screen.getByLabelText('需求的类型'), { target: { value: 'html' } });
+    expect(JSON.parse(screen.getByTestId('raw').textContent!)[0].type).toBe('html');
+    fireEvent.change(screen.getByLabelText('需求的值'), { target: { value: '<script>alert(1)</script>' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('完整 HTML');
+    expect(document.querySelector('script')).toBeNull();
   });
 
   it('keeps a wired field read-only while using its local guidance', () => {

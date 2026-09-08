@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-08
+
+- Add bounded Agent Graph review alongside sequential workflows: explicit feedback connections carry validated previous-round outputs, a boolean review verdict approves or requests revision, and a configurable 1–5 round limit prevents unlimited execution.
+- Keep one Session per node while persisting a new operation identity before each round's native dispatch. Publish coherent deliverables only after approval; retain failed, exhausted or interrupted results as partial evidence and recover without automatically dispatching another round.
+- Add a review-partner shortcut, editable graph policies and connection roles, and natural-language planning support for the same structure without granting the planner execution permissions.
+- Enforce complete HTML document content in output contracts, retain Markdown compatibility, and export validated HTML/Markdown deliveries. HTML is displayed as escaped source; local file references remain references rather than verified files.
+- Show directional arrows and state-driven connection animation, distinguish next-round feedback, and support keyboard connection selection, execution locks and reduced-motion preferences.
+
 ## [0.3.2] - 2026-09-08
 
 - Redact invitation credentials from request paths, repeated query or fragment values, structured error context and authentication warnings before they reach formatted logs; credential-shaped keys in thrown objects are also removed while ordinary pagination and CSRF token fields remain useful.

@@ -18,7 +18,8 @@
 
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { CanvasEdge, CanvasNode } from './canvasDoc';
+import type { CanvasEdge, CanvasNode, ReviewGraphPolicy } from './canvasDoc';
+import { preflightReviewGraphIssue } from './reviewGraph';
 import { preflightGraphIssue, type RunNodeStatus, type RunSummary } from './runGraph';
 import { canvasText, useCanvasI18n } from './i18n';
 import type { UiLocale } from '../locale';
@@ -29,6 +30,8 @@ export interface RunControlsProps {
   nodes: ReadonlyArray<CanvasNode>;
   edges: ReadonlyArray<CanvasEdge>;
   running: boolean;
+  execution?: ReviewGraphPolicy;
+  round?: number;
   /** Live per-node states (RAW node ids), for the in-flight progress count. */
   runs: Readonly<Record<string, RunNodeStatus>>;
   /** The finished run's summary; null while none has finished in this session. */
@@ -58,6 +61,7 @@ const CLUSTER_STYLE: CSSProperties = {
 
 /** The finished-run note. Pure + exported so the wording is testable without a render. */
 export function summaryNote(summary: RunSummary, stopped: boolean, locale: UiLocale = 'zh'): string {
+  if (summary.review) return canvasText(locale, `graph.result.${summary.review.outcome}`, { rounds: summary.review.rounds });
   // A scoped run reused upstream results instead of re-running them. Saying so is the difference
   // between "3/3 succeeded" reading as "the whole graph is fresh" and reading as what it is.
   const reused = summary.cached ? canvasText(locale, 'run.reusedSummary', { count: summary.cached }) : '';
@@ -73,6 +77,8 @@ export function RunControls({
   nodes,
   edges,
   running,
+  execution,
+  round = 0,
   runs,
   summary = null,
   stopped = false,
@@ -88,10 +94,11 @@ export function RunControls({
   // bind the missing agent and the message goes away by itself (and if the graph acquires a
   // different problem meanwhile, the operator sees THAT one, not a stale sentence).
   const [refused, setRefused] = useState(false);
-  const problem = refused ? preflightIssueMessage(t, preflightGraphIssue(nodes, edges), locale) : null;
+  const preflight = () => execution ? preflightReviewGraphIssue(nodes, edges, execution) : preflightGraphIssue(nodes, edges.filter(edge => edge.kind !== 'feedback'));
+  const problem = refused ? preflightIssueMessage(t, preflight(), locale) : null;
 
   const start = () => {
-    const found = preflightGraphIssue(nodes, edges);
+    const found = preflight();
     if (found) {
       setRefused(true);
       return;
@@ -125,7 +132,7 @@ export function RunControls({
           disabled={nodes.length === 0}
           title={nodes.length === 0 ? t('run.emptyTitle') : undefined}
         >
-          ▶ {t('run.runGraph')}
+          ▶ {t(execution ? 'graph.runReview' : 'run.runGraph')}
         </button>
       )}
 
@@ -137,7 +144,7 @@ export function RunControls({
         </span>
       ) : running ? (
         <span className="canvas-run-note">
-          {t('run.inProgress', { done: doneNow, total: runTotal })}
+          {execution ? `${t('graph.round', { round, max: execution.maxRounds })} · ` : ''}{t('run.inProgress', { done: doneNow, total: runTotal })}
         </span>
       ) : summary ? (
         <span className="canvas-run-note">{summaryNote(summary, stopped, locale)}</span>

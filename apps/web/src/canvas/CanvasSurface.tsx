@@ -33,6 +33,10 @@ import { Marquee, useMarquee } from './Marquee';
 import { AddNodeMenu, type AddNodeKind } from './AddNodeMenu';
 import { InspectorPanel } from './InspectorPanel';
 import { RunControls } from './RunControls';
+import { GraphSettings } from './GraphSettings';
+import { addReviewPartner } from './reviewPartner';
+import { preflightReviewGraphIssue, runReviewGraph } from './reviewGraph';
+import { beginReviewRound, prepareReviewTurn } from './reviewJournal';
 import { RunTimeline, type RunView } from './RunTimeline';
 import { Minimap } from './Minimap';
 import { CommandBar, type CommandBarMode, type CanvasCommandActions } from './CommandBar';
@@ -294,6 +298,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   const [handoffNote, setHandoffNote] = useState('');
 
   const [selection, setSelection] = useState<string[]>([]);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   // Read inside the drag so moving a group never depends on the callback identity at press time.
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
@@ -426,6 +431,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   recoveringRef.current = recovering;
   const [runs, setRuns] = useState<Record<string, RunView>>(() => initialJournal?.nodes ?? {});
   const [running, setRunning] = useState(Boolean(initialJournal));
+  const [reviewRound, setReviewRound] = useState(initialJournal?.review?.round ?? 0);
   const [runSummary, setRunSummary] = useState<Parameters<typeof RunControls>[0]['summary']>(null);
   const [stopped, setStopped] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
@@ -437,7 +443,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       if (event.key !== CANVAS_RUN_JOURNAL_KEY || runAbort.current) return;
       const active = loadRunJournal();
       if (active) {
-        journal.current = active; setRuns(active.nodes); setRunning(true); setRecovering(true);
+        journal.current = active; setRuns(active.nodes); setReviewRound(active.review?.round ?? 0); setRunning(true); setRecovering(true);
       }
     };
     window.addEventListener('storage', observeOtherTab);
@@ -493,11 +499,12 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         if (journal.current !== observed || loadRunJournal()
             || JSON.stringify(loadDocumentWithStatus().doc) !== JSON.stringify(current.doc)) { retry(); return; }
         docRef.current = current.doc; setDoc(current.doc);
-        journal.current = null; setRecovering(false); setRunning(false); setRuns({});
+        journal.current = null; setRecovering(false); setRunning(false); setRuns({}); setReviewRound(0);
         setHandoffNote(surfaceNotice(t, 'recovery_complete'));
         return;
       }
       journal.current = durable;
+      setReviewRound(durable.review?.round ?? 0);
       if (!journal.current) return;
       const observed = journal.current;
       const reconciled = await reconcileRunJournal(observed, docRef.current.nodes, gatewayApiBase(), controller.signal);
@@ -517,6 +524,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       journal.current = next;
       saveRunJournal(next);
       setRuns(next.nodes);
+      setReviewRound(next.review?.round ?? 0);
       setRunStartedAt(next.startedAt);
       setTimelineOpen(true);
       const recovered = applyRecoveredDocument(docRef.current, { ...next, inputFingerprint: next.inputFingerprint ?? '' });
@@ -596,7 +604,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     const durable = loadRunJournal();
     if (durable) {
       journal.current = durable;
-      setRuns(durable.nodes); setRunning(true); setRecovering(true);
+      setRuns(durable.nodes); setReviewRound(durable.review?.round ?? 0); setRunning(true); setRecovering(true);
       return;
     }
     if (manualMessage && submittedNode && !await prepareManualHistoryCapacity(
@@ -633,13 +641,17 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     }
     if (inspectorCloseLocked.current) { setHandoffNote(surfaceNotice(t, 'bind_before_run')); return; }
     if (hasStreamingConversation(docRef.current.nodes)) { setHandoffNote(surfaceNotice(t, 'wait_conversation')); return; }
-    const problem = preflightIssueMessage(t, preflightGraphIssue(nodes, edges, scope), locale);
+    const reviewPolicy = !manualMessage ? docRef.current.execution : undefined;
+    const problem = preflightIssueMessage(t, reviewPolicy
+      ? preflightReviewGraphIssue(nodes, edges, reviewPolicy, scope)
+      : preflightGraphIssue(nodes, edges.filter(edge => edge.kind !== 'feedback'), scope), locale);
     if (problem) { setHandoffNote(problem); return; }
     setHandoffNote('');
     const ac = new AbortController();
     // A failed or stopped retry must never leave its previous success available to downstream nodes.
     const executing = new Set(scope ?? nodes.map(n => n.id));
     const pending: CanvasRunJournal = { version: 1, id: crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(docRef.current, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(nodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
+    if (reviewPolicy) pending.review = { round: 0, maxRounds: reviewPolicy.maxRounds, outcome: 'running', turns: [] };
     const prepared = prepareRunDocument(docRef.current, [...executing], Boolean(manualMessage));
     if (!saveLocalDocument(prepared)) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
     if (!saveRunJournal(pending)) {
@@ -667,6 +679,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     setStopped(false);
     setRunSummary(null);
     setRuns({});
+    setReviewRound(0);
     setRunStartedAt(Date.now());
     setNow(Date.now());
     setTimelineOpen(true);
@@ -679,7 +692,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       gatewayBase: gatewayApiBase(),
       signal: ac.signal,
       deferFinalPresentation: true,
-      operationIdForNode: nodeId => pending.nodes[nodeId]?.operationId ?? undefined,
+      operationIdForNode: nodeId => journal.current?.nodes[nodeId]?.operationId ?? undefined,
       // Display metadata is captured separately; the Agent receives the complete execution
       // request, including the inputs and output contract, without any display substitutions.
       presentationForNode: node => ({
@@ -706,7 +719,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       const result = await nativeExec(node, message);
       const entry = journal.current?.nodes[node.id];
       const settled = await settleExecutionResult(gatewayApiBase(), entry, result);
-      const operationId = pending.nodes[node.id]?.operationId;
+      const operationId = entry?.operationId;
       const outputState = settled.ok && !settled.unconfirmed ? 'final' : 'failed';
       if (operationId) {
         updateConversationPresentation(node, operationId, { issueId: entry?.issueId, runId: entry?.runId,
@@ -721,10 +734,12 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       return settled;
     };
     const onStatus = (nodeId: string, status: RunNodeStatus) => {
-        updateJournal(nodeId, status);
+        // In review mode the fresh operation is saved by beforeTurn, before any dispatch.
+        // A crash between this UI event and beforeTurn must leave a waiting, undispatched node.
+        if (!reviewPolicy || status.state !== 'running' || journal.current?.nodes[nodeId]?.operationId) updateJournal(nodeId, status);
         if (runAbort.current !== ac) return;
         const stamp = Date.now();
-        if (!manualMessage && (status.state === 'done' || status.state === 'failed' || status.state === 'cancelled') && status.output) {
+        if (!manualMessage && !reviewPolicy && (status.state === 'done' || status.state === 'failed' || status.state === 'cancelled') && status.output) {
           patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, lastOutput: { text: status.output!, at: stamp, source: 'run' as const, ...(status.state !== 'done' ? { partial: true } : {}) } } : n) }), { silent: true });
         }
         setRuns(prev => ({ ...prev, [nodeId]: { ...status, startedAt: prev[nodeId]?.startedAt ?? stamp, ...(status.state !== 'waiting' && status.state !== 'running' ? { endedAt: stamp } : {}) } }));
@@ -737,19 +752,40 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       onStatus(node.id, { state: result.unconfirmed ? 'running' : result.ok ? 'done' : result.cancelled ? 'cancelled' : 'failed', output: result.output, detail: result.detail });
       return journalSummary(journal.current!);
     };
-    const summary = manualMessage ? await executeManual() : await runGraph({
+    const options = {
       nodes,
-      edges,
+      edges: reviewPolicy ? edges : edges.filter(edge => edge.kind !== 'feedback'),
       scope,
       // An out-of-scope upstream contributes what it produced earlier rather than running again.
-      storedOutput: (nodeId) => {
+      storedOutput: (nodeId: string) => {
         const output = docRef.current.nodes.find((n) => n.id === nodeId)?.lastOutput;
         return output && !output.partial ? output.text : null;
       },
       execAgent: exec,
       onStatus,
       signal: ac.signal,
-    });
+    };
+    const summary = manualMessage ? await executeManual() : reviewPolicy ? await runReviewGraph({ ...options,
+      policy: reviewPolicy,
+      onRound: round => {
+        const next = beginReviewRound(journal.current!, round);
+        if (!saveRunJournal(next)) throw new Error(surfaceNotice(t, 'storage_write_failed'));
+        journal.current = next;
+        setRuns(next.nodes); setReviewRound(round);
+      },
+      beforeTurn: async node => {
+        const live = docRef.current.nodes.find(item => item.id === node.id);
+        if (live?.kind !== 'session') throw new Error('review_turn_identity_changed');
+        const next = prepareReviewTurn(journal.current!, live, crypto.randomUUID());
+        if (!saveRunJournal(next)) throw new Error(surfaceNotice(t, 'storage_write_failed'));
+        journal.current = next;
+        return { ...node, issueId: live.issueId, threads: live.threads };
+      },
+    }) : await runGraph(options);
+    if (summary.review && journal.current?.review) {
+      journal.current = { ...journal.current, review: { ...journal.current.review, outcome: summary.review.outcome } };
+      if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
+    }
     if (runAbort.current === ac) {
       runAbort.current = null;
       if (Object.values(journal.current?.nodes ?? {}).some(node => node.state === 'running')) {
@@ -758,6 +794,11 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       }
       const persistedCanvas = loadDocumentWithStatus();
       let finalSummary = summary;
+      if (reviewPolicy && journal.current) {
+        // Publish one coherent batch; intermediate review outputs cannot invalidate each other around a loop.
+        docRef.current = applyRecoveredDocument(docRef.current, { ...journal.current, inputFingerprint: pending.inputFingerprint! });
+        setDoc(docRef.current);
+      }
       if (persistedCanvas.status === 'ok' && pending.inputFingerprint !== runInputFingerprint(persistedCanvas.doc, pending.scope)) {
         const historical = recoveryJournalForDocument(persistedCanvas.doc, journal.current!);
         journal.current = historical; saveRunJournal(historical);
@@ -823,6 +864,9 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       while (grew) {
         grew = false;
         for (const e of edges) {
+          // Scoped runs follow same-turn dependencies. Feedback belongs to the bounded
+          // review scheduler and must not expand a Workflow run after switching modes.
+          if (e.kind === 'feedback') continue;
           if (out.has(e.fromNode) && !out.has(e.toNode)) {
             out.add(e.toNode);
             grew = true;
@@ -1307,10 +1351,18 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       onToggleAssistant={() => setAssistantOpen(value => !value)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked}>{accountControl}</div>}
-      toolbar={<RunControls nodes={nodes} edges={edges} running={running} runs={runs} summary={runSummary}
+      toolbar={<><GraphSettings doc={doc} selectedNodeId={selection[0]} selectedEdgeId={selectedEdgeId}
+        disabled={running || bindingLocked} onChange={next => { if (canEditStructure()) patchDoc(() => next, { label: 'graph-settings' }); }}
+        onAddPartner={nodeId => {
+          if (!canEditStructure()) return;
+          const result = addReviewPartner(docRef.current, nodeId, locale);
+          patchDoc(() => result.doc, { label: 'review-partner' });
+          setSelection([result.reviewerId]); setFocusedId(null);
+        }} />
+      <RunControls nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
-        style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} />}>
+        style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
     <div className="canvas-root" ref={rootRef}>
       <CanvasViewport
         view={view}
@@ -1322,6 +1374,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
           // plain background press just clears the selection.
           if (marquee.onBackgroundPointerDown(e)) return true;
           setSelection([]);
+          setSelectedEdgeId(null);
           return undefined;
         }}
         onBackgroundDoubleClick={running ? undefined : (world) => addNode('llm', world)}
@@ -1337,7 +1390,9 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
               }
         }
       >
-        <WirePlane nodes={renderNodes} edges={edges} preview={wiring.wireDrag} onDisconnect={running ? undefined : disconnect} />
+        <WirePlane nodes={renderNodes} edges={edges} runs={runs} running={running} round={doc.execution ? reviewRound : 0} scale={view.scale}
+          selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={setSelectedEdgeId}
+          preview={wiring.wireDrag} onDisconnect={running ? undefined : disconnect} />
         {nodes.map((node) => (
           <SessionTile
             key={node.id}
@@ -1350,7 +1405,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
             run={runs[node.id] ?? null}
             gatewayBase={gatewayApiBase()}
             onSend={(node, message, accepted, displayText) => { void startRun([node.id], message, accepted, displayText); }}
-            conversationContext={node.kind === 'session' ? prepareNodeConversation(node, nodes, edges) : undefined}
+            conversationContext={node.kind === 'session' ? prepareNodeConversation(node, nodes, edges.filter(edge => edge.kind !== 'feedback')) : undefined}
             onIssueId={(nodeId, issueId, threadId) =>
               // Server-minted, not a user edit — never an undo step.
               patchDoc(

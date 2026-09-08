@@ -25,6 +25,24 @@ function fixture(): CanvasDocument {
 }
 
 describe('strict canvas plan protocol', () => {
+  it.each([
+    { type: 'set_execution', mode: 'review', reviewerNodeId: 'target', verdictFieldId: 'approved' },
+    { type: 'set_execution', mode: 'review', maxRounds: 0, reviewerNodeId: 'target', verdictFieldId: 'approved' },
+    { type: 'set_execution', mode: 'review', maxRounds: 6, reviewerNodeId: 'target', verdictFieldId: 'approved' },
+    { type: 'set_execution', mode: 'review', maxRounds: 2.5, reviewerNodeId: 'target', verdictFieldId: 'approved' },
+    { type: 'set_execution', mode: 'review', maxRounds: '3', reviewerNodeId: 'target', verdictFieldId: 'approved' },
+    { type: 'set_execution', mode: 'review', maxRounds: 3, verdictFieldId: 'approved' },
+    { type: 'set_execution', mode: 'review', maxRounds: 3, reviewerNodeId: 'target' },
+    { type: 'set_execution', mode: 'workflow', maxRounds: 3 },
+    { type: 'set_execution', mode: 'workflow', reviewerNodeId: 'target' },
+    { type: 'set_execution', mode: 'autonomous' },
+    { type: 'set_execution', mode: 'review', maxRounds: 3, reviewerNodeId: 'target', verdictFieldId: 'approved', runNow: true },
+    { type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'target', toField: 'schema', kind: 'recursive' },
+    { type: 'set_edge_kind', edgeId: 'edge', kind: 'recursive' },
+  ])('rejects unsupported execution policy or edge semantics: %j', operation => {
+    expect(() => parseCanvasPlan({ ...plan(), operations: [operation] })).toThrow('画布方案');
+  });
+
   it('accepts exact JSON objects and fenced JSON without allowing surrounding prose', () => {
     const wanted = plan({ type: 'add_node', ref: 'new-data', templateId: 'data', inputValues: { brief: 'A real requested brief' } });
     expect(parseCanvasPlan(JSON.stringify(wanted))).toEqual(wanted);
@@ -57,6 +75,84 @@ describe('strict canvas plan protocol', () => {
     expect(() => parseCanvasPlan({ ...plan(), operations: [{ type: 'update_field', nodeId: 'source', side: 'output', fieldId: 'schema', changes: { value: 'Invented output' } }] })).toThrow('value');
     expect(() => applyCanvasPlan(fixture(), plan({ type: 'set_input', nodeId: 'source', fieldId: 'schema', value: 'Invented output' }))).toThrow('没有输入字段');
     expect(() => parseCanvasPlan({ ...plan(), operations: [{ type: 'add_node', ref: 'new', templateId: 'data', outputValues: { schema: 'Invented' } }] })).toThrow('outputValues');
+  });
+});
+
+describe('AI review graph and document format editing', () => {
+  function reviewPlan(): CanvasPlan {
+    return plan(
+      { type: 'add_node', ref: 'producer', templateId: 'general', inputValues: { brief: '制作完整 HTML 页面' } },
+      { type: 'update_field', nodeId: 'producer', side: 'output', fieldId: 'result', changes: { type: 'html' } },
+      { type: 'add_node', ref: 'reviewer', templateId: 'general', persona: '独立验证并质疑收到的页面，列出具体修改意见。' },
+      { type: 'add_field', nodeId: 'reviewer', side: 'output', field: { id: 'approved', label: '是否通过', type: 'boolean', required: true, value: '' } },
+      { type: 'connect', fromNode: 'producer', fromField: 'result', toNode: 'reviewer', toField: 'brief', kind: 'data' },
+      { type: 'connect', fromNode: 'reviewer', fromField: 'result', toNode: 'producer', toField: 'constraints', kind: 'feedback' },
+      { type: 'set_execution', mode: 'review', maxRounds: 3, reviewerNodeId: 'reviewer', verdictFieldId: 'approved' },
+    );
+  }
+
+  it('builds a bounded review loop with HTML delivery and real added-node references without executing or binding it', () => {
+    const doc = fixture();
+    const before = structuredClone(doc);
+    const applied = applyCanvasPlan(doc, reviewPlan());
+    const [producer, reviewer] = applied.doc.nodes.slice(2) as SessionNode[];
+    expect(applied.doc.execution).toEqual({ mode: 'review', maxRounds: 3, reviewerNodeId: reviewer.id, verdictFieldId: 'approved' });
+    expect(producer.contract!.outputs.find(field => field.id === 'result')).toMatchObject({ type: 'html', value: '' });
+    expect(reviewer.x).toBeGreaterThan(producer.x);
+    expect(applied.doc.edges.slice(1)).toMatchObject([
+      { fromNode: producer.id, toNode: reviewer.id, kind: 'data', dataType: 'text' },
+      { fromNode: reviewer.id, toNode: producer.id, kind: 'feedback', dataType: 'text' },
+    ]);
+    expect(producer.binding).toBeNull();
+    expect(reviewer.binding).toBeNull();
+    expect(producer.issueId).toBeNull();
+    expect(reviewer.issueId).toBeNull();
+    expect(activeNodeThread(applied.doc.nodes[0] as SessionNode).draft).toBe('Unsent user message');
+    expect((applied.doc.nodes[0] as SessionNode).binding).toEqual((doc.nodes[0] as SessionNode).binding);
+    expect((applied.doc.nodes[0] as SessionNode).threads).toEqual((doc.nodes[0] as SessionNode).threads);
+    expect(doc).toEqual(before);
+  });
+
+  it('switches back to workflow while retaining inactive feedback and can edit the existing edge kind', () => {
+    const review = applyCanvasPlan(emptyDocument(), reviewPlan()).doc;
+    const feedback = review.edges.find(edge => edge.kind === 'feedback')!;
+    const workflow = applyCanvasPlan(review, plan({ type: 'set_execution', mode: 'workflow' })).doc;
+    expect(workflow.execution).toBeUndefined();
+    expect(workflow.edges).toEqual(review.edges);
+    const before = structuredClone(workflow);
+    expect(() => applyCanvasPlan(workflow, plan({ type: 'set_edge_kind', edgeId: feedback.id, kind: 'data' }))).toThrow('回环');
+    expect(workflow).toEqual(before);
+    const data = workflow.edges.find(edge => edge.kind === 'data')!;
+    const reversed = applyCanvasPlan(workflow, plan(
+      { type: 'set_edge_kind', edgeId: data.id, kind: 'feedback' },
+      { type: 'set_edge_kind', edgeId: feedback.id, kind: 'data' },
+    )).doc;
+    expect(reversed.edges.find(edge => edge.id === feedback.id)?.kind).toBe('data');
+    expect(reversed.edges.find(edge => edge.id === data.id)?.kind).toBe('feedback');
+    expect(() => applyCanvasPlan(workflow, plan({ type: 'set_edge_kind', edgeId: 'another-project-edge', kind: 'data' }))).toThrow('不在当前画布');
+  });
+
+  it('can save an incomplete loop for manual completion but rejects unresolved or nonboolean reviewers', () => {
+    const doc = fixture();
+    const setup: CanvasPlanOperation = { type: 'add_field', nodeId: 'target', side: 'output', field: { ...emptyField, id: 'approved', type: 'boolean' } };
+    const policy: CanvasPlanOperation = { type: 'set_execution', mode: 'review', maxRounds: 2, reviewerNodeId: 'target', verdictFieldId: 'approved' };
+    expect(applyCanvasPlan(doc, plan(setup, policy)).doc.execution?.maxRounds).toBe(2);
+    expect(() => applyCanvasPlan(doc, plan(policy, setup))).toThrow('boolean');
+    expect(() => applyCanvasPlan(doc, plan({ ...policy, reviewerNodeId: 'future' }, { type: 'add_node', ref: 'future', templateId: 'review' }))).toThrow('尚未创建');
+    expect(() => applyCanvasPlan(doc, plan({ ...policy, verdictFieldId: 'api' }))).toThrow('boolean');
+    expect(() => applyCanvasPlan(doc, plan(setup, policy, { type: 'remove_node', nodeId: 'target' }))).toThrow('最终评审');
+    expect(() => applyCanvasPlan(doc, plan(setup, policy, { type: 'update_field', nodeId: 'target', side: 'output', fieldId: 'approved', changes: { type: 'markdown' } }))).toThrow('boolean');
+    expect(applyCanvasPlan(doc, plan(setup, policy, { type: 'set_execution', mode: 'workflow' }, { type: 'remove_node', nodeId: 'target' })).doc.execution).toBeUndefined();
+  });
+
+  it('supports added and edited HTML fields without permitting fabricated output values or unknown types', () => {
+    const doc = fixture();
+    const htmlField: CanvasPlanOperation = { type: 'add_field', nodeId: 'source', side: 'output', field: { ...emptyField, id: 'page', type: 'html' } };
+    const result = applyCanvasPlan(doc, plan(htmlField, { type: 'update_field', nodeId: 'source', side: 'output', fieldId: 'schema', changes: { type: 'html' } })).doc;
+    expect((result.nodes[0] as SessionNode).contract?.outputs.filter(field => field.type === 'html')).toHaveLength(2);
+    expect(result.nodes[0].lastOutput).toBeNull();
+    expect(() => parseCanvasPlan({ ...plan(), operations: [{ ...htmlField, field: { ...htmlField.field, value: '<html>Invented</html>' } }] })).toThrow('禁止生成输出值');
+    expect(() => parseCanvasPlan({ ...plan(), operations: [{ ...htmlField, field: { ...htmlField.field, type: 'executable' } }] })).toThrow('不是支持的字段类型');
   });
 });
 
@@ -185,8 +281,12 @@ it('creates a stable revision that detects edits and layout changes while ignori
     (copy: CanvasDocument) => { copy.nodes[0].w += 100; },
     (copy: CanvasDocument) => { (copy.nodes[0] as SessionNode).contract!.inputs[0].value = 'Manual edit during request'; },
     (copy: CanvasDocument) => { copy.edges = []; },
+    (copy: CanvasDocument) => { copy.edges[0].kind = 'feedback'; },
+    (copy: CanvasDocument) => { copy.execution = { mode: 'review', maxRounds: 3, reviewerNodeId: 'target', verdictFieldId: 'approved' }; },
   ]) {
     const copy = structuredClone(doc); change(copy);
     expect(canvasPlanRevision(copy)).not.toBe(original);
   }
+  const review = { ...doc, execution: { mode: 'review' as const, maxRounds: 3, reviewerNodeId: 'target', verdictFieldId: 'approved' } };
+  expect(canvasPlanRevision({ ...review, execution: { ...review.execution, maxRounds: 4 } })).not.toBe(canvasPlanRevision(review));
 });

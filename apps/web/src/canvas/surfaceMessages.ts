@@ -1,6 +1,7 @@
 import type { UiLocale } from '../locale';
 import type { CanvasTextKey, CanvasTextValues, CanvasTranslate } from './i18n';
 import type { PreflightIssue, PreflightIssueCode } from './runGraph';
+import type { ReviewPreflightReason } from './reviewGraph';
 
 export type SurfaceNotice =
   | 'recovering_run'
@@ -50,6 +51,8 @@ const RECOVERY_DETAIL_KEYS = {
   recovery_input_changed: 'surface.recoveryInputChanged',
   recovery_unconfirmed: 'surface.recoveryUnconfirmed',
   recovery_settlement_unconfirmed: 'surface.settlementUnconfirmed',
+  review_invalid_verdict: 'graph.invalidVerdict',
+  review_exhausted: 'graph.exhausted',
   succeeded: 'session.succeeded',
   failed: 'session.failed',
   cancelled: 'session.cancelled',
@@ -72,6 +75,23 @@ const PREFLIGHT_KEYS: Record<PreflightIssueCode, CanvasTextKey> = {
   cycle: 'run.preflightCycle',
 };
 
+const REVIEW_PREFLIGHT_KEYS: Record<ReviewPreflightReason, CanvasTextKey> = {
+  full_graph_required: 'graph.preflightFullGraph',
+  invalid_round_limit: 'graph.preflightRoundLimit',
+  duplicate_nodes: 'graph.preflightDuplicateNodes',
+  duplicate_edges: 'graph.preflightDuplicateEdges',
+  invalid_edges: 'graph.preflightInvalidEdges',
+  missing_feedback: 'graph.preflightMissingFeedback',
+  missing_reviewer: 'graph.preflightMissingReviewer',
+  invalid_verdict_field: 'graph.preflightVerdictField',
+  reviewer_not_terminal: 'graph.preflightReviewerTerminal',
+  missing_reviewer_feedback: 'graph.preflightReviewerFeedback',
+  invalid_feedback_input: 'graph.preflightFeedbackInput',
+  conflicting_feedback_input: 'graph.preflightFeedbackConflict',
+  invalid_feedback_path: 'graph.preflightFeedbackPath',
+  unreviewed_nodes: 'graph.preflightUnreviewedNodes',
+};
+
 function localizedValues(issue: PreflightIssue, locale: UiLocale): CanvasTextValues {
   return Object.fromEntries(Object.entries(issue.values).map(([name, value]) => [
     name,
@@ -85,7 +105,12 @@ export function preflightIssueMessage(
   issue: PreflightIssue | null,
   locale: UiLocale,
 ): string | null {
-  return issue ? t(PREFLIGHT_KEYS[issue.code], localizedValues(issue, locale)) : null;
+  if (!issue) return null;
+  const reason = issue.values.reviewReason;
+  if (typeof reason === 'string' && Object.hasOwn(REVIEW_PREFLIGHT_KEYS, reason)) {
+    return t(REVIEW_PREFLIGHT_KEYS[reason as ReviewPreflightReason], localizedValues(issue, locale));
+  }
+  return t(PREFLIGHT_KEYS[issue.code], localizedValues(issue, locale));
 }
 
 /** Known wrapper text is localized; an unknown native/server detail stays verbatim evidence. */

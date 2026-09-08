@@ -68,6 +68,7 @@ export interface RunGraphOptions {
 }
 
 export interface RunSummary {
+  review?: { rounds: number; outcome: 'approved' | 'exhausted' | 'failed' | 'cancelled' | 'interrupted' };
   ok: boolean;
   done: number;
   failed: number;
@@ -240,8 +241,10 @@ export function buildNodeMessage(node: SessionNode, upstream: ReadonlyArray<Upst
           + (help ? `\n  字段说明：${help}` : '')
           + (structure && structure !== help ? `\n  结构参考（不代表已有产出）：${structure}` : '');
       }).join('\n');
-      const singleText = outputs.length === 1 && (outputs[0].type === 'text' || outputs[0].type === 'markdown');
+      const singleText = outputs.length === 1 && (outputs[0].type === 'text' || outputs[0].type === 'markdown' || outputs[0].type === 'html');
       parts.push(`【输出格式】\n${schema}\n${singleText ? '可直接返回该字段的文本，或返回以字段 ID 为键的 JSON 对象。' : '最终输出必须是以字段 ID 为键的 JSON 对象；number 使用 JSON 数字，boolean 使用 JSON 布尔值，其余字段使用字符串。'}文件字段仅填写文件引用，不表示文件已上传。`);
+      if (outputs.some(field => field.type === 'html')) parts.push('HTML 字段必须提供完整文档源码，包含显式 html、head、body 起止标签；可使用一个完整的 html 代码块。不能用文件路径、链接、交付说明或 HTML 片段代替文档。');
+      if (outputs.some(field => field.type === 'markdown')) parts.push('Markdown 字段直接提供 Markdown 文档正文，保留标题、列表和代码等原始格式，以便导出 .md 文件。');
     }
     parts.push(fields.length ? '请基于以上输入完成本节点的职责，并按声明的格式给出最终输出。' : '本节点没有输入，请按本节点职责完成任务，并按声明的格式给出最终输出。');
     return parts.join('\n\n');

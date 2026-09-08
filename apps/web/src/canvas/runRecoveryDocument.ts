@@ -330,6 +330,7 @@ function edgeInput(edge: CanvasEdge) {
   return {
     fromNode: edge.fromNode, fromPort: edge.fromPort,
     toNode: edge.toNode, toPort: edge.toPort, dataType: edge.dataType,
+    ...(edge.kind === 'feedback' ? { kind: edge.kind } : {}),
   };
 }
 
@@ -383,7 +384,7 @@ export function runInputFingerprint(doc: CanvasDocument, scope: ReadonlyArray<st
     .map(edgeInput)
     .sort((a, b) => lexical(JSON.stringify(a), JSON.stringify(b)));
   const orderedInputs = incomingOrder(doc.nodes, executableEdges, relevant);
-  return `v1:${JSON.stringify({ scope: scoped, nodes, edges, orderedInputs })}`;
+  return `v1:${JSON.stringify({ scope: scoped, nodes, edges, orderedInputs, ...(doc.execution ? { execution: doc.execution } : {}) })}`;
 }
 
 /** Build and persist this snapshot before any native dispatch can begin. */
@@ -472,14 +473,25 @@ export function applyRecoveredDocument(
     // invalidation so a newly observed id cannot erase an existing manual publication.
     if (next.kind === 'session' && item.issueId) next = updateThreadIssueId(next, item.threadId, item.issueId);
     if (journal.manual || !inputsMatch || !selected.has(node.id)) return next;
-    if (!['done', 'failed', 'cancelled'].includes(item.state) || !item.output) return next;
+    const currentOutput = ['done', 'failed', 'cancelled'].includes(item.state) && item.output ? item : null;
+    // A later interrupted round must not hide the last inspectable attempt. Retain it only
+    // for the exact same Session/binding, always as partial evidence, never as approval.
+    const priorOutput = !currentOutput && item.state !== 'running' && journal.review
+      && journal.review.outcome !== 'approved'
+      ? [...journal.review.turns].reverse().find(turn => turn.nodeId === node.id
+        && turn.round < journal.review!.round && turn.issueId === item.issueId
+        && turn.threadId === item.threadId && belongsToJournalBinding(node, turn)
+        && ['done', 'failed', 'cancelled'].includes(turn.state) && turn.output)
+      : null;
+    const evidence = currentOutput ?? priorOutput;
+    if (!evidence?.output) return next;
     return {
       ...next,
       lastOutput: {
-        text: item.output,
+        text: evidence.output,
         at: journal.startedAt,
         source: 'run' as const,
-        ...(item.state === 'done' ? {} : { partial: true }),
+        ...(currentOutput?.state === 'done' && (!journal.review || journal.review.outcome === 'approved') ? {} : { partial: true }),
       },
     };
   });

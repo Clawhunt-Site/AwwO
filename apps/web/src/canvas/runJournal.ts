@@ -29,6 +29,13 @@ export interface CanvasRunJournal {
   manual?: boolean;
   /** Exact operator turn needed to reconstruct a detached manual conversation. */
   manualMessage?: string;
+  /** Review rounds never imply convergence until the gate verdict has been checked. */
+  review?: {
+    round: number;
+    maxRounds: number;
+    outcome: 'running' | 'approved' | 'exhausted' | 'failed' | 'cancelled' | 'interrupted';
+    turns: Array<CanvasRunJournalNode & { round: number }>;
+  };
   nodes: Record<string, CanvasRunJournalNode>;
 }
 
@@ -60,7 +67,19 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = localStorage)
     };
   }
   if (!scope.length || scope.length > 1000 || scope.some(id => !Object.hasOwn(nodes, id))) return null;
-  return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes, ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
+  let review: CanvasRunJournal['review'];
+  if (value.review !== undefined) {
+    const r = value.review as NonNullable<CanvasRunJournal['review']>;
+    if (!r || !Number.isInteger(r.round) || r.round < 0 || r.round > 5
+      || !Number.isInteger(r.maxRounds) || r.maxRounds < 1 || r.maxRounds > 5 || r.round > r.maxRounds
+      || !['running', 'approved', 'exhausted', 'failed', 'cancelled', 'interrupted'].includes(r.outcome)
+      || !Array.isArray(r.turns) || r.turns.length > 5000
+      || r.turns.some(turn => !turn || !text(turn.nodeId) || !text(turn.threadId)
+        || !Number.isInteger(turn.round) || turn.round < 1 || turn.round > r.round
+        || !states.has(turn.state) || ['waiting', 'running'].includes(turn.state))) return null;
+    review = r;
+  }
+  return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes, ...(review ? { review } : {}), ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
 }
 
 export function saveRunJournal(journal: CanvasRunJournal, storage: Pick<Storage, 'setItem'> = localStorage): boolean {
@@ -101,7 +120,8 @@ export function patchRunJournalNode(
 export function journalSummary(journal: CanvasRunJournal): RunSummary {
   const scoped = journal.scope.map(id => journal.nodes[id]).filter(Boolean);
   const count = (state: RunNodeState) => scoped.filter(node => node.state === state).length;
-  return { ok: count('done') === scoped.length, done: count('done'), failed: count('failed'), blocked: count('blocked'), cancelled: count('cancelled'), cached: Object.values(journal.nodes).filter(n => n.state === 'cached').length, total: scoped.length };
+  return { ok: count('done') === scoped.length && (!journal.review || journal.review.outcome === 'approved'), done: count('done'), failed: count('failed'), blocked: count('blocked'), cancelled: count('cancelled'), cached: Object.values(journal.nodes).filter(n => n.state === 'cached').length, total: scoped.length,
+    ...(journal.review ? { review: { rounds: journal.review.round, outcome: journal.review.outcome === 'running' ? 'interrupted' as const : journal.review.outcome } } : {}) };
 }
 
 /** One read-only recovery pass. A missing identity or network failure always keeps the lock. */
