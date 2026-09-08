@@ -1,0 +1,36 @@
+import { readInitialLocale, type UiLocale } from '../locale';
+import { SaaSApiError, saasErrorMessage } from './api';
+
+export function canvasLocale(): UiLocale {
+  const language = document.documentElement.lang;
+  return language === 'en' ? 'en' : language.startsWith('zh') ? 'zh' : readInitialLocale();
+}
+
+export const canvasText = (zh: string, en: string): string => canvasLocale() === 'zh' ? zh : en;
+
+const runErrors: Record<string, [string, string]> = {
+  runtime_unavailable: ['Pi 执行服务暂不可用，请稍后重试。', 'The Pi execution service is unavailable. Please try again later.'],
+  runtime_session_busy: ['执行服务中的会话仍在运行，请稍后重试。', 'The runtime session is still busy. Please try again later.'],
+  runtime_rejected: ['执行服务未接受此请求，请检查运行配置。', 'The runtime did not accept this request. Check the runtime configuration.'],
+  invalid_canvas_plan: ['规划结果无效，当前画布保持原样。', 'The plan is invalid. The canvas has not changed.'],
+  database_unavailable: ['暂时无法保存运行状态，请恢复运行状态后再试。', 'The run state could not be saved. Restore its state before retrying.'],
+  history_unavailable: ['暂时无法读取会话历史，请稍后重试。', 'Conversation history is unavailable. Please try again later.'],
+  invalid_runtime_event: ['执行服务返回了无效事件，请恢复运行状态。', 'The runtime returned an invalid event. Restore the run state.'],
+  output_limit: ['运行输出超过限制，请缩小任务范围。', 'The run output exceeds the limit. Reduce the task scope.'],
+  runtime_disconnected: ['执行服务连接中断，请恢复运行状态。', 'The runtime connection was interrupted. Restore the run state.'],
+  server_restarted: ['服务重启中断了运行，请核对历史后重试。', 'A service restart interrupted the run. Check its history before retrying.'],
+  'API restarted before completion': ['服务重启中断了运行，请核对历史后重试。', 'A service restart interrupted the run. Check its history before retrying.'],
+  runtime_failed: ['模型执行失败，请检查运行配置后重试。', 'Model execution failed. Check the runtime configuration and try again.'],
+  run_timeout: ['运行超时，请缩小任务范围后重试。', 'The run timed out. Reduce the task scope and try again.'],
+  runtime_stream_ended: ['执行流提前结束，请恢复运行状态后核对输出。', 'The execution stream ended early. Restore the run state and check its output.'],
+  event_persistence_failed: ['运行事件保存失败，请恢复运行状态后核对。', 'Run events could not be saved. Restore the run state and check it.'],
+  inconsistent_runtime_output: ['执行输出校验失败，请恢复运行状态后核对。', 'The runtime output failed validation. Restore the run state and check it.'],
+};
+
+/** Keep a stable code alongside localized text; unknown provider details remain intact. */
+export function canvasErrorMessage(error: unknown, code?: string): string {
+  const locale = canvasLocale();
+  const key = code || (error instanceof SaaSApiError ? error.code : typeof error === 'string' ? error : '');
+  if (runErrors[key]) return runErrors[key][locale === 'zh' ? 0 : 1];
+  return saasErrorMessage(key ? new SaaSApiError(error instanceof SaaSApiError ? error.status : 500, key, error instanceof Error ? error.message : typeof error === 'string' ? error : '') : error, locale);
+}

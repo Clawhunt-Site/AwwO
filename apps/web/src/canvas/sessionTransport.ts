@@ -27,6 +27,8 @@ import { mergePersistedManualConversations } from './runRecoveryDocument';
 import * as sessions from './sessions';
 import { sessionStoreKey } from './nodeThreads';
 import { projectConversationTurns } from './conversationPresentation';
+import { canvasStorage } from './canvasStorage';
+import { currentSaaSCanvas } from '../saas/canvasBridge';
 
 export const COPY = {
   thinking: '已投递，等待 agent 启动…',
@@ -124,6 +126,7 @@ export interface RestoreHistoryArgs {
 export async function restoreHistory({ gatewayBase, node, signal }: RestoreHistoryArgs): Promise<void> {
   const binding = node.binding;
   const storeKey = sessionStoreKey(node);
+  const storage = canvasStorage();
   // An unbound node cannot have a conversation, and a node that has never sent a turn has no
   // thread of its own yet. Both are honestly 'loaded' (we know there is nothing), NOT 'unreadable'.
   if (!binding || !node.issueId) {
@@ -141,7 +144,7 @@ export async function restoreHistory({ gatewayBase, node, signal }: RestoreHisto
     sessions.setHistory(storeKey, state);
   };
 
-  const index = await fetchConversationIndex(gatewayBase, binding.companyId, signal);
+  const index = await fetchConversationIndex(gatewayBase, binding.companyId, signal, currentSaaSCanvas() ? node.issueId : undefined);
   if (signal?.aborted) { finish('unloaded'); return; }
   if (!stillCurrent()) return;
   if (index === null) {
@@ -162,12 +165,12 @@ export async function restoreHistory({ gatewayBase, node, signal }: RestoreHisto
     finish('loaded');
     return;
   }
-  const merged = mergePersistedManualConversations(node, stored);
+  const merged = mergePersistedManualConversations(node, stored, storage);
   if (!merged) {
     finish('unreadable');
     return;
   }
-  if (merged.length) sessions.replaceTurns(storeKey, projectConversationTurns(node, merged));
+  if (merged.length) sessions.replaceTurns(storeKey, projectConversationTurns(node, merged, storage));
   finish('loaded');
 }
 
@@ -197,7 +200,7 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
   }
 
   markLocalSend(storeKey);
-  sessions.appendTurn(storeKey, { role: 'user', text: message });
+  const userTurnId = sessions.appendTurn(storeKey, { role: 'user', text: message });
   const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '' });
   sessions.setStreaming(storeKey, true);
   sessions.setStatus(storeKey, 'queued');
@@ -223,6 +226,10 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
     switch (f.event) {
       case 'accepted':
         reportIssue(f.issueId);
+        if (f.runId) {
+          sessions.attachTurnRun(storeKey, userTurnId, f.runId);
+          sessions.attachTurnRun(storeKey, agentTurnId, f.runId);
+        }
         if (!f.runVisible) sessions.patchTurn(storeKey, agentTurnId, COPY.thinking, 'info');
         break;
       case 'delta':
@@ -264,6 +271,7 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
   try {
     await streamAgentConversation(gatewayBase, binding.companyId, binding.agentId, message, onFrame, {
       issueId,
+      nodeId: node.id,
       signal,
     });
   } finally {

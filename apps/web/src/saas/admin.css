@@ -1,0 +1,8 @@
+.saas-admin-tools { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:18px 0; font-size:13px; }
+.saas-admin-tools p { flex:1; min-width:220px; line-height:1.6; opacity:.8; }
+.saas-admin-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.saas-dashboard>header>a:not(.saas-logo) { color:var(--saas-accent, #54715b); }
+.saas-table-wrap td { overflow-wrap:anywhere; max-width:420px; }
+.saas-runtime-values { display:grid; grid-template-columns:auto 1fr; gap:12px 20px; font-size:14px; }
+.saas-runtime-values dt { opacity:.7; }
+.saas-runtime-values dd { margin:0; overflow-wrap:anywhere; }

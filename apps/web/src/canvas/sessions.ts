@@ -46,6 +46,8 @@ export interface Turn {
   recoveryOperationId?: string;
   recoveryRunId?: string;
   createdAt?: number;
+  /** Durable backend run identity for per-member collaboration records. */
+  runId?: string;
 }
 
 /**
@@ -174,6 +176,18 @@ export function patchPresentation(nodeId: string, turnId: number, presentation: 
   update(nodeId, session => {
     if (!session.turns.some(turn => turn.id === turnId)) return null;
     return { ...session, turns: session.turns.map(turn => turn.id === turnId ? { ...turn, presentation } : turn) };
+  });
+}
+
+/** Attach only to the existing reply: late accepted frames must not resurrect old turns. */
+export function attachTurnRun(nodeId: string, turnId: number, runId: string): void {
+  if (!runId) return;
+  update(nodeId, session => {
+    const index = session.turns.findIndex(turn => turn.id === turnId);
+    if (index < 0 || session.turns[index].runId === runId) return null;
+    const turns = session.turns.slice();
+    turns[index] = { ...turns[index], runId };
+    return { ...session, turns };
   });
 }
 

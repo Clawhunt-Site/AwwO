@@ -1,0 +1,19 @@
+.saas-team-run-details { min-width: 0; margin-block: 10px; border: 1px solid var(--saas-border, var(--line)); border-radius: 9px; background: var(--saas-card, var(--panel)); color: var(--saas-text, var(--text)); text-align: left; font-size: 12px; overflow-wrap: anywhere; }
+.saas-team-run-details .saas-team-run-toggle { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; min-height: 36px; padding: 8px 10px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.saas-team-run-toggle > span:last-child { margin-left: auto; }
+.saas-team-run-content { padding: 0 12px 12px; }
+.saas-team-run-content p { margin: 8px 0; line-height: 1.6; white-space: normal; }
+.saas-team-run-details .saas-team-turn { padding: 12px 0; border-top: 1px solid var(--saas-border, var(--line)); }
+.saas-team-run-details .saas-team-turn > header { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.saas-team-run-details .saas-team-turn-meta { color: var(--saas-muted, var(--muted)); font-size: 11px; }
+.saas-team-run-details pre { max-height: 360px; overflow: auto; margin: 7px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; }
+.saas-team-run-details .saas-team-output { display: block; margin-block: 12px; }
+.saas-team-run-details .saas-team-input-audit { border-top: 1px dashed var(--saas-border, var(--line)); padding-top: 8px; }
+.saas-team-input-audit summary { cursor: pointer; line-height: 1.6; }
+.saas-team-input-audit dl { margin: 10px 0 0; }
+.saas-team-input-audit dt { font-weight: 600; margin-top: 14px; }
+.saas-team-input-audit dd { margin: 6px 0 0; }
+.saas-team-input-audit :is(ol, ul) { padding-left: 22px; }
+.saas-team-error { color: var(--saas-danger, var(--err)); }
+.saas-team-error button { padding: 4px 7px; border: 1px solid currentColor; border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.saas-team-error button:disabled { opacity: .5; cursor: default; }

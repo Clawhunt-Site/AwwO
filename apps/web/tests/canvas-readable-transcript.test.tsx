@@ -207,3 +207,20 @@ describe('readable node transcript', () => {
     expect(screen.queryByText('查看原始回复')).toBeNull();
   });
 });
+
+// Both execution identity and readable content survive the SaaS/native UI integration.
+it('keeps one team process slot beside a formatted reply and the exact raw input and output', () => {
+  const input = 'Full execution request with upstream input';
+  const output = JSON.stringify({ result: '## Delivered report' });
+  const turns: Turn[] = [
+    { id: 1, role: 'user', text: input, runId: 'same-run', presentation: { inputKind: 'manual', displayText: 'Please write the report' } },
+    finalTurn(output, { id: 2, runId: 'same-run' }),
+  ];
+  const { container } = render(<TileTranscript turns={turns} history="loaded" streaming={false} limit={Infinity}
+    renderTurnDetails={(turn, latest) => <aside data-testid="team-process">{turn.runId}:{latest ? 'latest' : 'earlier'}</aside>} />);
+  expect(screen.getByRole('heading', { name: 'Delivered report' })).toBeInTheDocument();
+  expect(screen.getByText('Please write the report')).toBeInTheDocument();
+  expect(screen.getAllByTestId('team-process')).toHaveLength(1);
+  expect(screen.getByTestId('team-process')).toHaveTextContent('same-run:latest');
+  expect(Array.from(container.querySelectorAll('details pre'), node => node.textContent)).toEqual([input, output]);
+});

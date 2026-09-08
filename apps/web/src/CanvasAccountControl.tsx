@@ -3,6 +3,7 @@ import { UserRound, X } from 'lucide-react';
 import { AccountWorkspacePanel } from './account';
 import type { ClawHuntSsoIdentity } from './clawhuntSso';
 import type { UiLocale } from './i18n';
+import type { AccountApi } from './account/types';
 import './canvasAccount.css';
 
 export interface CanvasAccountControlProps {
@@ -11,10 +12,11 @@ export interface CanvasAccountControlProps {
   onLogin: () => void;
   onLogout: () => void;
   onOpenWorkspaceAuth: () => void;
+  workspace?: { displayName: string; selectedCompanyId: string | null; onCompanyChange: (id: string) => void; api: AccountApi };
 }
 
 /** Native modal semantics keep keyboard focus inside account management. */
-export function CanvasAccountControl({ locale, identity, onLogin, onLogout, onOpenWorkspaceAuth }: CanvasAccountControlProps) {
+export function CanvasAccountControl({ locale, identity, onLogin, onLogout, onOpenWorkspaceAuth, workspace }: CanvasAccountControlProps) {
   const [open, setOpen] = useState(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -39,7 +41,7 @@ export function CanvasAccountControl({ locale, identity, onLogin, onLogout, onOp
       {identity?.avatar_url
         ? <img className="canvas-auth-avatar" src={identity.avatar_url} alt="" />
         : <UserRound size={17} aria-hidden="true" />}
-      <span className="canvas-auth-name">{identity?.username || title}</span>
+      <span className="canvas-auth-name">{workspace?.displayName || identity?.username || title}</span>
     </button>
     {open && <dialog ref={dialog} className="awwo-account-dialog" aria-labelledby="awwo-account-title"
       onCancel={event => { event.preventDefault(); close(); }}
@@ -50,8 +52,9 @@ export function CanvasAccountControl({ locale, identity, onLogin, onLogout, onOp
           onClick={close}><X size={18} aria-hidden="true" /></button>
       </header>
       <div className="awwo-account-dialog-body">
-        <AccountWorkspacePanel locale={locale} clawHuntIdentity={identity}
-          selectedCompanyId={companyId} onCompanyChange={setCompanyId}
+        <AccountWorkspacePanel key={workspace?.selectedCompanyId || 'default'} locale={locale} clawHuntIdentity={workspace ? null : identity}
+          selectedCompanyId={workspace ? workspace.selectedCompanyId : companyId} onCompanyChange={workspace?.onCompanyChange || setCompanyId}
+          api={workspace?.api} workspaceOnly={Boolean(workspace)}
           onClawHuntLogin={() => { close(); onLogin(); }} onClawHuntLogout={onLogout}
           onOpenWorkspaceAuth={() => { close(); onOpenWorkspaceAuth(); }} />
       </div>

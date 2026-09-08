@@ -561,6 +561,11 @@ function toHexColor(value: string): string {
 }
 
 interface ColorSchemeDialogProps {
+  t?: (zh: string, en: string) => string;
+  busy?: boolean;
+  serializeChanges?: boolean;
+  serverError?: string;
+  onReload?: () => void;
   open: boolean;
   onClose: () => void;
   appearance: AppearancePayload;
@@ -576,7 +581,12 @@ interface ColorSchemeDialogProps {
 // Appearance row, instead of a sprawling inline panel — it matches the rest of
 // the settings surface (one row + a control) and keeps the heavy preset/token
 // grid out of the page until the user asks for it.
-function ColorSchemeDialog({
+export function ColorSchemeDialog({
+  t = (_zh, en) => en,
+  busy = false,
+  serializeChanges = false,
+  serverError,
+  onReload,
   open,
   onClose,
   appearance,
@@ -657,16 +667,19 @@ function ColorSchemeDialog({
       open={open}
       variant="default"
       titleId="settings-color-scheme-title"
-      title="Color scheme"
-      subtitle={`Presets and custom colors layer on top of the ${activeCanvas} theme.`}
-      closeLabel="Close"
+      title={t('配色', 'Color scheme')}
+      subtitle={t(`预设和自定义颜色应用于${activeCanvas === 'dark' ? '深色' : '浅色'}主题。`, `Presets and custom colors layer on top of the ${activeCanvas} theme.`)}
+      closeLabel={t('关闭', 'Close')}
       onClose={onClose}
       dismissable
     >
       <div className="color-scheme-dialog">
+        {serverError && <p role="alert" className="color-scheme-error">{serverError} {onReload && <button type="button" disabled={busy} onClick={onReload}>{t('重新加载配色', 'Reload color scheme')}</button>}</p>}
+        {busy && <p role="status">{t('正在保存配色…', 'Saving color scheme…')}</p>}
+        <fieldset disabled={busy && !serializeChanges} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <section className="color-scheme-section">
-          <h3 className="color-scheme-section-title">Preset</h3>
-          <div className="color-scheme-presets" role="radiogroup" aria-label="Color scheme presets">
+          <h3 className="color-scheme-section-title">{t('预设', 'Preset')}</h3>
+          <div className="color-scheme-presets" role="radiogroup" aria-label={t('配色预设', 'Color scheme presets')}>
             {appearance.presets.map((preset) => {
               const selected = !customActive && appearance.active_preset === preset.id;
               return (
@@ -693,10 +706,10 @@ function ColorSchemeDialog({
                 selectPreset(appearance.custom_preset_id);
                 setAdvancedOpen(true);
               }}
-              title="Use your custom palette"
+              title={t('使用自定义配色', 'Use your custom palette')}
             >
               <span className="color-scheme-swatch color-scheme-swatch-custom" aria-hidden="true" />
-              <span className="color-scheme-preset-label">Custom</span>
+              <span className="color-scheme-preset-label">{t('自定义', 'Custom')}</span>
             </button>
           </div>
         </section>
@@ -713,10 +726,10 @@ function ColorSchemeDialog({
             }}
           >
             <ChevronRight size={16} aria-hidden="true" className="color-scheme-advanced-caret" />
-            <span>Advanced — custom colors</span>
+            <span>{t('高级 — 自定义颜色', 'Advanced — custom colors')}</span>
           </summary>
           <div className="color-scheme-advanced-body">
-            <p className="color-scheme-section-hint">Editing a color switches to your custom palette.</p>
+            <p className="color-scheme-section-hint">{t('编辑颜色将切换到自定义配色。', 'Editing a color switches to your custom palette.')}</p>
             <div className="color-scheme-tokens">
               {appearance.tokens.map((token) => (
                 <label key={token.id} className="color-scheme-token">
@@ -734,10 +747,10 @@ function ColorSchemeDialog({
             </div>
             <div className="color-scheme-advanced-actions">
               <button type="button" className="text-button" onClick={() => fileInputRef.current?.click()}>
-                <ExternalLink size={15} aria-hidden="true" /> Import
+                <ExternalLink size={15} aria-hidden="true" /> {t('导入', 'Import')}
               </button>
-              <button type="button" className="text-button" onClick={() => void exportAppearance()}>
-                <Download size={15} aria-hidden="true" /> Export
+              <button type="button" disabled={busy} className="text-button" onClick={() => void exportAppearance()}>
+                <Download size={15} aria-hidden="true" /> {t('导出', 'Export')}
               </button>
             </div>
           </div>
@@ -751,7 +764,7 @@ function ColorSchemeDialog({
 
         <footer className="color-scheme-dialog-actions">
           <button type="button" className="text-button" onClick={resetAppearance}>
-            <RefreshCw size={15} aria-hidden="true" /> Reset to default
+            <RefreshCw size={15} aria-hidden="true" /> {t('恢复默认', 'Reset to default')}
           </button>
           <input
             ref={fileInputRef}
@@ -761,6 +774,7 @@ function ColorSchemeDialog({
             onChange={onImportFile}
           />
         </footer>
+        </fieldset>
       </div>
     </DialogShell>
   );

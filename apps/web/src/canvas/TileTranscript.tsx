@@ -12,7 +12,7 @@
 // visually distinct from the empty state ("还没有对话"). Collapsing the two would tell the
 // operator that nothing was ever said when the truth is that we could not find out.
 
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { HistoryState, Turn } from './sessions';
@@ -103,12 +103,23 @@ export interface TileTranscriptProps {
   status?: string | null;
   /** Auto-scroll to the newest turn. Off for the tiers that render a fixed tail. */
   autoScroll?: boolean;
+  renderTurnDetails?: (turn: Turn, latest: boolean) => ReactNode;
 }
 
-export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false }: TileTranscriptProps) {
+export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false, renderTurnDetails }: TileTranscriptProps) {
   const { t } = useCanvasI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const shown = Number.isFinite(limit) ? turns.slice(Math.max(0, turns.length - limit)) : turns;
+  // Failed restored runs may have only their accepted user message. Keep one details slot per
+  // run, preferring its agent reply when present; message text is not a durable identity.
+  const detailOwners = new Map<string, number>();
+  shown.forEach((turn, index) => {
+    if (!turn.runId || turn.role === 'system') return;
+    const owner = detailOwners.get(turn.runId);
+    if (turn.role === 'agent' || owner === undefined || shown[owner].role !== 'agent') {
+      detailOwners.set(turn.runId, index);
+    }
+  });
 
   useEffect(() => {
     if (!autoScroll) return;
@@ -137,13 +148,17 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
             </div>
           )
         ) : (
-          shown.map((turn) => (
+          shown.map((turn, index) => (
+            <Fragment key={turn.id}>
             <div
               key={turn.id}
               className={`canvas-transcript-turn canvas-transcript-turn--${turn.role}${turn.tone ? ` is-${turn.tone}` : ''}`}
             >
               <TurnContent turn={turn} streaming={streaming} />
             </div>
+            {(turn.runId ? detailOwners.get(turn.runId) === index : turn.role === 'agent')
+              && renderTurnDetails?.(turn, index === shown.length - 1)}
+            </Fragment>
           ))
         )}
       </div>

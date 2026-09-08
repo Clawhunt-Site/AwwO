@@ -140,6 +140,21 @@
 :root[data-theme='dark'] .awwo-template-icon, :root[data-theme='dark'] .awwo-empty-kicker { color: #95bda2; }
 @media (max-width: 720px) { .awwo-workspace .awwo-page-title h1 { font-size: 14px; }.awwo-breadcrumb { font-size: 10px; }.awwo-statusbar, .awwo-empty-note { font-size: 10px; } }
 .awwo-workspace .awwo-run-slot .canvas-run-note { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.7; }
+.canvas-run-note-head { display: flex; align-items: center; gap: 8px; }
+.canvas-run-note-head > span { flex: 1; }
+.canvas-run-note-action, .canvas-run-note-dismiss { border: 0; border-radius: 4px; padding: 3px 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.canvas-run-note-action { text-decoration: underline; text-underline-offset: 3px; }
+.canvas-run-note-dismiss { flex: none; font-size: 18px; line-height: 1; }
+.canvas-run-note-action:hover, .canvas-run-note-dismiss:hover { background: var(--awwo-hover, #80808020); }
+.canvas-run-note-action:disabled { opacity: .5; cursor: default; }
+.canvas-run-note-details { max-height: 240px; overflow-y: auto; white-space: normal; }
+.canvas-run-note-details p { margin: 8px 0; }
+.canvas-run-note-details ul { margin: 4px 0; padding-left: 20px; }
+.canvas-inspector-initialization { border-top: 1px solid var(--awwo-border, #80808040); padding-top: 8px; }
+.awwo-handoff-note { display: flex; align-items: flex-start; gap: 8px; }
+.awwo-handoff-note > span { flex: 1; }
+.awwo-handoff-note > button { flex: none; border: 0; border-radius: 4px; padding: 2px 5px; background: transparent; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; }
+.awwo-handoff-note > button:hover { background: #80808020; }
 :root[data-theme='dark'] .awwo-workspace .canvas-minimap { background: #2b3830; }
 /* Focus scrolls the field panel, never offsets the canvas coordinate system. */
 .awwo-workspace .canvas-root, .awwo-workspace .awwo-stage { overflow: clip; }
@@ -252,4 +267,34 @@
   .awwo-planner-sidebar { width: 100%; }
   .awwo-canvas-bar:has(.awwo-assistant-toggle) { gap: 10px; padding-inline: 14px; }
   .awwo-canvas-bar:has(.awwo-assistant-toggle) .awwo-canvas-tab { display: none; }
+}
+
+/* SaaS configuration stays inside the viewport, independent of a node's position. */
+.saas-canvas-shell .awwo-header,
+.saas-canvas-shell .awwo-canvas-bar,
+.saas-canvas-shell .awwo-statusbar { flex-shrink: 0; }
+.saas-canvas-shell .canvas-root > .canvas-inspector {
+  --panel: var(--awwo-surface);
+  --card: var(--soft);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--awwo-border);
+  background: var(--awwo-surface);
+  color: var(--awwo-ink);
+}
+.saas-canvas-shell .canvas-root > .canvas-inspector :is(.canvas-inspector-head, .canvas-inspector-foot) { flex-shrink: 0; }
+.saas-canvas-shell .canvas-root > .canvas-inspector .canvas-inspector-title { min-width: 0; overflow-wrap: anywhere; }
+.saas-canvas-shell .canvas-root > .canvas-inspector .canvas-inspector-close { flex-shrink: 0; min-width: 32px; min-height: 32px; }
+.saas-canvas-shell .canvas-root > .canvas-inspector .canvas-inspector-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.saas-canvas-shell .canvas-root > .canvas-inspector .canvas-inspector-body > * { flex-shrink: 0; }
+.saas-canvas-shell .canvas-root > .canvas-inspector .canvas-inspector-foot > button { min-height: 36px; }
+@media (max-width: 900px) {
+  .saas-canvas-shell .awwo-stage-canvas:has(.canvas-root > .canvas-inspector) { z-index: 31; }
+}
+@media (max-width: 760px) {
+  .saas-canvas-shell .awwo-workspace .awwo-canvas-bar { flex-wrap: wrap; gap: 8px; min-width: 0; }
+  .saas-canvas-shell .awwo-workspace .awwo-canvas-bar > .awwo-run-slot { flex: 1 0 100%; width: 100%; margin-left: 0; }
+  .saas-canvas-shell .awwo-workspace .awwo-run-slot .canvas-run-ctl { max-width: 100%; }
+  .saas-canvas-shell .canvas-root > .canvas-inspector { left: 12px; width: auto !important; }
 }

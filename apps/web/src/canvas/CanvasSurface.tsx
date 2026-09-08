@@ -1,3 +1,9 @@
+import { canvasStorage, canvasStorageKey } from './canvasStorage';
+import { canvasFetch } from '../saas/canvasBridge';
+import { saasErrorMessage } from '../saas/api';
+import { TeamRunDetails } from '../saas/TeamRunDetails';
+import { currentSaaSCanvas, initializeSaaSCanvas } from '../saas/canvasBridge';
+import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
 // One infinite canvas whose nodes ARE agent sessions: each tile holds a live conversation that
@@ -93,6 +99,12 @@ function hasStreamingConversation(nodes: ReadonlyArray<CanvasNode>): boolean {
 }
 
 export interface CanvasSurfaceProps {
+  /** View the cloud snapshot without editing, persistence, planning, or run recovery. */
+  readOnly?: boolean;
+  workspaceName?: string;
+  workspaceCaption?: string;
+  /** Storage destination shown in the footer; the host owns cloud sync status. */
+  storageMode?: 'local' | 'cloud';
   /** Injectable planner transport; graph edits always pass the same validation pipeline. */
   planRequest?: typeof requestCanvasPlan;
   accountControl?: ReactNode;
@@ -112,7 +124,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   useEffect(() => {
     let stale = false;
     const base = apiBase.replace(/\/+$/, '');
-    void fetch(`${base}/companies`, { credentials: 'include', headers: { accept: 'application/json' } })
+    void canvasFetch(`${base}/companies`, { credentials: 'include', headers: { accept: 'application/json' } })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (stale || !d) return;
@@ -143,9 +155,18 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  const setupRequest = useRef<AbortController | null>(null);
+  const [initializing, setInitializing] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; setupRequest.current?.abort(); }; }, []);
+  const cloudScope = currentSaaSCanvas();
+  const [storage] = useState(canvasStorage);
+  const canInitialize = storageMode === 'cloud' && Boolean(cloudScope);
   const inspectorCloseLocked = useRef(false);
   const [bindingLocked, setBindingLocked] = useState(false);
   const onInspectorLockChange = useCallback((locked: boolean) => {
@@ -154,6 +175,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   }, []);
   // ---- document -----------------------------------------------------------------------------
   const [doc, setDoc] = useState<CanvasDocument>(() => {
+    if (readOnly) return loadDocumentWithStatus({ readOnly: true }).doc;
     const migrated = migrateFromLegacy();
     if (migrated) return migrated;
     return loadDocumentWithStatus().doc;
@@ -212,7 +234,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
    */
   const patchDoc = useCallback(
     (mut: (prev: CanvasDocument) => CanvasDocument, opts?: { label?: string; silent?: boolean; serverIdentity?: boolean }) => {
-      if (!runAbort.current && loadRunJournal()) return;
+      if (readOnlyRef.current || setupRequest.current || (!runAbort.current && loadRunJournal())) return;
       const prev = docRef.current;
       const proposed = mut(prev);
       const next = opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed);
@@ -240,13 +262,13 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   // User callbacks can outlive their idle render. The journal/ref checks also cover
   // acceptance before React commits `running`, waiting nodes, and terminal settlement.
   const canEditStructure = useCallback((allowBindingSave = false) => !(
-    runAbort.current || journal.current || loadRunJournal() || recoveringRef.current
+    readOnlyRef.current || setupRequest.current || runAbort.current || journal.current || loadRunJournal() || recoveringRef.current
     || (inspectorCloseLocked.current && !allowBindingSave) || hasStreamingConversation(docRef.current.nodes)
   ), []);
 
   /** Step to a stored document without recording it as a new edit. */
   const restoreDoc = useCallback((target: CanvasDocument) => {
-    if (loadRunJournal()) return;
+    if (readOnlyRef.current || setupRequest.current || loadRunJournal()) return;
     lastCommit.current = null;
     const live = docRef.current;
     const restored = invalidateOutputs(live, { ...target, nodes: target.nodes.map(node => {
@@ -279,9 +301,9 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   }, [canEditStructure, restoreDoc, syncHistory]);
 
   useEffect(() => {
-    if (!runAbort.current && loadRunJournal()) return;
+    if (readOnlyRef.current || setupRequest.current || (!runAbort.current && loadRunJournal())) return;
     saveLocalDocument({ ...doc, edges });
-  }, [doc, edges, saveLocalDocument]);
+  }, [doc, edges, readOnly, saveLocalDocument]);
 
   // ---- viewport / selection / focus ----------------------------------------------------------
   const [view, setView] = useState<ViewportState>(() => doc.view ?? { x: 0, y: 0, scale: 1 });
@@ -292,6 +314,13 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   sizeRef.current = size;
   const rootRef = useRef<HTMLDivElement>(null);
   const [handoffNote, setHandoffNote] = useState('');
+  const refusedRevision = useRef<string | null>(null);
+  useEffect(() => {
+    if (refusedRevision.current && refusedRevision.current !== canvasPlanRevision(doc)) {
+      refusedRevision.current = null;
+      setHandoffNote('');
+    }
+  }, [doc]);
 
   const [selection, setSelection] = useState<string[]>([]);
   // Read inside the drag so moving a group never depends on the callback identity at press time.
@@ -323,8 +352,9 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     setView(fitNodeOverview(nodes, box));
   }, [nodes, viewportSize]);
 
-  // Fit once, after the first real size + nodes are known.
-  const fitted = useRef(false);
+  // A valid saved view owns the initial position. Only an unpositioned graph auto-fits once
+  // its first real size is known; explicit Fit and newly generated plans still fit on request.
+  const fitted = useRef(doc.view !== null);
   useEffect(() => {
     if (fitted.current || size.w === 0 || nodes.length === 0) return;
     fitted.current = true;
@@ -419,7 +449,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   );
 
   // ---- run state ----------------------------------------------------------------------------
-  const [initialJournal] = useState(loadRunJournal);
+  const [initialJournal] = useState(() => readOnly ? null : loadRunJournal());
   const journal = useRef<CanvasRunJournal | null>(initialJournal);
   const [recovering, setRecovering] = useState(Boolean(initialJournal));
   const recoveringRef = useRef(recovering);
@@ -433,8 +463,10 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   const [now, setNow] = useState(() => Date.now());
   const runAbort = useRef<AbortController | null>(null);
   useEffect(() => {
+    if (readOnly) return;
     const observeOtherTab = (event: StorageEvent) => {
-      if (event.key !== CANVAS_RUN_JOURNAL_KEY || runAbort.current) return;
+      if (readOnlyRef.current) return;
+      if (event.key !== canvasStorageKey(CANVAS_RUN_JOURNAL_KEY) || runAbort.current) return;
       const active = loadRunJournal();
       if (active) {
         journal.current = active; setRuns(active.nodes); setRunning(true); setRecovering(true);
@@ -442,15 +474,15 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     };
     window.addEventListener('storage', observeOtherTab);
     return () => window.removeEventListener('storage', observeOtherTab);
-  }, []);
+  }, [readOnly]);
   // A page reload detaches observation; only an explicit Stop cancels native execution.
   const updateJournal = useCallback((nodeId: string, patch: Parameters<typeof patchRunJournalNode>[2]) => {
-    if (!journal.current) return;
+    if (readOnlyRef.current || !journal.current) return;
     journal.current = patchRunJournalNode(journal.current, nodeId, patch);
     if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
   }, []);
   useEffect(() => {
-    if (!recovering) return;
+    if (readOnly || !recovering) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const refreshedHistories = new Set<string>();
@@ -508,7 +540,10 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         timer = setTimeout(() => void poll(), 2500);
         return;
       }
-      const next = await settleRecoveredJournal(gatewayApiBase(), recoveryJournalForDocument(docRef.current, reconciled), controller.signal);
+      const recoveredJournal = recoveryJournalForDocument(docRef.current, reconciled);
+      // SaaS runs are settled durably by Go; only native gateway runs own a native hold.
+      const next = cloudScope || recoveredJournal.serverGraph ? recoveredJournal
+        : await settleRecoveredJournal(gatewayApiBase(), recoveredJournal, controller.signal);
       if (controller.signal.aborted) return;
       if (journal.current !== observed || JSON.stringify(loadRunJournal()) !== JSON.stringify(observed)) {
         timer = setTimeout(() => void poll(), 2500);
@@ -523,10 +558,10 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       docRef.current = recovered; setDoc(recovered);
       // Persist the complete batch before deleting its recovery journal.
       const persisted = saveLocalDocument(recovered);
-      const unresolved = Object.values(next.nodes).some(node => node.state === 'running');
+      const unresolved = Object.values(next.nodes).some(node => node.state === 'running' || (next.serverGraph && node.state === 'waiting'));
       if (unresolved) {
         const missing = Object.values(next.nodes).some(node => node.detail === 'recovery_identity_missing');
-        setHandoffNote(missing ? surfaceNotice(t, 'run_identity_unconfirmed') : surfaceNotice(t, 'recovery_pending'));
+        setHandoffNote(missing ? surfaceNotice(t, 'run_identity_unconfirmed') : surfaceNotice(t, next.serverGraph ? 'graph_recovery_pending' : 'recovery_pending'));
         timer = setTimeout(() => void poll(), 2500);
       } else if (!persisted) {
         setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
@@ -539,7 +574,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
             if (entry.operationId) updateConversationPresentation(node, entry.operationId, {
               issueId: node.issueId, runId: entry.runId, outputText: entry.output ?? '',
               outputState: entry.state === 'done' ? 'final' : 'failed',
-            });
+            }, storage);
             if (next.manual && !await persistManualHistoryWithNativeProof(gatewayApiBase(), node, next, controller.signal)) {
               if (controller.signal.aborted) return;
               setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
@@ -552,13 +587,13 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
               signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
             if (controller.signal.aborted) return;
             if (next.manual) replaceTurns(storeKey, projectConversationTurns(node,
-              mergeRecoveredManualConversation(getSessionSnapshot(storeKey).turns, next, node.id)));
+              mergeRecoveredManualConversation(getSessionSnapshot(storeKey).turns, next, node.id), storage));
           }
         }
         clearRunJournal(next.id); journal.current = null;
         setRecovering(false); setRunning(false);
         setRunSummary(journalSummary(next));
-        setHandoffNote(surfaceNotice(t, Object.values(next.nodes).some(node => node.detail === 'recovery_input_changed') ? 'recovery_input_changed' : 'recovery_complete'));
+        setHandoffNote(surfaceNotice(t, Object.values(next.nodes).some(node => node.detail === 'recovery_input_changed') ? 'recovery_input_changed' : next.serverGraph ? 'graph_recovery_complete' : 'recovery_complete'));
       }
     }, () => {
       if (controller.signal.aborted) return;
@@ -567,7 +602,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     });
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [recovering, patchDoc, saveLocalDocument, t]);
+  }, [readOnly, recovering, patchDoc, saveLocalDocument, t]);
   useEffect(() => {
     if (!running) return undefined;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -580,7 +615,29 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     * `scope` names the nodes allowed to EXECUTE; anything upstream of them contributes its stored
     * output instead of re-running. Omitted = the whole canvas, which is what 运行图 still does.
     */
+  const prepareNodes = useCallback(async (scope?: readonly string[]): Promise<CanvasDocument> => {
+    if (!currentSaaSCanvas()) return docRef.current;
+    const sessionScope = scope?.filter(id => docRef.current.nodes.some(node => node.id === id && node.kind === 'session'));
+    if (sessionScope?.length === 0) return docRef.current;
+    if (setupRequest.current) throw new Error(locale === 'zh' ? '节点正在准备，请稍候。' : 'Nodes are being prepared. Please wait.');
+    const controller = new AbortController();
+    setupRequest.current = controller; setInitializing(true); setHandoffNote('');
+    try {
+      // Save the synchronous ref now: React's document effect has not necessarily committed yet.
+      if (!saveLocalDocument(docRef.current)) throw new Error(surfaceNotice(t, 'storage_unavailable'));
+      const document = await initializeSaaSCanvas(sessionScope, controller.signal);
+      if (!mounted.current || controller.signal.aborted || readOnlyRef.current) throw new Error(locale === 'zh' ? '节点准备已取消。' : 'Node setup was cancelled.');
+      docRef.current = document; setDoc(document);
+      lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(document));
+      return document;
+    } finally {
+      if (setupRequest.current === controller) setupRequest.current = null;
+      if (mounted.current) setInitializing(false);
+    }
+  }, [locale, t, saveLocalDocument]);
+
   const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string) => {
+    if (readOnlyRef.current) return Promise.resolve();
     // Ownership can arrive after another edit. A manual send belongs to the exact Session
     // and draft that initiated it, never whichever Session happens to be selected later.
     const submittedNode = manualMessage && scope?.length === 1
@@ -592,7 +649,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     return withCanvasRunOwnership(async () => {
     // Synchronous re-entrancy guard on the REF: React state commits asynchronously, so a double
     // click could otherwise start two overlapping runs whose callbacks interleave into one map.
-    if (runAbort.current || journal.current) return;
+    if (!mounted.current || currentSaaSCanvas() !== cloudScope || readOnlyRef.current || setupRequest.current || runAbort.current || journal.current) return;
     const durable = loadRunJournal();
     if (durable) {
       journal.current = durable;
@@ -608,7 +665,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       },
     )) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
     // A capacity read may yield while another tab acquires or restores a durable run.
-    if (runAbort.current || journal.current || loadRunJournal()) return;
+    if (!mounted.current || currentSaaSCanvas() !== cloudScope || readOnlyRef.current || runAbort.current || journal.current || loadRunJournal()) return;
     const persistedCanvas = loadDocumentWithStatus();
     const persistedRevision = canvasPlanRevision(persistedCanvas.doc);
     if (persistedCanvas.status === 'ok'
@@ -622,7 +679,6 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     // Freeze the current ref after acquiring ownership: a drag/edit may be newer than the
     // render that supplied this callback, even when its persistence base is still current.
     const nodes = docRef.current.nodes;
-    const edges = reconcileEdges(nodes, docRef.current.edges);
     const manualNode = submittedNode && nodes.find(node => node.id === submittedNode.id);
     if (manualMessage && (!submittedNode || manualNode?.kind !== 'session'
         || activeThreadId(manualNode) !== submittedThread?.id
@@ -633,14 +689,26 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     }
     if (inspectorCloseLocked.current) { setHandoffNote(surfaceNotice(t, 'bind_before_run')); return; }
     if (hasStreamingConversation(docRef.current.nodes)) { setHandoffNote(surfaceNotice(t, 'wait_conversation')); return; }
-    const problem = preflightIssueMessage(t, preflightGraphIssue(nodes, edges, scope), locale);
-    if (problem) { setHandoffNote(problem); return; }
+    if (!currentSaaSCanvas() && nodes.some(node => node.kind === 'session' && node.team && (!scope || scope.includes(node.id)))) {
+      setHandoffNote(locale === 'zh' ? '此工作区未提供节点团队执行能力，请使用 SaaS 工作区运行。' : 'This workspace cannot execute node teams. Run this canvas in a SaaS workspace.'); return;
+    }
+    let runDocument = docRef.current;
+    try { if (currentSaaSCanvas()) runDocument = await prepareNodes(scope); }
+    catch (error) { if (mounted.current) setHandoffNote(saasErrorMessage(error, locale)); return; }
+    if (!mounted.current || readOnlyRef.current) return;
+    const runNodes = runDocument.nodes;
+    const runEdges = reconcileEdges(runNodes, runDocument.edges);
+    const problem = preflightIssueMessage(t, preflightGraphIssue(runNodes, runEdges, scope, { conversation: Boolean(currentSaaSCanvas() && manualMessage) }), locale);
+    if (problem) { refusedRevision.current = canvasPlanRevision(runDocument); setHandoffNote(problem); return; }
     setHandoffNote('');
     const ac = new AbortController();
     // A failed or stopped retry must never leave its previous success available to downstream nodes.
-    const executing = new Set(scope ?? nodes.map(n => n.id));
-    const pending: CanvasRunJournal = { version: 1, id: crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(docRef.current, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(nodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
-    const prepared = prepareRunDocument(docRef.current, [...executing], Boolean(manualMessage));
+    const executing = new Set(scope ?? runNodes.map(n => n.id));
+    const pending: CanvasRunJournal = { version: 1, id: crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(runDocument, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(runNodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
+    const cloud = currentSaaSCanvas();
+    if (cloud && !manualMessage) pending.serverGraph = { tenantId: cloud.tenant.id, canvasId: cloud.canvasId };
+    const prepared = prepareRunDocument(runDocument, [...executing], Boolean(manualMessage));
+    const acceptedManualNode = manualMessage ? runNodes.find(node => executing.has(node.id)) : undefined;
     if (!saveLocalDocument(prepared)) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
     if (!saveRunJournal(pending)) {
       // No dispatch happened: preserve the previous published results on a quota failure.
@@ -650,11 +718,12 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     // Draft consumption is part of durable acceptance, not a generic composer edit (which
     // is correctly blocked once running). Save only after the journal succeeds, so neither
     // storage failure can discard a request that has not been accepted or dispatched.
-    const consumeDraft = manualNode?.kind === 'session' && submittedThread
-      && getNodeThreads(manualNode).find(thread => thread.id === submittedThread.id)?.draft === submittedThread.draft;
+    const acceptedThreadId = acceptedManualNode?.kind === 'session' ? activeThreadId(acceptedManualNode) : undefined;
+    const consumeDraft = acceptedManualNode?.kind === 'session' && submittedThread
+      && getNodeThreads(acceptedManualNode).find(thread => thread.id === acceptedThreadId)?.draft === submittedThread.draft;
     const acceptedDocument = consumeDraft ? { ...prepared, nodes: prepared.nodes.map(node =>
-      node.id === manualNode.id && node.kind === 'session'
-        ? updateNodeDraft(node, '', submittedThread.id) : node) } : prepared;
+      node.id === acceptedManualNode.id && node.kind === 'session'
+        ? updateNodeDraft(node, '', acceptedThreadId) : node) } : prepared;
     if (acceptedDocument !== prepared && !saveLocalDocument(acceptedDocument)) {
       clearRunJournal(pending.id);
       setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return;
@@ -670,6 +739,33 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     setRunStartedAt(Date.now());
     setNow(Date.now());
     setTimelineOpen(true);
+    if (pending.serverGraph) {
+      const submissionStorage = canvasStorage();
+      let admitted = false;
+      try {
+        const accepted = await submitCloudGraph(pending.id, pending.scope);
+        admitted = true;
+        const stored = loadRunJournal(submissionStorage);
+        const recovered = mergeGraphSnapshot(stored?.id === pending.id ? stored : pending, accepted);
+        saveRunJournal(recovered, submissionStorage);
+        if (currentSaaSCanvas() !== cloud) return;
+        journal.current = recovered;
+        if (ac.signal.aborted) await cancelCloudGraph(journal.current);
+      } catch (error) {
+        if (!admitted && graphAdmissionRejected(error)) {
+          // This request was rejected before admission; retain the user's inputs and
+          // show the rejection. A lost response keeps its operation journal instead.
+          clearRunJournal(submissionStorage, pending.id);
+          if (currentSaaSCanvas() !== cloud) return;
+          journal.current = null; setRunning(false);
+          setHandoffNote(error instanceof Error ? error.message : String(error)); runAbort.current = null; return;
+        }
+        if (currentSaaSCanvas() !== cloud) return;
+        setHandoffNote(error instanceof Error ? error.message : surfaceNotice(t, 'run_identity_unconfirmed'));
+      }
+      runAbort.current = null; setRecovering(true);
+      return;
+    }
     // Use the SHARED executor factory rather than re-deriving one here: it already owns the
     // per-agent serialization contract (two tiles bound to the same agent must not execute
     // concurrently — the gateway wakes one worker per agent, so parallel turns would
@@ -686,7 +782,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         inputKind: manualMessage ? 'manual' : 'workflow',
         ...(manualMessage && manualDisplayText !== undefined ? { displayText: manualDisplayText } : {}),
         outputState: 'streaming',
-        outputContract: node.contract ? { version: 1, inputs: [],
+        outputContract: !(cloud && manualMessage) && node.contract ? { version: 1, inputs: [],
           outputs: node.contract.outputs.map(field => ({ ...field, value: '' })) } : undefined,
       }),
       onIssueId: (nodeId: string, issueId: string, threadId?: string) => {
@@ -705,12 +801,12 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     const exec = async (node: SessionNode, message: string) => {
       const result = await nativeExec(node, message);
       const entry = journal.current?.nodes[node.id];
-      const settled = await settleExecutionResult(gatewayApiBase(), entry, result);
+      const settled = cloud ? result : await settleExecutionResult(gatewayApiBase(), entry, result);
       const operationId = pending.nodes[node.id]?.operationId;
       const outputState = settled.ok && !settled.unconfirmed ? 'final' : 'failed';
       if (operationId) {
         updateConversationPresentation(node, operationId, { issueId: entry?.issueId, runId: entry?.runId,
-          outputText: settled.output, outputState });
+          outputText: settled.output, outputState }, storage);
         const key = sessionStoreKey(node);
         for (const turn of getSessionSnapshot(key).turns) {
           if (turn.role === 'agent' && turn.recoveryOperationId === operationId && turn.text === settled.output) {
@@ -730,7 +826,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         setRuns(prev => ({ ...prev, [nodeId]: { ...status, startedAt: prev[nodeId]?.startedAt ?? stamp, ...(status.state !== 'waiting' && status.state !== 'running' ? { endedAt: stamp } : {}) } }));
     };
     const executeManual = async () => {
-      const node = nodes.find(n => executing.has(n.id));
+      const node = runNodes.find(n => executing.has(n.id));
       if (!node || node.kind !== 'session') throw new Error('Conversation node is unavailable');
       onStatus(node.id, { state: 'running' });
       const result = await exec(node, manualMessage!);
@@ -738,8 +834,8 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       return journalSummary(journal.current!);
     };
     const summary = manualMessage ? await executeManual() : await runGraph({
-      nodes,
-      edges,
+      nodes: runNodes,
+      edges: runEdges,
       scope,
       // An out-of-scope upstream contributes what it produced earlier rather than running again.
       storedOutput: (nodeId) => {
@@ -781,9 +877,17 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       setRunSummary(finalSummary);
     }
     }, () => setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere')));
-  }, [patchDoc, saveLocalDocument, updateJournal, locale, t]);
+  }, [patchDoc, saveLocalDocument, updateJournal, prepareNodes, locale, t]);
 
   const stopRun = useCallback(() => {
+    if (readOnlyRef.current) return;
+    if (journal.current?.serverGraph) {
+      journal.current = { ...journal.current, serverGraph: { ...journal.current.serverGraph, cancelRequested: true } };
+      if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
+      if (runAbort.current) runAbort.current.abort();
+      void cancelCloudGraph(journal.current).catch(error => setHandoffNote(stopUnconfirmedMessage(t, error instanceof Error ? error.message : '')));
+      return;
+    }
     if (runAbort.current && !runAbort.current.signal.aborted) { runAbort.current.abort(); return; }
     // Also works after a refresh or a previous Stop failure; never invent an ID.
     const requestedJournal = journal.current;
@@ -868,7 +972,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   );
 
   const persistDraft = useCallback((nodeId: string, threadId: string, draft: string) => {
-    if (runAbort.current || inspectorCloseLocked.current) return;
+    if (readOnlyRef.current || runAbort.current || inspectorCloseLocked.current) return;
     patchDoc(prev => {
       const target = prev.nodes.find(node => node.id === nodeId);
       if (!target || target.kind !== 'session') return prev;
@@ -1001,13 +1105,19 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(n => n.id === next.id
         ? { ...next, x: n.x, y: n.y, w: n.w, h: n.h }
         : n) }), { label: `config:${next.id}` });
+      if (current?.kind === 'session' && next.kind === 'session' && JSON.stringify(current.team) !== JSON.stringify(next.team)) {
+        const affected = new Set(downstreamClosure([next.id]));
+        setRuns(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !affected.has(id))));
+        setRunSummary(null);
+      }
       setHandoffNote('');
     },
-    [canEditStructure, patchDoc],
+    [canEditStructure, patchDoc, downstreamClosure],
   );
 
   // The inspector owns configuration, while cards own contracts and the transport owns thread IDs.
   const saveInspector = useCallback((draft: CanvasNode) => {
+    if (readOnlyRef.current) return;
     const live = docRef.current.nodes.find(n => n.id === draft.id);
     if (!live || !canEditStructure(true)) return;
     if (live.kind === 'session' && draft.kind === 'session') {
@@ -1018,9 +1128,9 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       // silently editing only the canvas would make later runs execute different settings than
       // the UI promises.
       const rebound = bindingChanged ? rebindNodeThread(live, draft.binding)
-        : configChanged ? rebindNodeThread(live, null) : live;
+        : configChanged ? rebindNodeThread(live, null) : { ...live, threads: getNodeThreads(live) };
       saveNode({ ...rebound, title: draft.title, agentKind: draft.agentKind, runtime: draft.runtime,
-        model: draft.model, effort: draft.effort, persona: draft.persona,
+        model: draft.model, effort: draft.effort, persona: draft.persona, team: draft.team,
         binding: configChanged ? null : draft.binding, bindAttempt: configChanged ? null : draft.bindAttempt,
         issueId: bindingChanged || configChanged ? null : live.issueId }, true);
       if (configChanged) setHandoffNote(surfaceNotice(t, 'config_forked'));
@@ -1028,6 +1138,17 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       saveNode({ ...live, title: draft.title, fields: draft.fields });
     }
   }, [canEditStructure, saveNode]);
+  const initializeInspector = useCallback(async (draft: SessionNode) => {
+    let completed = false;
+    await withCanvasRunOwnership(async () => {
+      if (readOnlyRef.current || setupRequest.current || runAbort.current || journal.current || loadRunJournal()) throw new Error(locale === 'zh' ? '请等待当前任务结束后再保存配置。' : 'Wait for the current task before saving configuration.');
+      saveInspector(draft);
+      await prepareNodes([draft.id]);
+      completed = true;
+    }, () => { throw new Error(surfaceNotice(t, 'execution_owned_elsewhere')); });
+    if (!completed) throw new Error(locale === 'zh' ? '配置尚未保存，请重试。' : 'Configuration was not saved. Please try again.');
+  }, [saveInspector, prepareNodes, locale, t]);
+
   const onConnect = useCallback(
     (from: PortRef, to: PortRef, dataType: DataType) => {
       if (!canEditStructure()) return;
@@ -1071,7 +1192,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   // SNAPSHOT of the graph, so a wire cut mid-run would not change what is executing — the user
   // would be shown a graph that no longer matches the timeline describing the run. Omitting
   // onConnect leaves the ports visible but inert (they are the graph's structure, not a control).
-  const wiring = useWiring({ nodes: renderNodes, edges, onConnect: running ? undefined : onConnect, rootRef, view });
+  const wiring = useWiring({ nodes: renderNodes, edges, onConnect: readOnly || running || initializing ? undefined : onConnect, rootRef, view });
   const marquee = useMarquee({
     nodes: renderNodes,
     rootRef,
@@ -1086,13 +1207,13 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     onPalette: () => setBarMode('commands'),
     onSearch: () => setBarMode('search'),
     onFitAll: fitAll,
-    onDeleteSelection: running ? undefined : () => deleteNodes(selection),
+    onDeleteSelection: readOnly || running || initializing ? undefined : () => deleteNodes(selection),
     // Undo/redo are locked during a run for the same reason every other structural edit is: the
     // run executes a SNAPSHOT, so rewinding the graph under it would show the operator a document
     // that does not match the timeline describing what is executing.
-    onUndo: running || !history.undo ? undefined : undo,
-    onRedo: running || !history.redo ? undefined : redo,
-    onSaveWaypoint: saveWaypoint,
+    onUndo: readOnly || running || initializing || !history.undo ? undefined : undo,
+    onRedo: readOnly || running || initializing || !history.redo ? undefined : redo,
+    onSaveWaypoint: readOnly ? undefined : saveWaypoint,
     onRecallWaypoint: recallWaypoint,
     onEscape: () => {
       // Unwind outermost-first so one Escape never closes two things at once.
@@ -1119,7 +1240,10 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
 
   const canEdit = !running && !recovering && canEditStructure();
   const commandActions: CanvasCommandActions = useMemo(
-    () => ({
+    () => readOnly ? ({
+      fitAll, toggleTimeline: () => setTimelineOpen(o => !o),
+      toggleMinimap: () => setMinimapOpen(o => !o), recallWaypoint: () => recallWaypoint(1),
+    }) : ({
       addSession: (kind) => addAtViewCenter(kind),
       canEdit,
       run: () => void startRun(),
@@ -1141,7 +1265,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       canUndo: canEdit && history.undo > 0,
       canRedo: canEdit && history.redo > 0,
     }),
-    [addAtViewCenter, canEdit, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo],
+    [readOnly, addAtViewCenter, canEdit, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo],
   );
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
@@ -1170,6 +1294,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
 
   // Persist the viewport so the canvas reopens where it was left (debounced by the doc save).
   useEffect(() => {
+    if (readOnly) return;
     // The viewport is not an edit: panning is navigation, and letting it clear the redo stack
     // would silently destroy a redo the user was about to reach for.
     const t = setTimeout(
@@ -1177,10 +1302,10 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       400,
     );
     return () => clearTimeout(t);
-  }, [view, patchDoc]);
+  }, [view, patchDoc, readOnly]);
 
   // The planning conversation is local UI history, separate from node execution Sessions.
-  const [planning, setPlanning] = useState(loadPlanningConversation);
+  const [planning, setPlanning] = useState(() => readOnly ? { draft: '', messages: [] } as ReturnType<typeof loadPlanningConversation> : loadPlanningConversation());
   const [assistantOpen, setAssistantOpen] = useState(true);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState('');
@@ -1196,18 +1321,20 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     const box = viewportSize();
     if (box) setView(fitNodeOverview(docRef.current.nodes, box));
   }, [planningFitId, viewportSize]);
-  useEffect(() => { savePlanningConversation(planning); }, [planning]);
+  useEffect(() => { if (!readOnly) savePlanningConversation(planning); }, [planning, readOnly]);
   useEffect(() => {
     const controller = new AbortController();
+    if (readOnly) return;
     void readPlannerStatus(controller.signal, locale).then(status => { if (!controller.signal.aborted) setPlannerStatus(status); });
     return () => controller.abort();
-  }, [locale]);
+  }, [locale, readOnly]);
   useEffect(() => () => { planningRequest.current?.controller.abort(); planningRequest.current = null; }, []);
   const appendPlanningMessage = (id: string, content: string, status?: 'applied' | 'error' | 'stale') => {
     setPlanning(previous => ({ ...previous, messages: [...previous.messages,
       { id, role: 'assistant' as const, content, ...(status ? { status } : {}) }].slice(-60) }));
   };
   const sendPlanningMessage = async () => {
+    if (readOnlyRef.current) return;
     const prompt = planning.draft.trim();
     if (!prompt || planningRequest.current) return;
     if (journal.current || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
@@ -1224,7 +1351,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     setPlanning(previous => ({ draft: '', messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt }].slice(-60) }));
     try {
       const plan = await planRequest(prompt, snapshot, planning.messages, controller.signal, locale);
-      if (controller.signal.aborted || planningRequest.current?.id !== id) return;
+      if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (canvasPlanRevision(docRef.current) !== revision || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale');
         setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
@@ -1244,7 +1371,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
       appendPlanningMessage(`${id}-assistant`, applied.summary, plan.operations.length ? 'applied' : undefined);
       setPlannerStatus(previous => ({ available: true, provider: previous?.provider || 'AI' }));
     } catch (error) {
-      if (controller.signal.aborted || planningRequest.current?.id !== id) return;
+      if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       const message = planFailureMessage(t, error);
       setPlanningError(message);
       appendPlanningMessage(`${id}-assistant`, message, 'error');
@@ -1254,6 +1381,7 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     }
   };
   const cancelPlanning = () => {
+    if (readOnlyRef.current) return;
     const request = planningRequest.current;
     if (!request) return;
     planningRequest.current = null;
@@ -1263,12 +1391,12 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
     appendPlanningMessage(`${request.id}-cancelled`, surfaceNotice(t, 'plan_cancelled'));
     setPlanning(previous => ({ ...previous, draft: previous.draft || request.prompt }));
   };
-  const canUndoPlan = !planningBusy && !running && !bindingLocked && history.undo > 0
+  const canUndoPlan = !readOnly && !planningBusy && !running && !bindingLocked && history.undo > 0
     && lastPlanRevision !== null && canvasPlanRevision(doc) === lastPlanRevision
     && Boolean(lastCommit.current?.label.startsWith('ai:'));
   const assistantProps = {
     messages: planning.messages, draft: planning.draft, busy: planningBusy, error: planningError,
-    onDraftChange: (draft: string) => setPlanning(previous => ({ ...previous, draft })),
+    onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
     onSend: () => { void sendPlanningMessage(); }, onCancel: cancelPlanning,
     onUndo: () => {
       if (!canUndoPlan) return;
@@ -1282,10 +1410,10 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   };
 
   const renderInspector = (node: CanvasNode, inline = false) => (
-    <InspectorPanel key={node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
-      readJson={runtimeReadJson} onSave={saveInspector} readOnly={running}
+    <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
+      readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize ? initializeInspector : undefined} readOnly={readOnly || running} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
-      onCreateCompany={onCreateCompany ? () => {
+      onCreateCompany={!readOnly && onCreateCompany ? () => {
         if (inspectorCloseLocked.current) return;
         setInspectorId(null);
         onCreateCompany();
@@ -1298,20 +1426,20 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
   );
 
   return (
-    <AgentWorkspace nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
+    <AgentWorkspace readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
       onFocusNode={focusNode} onAddAgent={addAgent} onCreateTemplate={createTemplate}
       onSearch={() => setBarMode('search')}
-      assistant={nodes.length && assistantOpen ? <CanvasAssistant mode="panel" {...assistantProps} onClose={() => setAssistantOpen(false)} /> : undefined}
-      welcome={<CanvasAssistant mode="welcome" {...assistantProps} />}
+      assistant={!readOnly && nodes.length && assistantOpen ? <CanvasAssistant mode="panel" {...assistantProps} onClose={() => setAssistantOpen(false)} /> : undefined}
+      welcome={readOnly ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} />}
       assistantOpen={assistantOpen}
-      onToggleAssistant={() => setAssistantOpen(value => !value)}
+      onToggleAssistant={readOnly ? undefined : () => setAssistantOpen(value => !value)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
-      accountControl={<div className="awwo-account-controls" inert={bindingLocked}>{accountControl}</div>}
-      toolbar={<RunControls nodes={nodes} edges={edges} running={running} runs={runs} summary={runSummary}
+      accountControl={<div className="awwo-account-controls" inert={bindingLocked || initializing}>{accountControl}</div>}
+      toolbar={<RunControls initializeOnRun={canInitialize} onConfigureNode={(id) => { focusNode(id); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} running={running} runs={runs} summary={runSummary}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} />}>
-    <div className="canvas-root" ref={rootRef}>
+    <div className="canvas-root" data-read-only={readOnly || undefined} ref={rootRef}>
       <CanvasViewport
         view={view}
         onViewChange={setView}
@@ -1324,9 +1452,9 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
           setSelection([]);
           return undefined;
         }}
-        onBackgroundDoubleClick={running ? undefined : (world) => addNode('llm', world)}
+        onBackgroundDoubleClick={readOnly || running || initializing ? undefined : (world) => addNode('llm', world)}
         onBackgroundContextMenu={
-          running
+          readOnly || running
             ? undefined
             : (world, client) => {
                 const rect = rootRef.current?.getBoundingClientRect();
@@ -1337,11 +1465,15 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
               }
         }
       >
-        <WirePlane nodes={renderNodes} edges={edges} preview={wiring.wireDrag} onDisconnect={running ? undefined : disconnect} />
+        <WirePlane nodes={renderNodes} edges={edges} preview={wiring.wireDrag} onDisconnect={readOnly || running || initializing ? undefined : disconnect} />
         {nodes.map((node) => (
           <SessionTile
             key={node.id}
             node={node}
+            readOnly={readOnly}
+            initializeOnSend={canInitialize}
+            freeConversation={Boolean(cloudScope)}
+            renderTurnDetails={cloudScope ? (turn, latest) => turn.runId ? <TeamRunDetails key={turn.runId} tenantId={cloudScope.tenant.id} runId={turn.runId} defaultOpen={latest} runStatus={latest ? runs[node.id]?.state : undefined} /> : null : undefined}
             geometry={renderNodeById.get(node.id)}
             compact={node.kind === 'session' && focusedId !== node.id}
             scale={view.scale}
@@ -1362,39 +1494,40 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
                 { silent: true },
               )
             }
-            onPreview={persistPreview}
-            onDraftChange={persistDraft}
-            onToggleDeliverables={toggleDeliverables}
-            interactionLocked={running || bindingLocked}
-            onMove={running ? undefined : moveNode}
-            onResizeNode={running || (node.kind === 'session' && focusedId !== node.id) ? undefined : resizeNode}
+            onPreview={readOnly ? undefined : persistPreview}
+            onDraftChange={readOnly ? undefined : persistDraft}
+            onToggleDeliverables={readOnly ? undefined : toggleDeliverables}
+            interactionLocked={running || initializing || bindingLocked}
+            onMove={readOnly || running || initializing ? undefined : moveNode}
+            onResizeNode={readOnly || running || initializing || (node.kind === 'session' && focusedId !== node.id) ? undefined : resizeNode}
             onSelect={selectNode}
             onToggleFocus={toggleFocus}
             onFitNode={focusNode}
             onConfigure={(id) => { if (!inspectorCloseLocked.current) { setInspectorId(id); focusNode(id); } }}
-            configurationPanel={node.kind === 'session' && focusedId === node.id && inspectorId === node.id ? renderInspector(node, true) : null}
-            onUpdateNode={running || bindingLocked ? undefined : saveNode}
-            onRunNode={running ? undefined : rerunNode}
-            onDelete={running ? undefined : (id) => deleteNodes([id])}
+            configurationPanel={!canInitialize && node.kind === 'session' && focusedId === node.id && inspectorId === node.id ? renderInspector(node, true) : null}
+            onUpdateNode={readOnly || running || initializing || bindingLocked ? undefined : saveNode}
+            onRunNode={readOnly || running || initializing ? undefined : rerunNode}
+            onDelete={readOnly || running || initializing ? undefined : (id) => deleteNodes([id])}
             wiring={wiring}
           />
         ))}
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
 
-      {handoffNote && <div className="awwo-handoff-note" role="alert">{handoffNote}</div>}
+      {initializing && <div className="awwo-handoff-note" role="status">{locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…'}</div>}
+      {!initializing && handoffNote && <div className="awwo-handoff-note" role="alert"><span>{handoffNote}</span><button type="button" aria-label={locale === 'zh' ? '关闭提示' : 'Dismiss notice'} onClick={() => setHandoffNote('')}>×</button></div>}
       <div className="awwo-view-tools" role="toolbar" aria-label={viewText.toolbar}>
         <button aria-label={viewText.zoomOut} title={viewText.zoomOut} onClick={() => zoomBy(1 / 1.2)}><Minus size={16} /></button>
         <span>{Math.round(view.scale * 100)}%</span>
         <button aria-label={viewText.zoomIn} title={viewText.zoomIn} onClick={() => zoomBy(1.2)}><Plus size={16} /></button>
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.fitAll} title={viewText.fitAll} disabled={!nodes.length} onClick={fitAll}><Maximize2 size={16} /></button>
-        <button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={running || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
+        <button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={readOnly || running || initializing || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
         <button aria-label={viewText.showMinimap} title={viewText.showMinimap} aria-pressed={minimapOpen} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
         <span className="awwo-tool-separator" />
-        <button aria-label={viewText.undo} title={viewText.undo} disabled={running || !history.undo} onClick={undo}><Undo2 size={16} /></button>
-        <button aria-label={viewText.redo} title={viewText.redo} disabled={running || !history.redo} onClick={redo}><Redo2 size={16} /></button>
-        {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={viewText.runSelection} disabled={running} onClick={runFromSelection}><Play size={15} /></button></>}
+        <button aria-label={viewText.undo} title={viewText.undo} disabled={readOnly || running || initializing || !history.undo} onClick={undo}><Undo2 size={16} /></button>
+        <button aria-label={viewText.redo} title={viewText.redo} disabled={readOnly || running || initializing || !history.redo} onClick={redo}><Redo2 size={16} /></button>
+        {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={viewText.runSelection} disabled={readOnly || running} onClick={runFromSelection}><Play size={15} /></button></>}
       </div>
 
       {minimapOpen && nodes.length > 0 ? (
@@ -1416,9 +1549,9 @@ export function CanvasSurface({ runtimeReadJson, onCreateCompany, accountControl
         />
       ) : null}
 
-      {inspectorNode?.kind === 'form' ? renderInspector(inspectorNode) : null}
+      {inspectorNode && (inspectorNode.kind === 'form' || canInitialize) ? renderInspector(inspectorNode) : null}
 
-      {addMenu ? (
+      {!readOnly && addMenu ? (
         <AddNodeMenu
           at={addMenu.at}
           onPick={(kind) => {
