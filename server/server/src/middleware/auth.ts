@@ -7,6 +7,7 @@ import { verifyLocalAgentJwt } from "../agent-auth-jwt.js";
 import { normalizeAgentApiKeyScope, type DeploymentMode } from "@paperclipai/shared";
 import type { BetterAuthSessionResult } from "../auth/better-auth.js";
 import { logger } from "./logger.js";
+import { sanitizeLogValueForUrl, sanitizeUrlForLog } from "./redact-sensitive.js";
 import { boardAuthService } from "../services/board-auth.js";
 import { ensureHumanRoleDefaultGrants } from "../services/principal-access-compatibility.js";
 
@@ -53,8 +54,13 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
         try {
           session = await opts.resolveSession(req);
         } catch (err) {
+          const requestUrl = req.originalUrl;
           logger.warn(
-            { err, method: req.method, url: req.originalUrl },
+            {
+              err: sanitizeLogValueForUrl(err, requestUrl),
+              method: req.method,
+              url: sanitizeUrlForLog(requestUrl),
+            },
             "Failed to resolve auth session from request headers",
           );
         }

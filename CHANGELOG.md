@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-08
+
+- Redact invitation credentials from request paths, repeated query or fragment values, structured error context and authentication warnings before they reach formatted logs; credential-shaped keys in thrown objects are also removed while ordinary pagination and CSRF token fields remain useful.
+- Add pre-construction `AWWO_LOG_LEVEL` control with strict validation, an unchanged `debug` default, persisted `trace` records and a `silent` mode for isolated acceptance runs where request logs must not persist.
+
 ## [0.3.1] - 2026-09-07
 
 - Keep natural-language requests readable with expandable execution details; display confirmed structured replies using their original output-field labels while preserving raw responses and failed or interrupted output.

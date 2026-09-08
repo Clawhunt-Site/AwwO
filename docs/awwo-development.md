@@ -70,6 +70,7 @@ JWT secret 通过 vendored CLI 的 `ensureAgentJwtSecret` 生成，不写进源�
 | `PAPERCLIP_HOME` / `PAPERCLIP_CONFIG` / `PAPERCLIP_INSTANCE_ID` | 可覆盖默认运行实例路径；指定已有配置前先确认其中的数据库与数据目录 |
 | `SUPERCLAW_HOME` | 网关状态目录；Vite 与网关使用同一个值 |
 | `PAPERCLIP_LOG_DIR` / `PAPERCLIP_STORAGE_LOCAL_DIR` | 可覆盖日志、文件存储目录 |
+| `AWWO_LOG_LEVEL` | 进程与 HTTP 日志级别；允许 `fatal`、`error`、`warn`、`info`、`debug`、`trace`、`silent`，未设置或仅空白时默认为 `debug` |
 | `CODEX_HOME` | 可选；使用本机已有 Codex 登录目录，不复制凭据 |
 | `SUPERCLAW_CANVAS_PLANNER_CLI_PATH` | 画布规划使用的 Codex 可执行文件，默认从 PATH 找 `codex` |
 | `SUPERCLAW_CANVAS_PLANNER_MODEL` | 可选模型，未设置则沿用 Codex 默认配置 |
@@ -77,6 +78,8 @@ JWT secret 通过 vendored CLI 的 `ensureAgentJwtSecret` 生成，不写进源�
 | `SUPERCLAW_CANVAS_PLANNER_TIMEOUT_MS` | 规划超时，默认 `120000` |
 
 启动器固定关闭定时 heartbeat、DB 自动备份及浏览器自动打开，并使用明确的网关上游地址。它不会清理其他运行实例或自动派发任何新任务。显式复用一个已有数据库时，数据库中原有的任务状态依旧存在。
+
+`AWWO_LOG_LEVEL` 在日志目录、根 logger 与 HTTP logger 创建之前同步读取并校验，development、staging 和 production 使用同一个变量。默认 `debug` 保持既有日志行为；显式 `trace` 会把 trace 记录写入日志文件；`silent` 仅用于独立、隔离的验收运行，以确保请求日志不落盘。非法值（包括大小写变体）会使控制面启动失败；错误信息只列出允许值，不回显收到的值。
 
 ## 接入本机真实 Codex
 

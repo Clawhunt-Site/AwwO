@@ -3,6 +3,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { instanceUserRoles } from "@paperclipai/db";
 import { actorMiddleware } from "../middleware/auth.js";
+import { logger } from "../middleware/logger.js";
 
 function createSelectChain(rows: unknown[]) {
   return {
@@ -29,8 +30,46 @@ describe("actorMiddleware authenticated session profile", () => {
   const originalCloudTenantToken = process.env.PAPERCLIP_CLOUD_TENANT_SERVER_TOKEN;
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (originalCloudTenantToken === undefined) delete process.env.PAPERCLIP_CLOUD_TENANT_SERVER_TOKEN;
     else process.env.PAPERCLIP_CLOUD_TENANT_SERVER_TOKEN = originalCloudTenantToken;
+  });
+
+  it("redacts an invitation URL and thrown credential object when session resolution fails", async () => {
+    const segment = "fixture-invite-segment";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const app = express();
+    app.use(
+      actorMiddleware({} as any, {
+        deploymentMode: "authenticated",
+        resolveSession: async () => {
+          throw {
+            message: `Session failed for ${segment}`,
+            cookie: "session=fixture-cookie",
+            nested: {
+              authorization: "Bearer fixture-authorization",
+              session_token: "fixture-session-token",
+            },
+          };
+        },
+      }),
+    );
+    app.post(`/api/invites/${segment}/accept`, (req, res) => res.json(req.actor));
+
+    const response = await request(app).post(
+      `/api/invites/${segment}/accept?token=${segment}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(warn).toHaveBeenCalledOnce();
+    const serialized = JSON.stringify(warn.mock.calls[0]);
+    expect(serialized).not.toContain(segment);
+    expect(serialized).not.toContain("fixture-cookie");
+    expect(serialized).not.toContain("fixture-authorization");
+    expect(serialized).not.toContain("fixture-session-token");
+    expect(serialized).toContain(
+      "/api/invites/[REDACTED]/accept?token=[REDACTED]",
+    );
   });
 
   it("preserves the signed-in user name and email on the board actor", async () => {

@@ -5,7 +5,17 @@ import { pinoHttp } from "pino-http";
 import { readConfigFile } from "../config-file.js";
 import { resolveDefaultLogsDir, resolveHomeAwarePath } from "../home-paths.js";
 import { shouldSilenceHttpSuccessLog } from "./http-log-policy.js";
-import { redactSensitive } from "./redact-sensitive.js";
+import { redactSensitive, sanitizeLogValueForUrl, sanitizeUrlForLog } from "./redact-sensitive.js";
+
+const LOG_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace", "silent"] as const;
+type LogLevel = (typeof LOG_LEVELS)[number];
+
+function resolveLogLevel(): LogLevel {
+  const configured = process.env.AWWO_LOG_LEVEL?.trim();
+  if (!configured) return "debug";
+  if ((LOG_LEVELS as readonly string[]).includes(configured)) return configured as LogLevel;
+  throw new Error(`AWWO_LOG_LEVEL must be one of ${LOG_LEVELS.join(", ")}`);
+}
 
 function resolveServerLogDir(): string {
   const envOverride = process.env.PAPERCLIP_LOG_DIR?.trim();
@@ -17,6 +27,7 @@ function resolveServerLogDir(): string {
   return resolveDefaultLogsDir();
 }
 
+const logLevel = resolveLogLevel();
 const logDir = resolveServerLogDir();
 fs.mkdirSync(logDir, { recursive: true });
 
@@ -29,8 +40,12 @@ const sharedOpts = {
 };
 
 export const logger = pino({
-  level: "debug",
-  redact: ["req.headers.authorization"],
+  level: logLevel,
+  redact: [
+    "req.headers.authorization",
+    "req.headers.cookie",
+    'res.headers["set-cookie"]',
+  ],
 }, pino.transport({
   targets: [
     {
@@ -41,13 +56,32 @@ export const logger = pino({
     {
       target: "pino-pretty",
       options: { ...sharedOpts, colorize: false, destination: logFile, mkdir: true },
-      level: "debug",
+      level: "trace",
     },
   ],
 }));
 
+function requestUrl(req: { url?: unknown; originalUrl?: unknown }): string {
+  if (typeof req.originalUrl === "string") return req.originalUrl;
+  return typeof req.url === "string" ? req.url : "";
+}
+
+function sanitizeRequestRecord(req: Record<string, unknown>): Record<string, unknown> {
+  const url = requestUrl(req);
+  return sanitizeLogValueForUrl(redactSensitive(req), url) as Record<string, unknown>;
+}
+
+function sanitizeRequestValue(value: unknown, url: string): unknown {
+  return redactSensitive(sanitizeLogValueForUrl(value, url));
+}
+
 export const httpLogger = pinoHttp({
   logger,
+  serializers: {
+    req(req) {
+      return sanitizeRequestRecord(req as unknown as Record<string, unknown>);
+    },
+  },
   customLogLevel(_req, res, err) {
     if (shouldSilenceHttpSuccessLog(_req.method, _req.url, res.statusCode)) {
       return "silent";
@@ -57,37 +91,47 @@ export const httpLogger = pinoHttp({
     return "info";
   },
   customSuccessMessage(req, res) {
-    return `${req.method} ${req.url} ${res.statusCode}`;
+    return `${req.method} ${sanitizeUrlForLog(requestUrl(req))} ${res.statusCode}`;
   },
   customErrorMessage(req, res, err) {
+    const url = requestUrl(req);
     const ctx = (res as any).__errorContext;
     const errMsg = ctx?.error?.message || err?.message || (res as any).err?.message || "unknown error";
-    return `${req.method} ${req.url} ${res.statusCode} — ${errMsg}`;
+    const safeMessage = sanitizeLogValueForUrl(String(errMsg), url);
+    return `${req.method} ${sanitizeUrlForLog(url)} ${res.statusCode} — ${safeMessage}`;
+  },
+  customErrorObject(req, _res, err, loggableObject) {
+    const url = requestUrl(req);
+    return {
+      ...loggableObject,
+      err: sanitizeRequestValue(err, url),
+    };
   },
   customProps(req, res) {
     if (res.statusCode >= 400) {
+      const url = requestUrl(req);
       const ctx = (res as any).__errorContext;
       if (ctx) {
         return {
-          errorContext: ctx.error,
-          reqBody: redactSensitive(ctx.reqBody),
-          reqParams: redactSensitive(ctx.reqParams),
-          reqQuery: redactSensitive(ctx.reqQuery),
+          errorContext: sanitizeRequestValue(ctx.error, url),
+          reqBody: sanitizeRequestValue(ctx.reqBody, url),
+          reqParams: sanitizeRequestValue(ctx.reqParams, url),
+          reqQuery: sanitizeRequestValue(ctx.reqQuery, url),
         };
       }
       const props: Record<string, unknown> = {};
       const { body, params, query } = req as any;
       if (body && typeof body === "object" && Object.keys(body).length > 0) {
-        props.reqBody = redactSensitive(body);
+        props.reqBody = sanitizeRequestValue(body, url);
       }
       if (params && typeof params === "object" && Object.keys(params).length > 0) {
-        props.reqParams = redactSensitive(params);
+        props.reqParams = sanitizeRequestValue(params, url);
       }
       if (query && typeof query === "object" && Object.keys(query).length > 0) {
-        props.reqQuery = redactSensitive(query);
+        props.reqQuery = sanitizeRequestValue(query, url);
       }
       if ((req as any).route?.path) {
-        props.routePath = (req as any).route.path;
+        props.routePath = sanitizeUrlForLog(String((req as any).route.path));
       }
       return props;
     }
