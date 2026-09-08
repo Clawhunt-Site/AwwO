@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — exact team cancellation and clean stopped status
+
+- **What changed:** Cancel every unfinished Pi member by its submitted turn ID with an independent two-second cleanup deadline, before releasing its invocation slot. Record deliberate cancellation without a false runtime error; preserve actual provider failures, malformed events, broken streams and timeouts.
+- **Why:** Public run IDs did not match Pi's active member keys, and a cancelled stream could appear as a red runtime failure.
+- **Impact:** Parallel siblings clean up independently; completed calls remain complete and unrelated calls are untouched. Cancellation is bounded and best effort when the worker is unreachable.
+- **Verification:** Strict worker fixtures deliberately ignore stream closure and require exact DELETE IDs. Final PostgreSQL race: 25 top-level / 27 subcases; vet and local protocol stack pass. Real browser stop confirms one cancelled member, no subsequent member, empty error, preserved partial output and zero Pi/invocation activity. Codex GPT-5.5 and Gemini final reviews both PASS.
+- **Files:** `backend/internal/app/runs.go`, `backend/internal/app/teams.go`, `backend/internal/app/team_cancel_test.go`.
+
 ### Fixed — team conversation history and visible member execution
 
 - **What changed:** Show each member's ordered output and actual input audit beside its conversation reply and in background task records. Preserve run identities through streaming, refresh and failed-run recovery. Share completed exchanges within the same session according to each member's context setting, and apply member persona instructions independently. Separate natural chat from the explicit node-task action.

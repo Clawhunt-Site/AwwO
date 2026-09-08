@@ -573,6 +573,12 @@ func (a *App) cancelExecution(id string) {
 	if cancel != nil {
 		cancel()
 	}
+	a.cancelPI(id)
+}
+
+// A Pi request is keyed by its submitted runId. Team members submit their turn
+// ID, whereas a single-Agent request submits the public run ID.
+func (a *App) cancelPI(id string) {
 	ctx, done := context.WithTimeout(context.Background(), 2*time.Second)
 	defer done()
 	req, e := http.NewRequestWithContext(ctx, "DELETE", strings.TrimRight(a.cfg.PIURL, "/")+"/internal/runs/"+id, nil)

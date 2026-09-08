@@ -166,6 +166,9 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID string) err
 		if e == nil {
 			e = tx.QueryRow(ctx, "SELECT COALESCE(actor_id,''),status FROM runs WHERE tenant_id=$1 AND id=$2", tid, rid).Scan(&actor, &runStatus)
 		}
+		if e == nil && runStatus == "cancelled" {
+			e = context.Canceled
+		}
 		if e == nil && (status != "active" || (runStatus != "queued" && runStatus != "running")) {
 			e = errors.New("execution_revoked")
 		}
@@ -371,6 +374,17 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	output := ""
 	status := "failed"
 	code := ""
+	contextFailure := func(err error) bool {
+		if errors.Is(err, context.Canceled) {
+			status, code = "cancelled", ""
+			return true
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			code = "team_timeout"
+			return true
+		}
+		return false
+	}
 	defer func() {
 		// A member cannot contribute to aggregation until both its deliverable
 		// and released concurrency slot commit together.
@@ -394,21 +408,31 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	}()
 	if e := a.reserveInvocation(ctx, tid, rid, id); e != nil {
 		code = e.Error()
-		if ctx.Err() != nil {
-			status = "cancelled"
-		}
+		contextFailure(e)
 		return "", e
 	}
 	if _, e := a.db.Exec(ctx, "UPDATE run_turns SET status='running',updated_at=now() WHERE tenant_id=$1 AND id=$2", tid, id); e != nil {
+		if contextFailure(e) {
+			return "", e
+		}
 		code = "turn_persistence_failed"
 		return "", errors.New(code)
 	}
+	// Parent cancellation stops this request context, but Pi's active map is
+	// keyed by this turn ID. Explicit cleanup also covers interrupted admission
+	// and broken streams, using a fresh bounded context after ctx is cancelled.
+	// Parallel members clean up independently before their slots are released.
+	defer func() {
+		if status != "completed" {
+			a.cancelPI(id)
+		}
+	}()
 	resp, e := a.admitPI(ctx, body)
 	if e != nil {
-		code = "runtime_unavailable"
-		if ctx.Err() != nil {
-			status = "cancelled"
+		if contextFailure(e) {
+			return "", e
 		}
+		code = "runtime_unavailable"
 		return "", errors.New(code)
 	}
 	defer resp.Body.Close()
@@ -426,7 +450,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		var ev struct{ Type, Delta, Text string }
 		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev) != nil {
 			code = "invalid_runtime_event"
-			break
+			return "", errors.New(code)
 		}
 		switch ev.Type {
 		case "text_delta":
@@ -436,6 +460,9 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			}
 			output += ev.Delta
 			if _, e = a.db.Exec(ctx, "UPDATE run_turns SET output=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, output); e != nil {
+				if contextFailure(e) {
+					return "", e
+				}
 				code = "turn_persistence_failed"
 				return "", errors.New(code)
 			}
@@ -449,8 +476,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			return output, nil
 		case "cancelled":
 			status = "cancelled"
-			code = "cancelled"
-			return "", errors.New(code)
+			return "", context.Canceled
 		case "failed":
 			code = "runtime_failed"
 			return "", errors.New(code)
@@ -460,8 +486,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		}
 	}
 	code = "runtime_stream_ended"
-	if ctx.Err() != nil {
-		status = "cancelled"
+	if contextFailure(ctx.Err()) {
 		return "", ctx.Err()
 	}
 	return "", errors.New(code)
