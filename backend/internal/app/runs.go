@@ -196,6 +196,14 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot := executionSnapshot{Instructions: instructions, Model: model, Budget: budget, Overhead: overhead, Team: team, Health: health}
+	if team != nil {
+		history, available, err := completedTeamHistory(r.Context(), tx, tid, b.SessionID)
+		if err != nil {
+			a.dbError(w, err)
+			return
+		}
+		snapshot.History, snapshot.HistoryAvailable = &history, available
+	}
 	id := randomID()
 	v, e := oneJSON(r.Context(), tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status) VALUES($1,$2,$3,$4,$5,$6,'queued') RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt)
 	if e != nil {

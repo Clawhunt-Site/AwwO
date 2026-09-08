@@ -36,13 +36,14 @@ type nodeTeam struct {
 	Members        []teamMember `json:"members"`
 }
 type executionSnapshot struct {
-	Instructions string             `json:"instructions"`
-	Model        string             `json:"model"`
-	Budget       int                `json:"budget"`
-	Overhead     int                `json:"overhead"`
-	Team         *nodeTeam          `json:"team,omitempty"`
-	Health       piHealth           `json:"health"`
-	History      *[]json.RawMessage `json:"history,omitempty"`
+	Instructions     string             `json:"instructions"`
+	Model            string             `json:"model"`
+	Budget           int                `json:"budget"`
+	Overhead         int                `json:"overhead"`
+	Team             *nodeTeam          `json:"team,omitempty"`
+	Health           piHealth           `json:"health"`
+	History          *[]json.RawMessage `json:"history,omitempty"`
+	HistoryAvailable int                `json:"historyAvailable,omitempty"`
 }
 
 func validateTeam(t *nodeTeam) error {
@@ -145,7 +146,7 @@ func (a *App) runTurns(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Run not found")
 		return
 	}
-	v, e := rowsJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',id,'memberId',member_id,'memberName',member_name,'role',role,'round',round,'ordinal',ordinal,'status',status,'output',output,'error',error,'model',config->>'model','runtime',config->>'runtime','config',config,'createdAt',created_at,'updatedAt',updated_at) FROM run_turns WHERE tenant_id=$1 AND run_id=$2 ORDER BY ordinal`, tid, id)
+	v, e := rowsJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',id,'memberId',member_id,'memberName',member_name,'role',role,'round',round,'ordinal',ordinal,'status',status,'output',output,'error',error,'model',config->>'model','runtime',config->>'runtime','config',config,'prompt',prompt,'systemPrompt',system_prompt,'messages',messages,'context',context,'createdAt',created_at,'updatedAt',updated_at) FROM run_turns WHERE tenant_id=$1 AND run_id=$2 ORDER BY ordinal`, tid, id)
 	a.replyList(w, v, e)
 }
 
@@ -219,29 +220,26 @@ func (a *App) settleRunInvocation(tid, id string) {
 	a.completeInvocation(tid, id, status)
 }
 
-type teamCall func(context.Context, teamMember, int, int, string) (string, error)
+type teamCall func(context.Context, teamMember, int, int, teamTurnInput) (string, error)
 
 // runTeam is deterministic orchestration: outputs are data, never executable instructions.
 // shared means earlier completed turns are supplied, task means only the task; aggregation
 // and review necessarily receive their explicit operands regardless of context preference.
 func runTeam(ctx context.Context, t nodeTeam, task string, call teamCall) (string, error) {
 	ordinal := 0
-	transcript := []string{}
-	invoke := func(m teamMember, round int, extra string, force bool) (string, error) {
+	transcript := []teamOutput{}
+	invoke := func(m teamMember, round int, extra, purpose string, force bool) (string, error) {
 		ordinal++
 		if ordinal > t.MaxTurns {
 			return "", errors.New("team_turn_budget_exhausted")
 		}
-		prompt := task
-		if (m.Context == "shared" || force) && len(transcript) > 0 {
-			prompt += "\n\n<team_outputs>\n" + strings.Join(transcript, "\n\n") + "\n</team_outputs>"
+		input := teamTurnInput{Task: task, Instruction: extra, Purpose: purpose, Required: force}
+		if m.Context == "shared" || force {
+			input.Upstream = append([]teamOutput{}, transcript...)
 		}
-		if extra != "" {
-			prompt += "\n\n" + extra
-		}
-		out, err := call(ctx, m, round, ordinal, prompt)
+		out, err := call(ctx, m, round, ordinal, input)
 		if err == nil {
-			transcript = append(transcript, fmt.Sprintf("[%s / round %d]\n%s", m.Name, round, out))
+			transcript = append(transcript, teamOutput{teamSource: teamSource{MemberID: m.ID, MemberName: m.Name, Round: round, Ordinal: ordinal}, Output: out})
 		}
 		return out, err
 	}
@@ -250,14 +248,14 @@ func runTeam(ctx context.Context, t nodeTeam, task string, call teamCall) (strin
 	switch t.Mode {
 	case "sequential":
 		for _, m := range t.Members {
-			out, err = invoke(m, 1, "", false)
+			out, err = invoke(m, 1, "", "work", false)
 			if err != nil {
 				return "", err
 			}
 		}
 	case "parallel":
 		if len(t.Members) == 1 {
-			return invoke(t.Members[0], 1, "", false)
+			return invoke(t.Members[0], 1, "", "work", false)
 		}
 		workers := t.Members[:len(t.Members)-1]
 		results := make([]string, len(workers))
@@ -269,7 +267,7 @@ func runTeam(ctx context.Context, t nodeTeam, task string, call teamCall) (strin
 			wg.Add(1)
 			go func(i int, m teamMember) {
 				defer wg.Done()
-				results[i], errs[i] = call(workCtx, m, 1, i+1, task)
+				results[i], errs[i] = call(workCtx, m, 1, i+1, teamTurnInput{Task: task, Purpose: "work"})
 				if errs[i] != nil {
 					cancel()
 				}
@@ -281,28 +279,28 @@ func runTeam(ctx context.Context, t nodeTeam, task string, call teamCall) (strin
 			if errs[i] != nil {
 				return "", errs[i]
 			}
-			transcript = append(transcript, fmt.Sprintf("[%s / round 1]\n%s", m.Name, results[i]))
+			transcript = append(transcript, teamOutput{teamSource: teamSource{MemberID: m.ID, MemberName: m.Name, Round: 1, Ordinal: i + 1}, Output: results[i]})
 		}
-		out, err = invoke(t.Members[len(t.Members)-1], 1, "Summarize the member outputs into the final node result. Follow the task's output contract.", true)
+		out, err = invoke(t.Members[len(t.Members)-1], 1, "Summarize the member outputs into the final node result. Follow the task's output contract.", "aggregate", true)
 	case "debate":
 		for round := 1; round <= t.MaxRounds; round++ {
 			for _, m := range t.Members {
-				out, err = invoke(m, round, "Discuss and critically evaluate the task and available arguments. Identify disagreements and improvements.", false)
+				out, err = invoke(m, round, "Discuss and critically evaluate the task and available arguments. Identify disagreements and improvements.", "work", false)
 				if err != nil {
 					return "", err
 				}
 			}
 		}
-		out, err = invoke(t.Members[len(t.Members)-1], t.MaxRounds+1, "Resolve the discussion and return the final node result, following the task's output contract.", true)
+		out, err = invoke(t.Members[len(t.Members)-1], t.MaxRounds+1, "Resolve the discussion and return the final node result, following the task's output contract.", "aggregate", true)
 	case "review":
 		for round := 1; round <= t.MaxRounds; round++ {
 			for _, m := range t.Members[:len(t.Members)-1] {
-				out, err = invoke(m, round, "Produce or improve the deliverable. Address the previous review feedback when provided.", round > 1)
+				out, err = invoke(m, round, "Produce or improve the deliverable. Address the previous review feedback when provided.", "revise", round > 1)
 				if err != nil {
 					return "", err
 				}
 			}
-			verdict, reviewErr := invoke(t.Members[len(t.Members)-1], round, `Review the latest deliverable. Return ONLY strict JSON: {"approved":boolean,"output":string,"feedback":string}. When approved, output MUST contain the approved final deliverable matching the original task output contract. Otherwise provide actionable feedback.`, true)
+			verdict, reviewErr := invoke(t.Members[len(t.Members)-1], round, `Review the latest deliverable. Return ONLY strict JSON: {"approved":boolean,"output":string,"feedback":string}. When approved, output MUST contain the approved final deliverable matching the original task output contract. Otherwise provide actionable feedback.`, "review", true)
 			if reviewErr != nil {
 				return "", reviewErr
 			}
@@ -330,8 +328,8 @@ func (a *App) executeTeam(ctx context.Context, tid, rid, sid, prompt string, sna
 	t := *snap.Team
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(t.TimeoutSeconds)*time.Second)
 	defer cancel()
-	output, err := runTeam(ctx, t, prompt, func(ctx context.Context, m teamMember, round, ordinal int, p string) (string, error) {
-		return a.executeTeamTurn(ctx, tid, rid, sid, snap, m, round, ordinal, p)
+	output, err := runTeam(ctx, t, prompt, func(ctx context.Context, m teamMember, round, ordinal int, input teamTurnInput) (string, error) {
+		return a.executeTeamTurn(ctx, tid, rid, sid, snap, m, round, ordinal, input)
 	})
 	if err != nil {
 		status, code := "failed", err.Error()
@@ -346,7 +344,7 @@ func (a *App) executeTeam(ctx context.Context, tid, rid, sid, prompt string, sna
 	}
 	a.finish(tid, rid, "completed", output, "")
 }
-func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap executionSnapshot, m teamMember, round, ordinal int, prompt string) (result string, resultErr error) {
+func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap executionSnapshot, m teamMember, round, ordinal int, input teamTurnInput) (result string, resultErr error) {
 	if m.Model == "" {
 		m.Model = snap.Model
 	}
@@ -355,13 +353,19 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	if !ok {
 		return "", errors.New("model_unavailable")
 	}
-	instructions := snap.Instructions + "\n\nTeam member: " + m.Name + "\nRole: " + m.Role + "\n" + m.Instructions
-	if len(prompt)+len(instructions)+overhead > budget {
+	prompt, instructions, history, inputContext, err := prepareTeamInput(snap, m, input, budget, overhead)
+	if err != nil {
+		return "", err
+	}
+	messagesRaw, _ := json.Marshal(history)
+	contextRaw, _ := json.Marshal(inputContext)
+	id := randomID()
+	body, _ := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid + "_" + tokenHash(m.ID)[:16], "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": m.Model, "runtime": "pi"})
+	if len(body) > 1<<20 {
 		return "", errors.New("context_limit")
 	}
-	id := randomID()
 	config, _ := json.Marshal(m)
-	if _, e := a.db.Exec(ctx, "INSERT INTO run_turns(id,tenant_id,run_id,member_id,member_name,role,round,ordinal,config,status,prompt) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10)", id, tid, rid, m.ID, m.Name, m.Role, round, ordinal, config, prompt); e != nil {
+	if _, e := a.db.Exec(ctx, "INSERT INTO run_turns(id,tenant_id,run_id,member_id,member_name,role,round,ordinal,config,status,prompt,system_prompt,messages,context) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,$11,$12,$13)", id, tid, rid, m.ID, m.Name, m.Role, round, ordinal, config, prompt, instructions, messagesRaw, contextRaw); e != nil {
 		return "", errors.New("turn_persistence_failed")
 	}
 	output := ""
@@ -399,7 +403,6 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		code = "turn_persistence_failed"
 		return "", errors.New(code)
 	}
-	body, _ := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid + "_" + tokenHash(m.ID)[:16], "prompt": prompt, "messages": []any{}, "systemPrompt": instructions, "model": m.Model, "runtime": "pi"})
 	resp, e := a.admitPI(ctx, body)
 	if e != nil {
 		code = "runtime_unavailable"

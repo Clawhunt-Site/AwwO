@@ -58,6 +58,19 @@ describe('node team configuration', () => {
     fireEvent.change(screen.getByLabelText('协作方式'), { target: { value: 'review' } }); expect(screen.getByText(/计划最多 6 次调用/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '删除 Agent 2' })); expect(screen.getByRole('alert')).toHaveTextContent('审核模式至少需要一位执行者和一位审核者');
   });
+  it('explains real chat history, independent task context and the final result for every collaboration mode', async () => {
+    render(<Harness />); await enable();
+    expect(member(1).getByRole('option', { name: '当前会话历史与本次运行前序成果' })).toHaveValue('shared');
+    expect(member(1).getByRole('option', { name: '仅当前任务（含节点输入）' })).toHaveValue('task');
+    expect(screen.getByText(/不包含此前所有成员的发言/)).toHaveTextContent('汇总、审核及返工仍接收必要的团队结果和审核意见');
+    expect(screen.getByText(/全部成功后，最后一位的输出成为节点最终结果/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText('协作方式'), { target: { value: 'parallel' } });
+    expect(screen.getByText(/最后一位等待全部完成/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText('协作方式'), { target: { value: 'debate' } });
+    expect(screen.getByText(/最后一位额外汇总，作为节点最终结果/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText('协作方式'), { target: { value: 'review' } });
+    expect(screen.getByText(/其批准的交付成为最终结果/)).toBeVisible();
+  });
   it('caps teams at eight members and preserves at least one member', async () => {
     render(<Harness />); await enable();
     for (let count = 2; count < 8; count += 1) fireEvent.click(screen.getByRole('button', { name: '添加 Agent' }));
@@ -104,6 +117,7 @@ describe('node team configuration', () => {
     const initial = session(); initial.team = { ...createNodeTeam(initial), mode: 'parallel' };
     const { unmount } = render(<CanvasI18nProvider locale="en"><Harness initial={initial} /></CanvasI18nProvider>);
     expect(screen.getByRole('checkbox', { name: 'Enable multiple Agents' })).toBeInTheDocument(); expect(screen.getByLabelText('Maximum model calls')).toBeInTheDocument(); await screen.findAllByRole('option', { name: 'model-a' });
+    expect(screen.getByText(/Shared session history includes completed user exchanges/)).toHaveTextContent('not every earlier member response');
     unmount(); render(<CanvasI18nProvider locale="en"><SessionTile node={initial} compact scale={1} focused={false} /></CanvasI18nProvider>);
     expect(screen.getByTestId('node-team-badge-node-a')).toHaveTextContent('2 Agent · Parallel and aggregate');
   });

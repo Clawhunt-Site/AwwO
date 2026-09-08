@@ -201,13 +201,22 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			history, err := rowsJSON(r.Context(), tx, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid)
-			if err != nil {
-				a.dbError(w, err)
-				return
+			if team != nil {
+				history, available, err := completedTeamHistory(r.Context(), tx, tid, sid)
+				if err != nil {
+					a.dbError(w, err)
+					return
+				}
+				snap.History, snap.HistoryAvailable = &history, available
+			} else {
+				history, err := rowsJSON(r.Context(), tx, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid)
+				if err != nil {
+					a.dbError(w, err)
+					return
+				}
+				history = boundedHistoryWithLimits(history, len(instructions), budget, overhead)
+				snap.History = &history
 			}
-			history = boundedHistoryWithLimits(history, len(instructions), budget, overhead)
-			snap.History = &history
 		}
 		snapRaw, _ := json.Marshal(snap)
 		_, e = tx.Exec(r.Context(), "INSERT INTO graph_run_nodes(tenant_id,graph_id,node_id,ordinal,state,output,detail,session_id,execution_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9)", tid, id, n.ID, i, state, output, detail, sid, snapRaw)

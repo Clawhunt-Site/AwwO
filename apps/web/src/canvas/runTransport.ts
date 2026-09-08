@@ -109,7 +109,7 @@ export async function execAgentViaGateway(
   markLocalSend(storeKey);
   const token = beginStream(storeKey);
   const mirroring = () => isStreamCurrent(storeKey, token);
-  sessions.appendTurn(storeKey, { role: 'user', text: message });
+  const userTurnId = sessions.appendTurn(storeKey, { role: 'user', text: message });
   const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '' });
   sessions.setStreaming(storeKey, true);
   sessions.setStatus(storeKey, 'queued');
@@ -183,6 +183,10 @@ export async function execAgentViaGateway(
       case 'accepted':
         reportIssue(f.issueId);
         runId = f.runId;
+        if (mirroring() && f.runId) {
+          sessions.attachTurnRun(storeKey, userTurnId, f.runId);
+          sessions.attachTurnRun(storeKey, agentTurnId, f.runId);
+        }
         onRunAccepted?.({ issueId: f.issueId, runId: f.runId });
         beginCancellation();
         if (mirroring() && !f.runVisible) sessions.patchTurn(storeKey, agentTurnId, COPY.thinking, 'info');

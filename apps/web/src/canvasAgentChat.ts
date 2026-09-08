@@ -197,6 +197,7 @@ export interface ConversationSummary {
 
 /** A stored transcript turn, normalized from an issue comment. */
 export interface StoredMessage {
+  runId?: string;
   role: 'user' | 'agent';
   text: string;
 }
@@ -274,7 +275,7 @@ export async function fetchConversationMessages(
         if (!text.trim()) return null;
         // An agent-authored comment carries authorAgentId; anything else is the operator's turn.
         const role: StoredMessage['role'] = typeof d.authorAgentId === 'string' && d.authorAgentId ? 'agent' : 'user';
-        return { role, text };
+        return { role, text, ...(typeof d.runId === 'string' && d.runId ? { runId: d.runId } : {}) };
       })
       .filter((m): m is StoredMessage => m !== null);
   } catch {

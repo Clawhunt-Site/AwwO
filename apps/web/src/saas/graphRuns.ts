@@ -32,10 +32,36 @@ export interface TeamTurn {
   memberName: string;
   role: string;
   round: number;
+  ordinal?: number;
   status: string;
   output: string;
   error?: string;
   model?: string;
+  runtime?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  config?: { instructions?: string; context?: 'task' | 'shared' } | null;
+  prompt?: string | null;
+  systemPrompt?: string | null;
+  messages?: { role: string; content: string }[] | null;
+  context?: TeamTurnContext | null;
+}
+export interface TeamTurnContext {
+  version: 1;
+  mode: 'task' | 'shared';
+  historyMessages: number;
+  historyAvailable: number;
+  historyTruncated: boolean;
+  upstreamMembers: { memberId: string; memberName: string; round: number; ordinal: number }[];
+  upstreamAvailable: number;
+  upstreamTruncated: boolean;
+  purpose: 'work' | 'aggregate' | 'review' | 'revise';
+}
+export interface TeamRunRecord {
+  id: string;
+  tenantId: string;
+  status: GraphRunSnapshot['status'];
+  error?: string;
 }
 export const graphIsActive = (snapshot: GraphRunSnapshot) => snapshot.status === 'queued' || snapshot.status === 'running';
 export const graphPath = (tenantId: string, canvasId: string) => tenantPath(tenantId, `/canvases/${encodeURIComponent(canvasId)}/graph-runs`);

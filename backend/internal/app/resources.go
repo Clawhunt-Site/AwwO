@@ -473,6 +473,6 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Session not found")
 		return
 	}
-	v, e := rowsJSON(r.Context(), a.db, "SELECT jsonb_build_object('id',id,'sessionId',session_id,'role',role,'content',content,'createdAt',created_at) FROM messages WHERE tenant_id=$1 AND session_id=$2 ORDER BY created_at,id", r.PathValue("tenantId"), r.PathValue("id"))
+	v, e := rowsJSON(r.Context(), a.db, "SELECT jsonb_build_object('id',id,'sessionId',session_id,'role',role,'content',content,'runId',run_id,'createdAt',created_at) FROM messages WHERE tenant_id=$1 AND session_id=$2 ORDER BY created_at,id", r.PathValue("tenantId"), r.PathValue("id"))
 	a.replyList(w, v, e)
 }

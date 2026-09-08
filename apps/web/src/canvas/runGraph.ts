@@ -119,6 +119,7 @@ export function preflightGraphIssue(
   nodes: ReadonlyArray<CanvasNode>,
   edges: ReadonlyArray<CanvasEdge>,
   scope?: ReadonlyArray<string>,
+  options: { conversation?: boolean } = {},
 ): PreflightIssue | null {
   if (nodes.length === 0) return { code: 'empty_graph', values: {}, message: '画布上还没有节点。' };
   // Only nodes that will actually EXECUTE are validated. Refusing a whole run because an unwired
@@ -137,7 +138,7 @@ export function preflightGraphIssue(
       const issues = validateNodeTeam(node.team);
       if (issues.length) return { code: 'invalid_team', values: { nodeTitle: node.title, detail: issues[0].message }, message: `「${node.title}」协作配置无效：${issues[0].message}` };
     }
-    if (node.kind !== 'session' || !node.contract) continue;
+    if (options.conversation || node.kind !== 'session' || !node.contract) continue;
     // Wired fields are checked once their actual values arrive. A missing or incompatible
     // source port must never stand in for a required value during preflight.
     const local: ContractField[] = [];
@@ -152,6 +153,7 @@ export function preflightGraphIssue(
     const errors = validateContractFields(local);
     if (errors.length) return { code: 'missing_inputs', values: { nodeTitle: node.title, errors, fields: local.filter(field => validateContractFields([field]).length).map(field => field.label || field.id) }, message: `「${node.title}」输入未就绪：${errors.join(' ')}` };
   }
+  if (options.conversation) return null;
   const cyclic = findCycle(nodes, edges);
   if (cyclic.length) {
     // Kahn leftovers include nodes DOWNSTREAM of a cycle, not only its members — say so.

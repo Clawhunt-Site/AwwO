@@ -23,16 +23,16 @@ func TestTeamModesAndBudgets(t *testing.T) {
 			team := fixtureTeam(mode)
 			var calls atomic.Int32
 			var reviews atomic.Int32
-			out, e := runTeam(context.Background(), team, "TASK", func(ctx context.Context, m teamMember, round, ordinal int, prompt string) (string, error) {
+			out, e := runTeam(context.Background(), team, "TASK", func(ctx context.Context, m teamMember, round, ordinal int, input teamTurnInput) (string, error) {
 				calls.Add(1)
-				if !strings.HasPrefix(prompt, "TASK") {
+				if !strings.HasPrefix(renderTeamPrompt(input, input.Upstream), "TASK") {
 					t.Error("task missing")
 				}
 				if mode == "review" && m.ID == "judge" {
 					if reviews.Add(1) == 1 {
 						return `{"approved":false,"output":"draft","feedback":"FIX-THIS"}`, nil
 					}
-					if !strings.Contains(prompt, "FIX-THIS") {
+					if !strings.Contains(renderTeamPrompt(input, input.Upstream), "FIX-THIS") {
 						t.Error("review feedback lost")
 					}
 					return `{"approved":true,"output":"approved-deliverable"}`, nil
@@ -56,7 +56,7 @@ func TestTeamModesAndBudgets(t *testing.T) {
 		entered := make(chan struct{}, 2)
 		release := make(chan struct{})
 		go func() { <-entered; <-entered; close(release) }()
-		_, e := runTeam(context.Background(), team, "T", func(ctx context.Context, m teamMember, r, o int, p string) (string, error) {
+		_, e := runTeam(context.Background(), team, "T", func(ctx context.Context, m teamMember, r, o int, input teamTurnInput) (string, error) {
 			if m.ID != "judge" {
 				entered <- struct{}{}
 				select {
@@ -64,7 +64,7 @@ func TestTeamModesAndBudgets(t *testing.T) {
 				case <-time.After(time.Second):
 					return "", errors.New("not parallel")
 				}
-			} else if !strings.Contains(p, "author-result") || !strings.Contains(p, "critic-result") {
+			} else if !strings.Contains(renderTeamPrompt(input, input.Upstream), "author-result") || !strings.Contains(renderTeamPrompt(input, input.Upstream), "critic-result") {
 				t.Error("fan-in missing")
 			}
 			return m.ID + "-result", nil
@@ -75,7 +75,7 @@ func TestTeamModesAndBudgets(t *testing.T) {
 	})
 	t.Run("review cannot succeed on exhaustion", func(t *testing.T) {
 		team := fixtureTeam("review")
-		_, e := runTeam(context.Background(), team, "T", func(context.Context, teamMember, int, int, string) (string, error) {
+		_, e := runTeam(context.Background(), team, "T", func(context.Context, teamMember, int, int, teamTurnInput) (string, error) {
 			return `{"approved":false,"output":"bad","feedback":"fix"}`, nil
 		})
 		if e == nil || e.Error() != "review_rounds_exhausted" {
@@ -84,7 +84,7 @@ func TestTeamModesAndBudgets(t *testing.T) {
 	})
 	t.Run("strict verdict", func(t *testing.T) {
 		team := fixtureTeam("review")
-		_, e := runTeam(context.Background(), team, "T", func(context.Context, teamMember, int, int, string) (string, error) {
+		_, e := runTeam(context.Background(), team, "T", func(context.Context, teamMember, int, int, teamTurnInput) (string, error) {
 			return `{"approved":true,"output":"bad"} {}`, nil
 		})
 		if e == nil || e.Error() != "invalid_review_verdict" {
@@ -95,7 +95,7 @@ func TestTeamModesAndBudgets(t *testing.T) {
 		team := fixtureTeam("debate")
 		team.MaxTurns = 3
 		var calls int
-		_, e := runTeam(context.Background(), team, "T", func(context.Context, teamMember, int, int, string) (string, error) { calls++; return "x", nil })
+		_, e := runTeam(context.Background(), team, "T", func(context.Context, teamMember, int, int, teamTurnInput) (string, error) { calls++; return "x", nil })
 		if e == nil || e.Error() != "team_turn_budget_exhausted" || calls != 3 {
 			t.Fatalf("calls=%d error=%v", calls, e)
 		}

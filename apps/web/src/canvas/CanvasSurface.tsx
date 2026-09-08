@@ -1,6 +1,7 @@
 import { canvasStorage, canvasStorageKey } from './canvasStorage';
 import { canvasFetch } from '../saas/canvasBridge';
 import { saasErrorMessage } from '../saas/api';
+import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { currentSaaSCanvas, initializeSaaSCanvas } from '../saas/canvasBridge';
 import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
@@ -160,7 +161,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [initializing, setInitializing] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; setupRequest.current?.abort(); }; }, []);
-  const canInitialize = storageMode === 'cloud' && Boolean(currentSaaSCanvas());
+  const cloudScope = currentSaaSCanvas();
+  const canInitialize = storageMode === 'cloud' && Boolean(cloudScope);
   const inspectorCloseLocked = useRef(false);
   const [bindingLocked, setBindingLocked] = useState(false);
   const onInspectorLockChange = useCallback((locked: boolean) => {
@@ -594,7 +596,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (!mounted.current || readOnlyRef.current) return;
     const runNodes = runDocument.nodes;
     const runEdges = reconcileEdges(runNodes, runDocument.edges);
-    const problem = preflightIssueMessage(t, preflightGraphIssue(runNodes, runEdges, scope), locale);
+    const problem = preflightIssueMessage(t, preflightGraphIssue(runNodes, runEdges, scope, { conversation: Boolean(currentSaaSCanvas() && manualMessage) }), locale);
     if (problem) { refusedRevision.current = canvasPlanRevision(runDocument); setHandoffNote(problem); return; }
     setHandoffNote('');
     const ac = new AbortController();
@@ -1323,6 +1325,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             node={node}
             readOnly={readOnly}
             initializeOnSend={canInitialize}
+            freeConversation={Boolean(cloudScope)}
+            renderTurnDetails={cloudScope ? (turn, latest) => turn.runId ? <TeamRunDetails key={turn.runId} tenantId={cloudScope.tenant.id} runId={turn.runId} defaultOpen={latest} runStatus={latest ? runs[node.id]?.state : undefined} /> : null : undefined}
             geometry={renderNodeById.get(node.id)}
             compact={node.kind === 'session' && focusedId !== node.id}
             scale={view.scale}

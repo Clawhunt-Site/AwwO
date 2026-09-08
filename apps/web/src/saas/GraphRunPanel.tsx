@@ -1,18 +1,21 @@
 import { useEffect, useState } from 'react';
-import { api, tenantPath, saasErrorMessage } from './api';
-import { graphPath, graphIsActive, type GraphRunSnapshot, type TeamTurn } from './graphRuns';
+import { api, saasErrorMessage } from './api';
+import { graphPath, graphIsActive, type GraphRunSnapshot } from './graphRuns';
+import { TeamRunDetails } from './TeamRunDetails';
 import { useSaaSPreferences } from './preferences';
 import './graph-runs.css';
 
-export function GraphRunPanel({ tenantId, canvasId, readOnly = false }: { tenantId: string; canvasId: string; readOnly?: boolean }) {
+type GraphRunPanelProps = { tenantId: string; canvasId: string; readOnly?: boolean };
+export function GraphRunPanel(props: GraphRunPanelProps) {
+  return <GraphRunPanelView key={JSON.stringify([props.tenantId, props.canvasId])} {...props} />;
+}
+function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPanelProps) {
   const { locale, t } = useSaaSPreferences();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<GraphRunSnapshot[]>([]);
   const [selected, setSelected] = useState('');
   const [nodeId, setNodeId] = useState('');
-  const [turns, setTurns] = useState<TeamTurn[]>([]);
   const [error, setError] = useState<unknown>(null);
-  const [turnError, setTurnError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const current = items.find(item => item.id === selected) || items[0];
@@ -35,22 +38,6 @@ export function GraphRunPanel({ tenantId, canvasId, readOnly = false }: { tenant
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
   }, [tenantId, canvasId, open, refresh]);
-  useEffect(() => {
-    setTurns([]); setTurnError(null);
-    if (!open || !node?.runId) return;
-    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const result = await api<{ items: TeamTurn[] }>(tenantPath(tenantId, `/runs/${encodeURIComponent(node.runId!)}/turns`), { signal: controller.signal });
-        if (controller.signal.aborted) return;
-        if (!Array.isArray(result.items)) throw new Error('Invalid member turn response');
-        setTurns(result.items); setTurnError(null);
-      } catch (error) { if (!controller.signal.aborted) setTurnError(error); }
-      if (!controller.signal.aborted && current && graphIsActive(current)) timer = setTimeout(() => void poll(), 2000);
-    };
-    void poll();
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [tenantId, node?.runId, open, current?.status]);
   useEffect(() => {
     if (!open) return;
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
@@ -79,14 +66,8 @@ export function GraphRunPanel({ tenantId, canvasId, readOnly = false }: { tenant
           {current.document?.nodes.find(n => n.id === item.nodeId)?.title || item.nodeId} · {status(item.state)}
         </button>)}</nav>
         {node && <><p>{node.detail && status(node.detail)}</p>{node.output && <details open><summary>{t('节点最终结果', 'Node result')}</summary><pre>{node.output}</pre></details>}</>}
-        <h3>{t('成员发言与审核', 'Member turns & review')}</h3>
-        {turnError !== null && <p role="alert">{saasErrorMessage(turnError, locale)}</p>}
-        {!turns.length && turnError === null && <p>{t('此节点暂无成员协作记录；单 Agent 的对话仍显示在节点中。', 'No team turns for this node yet. Single-agent conversations remain in the node.')}</p>}
-        {turns.map(turn => <article className="saas-team-turn" key={turn.id}>
-          <div><strong>{turn.memberName}</strong><span>{turn.role} · {t('第', 'Round ')}{turn.round}{t('轮', '')} · {status(turn.status)}</span></div>
-          {turn.model && <small>{turn.model}</small>}
-          {turn.output && <pre>{turn.output}</pre>}{turn.error && <p role="alert">{turn.error}</p>}
-        </article>)}
+        {node?.runId ? <TeamRunDetails tenantId={tenantId} runId={node.runId} runStatus={node.state} defaultOpen />
+          : <p>{t('此节点还没有实际调用记录。', 'This node has no model call record yet.')}</p>}
       </>}
     </section>}
   </div>;

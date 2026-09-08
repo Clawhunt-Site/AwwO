@@ -175,6 +175,9 @@ function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass
 export interface SessionTileProps {
   /** SaaS host prepares draft nodes before accepting their first turn. */
   initializeOnSend?: boolean;
+  /** SaaS chat sends the current message; task execution uses the separate contract action. */
+  freeConversation?: boolean;
+  renderTurnDetails?: (turn: Turn, latest: boolean) => ReactNode;
   node: CanvasNode;
   /** View geometry stays separate from persisted workspace dimensions. */
   geometry?: { x: number; y: number; w: number; h: number };
@@ -249,6 +252,8 @@ export function SessionTile({
   onToggleDeliverables,
   onSend,
   conversationContext,
+  freeConversation = false,
+  renderTurnDetails,
   onMove,
   onResizeNode,
   onSelect,
@@ -432,16 +437,17 @@ export function SessionTile({
       : { messagePrefix: '' },
     [node, conversationContext],
   );
+  const conversationError = freeConversation ? undefined : preparedConversation.error;
   const send = useCallback(
     (text: string, onAccepted?: () => void) => {
       if (viewOnlyRef.current || node.kind !== 'session' || interactionLocked) return;
-      if (preparedConversation.error) {
+      if (conversationError) {
         // The composer normally blocks before clearing. Retain the user's text if readiness
         // changes at the send boundary or a host invokes the callback directly.
         setComposerDraft(text);
         return;
       }
-      const message = preparedConversation.messagePrefix
+      const message = !freeConversation && preparedConversation.messagePrefix
         ? `${preparedConversation.messagePrefix}\n\n${t('conversation.userMessageHeader')}\n${text}`
         : text;
       if (onSend) {
@@ -458,7 +464,7 @@ export function SessionTile({
       });
       onAccepted?.();
     },
-    [node, nodeId, onSend, gatewayBase, onIssueId, preparedConversation, currentThread?.id, interactionLocked, t],
+    [node, nodeId, onSend, gatewayBase, onIssueId, preparedConversation, conversationError, freeConversation, currentThread?.id, interactionLocked, t],
   );
 
   const { kindClass, label } = glyphOf(node, locale);
@@ -639,6 +645,7 @@ export function SessionTile({
                 {expanded ? <div className="awwo-chat-heading">
                   {!sessionsOpen ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
                   <span>{currentThread?.title || 'Session 1'}</span>
+                  {freeConversation && onRunNode ? <button type="button" className="awwo-chat-task-action" disabled={viewOnly || busy || interactionLocked} onClick={() => onRunNode(nodeId)}><Play size={13} />{t('conversation.executeTask')}</button> : null}
                   {template ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
                   {!sessionsOpen ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setTemplateOpen(false); }}><ArrowDownToLine size={14} /></button> : null}
                 </div> : null}
@@ -657,10 +664,11 @@ export function SessionTile({
                       {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
                     : <TileTranscript turns={session.turns} history={session.history} streaming={session.streaming}
-                      limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} />}
+                      limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
-                    blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(preparedConversation.error)}
-                    blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : preparedConversation.error || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
+                    notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
+                    blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(conversationError)}
+                    blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : conversationError || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>
               </div>
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>

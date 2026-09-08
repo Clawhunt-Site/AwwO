@@ -28,6 +28,8 @@ export interface Turn {
   role: TurnRole;
   text: string;
   tone?: TurnTone;
+  /** Durable backend run identity for per-member collaboration records. */
+  runId?: string;
 }
 
 /**
@@ -148,6 +150,18 @@ export function patchTurn(nodeId: string, turnId: number, text: string, tone?: T
     if (turn.text === text && turn.tone === tone) return null;
     const turns = session.turns.slice();
     turns[idx] = { ...turn, text, tone };
+    return { ...session, turns };
+  });
+}
+
+/** Attach only to the existing reply: late accepted frames must not resurrect old turns. */
+export function attachTurnRun(nodeId: string, turnId: number, runId: string): void {
+  if (!runId) return;
+  update(nodeId, session => {
+    const index = session.turns.findIndex(turn => turn.id === turnId);
+    if (index < 0 || session.turns[index].runId === runId) return null;
+    const turns = session.turns.slice();
+    turns[index] = { ...turns[index], runId };
     return { ...session, turns };
   });
 }

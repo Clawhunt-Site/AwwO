@@ -16,6 +16,7 @@ export interface RecoveredConversationTurn {
    *  turns are replaced, while renderers continue to use role/text/tone only. */
   recoveryOperationId?: string;
   recoveryRunId?: string;
+  runId?: string;
 }
 
 interface DurableManualTurn {
@@ -117,7 +118,7 @@ function mergeManualRecord(
 ): RecoveredConversationTurn[] {
   const identity = {
     ...(record.operationId ? { recoveryOperationId: record.operationId } : {}),
-    ...(record.runId ? { recoveryRunId: record.runId } : {}),
+    ...(record.runId ? { recoveryRunId: record.runId, runId: record.runId } : {}),
   };
   const reply: RecoveredConversationTurn | null = record.agentText.trim() ? {
     role: 'agent', text: record.agentText,
@@ -126,17 +127,26 @@ function mergeManualRecord(
   } : null;
   const visible = existing.map((turn, index) => ({ turn, index })).filter(item => item.turn.role !== 'system');
   const recoveredIndex = visible.findIndex(({ turn }) => (record.operationId && turn.recoveryOperationId === record.operationId)
-    || (record.runId && turn.recoveryRunId === record.runId));
+    || (record.runId && (turn.runId ?? turn.recoveryRunId) === record.runId));
   if (recoveredIndex >= 0) {
     const recovered = visible[recoveredIndex].turn;
     const user = recovered.role === 'user' ? recovered : visible[recoveredIndex - 1]?.turn;
     if (user?.role === 'user') consumedUsers.add(user);
+    const following = visible[recoveredIndex + 1]?.turn;
+    if (reply && recovered.role === 'user' && (following?.role !== 'agent'
+      || (following.runId && following.runId !== record.runId))) {
+      const merged = [...existing];
+      merged.splice(visible[recoveredIndex].index + 1, 0, reply);
+      return merged;
+    }
     return existing;
   }
   for (let index = 0; index < visible.length; index += 1) {
     const user = visible[index];
     const agent = visible[index + 1];
     if (consumedUsers.has(user.turn) || user.turn.role !== 'user' || user.turn.text !== record.userText) continue;
+    if (record.runId && user.turn.runId && user.turn.runId !== record.runId) continue;
+    if (record.runId && agent?.turn.runId && agent.turn.runId !== record.runId) continue;
     if (agent?.turn.role === 'agent' && record.agentText && agent.turn.text !== record.agentText
       && !(record.state !== 'done' && agent.turn.text.startsWith(record.agentText))) continue;
     // A cancelled run may persist its user message but keep partial stdout only

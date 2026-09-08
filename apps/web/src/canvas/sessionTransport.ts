@@ -161,7 +161,7 @@ export async function restoreHistory({ gatewayBase, node, signal }: RestoreHisto
     finish('loaded');
     return;
   }
-  const merged = mergePersistedManualConversations(node, stored.map((m) => ({ role: m.role, text: m.text })));
+  const merged = mergePersistedManualConversations(node, stored.map((m) => ({ role: m.role, text: m.text, ...(m.runId ? { runId: m.runId } : {}) })));
   if (!merged) {
     finish('unreadable');
     return;
@@ -196,7 +196,7 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
   }
 
   markLocalSend(storeKey);
-  sessions.appendTurn(storeKey, { role: 'user', text: message });
+  const userTurnId = sessions.appendTurn(storeKey, { role: 'user', text: message });
   const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '' });
   sessions.setStreaming(storeKey, true);
   sessions.setStatus(storeKey, 'queued');
@@ -222,6 +222,10 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
     switch (f.event) {
       case 'accepted':
         reportIssue(f.issueId);
+        if (f.runId) {
+          sessions.attachTurnRun(storeKey, userTurnId, f.runId);
+          sessions.attachTurnRun(storeKey, agentTurnId, f.runId);
+        }
         if (!f.runVisible) sessions.patchTurn(storeKey, agentTurnId, COPY.thinking, 'info');
         break;
       case 'delta':

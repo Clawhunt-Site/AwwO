@@ -10,42 +10,42 @@ const COPY = {
     title: '节点协作团队', enable: '启用多 Agent 协作', unavailable: '当前运行环境未提供 Pi 团队执行能力。',
     mode: '协作方式', runtime: '节点默认执行框架', rounds: '最多轮数', turns: '最多模型调用次数', timeout: '节点超时（秒）',
     inherit: '继承节点默认（Pi）', defaultModel: '继承节点已绑定模型', model: '模型', memberRuntime: '执行框架',
-    name: '名称', role: '职责', instructions: '专属指令', context: '可见上下文', task: '仅任务与上游输入', shared: '任务与团队历史',
+    name: '名称', role: '职责', instructions: '专属指令', context: '可见上下文', task: '仅当前任务（含节点输入）', shared: '当前会话历史与本次运行前序成果',
     add: '添加 Agent', remove: '删除 Agent', up: '上移 Agent', down: '下移 Agent', member: 'Agent',
     loading: '正在读取 Pi 模型清单…', failed: 'Pi 模型清单读取失败；确认连接后重试。', retry: '重试模型清单', unknownModel: '当前清单不可用：',
     tools: '当前成员仅能生成文本；工具、文件读写和 Shell 尚不可用。',
-    retained: '原有单 Agent 配置与会话保留。团队仅在节点运行时执行。',
-    contextNote: '上下文选项控制普通执行轮次。汇总、审核及返工阶段会始终接收所需的团队结果和审核意见。',
+    retained: '原有单 Agent 配置与会话保留。手动发送和画布运行都会执行团队；聊天主回复显示最终结果，运行过程可查看每位成员的实际发言。',
+    contextNote: '共享会话历史指当前会话已完成的用户问答与团队最终结果，不包含此前所有成员的发言。仅当前任务不带这些历史或普通前序成果；汇总、审核及返工仍接收必要的团队结果和审核意见。实际提供或截取的内容可在运行过程中查看。',
     budget: '计划最多 {count} 次调用；达到调用次数或超时上限即停止，未完成的结果不会发布给下游。',
     budgetShort: '调用次数上限低于完整流程所需次数，任务可能提前停止。',
     errors: '请修正团队配置后再保存：', invalid: '配置无效',
     modes: { sequential: '顺序执行', parallel: '并行汇总', debate: '多轮讨论', review: '审核与返工' },
     descriptions: {
-      sequential: '成员按列表顺序执行；最后一位产出节点结果。共享上下文的成员可见之前的团队回复。',
+      sequential: '成员按列表顺序执行；全部成功后，最后一位的输出成为节点最终结果。共享上下文可接力读取当前会话历史和本次运行的前序成员成果；仅当前任务则独立处理。',
       parallel: '前面的成员独立并行执行；最后一位等待全部完成，读取各方结果并汇总。',
-      debate: '每轮按列表顺序讨论；完成指定轮数后，由最后一位汇总最终结果。选择共享上下文才能看到其他成员的讨论。',
-      review: '前面的成员依次处理任务，最后一位审核。通过即结束；未通过则把审核意见交回返工，直到通过或达到轮数上限。',
+      debate: '每轮按列表顺序讨论；共享上下文的成员可见已有讨论。完成指定轮数后，最后一位额外汇总，作为节点最终结果。',
+      review: '前面的成员依次处理任务，最后一位审核。审核通过时，其批准的交付成为最终结果；未通过则把审核意见交回返工，直到通过或达到轮数上限。',
     },
   },
   en: {
     title: 'Node collaboration team', enable: 'Enable multiple Agents', unavailable: 'The current runtime does not provide Pi team execution.',
     mode: 'Collaboration mode', runtime: 'Node default harness', rounds: 'Maximum rounds', turns: 'Maximum model calls', timeout: 'Node timeout (seconds)',
     inherit: 'Inherit node default (Pi)', defaultModel: 'Inherit bound node model', model: 'Model', memberRuntime: 'Harness',
-    name: 'Name', role: 'Responsibility', instructions: 'Member instructions', context: 'Visible context', task: 'Task and upstream inputs only', shared: 'Task and team history',
+    name: 'Name', role: 'Responsibility', instructions: 'Member instructions', context: 'Visible context', task: 'Current task only (including node inputs)', shared: 'Current session history and earlier results in this run',
     add: 'Add Agent', remove: 'Remove Agent', up: 'Move Agent up', down: 'Move Agent down', member: 'Agent',
     loading: 'Loading the Pi model catalog…', failed: 'Could not load Pi models. Check the connection and retry.', retry: 'Retry model catalog', unknownModel: 'Unavailable in current catalog: ',
     tools: 'Members currently generate text only. Tools, file access, and Shell are unavailable.',
-    retained: 'The original single-Agent settings and conversations are preserved. Teams execute when the node runs.',
-    contextNote: 'Context preferences apply to ordinary turns. Aggregation, review, and revision always receive the team results and feedback they need.',
+    retained: 'Single-Agent settings and conversations are preserved. Both chat sends and canvas runs execute the team. The main reply shows the final result; run details show each member’s actual response.',
+    contextNote: 'Shared session history includes completed user exchanges and final team replies in this session, not every earlier member response. Task only excludes that history and ordinary earlier results; aggregation, review and revision still receive required team results and feedback. Inspect run details to see the actual included or truncated content.',
     budget: 'Up to {count} planned calls. Reaching the call or timeout limit stops execution; incomplete results are not published downstream.',
     budgetShort: 'The call limit is below the full plan estimate, so execution may stop early.',
     errors: 'Correct the team settings before saving:', invalid: 'Invalid configuration',
     modes: { sequential: 'Sequential', parallel: 'Parallel and aggregate', debate: 'Multi-round discussion', review: 'Review and revise' },
     descriptions: {
-      sequential: 'Members execute in order; the last member produces the node result. Members with shared context see earlier team replies.',
+      sequential: 'Members execute in order. If all succeed, the last member’s output becomes the final node result. Shared context passes along current session history and earlier results in this run; task-only members work independently.',
       parallel: 'Earlier members work independently in parallel. The final member reads all results and aggregates them.',
-      debate: 'Members discuss in order each round. After all rounds, the final member summarizes. Shared context is needed to see other members’ discussion.',
-      review: 'Earlier members work in order, then the final member reviews. Approval ends the run; otherwise review feedback is returned for revision until approval or the round limit.',
+      debate: 'Members discuss in order each round; shared context includes the discussion so far. After all rounds, the final member makes an additional summary that becomes the final node result.',
+      review: 'Earlier members work in order, then the final member reviews. Its approved deliverable becomes the final result; otherwise feedback is returned for revision until approval or the round limit.',
     },
   },
 } as const;
@@ -112,7 +112,7 @@ export function NodeTeamEditor({ node, available, readJson, disabled = false, on
         {NODE_TEAM_MODES.map(mode => <option key={mode} value={mode}>{t.modes[mode]}</option>)}
       </select></label>
       <p className="canvas-inspector-hint">{t.descriptions[team.mode]}</p>
-      {team.mode !== 'sequential' ? <p className="canvas-inspector-hint">{t.contextNote}</p> : null}
+      <p className="canvas-inspector-hint">{t.contextNote}</p>
       <label>{t.runtime}<select className="canvas-inspector-input" value={team.runtime} disabled={disabled}
         onChange={event => edit({ runtime: event.target.value as 'pi' })}><option value="pi">Pi</option></select></label>
       <div className="node-team-limits">

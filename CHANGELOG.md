@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — team conversation history and visible member execution
+
+- **What changed:** Show each member's ordered output and actual input audit beside its conversation reply and in background task records. Preserve run identities through streaming, refresh and failed-run recovery. Share completed exchanges within the same session according to each member's context setting, and apply member persona instructions independently. Separate natural chat from the explicit node-task action.
+- **Why:** The chat showed only the final member, discarded prior team conversation history, and appended stale task forms and JSON contracts to follow-up questions, obscuring whether earlier members ran.
+- **Impact:** Tenant/session boundaries, immutable run snapshots and per-model context limits remain enforced. Chat preserves published deliverables. Required task inputs still gate task execution; old input audits remain explicitly unavailable.
+- **Verification:** Related frontend/canvas 76 files / 753 tests, PostgreSQL race 25 top-level / 27 subcases, Pi 27, protocol stack 1, typecheck, build and vet pass. Five real GPT-5.6 runs / ten member calls verify both personas, handoff, continuous history, new-session isolation and task/chat delivery separation; eight screenshots and exact review status are in [the acceptance report](docs/awwo-team-conversation-acceptance-20260908.md).
+- **Files:** `backend/internal/app/{team_context,teams,runs,graph_runs,resources}.go`, migration 009; `apps/web/src/{canvas,saas}/`, conversation transports and identity/recovery tests; node-team/API documentation and acceptance report.
+
 ### Fixed — automatic SaaS node initialization
 
 - **What changed:** Save node configuration and prepare its real Agent/session in one action; automatically prepare nodes before graph, scoped and conversation execution. Use default Pi/model when omitted, preserve old sessions on configuration changes, and make notices dismissible. Keep SaaS configuration outside the scaled canvas with visible save/close controls in narrow windows.

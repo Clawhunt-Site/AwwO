@@ -7,6 +7,8 @@ import { SaaSPreferencesProvider } from '../src/saas/preferences';
 
 const base = '/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs';
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+const runRecord = (url: string) => /\/runs\/run-[ab]$/.test(url)
+  ? { id: url.endsWith('run-a') ? 'run-a' : 'run-b', tenantId: 'tenant-a', status: url.endsWith('run-a') ? 'completed' : 'running' } : null;
 const graph = (patch: Partial<GraphRunSnapshot> = {}): GraphRunSnapshot => ({
   id: 'graph-a', operationId: 'operation-a', canvasId: 'canvas-a', documentVersion: 8, scope: ['a', 'b'], status: 'running', createdAt: '2026-09-08T03:04:05Z',
   document: { ...emptyDocument(), nodes: [{ ...createSessionNode('llm', { x: 0, y: 0 }), id: 'a', title: 'Research team' }, { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'b', title: 'Delivery team' }] },
@@ -25,6 +27,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
 it('renders actual member rounds, per-agent models, review text and final node output', async () => {
   const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => {
     if (url === base) return json({ items: [graph()] });
+    if (runRecord(url)) return json(runRecord(url));
     if (url === '/api/v1/tenants/tenant-a/runs/run-a/turns') return json({ items: turns });
     if (url === '/api/v1/tenants/tenant-a/runs/run-b/turns') return json({ items: [{ ...turns[0], id: 'delivery-turn', memberName: 'Delivery Kai', output: 'Delivery member response' }] });
     throw new Error(`Unexpected request: ${url}`);
@@ -49,7 +52,7 @@ it('renders actual member rounds, per-agent models, review text and final node o
 });
 
 it('lets a reader inspect active collaboration but never offers Stop or sends a mutation', async () => {
-  const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url === base ? { items: [graph()] } : { items: turns }));
+  const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(runRecord(url) || (url === base ? { items: [graph()] } : { items: turns })));
   vi.stubGlobal('fetch', fetcher); renderPanel(true); openPanel();
   await screen.findByText('Review: verify the cost estimate');
   expect(screen.queryByRole('button', { name: 'Stop entire task' })).toBeNull();
@@ -63,6 +66,7 @@ it('sends an explicit Stop for the selected graph and displays the authoritative
     if (url === `${base}/graph-a/cancel` && init.method === 'POST') { stopped = true; return json({ confirmed: true }); }
     if (url === base) return json({ items: [graph(stopped ? { status: 'cancelled', nodes: [{ nodeId: 'a', state: 'done', output: 'Research consensus from the server' }, { nodeId: 'b', state: 'cancelled', output: 'Delivery partial evidence' }] } : {})] });
     if (url.endsWith('/turns')) return json({ items: turns });
+    if (runRecord(url)) return json(runRecord(url));
     throw new Error(`Unexpected request: ${url}`);
   });
   vi.stubGlobal('fetch', fetcher); renderPanel(); openPanel();
@@ -78,18 +82,18 @@ it('sends an explicit Stop for the selected graph and displays the authoritative
 it('keeps a running graph visible after a rejected Stop instead of reporting cancellation', async () => {
   const fetcher = vi.fn(async (url: string, init: RequestInit = {}) => {
     if (init.method === 'POST') return json({ error: { code: 'forbidden', message: 'Stop forbidden' } }, 403);
-    return json(url === base ? { items: [graph()] } : { items: [] });
+    return json(runRecord(url) || (url === base ? { items: [graph()] } : { items: [] }));
   });
   vi.stubGlobal('fetch', fetcher); renderPanel(); openPanel();
   fireEvent.click(await screen.findByRole('button', { name: 'Stop entire task' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('You do not have permission for this action.');
-  expect(screen.getByRole('status')).toHaveTextContent('Running');
+  expect(screen.getByText('Running', { selector: 'strong' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Stop entire task' })).toBeEnabled();
   expect(screen.getByText('Research consensus from the server')).toBeVisible();
 });
 
 it('detaches observers on panel close and component unmount without cancelling accepted work', async () => {
-  const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url === base ? { items: [graph()] } : { items: turns }));
+  const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(runRecord(url) || (url === base ? { items: [graph()] } : { items: turns })));
   vi.stubGlobal('fetch', fetcher); const view = renderPanel(); openPanel();
   await screen.findByText('First proposal with evidence');
   const turnSignal = fetcher.mock.calls.find(([url]) => url.endsWith('/turns'))![1].signal!;

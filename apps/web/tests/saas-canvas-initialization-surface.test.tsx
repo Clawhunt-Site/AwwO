@@ -82,7 +82,7 @@ it('allows a SaaS draft composer while retaining its text until initialization a
   await act(async () => reject(new Error('Cannot prepare')));
   await screen.findByText('Cannot prepare'); expect(input).toHaveValue('Keep my request'); expect(input).not.toBeDisabled();
 });
-it('explains missing required input on an unbound SaaS node instead of asking for a separate binding', () => {
+it('allows conversation before required task input is filled while keeping explicit task validation', async () => {
   seed(); const document = loadDocumentWithStatus().doc;
   document.nodes[0] = { ...document.nodes[0], contract: { version: 1,
     inputs: [{ id: 'task', label: '任务要求', type: 'text', required: true, value: '' }], outputs: [] } } as SessionNode;
@@ -90,7 +90,9 @@ it('explains missing required input on an unbound SaaS node instead of asking fo
   configureSaaSCanvasInitialize(async () => canonical(loadDocumentWithStatus().doc));
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
   fireEvent.click(screen.getByRole('button', { name: '打开 Draft node', exact: true }));
-  expect(screen.getByTestId('composer-input')).toBeDisabled();
-  expect(screen.getByText('「Draft node」输入未就绪：「任务要求」为必填项。')).toBeInTheDocument();
+  expect(screen.getByTestId('composer-input')).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '执行节点任务' }));
+  await screen.findByText('“Draft node”输入未就绪：任务要求。请补齐必填项并填写有效值。');
+  expect(journalAtSubmission).toBeNull();
   expect(screen.queryByText(/未绑定真实 Agent|先绑定/)).toBeNull();
 });
