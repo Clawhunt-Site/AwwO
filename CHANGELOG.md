@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — automatic SaaS node initialization
+
+- **What changed:** Save node configuration and prepare its real Agent/session in one action; automatically prepare nodes before graph, scoped and conversation execution. Use default Pi/model when omitted, preserve old sessions on configuration changes, and make notices dismissible. Keep SaaS configuration outside the scaled canvas with visible save/close controls in narrow windows.
+- **Why:** Template nodes remained drafts after saving, and the separate binding workflow repeatedly blocked execution with a persistent warning. Narrow-window configuration actions could be covered by the footer; missing task input could be mislabeled as an unbound Agent.
+- **Impact:** Tenant membership, canvas versions and active-run locks govern initialization. Repeated compatible initialization reuses identities; uncertain responses retain drafts and require reconciliation. Existing local runtime behavior remains compatible.
+- **Verification:** Web 1,066, SaaS 200, Go race 48 top-level/45 subcases, Pi 27, launcher 8, local protocol stack 1, typecheck/build and independent review pass. Real browser acceptance covers default preparation, actual GPT-5.6 execution, team configuration and session history; see [acceptance evidence](docs/awwo-node-setup-acceptance-20260908.md). One concurrent Web invitation test timed out; isolated case and final independent full suite passed.
+- **Files:** `backend/internal/app/node_setup.go`, migration 008 and authorization/regression tests; `apps/web/src/{canvas,saas}/`, four new test files; SaaS API, architecture, design standards, development and node-team documentation.
+
 ### Added — node teams and durable graph orchestration
 
 - **What changed:** Add 1–8 configurable members per canvas node, four collaboration modes, independent Pi model profiles, persisted member turns, background graph dispatch, versioned admission and operation cancellation recovery.

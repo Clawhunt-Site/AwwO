@@ -73,6 +73,7 @@
 | POST /canvases | name, document | 创建画布，201 |
 | GET /canvases/{id} | 无 | id, tenantId, name, document, version, createdAt, updatedAt |
 | PUT /canvases/{id} | name, document, version | version 必须是上次读取值；成功递增，陈旧值 409 |
+| POST /canvases/{id}/initialize | documentVersion, scope? | 根据已保存文档准备节点 Agent / Session，200 返回完整 canonical 画布；不执行模型 |
 | DELETE /canvases/{id} | 无 | 成功 204；关联节点或规划 run 为 queued/running 时 409 / resource_in_use，拒绝时不改运行、事件或审计 |
 | POST /canvases/{id}/plan | prompt, context, operationId | 202，创建持久规划 run；空画布也可使用，共享运行限额和 SSE |
 | GET /agents | limit?, cursor? | Pi Agent 列表，`{items,nextCursor,snapshot}` |
@@ -106,6 +107,26 @@ Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructi
 ```
 
 画布 document 的实际前端结构以 `canvas/canvasDoc.ts` 为准，API 外层 version 与 document 自身格式版本不同。
+
+### 节点初始化与配置保存
+
+`POST /tenants/{tenantId}/canvases/{id}/initialize` 只读取已保存画布，不接受另一份 document、Agent 定义或供应商连接信息。请求示例：
+
+```json
+{"documentVersion":12,"scope":["research-node","review-node"]}
+```
+
+`documentVersion` 必填、整数且至少为 1，必须匹配当前 API 外层版本。省略 `scope` 处理全部 session 节点；传入时必须为 1–200 个已有、不重复的 session 节点 ID，空数组、null、form 节点和未知 ID 返回 `400 invalid_scope`。form 节点本身不需要初始化。
+
+Go 在事务中重新检查 member 以上权限、租户 active 状态及画布归属，锁定画布并比较版本。过期版本返回 `409 version_conflict`；当前画布存在 queued/running 的图、节点或规划任务时返回 `409 resource_in_use`。已有 Agent 绑定必须属于当前租户；当前及历史会话还需属于当前画布和节点，并与声明的 Agent 引用一致。伪造或跨范围引用返回 `404 not_found`。选中节点全部成功后才提交，有任一错误则整体回滚。
+
+选中 session 节点时需要 Pi health 可读，失败返回 `503 runtime_unavailable`，健康检查不会执行推理。空 runtime 解析为 `pi`，空 model 解析为 Pi 当前默认模型，非空 model 必须在服务目录；支持 `llm` 与 `coding`，不接受图像类型、其他 runtime 或非空 effort。非法节点、团队或模型返回 `400 invalid_node_setup`。初始化不占用模型调用次数，也不证明供应商真实推理连通。
+
+响应为 `{id,tenantId,name,document,version,createdAt,updatedAt}`。document 回填实际 `runtime/model/binding/issueId/activeThreadId/threads`；客户端必须使用这份 canonical 文档及其版本继续执行。首次准备创建 Agent 与 node Session；与已初始化的有效配置快照相比，名称、类型、模型、人格或团队变化会建立新的 Agent / 当前会话，保留历史身份与消息，清空新会话的旧交付。成员继承值在 `node_sessions.setup_snapshot` 中按实际值比较；仅把“继承”改写为相同显式值不会额外分叉。team 仍为节点级配置，旧 run 的执行快照保持不变。
+
+规范化后的文档无需变化时，初始化返回相同版本，不重复创建 Agent / Session，不仅为了复制新的预览而改写当前 thread。文档变化时版本加一并记录 `canvas.initialized`。这是按当前状态与 CAS 实现的重复调用保护，不提供 operationId 回放：响应丢失后用旧版本重试可能返回 409，应先 GET 核对 canonical 文档。
+
+SaaS 属性面板的“保存并准备运行”先完成画布保存，再调用此接口，成功后关闭；整图、局部运行和节点手动发送也会在执行前准备对应 session 节点，并以返回文档重新预检。浏览器用同一保存队列、工作区身份和执行锁串行处理。明确拒绝保留草稿供修正；网络断开、超时、版本冲突或迟到响应不说明事务未提交，前端保留本地草稿、暂停继续覆盖，要求重新加载核对云端版本。直接调用 runs / graph-runs API 的客户端仍须提供已准备好的有效节点，不自动绕过绑定校验。
 
 ## Session 与运行
 
@@ -161,6 +182,6 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 以上全部要求 platformRole=admin。租户 owner 并不能访问平台后台。每日限额按 UTC 日期计算；降低额度不主动中断正在进行的模型调用，但团队后续成员调用需再次通过准入。暂停租户禁止新增业务写入，并取消当前活跃运行、记录事件；Go 保留历史读取权限，当前 SaaS 暂停页提供切换工作区与退出。恢复不自动重新执行取消过的任务。
 
-reader 可读取原画布、会话及历史；业务写入由 Go 独立拒绝，原 CanvasSurface 的只读模式不发起保存、绑定、运行、规划或恢复写入。reader 仍可保存自己的账号配色；语言和浅深主题是浏览器偏好。
+reader 可读取原画布、会话及历史；业务写入由 Go 独立拒绝，原 CanvasSurface 的只读模式不发起保存、初始化、运行、规划或恢复写入。reader 仍可保存自己的账号配色；语言和浅深主题是浏览器偏好。
 
 当前不提供支付、邮箱验证/找回、OIDC、文件上传下载或工具/工程文件执行。节点团队以 Pi 文本推理为范围；协议 fixture、真实模型、本地浏览器及生产验收须分别报告，实际验收范围以对应日期的报告为准。

@@ -72,6 +72,7 @@ func TestPostgresMutationRechecksAuthorizationAfterBodyWait(t *testing.T) {
 				{"POST", "/sessions", map[string]string{"canvasId": canvas, "nodeId": "node-a", "agentId": agent}},
 				{"POST", "/runs", map[string]string{"sessionId": session, "prompt": "Late run", "operationId": "late-run-operation"}},
 				{"POST", "/canvases/" + canvas + "/plan", map[string]string{"prompt": "Late plan", "context": "Empty plan", "operationId": "late-plan-operation"}},
+				{"POST", "/canvases/" + canvas + "/initialize", map[string]any{"documentVersion": 1}},
 			}
 			type pending struct {
 				gate     *requestGate

@@ -186,6 +186,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases", a.tenant(a.listCanvases, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases", a.tenant(a.createCanvas, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/plan", a.tenant(a.planCanvas, 2))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/initialize", a.tenant(a.initializeCanvas, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.getCanvas, 1))
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.updateCanvas, 2))
 	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.deleteCanvas, 2))

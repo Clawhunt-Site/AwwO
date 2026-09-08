@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LogOut, Plus, ArrowLeft, ShieldCheck, Save } from 'lucide-react';
 import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
-import { configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from './canvasBridge';
+import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
 import { CanvasSurface } from '../canvas/CanvasSurface';
@@ -242,6 +242,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const cacheKey = canvasStorageKey(CANVAS_STORAGE_KEY);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
+    const setupAbort = new AbortController();
+    let initializationQueue: Promise<unknown> = Promise.resolve();
     const flush = async () => {
       while (saving.current && !disposed) await new Promise(resolve => setTimeout(resolve, 20));
       if (failed.current || disposed) throw new Error('画布未同步，请先解决保存错误再运行。');
@@ -276,7 +278,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       if ((event as CustomEvent).detail?.storageKey !== cacheKey) return;
       try {
         const document: CanvasDocument = JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}');
-        if (!saving.current && !pending.current && !draft.current && canonicalCanvasDocumentJSON(document) === canonicalCanvasDocumentJSON(current.current!.document)) return;
+        if (!pending.current && !draft.current && canonicalCanvasDocumentJSON(document) === canonicalCanvasDocumentJSON(current.current!.document)) return;
         pending.current = document;
         draft.current = persistCanvasDraft(storage, writerId, current.current!.version, pending.current!);
       } catch (error) {
@@ -287,8 +289,62 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const leave = (event: BeforeUnloadEvent) => { if (pending.current || saving.current || failed.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('awwo:canvas-cache-write', observe); window.addEventListener('beforeunload', leave);
     configureSaaSCanvasSave(async () => { await flush(); return current.current?.version; });
+    const initialize = async (scope?: readonly string[], signal?: AbortSignal) => {
+      const captured = currentSaaSCanvas();
+      await flush();
+      if (disposed || signal?.aborted || currentSaaSCanvas() !== captured || !current.current) throw new Error('画布初始化已取消。');
+      const before = current.current;
+      const cacheBefore = canonicalCanvasDocumentJSON(JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}'));
+      if (cacheBefore !== canonicalCanvasDocumentJSON(before.document)) throw new Error('画布已在另一页面更新，请重新加载后核对。');
+      saving.current = true;
+      clearTimeout(timer);
+      setSaveState('正在准备节点…');
+      try {
+        // Share autosave's queue. An uncertain POST must never be followed by a stale PUT.
+        const saved = await api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}/initialize`), {
+          method: 'POST', body: JSON.stringify({ documentVersion: before.version, ...(scope ? { scope: [...scope] } : {}) }),
+          signal: AbortSignal.any([setupAbort.signal, AbortSignal.timeout(30000), ...(signal ? [signal] : [])]),
+        });
+        if (disposed || signal?.aborted || currentSaaSCanvas() !== captured) throw new Error('画布初始化已取消。');
+        if (pending.current || draft.current || current.current !== before
+            || Number(storage.getItem('awwo.cloud.version')) !== before.version
+            || canonicalCanvasDocumentJSON(JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}')) !== cacheBefore) {
+          throw new Error('初始化期间画布已变化，本机草稿已保留，请重新加载后核对。');
+        }
+        const payload = saved.document as Partial<CanvasDocument> | null;
+        if (saved.id !== before.id || saved.tenantId !== tenant.id || !Number.isSafeInteger(saved.version) || saved.version < before.version
+            || payload?.version !== 2 || !Array.isArray(payload.nodes) || !Array.isArray(payload.edges)) throw new Error('初始化响应与当前画布不一致。');
+        const document = sanitizeDocument(saved.document);
+        current.current = { ...saved, document };
+        rememberCanvasBaseline(storage, saved.version, document);
+        storage.setItem('awwo.cloud.version', String(saved.version));
+        storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(document));
+        setSaveState('已同步');
+        return document;
+      } catch (error) {
+        // A definitive 4xx rejection did not commit. Lost responses, version conflicts and
+        // late edits instead require reconciliation, preserving the editor's independent draft.
+        const rejected = error instanceof SaaSApiError && ((error.status >= 400 && error.status < 500 && error.code !== 'version_conflict')
+          || (error.status === 503 && ['runtime_unavailable', 'database_unavailable'].includes(error.code)));
+        if (!rejected) {
+          failed.current = true;
+          if (!draft.current) {
+            const local = sanitizeDocument(JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}'));
+            draft.current = persistCanvasDraft(storage, writerId, before.version, local);
+            pending.current = local;
+          }
+          if (!disposed) { setSaveState('需要重新连接'); setError('节点准备结果尚未确认。草稿已保留，请重新加载后核对云端版本，避免重复创建。'); }
+        } else if (!disposed) setSaveState('已同步');
+        throw error;
+      } finally { saving.current = false; }
+    };
+    configureSaaSCanvasInitialize((scope, signal) => {
+      const next = initializationQueue.then(() => initialize(scope, signal));
+      initializationQueue = next.catch(() => {});
+      return next;
+    });
     if (pending.current) timer = setTimeout(() => void flush().catch(() => {}), 450);
-    return () => { disposed = true; configureSaaSCanvasSave(null); clearTimeout(timer); window.removeEventListener('awwo:canvas-cache-write', observe); window.removeEventListener('beforeunload', leave); };
+    return () => { disposed = true; setupAbort.abort(); configureSaaSCanvasSave(null); configureSaaSCanvasInitialize(null); clearTimeout(timer); window.removeEventListener('awwo:canvas-cache-write', observe); window.removeEventListener('beforeunload', leave); };
   }, [record, recovery, tenant.id, canvasId, writerId]);
   const useCloud = () => {
     const storage = scopedStorage.current!;

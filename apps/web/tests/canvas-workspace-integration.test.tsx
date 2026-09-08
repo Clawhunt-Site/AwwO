@@ -122,7 +122,7 @@ it('preserves the server thread while undoing a user edit made before graph exec
   expect(screen.getByRole('button', { name: '撤销', exact: true })).toBeDisabled();
 });
 
-it('explains missing input when the operator runs one configured node', () => {
+it('explains missing input when the operator runs one configured node', async () => {
   const node = createAgentTemplate('data', { x: 0, y: 0 });
   node.runtime = 'claude_local';
   node.binding = { companyId: 'company', agentId: 'agent', agentName: 'Data agent' };
@@ -130,6 +130,6 @@ it('explains missing input when the operator runs one configured node', () => {
   render(<CanvasSurface />);
   fireEvent.click(screen.getByRole('button', { name: '更多节点操作' }));
   fireEvent.click(screen.getByRole('button', { name: '运行节点', exact: true }));
-  expect(screen.getByRole('alert')).toHaveTextContent('业务需求');
+  expect(await screen.findByRole('alert')).toHaveTextContent('业务需求');
   expect(screen.queryByRole('button', { name: /停止/ })).toBeNull();
 });

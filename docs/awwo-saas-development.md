@@ -19,7 +19,7 @@ npm run dev:saas
 
 ## 当前前端入口
 
-SaaS 使用 `apps/web/saas.html → src/saas/main.tsx → SaaSApp`，通过 CloudCanvas 复用原 `CanvasSurface / AgentWorkspace / SessionTile`，不需要历史 `server/ui` 安装。reader 同样打开原画布，浏览节点、历史会话和导出 JSON，写入、绑定、规划及运行入口禁用；只读缓存不覆盖编辑草稿。
+SaaS 使用 `apps/web/saas.html → src/saas/main.tsx → SaaSApp`，通过 CloudCanvas 复用原 `CanvasSurface / AgentWorkspace / SessionTile`，不需要历史 `server/ui` 安装。reader 同样打开原画布，浏览节点、历史会话和导出 JSON，写入、初始化、规划及运行入口禁用；只读缓存不覆盖编辑草稿。
 
 顶部账户按钮打开原 `CanvasAccountControl / AccountWorkspacePanel`，已接显示名称编辑、已注册邮箱添加成员、角色变更/移除和邀请创建/复制/撤销。SaaS 只显示当前 Go 工作区身份。邀请链接在登录或注册后保留，需受邀人明确确认加入；注册仍先创建其个人工作区。owner/admin 的角色范围由 Go 再次校验，复制链接不发送邮件。
 
@@ -63,7 +63,11 @@ AWWO_REVIEWER_API_KEY=YOUR_PRIVATE_KEY
 
 需要可重复的本地负向验收时，使用 `node scripts/awwo-saas-browser-fixture.mjs --start`。输出的 0600 credentials 文件含随机管理员与控制 token；`scripts/awwo-saas-fixture-control.mjs --credentials <file> --rules <json>` 只为该 fixture 设置一次性精确方法/路径故障。Go API 和生产部署不加载此控制器。支持非法规划、上游 503/断连、HTTP 失败/延迟和 SSE 断连，普通请求仍经过实际 Go/Pi。详见 [整改验收记录](awwo-fable-remediation-20260907.md)。
 
-原画布规划助手在点击“生成画布”后提交持久规划 run；合法结果自动应用并显示“已更新画布”，支持撤销，没有额外应用确认按钮。planner 尚不创建或修改 team。SaaS 整图运行则先保存画布，再提交固定文档版本及 scope，由 Go 持久调度；关闭页面后已受理图继续运行，后台记录面板可查询节点与成员结果。原本机模式仍由浏览器 runGraph 调度。
+原画布规划助手在点击“生成画布”后提交持久规划 run；合法结果自动应用并显示“已更新画布”，支持撤销，没有额外应用确认按钮。planner 尚不创建或修改 team。SaaS 整图运行先保存画布、初始化节点身份，再提交 canonical 文档版本及 scope，由 Go 持久调度；关闭页面后已受理图继续运行，后台记录面板可查询节点与成员结果。原本机模式仍由浏览器 runGraph 调度。
+
+SaaS 属性面板编辑名称、人格、模型后点击“保存并准备运行”即可，不再另选公司或绑定 Agent。runtime/model 留空使用服务默认 Pi/模型；当前只能选择文本或编程任务，图像禁用。保存及首次整图、局部运行、手动会话发送都会调用 `POST canvases/{id}/initialize`，先准备 Agent / Session 再进行运行校验。初始化只探测 Pi health 和写数据库，不调用模型；配置健康与真实推理仍分别验收。
+
+重复初始化使用当前版本且有效文档未变时，不重复建 Agent / Session 或提升版本；有效模型、人格、类型、名称及 team 变化会建立新当前会话，旧历史仍保留。迁移 008 保存有效初始化快照。后端拒绝 reader、跨租户/画布引用、陈旧版本，以及存在活动图/节点/规划任务的初始化请求。属性面板等待期间锁定控件；明确拒绝时修正草稿再保存。若提示“节点准备结果尚未确认”，保留或导出本地草稿，重新加载核对云端版本与会话后继续，不反复点击创建，也不把旧草稿覆盖未知的新状态。完整字段见 [API 初始化契约](awwo-saas-api.md#节点初始化与配置保存)。
 
 节点属性中启用团队，配置 1–8 位成员并保存；review 至少 2 位。顺序模式按序一次，parallel 前 N−1 位独立执行后由最后一位汇总，debate 按轮次讨论后额外总结，review 每轮执行者工作后由最后一位给出严格 JSON 批准/返工。maxTurns 是调用次数上限，不是 token 或货币预算；timeoutSeconds 与 Go/Pi 外层超时共同限制执行。精确上下文、调用估算及审核格式以节点团队设计为准。
 
@@ -143,7 +147,7 @@ node scripts/awwo-saas-browser-fixture.mjs --start
 
 启动成功打印 `webURL`、`apiURL`、`piURL`、`requestSummaryURL`、`requestSummaryFile` 和临时 schema。打开打印的 webURL，注册专用测试账号；固定模型名为 `awwo-protocol-fixture`，此临时实例不 bootstrap 平台管理员。可从原入口执行：
 
-1. 输入需求并“生成画布”：fixture 返回两节点、一连接的合法计划，原前端校验后自动应用；分别绑定该固定模型并设置人格，再运行整图。
+1. 输入需求并“生成画布”：fixture 返回两节点、一连接的合法计划，原前端校验后自动应用；在节点配置中选择该固定模型、设置人格并“保存并准备运行”，再运行整图；也可使用服务默认模型，在首次运行时自动初始化。
 2. 节点会话发送 `first-turn`、`second-turn`，检查历史和人格进入同一 session；运行结果中的字符串、number、boolean、file 等类型来自固定协议规则，不是模型理解能力。
 3. 提示中加入 `[fixture:slow]`，获得约 15 秒刷新恢复窗口；加入 `[fixture:hold]`，收到部分输出后等待在原 UI 明确取消，再在同一会话继续运行。
 4. 通过打印的摘要地址或临时 `requests.jsonl` 对照模型名、角色顺序、文本长度、SHA256 与截取的测试文本；它不保存请求 headers、API key 或数据库 DSN。只输入专用测试内容。

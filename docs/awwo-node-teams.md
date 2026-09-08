@@ -11,7 +11,8 @@
 ```mermaid
 flowchart TD
   UI[原画布与节点属性] --> Save[Go 画布版本 CAS 保存]
-  Save --> Graph[Go 接收固定文档版本与 scope]
+  Save --> Setup[Go 按版本初始化 Agent 与会话]
+  Setup --> Graph[Go 接收 canonical 文档版本与 scope]
   Graph --> DB[(PostgreSQL 图任务与节点状态)]
   DB --> DAG[Go 依赖检查与节点派发]
   DAG --> Single[单 Agent 运行]
@@ -30,7 +31,9 @@ SaaS 的整图、选中节点及重跑请求交给 Go 调度；浏览器负责�
 
 ## 2. 配置契约
 
-`SessionNode.team` 是可选字段，随原画布 JSON 保存、导出和恢复。原 `binding`、人格、模型和会话身份继续保留，开启团队仍需有效的主 Agent 绑定。删除 `team` 恢复原单 Agent 模式，不删除单 Agent 配置。团队是节点级配置，切换历史会话不会切换一份独立团队配置。
+`SessionNode.team` 是可选字段，随原画布 JSON 保存、导出和恢复。执行仍需有效的主 Agent 和会话身份，SaaS 通过“保存并准备运行”自动准备，用户无需再选择公司或点击绑定；运行图、局部运行和手动发送也会先初始化对应节点。空 runtime/model 由 Pi 服务默认值补齐，团队成员空模型继承准备后的主 Agent 模型。删除 `team` 恢复单 Agent 模式，不删除单 Agent 配置。
+
+初始化将有效团队配置纳入 `node_sessions.setup_snapshot`。与已初始化快照相比，团队、人格、模型等有效配置变化会创建新的 Agent / 当前会话，清空当前旧交付并保留历史 Agent、会话、消息及 run 快照；“继承”与相同显式模型/runtime 按解析后的值比较。团队仍是节点级配置，切换历史会话不会切换一份独立团队配置，也不会改写旧 run 的执行快照。
 
 以下为可保存的示例，模型空值继承该节点已绑定主 Agent 的持久模型；主 Agent 自身使用默认模型时，再解析为服务端默认模型：
 
@@ -121,6 +124,7 @@ Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继
 | 方法与路径 | 请求 / 响应及边界 |
 | --- | --- |
 | `PUT T/canvases/{canvasId}` | 沿用 `{name, document, version}` CAS 保存；`document.nodes[].team` 保存配置，无独立团队 CRUD API |
+| `POST T/canvases/{canvasId}/initialize` | 必填 `{documentVersion, scope?}`；按已保存配置准备 Agent / Session 并返回 canonical 画布，不执行模型；scope 省略为全部 session，传入则为 1–200 个不重复的已保存 session 节点 ID |
 | `POST T/runs` | 原 `{sessionId, prompt, operationId}`；普通节点会话也从保存的节点读取 team，受理后冻结执行快照。未设置 team 沿用单 Agent |
 | `GET T/runs/{id}/turns` | `{items: [...]}`，按 `ordinal` 排序，最多受该次团队 64 调用上限约束；普通单 Agent 无成员记录 |
 | `POST T/canvases/{canvasId}/graph-runs` | `{operationId, scope?, documentVersion?}`；首次受理 `202`，相同幂等请求返回原任务 `200` |
@@ -135,11 +139,15 @@ Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继
 {"operationId":"graph-client-operation-001","scope":["research-node","review-node"],"documentVersion":12}
 ```
 
-`operationId` 为 8–200 字节，在租户与画布内唯一；相同操作 ID 的 scope/版本参数必须一致，否则 `409 idempotency_conflict`。省略 scope 表示全图，空数组不合法；scope 必须是已有且不重复的节点 ID，不自动扩展为全部祖先。API 兼容省略 documentVersion，此时使用受理瞬间最新文档；SaaS UI 必须先确认保存，再携带实际版本，过期返回 `409 version_conflict`。同一画布一次只允许一个 queued/running 图任务（`409 graph_busy`）。请求不上传另一份任意执行文档。
+图运行的 `operationId` 为 8–200 字节，在租户与画布内唯一；相同操作 ID 的 scope/版本参数必须一致，否则 `409 idempotency_conflict`。省略 scope 表示全图，空数组不合法；scope 必须是已有且不重复的节点 ID，不自动扩展为全部祖先。图 API 兼容省略 documentVersion，此时使用受理瞬间最新文档；SaaS UI 必须先确认保存及初始化，再携带 canonical 文档的实际版本，过期返回 `409 version_conflict`。同一画布一次只允许一个 queued/running 图任务（`409 graph_busy`）。请求不上传另一份任意执行文档。
+
+初始化接口独立要求 documentVersion，并复验租户权限、Agent / 会话归属和画布 CAS；当前画布存在 queued/running 图、节点或规划任务时返回 `409 resource_in_use`。原子提交失败不留下半套身份；规范化文档未变化则不增版本或重复建资源。它没有 operationId 回放语义：响应丢失或版本冲突时前端保留草稿、暂停覆盖，重新加载核对云端版本后再继续。Pi health 不可用会明确拒绝准备；初始化成功不代表真实推理或工具沙箱已可用。
 
 图响应字段为 `id, canvasId, operationId, documentVersion, document, scope, status, error, createdAt, updatedAt, nodes`。每个节点有 `nodeId, state, output, detail, runId, sessionId`；尚未派发的节点可以没有 runId。成员记录包含 `id, memberId, memberName, role, round, ordinal, status, output, error, model, runtime, config, createdAt, updatedAt`；config 为该次调用已解析的公开成员配置，不含供应商秘密。
 
 迁移 `007_node_teams_graph_runs.sql` 为 `runs` 增加 `team_snapshot`、`execution_snapshot`、`actor_id`，并新增 `run_turns`、`model_invocations`、`graph_runs`、`graph_run_nodes`、`graph_operation_cancellations`。图受理事务保存固定 document/version/scope 和每个节点的 Agent/团队执行快照；后续修改配置不改写已受理任务。旧 run 迁移为历史调用计数，不重放历史请求。
+
+迁移 `008_node_setup_snapshot.sql` 为 `node_sessions` 增加有效初始化配置快照，初始化逻辑见 [node_setup.go](../backend/internal/app/node_setup.go)，完整请求与错误见 [API 初始化契约](awwo-saas-api.md#节点初始化与配置保存)。
 
 ## 6. 依赖、失败与恢复
 

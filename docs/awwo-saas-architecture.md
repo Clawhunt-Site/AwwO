@@ -1,6 +1,6 @@
 # AwwO Go + Pi 多租户 SaaS 架构
 
-初始设计：2026-09-07；节点团队与后台整图更新：2026-09-08。初始基线为 Forgejo `ClawHunt-Store/AwwO` 的 `main@6e1dc158a79e2f18c7bdf82610a353883b883f31`（0.3.0）；当前增强分支为 `codex/awwo-node-teams-20260908`。本文记录实现契约，本轮最终 SHA 与实测结果由独立验收报告记录；此前结果见 [本地验收](awwo-saas-verification.md)及[真实模型验收](awwo-real-provider-acceptance-20260908.md)，不自动覆盖新增团队能力。
+初始设计：2026-09-07；节点团队、后台整图与节点初始化更新：2026-09-08。初始基线为 Forgejo `ClawHunt-Store/AwwO` 的 `main@6e1dc158a79e2f18c7bdf82610a353883b883f31`（0.3.0）；节点初始化工作分支为 `codex/awwo-node-setup-20260908`，基于 `d0fb9a7`。本文记录实现契约，本轮最终 SHA 与实测结果由独立验收报告记录；此前结果见 [本地验收](awwo-saas-verification.md)及[真实模型验收](awwo-real-provider-acceptance-20260908.md)，不自动覆盖新增能力。
 
 执行约束见 [设计与开发规范](awwo-saas-design-standards.md)；原页面功能、接口映射、实际覆盖与待补差距见 [前端逐项对接清单](awwo-saas-frontend-contract.md)。后端交付以现有前端的操作和数据契约为验收依据。
 
@@ -70,6 +70,8 @@ Cookie 为 HttpOnly、SameSite，staging/production 必须 Secure。写请求验
 
 核心实体：`users`、`tenants`、`memberships`、`auth_sessions`、`tenant_invites`、`canvases`、`agents`、`node_sessions`、`messages`、`runs`、`run_events`、`audit_events`、`user_appearance`。迁移 007 增加 `graph_runs`、`graph_run_nodes`、`run_turns`、`model_invocations`、`graph_operation_cancellations`，并在 runs 保存团队、执行配置与发起人快照。具体结构以 `backend/internal/app/migrations/` 为准。
 
+迁移 008 为 `node_sessions` 增加 `setup_snapshot`，记录初始化时的有效名称、类型、Pi runtime、模型、人格及团队。Go 的 `POST canvases/{id}/initialize` 在同一事务内完成权限复验、画布行锁/CAS、活动任务检查、Agent / Session 准备和 canonical 文档回填。配置改变时另建当前会话并保留旧 Agent、消息和会话；没有实际文档变化的重复初始化不增版本、不重复建资源。任一选中节点失败则事务回滚，跨租户或跨画布会话不能被复用。
+
 六类租户资源列表使用与管理列表相同的签名游标机制，并绑定账号、租户及规范化查询过滤。成员在迁移 005 中增加不可变创建时间，列表按创建时间与 ID 排序，避免画布改名改变页次。前端每页 50 条并在范围切换时中止旧读取；会话恢复可以按 sessionId 精确查询。创建时间边界不是数据库一致性快照。
 
 账号配色由迁移 006 的 `user_appearance` 持久化，使用版本 CAS，与租户业务文档分开。前端复用原配色弹窗与固定预设/token 目录，只应用当前登录账号返回的配置；切换账号清除旧样式。连续颜色输入串行写入，冲突提示重新加载，原 JSON 导入导出格式不包含身份、版本、秘密或自定义 CSS。语言与浅深主题仍属于浏览器偏好。
@@ -108,6 +110,10 @@ SaaS 整图运行由 Go 接收固定 document/version/scope，持久化 DAG 与�
 公共版本前缀为 `/api/v1`。基础分组 auth、tenants/members/invites、canvases、agents、sessions/messages、runs/events/cancel、runtime 及 admin 的契约见 [API v1](awwo-saas-api.md)。新增 `canvases/{id}/graph-runs` 创建/读取/取消、按 operationId 取消和 `runs/{id}/turns` 的请求、状态及错误见 [节点团队 API](awwo-node-teams.md#5-api-与持久状态)。
 
 用户端使用独立 SaaS 入口复用 `CanvasSurface`；`saas/graphRuns.ts` 将 Go 图快照适配为原节点状态与恢复 journal，`GraphRunPanel` 查询后台图与成员记录，原会话 transport 保持兼容。管理页面通过相同登录会话但独立平台权限访问 Go 管理端点。SaaS 编译不依赖整个历史 `server/ui` 工作区。
+
+SaaS 节点配置采用“保存并准备运行”：在当前工作区保存草稿后，携带已确认的 `documentVersion` 和节点 scope 请求初始化，使用返回的 canonical 文档继续操作，不再要求用户另外选择公司并绑定。未指定 runtime/model 时由 Pi 服务默认值补齐；图像和工具执行尚不支持。整图、局部运行及节点手动发送同样在执行前初始化，随后验证真实输入、连线、团队和身份，再受理运行。初始化只有健康探测及数据库操作，没有模型调用；原本机入口保留旧绑定/浏览器调度流程。
+
+初始化与 autosave 共用串行保存队列，CanvasSurface 使用浏览器执行所有权锁和同步关闭锁防止同页重复及跨页冲突。期间控件锁定，失败保留草稿，成功才关闭配置。响应不确定、版本冲突或工作区切换时不能把旧草稿继续 PUT 到未知的新版本，也不能按空 binding 盲建第二个 Agent；应保留本地副本、重新加载并核对云端状态。后台 CAS、租户检查和活动任务锁仍独立生效，不依赖浏览器锁授予权限。
 
 原 AI 画布助手通过 `canvases/{id}/plan` 创建受租户配额约束、可审计的规划 run。Go 在完成并验证 JSON/操作后返回规范化计划，前端复用原规划上下文、模板 schema、JSON 解析及图结构校验；合法结果直接应用、显示“已更新画布”并提供“撤销本次更改”，没有第二个应用确认按钮。模型错误、结构错误或过期结果不能应用到当前画布。规划不是临时旁路模型调用。
 

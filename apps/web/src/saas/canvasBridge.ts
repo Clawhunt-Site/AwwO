@@ -1,13 +1,23 @@
 import { api, API_BASE, tenantPath, type Tenant } from './api';
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText } from './canvasErrors';
+import type { CanvasDocument } from '../canvas/canvasDoc';
 
 type CanvasScope = { tenant: Tenant; canvasId: string };
 let active: CanvasScope | null = null;
+let initializeCanvas: ((scope?: readonly string[], signal?: AbortSignal) => Promise<CanvasDocument>) | null = null;
+export function configureSaaSCanvasInitialize(initialize: typeof initializeCanvas): void { initializeCanvas = initialize; }
+export async function initializeSaaSCanvas(scope?: readonly string[], signal?: AbortSignal): Promise<CanvasDocument> {
+  const captured = active;
+  if (!captured || !initializeCanvas) throw new Error(canvasText('画布初始化尚未就绪，请稍后重试。', 'Canvas setup is not ready. Please try again.'));
+  const document = await initializeCanvas(scope, signal);
+  if (active !== captured || signal?.aborted) throw new Error(canvasText('工作区已切换，请在当前画布重新运行。', 'The workspace changed. Run from the current canvas.'));
+  return document;
+}
 let saveCanvas: (() => Promise<number | void>) | null = null;
 export function configureSaaSCanvas(scope: CanvasScope): void { active = scope; }
 export function configureSaaSCanvasSave(save: (() => Promise<number | void>) | null): void { saveCanvas = save; }
-export function clearSaaSCanvas(): void { active = null; }
+export function clearSaaSCanvas(): void { active = null; saveCanvas = null; initializeCanvas = null; }
 /** Capture a tenant/canvas scope once; an in-flight operation must not follow a workspace switch. */
 export function currentSaaSCanvas(): CanvasScope | null { return active; }
 export async function flushSaaSCanvas(): Promise<number | void> {
@@ -52,6 +62,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
     if (path === '/canvas/plan' && method === 'POST') {
       if (!saveCanvas) return json({ error: canvasText('画布保存尚未就绪', 'Canvas saving is not ready.') }, 409);
       await saveCanvas();
+      if (active !== scope || init.signal?.aborted) throw new Error(canvasText('工作区已切换或操作已取消。', 'The workspace changed or the operation was cancelled.'));
       const operationId = crypto.randomUUID();
       const run = await post(`/canvases/${encodeURIComponent(scope.canvasId)}/plan`, { prompt: body.prompt, context: body.context, operationId });
       const cancel = () => { void api(`${base}/runs/${encodeURIComponent(run.id)}/cancel`, { method: 'POST', body: '{}' }).catch(() => {}); };
@@ -132,6 +143,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       if (decodeURIComponent(send[1]) !== scope.tenant.id) return json({ error: canvasText('租户与当前画布不一致', 'The workspace does not match the current canvas.') }, 403);
       if (!saveCanvas) return json({ error: canvasText('画布保存尚未就绪', 'Canvas saving is not ready.') }, 409);
       await saveCanvas();
+      if (active !== scope || init.signal?.aborted) throw new Error(canvasText('工作区已切换或操作已取消。', 'The workspace changed or the operation was cancelled.'));
       const operationId = body.operationId || crypto.randomUUID();
       const existing = (await request(`/runs?operationId=${encodeURIComponent(operationId)}`)).items[0];
       let sessionId = existing?.sessionId || body.issueId;

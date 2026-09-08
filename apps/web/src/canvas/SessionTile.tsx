@@ -173,6 +173,8 @@ function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass
 }
 
 export interface SessionTileProps {
+  /** SaaS host prepares draft nodes before accepting their first turn. */
+  initializeOnSend?: boolean;
   node: CanvasNode;
   /** View geometry stays separate from persisted workspace dimensions. */
   geometry?: { x: number; y: number; w: number; h: number };
@@ -229,6 +231,7 @@ export interface SessionTileProps {
 
 export function SessionTile({
   node: sourceNode,
+  initializeOnSend = false,
   geometry,
   compact = false,
   scale,
@@ -583,7 +586,7 @@ export function SessionTile({
           <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenuOpen(false); } }}>
             {onToggleFocus ? <button type="button" onClick={() => { onToggleFocus(nodeId); setMenuOpen(false); }}><Maximize2 size={14} />{t('tile.focus')}</button> : null}
-            {onRunNode ? <button type="button" disabled={viewOnly || busy || !node.binding} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
+            {onRunNode ? <button type="button" disabled={viewOnly || busy || (!node.binding && !initializeOnSend)} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
             {onDelete ? <button type="button" disabled={viewOnly || busy} onClick={() => { if (!viewOnlyRef.current) onDelete(nodeId); }}><Trash2 size={14} />{t('tile.delete')}</button> : null}
           </div> : null}
         </div> : null}
@@ -591,7 +594,7 @@ export function SessionTile({
           <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu">
             {onConfigure ? <button type="button" disabled={busy} onClick={() => { onConfigure(nodeId); setMenuOpen(false); }}><Settings2 size={14} />{t('tile.configure')}</button> : null}
-            {onRunNode ? <button type="button" disabled={viewOnly || busy || (node.kind === 'session' && !node.binding)} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
+            {onRunNode ? <button type="button" disabled={viewOnly || busy || (node.kind === 'session' && !node.binding && !initializeOnSend)} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
             {onDelete ? <button type="button" disabled={viewOnly || busy} onClick={() => { if (!viewOnlyRef.current) onDelete(nodeId); }}><Trash2 size={14} />{t('tile.delete')}</button> : null}
           </div> : null}
         </div> : null}
@@ -650,14 +653,14 @@ export function SessionTile({
                   </section> : session.turns.length === 0 && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming ?
                     <div className="awwo-node-empty" data-template={template?.id}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
-                      <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding ? 'tile.startBound' : 'tile.startUnbound')}</span>
+                      <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound')}</span>
                       {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
                     : <TileTranscript turns={session.turns} history={session.history} streaming={session.streaming}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
-                    blocked={viewOnly || interactionLocked || !node.binding || (!onSend && !gatewayBase) || Boolean(preparedConversation.error)}
-                    blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding ? undefined : preparedConversation.error || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
+                    blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(preparedConversation.error)}
+                    blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : preparedConversation.error || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>
               </div>
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
