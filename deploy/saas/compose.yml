@@ -19,6 +19,10 @@ services:
     build:
       context: ../..
       dockerfile: deploy/saas/pi.Dockerfile
+    # Only the Pi container receives these optional profile-specific credentials.
+    env_file:
+      - path: ${AWWO_PI_PROFILES_ENV_FILE:-./pi-profiles.env}
+        required: false
     environment:
       AWWO_PI_HOST: 0.0.0.0
       AWWO_PI_PORT: 8097
@@ -27,6 +31,7 @@ services:
       AWWO_PI_MODEL: ${AWWO_PI_MODEL:-}
       AWWO_PI_BASE_URL: ${AWWO_PI_BASE_URL:-}
       AWWO_PI_API_KEY: ${AWWO_PI_API_KEY:-}
+      AWWO_PI_MODELS_JSON: ${AWWO_PI_MODELS_JSON:-}
       AWWO_PI_MAX_CONCURRENCY: ${AWWO_PI_MAX_CONCURRENCY:-4}
       AWWO_PI_CONTEXT_WINDOW: ${AWWO_PI_CONTEXT_WINDOW:-32768}
       AWWO_PI_MAX_TOKENS: ${AWWO_PI_MAX_TOKENS:-4096}

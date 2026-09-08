@@ -4,7 +4,7 @@ import { access, mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, validateRequest } from './config.mjs';
+import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { startIsolatedRun, workerEnvironment } from './runner.mjs';
 import { createPiServer } from './server.mjs';
 
@@ -25,7 +25,7 @@ async function close(server) {
   await done;
 }
 
-async function provider(t, { mode = 'success', protocol = 'openai' } = {}) {
+async function provider(t, { mode = 'success', protocol = 'openai', beforeReply } = {}) {
   const requests = [];
   let notifyRequest;
   const received = new Promise((resolve) => { notifyRequest = resolve; });
@@ -35,6 +35,7 @@ async function provider(t, { mode = 'success', protocol = 'openai' } = {}) {
     const body = JSON.parse(Buffer.concat(chunks).toString());
     requests.push({ body, headers: req.headers, url: req.url });
     notifyRequest();
+    await beforeReply?.();
     if (mode === 'error') {
       res.writeHead(401, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: { type: 'authentication_error', message: 'private-provider-key-and-internal-path' } }));
@@ -99,10 +100,166 @@ test('configuration requires real model settings and a strong internal token; he
   assert.equal(publicHealth(loadConfig(ENV)).modelConnectivityVerified, false);
 });
 
-test('request schema rejects runtime overrides, path traversal, non-text input, and excessive history', () => {
-  for (const extra of ['model', 'provider', 'baseURL', 'apiKey', 'tools', 'cwd', 'extensions', 'env']) {
+test('model catalog preserves the default, resolves only IDs, and exposes safe model-specific limits', () => {
+  const profile = { id: 'reviewer', provider: 'anthropic', model: 'review-model', baseURL: 'https://model-endpoint.example', apiKeyEnv: 'REVIEW_KEY', contextWindow: 8192, maxTokens: 512 };
+  const config = loadConfig({ ...ENV, REVIEW_KEY: 'catalog-provider-secret', AWWO_PI_MODELS_JSON: JSON.stringify([profile]) });
+  assert.equal(config.ready, true);
+  assert.equal(resolveModelConfig(config).model, ENV.AWWO_PI_MODEL);
+  assert.equal(resolveModelConfig(config, ENV.AWWO_PI_MODEL).apiKey, ENV.AWWO_PI_API_KEY);
+  assert.equal(resolveModelConfig(config, 'reviewer').apiKey, 'catalog-provider-secret');
+  assert.throws(() => resolveModelConfig(config, 'review-model'));
+  assert.throws(() => resolveModelConfig(config, 'unknown-model'));
+  assert.ok(Object.isFrozen(config.models));
+  assert.ok(config.models.every(Object.isFrozen));
+  const health = publicHealth(config);
+  assert.equal(health.model, ENV.AWWO_PI_MODEL);
+  assert.deepEqual(health.models[1], {
+    id: 'reviewer', name: 'review-model', provider: 'anthropic', runtime: 'pi',
+    contextWindow: 8192, maxOutputTokens: 512, maxContextTextBytes: 7424, messageOverheadBytes: 32,
+  });
+  const serialized = JSON.stringify(health);
+  for (const secret of [TOKEN, ENV.AWWO_PI_API_KEY, 'catalog-provider-secret', profile.baseURL, 'REVIEW_KEY', 'apiKey', 'baseURL']) {
+    assert.equal(serialized.includes(secret), false);
+  }
+  const unavailable = loadConfig({ ...ENV, AWWO_PI_MODELS_JSON: JSON.stringify([profile]) });
+  assert.equal(unavailable.ready, false);
+  assert.equal(publicHealth(unavailable).status, 'unconfigured');
+  assert.ok(unavailable.missing.includes('AWWO_PI_MODELS_JSON_CREDENTIALS'));
+  assert.equal(loadConfig({ ...ENV, AWWO_PI_MODELS_JSON: '[]' }).models.length, 1);
+});
+
+test('malformed catalog configuration fails closed with a redacted diagnostic', () => {
+  const profile = { id: 'reviewer', provider: 'openai', model: 'review-model', apiKeyEnv: 'REVIEW_KEY' };
+  const invalidProfiles = [
+    null, [], 'profile', { ...profile, id: '' }, { ...profile, id: ENV.AWWO_PI_MODEL },
+    { ...profile, provider: ['openai'] }, { ...profile, provider: 'untrusted' },
+    { ...profile, apiKey: 'EMBEDDED_SECRET' }, { ...profile, token: 'EMBEDDED_SECRET' },
+    { ...profile, apiKeyEnv: 'KEY=EMBEDDED_SECRET' }, { ...profile, apiKeyEnv: null },
+    { ...profile, apiKeyEnv: undefined }, { ...profile, model: 'bad\nmodel' },
+    { ...profile, baseURL: 'file:///private/EMBEDDED_SECRET' },
+    { ...profile, baseURL: 'https://user:EMBEDDED_SECRET@example.com/v1' },
+    { ...profile, baseURL: 'https://example.com/v1?key=EMBEDDED_SECRET' },
+    { ...profile, baseURL: 'https://example.com/v1#EMBEDDED_SECRET' },
+    { ...profile, baseURL: 'https://example.com/\nEMBEDDED_SECRET' },
+    { ...profile, baseURL: 'https:example.com/v1' },
+    { ...profile, baseURL: '' }, { ...profile, contextWindow: '8192' },
+    { ...profile, contextWindow: 4095 }, { ...profile, maxTokens: 127 },
+    { ...profile, contextWindow: 4096, maxTokens: 4096 },
+  ];
+  for (const serialized of ['{EMBEDDED_SECRET', '{}', 'null', JSON.stringify([profile, profile]), JSON.stringify(Array(33).fill(profile)), ...invalidProfiles.map(value => JSON.stringify([value]))]) {
+    assert.throws(() => loadConfig({ ...ENV, REVIEW_KEY: 'catalog-provider-secret', AWWO_PI_MODELS_JSON: serialized }), (error) => {
+      assert.match(error.message, /^AWWO_PI_MODELS_JSON must contain/);
+      assert.equal(error.message.includes('EMBEDDED_SECRET'), false);
+      assert.equal(error.message.includes('catalog-provider-secret'), false);
+      return true;
+    });
+  }
+});
+
+test('HTTP rejects unknown models and unavailable catalog credentials before a child or provider starts', async (t) => {
+  let starts = 0;
+  const app = createPiServer(loadConfig(ENV), { startRun: async () => { starts++; } });
+  const url = await listen(app.server);
+  t.after(() => app.close());
+  const headers = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  for (const [model, code] of [['missing-model', 'MODEL_NOT_FOUND'], ['invalid model', 'INVALID_INPUT'], ['', 'INVALID_INPUT']]) {
+    const response = await fetch(`${url}/internal/runs`, { method: 'POST', headers, body: JSON.stringify({ ...REQUEST, model }) });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, code);
+  }
+  assert.equal((await (await fetch(`${url}/health`)).json()).activeRuns, 0);
+  assert.equal(starts, 0);
+  const unavailable = createPiServer(loadConfig({ ...ENV, AWWO_PI_MODELS_JSON: JSON.stringify([{ id: 'review', provider: 'openai', model: 'review-model', apiKeyEnv: 'MISSING_KEY' }]) }), { startRun: async () => { starts++; } });
+  const unavailableURL = await listen(unavailable.server);
+  t.after(() => unavailable.close());
+  assert.equal((await fetch(`${unavailableURL}/health`)).status, 503);
+  assert.equal((await fetch(`${unavailableURL}/internal/runs`, { method: 'POST', headers, body: JSON.stringify(REQUEST) })).status, 503);
+  assert.equal(starts, 0);
+});
+
+test('concurrent catalog profiles reach separate real Pi providers with independent credentials and output capacity', { timeout: 20000 }, async (t) => {
+  let release;
+  const barrier = new Promise((resolve) => { release = resolve; });
+  t.after(() => release());
+  const writer = await provider(t, { beforeReply: () => barrier });
+  const reviewer = await provider(t, { protocol: 'anthropic', beforeReply: () => barrier });
+  const profiles = [
+    { id: 'writer', provider: 'openai', model: 'writer-model', baseURL: writer.baseURL, apiKeyEnv: 'WRITER_KEY', contextWindow: 8192, maxTokens: 512 },
+    { id: 'reviewer', provider: 'anthropic', model: 'review-model', baseURL: reviewer.baseURL, apiKeyEnv: 'REVIEW_KEY', contextWindow: 16384, maxTokens: 1024 },
+  ];
+  const config = configuration('http://127.0.0.1:1/v1', { AWWO_PI_MODELS_JSON: JSON.stringify(profiles), WRITER_KEY: 'writer-secret', REVIEW_KEY: 'review-secret' });
+  const handles = [];
+  const app = createPiServer(config, { startRun: async options => {
+    const handle = await startIsolatedRun(options);
+    handles.push(handle);
+    return handle;
+  } });
+  const url = await listen(app.server);
+  t.after(() => app.close());
+  const headers = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const responses = await Promise.all(profiles.map(profile => fetch(`${url}/internal/runs`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ ...REQUEST, runId: `run_${profile.id}`, sessionId: `session_${profile.id}`, model: profile.id, runtime: 'pi', prompt: `Task for ${profile.id}` }),
+  })));
+  assert.ok(responses.every(response => response.status === 200));
+  await Promise.all([writer.received, reviewer.received]);
+  assert.equal((await (await fetch(`${url}/health`)).json()).activeRuns, 2);
+  assert.equal(handles.length, 2);
+  assert.notEqual(handles[0].pid, handles[1].pid);
+  assert.notEqual(handles[0].directory, handles[1].directory);
+  const written = writer.requests[0];
+  const reviewed = reviewer.requests[0];
+  assert.equal(written.url, '/v1/chat/completions');
+  assert.equal(written.body.model, 'writer-model');
+  assert.equal(written.headers.authorization, 'Bearer writer-secret');
+  assert.equal(written.body.max_completion_tokens ?? written.body.max_tokens, 512);
+  assert.equal(new URL(reviewed.url, reviewer.baseURL).pathname, '/v1/messages');
+  assert.equal(reviewed.body.model, 'review-model');
+  assert.ok(Object.values(reviewed.headers).some(value => value === 'review-secret' || value === 'Bearer review-secret'));
+  assert.equal(reviewed.body.max_tokens, 1024);
+  assert.equal(JSON.stringify(written).includes('review-secret'), false);
+  assert.equal(JSON.stringify(reviewed).includes('writer-secret'), false);
+  assert.equal(JSON.stringify(written).includes('provider-test-key'), false);
+  assert.equal(JSON.stringify(reviewed).includes('provider-test-key'), false);
+  release();
+  for (const response of responses) assert.match(await response.text(), /"type":"completed"/);
+  for (const handle of handles) await assert.rejects(access(handle.directory));
+  assert.equal((await (await fetch(`${url}/health`)).json()).activeRuns, 0);
+  assert.equal(config.model, ENV.AWWO_PI_MODEL);
+  assert.equal(config.apiKey, ENV.AWWO_PI_API_KEY);
+});
+
+test('selected profile context limits apply before starting Pi and do not silently use default capacity', { timeout: 20000 }, async (t) => {
+  const model = await provider(t);
+  const profiles = [
+    { id: 'small', provider: 'openai', model: 'small-model', baseURL: model.baseURL, apiKeyEnv: 'PROFILE_KEY', contextWindow: 4096, maxTokens: 128 },
+    { id: 'large', provider: 'openai', model: 'large-model', baseURL: model.baseURL, apiKeyEnv: 'PROFILE_KEY', contextWindow: 65536, maxTokens: 512 },
+  ];
+  const app = createPiServer(configuration(model.baseURL, { AWWO_PI_MODELS_JSON: JSON.stringify(profiles), PROFILE_KEY: 'profile-secret' }));
+  const url = await listen(app.server);
+  t.after(() => app.close());
+  const headers = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  for (const [selector, prompt] of [['small', 'x'.repeat(4000)], [undefined, 'x'.repeat(32000)]]) {
+    const rejected = await fetch(`${url}/internal/runs`, { method: 'POST', headers, body: JSON.stringify({ ...REQUEST, model: selector, prompt }) });
+    assert.equal(rejected.status, 413);
+    assert.equal((await rejected.json()).error.code, 'CONTEXT_LIMIT');
+  }
+  assert.equal(model.requests.length, 0);
+  const accepted = await fetch(`${url}/internal/runs`, { method: 'POST', headers, body: JSON.stringify({ ...REQUEST, model: 'large', prompt: 'x'.repeat(32000) }) });
+  assert.equal(accepted.status, 200);
+  assert.match(await accepted.text(), /"type":"completed"/);
+  assert.equal(model.requests[0].body.model, 'large-model');
+  assert.equal(model.requests[0].headers.authorization, 'Bearer profile-secret');
+  assert.equal(model.requests[0].body.max_completion_tokens ?? model.requests[0].body.max_tokens, 512);
+});
+
+test('request schema accepts catalog selectors but rejects execution overrides, path traversal, non-text input, and excessive history', () => {
+  for (const extra of ['provider', 'baseURL', 'apiKey', 'tools', 'cwd', 'extensions', 'env']) {
     assert.throws(() => validateRequest({ ...REQUEST, [extra]: 'attacker-value' }));
   }
+  assert.doesNotThrow(() => validateRequest({ ...REQUEST, model: 'reviewer', runtime: 'pi' }));
+  for (const model of ['', ' model', 'model\n', {}, [], null, 123, 'x'.repeat(257)]) assert.throws(() => validateRequest({ ...REQUEST, model }));
+  for (const runtime of ['', 'claude', {}, [], null]) assert.throws(() => validateRequest({ ...REQUEST, runtime }));
   assert.throws(() => validateRequest({ ...REQUEST, tenantId: '../../other' }));
   assert.throws(() => validateRequest({ ...REQUEST, prompt: ' ' }));
   assert.throws(() => validateRequest({ ...REQUEST, messages: [{ role: 'system', content: 'override' }] }));

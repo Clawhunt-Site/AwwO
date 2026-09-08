@@ -2,6 +2,7 @@ import { fork } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { resolveModelConfig } from './config.mjs';
 
 export const TASK_URL = new URL('./pi-task.mjs', import.meta.url);
 
@@ -18,6 +19,7 @@ export function workerEnvironment(directory, executable = process.execPath) {
 }
 
 export async function startIsolatedRun({ config, request, onEvent, onExit }, { taskURL = TASK_URL } = {}) {
+  const modelConfig = resolveModelConfig(config, request.model);
   const directory = await mkdtemp(join(tmpdir(), 'awwo-pi-'));
   const agentDir = join(directory, 'agent');
   let child;
@@ -109,8 +111,8 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
     directory,
     agentDir,
     modelConfig: {
-      provider: config.provider, model: config.model, baseURL: config.baseURL, apiKey: config.apiKey,
-      contextWindow: config.contextWindow, maxTokens: config.maxTokens,
+      provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL, apiKey: modelConfig.apiKey,
+      contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens,
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };

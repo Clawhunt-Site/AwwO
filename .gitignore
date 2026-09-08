@@ -63,6 +63,7 @@ apps/desktop/backend/.node-cache/
 /.grok/
 /.gemini/
 /apps/web/dist-saas/
+/deploy/saas/pi-profiles.env
 
 # Remotion render artifacts (P3b render lane)
 /out/

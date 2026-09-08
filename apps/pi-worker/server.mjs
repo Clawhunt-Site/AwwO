@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, validateRequest } from './config.mjs';
+import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { startIsolatedRun } from './runner.mjs';
 
 function json(response, status, body) {
@@ -62,7 +62,11 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
       return;
     }
     if (response.destroyed) return;
-    if (!fitsContextBudget(body, config)) return json(response, 413, { error: {
+    let modelConfig;
+    try { modelConfig = resolveModelConfig(config, body.model); } catch {
+      return json(response, 400, { error: { code: 'MODEL_NOT_FOUND', message: 'Select a model from the configured model catalog.' } });
+    }
+    if (!fitsContextBudget(body, modelConfig)) return json(response, 413, { error: {
       code: 'CONTEXT_LIMIT', message: 'The prompt and history exceed the configured model context budget. Shorten the conversation or configure a model with a larger supported context window.',
     } });
     const sessionKey = `${body.tenantId}:${body.sessionId}`;
