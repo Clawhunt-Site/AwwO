@@ -113,7 +113,13 @@ npm run test:saas:smoke
 
 `test:saas:backend` 自动使用本项目专属 PostgreSQL，并执行真实数据库测试、race 和 vet；每次测试创建独立 schema 并清理。`test:saas:stack` 使用临时端口、独立数据库 schema、真实 Go/Pi 进程及本地模型协议 fixture，覆盖持久 SSE、历史、幂等、取消、规划和重启。`test:saas:smoke` 访问正在运行的本地服务，创建名称带 Acceptance 的验收用户和工作区，保留这些样例供查看。
 
-不能把没配置数据库而 skip 的测试算通过；真实 provider、HTTP 链路、浏览器和容器分别记录。[基础验收](awwo-saas-verification.md)和[此前真实模型验收](awwo-real-provider-acceptance-20260908.md)有各自快照与范围，本次团队及后台图结果单独报告。团队相关组件/持久化、图恢复、Go 模式与数据库、Pi 多模型测试需随本次实现执行，不能沿用旧用例数判绿。
+不能把没配置数据库而 skip 的测试算通过；真实 provider、HTTP 链路、浏览器和容器分别记录。[基础验收](awwo-saas-verification.md)和[此前真实模型验收](awwo-real-provider-acceptance-20260908.md)有各自快照与范围，本次团队及后台图结果见[节点团队验收报告](awwo-node-teams-acceptance-20260908.md)。团队相关组件/持久化、图恢复、Go 模式与数据库、Pi 多模型测试需随本次实现执行，不能沿用旧用例数判绿。
+
+### 节点团队真实模型验收
+
+`scripts/awwo-node-teams-acceptance.mjs --provider-stdin` 是显式调用真实模型的独立验收入口。先启动项目专属 PostgreSQL，再用保密的 stdin 通道传入一行包含 `provider`、`model`、`baseURL`、`apiKey` 的 JSON；不要把真实密钥放在命令行参数或提交文件中。后续输入 `{"command":"run"}` 执行四种模式，`{"command":"collect"}` 保存各画布及聊天运行记录，`{"command":"finish"}` 清理并退出。该入口会产生真实推理调用，不属于默认自动测试。
+
+它使用独立随机 schema、临时账号及 loopback 端口，保留非秘密结果，退出时清理自己的进程、schema、临时登录文件和二进制。浏览器点击与关页复开需要另行执行和记录；脚本的 `API_PASS_BROWSER_PENDING` 只说明四种模式的自动 API 验证通过。
 
 ### 原画布浏览器协议 fixture
 
