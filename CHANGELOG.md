@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Documentation — real-provider local acceptance evidence
+
+- **What changed:** Record current AwwO Go/Pi SaaS acceptance, 57 composite UI cases, 72 screenshot records, real model/database evidence, backup restore, and both browser-discovered fixes.
+- **Why:** Source review and protocol fixtures do not prove the existing frontend works against an external model or that every deployment capability is ready.
+- **Impact:** The report accepts the tested local text collaboration core and explicitly retains engineering-tool, background-graph, UI edge-case, container and public deployment gaps. It does not certify production readiness or unrelated inherited workspaces.
+- **Verification:** Current Web/SaaS/Gateway/Go/Pi suites, negative HTTP cases, real UI/Pi requests, download integrity and local backup restore passed within their stated scopes; report links, screenshot hashes and cleanup are checked.
+- **Files:** `docs/awwo-real-provider-acceptance-20260908.md`; local evidence in `.local/awwo-saas/acceptance-20260908/`.
+
 ### Fixed — SaaS mobile canvas controls
 
 - **What changed:** Wrap mobile canvas account controls below the workspace title and place run status in the control group flow.
