@@ -49,6 +49,7 @@ import { prepareNodeConversation, type NodeConversationContext } from './nodeCon
 import './awwo-node.css';
 import { canvasText, useCanvasI18n, type CanvasTranslate } from './i18n';
 import { recoveryDetailMessage } from './surfaceMessages';
+import { nodeTeamModeLabel } from './NodeTeamEditor';
 import type { UiLocale } from '../locale';
 
 /** Smallest a tile may be dragged to. Below this the head itself stops being readable. */
@@ -558,6 +559,9 @@ export function SessionTile({
           style={lod === 'card' || lod === 'glance' ? { fontSize: Math.min(compact ? 20 : 32, 13 / Math.max(.1, scale)) } : undefined}>
           {node.title}
         </span>
+        {!compact && node.kind === 'session' && node.team ? <span className="node-team-badge" data-testid={`node-team-badge-${nodeId}`}>
+          {node.team.members.length} Agent · {nodeTeamModeLabel(node.team.mode, locale)}
+        </span> : null}
         {badge ? (
           <span
             className={`canvas-tile-badge canvas-tile-badge--${run!.state}`}
@@ -595,7 +599,8 @@ export function SessionTile({
 
       {compact && node.kind === 'session' ? <button className="awwo-compact-open" style={{ fontSize: Math.min(16, 11 / Math.max(.4, scale)) }} type="button" aria-label={t('tile.openSession', { title: node.title })} onClick={() => onToggleFocus?.(nodeId)}>
         <span className="awwo-compact-summary">{preview || (node.lastOutput ? t('tile.deliveryUpdated') : currentThread?.lastOutput ? t('tile.historicalAvailable') : node.contract?.outputs.length ? t('tile.deliverySummary', { fields: node.contract.outputs.map(field => field.label).join(' / ') }) : t('tile.noDeliverables'))}</span>
-        <span className="awwo-compact-footer"><span>{getNodeThreads(node).length} Session{node.lastOutput || currentThread?.lastOutput ? t('tile.hasDeliverables') : ''}</span><span>{t('tile.open')}<ChevronRight size={13} /></span></span>
+        <span className="awwo-compact-footer"><span>{node.team ? <span className="node-team-badge" data-testid={`node-team-badge-${nodeId}`}>{node.team.members.length} Agent · {nodeTeamModeLabel(node.team.mode, locale)}</span>
+          : <>{getNodeThreads(node).length} Session{node.lastOutput || currentThread?.lastOutput ? t('tile.hasDeliverables') : ''}</>}</span><span>{t('tile.open')}<ChevronRight size={13} /></span></span>
       </button> : !showBody && !configurationPanel ? (
         // glance: identity only. The preview line is PERSISTED on the node, so a freshly reloaded
         // canvas reads correctly before any history has been fetched.

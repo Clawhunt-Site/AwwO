@@ -1,12 +1,12 @@
 # AwwO Go + Pi 多租户 SaaS 架构
 
-设计日期：2026-09-07。代码基线：Forgejo `ClawHunt-Store/AwwO` 的 `main@6e1dc158a79e2f18c7bdf82610a353883b883f31`（0.3.0）。工作分支：`feat/awwo-go-pi-saas`。本文中的目标架构、当前实现与后续工作分别标明；测试结果见 `awwo-saas-verification.md`。
+初始设计：2026-09-07；节点团队与后台整图更新：2026-09-08。初始基线为 Forgejo `ClawHunt-Store/AwwO` 的 `main@6e1dc158a79e2f18c7bdf82610a353883b883f31`（0.3.0）；当前增强分支为 `codex/awwo-node-teams-20260908`。本文记录实现契约，本轮最终 SHA 与实测结果由独立验收报告记录；此前结果见 [本地验收](awwo-saas-verification.md)及[真实模型验收](awwo-real-provider-acceptance-20260908.md)，不自动覆盖新增团队能力。
 
 执行约束见 [设计与开发规范](awwo-saas-design-standards.md)；原页面功能、接口映射、实际覆盖与待补差距见 [前端逐项对接清单](awwo-saas-frontend-contract.md)。后端交付以现有前端的操作和数据契约为验收依据。
 
 ## 1. 产品范围与现状
 
-AwwO 是以独立 Agent Session 为节点的协作画布，已有七种 Agent 模板、节点输入输出契约、连线、会话、对话规划、图运行、取消与恢复界面。现役路径为 `apps/web/src/main.tsx → App.tsx → canvas/CanvasSurface.tsx → AgentWorkspace`。原链路依赖 `apps/gateway` 和 vendored `server/`，运行引擎为本机 Codex。
+AwwO 是以任务和 Agent Session 为节点的协作画布，已有七种 Agent 模板、输入输出契约、连线、会话、规划、运行、取消与恢复界面。SaaS Session 节点可选配置 1–8 个成员组成的团队，节点内协作后仍按原字段契约向下游交付。历史本机路径为 `apps/web/src/main.tsx → App.tsx → canvas/CanvasSurface.tsx → AgentWorkspace`，依赖 `apps/gateway` 和 vendored `server/`，运行引擎为本机 Codex。
 
 0.3.0 的账户界面不等于完整的公网 SaaS。原画布及运行记录在浏览器缓存中，部分 key 没有用户、租户和画布作用域；账号、Agent 执行环境和工作目录存在本机假设。新后端必须从服务端补齐这些边界。
 
@@ -21,11 +21,11 @@ flowchart LR
   U[用户浏览器] --> E[HTTPS 入口 / 同源路由]
   A[平台管理员浏览器] --> E
   E --> W[现有 React 画布 + SaaS 用户/管理入口]
-  E --> G[Go API 模块化单体]
+  E --> G[Go API / 持久 DAG 与节点团队协调]
   G --> D[(PostgreSQL)]
   G --> P[内部 Pi supervisor]
-  P --> R1[运行 A 的独立 Node 进程]
-  P --> R2[运行 B 的独立 Node 进程]
+  P --> R1[模型调用 A 的独立 Node 进程]
+  P --> R2[模型调用 B 的独立 Node 进程]
   R1 --> M[服务端配置的模型 API]
   R2 --> M
 ```
@@ -34,7 +34,7 @@ flowchart LR
 | --- | --- | --- |
 | 用户端 | 编辑画布、模板、输入输出、发起/查看/取消运行 | 自行授予角色、改变资源归属、声明运行成功 |
 | 平台管理端 | 经过平台角色验证后查看租户、用户、任务、审计与暂停租户 | 以租户 owner 代替平台管理员、绕过审计直接改库 |
-| Go | 身份、成员权限、租户状态、资源归属、CAS、运行幂等、并发限制、数据库与事件 | 相信前端传来的 tenantId/role/cwd 就直接执行 |
+| Go | 身份、成员权限、租户状态、资源归属、CAS、图快照与依赖调度、团队执行、逐次调用额度、数据库与事件 | 相信前端传来的 tenantId/role/cwd 就直接执行 |
 | Pi | 当前已授权任务的模型推理和对话 | 读取全局 Pi 配置、加载租户代码、任意 shell/文件/网络工具 |
 | PostgreSQL | 已提交业务状态和事件，重启后的事实来源 | 依赖浏览器内存作为持久记录 |
 
@@ -68,7 +68,7 @@ Cookie 为 HttpOnly、SameSite，staging/production 必须 Secure。写请求验
 
 ## 4. 数据与一致性
 
-核心实体：`users`、`tenants`、`memberships`、`auth_sessions`、`tenant_invites`、`canvases`、`agents`、`sessions`、`messages`、`runs`、`run_events`、`audit_events`、`user_appearance`。具体表结构和索引以 `backend/internal/app/migrations/` 为准。
+核心实体：`users`、`tenants`、`memberships`、`auth_sessions`、`tenant_invites`、`canvases`、`agents`、`node_sessions`、`messages`、`runs`、`run_events`、`audit_events`、`user_appearance`。迁移 007 增加 `graph_runs`、`graph_run_nodes`、`run_turns`、`model_invocations`、`graph_operation_cancellations`，并在 runs 保存团队、执行配置与发起人快照。具体结构以 `backend/internal/app/migrations/` 为准。
 
 六类租户资源列表使用与管理列表相同的签名游标机制，并绑定账号、租户及规范化查询过滤。成员在迁移 005 中增加不可变创建时间，列表按创建时间与 ID 排序，避免画布改名改变页次。前端每页 50 条并在范围切换时中止旧读取；会话恢复可以按 sessionId 精确查询。创建时间边界不是数据库一致性快照。
 
@@ -89,23 +89,25 @@ Cookie 为 HttpOnly、SameSite，staging/production 必须 Secure。写请求验
 
 Pi 固定发布版本 `@earendil-works/pi-coding-agent@0.85.1`，直接依赖和 lockfile 一起管理。官方原 `badlogic/pi-mono` 已迁移至 `earendil-works/pi`。Node 要求至少 22.19.0，实际本地验证版本另外记录。
 
-内部最小契约：Go `POST /internal/runs` 发送服务器验证过的 runId、tenantId、sessionId、prompt、history 和纯文本 systemPrompt，认证使用独立 service token。返回 SSE 文本增量及完成/失败/取消事件；`DELETE /internal/runs/{runId}` 取消。模型、provider、base URL、工具与子进程环境全部在服务端配置，不从浏览器请求透传。
+内部最小契约：Go `POST /internal/runs` 发送服务器验证过的 runId、tenantId、sessionId、prompt、messages、纯文本 systemPrompt、model 和 runtime，以独立 service token 认证。返回 SSE 增量及终态；`DELETE /internal/runs/{runId}` 取消。model 只能选择服务器目录 ID，Pi 从目录解析实际 provider/模型/连接；base URL、密钥、工具与子进程环境由服务器管理，不从浏览器透传。
 
 Go 根据 Pi health 公布的模型输入预算保留最近完整对话轮次，优先丢弃最老的整对历史；当前提示词和指令不被静默截断。Pi 再次按 UTF-8 字节保守预留输出容量，超限明确失败，不能用较大的传输体积上限冒充模型上下文容量。画布规划发送当前图快照，不不断累积过去的规划请求；模板自带的重复说明被压缩，保留用户自定义指令与实际输入。
 
-每个 run 使用独立 Node 进程和临时目录；Pi 使用内存凭证/设置/会话，关闭全局 model 文件、扩展、技能、模板、主题和 context 文件加载。首版不提供 read/bash/edit/write 或执行租户代码的工具。独立进程和目录不等于 OS 沙箱；容器部署还要限制挂载、资源和网络，开放工程执行工具前需另外建立执行沙箱。
+每次实际模型调用使用独立 Node 进程和临时目录；一个团队 run 可以包含多次成员调用。Pi 使用内存凭证/设置/会话，关闭全局 model 文件、扩展、技能、模板、主题和 context 文件加载。当前不提供 read/bash/edit/write 或执行租户代码的工具，成员 tools 必须为空。独立进程和目录不等于 OS 沙箱；开放工程执行前需建立沙箱、挂载、资源和网络隔离。
 
 完成必须以模型确实返回、无错误/中断且结果已持久化为依据；HTTP 200、请求受理或单个 agent_end 都不能单独作为成功证据。未配置模型时给出不可用状态，不能回假回复。测试替身明确仅用于测试。
 
-取消先阻止继续派发，调用 Pi 清空队列/abort，必要时终止该 run 的专属进程。Go 重启后把不确定的活跃任务标记为 interrupted，保留部分输出和事件，由用户决定重试；首版不承诺从任意工具步骤无损续跑。
+取消先阻止继续派发，再中止对应 Pi 调用。Go 重启后将不确定的活跃 run、成员轮次与模型调用标记 interrupted，保留已有记录，不盲目重放。图调度读取持久节点状态：中断节点阻断其依赖，未受理且依赖已满足的等待节点可继续；不保证已接受调用无损续跑。
 
-现有 `runGraph` 仍管理用户发起的画布拓扑调度，Go 管理每个实际运行的状态和幂等。关闭页面不会撤销已提交的节点运行，但首版**不承诺关闭浏览器后自动派发尚未启动的下游节点**。要实现全天候后台整图运行，需把 DAG 快照、输入输出版本、依赖就绪和调度租约迁入 Go，沿用现有节点契约与运行 API。
+SaaS 整图运行由 Go 接收固定 document/version/scope，持久化 DAG 与每个节点执行快照，按依赖派发并校验最终输出。关闭浏览器后已受理图可继续启动尚未运行的下游；前端观察状态并恢复结果。原本机模式继续使用浏览器 runGraph。这是单 Go 实例的后台图执行，尚无分布式 worker 租约或多副本接管。
+
+节点团队通过原 Inspector 手动配置 1–8 位成员，每位有独立职责、指令、上下文和模型目录选择；空模型继承已绑定主 Agent 的模型，空 runtime 继承节点 Pi。四模式、审核 JSON、调用次数与超时边界见 [节点团队设计](awwo-node-teams.md)。maxTurns 是最多模型调用次数；每次准入进入 model_invocations，受租户并发和 UTC 每日次数限制，并不等于 token 或货币账单。
 
 ## 6. 用户端与平台管理端 API
 
-公共版本前缀为 `/api/v1`。基本分组包括 auth/profile、tenants/members/invites、invites/accept、canvases、agents、sessions/messages、runs/events/cancel、runtime（含 models）以及 admin summary/tenants/users/runs/audit。精确路径、请求、响应和示例见 `awwo-saas-api.md`。
+公共版本前缀为 `/api/v1`。基础分组 auth、tenants/members/invites、canvases、agents、sessions/messages、runs/events/cancel、runtime 及 admin 的契约见 [API v1](awwo-saas-api.md)。新增 `canvases/{id}/graph-runs` 创建/读取/取消、按 operationId 取消和 `runs/{id}/turns` 的请求、状态及错误见 [节点团队 API](awwo-node-teams.md#5-api-与持久状态)。
 
-用户端使用独立 SaaS 入口复用 `CanvasSurface`；新增 transport adapter 将 Go 返回值适配为现有 runGraph/session UI 契约，不引入另一套画布。管理页面通过相同登录会话但独立平台权限访问 Go 管理端点。SaaS 编译不依赖整个历史 `server/ui` 工作区。
+用户端使用独立 SaaS 入口复用 `CanvasSurface`；`saas/graphRuns.ts` 将 Go 图快照适配为原节点状态与恢复 journal，`GraphRunPanel` 查询后台图与成员记录，原会话 transport 保持兼容。管理页面通过相同登录会话但独立平台权限访问 Go 管理端点。SaaS 编译不依赖整个历史 `server/ui` 工作区。
 
 原 AI 画布助手通过 `canvases/{id}/plan` 创建受租户配额约束、可审计的规划 run。Go 在完成并验证 JSON/操作后返回规范化计划，前端复用原规划上下文、模板 schema、JSON 解析及图结构校验；合法结果直接应用、显示“已更新画布”并提供“撤销本次更改”，没有第二个应用确认按钮。模型错误、结构错误或过期结果不能应用到当前画布。规划不是临时旁路模型调用。
 
@@ -124,7 +126,7 @@ Go 根据 Pi health 公布的模型输入预算保留最近完整对话轮次，
 
 这是公网目标的本地开发版本，部署模板不代表已经部署或运维验收。上线前必须完成域名/HTTPS、staging 独立数据库和模型凭据、备份恢复演练、限流与监控告警、日志脱敏、secret 生命周期、真实模型配额/成本策略。自助开放注册还需要邮箱验证/找回、反滥用与邀请策略；付费 SaaS 还需支付账单/订阅/webhook 幂等，这些不以 mock 冒充交付。
 
-下一阶段顺序：后台整图调度 → 对象存储及受控业务工具 → 邮件/账号恢复/OIDC → 使用量与付费额度 → 任务租约及多副本 → 灰度/备份恢复/生产验收。用户邀请链接属于本地前端对接实现，邮件服务另行接入。保持 API v1 与执行服务契约独立，避免将本地单实例假设散落到前端。
+下一阶段顺序：新增团队/后台图的独立验收 → 对象存储及受控业务工具 → 邮件/账号恢复/OIDC → 精确使用量与付费额度 → 任务租约及多副本 → 灰度/备份恢复/生产验收。邀请链接已在本地接入，邮件服务另行接入。自然语言 planner 尚不创建/修改 team，模型目录和团队能力 UI 也不代表真实模型已验收。保持 API v1 与内部执行契约独立，避免将单实例假设散落到前端。
 
 ## 官方接口依据
 

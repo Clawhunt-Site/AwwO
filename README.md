@@ -6,7 +6,7 @@ AwwO 是以独立 Agent Session 为节点的协作画布。用户先描述目标
 
 ## Go + Pi 多租户 SaaS
 
-新增的 SaaS 入口复用本项目画布，由 Go API 管理身份、租户成员、画布、Agent、持久会话、运行事件与平台后台，PostgreSQL 存储业务数据，Pi 提供独立进程中的模型执行。
+新增的 SaaS 入口复用本项目画布，由 Go API 管理身份、租户成员、画布、Agent、持久会话、运行事件与平台后台，PostgreSQL 存储业务数据，Pi 提供独立进程中的模型执行。节点可配置 1–8 位 Agent，按顺序、并行汇总、多轮讨论或审核返工协作；Go 持久调度整图，关闭网页后继续执行。
 
 ```sh
 npm run setup:saas
@@ -15,9 +15,9 @@ npm run dev:saas
 
 本地用户入口 `http://127.0.0.1:5189/`，平台管理入口 `/admin`。需要 Node >=22.19、Go 自动工具链和 PostgreSQL 工具。首次启动生成独立的本地数据库与管理员配置；秘密保存在忽略的 `.local/awwo-saas/.env`。模型需配置服务端提供商，未配置时可使用账号和画布功能。
 
-[架构与实施路线](docs/awwo-saas-architecture.md) · [设计与开发规范](docs/awwo-saas-design-standards.md) · [前端逐项对接清单](docs/awwo-saas-frontend-contract.md) · [API 契约](docs/awwo-saas-api.md) · [启动与部署](docs/awwo-saas-development.md) · [实际验收记录](docs/awwo-saas-verification.md)
+[节点团队架构与 API](docs/awwo-node-teams.md) · [架构与实施路线](docs/awwo-saas-architecture.md) · [设计与开发规范](docs/awwo-saas-design-standards.md) · [前端逐项对接清单](docs/awwo-saas-frontend-contract.md) · [API 契约](docs/awwo-saas-api.md) · [启动与部署](docs/awwo-saas-development.md) · [实际验收记录](docs/awwo-saas-verification.md)
 
-这是本地 SaaS 基础版本，公网发布、付费、邮件、工程执行沙箱与后台整图调度的后续范围在架构文档中列明。
+这是本地 SaaS 基础版本，公网发布、付费、邮件、工程执行沙箱与分布式高可用调度的后续范围在架构文档中列明。
 
 ## 原本地 Codex 模式
 

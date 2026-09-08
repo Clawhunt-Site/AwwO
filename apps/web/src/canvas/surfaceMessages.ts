@@ -6,7 +6,9 @@ export type SurfaceNotice =
   | 'recovering_run'
   | 'run_identity_unconfirmed'
   | 'recovery_pending'
+  | 'graph_recovery_pending'
   | 'recovery_complete'
+  | 'graph_recovery_complete'
   | 'recovery_input_changed'
   | 'execution_owned_elsewhere'
   | 'canvas_changed_elsewhere'
@@ -24,7 +26,9 @@ const NOTICE_KEYS = {
   recovering_run: 'surface.recoveringRun',
   run_identity_unconfirmed: 'surface.runIdentityUnconfirmed',
   recovery_pending: 'surface.recoveryPending',
+  graph_recovery_pending: 'surface.graphRecoveryPending',
   recovery_complete: 'surface.recoveryComplete',
+  graph_recovery_complete: 'surface.graphRecoveryComplete',
   recovery_input_changed: 'surface.recoveryInputChanged',
   execution_owned_elsewhere: 'surface.executionOwnedElsewhere',
   canvas_changed_elsewhere: 'surface.canvasChangedElsewhere',
@@ -52,6 +56,7 @@ const RECOVERY_DETAIL_KEYS = {
   succeeded: 'session.succeeded',
   failed: 'session.failed',
   cancelled: 'session.cancelled',
+  'Graph cancelled': 'session.cancelled',
   timed_out: 'session.timedOut',
 } as const satisfies Record<string, CanvasTextKey>;
 
@@ -69,6 +74,7 @@ const PREFLIGHT_KEYS: Record<PreflightIssueCode, CanvasTextKey> = {
   multiple_inputs: 'run.preflightMultipleInputs',
   missing_inputs: 'run.preflightMissingInputs',
   cycle: 'run.preflightCycle',
+  invalid_team: 'run.preflightInvalidTeam',
 };
 
 function localizedValues(issue: PreflightIssue, locale: UiLocale): CanvasTextValues {

@@ -50,6 +50,7 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
         name: item.type,
         supports_model_selection: item.modelsCount > 0 || Boolean(companyId && (await modelIds(item.type, init?.signal, companyId)).length),
         supports_effort_selection: false,
+        ...(item.supportsNodeTeams === true ? { supports_node_teams: true } : {}),
       }))) };
     }
     const models = /^\/api\/agents\/([^/]+)\/models$/.exec(path);

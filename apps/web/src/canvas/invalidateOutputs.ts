@@ -1,5 +1,6 @@
 import type { CanvasDocument, CanvasEdge, CanvasNode, NodeOutput } from './canvasDoc';
 import type { ContractField } from './nodeContracts';
+import { nodeTeamFingerprint } from './nodeTeam';
 
 function fieldKey(field: ContractField, output = false): unknown[] {
   return [field.id, field.label, field.type, field.required, field.value, field.help?.trim() || '', output ? field.placeholder?.trim() || '' : ''];
@@ -16,7 +17,7 @@ function executionKey(node: CanvasNode): string {
     : null;
   return JSON.stringify([
     node.kind, node.title, node.agentKind, node.runtime, node.model, node.effort,
-    node.persona, binding, node.issueId, node.activeThreadId || 'default', contract,
+    node.persona, binding, node.issueId, node.activeThreadId || 'default', contract, nodeTeamFingerprint(node.team),
   ]);
 }
 

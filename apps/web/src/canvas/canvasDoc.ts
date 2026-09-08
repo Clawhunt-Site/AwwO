@@ -23,6 +23,7 @@ import { reconcileEdges } from './ports';
 import type { ViewportState } from './viewport';
 import { normalizeContract, type NodeContract } from './nodeContracts';
 import type { AgentTemplateId } from './agentTemplates';
+import { sanitizeNodeTeam, type NodeTeam } from './nodeTeam';
 
 export type AgentKind = 'llm' | 'coding' | 'image';
 
@@ -53,6 +54,8 @@ export interface SessionNode extends CanvasNodeBase {
   effort: string;
   /** Persona / system prompt draft. Synced to the bound agent's instructions bundle on bind. */
   persona: string;
+  /** Optional collaboration plan; the primary binding remains the legacy conversation owner. */
+  team?: NodeTeam;
   binding: AgentBinding | null;
   /** A bind attempt whose outcome was UNKNOWN (request sent, response lost). Persisted so the
    *  tile keeps warning across reloads — a blind retry could hire a duplicate agent.
@@ -321,11 +324,15 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
 
   if (r.kind === 'session') {
     const contract = normalizeContract(r.contract);
+    const team = r.team == null ? undefined : sanitizeNodeTeam(r.team);
     const threads = sanitizeThreads(r.threads);
     const templateId = AGENT_TEMPLATE_IDS.includes(r.templateId as AgentTemplateId) ? r.templateId as AgentTemplateId : undefined;
     // A declared but unreadable schema must not silently become a legacy session with
     // unrestricted context/result ports. The loader preserves the raw document for recovery.
     if (r.contract != null && !contract) return null;
+    // A malformed team must never become a single-agent run. The loader preserves the
+    // original payload and reports corrupt status when this node cannot be recovered.
+    if (r.team != null && !team) return null;
     // An unrecognised agent kind is coerced rather than dropped: the tile's persona, binding
     // and thread are the operator's real work, and losing them to a typo'd enum would be worse
     // than showing it as an LLM tile they can switch back.
@@ -352,6 +359,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       model: str(r.model),
       effort: str(r.effort),
       persona: str(r.persona),
+      ...(team ? { team } : {}),
       binding,
       bindAttempt: r.bindAttempt === 'unknown' ? 'unknown' : null,
       issueId: typeof r.issueId === 'string' && r.issueId ? r.issueId : null,
@@ -599,6 +607,12 @@ export function loadDocumentWithStatus({ readOnly = false }: { readOnly?: boolea
       new Error(`${declaredNodes - doc.nodes.length} of ${declaredNodes} stored node(s) failed sanitisation`),
       'canvas document',
     );
+    const invalidTeam = (parsed as { nodes: unknown[] }).nodes.some(rawNode => {
+      if (!rawNode || typeof rawNode !== 'object') return false;
+      const candidate = rawNode as Record<string, unknown>;
+      return candidate.kind === 'session' && candidate.team != null && !sanitizeNodeTeam(candidate.team);
+    });
+    if (invalidTeam) return { doc, status: 'corrupt' };
   }
   return { doc, status: 'ok' };
 }

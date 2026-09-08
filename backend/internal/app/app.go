@@ -92,6 +92,12 @@ func (a *App) Start(ctx context.Context) error {
 			return e
 		}
 	}
+	if _, e = tx.Exec(ctx, "UPDATE run_turns SET status='interrupted',error='API restarted before completion',updated_at=now() WHERE status IN ('queued','running')"); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET status='interrupted',updated_at=now() WHERE status='running'"); e != nil {
+		return e
+	}
 	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
@@ -127,7 +133,7 @@ func (a *App) Start(ctx context.Context) error {
 			}
 		}
 	}()
-	return nil
+	return a.recoverGraphs(ctx)
 }
 func (a *App) Close() {
 	if a.leaseCancel != nil {
@@ -198,6 +204,12 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}", a.tenant(a.getRun, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/runs/{id}/cancel", a.tenant(a.cancelRun, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/events", a.tenant(a.events, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/turns", a.tenant(a.runTurns, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs", a.tenant(a.createGraphRun, 2))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs", a.tenant(a.listGraphRuns, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/{id}", a.tenant(a.getGraphRun, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/{id}/cancel", a.tenant(a.cancelGraphRun, 2))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/operations/{operationId}/cancel", a.tenant(a.cancelGraphOperation, 2))
 	m.HandleFunc("GET /api/v1/admin/summary", a.admin(a.adminSummary))
 	for _, kind := range []string{"tenants", "users", "runs", "audit"} {
 		m.HandleFunc("GET /api/v1/admin/"+kind, a.admin(a.adminList(kind)))

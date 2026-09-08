@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Added — node teams and durable graph orchestration
+
+- **What changed:** Add 1–8 configurable members per canvas node, four collaboration modes, independent Pi model profiles, persisted member turns, background graph dispatch, versioned admission and operation cancellation recovery.
+- **Why:** A single session per node and browser-owned downstream dispatch could not represent team collaboration or continue a graph after the page closed.
+- **Impact:** Existing single-Agent documents remain compatible; team settings and execution snapshots stay tenant scoped. Model-call budgets and timeouts bound collaboration. This is local text inference; engineering tools and distributed execution are outside this delivery.
+- **Verification:** See the node-team acceptance report for automated suites, real GPT-5.6 member calls, close/reopen evidence, cancellation and remaining deployment gates.
+- **Files:** `backend/internal/app/{teams,graph_runs,graph_contracts}.go`, migration 007; `apps/pi-worker/`; `apps/web/src/{canvas,saas}/`; `docs/awwo-node-teams.md`; `scripts/awwo-node-teams-acceptance.mjs`.
+
 ### Documentation — real-provider local acceptance evidence
 
 - **What changed:** Record current AwwO Go/Pi SaaS acceptance, 57 composite UI cases, 72 screenshot records, real model/database evidence, backup restore, and both browser-discovered fixes.

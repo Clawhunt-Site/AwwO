@@ -18,6 +18,7 @@
 import type { CanvasEdge, CanvasNode, FormNode, SessionNode } from './canvasDoc';
 import { parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
 import { reconcileEdges } from './ports';
+import { validateNodeTeam } from './nodeTeam';
 
 export type RunNodeState = 'waiting' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled' | 'cached';
 
@@ -106,7 +107,7 @@ export function findCycle(nodes: ReadonlyArray<CanvasNode>, edges: ReadonlyArray
 }
 
 /** Pre-flight problems that make a run impossible — reported up front, never mid-run. */
-export type PreflightIssueCode = 'empty_graph' | 'empty_scope' | 'unbound_nodes' | 'multiple_inputs' | 'missing_inputs' | 'cycle';
+export type PreflightIssueCode = 'empty_graph' | 'empty_scope' | 'unbound_nodes' | 'multiple_inputs' | 'missing_inputs' | 'cycle' | 'invalid_team';
 export interface PreflightIssue {
   code: PreflightIssueCode;
   values: Record<string, string | number | string[]>;
@@ -132,6 +133,10 @@ export function preflightGraphIssue(
   }
   const validEdges = reconcileEdges(nodes, edges);
   for (const node of runnable) {
+    if (node.kind === 'session' && node.team) {
+      const issues = validateNodeTeam(node.team);
+      if (issues.length) return { code: 'invalid_team', values: { nodeTitle: node.title, detail: issues[0].message }, message: `「${node.title}」协作配置无效：${issues[0].message}` };
+    }
     if (node.kind !== 'session' || !node.contract) continue;
     // Wired fields are checked once their actual values arrive. A missing or incompatible
     // source port must never stand in for a required value during preflight.

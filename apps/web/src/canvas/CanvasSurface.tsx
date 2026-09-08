@@ -1,5 +1,7 @@
-import { canvasStorageKey } from './canvasStorage';
+import { canvasStorage, canvasStorageKey } from './canvasStorage';
 import { canvasFetch } from '../saas/canvasBridge';
+import { currentSaaSCanvas } from '../saas/canvasBridge';
+import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
 // One infinite canvas whose nodes ARE agent sessions: each tile holds a live conversation that
@@ -479,10 +481,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       docRef.current = recovered; setDoc(recovered);
       // Persist the complete batch before deleting its recovery journal.
       const persisted = saveDocument(recovered);
-      const unresolved = Object.values(next.nodes).some(node => node.state === 'running');
+      const unresolved = Object.values(next.nodes).some(node => node.state === 'running' || (next.serverGraph && node.state === 'waiting'));
       if (unresolved) {
         const missing = Object.values(next.nodes).some(node => node.detail === 'recovery_identity_missing');
-        setHandoffNote(missing ? surfaceNotice(t, 'run_identity_unconfirmed') : surfaceNotice(t, 'recovery_pending'));
+        setHandoffNote(missing ? surfaceNotice(t, 'run_identity_unconfirmed') : surfaceNotice(t, next.serverGraph ? 'graph_recovery_pending' : 'recovery_pending'));
         timer = setTimeout(() => void poll(), 2500);
       } else if (!persisted) {
         setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
@@ -508,7 +510,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         clearRunJournal(next.id); journal.current = null;
         setRecovering(false); setRunning(false);
         setRunSummary(journalSummary(next));
-        setHandoffNote(surfaceNotice(t, Object.values(next.nodes).some(node => node.detail === 'recovery_input_changed') ? 'recovery_input_changed' : 'recovery_complete'));
+        setHandoffNote(surfaceNotice(t, Object.values(next.nodes).some(node => node.detail === 'recovery_input_changed') ? 'recovery_input_changed' : next.serverGraph ? 'graph_recovery_complete' : 'recovery_complete'));
       }
     }, () => {
       if (controller.signal.aborted) return;
@@ -550,6 +552,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
     if (inspectorCloseLocked.current) { setHandoffNote(surfaceNotice(t, 'bind_before_run')); return; }
     if (hasStreamingConversation(docRef.current.nodes)) { setHandoffNote(surfaceNotice(t, 'wait_conversation')); return; }
+    if (!currentSaaSCanvas() && nodes.some(node => node.kind === 'session' && node.team && (!scope || scope.includes(node.id)))) {
+      setHandoffNote(locale === 'zh' ? '此工作区未提供节点团队执行能力，请使用 SaaS 工作区运行。' : 'This workspace cannot execute node teams. Run this canvas in a SaaS workspace.'); return;
+    }
     const problem = preflightIssueMessage(t, preflightGraphIssue(nodes, edges, scope), locale);
     if (problem) { setHandoffNote(problem); return; }
     setHandoffNote('');
@@ -557,6 +562,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // A failed or stopped retry must never leave its previous success available to downstream nodes.
     const executing = new Set(scope ?? nodes.map(n => n.id));
     const pending: CanvasRunJournal = { version: 1, id: crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(docRef.current, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(nodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
+    const cloud = currentSaaSCanvas();
+    if (cloud && !manualMessage) pending.serverGraph = { tenantId: cloud.tenant.id, canvasId: cloud.canvasId };
     let prepared = prepareRunDocument(docRef.current, [...executing], Boolean(manualMessage));
     const manualNode = manualMessage ? nodes.find(node => executing.has(node.id)) : undefined;
     if (manualNode?.kind === 'session') {
@@ -582,6 +589,33 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setRunStartedAt(Date.now());
     setNow(Date.now());
     setTimelineOpen(true);
+    if (pending.serverGraph) {
+      const submissionStorage = canvasStorage();
+      let admitted = false;
+      try {
+        const accepted = await submitCloudGraph(pending.id, pending.scope);
+        admitted = true;
+        const stored = loadRunJournal(submissionStorage);
+        const recovered = mergeGraphSnapshot(stored?.id === pending.id ? stored : pending, accepted);
+        saveRunJournal(recovered, submissionStorage);
+        if (currentSaaSCanvas() !== cloud) return;
+        journal.current = recovered;
+        if (ac.signal.aborted) await cancelCloudGraph(journal.current);
+      } catch (error) {
+        if (!admitted && graphAdmissionRejected(error)) {
+          // This request was rejected before admission; retain the user's inputs and
+          // show the rejection. A lost response keeps its operation journal instead.
+          clearRunJournal(submissionStorage, pending.id);
+          if (currentSaaSCanvas() !== cloud) return;
+          journal.current = null; setRunning(false);
+          setHandoffNote(error instanceof Error ? error.message : String(error)); runAbort.current = null; return;
+        }
+        if (currentSaaSCanvas() !== cloud) return;
+        setHandoffNote(error instanceof Error ? error.message : surfaceNotice(t, 'run_identity_unconfirmed'));
+      }
+      runAbort.current = null; setRecovering(true);
+      return;
+    }
     // Use the SHARED executor factory rather than re-deriving one here: it already owns the
     // per-agent serialization contract (two tiles bound to the same agent must not execute
     // concurrently — the gateway wakes one worker per agent, so parallel turns would
@@ -668,6 +702,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const stopRun = useCallback(() => {
     if (readOnlyRef.current) return;
+    if (journal.current?.serverGraph) {
+      journal.current = { ...journal.current, serverGraph: { ...journal.current.serverGraph, cancelRequested: true } };
+      if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
+      if (runAbort.current) runAbort.current.abort();
+      void cancelCloudGraph(journal.current).catch(error => setHandoffNote(stopUnconfirmedMessage(t, error instanceof Error ? error.message : '')));
+      return;
+    }
     if (runAbort.current && !runAbort.current.signal.aborted) { runAbort.current.abort(); return; }
     // Also works after a refresh or a previous Stop failure; never invent an ID.
     const requestedJournal = journal.current;
@@ -882,9 +923,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(n => n.id === next.id
         ? { ...next, x: n.x, y: n.y, w: n.w, h: n.h }
         : n) }), { label: `config:${next.id}` });
+      if (current?.kind === 'session' && next.kind === 'session' && JSON.stringify(current.team) !== JSON.stringify(next.team)) {
+        const affected = new Set(downstreamClosure([next.id]));
+        setRuns(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !affected.has(id))));
+        setRunSummary(null);
+      }
       setHandoffNote('');
     },
-    [patchDoc],
+    [patchDoc, downstreamClosure],
   );
 
   // The inspector owns configuration, while cards own contracts and the transport owns thread IDs.
@@ -902,7 +948,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const rebound = bindingChanged ? rebindNodeThread(live, draft.binding)
         : configChanged ? rebindNodeThread(live, null) : live;
       saveNode({ ...rebound, title: draft.title, agentKind: draft.agentKind, runtime: draft.runtime,
-        model: draft.model, effort: draft.effort, persona: draft.persona,
+        model: draft.model, effort: draft.effort, persona: draft.persona, team: draft.team,
         binding: configChanged ? null : draft.binding, bindAttempt: configChanged ? null : draft.bindAttempt,
         issueId: bindingChanged || configChanged ? null : live.issueId }, true);
       if (configChanged) setHandoffNote(surfaceNotice(t, 'config_forked'));

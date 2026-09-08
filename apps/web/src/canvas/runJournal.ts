@@ -4,6 +4,7 @@ import type { RunNodeState, RunNodeStatus } from './runGraph';
 import { validateNodeOutput, type RunSummary } from './runGraph';
 import type { CanvasNode } from './canvasDoc';
 import { fetchConversationOperation } from '../canvasAgentChat';
+import { observeCloudGraph } from '../saas/graphRuns';
 
 export const CANVAS_RUN_JOURNAL_KEY = 'awwo.canvas.active-run.v1';
 
@@ -27,6 +28,8 @@ export interface CanvasRunJournal {
   startedAt: number;
   scope: string[];
   inputFingerprint?: string;
+  /** Accepted cloud graphs continue scheduling while all observers are detached. */
+  serverGraph?: { id?: string; tenantId: string; canvasId: string; cancelRequested?: boolean };
   /** Manual replies remain transcript evidence until explicitly published. */
   manual?: boolean;
   /** Exact operator turn needed to reconstruct a detached manual conversation. */
@@ -62,7 +65,11 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage
     };
   }
   if (!scope.length || scope.length > 1000 || scope.some(id => !Object.hasOwn(nodes, id))) return null;
-  return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes, ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
+  const graph = value.serverGraph as Record<string, unknown> | undefined;
+  if (graph && (!text(graph.tenantId) || !text(graph.canvasId) || (graph.id !== undefined && !text(graph.id)))) return null;
+  return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes,
+    ...(graph ? { serverGraph: { tenantId: String(graph.tenantId), canvasId: String(graph.canvasId), ...(graph.id ? { id: String(graph.id) } : {}), ...(graph.cancelRequested === true ? { cancelRequested: true } : {}) } } : {}),
+    ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
 }
 
 export function saveRunJournal(journal: CanvasRunJournal, storage: Pick<Storage, 'setItem'> = canvasStorage()): boolean {
@@ -108,6 +115,10 @@ export function journalSummary(journal: CanvasRunJournal): RunSummary {
 
 /** One read-only recovery pass. A missing identity or network failure always keeps the lock. */
 export async function reconcileRunJournal(journal: CanvasRunJournal, nodes: ReadonlyArray<CanvasNode>, base: string, signal?: AbortSignal): Promise<CanvasRunJournal> {
+  if (journal.serverGraph) {
+    try { return await observeCloudGraph(journal, signal); }
+    catch { return journal; } // Network/auth uncertainty cannot turn an accepted graph green.
+  }
   let next = journal;
   for (const item of Object.values(journal.nodes)) {
     if (signal?.aborted) break;

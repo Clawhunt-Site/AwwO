@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type piHealth struct {
@@ -21,6 +23,14 @@ type piHealth struct {
 	Model    string         `json:"model"`
 	Status   string         `json:"status"`
 	Limits   map[string]any `json:"limits"`
+	Models   []piModel      `json:"models"`
+}
+type piModel struct {
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Provider             string `json:"provider"`
+	MaxContextTextBytes  int    `json:"maxContextTextBytes"`
+	MessageOverheadBytes int    `json:"messageOverheadBytes"`
 }
 
 func (a *App) probePI(ctx context.Context) (piHealth, error) {
@@ -49,6 +59,12 @@ func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
 	models := []map[string]string{}
 	if h.Model != "" {
 		models = append(models, map[string]string{"id": h.Model, "provider": h.Provider})
+	}
+	if len(h.Models) > 0 {
+		models = []map[string]string{}
+		for _, m := range h.Models {
+			models = append(models, map[string]string{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": "pi"})
+		}
 	}
 	v := map[string]any{"engine": "pi", "configured": a.cfg.PIToken != "" && h.Ready, "available": e == nil, "plannerAvailable": e == nil, "models": models, "modelConnectivityVerified": false, "limits": h.Limits}
 	if e != nil {
@@ -115,7 +131,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var active, today int
-	if e = tx.QueryRow(r.Context(), "SELECT count(*) FILTER (WHERE status IN ('queued','running')),count(*) FILTER (WHERE created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') FROM runs WHERE tenant_id=$1", tid).Scan(&active, &today); e != nil {
+	if e = tx.QueryRow(r.Context(), "SELECT count(*) FROM runs WHERE tenant_id=$1 AND status IN ('queued','running')", tid).Scan(&active); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if e = tx.QueryRow(r.Context(), "SELECT count(*) FROM model_invocations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'", tid).Scan(&today); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -124,7 +144,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var model, instructions, kind string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind)
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -148,17 +168,41 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	budget, overhead := health.contextLimits()
-	if len(b.Prompt)+len(instructions)+overhead > budget {
-		fail(w, 413, "context_limit", "Prompt and instructions exceed the configured model context budget")
-		return
-	}
-	if model != "" && model != health.Model {
+	if _, _, ok := health.modelLimits(model); !ok {
 		fail(w, 409, "model_unavailable", "Agent model differs from the configured Pi model")
 		return
 	}
+	var document []byte
+	var nodeID string
+	if e = tx.QueryRow(r.Context(), "SELECT c.document,s.node_id FROM node_sessions s JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2", tid, b.SessionID).Scan(&document, &nodeID); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	team, e := savedNodeTeam(document, nodeID)
+	if e != nil {
+		fail(w, 400, "invalid_team", e.Error())
+		return
+	}
+	if e = validateTeamModels(team, health); e != nil {
+		fail(w, 400, "invalid_team", e.Error())
+		return
+	}
+	if model == "" {
+		model = health.Model
+	}
+	budget, overhead, _ = health.modelLimits(model)
+	if team == nil && len(b.Prompt)+len(instructions)+overhead > budget {
+		fail(w, 413, "context_limit", "Prompt and instructions exceed the configured model context budget")
+		return
+	}
+	snapshot := executionSnapshot{Instructions: instructions, Model: model, Budget: budget, Overhead: overhead, Team: team, Health: health}
 	id := randomID()
 	v, e := oneJSON(r.Context(), tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status) VALUES($1,$2,$3,$4,$5,$6,'queued') RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt)
 	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if e = saveRunSnapshot(r.Context(), tx, tid, id, currentUser(r).ID, snapshot); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -202,6 +246,9 @@ func (a *App) dispatch(tid, id, sid, prompt, instructions, kind string, budget, 
 		defer cancel()
 		defer func() { a.mu.Lock(); delete(a.running, id); a.mu.Unlock() }()
 		a.execute(ctx, tid, id, sid, prompt, instructions, kind, budget, overhead)
+		// Every accepted child must become terminal even if execution returned
+		// before provider admission or after a failed persistence operation.
+		a.finish(tid, id, "interrupted", "", "execution_interrupted")
 	}()
 }
 func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, kind string, budget, overhead int) {
@@ -221,7 +268,31 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	if e = tx.Commit(ctx); e != nil {
 		return
 	}
-	history, e := rowsJSON(ctx, a.db, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND m.run_id<>$3 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid, id)
+	var snapshot executionSnapshot
+	var snapshotRaw []byte
+	if e = a.db.QueryRow(ctx, "SELECT execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&snapshotRaw); e != nil {
+		a.finish(tid, id, "failed", "", "snapshot_unavailable")
+		return
+	}
+	if json.Unmarshal(snapshotRaw, &snapshot) != nil {
+		a.finish(tid, id, "failed", "", "snapshot_invalid")
+		return
+	}
+	if snapshot.Team != nil {
+		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
+		return
+	}
+	if e = a.reserveInvocation(ctx, tid, id, id); e != nil {
+		a.finish(tid, id, "failed", "", e.Error())
+		return
+	}
+	defer a.settleRunInvocation(tid, id)
+	var history []json.RawMessage
+	if snapshot.History != nil {
+		history = *snapshot.History
+	} else {
+		history, e = rowsJSON(ctx, a.db, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND m.run_id<>$3 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid, id)
+	}
 	if e != nil {
 		a.finish(tid, id, "failed", "", "history_unavailable")
 		return
@@ -231,7 +302,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	} else {
 		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions), budget, overhead)
 	}
-	body, e := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions})
+	body, e := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": "pi"})
 	if e != nil {
 		a.finish(tid, id, "failed", "", "invalid_request")
 		return
@@ -346,19 +417,48 @@ func (a *App) appendDelta(ctx context.Context, tid, id, delta string) bool {
 	return tx.Commit(ctx) == nil
 }
 func (a *App) finish(tid, id, status, output, code string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	if e := a.persistExecution(func(ctx context.Context) error {
+		return a.finishOnce(ctx, tid, id, status, output, code)
+	}); e != nil {
+		a.log.Error("run finalization interrupted; restart recovery required", "runId", id)
+	}
+}
+
+// Persistence retries only database writes; it never replays a provider request.
+// Shutdown or loss of our single-worker lease stops retrying. Start recovers the
+// remaining uncertain records before allowing another invocation.
+func (a *App) persistExecution(write func(context.Context) error) error {
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := write(ctx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		a.mu.Lock()
+		closed := a.closed
+		a.mu.Unlock()
+		if closed {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code string) error {
 	tx, e := a.db.Begin(ctx)
 	if e != nil {
-		a.log.Error("run finalization failed", "runId", id)
-		return
+		return e
 	}
 	defer tx.Rollback(ctx)
 	var sid string
 	if status == "completed" {
 		var kind string
 		if e = tx.QueryRow(ctx, "SELECT s.kind FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND r.id=$2", tid, id).Scan(&kind); e != nil {
-			return
+			if noRows(e) {
+				return nil
+			}
+			return e
 		}
 		if kind == "planner" {
 			if !validatePlan(output) {
@@ -371,17 +471,25 @@ func (a *App) finish(tid, id, status, output, code string) {
 	}
 	e = tx.QueryRow(ctx, "UPDATE runs SET status=$3,output=CASE WHEN $4='' THEN output ELSE $4 END,error=$5,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status IN ('queued','running') RETURNING session_id,output", tid, id, status, output, code).Scan(&sid, &output)
 	if noRows(e) {
-		return
+		if e = tx.QueryRow(ctx, "SELECT status FROM runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&status); e != nil {
+			if noRows(e) {
+				return nil
+			}
+			return e
+		}
+		if e = settleExecutionRecords(ctx, tx, tid, id, status); e != nil {
+			return e
+		}
+		return tx.Commit(ctx)
 	}
 	if e != nil {
-		a.log.Error("run finalization failed", "runId", id)
-		return
+		return e
 	}
 	event := map[string]string{"type": status}
 	if status == "completed" {
 		event["text"] = output
 		if _, e = tx.Exec(ctx, "INSERT INTO messages(id,tenant_id,session_id,run_id,role,content) VALUES($1,$2,$3,$4,'assistant',$5)", randomID(), tid, sid, id, output); e != nil {
-			return
+			return e
 		}
 	}
 	if status == "failed" {
@@ -390,11 +498,22 @@ func (a *App) finish(tid, id, status, output, code string) {
 	}
 	data, _ := json.Marshal(event)
 	if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, data); e != nil {
-		return
+		return e
 	}
-	if e = tx.Commit(ctx); e != nil {
-		a.log.Error("run finalization commit failed", "runId", id)
+	if e = settleExecutionRecords(ctx, tx, tid, id, status); e != nil {
+		return e
 	}
+	return tx.Commit(ctx)
+}
+
+func settleExecutionRecords(ctx context.Context, tx pgx.Tx, tid, id, status string) error {
+	// Completed member records are immutable; only abandoned active records need
+	// reconciliation after the execution goroutine has stopped calling providers.
+	if _, e := tx.Exec(ctx, "UPDATE run_turns SET status=$3,error=CASE WHEN $3='interrupted' THEN 'execution_interrupted' ELSE error END,updated_at=now() WHERE tenant_id=$1 AND run_id=$2 AND status IN ('queued','running')", tid, id, status); e != nil {
+		return e
+	}
+	_, e := tx.Exec(ctx, "UPDATE model_invocations SET status=$3,updated_at=now() WHERE tenant_id=$1 AND run_id=$2 AND status='running'", tid, id, status)
+	return e
 }
 func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")

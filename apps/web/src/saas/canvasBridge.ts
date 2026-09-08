@@ -4,10 +4,16 @@ import { canvasErrorMessage, canvasText } from './canvasErrors';
 
 type CanvasScope = { tenant: Tenant; canvasId: string };
 let active: CanvasScope | null = null;
-let saveCanvas: (() => Promise<void>) | null = null;
+let saveCanvas: (() => Promise<number | void>) | null = null;
 export function configureSaaSCanvas(scope: CanvasScope): void { active = scope; }
-export function configureSaaSCanvasSave(save: (() => Promise<void>) | null): void { saveCanvas = save; }
+export function configureSaaSCanvasSave(save: (() => Promise<number | void>) | null): void { saveCanvas = save; }
 export function clearSaaSCanvas(): void { active = null; }
+/** Capture a tenant/canvas scope once; an in-flight operation must not follow a workspace switch. */
+export function currentSaaSCanvas(): CanvasScope | null { return active; }
+export async function flushSaaSCanvas(): Promise<number | void> {
+  if (!saveCanvas) throw new Error(canvasText('画布保存尚未就绪', 'Canvas saving is not ready.'));
+  return saveCanvas();
+}
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 const operationStatus = (operationId: string, run?: any) => ({ operationId,
   state: !run ? 'not_started' : run.terminal ? 'terminal' : 'accepted',
@@ -34,7 +40,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
     if (path === '/companies') return json([{ id: scope.tenant.id, name: scope.tenant.name, status: scope.tenant.status }]);
     if (path === '/adapters') {
       const runtime = await api<any>('/runtime', { signal: init.signal });
-      return json([{ type: 'pi', loaded: true, disabled: false, modelsCount: runtime.models?.length || 0 }]);
+      return json([{ type: 'pi', loaded: true, disabled: false, supportsNodeTeams: true, modelsCount: runtime.models?.length || 0 }]);
     }
     if (/\/adapters\/[^/]+\/models$/.test(path)) return json((await api<any>('/runtime', { signal: init.signal })).models || []);
     if (path === '/canvas/planner') {

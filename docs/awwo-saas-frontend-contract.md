@@ -1,8 +1,8 @@
 # AwwO SaaS 前端对接与验收规范
 
-本项目以现有前端交互为产品基准，由 Go 承接身份、租户、资源、持久化与运行治理，由 Pi 承接模型执行。本轮补齐原账户资料、邀请链接、语言主题、原画布只读挂载和平台配额/分页。源码接通与实际验收分别记录；不能将“API 可调用”表述为“真实模型及公网运行全部完成”。
+本项目以现有前端为产品基准，Go 承接身份、租户、持久 DAG、节点团队与运行治理，Pi 承接真实文本推理。2026-09-08 增加每节点 1–8 位成员的手动团队配置、每成员模型目录选择和后台整图记录；源码接通、实际验收与公网发布分别记录。
 
-本文基于 2026-09-07 的 `feat/awwo-go-pi-saas` 本地实现，前一文档基准为 `847d045e569d2b6c7bceb961f27b2c69aba0ec79`；实施 worktree 为 `/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-saas-20260907`。本轮代码、测试和浏览器结果以 [本地验收记录](awwo-saas-verification.md) 的新增记录为准，真实 provider 仍需本项目配置。
+本文初版基于 2026-09-07 的 `feat/awwo-go-pi-saas`，此前文档基准为 `847d045e569d2b6c7bceb961f27b2c69aba0ec79`。当前增强分支 `codex/awwo-node-teams-20260908`，worktree `/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-saas-20260907`。本次团队与后台图的最终 SHA、测试及截图单独报告；此前 [基础验收](awwo-saas-verification.md)、[整改](awwo-fable-remediation-20260907.md)、[真实模型验收](awwo-real-provider-acceptance-20260908.md)仅覆盖各自版本范围。
 
 项目约束、分工与交付门见 [设计与开发规范](awwo-saas-design-standards.md)。
 
@@ -35,7 +35,7 @@
 - 集合通常返回 `{items:[]}`，错误为 `{error:{code,message}}`。401、403、404、409、413、429、503 分别需要显示登录、权限、资源、冲突、上下文、配额、运行服务问题；失败不得显示已保存或已完成。
 - 六类租户资源和四类平台管理列表返回 `{items,nextCursor,snapshot}`。分页必须保留资源范围及过滤条件，切换用户/租户后重置并忽略旧响应；快照字段只是创建时间边界。
 - 使用 HttpOnly `awwo_session` cookie；不将 token 写入 localStorage。节点、会话、运行、规划和成员操作都在 Go 校验租户关系及权限。
-- 数据库列只描述逻辑实体，实际表结构以 Go 迁移为准。完整字段、状态与错误约定见 [API v1](awwo-saas-api.md)。
+- 数据库列只描述逻辑实体，实际表结构以 Go 迁移为准。基础字段、状态与错误见 [API v1](awwo-saas-api.md)，新增团队和图路由以 [节点团队设计](awwo-node-teams.md)为准。
 
 ## 3. 前端能力与后端覆盖矩阵
 
@@ -49,13 +49,15 @@
 | 自动保存与冲突提示 | `apps/web/src/saas/SaaSApp.tsx` 的 CloudCanvas；`canvasDraft.ts`；`apps/web/src/canvas/canvasStorage.ts` | `GET/PUT T/canvases/{id}`，PUT 携带读取到的 version，陈旧值 409 | Go document 为同步基准；草稿保存 document、baseVersion、dirty、revision | 已接；新增持久化适配 | 两页冲突后不覆盖新服务端版本；409 或断网后刷新仍可恢复/导出草稿；成功确认精确 revision 后才清理。 |
 | 节点标题、角色、人格与契约编辑 | `apps/web/src/canvas/InspectorPanel.tsx`；`CanvasSurface.tsx` 的 saveInspector；`nodeThreads.ts` | 图配置走 CAS；绑定时 `POST T/agents`，人格写入 `PUT T/agents/{id}/instructions`；Pi 接收已保存指令 | document 保存节点配置及 binding；Go 保存 Agent 定义和 instructions | 已接；保留原重新绑定语义 | 修改已绑定运行配置后进入新绑定流程，旧会话身份不被覆盖；人格写入失败要显示错误，不能声称同步成功。 |
 | 绑定 Agent | `apps/web/src/canvas/InspectorPanel.tsx` 的 bind / completeBinding；`apps/web/src/canvasHire.ts`；`apps/web/src/saas/canvasBridge.ts:77` | 原 hire 请求映射为 `POST T/agents`，得到 agentId 后保存 binding；Pi 此时不执行 | Go Agent；document binding 与 bindAttempt | 已接 | 点击绑定后实际创建租户 Agent；后续 session 使用该 ID；响应不确定显示待确认，不当作绑定成功。 |
-| 运行环境与模型选择 | `apps/web/src/RuntimePicker.tsx`；`apps/web/src/canvasRuntimeReader.ts`；`apps/web/src/saas/canvasBridge.ts` | 原 inventory/models 请求映射 `GET /api/v1/runtime`；Go 返回服务端配置的 Pi 模型；Pi 使用该模型执行 | 节点与 Agent 保存选择；provider、凭据、模型配置在服务端 | 已接；目前只有服务端配置的模型 | 下拉来自 runtime 响应，不写死模型；不可用时明确提示；实际执行模型须与保存值一致。未声明支持的 effort 控件不显示。 |
+| 运行环境与模型选择 | `RuntimePicker.tsx`、`canvasRuntimeReader.ts`、`saas/canvasBridge.ts`、`NodeTeamEditor.tsx` | inventory/models 映射 `GET /api/v1/runtime`；Pi 目录解析选择 ID；明确 supportsNodeTeams 能力门控 | 节点绑定 Agent 与 team 保存选择，provider/连接/秘密留在服务器 | 已接模型目录和成员选择；实际验证单列 | 目录加载失败/不可用模型阻止未验证团队保存；选择→持久化→实际模型→重载一致；空成员模型继承已绑定主 Agent。 |
 | 新增和切换节点会话 | `apps/web/src/canvas/SessionTile.tsx:486`；`nodeThreads.ts`；`apps/web/src/saas/canvasBridge.ts:120` | 新空会话先是本地 thread；首次发送前 `POST T/sessions`，后续复用其 ID | document 保存 thread、草稿和 issueId→sessionId；Go 保存 session | 已接；复用原会话侧栏 | 新增空会话不产生模型调用；首条消息创建独立 session；切回旧会话恢复自己的草稿与历史，不串节点。 |
-| 节点聊天与实时输出 | `apps/web/src/canvas/SessionTile.tsx:420`；`CanvasSurface.tsx` 的 startRun；`apps/web/src/canvasAgentChat.ts`；`apps/web/src/saas/canvasBridge.ts:120` | 先确认画布保存，再 `POST T/runs {sessionId,prompt,operationId}`，读取 `GET T/runs/{id}/events`；Go 管持久化和准入，Pi 推理 | Go user/assistant messages、run 与事件；前端流式展示 | 已接；真实 provider 待验收 | 用户输入受理后进入运行态；增量可见；仅 completed 才显示成功；失败保留可理解原因；重复 operationId 不重跑。 |
-| 整图、选中节点、重跑与上游输入传递 | `apps/web/src/canvas/runGraph.ts`；`CanvasSurface.tsx`；RunControls | 浏览器按原依赖调度逐个提交 Go run；Pi 只执行当前节点请求，不自行调度整图 | 图与交付物在 document；单节点运行和消息在 Go；调度中间状态与 journal 在浏览器 | 部分：原图交互已接，长期后台整图调度未实现 | 实测多节点依赖依次满足、必填输入缺失或环路阻止执行；关闭页面后已有 run 可完成，但不能把尚未提交的下游节点说成已后台托管。 |
+| 节点聊天与实时输出 | `SessionTile.tsx`、`CanvasSurface.tsx` startRun、`canvasAgentChat.ts`、`saas/canvasBridge.ts` | 保存后 `POST T/runs {sessionId,prompt,operationId}`，读取 runs/events；Go 从保存节点读取可选 team | messages、run、事件和执行快照；team 时增加 run_turns | 已接；团队扩展需独立验收 | 普通节点聊天也按保存 team 执行；单 Agent 沿用历史和增量，团队最终结果进入节点会话；未完成不能标成功，operationId 不重跑。 |
+| 整图、选中节点、重跑与上游输入传递 | `CanvasSurface.tsx`、`saas/graphRuns.ts`、RunControls | SaaS `POST T/canvases/{id}/graph-runs` 受理固定文档版本与 scope；Go 调度依赖，Pi 执行当前成员或节点 | graph_runs / graph_run_nodes 与执行快照；journal 是前端投影 | 已接 Go 后台图；本轮实测单列 | 关闭页面后下游仍派发；字段和环路校验、失败传播、丢失响应恢复、取消及重启不重放已受理调用。原本机模式仍使用浏览器 runGraph。 |
+| 节点内成员与四种协作 | `NodeTeamEditor.tsx`、`InspectorPanel.tsx`、`nodeTeam.ts`、`SessionTile.tsx` | 原画布 CAS 保存可选 team；Go 运行时校验并按顺序/并行/讨论/审核执行 | document.nodes[].team、run 团队/执行快照、run_turns | 已接手动配置；不含自然语言生成团队 | 1–8 位增删/排序/独立职责指令模型/context；review 至少 2；空 runtime 继承 Pi；invalid_team 明确显示；修改使自己和下游结果失效，关闭团队保留原绑定与人格。 |
+| 后台运行与成员记录 | `saas/GraphRunPanel.tsx`、`saas/graphRuns.ts` | GET graph-runs 及 runs/{id}/turns；POST 图取消；不靠打开面板发起推理 | Go 图快照、节点结果和按 ordinal 排序的成员记录 | 已接；图列表最近 50 条，无分页导出 | 运行状态、成员/职责/模型/轮次/输出/错误可见；刷新或其他页面读取同一图；reader 可查看但不能停止。 |
 | 历史消息、刷新恢复运行 | `apps/web/src/canvas/SessionTile.tsx` 的 restoreHistory；`sessionTransport.ts`；`runJournal.ts`；`CanvasSurface.tsx` 的 recovery；`apps/web/src/saas/canvasBridge.ts:84` | `GET T/sessions/{id}/messages`、`GET T/runs?operationId=...`、`GET T/runs/{id}`；Go 提供持久输出/终态；不因恢复自动重新推理 | Go messages/run/output；document thread ID；本地 scoped journal | 已接 | 运行时刷新后回读同一 run；断线不冒充成功；completed、failed、cancelled、interrupted 区分；历史会话不自动重新发布为下游当前产出。 |
 | 停止运行 | `apps/web/src/canvas/CanvasSurface.tsx` 的 stopRun；`sessionTransport.ts`；`apps/web/src/saas/canvasBridge.ts:103` | `POST T/runs/{id}/cancel` 并回读终态；Go 持久取消，Pi 终止当前执行 | Go run 终态、事件、部分输出；本地运行状态 | 已接 | 点击停止后以确认结果更新 UI；断开 SSE 不视作已取消；停止后下游不继续使用部分输出。 |
-| AI 画布规划、取消、应用与撤销 | `apps/web/src/canvas/canvasPlanning.ts`；`canvasPlan.ts`；`CanvasSurface.tsx:1087`；`apps/web/src/saas/canvasBridge.ts:39` | `POST T/canvases/{id}/plan {prompt,context,operationId}`，复用 runs/SSE/cancel；Pi 返回计划，Go 验证 JSON/操作，前端再验 schema、引用、环路和版本后应用并 CAS 保存 | Go 持久规划 run；planning 会话在隔离本地缓存；应用结果存 document | 已接；真实 provider 待验收 | 合法计划应用到原画布；非法/陈旧/失败计划不改图；取消可观察；模型未配置或上下文超限显示原因，不伪造规划。 |
+| AI 画布规划、取消、应用与撤销 | `apps/web/src/canvas/canvasPlanning.ts`；`canvasPlan.ts`；`CanvasSurface.tsx:1087`；`apps/web/src/saas/canvasBridge.ts:39` | `POST T/canvases/{id}/plan {prompt,context,operationId}`，复用 runs/SSE/cancel；Pi 返回计划，Go 验证 JSON/操作，前端再验 schema、引用、环路和版本后应用并 CAS 保存 | Go 持久规划 run；planning 会话在隔离本地缓存；应用结果存 document | 已接；真实 provider 证据按版本记录 | 合法计划应用到原画布；非法/陈旧/失败计划不改图；取消可观察；模型未配置或上下文超限显示原因，不伪造规划。 |
 | 结构化输入、输出、手工发布与下游交付 | `apps/web/src/canvas/ContractFields.tsx`；`NodeDeliverables.tsx`；`runGraph.ts:215` | 前端构造输入/输出约束放入 prompt；Pi 返回文本；原 validator 验证后允许发布；产出随 CAS 保存 | document contract、outputValues、lastOutput；Go 同时保留原 run 文本 | 已接；复用原契约与交付面板 | number/boolean/必填字段错误阻止发布；有效输出进入指定下游端口；历史、手工与部分输出保持原有标记。 |
 | 文件引用、复制及画布导出 | `apps/web/src/canvas/ContractFields.tsx`；`NodeDeliverables.tsx`；`apps/web/src/saas/SaaSApp.tsx` 的 ReadOnlyCanvas / exportLocal | 文件字段是字符串引用；复制与 JSON 导出由浏览器完成，不调用上传下载 API；Pi 不读取用户本地路径 | 引用在 document/文本；导出为浏览器下载文件 | 已接原引用展示/复制与编辑、只读、恢复视图的 JSON 导出；附件上传不在当前能力内 | 输入绝对路径只展示/复制，不能声称已上传或生成文件；reader 导出与服务端 document 一致，编辑导出及草稿导出保留当前本地内容。原画布没有通用附件上传能力，不登记为迁移遗失。 |
 
@@ -89,17 +91,17 @@ CloudCanvas 先读取服务端 document，再决定挂载原画布或展示草�
 
 本地 thread ID 与 Go session ID 不是同一概念。原 `issueId` 在适配层承载 Go session ID；首次发送后写回 document。operationId 用于查明受理结果和避免重复运行，HTTP 202、SSE 断开、存在部分文本均不等于成功。恢复只读取原 run，不重发一个新 operationId 冒充恢复。
 
-目前图调度仍由浏览器 `runGraph` 驱动。Go 能继续执行已经提交的节点 run；页面关闭后尚未提交的下游节点不是后台任务。若产品要求“关网页整图继续运行”，需要独立的服务端图执行设计与验收，不能仅增加一个前端 loading 提示。
+SaaS 图调度由 Go 驱动：UI 等待保存并提交 documentVersion/scope；Go 固定文档和节点执行配置，持续派发依赖就绪的节点，浏览器观察快照。关闭页面不停止已受理图。Go 重启会把已接受但不确定的调用标 interrupted，不盲目重放；读取持久图后，未受理且依赖满足的节点可继续。原本机入口仍使用 runGraph；本实现并非分布式 worker 高可用。
 
 ### 4.3 Pi 和交付物的边界
 
-Pi 当前承担模型对话与规划输出，服务端控制 provider/model、上下文预算、取消和超时。当前模式不向租户开放任意 shell、工具、扩展或文件系统访问。`runtime.available` 与配置健康检查不证明真实 provider 的账号、余额、模型或输出质量可用。
+Pi 当前承担真实文本推理和规划输出；成员从服务器模型目录选择，空值继承已绑定主 Agent 的模型。maxTurns 是最多模型调用次数，timeoutSeconds 是团队总时间上限，仍受外层 Go 和 Pi 单次超时约束。tools 只能为空，不能开放任意 shell、扩展或文件访问。supports_node_teams 只是 UI 配置能力，runtime.available 和健康检查不证明真实 provider 余额、连通或输出质量。
 
 结构化交付沿用原前端契约验证；Go 保存 run 原文本与画布 document，并不是一个独立的服务端交付物校验/对象存储系统。`file` 字段是文件引用字符串，不等于上传完成、文件存在或 Pi 已经读取文件。真正上传、生成文件下载和工程目录执行属于新增产品能力，实施时须另外定义对象归属、访问权限、体积限制、保留与删除规则。
 
 ### 4.4 规划结果的应用时点
 
-用户输入需求并点击“生成画布”后，合法结果通过 Go JSON/操作校验和原前端 schema、引用、环路及当前版本校验，随即应用到原画布并进入 CAS 保存。助手显示“已更新画布”，提供“撤销本次更改”；当前交互没有第二个确认/应用按钮。非法、失败、已取消或陈旧结果保持原图不变。此行为与邀请领取的显式确认是两个独立流程。
+用户输入需求并点击“生成画布”后，合法结果通过 Go JSON/操作校验和原前端 schema、引用、环路及当前版本校验，随即应用到原画布并进入 CAS 保存。助手显示“已更新画布”，提供“撤销本次更改”；当前交互没有第二个确认/应用按钮。非法、失败、已取消或陈旧结果保持原图不变。此行为与邀请领取的显式确认是两个独立流程。自然语言 planner 尚不创建或修改 team，团队需在原属性面板手动配置。
 
 ## 5. 本轮完成项与剩余工作
 
@@ -107,13 +109,13 @@ Pi 当前承担模型对话与规划输出，服务端控制 provider/model、�
 
 | 顺序 / 当前状态 | 范围 | 当前实现或下一步 | DoD / 验收要求 |
 | --- | --- | --- | --- |
-| 验收前置 / 待配置 | 真实 provider 尚未验收 | 在本项目明确配置 provider/model 后，从原画布绑定、发送、整图及规划入口执行；仅使用该项目获准凭据 | 留下浏览器动作、实际模型标识、Go run/message/SSE、刷新恢复和结构化结果证据；记录失败/取消。fixture 或健康检查不能替代。 |
+| 验收前置 / 按新范围重验 | 真实 provider 的新增团队与后台图链路 | 此前已执行范围见真实模型报告，本次从成员配置、四模式与后台图入口补验；只用本项目获准配置 | 留下模型目录 ID 与实际模型、每成员记录、调用次数、最终输出、关闭页面后下游派发及失败/取消证据。 |
 | P2-1 / 已实施 | 原账户资料编辑 | `CanvasAccountControl` → `AccountWorkspacePanel` → `saas/accountApi.ts` → `PATCH /auth/profile`；当前支持显示名称 | 修改名称→Go 持久化→顶部身份和刷新一致；空值/超长/未登录有明确失败；SaaS 面板不展示另一套外部账户身份。 |
 | P2-2 / 已实施 | 原邀请链接 | 原面板创建、复制及撤销；`InviteAcceptance` 保留登录/注册前的 URL token，预览后明确确认领取 | 创建并复制链接→登录/注册→确认加入→成员可见；覆盖过期、撤销、重复领取、发行者降权；已有角色不因领取而提升。只复制链接，不声称发信。 |
 | P2-3 / 已实施 | 语言、浅深主题 | `SaaSPreferencesProvider` 复用 `superclaw_locale`、`superclaw_theme` 和原画布词条；全页共享偏好 | 中英文及浅/深色可切换、刷新保留；账户、画布、只读、运行设置、管理外壳一致；已知服务错误本地化，未知错误保留原文。 |
 | P2-4 / 已实施 | 原成员入口、reader、运行设置 | 原面板按 reader/member/admin/owner 约束管理成员；reader 挂载原 `CanvasSurface readOnly`；`RuntimeSettings` 查询服务端配置 | 成员不越权；只读历史切换仅改变浏览状态，禁止保存/绑定/执行/规划/恢复写入；viewer cache 不覆盖编辑草稿；运行设置刷新不等于模型推理验证。 |
 | P2-5 / 已实施 | 平台配额、分页、导出 | `AdminPanel` / `adminData` 接 Go 配额 PATCH 与四列表 limit/cursor；显示每页 50，导出每次取 200 并遍历到末页 | 修改留审计并影响新 run 准入；非法值失败；下一页/返回页/刷新可用；导出失败或取消不下载半份文件，读取边界不冒充数据库一致性备份。 |
-| 后续能力 / 未实施 | 关闭浏览器后继续整个图 | 将图任务、依赖、发布和节点派发状态交给 Go 持久调度；保留现有 runGraph 的语义和 UI 投影 | 中途关闭浏览器，未派发的下游仍按依赖执行；重启恢复不重复派发；取消/失败传播和版本固定可验收。当前仅已接收的 Go run 继续执行。 |
+| 新增能力 / 已接待独立验收 | 关闭浏览器后继续整个图 | Go 持久图任务和节点执行快照；前端查询与恢复，保留原节点交互 | 页面关闭后仍按依赖执行；重启时已受理调用 interrupted，不盲目重放；验证版本固定、取消墓碑和失败传播。分布式 worker 仍未实施。 |
 | 后续能力 / 未实施 | 真实附件、工程文件和下载 | 单独设计对象存储与引用契约，随后扩展原 ContractFields / NodeDeliverables | 文件从 UI 上传→租户对象→模型可用内容→结果下载的全链证据齐全；跨租户引用拒绝。当前只是引用，不是原上传功能的回归缺口。 |
 
 实际 API 使用 SaaS reader/member/admin/owner 角色；原面板通过可注入 API、可分配角色和可编辑范围适配，历史调用默认行为保留。租户 owner 与平台 admin 为独立权限；邀请码不保存在 localStorage，复制链接不等于邮件邀请。
@@ -128,7 +130,7 @@ Pi 当前承担模型对话与规划输出，服务端控制 provider/model、�
 | 前端自动化 | SaaS、原账户、原画布相关测试，以及 typecheck/build；最新命令、文件和用例数以验收记录为准 | 可证明测试覆盖的隔离、持久草稿、账户/邀请/权限、运行和规划适配行为。旧批次用例数不代表本轮总量，不重复相加。 |
 | 本地真实浏览器 | 原画布保存重载、账户改名重载、语言主题持久、邀请注册后确认 reader、原图只读、运行状态说明、平台配额及审计分页/JSON 下载 | 可证明验收记录中的实际 UI 链路；未从这些动作推导真实模型执行成功。 |
 | 进程与协议 fixture | Go → Pi HTTP → 真实 Pi SDK/子进程 → 本地模型协议 fixture → PostgreSQL；浏览器 fixture 可从同一个原画布入口驱动此链路 | 可证明已执行记录中的真实进程协作、协议处理与 UI 回显；`--self-test` 仅验证 fixture 自身，fixture 输出不是商业或自建 provider 验收。 |
-| 真实模型、部署 | 尚未执行真实 provider；公网与容器运行未验收 | 明确记为未执行/环境阻塞，不记为通过。 |
+| 真实模型、部署 | 既有真实模型结果见 [2026-09-08 报告](awwo-real-provider-acceptance-20260908.md)；新团队/后台图按本轮报告；公网与容器运行分别记录 | 不把旧模型成功扩大为新增四模式或生产准备度。 |
 
 前端独立检查入口（仓库根目录）：
 

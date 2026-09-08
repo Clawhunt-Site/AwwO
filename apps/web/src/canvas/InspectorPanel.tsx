@@ -25,6 +25,8 @@ import { canvasFetch } from '../saas/canvasBridge';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { RuntimePicker, type RuntimeValue } from '../RuntimePicker';
+import { NodeTeamEditor } from './NodeTeamEditor';
+import { validateNodeTeam } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import {
@@ -154,6 +156,7 @@ export function InspectorPanel({
   // Local draft — committed on 保存 (or as part of 绑定, which saves first so a mid-bind close
   // never loses the operator's edits).
   const [draft, setDraft] = useState<CanvasNode>(node);
+  const [teamCatalogValid, setTeamCatalogValid] = useState(!('team' in node && node.team));
   // Keyed on the node IDENTITY, not the whole node: after a bind we setDraft(bound) AND
   // onSave(bound), so the parent re-renders with the same id — resetting here would be a no-op
   // at best and a clobber of a fresher draft at worst.
@@ -163,16 +166,19 @@ export function InspectorPanel({
   // must be DISTINGUISHABLE from "no runtimes exist" — an empty dropdown with no explanation
   // reads as a product with zero runtimes rather than as a kernel that is down.
   const [runtimes, setRuntimes] = useState<string[]>([]);
+  const [teamsAvailable, setTeamsAvailable] = useState(false);
   const [runtimesError, setRuntimesError] = useState(false);
   useEffect(() => {
     if (!readJson) return;
     let stale = false;
     setRuntimesError(false);
+    setTeamsAvailable(false);
     void readJson('/api/agents')
       .then((d) => {
         if (stale) return;
         const list = Array.isArray(d?.agents) ? d.agents : [];
         setRuntimes(list.map((a: { name?: unknown }) => String(a?.name ?? '')).filter(Boolean));
+        setTeamsAvailable(list.some((agent: { name?: unknown; supports_node_teams?: unknown }) => agent.name === 'pi' && agent.supports_node_teams === true));
       })
       .catch(() => {
         if (!stale) setRuntimesError(true);
@@ -222,6 +228,7 @@ export function InspectorPanel({
 
   const save = () => {
     if (mutationLocked()) return;
+    if (sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     onSave(draft);
     onClose();
   };
@@ -276,6 +283,7 @@ export function InspectorPanel({
 
   const bindAgent = async () => {
     if (!sessionDraft || mutationLocked()) return;
+    if (sessionDraft.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     // Only ever POST to a company that is actually in the live list: a selection left over from a
     // company that has since disappeared must fall back to a real one, never be sent as-is.
     const companyId = liveCompanies.some((c) => c.id === bindCompanyId)
@@ -410,6 +418,9 @@ export function InspectorPanel({
               onChange={(e) => editDraft({ ...sessionDraft, persona: e.target.value })}
             />
 
+            <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
+              disabled={busy} onValidityChange={setTeamCatalogValid}
+              onChange={team => editDraft({ ...sessionDraft, team })} />
             <div className="canvas-inspector-label">{t('inspector.bindReal')}</div>
             {sessionDraft.bindAttempt === 'unknown' && !sessionDraft.binding ? (
               <div className="canvas-inspector-outcome canvas-inspector-outcome--warn">
@@ -450,7 +461,7 @@ export function InspectorPanel({
                 <button
                   type="button"
                   className="canvas-inspector-bind"
-                  disabled={busy || !sessionDraft.runtime.trim()}
+                  disabled={busy || !sessionDraft.runtime.trim() || Boolean(sessionDraft.team && !teamCatalogValid)}
                   title={!sessionDraft.runtime.trim() ? t('inspector.chooseRuntime') : undefined}
                   onClick={() => void bindAgent()}
                 >
@@ -516,7 +527,7 @@ export function InspectorPanel({
       </div>
 
       <footer className="canvas-inspector-foot">
-        <button type="button" className="canvas-inspector-save" disabled={busy} onClick={save}>
+        <button type="button" className="canvas-inspector-save" disabled={busy || Boolean(sessionDraft?.team && !teamCatalogValid)} onClick={save}>
           {t('common.save')}
         </button>
         <button type="button" className="canvas-inspector-cancel" disabled={closeLocked} onClick={close}>

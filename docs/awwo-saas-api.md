@@ -83,7 +83,7 @@
 | DELETE /agents/{id} | 无 | 已被 session 引用时拒绝 |
 | GET /runtime（不带 tenant 前缀） | 无 | engine, configured, available, plannerAvailable, models[{id,provider}], modelConnectivityVerified, limits, reason?；登录即可 |
 
-Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructions,adapterType:'pi',adapterConfig:{model},createdAt}`；原绑定适配器使用 adapterConfig.model。服务器保存的非空 model 必须与当前服务端配置一致才能运行。前端不能在 Agent 定义中提供工具、模型 URL、工作目录或环境变量。内部 planner Agent 与 session 不出现在普通 Agent / session 列表。
+Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructions,adapterType:'pi',adapterConfig:{model},createdAt}`；原绑定适配器使用 adapterConfig.model。服务器保存的非空 model 必须属于服务端模型目录才能运行；目录包含默认模型与 `AWWO_PI_MODELS_JSON` 配置档。前端不能在 Agent 定义中提供工具、模型 URL、工作目录或环境变量。内部 planner Agent 与 session 不出现在普通 Agent / session 列表。
 
 `runtime.available` 和 `plannerAvailable` 表示 Pi 配置健康探测通过；`modelConnectivityVerified` 当前固定为 false，不在探测时执行推理。Pi health 可读时 `limits` 含 `contextWindow`、`maxOutputTokens`、`maxContextTextBytes`、`messageOverheadBytes` 及 `promptChars/systemPromptChars/historyMessageChars/historyMessages/totalTextChars/bodyBytes` 传输限制，不可读时可为 null。RuntimeSettings 展示引擎、服务状态、模型和原因并支持刷新；模型连接仍由服务管理员配置，不提供浏览器秘密写接口。真实 provider 是否可用必须另做实际运行验收。
 
@@ -120,14 +120,33 @@ Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructi
 | POST /runs | sessionId, prompt, operationId | 202；operationId 必须 8–200 字节，也可用 Idempotency-Key header |
 | GET /runs | 可选 sessionId、operationId、active、limit、cursor | 运行列表，用于恢复受理结果不确定的请求与查询活动运行 |
 | GET /runs/{id} | 无 | status/output/terminal/error 等 |
+| GET /runs/{id}/turns | 无 | `{items}`，按 ordinal 排序的团队成员回合；含成员、角色、模型、轮次、配置、状态、输出与错误，单 Agent 返回空列表 |
 | GET /runs/{id}/events | Last-Event-ID 或 after 查询参数 | text/event-stream，持久事件重放 |
 | POST /runs/{id}/cancel | 无 | 幂等取消；状态以回读运行记录为准 |
 
-同一个 operationId 与同样 session/prompt 返回既有 run；相同 key 换内容返回 409，不启动第二次模型执行。不同 operationId 对同一活跃 session 返回 session_busy。租户每日调用数和并发上限由后端检查。
+同一个 operationId 与同样 session/prompt 返回既有 run；相同 key 换内容返回 409，不启动第二次模型执行。不同 operationId 对同一活跃 session 返回 session_busy。租户每日调用数和并发上限由后端检查；团队每一次实际成员模型调用都单独占用和核算额度。运行接收时冻结节点团队配置，后续编辑不改变已受理运行。
 
 run 对象包含 `{id,tenantId,sessionId,operationId,status,output,outputAvailable,terminal,error,createdAt,updatedAt}`。运行状态：queued、running、completed、failed、cancelled、interrupted。`terminal` 是状态派生值；`outputAvailable` 仅说明有文本，部分输出不等于成功。服务重启产生 interrupted，不能把它自动归为 completed。
 
 SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、running、text_delta、completed、failed、cancelled、interrupted；文本增量使用 delta 字段。关闭 SSE 不等价于取消，取消必须走 cancel API。重连只补读事件，不重新执行任务。普通 HTTP 接受请求也不等价于运行完成。
+
+## 节点团队与后台整图
+
+节点 `document.nodes[].team` 是可选配置，支持顺序执行、并行汇总、多轮讨论、审核返工；省略则保留原单 Agent 行为。字段、范围、模型继承和审核 JSON 协议见 [节点团队设计](awwo-node-teams.md)。配置保存在画布文档内，服务器独立验证后才执行，不能通过前端选择任意密钥或执行器。
+
+以下路径仍以 `/tenants/{tenantId}` 开头；读取需 reader，创建与取消需 member。
+
+| 方法与后缀 | 请求 / 查询 | 说明 |
+| --- | --- | --- |
+| POST /canvases/{id}/graph-runs | operationId, documentVersion?, scope? | 新建 202，幂等回放 200；前端先保存并提交确认的 documentVersion，版本陈旧 409 |
+| GET /canvases/{id}/graph-runs | operationId? | `{items}`，最近 50 个运行快照；可按操作 ID 恢复响应丢失的提交 |
+| GET /canvases/{id}/graph-runs/{graphId} | 无 | 权威整图状态、受理时 document/documentVersion/scope 和 nodes |
+| POST /canvases/{id}/graph-runs/{graphId}/cancel | 空对象 | 幂等取消；保留已完成及部分输出，回读确认最终状态 |
+| POST /canvases/{id}/graph-runs/operations/{operationId}/cancel | 空对象 | 写入取消墓碑并与创建互斥；即使创建响应丢失也可阻止延迟提交，返回 confirmed/status 及可选 graphId |
+
+整图状态为 queued、running、completed、failed、cancelled、interrupted；节点状态为 waiting、running、done、failed、blocked、cancelled、cached。节点记录含 nodeId、runId、sessionId、output、detail；使用 runId 读取成员回合。成员模型调用通过 `model_invocations` 记录，失败、取消及重启均释放活跃占用。终态数据库写入的短暂故障只重试数据库事务，不重发模型请求。
+
+Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后已受理整图继续执行；重新打开会恢复输出及成员记录。当前为单 API 实例执行与数据库租约，尚未实现水平多执行器调度。服务重启会将已受理但结果不确定的模型调用标记 interrupted；可继续尚未受理且依赖成功的节点，不自动重放未知调用。
 
 ## 平台管理
 
@@ -140,8 +159,8 @@ SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、
 | GET /admin/audit | limit?, cursor? | `{items,nextCursor,snapshot}`；id,actorId,tenantId,action,resourceId,createdAt |
 | PATCH /admin/tenants/{id} | status?, maxConcurrentRuns?, maxRunsPerDay? | 至少一项；status=active/suspended，并发整数 1–100，每日整数 1–100000；200 返回更新的 tenant |
 
-以上全部要求 platformRole=admin。租户 owner 并不能访问平台后台。配额影响后续运行准入，每日限额按 UTC 日期计算，降低额度不终止已受理 run。暂停租户禁止新增业务写入，并取消当前活跃运行、记录事件；Go 保留历史读取权限，当前 SaaS 暂停页提供切换工作区与退出。恢复不自动重新执行取消过的任务。
+以上全部要求 platformRole=admin。租户 owner 并不能访问平台后台。每日限额按 UTC 日期计算；降低额度不主动中断正在进行的模型调用，但团队后续成员调用需再次通过准入。暂停租户禁止新增业务写入，并取消当前活跃运行、记录事件；Go 保留历史读取权限，当前 SaaS 暂停页提供切换工作区与退出。恢复不自动重新执行取消过的任务。
 
 reader 可读取原画布、会话及历史；业务写入由 Go 独立拒绝，原 CanvasSurface 的只读模式不发起保存、绑定、运行、规划或恢复写入。reader 仍可保存自己的账号配色；语言和浅深主题是浏览器偏好。
 
-首版不提供支付、邮箱验证/找回、OIDC、文件上传下载或工具/工程文件执行，也没有独立长期后台图调度接口。页面关闭只允许已接收的 Go run 继续，尚未提交的下游 DAG 节点不会自动调度。真实 provider 尚未验收；本地协议 fixture 不替代真实模型或生产验收。
+当前不提供支付、邮箱验证/找回、OIDC、文件上传下载或工具/工程文件执行。节点团队以 Pi 文本推理为范围；协议 fixture、真实模型、本地浏览器及生产验收须分别报告，实际验收范围以对应日期的报告为准。

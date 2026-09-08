@@ -379,7 +379,7 @@ func (a *App) deleteObject(w http.ResponseWriter, r *http.Request, table, action
 		return
 	}
 	var busy bool
-	sql := "SELECT EXISTS(SELECT 1 FROM node_sessions s JOIN runs r ON r.session_id=s.id WHERE s.tenant_id=$1 AND s.canvas_id=$2 AND r.status IN ('queued','running'))"
+	sql := "SELECT EXISTS(SELECT 1 FROM node_sessions s JOIN runs r ON r.session_id=s.id WHERE s.tenant_id=$1 AND s.canvas_id=$2 AND r.status IN ('queued','running')) OR EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND status IN ('queued','running'))"
 	if table == "agents" {
 		sql = "SELECT EXISTS(SELECT 1 FROM node_sessions WHERE tenant_id=$1 AND agent_id=$2)"
 	}

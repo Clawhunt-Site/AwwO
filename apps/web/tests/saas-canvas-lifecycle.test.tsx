@@ -5,6 +5,11 @@ import { CanvasList } from '../src/saas/CanvasList';
 import { CreateWorkspaceDialog, SaaSApp } from '../src/saas/SaaSApp';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { CanvasRecord, Tenant } from '../src/saas/api';
+import { createFormNode, emptyDocument } from '../src/canvas/canvasDoc';
+import { canvasStorage } from '../src/canvas/canvasStorage';
+import { loadRunJournal, saveRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
+import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
+import type { GraphRunSnapshot } from '../src/saas/graphRuns';
 
 const tenant: Tenant = { id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const record = (i: number): CanvasRecord => ({ id: `canvas-${i}`, tenantId: tenant.id, name: `Canvas ${i}`, version: 1, document: { nodes: [] }, createdAt: '2026-09-07T00:00:00Z', updatedAt: '2026-09-07T00:00:00Z' });
@@ -162,4 +167,49 @@ it('preserves workspace input on failure, then creates the independent workspace
   fail = false; fireEvent.click(screen.getByRole('button', { name: '创建工作区' }));
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new-tenant'));
   expect(writes[1]).toEqual({ url: '/api/v1/tenants', body: { name: 'New workspace' } });
+});
+
+it('preserves a newer operation journal created while background graph discovery is pending', async () => {
+  const form = { ...createFormNode({ x: 0, y: 0 }), id: 'brief' };
+  const document = { ...emptyDocument(), nodes: [form] };
+  const cloud = { ...record(0), document };
+  const identity = { user: { id: 'user-a', name: 'Alice', email: 'alice@example.test', platformRole: 'user' }, tenants: [tenant] };
+  const snapshot = (operationId: string): GraphRunSnapshot => ({ id: `graph-${operationId}`, operationId,
+    canvasId: cloud.id, documentVersion: cloud.version, document, scope: [form.id], status: 'running',
+    createdAt: '2026-09-08T00:00:00Z', nodes: [{ nodeId: form.id, state: 'waiting' }] });
+  let resolveDiscovery!: (response: Response) => void;
+  let discoveryStarted = false;
+  const writes: string[] = [];
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (init.method && init.method !== 'GET') writes.push(init.method);
+    if (url.endsWith('/appearance')) return json(appearanceFixture);
+    if (url.endsWith('/auth/me')) return json(identity);
+    if (url.endsWith('/runtime')) return json({ available: false, configured: false, models: [] });
+    if (url.endsWith('/graph-runs')) {
+      if (!discoveryStarted) { discoveryStarted = true; return new Promise<Response>(resolve => { resolveDiscovery = resolve; }); }
+      return json({ items: [snapshot('new-operation')] });
+    }
+    if (url.endsWith('/graph-runs/graph-new-operation')) return json(snapshot('new-operation'));
+    if (url.endsWith('/graph-runs/graph-old-operation')) return json(snapshot('old-operation'));
+    return json(cloud);
+  }));
+  window.history.replaceState({}, '', `/?tenant=${tenant.id}&canvas=${cloud.id}`);
+  render(<SaaSApp />);
+  await waitFor(() => expect(discoveryStarted).toBe(true));
+  const storage = canvasStorage();
+  expect(loadRunJournal(storage)).toBeNull();
+  // Another page admits a new operation after this page's initial journal read, while
+  // its older graph-list response remains in flight. Use the actual scoped journal store.
+  const newer: CanvasRunJournal = { version: 1, id: 'new-operation', startedAt: Date.now(), scope: [form.id],
+    inputFingerprint: runInputFingerprint(document, [form.id]),
+    serverGraph: { tenantId: tenant.id, canvasId: cloud.id, id: 'graph-new-operation' },
+    nodes: { [form.id]: { nodeId: form.id, threadId: 'form', companyId: tenant.id, agentId: null, issueId: null, runId: null, state: 'waiting' } },
+  };
+  expect(saveRunJournal(newer, storage)).toBe(true);
+  await act(async () => resolveDiscovery(json({ items: [snapshot('old-operation')] })));
+  await screen.findByTestId('canvas-tile-brief');
+  expect(loadRunJournal(storage)?.id).toBe('new-operation');
+  expect(loadRunJournal(storage)?.serverGraph).toEqual(newer.serverGraph);
+  expect(writes).toEqual([]);
 });

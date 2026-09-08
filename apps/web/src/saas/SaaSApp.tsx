@@ -6,7 +6,11 @@ import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canv
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
 import { CanvasSurface } from '../canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
-import { CANVAS_RUN_JOURNAL_KEY } from '../canvas/runJournal';
+import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
+import { withCanvasRunOwnership } from '../canvas/runOwnership';
+import { runInputFingerprint } from '../canvas/runRecoveryDocument';
+import { graphPath, graphIsActive, graphRecoveryJournal, type GraphRunSnapshot } from './graphRuns';
+import { GraphRunPanel } from './GraphRunPanel';
 import { createCanvasRuntimeReader } from '../canvasRuntimeReader';
 import { CanvasAccountControl } from '../CanvasAccountControl';
 import { createSaaSAccountApi } from './accountApi';
@@ -147,7 +151,7 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
     return () => { controller.abort(); clearSaaSCanvas(); configureSaaSCanvasSave(null); };
   }, [identity.user.id, tenant.id, canvasId]);
   if (!record) return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
-  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><span role="status">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span><button onClick={() => downloadDocument(record.document, record.name + '.json')}>{t('导出画布 JSON', 'Export canvas JSON')}</button></div>
+  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><span role="status">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span><button onClick={() => downloadDocument(record.document, record.name + '.json')}>{t('导出画布 JSON', 'Export canvas JSON')}</button></div>
     <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)} />
     {settingsOpen && <RuntimeSettings onClose={() => setSettingsOpen(false)} />}
   </div>;
@@ -177,13 +181,15 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     try { const saved = readCanvasDrafts(storage); if (saved.length) setRecovery(saved); }
     catch (error) { setError(`无法读取本机草稿：${message(error)}`); return () => controller.abort(); }
     Promise.all([api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }), api<any>('/runtime', { signal: controller.signal })])
-      .then(([value, health]) => {
+      .then(async ([value, health]) => {
         if (controller.signal.aborted) return;
         configureSaaSCanvas({ tenant, canvasId });
         let saved = readCanvasDrafts(storage);
         const cached = storage.getItem(CANVAS_STORAGE_KEY);
         const baseVersion = Number(storage.getItem('awwo.cloud.version'));
-        const hasJournal = Boolean(storage.getItem(CANVAS_RUN_JOURNAL_KEY));
+        const rawJournal = storage.getItem(CANVAS_RUN_JOURNAL_KEY);
+        const hasJournal = Boolean(loadRunJournal(storage));
+        if (rawJournal && !hasJournal) storage.setItem(`${CANVAS_RUN_JOURNAL_KEY}.corrupt.${Date.now()}`, rawJournal);
         // Migrate pre-draft caches conservatively, including edits whose draft write hit a storage error.
         // A confirmed clean cache can follow a newer server version without a false recovery prompt.
         if (!saved.length && cached) {
@@ -202,9 +208,32 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           rememberCanvasBaseline(storage, value.version, value.document);
           setSaveState('已同步');
         }
+        if (!hasJournal) {
+          // Cloud execution is discoverable on another browser/device. Local journals are
+          // an observation cache; the server owns accepted task and dependency state.
+          try {
+            const graphs = await api<{ items: GraphRunSnapshot[] }>(graphPath(tenant.id, canvasId), { signal: controller.signal });
+            const latest = graphs.items?.[0];
+            if (latest && !controller.signal.aborted) {
+              const document = sanitizeDocument(value.document);
+              const recovered = graphRecoveryJournal(latest, tenant.id, document);
+              const inputsMatch = recovered.inputFingerprint === runInputFingerprint(document, recovered.scope);
+              const unpublished = latest.nodes.some(item => typeof item.output === 'string' && document.nodes.find(node => node.id === item.nodeId)?.lastOutput?.text !== item.output);
+              if (graphIsActive(latest) || (inputsMatch && unpublished)) {
+                await withCanvasRunOwnership(async () => {
+                  // Another tab may have started a newer operation while discovery was pending.
+                  // Share its execution lock and preserve any journal written in the meantime.
+                  if (controller.signal.aborted || loadRunJournal(storage)) return;
+                  saveRunJournal(recovered, storage);
+                }, () => {});
+              }
+            }
+          } catch { /* The run panel shows connectivity errors; backend admission prevents overlap. */ }
+        }
+        if (controller.signal.aborted) return;
         current.current = value; setRuntime(health); setRecord(value);
       }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
-    return () => controller.abort();
+    return () => { controller.abort(); clearSaaSCanvas(); };
   }, [identity.user.id, tenant.id, canvasId, writerId]);
 
   useEffect(() => {
@@ -216,7 +245,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const flush = async () => {
       while (saving.current && !disposed) await new Promise(resolve => setTimeout(resolve, 20));
       if (failed.current || disposed) throw new Error('画布未同步，请先解决保存错误再运行。');
-      if (!current.current || !pending.current) return;
+      if (!current.current || !pending.current) return current.current?.version;
       saving.current = true;
       while (pending.current && !failed.current && !disposed) {
         const sent: CanvasDraft = draft.current || persistCanvasDraft(storage, writerId, current.current!.version, pending.current);
@@ -257,7 +286,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     };
     const leave = (event: BeforeUnloadEvent) => { if (pending.current || saving.current || failed.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('awwo:canvas-cache-write', observe); window.addEventListener('beforeunload', leave);
-    configureSaaSCanvasSave(flush);
+    configureSaaSCanvasSave(async () => { await flush(); return current.current?.version; });
     if (pending.current) timer = setTimeout(() => void flush().catch(() => {}), 450);
     return () => { disposed = true; configureSaaSCanvasSave(null); clearTimeout(timer); window.removeEventListener('awwo:canvas-cache-write', observe); window.removeEventListener('beforeunload', leave); };
   }, [record, recovery, tenant.id, canvasId, writerId]);
@@ -286,7 +315,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     } catch (error) { setError(message(error)); }
   };
   if (recovery) return <DraftRecovery controls={controls} record={record} drafts={recovery} error={error}
-    hasJournal={Boolean(scopedStorage.current?.getItem(CANVAS_RUN_JOURNAL_KEY))} onUseCloud={useCloud}
+    hasJournal={Boolean(scopedStorage.current && loadRunJournal(scopedStorage.current))} onUseCloud={useCloud}
     onRestore={saved => {
       if (!saved.draft || !current.current || saved.draft.baseVersion !== current.current.version) return;
       const storage = scopedStorage.current!;
@@ -308,7 +337,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const url = URL.createObjectURL(new Blob([scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}'], { type: 'application/json' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-canvas-recovery.json'; anchor.click(); URL.revokeObjectURL(url);
   };
-  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
+  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
     {runtime && !runtime.available && <div className="saas-runtime-note" role="status">{t('Pi 执行尚未就绪：', 'Pi execution is not ready: ')}{runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('请由服务管理员配置模型。', 'Ask the service administrator to configure a model.')}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
     <CanvasSurface storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)} />
@@ -329,7 +358,7 @@ function DraftRecovery({ controls, record, drafts, error, hasJournal, onRestore,
     {error && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
     <section className="saas-card saas-draft-recovery"><label>{t('选择本机草稿', 'Choose a local draft')}<select aria-label={t('选择本机草稿', 'Choose a local draft')} value={selected?.key || ''} onChange={event => { setSelectedKey(event.target.value); setConfirmDiscard(false); }}>{drafts.map((saved, index) => <option key={saved.key} value={saved.key}>{t('草稿', 'Draft')} {index + 1}{saved.draft ? ' · ' + new Date(saved.draft.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : t(' · 需要人工检查', ' · Manual inspection required')}</option>)}</select></label>
       {selected?.draft ? <><p>{t('草稿基于云端版本', 'Draft base version:')} {selected.draft.baseVersion}{t('；当前云端版本', '; current cloud version:')} {record?.version ?? t('读取中', 'loading')}。</p><p>{t('包含节点：', 'Nodes: ')}{selected.draft.document.nodes.map(node => node.title).join(', ') || t('空画布', 'Empty canvas')}</p>{record && !canRestore && <p className="saas-error">{t('云端版本已有变化。请导出草稿后核对，当前草稿不会自动覆盖较新的云端内容。', 'The cloud version has changed. Export and review your draft. It will not automatically overwrite newer cloud content.')}</p>}</> : <p className="saas-error">{t('草稿格式无法自动恢复。原始内容仍可导出，尚未删除。', 'This draft format cannot be restored automatically. Its original content is preserved and can be exported.')}</p>}
-      {hasJournal && <p>{t('本机还保存着待恢复运行记录。可保留草稿并使用云端版本核对已接收的运行；尚未下发的下游不会自动执行。', 'A local run recovery record also exists. Keep your drafts and use the cloud version to check accepted runs. Downstream nodes that were not submitted will not run automatically.')}</p>}
+      {hasJournal && <p>{t('本机还保存着待恢复运行记录。可保留草稿并使用云端版本核对运行；已提交的后台整图任务会继续调度下游。', 'A local recovery record exists. Keep your drafts and use the cloud version to check runs; accepted background graphs continue scheduling downstream nodes.')}</p>}
       <div className="saas-draft-actions"><button onClick={() => {
         const url = URL.createObjectURL(new Blob([selected.draft ? JSON.stringify(selected.draft.document, null, 2) : selected.raw], { type: 'application/json' }));
         const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-unsynced-draft.json'; anchor.click(); URL.revokeObjectURL(url);

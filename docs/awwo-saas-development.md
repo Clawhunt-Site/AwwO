@@ -1,6 +1,6 @@
 # AwwO SaaS 本地开发与部署说明
 
-本入口运行 Go API、PostgreSQL、Pi worker 和复用原画布的 SaaS Web，独立于历史 `npm run dev` 的 Node/Codex 模式。架构与阶段边界见 [架构设计](awwo-saas-architecture.md)。
+本入口运行 Go API、PostgreSQL、Pi worker 和复用原画布的 SaaS Web，独立于历史 `npm run dev` 的 Node/Codex 模式。架构见 [架构设计](awwo-saas-architecture.md)；2026-09-08 新增节点团队、独立成员模型和 Go 后台整图的完整契约见 [节点团队设计](awwo-node-teams.md)。本文给出操作步骤，不代替本轮实际验收报告。
 
 ## 本地启动
 
@@ -48,13 +48,24 @@ AWWO_PI_API_KEY=YOUR_PRIVATE_KEY
 
 `AWWO_PI_CONTEXT_WINDOW` 与 `AWWO_PI_MAX_TOKENS` 分别声明实际模型上下文和单次输出上限，默认 32768 / 4096。Pi 按 UTF-8 字节保守预留输出与消息开销，这不是精确 tokenizer；上下文超限返回明确错误，不能为消除错误而声明模型不支持的容量。复杂画布应选择足够上下文的模型，或精简规划上下文。
 
-服务端固定可用模型，租户不能通过前端指定任意 base URL、工作目录、环境变量或 shell。首版是无通用代码执行工具的 Agent 对话/结构化交付运行时；代码工程执行需在独立沙箱和交付物存储完成后开放。
+服务端维护可用模型目录，节点及团队成员从目录选择。成员模型空值继承已绑定主 Agent 的模型，主 Agent 使用默认模型时再落到服务默认。租户不能指定任意 base URL、工作目录、秘密环境变量或 shell。当前执行范围为 Pi 文本推理与结构化交付，成员 tools 为空；工程文件需要独立沙箱和存储。
+
+默认配置外可增加模型档案，以下仅为占位示例，不含真实秘密：
+
+```dotenv
+AWWO_PI_MODELS_JSON=[{"id":"reviewer","provider":"anthropic","model":"YOUR_APPROVED_MODEL_ID","apiKeyEnv":"AWWO_REVIEWER_API_KEY","contextWindow":32768,"maxTokens":4096}]
+AWWO_REVIEWER_API_KEY=YOUR_PRIVATE_KEY
+```
+
+目录最多 32 个额外档案；id 在前端可见，model 是实际上游名称，二者可不同。非 Ollama 用 apiKeyEnv 引用环境变量，不能在 JSON 内放 apiKey。每项还可配置 baseURL，容量需符合实际模型。默认档案仍须配置完整；额外档案非法会明确报错，缺少所需秘密不会静默改用其他模型。修改本项目 `.env` 后重启拥有的 Go/Pi 进程，再刷新运行设置与成员模型下拉。Compose 的 Pi 服务使用项目 `.env` 注入档案引用的变量，详见部署示例；staging/production 独立填值。
 
 真实模型验收先运行 `node scripts/awwo-saas-real-provider-acceptance.mjs --check`。它只从本项目配置文件读取模型配置，缺配置以 exit 2 标记阻塞。明确执行 `--run --env-file <本项目配置路径>` 后，脚本在独立 schema 启动 Go/Pi，校验真实两轮响应、历史、SSE 和持久化，失败或清理失败均非成功；不会改用 fixture。不要把模型密钥放入命令参数或聊天记录。
 
 需要可重复的本地负向验收时，使用 `node scripts/awwo-saas-browser-fixture.mjs --start`。输出的 0600 credentials 文件含随机管理员与控制 token；`scripts/awwo-saas-fixture-control.mjs --credentials <file> --rules <json>` 只为该 fixture 设置一次性精确方法/路径故障。Go API 和生产部署不加载此控制器。支持非法规划、上游 503/断连、HTTP 失败/延迟和 SSE 断连，普通请求仍经过实际 Go/Pi。详见 [整改验收记录](awwo-fable-remediation-20260907.md)。
 
-原画布规划助手在用户点击“生成画布”后提交持久规划 run；合法结果通过服务端与原前端校验后直接应用到图并显示“已更新画布”，可“撤销本次更改”，没有额外应用确认按钮。整图拓扑仍由浏览器调度：关闭页面后已接收的 Go run 可以继续，尚未提交的下游 DAG 节点不会在后台自动派发。
+原画布规划助手在点击“生成画布”后提交持久规划 run；合法结果自动应用并显示“已更新画布”，支持撤销，没有额外应用确认按钮。planner 尚不创建或修改 team。SaaS 整图运行则先保存画布，再提交固定文档版本及 scope，由 Go 持久调度；关闭页面后已受理图继续运行，后台记录面板可查询节点与成员结果。原本机模式仍由浏览器 runGraph 调度。
+
+节点属性中启用团队，配置 1–8 位成员并保存；review 至少 2 位。顺序模式按序一次，parallel 前 N−1 位独立执行后由最后一位汇总，debate 按轮次讨论后额外总结，review 每轮执行者工作后由最后一位给出严格 JSON 批准/返工。maxTurns 是调用次数上限，不是 token 或货币预算；timeoutSeconds 与 Go/Pi 外层超时共同限制执行。精确上下文、调用估算及审核格式以节点团队设计为准。
 
 ## 配置边界
 
@@ -69,7 +80,8 @@ AWWO_PI_API_KEY=YOUR_PRIVATE_KEY
 | AWWO_LOCAL_DB_PORT / AWWO_LOCAL_DB_PASSWORD | 启动器专属 PostgreSQL |
 | AWWO_PI_URL / AWWO_PI_HOST / AWWO_PI_PORT | 内部执行服务地址与监听 |
 | AWWO_PI_TOKEN | Go 与 Pi 独立认证秘密，至少 32 字符 |
-| AWWO_PI_PROVIDER / MODEL / BASE_URL / API_KEY | 服务器端模型连接 |
+| AWWO_PI_PROVIDER / MODEL / BASE_URL / API_KEY | 默认模型连接（完整名称都有 AWWO_PI_ 前缀） |
+| AWWO_PI_MODELS_JSON / 其中 apiKeyEnv 引用变量 | 可选额外模型目录与独立秘密；JSON 只存秘密引用，每环境分别配置 |
 | AWWO_PI_CONTEXT_WINDOW / AWWO_PI_MAX_TOKENS | 真实模型上下文与输出预算，默认 32768 / 4096；按 Pi health 的 limits 做保守输入检查 |
 | AWWO_PI_TIMEOUT_MS / MAX_CONCURRENCY / MAX_OUTPUT_BYTES | 运行时间、并发与输出限制（完整名称都有 AWWO_PI_ 前缀） |
 | AWWO_BOOTSTRAP_ADMIN_EMAIL / PASSWORD | 受控创建平台管理员 |
@@ -77,7 +89,13 @@ AWWO_PI_API_KEY=YOUR_PRIVATE_KEY
 | AWWO_PI_SESSION_WAIT | 取消后 Pi 同一会话清理的有界等待，默认 5s；只重试明确未受理的 SESSION_BUSY |
 | AWWO_TRUSTED_PROXY_CIDRS | 精确的可信代理地址/CIDR，逗号分隔；默认不信任转发头 |
 
-staging / production 使用同一配置 schema，要求 HTTPS Origin 与 Secure cookie，不复用开发账号、数据库、模型秘密。实例全局限流首版在单进程内生效，多副本时需要集中式配额/限流。
+staging / production 使用同一配置 schema，要求 HTTPS Origin 与 Secure cookie，不复用开发账号、数据库、模型秘密。Go 单实例协调图和团队任务；租户模型准入次数持久化，实例认证限流及执行所有权仍不具备多副本协调能力。
+
+## 后台图与服务恢复
+
+Go 启动自动应用迁移 007。升级前保留数据库备份；旧 run 按既有准入记录迁移到 model_invocations，不重新执行历史任务。已受理 run、成员轮次与模型调用在 Go 重启后标 interrupted；图读取持久节点状态，未受理且依赖已满足的节点继续，受中断影响的下游被阻断。观察或恢复不重放不确定调用，需重跑时由用户明确发起新任务。
+
+后台运行与协作记录面板读取最近 50 个图任务和选中节点成员记录，不是全历史分页导出。丢失提交响应时按原 operationId 查询；立即停止可按 operationId 写取消记录，避免延迟请求在停止确认后被受理。配置变更后旧图结果不会自动覆盖新输入。单实例数据库锁不是分布式 worker 或高可用承诺。
 
 ## 验证
 
@@ -95,7 +113,7 @@ npm run test:saas:smoke
 
 `test:saas:backend` 自动使用本项目专属 PostgreSQL，并执行真实数据库测试、race 和 vet；每次测试创建独立 schema 并清理。`test:saas:stack` 使用临时端口、独立数据库 schema、真实 Go/Pi 进程及本地模型协议 fixture，覆盖持久 SSE、历史、幂等、取消、规划和重启。`test:saas:smoke` 访问正在运行的本地服务，创建名称带 Acceptance 的验收用户和工作区，保留这些样例供查看。
 
-不能把没配置数据库而 skip 的测试算通过；真实 provider、HTTP 链路、浏览器和容器验证也分别记录。[验收报告](awwo-saas-verification.md)是实际结果的事实来源。
+不能把没配置数据库而 skip 的测试算通过；真实 provider、HTTP 链路、浏览器和容器分别记录。[基础验收](awwo-saas-verification.md)和[此前真实模型验收](awwo-real-provider-acceptance-20260908.md)有各自快照与范围，本次团队及后台图结果单独报告。团队相关组件/持久化、图恢复、Go 模式与数据库、Pi 多模型测试需随本次实现执行，不能沿用旧用例数判绿。
 
 ### 原画布浏览器协议 fixture
 
@@ -126,7 +144,7 @@ node scripts/awwo-saas-browser-fixture.mjs --start
 
 Ctrl-C 只清理本次 fixture 的进程组、随机 schema 和 `.local/awwo-saas/browser-fixture-*` 临时产物，原开发服务与数据保持原状；需要保留的非秘密验收结果应在退出前记录。该临时实例的数据不用于日常开发。
 
-`--self-test` 通过只证明 fixture 自身规则；`--start` 启动成功只证明实例就绪，浏览器动作与数据库结果须实际执行后另记。fixture 使用确定性模型协议、较大的测试上下文容量，不证明真实 provider 的推理质量、模型容量、计费或服务可用性。file 输出为 `fixture://.../no-file-created` 引用，不创建附件或工程文件。**真实 provider 仍未验收**，该入口不能替代真实模型与生产验收。
+`--self-test` 通过只证明 fixture 自身规则；`--start` 只证明实例就绪，浏览器动作与数据库结果须实际执行后另记。fixture 使用确定性协议与测试容量，不证明真实 provider 的推理、容量、计费或可用性；file 为 `fixture://.../no-file-created` 引用，不创建附件或工程文件。此前真实模型结果见独立报告，其范围不自动包含新增节点团队。
 
 ## 容器部署模板
 
