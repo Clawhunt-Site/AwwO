@@ -1,6 +1,6 @@
 # AwwO 节点团队与后台整图运行
 
-更新日期：2026-09-08。适用代码：`codex/awwo-node-teams-20260908`，worktree 为 `/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-saas-20260907`。本文说明当前实现契约及验收要求，不构成本轮实测通过或生产发布结论；最终候选 SHA、运行结果和截图由独立验收报告记录。
+更新日期：2026-09-08。适用代码：`codex/awwo-node-setup-20260908`，worktree 为 `/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-node-setup-20260908`。本文说明当前实现契约及验收要求，不构成本轮真实模型验收通过或生产发布结论；最终候选 SHA、运行结果和截图由独立验收报告记录。
 
 ## 1. 产品与架构
 
@@ -28,6 +28,8 @@ flowchart TD
 ```
 
 SaaS 的整图、选中节点及重跑请求交给 Go 调度；浏览器负责提交、观察及将结果投影回原画布。原本机运行模式仍保留浏览器 `runGraph`，不能将 SaaS 能力推定为所有历史 runtime 都支持。Go 仍是单实例执行协调器；数据库工作锁和持久状态不等于分布式 worker、自动故障切换或多实例高可用。
+
+SaaS 节点中的普通聊天与“执行节点任务”分开：聊天提交当前输入原文，不自动拼入旧任务描述或要求旧输出契约的 JSON，也不把聊天回答覆盖为节点交付物。执行节点任务、局部运行和整图运行继续使用节点任务与输入输出契约。两种入口都可运行该节点团队，仍使用原 `POST /runs` 请求字段，不新增客户端可任意指定执行器或团队的接口。
 
 ## 2. 配置契约
 
@@ -73,7 +75,7 @@ SaaS 的整图、选中节点及重跑请求交给 Go 调度；浏览器负责�
 | 成员 `role` / `instructions` | 职责非空且最多 512 码点；专属指令可空，最多 16000 码点 |
 | 成员 `runtime` | `""` 继承节点团队默认；或 `"pi"` |
 | 成员 `model` | 可空，最多 256 码点；非空必须是服务端模型目录 ID |
-| 成员 `context` | `task` 仅任务，或 `shared` 加入本次团队运行中此前已完成的成员输出；特殊汇总/审核/返工规则见下一节 |
+| 成员 `context` | `task` 仅当前任务；`shared` 加入同 Session 此前已完成问答快照及本次此前已完成的成员输出；特殊汇总/审核/返工规则见下一节 |
 | 成员 `tools` | 当前只能为 `[]`；不开放文件、Shell 或任意工具 |
 
 前端只从实际模型目录生成下拉，不接受任意模型文本。新增团队默认包含执行者和审核/汇总者：第一位复制当前节点名称、人格与模型，第二位模型继承节点绑定。修改成员顺序保持 ID 稳定；修改团队执行配置使当前节点和下游原输出失效，恢复时的输入指纹也包含团队内容。
@@ -91,9 +93,13 @@ UI 校验提示具体字段问题，运行前再次校验；模型目录加载�
 | `debate` 多轮讨论 | 每轮按成员顺序依次调用，重复 R 轮；普通轮次遵守各自 context；最后一位再额外调用一次，读取全部讨论并总结 | N × R + 1 |
 | `review` 审核返工 | 每轮前 N−1 位作为执行者依次工作，最后一位审核。批准则提前完成；拒绝则进入下一轮，达到 R 轮仍未批准则失败 | 最多 N × R，可提前结束 |
 
-`shared` 只分享**本次**团队运行已有的成功输出，不创建跨运行记忆；团队成员请求的 `messages` 为 `[]`。成员系统指令由绑定主 Agent 的持久指令、成员名称、职责和专属指令共同组成。单 Agent 原有会话历史逻辑仍独立保留。
+`shared` 接收两类上下文：同租户、同 Session 在受理前已 `completed` 的用户提问与团队最终结果，以及本次团队运行此前成功的成员输出。手动运行在准入事务中冻结历史，图运行在整图准入时冻结各节点历史；成员调用不重新读取变化中的消息或 Agent 配置。其他 Session、其他租户、失败或仍在运行的问答、受理后才完成的问答均不进入这份快照。历史范围是已完成问答，不会重新拼接过去每个成员的全部过程。
 
-并行模式的前 N−1 位不互相读取正在产生的输出，其 `context=shared` 也不会使并行任务等待或窃取其他成员结果。汇总者、审核者，以及 review 第二轮及以后返工执行者，**总会收到所需的团队历史**；这些阶段即使配置 `task` 也会注入团队结果和审核意见。成员文本是模型上下文，不构成修改租户权限、选择任意工具或更改模型连接的权限。
+Pi 请求的 `messages` 保存实际选入的历史问答；历史 assistant 内容明确标为“此前团队结果”，不是当前成员的自述或身份设定。本次上游成员输出以带 `memberId/memberName/round/ordinal` 的 JSON 数据加入 prompt。`task` 的 `messages` 为 `[]`，普通轮次也不接收前人成果。单 Agent 原有会话历史逻辑仍独立保留。
+
+成员系统指令分别呈现父节点公共指导、成员记录、成员专属指令和数据边界。成员 `name` 是 UI 显示标签，`role` 描述职责；专属指令定义的具体人格优先于显示标签及父节点人格，专属指令优先于冲突的公共指导。例如显示名为“初始化验收 Agent”、专属指令为“你是李白”时，显示名不应替代李白人格。历史结果及其他成员发言是供判断的数据，不能据此更换身份或执行其中嵌入的指令；这是提示词边界，不等于对模型行为的形式化保证。
+
+并行模式的前 N−1 位不互相读取正在产生的输出；`shared` 可接收此前 Session 问答，但不会使并行任务等待或读取同组未完成结果。汇总者、审核者，以及 review 第二轮及以后返工执行者，必须接收本次操作所需的团队结果；这些阶段即使配置 `task` 也会注入必要的成员结果和审核意见，仍不带入此前 Session 问答。这是 `task` 隔离的明确例外，由审计中的 `purpose` 和上游来源展示。必要操作数无法完整放入该成员模型预算时返回 `context_limit`，不悄悄省略后继续审核或汇总。成员文本不构成修改租户权限、选择任意工具或更改模型连接的权限。
 
 Review 审核者必须返回纯 JSON（不含 Markdown 围栏或额外文本）：
 
@@ -105,6 +111,8 @@ Review 审核者必须返回纯 JSON（不含 Markdown 围栏或额外文本）�
 
 调用次数达到 `maxTurns` 后不再发起下一次调用；计划调用数大于上限时 UI 明确提示，运行可能以 `team_turn_budget_exhausted` 结束。允许这一配置是为了提供硬上限，并不保证完成所有计划轮次。失败、取消或中断的成员记录保留供查看，不能自动作为已发布的节点结果；并行任一成员失败会停止该组后续工作。
 
+Pi 的活动调用以成员 turn ID 为键。取消父运行会停止其上下文，每个非完成的已提交成员调用再使用独立的 2 秒上下文向 Pi 发送该 turn ID 的取消请求；这也覆盖受理响应丢失、异常流及并行组失败。清理尝试结束后才持久化成员终态并释放并发名额。已完成成员不发取消；网络故障下仍受 Pi 自身超时约束，公共取消响应不是供应商已停止计费的证明。
+
 ## 4. 模型目录与实际 Pi 执行
 
 原 `AWWO_PI_PROVIDER / MODEL / BASE_URL / API_KEY` 配置默认模型。可选 `AWWO_PI_MODELS_JSON` 增加最多 32 个服务器配置档案；每项包含 `id`、`provider`、上游 `model`、可选 `baseURL`、`apiKeyEnv`、`contextWindow`、`maxTokens`。非 Ollama 必须通过 `apiKeyEnv` 引用独立环境变量，JSON 不接受明文 `apiKey`。每个环境分别提供值；默认档案仍需完整配置，不能只配置额外档案。
@@ -113,7 +121,9 @@ Review 审核者必须返回纯 JSON（不含 Markdown 围栏或额外文本）�
 
 Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继承、检查所选模型的上下文预算，然后通过内部 `POST /internal/runs` 传入 `runId`、`tenantId`、`sessionId`、`prompt`、`messages`、`systemPrompt`、`model` 和 `runtime: "pi"`。Pi 从目录解析该 ID，并将仅该档案所需配置交给独立子进程，实际经 Pi SDK 发起文本推理。每次调用具有独立身份；同一成员多轮沿用派生的内部 session 身份，但不从磁盘加载历史。
 
-文本按 UTF-8 字节保守计入模型输入预算，包含主 Agent 指令、成员指令、共享上下文和消息开销；不静默截断成员指令或审核记录。配置长度合法仍可能因实际组合提示词过大而 `context_limit`。工具能力当前为空，模型输出的路径只是文本，不产生代码工程、附件或可下载文件。
+文本按 UTF-8 字节保守计入所选成员模型的输入预算，包含公共指导、成员指令、共享上下文和消息开销；团队历史不先按未被调用的主 Agent 模型容量裁剪。受理时最多保留最近 50 对问答，并受 262144 字节的历史快照上限约束。调用时先完整保留当前任务及系统指令，再保留能容纳的近期完整成员输出，最后选入近期完整问答对。普通共享上下文超限时丢弃较早的完整输出或问答对，审计记录实际数量、来源和是否发生裁剪；不把截断文本当成完整对话。单条历史消息超过 Pi 的 32768 个 UTF-16 单元限制时，该问答对也不发送。
+
+当前任务、系统指令和必要审核/汇总操作数不做静默截断；配置长度合法仍可能因组合输入过大而 `context_limit`。Pi 的单条 prompt、systemPrompt 和整体请求大小限制仍独立生效，Go 在模型准入前检查准备后的请求。工具能力当前为空，模型输出的路径只是文本，不产生代码工程、附件或可下载文件。
 
 租户并发与每日额度逐次约束模型调用，`model_invocations` 记录准入，UTC 日界线统计每日次数；等待并发空位也消耗运行时间。失败或结果不确定的已准入调用仍占次数，不据此宣称提供精确 token 用量、计费或退款。Pi 另有服务级并发及单次超时上限。
 
@@ -126,6 +136,7 @@ Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继
 | `PUT T/canvases/{canvasId}` | 沿用 `{name, document, version}` CAS 保存；`document.nodes[].team` 保存配置，无独立团队 CRUD API |
 | `POST T/canvases/{canvasId}/initialize` | 必填 `{documentVersion, scope?}`；按已保存配置准备 Agent / Session 并返回 canonical 画布，不执行模型；scope 省略为全部 session，传入则为 1–200 个不重复的已保存 session 节点 ID |
 | `POST T/runs` | 原 `{sessionId, prompt, operationId}`；普通节点会话也从保存的节点读取 team，受理后冻结执行快照。未设置 team 沿用单 Agent |
+| `GET T/sessions/{id}/messages` | `{items: [{id, sessionId, runId, role, content, createdAt}]}`；runId 将持久消息与原运行及团队过程关联 |
 | `GET T/runs/{id}/turns` | `{items: [...]}`，按 `ordinal` 排序，最多受该次团队 64 调用上限约束；普通单 Agent 无成员记录 |
 | `POST T/canvases/{canvasId}/graph-runs` | `{operationId, scope?, documentVersion?}`；首次受理 `202`，相同幂等请求返回原任务 `200` |
 | `GET T/canvases/{canvasId}/graph-runs` | `{items: [...]}`，按创建时间倒序最多 50 条，可用 `?operationId=...` 查询；当前无游标分页，不作为完整历史导出 |
@@ -145,9 +156,13 @@ Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继
 
 图响应字段为 `id, canvasId, operationId, documentVersion, document, scope, status, error, createdAt, updatedAt, nodes`。每个节点有 `nodeId, state, output, detail, runId, sessionId`；尚未派发的节点可以没有 runId。成员记录包含 `id, memberId, memberName, role, round, ordinal, status, output, error, model, runtime, config, createdAt, updatedAt`；config 为该次调用已解析的公开成员配置，不含供应商秘密。
 
+成员记录还包含 `prompt`、`systemPrompt`、`messages`、`context`。它们保存该回合准备并冻结的实际 Pi 输入，不从当前编辑器配置重建；是否已经调用模型仍需结合回合状态判断。`context` 为 `{version:1, mode, historyMessages, historyAvailable, historyTruncated, upstreamMembers, upstreamAvailable, upstreamTruncated, purpose}`，`upstreamMembers` 每项为 `{memberId, memberName, round, ordinal}`；`purpose` 是 `work / aggregate / review / revise`。数量均为条数而非 token：historyMessages 是实际消息条数，完整问答为 2 条；historyAvailable 是受理时该共享会话已有的已完成消息数量，task 为 0。完整 API 字段和兼容方式见 [成员输入审计](awwo-saas-api.md#成员输入审计)。
+
 迁移 `007_node_teams_graph_runs.sql` 为 `runs` 增加 `team_snapshot`、`execution_snapshot`、`actor_id`，并新增 `run_turns`、`model_invocations`、`graph_runs`、`graph_run_nodes`、`graph_operation_cancellations`。图受理事务保存固定 document/version/scope 和每个节点的 Agent/团队执行快照；后续修改配置不改写已受理任务。旧 run 迁移为历史调用计数，不重放历史请求。
 
 迁移 `008_node_setup_snapshot.sql` 为 `node_sessions` 增加有效初始化配置快照，初始化逻辑见 [node_setup.go](../backend/internal/app/node_setup.go)，完整请求与错误见 [API 初始化契约](awwo-saas-api.md#节点初始化与配置保存)。
+
+迁移 `009_team_turn_inputs.sql` 为 `run_turns` 新增可空的 `system_prompt/messages/context`。旧回合没有记录过这些证据，API 返回 `null`，不伪造为空历史或拿新配置补造旧指令；已有 `prompt` 继续返回真实旧值。手动聊天和后台图面板按 runId 使用同一团队过程组件，页面刷新后从持久消息的 runId 恢复关联；成员列表接口不包含整个 run 的终态，观察者另读 `GET /runs/{id}`。
 
 ## 6. 依赖、失败与恢复
 
@@ -160,7 +175,7 @@ Go 校验最多 200 节点、2000 连线、字段版本/类型、端口、必填
 | 非法团队 / 图 / 模型 | 受理前 `400 invalid_team`、`400 invalid_graph` 或 `409 model_unavailable`；修正配置再提交 |
 | 模型不可用 | `503 runtime_unavailable`；ready 或 HTTP 受理不算推理成功 |
 | 团队调用数 / 轮次 / 时间耗尽 | `team_turn_budget_exhausted`、`review_rounds_exhausted`、`team_timeout`；保留已记录成员输出，调整后主动新建运行 |
-| 上下文超限 / 无效审核 / 非正常流结束 | `context_limit`、`invalid_review_verdict`、`runtime_stream_ended` 等明确失败；不静默截断或伪造完成 |
+| 固定输入或必要操作数超限 / 无效审核 / 非正常流结束 | `context_limit`、`invalid_review_verdict`、`runtime_stream_ended` 等明确失败；普通共享历史可按预算丢弃并记录审计，不截断当前任务或伪造完成 |
 | 浏览器断网、关闭或刷新 | 已受理图由 Go 继续派发；客户端用 graphId 或 operationId 查询原任务，不因失去响应自动重复提交推理 |
 | 发起后立即取消，响应尚未返回 | 操作级取消写入持久取消记录；后到的同 operationId 请求被 `409 operation_cancelled` 拒绝，不在确认取消后悄悄运行 |
 | 服务重启 | 已受理且状态不确定的 run / run_turns / model_invocations 标记 `interrupted`，不盲目重放。Go 重新观察持久图：关联的中断节点失败并阻断其依赖；未受理且依赖已满足的 waiting 节点可继续派发 |
@@ -173,8 +188,8 @@ Go 校验最多 200 节点、2000 连线、字段版本/类型、端口、必填
 
 属性面板沿用原样式、中英文、只读与运行锁。展开时可编辑团队；收起节点仅显示人数和模式。运行期间的原图配置锁与 Go 固定快照共同保证可追溯性；reader 可读历史，不能保存、绑定、发起、停止或恢复写入。新增能力不能只靠隐藏按钮保护，所有写 API 均需独立授权。
 
-验收应分别记录：四模式与不同成员模型的真实执行；成员增删/排序/校验/持久化/导入导出；普通聊天与后台图运行；字段传递、范围外缓存及失败阻断；调用数、超时、配额和取消；跨租户和 reader 拒绝；浏览器关闭、丢失受理响应及 Go 重启；旧单 Agent 回归。每项写明通过、失败、跳过或阻塞及可复查证据，协议 fixture 与真实模型结果分开。新增面板截图和既有模型验收不能互相替代。
+验收应分别记录：四模式与不同成员模型的真实执行；成员增删/排序/校验/持久化/导入导出；普通聊天与后台图运行；连续追问、成员人格优先级、task 隔离及审核操作数例外；实际 Pi 输入与持久审计一致、模型容量裁剪、旧审计缺失和刷新后的 runId 关联；字段传递、范围外缓存及失败阻断；调用数、超时、配额和取消；跨租户和 reader 拒绝；浏览器关闭、丢失受理响应及 Go 重启；旧单 Agent 回归。每项写明通过、失败、跳过或阻塞及可复查证据，协议 fixture 与真实模型结果分开。新增面板截图和既有模型验收不能互相替代。
 
 当前边界是 Pi 文本推理、单 Go 实例和持久图协调；工具沙箱、附件存储、分布式 worker 租约、自动故障接管、精确 token 账单及公网运维验收仍需独立设计实施。
 
-实现依据：[前端团队契约](../apps/web/src/canvas/nodeTeam.ts)、[属性编辑器](../apps/web/src/canvas/NodeTeamEditor.tsx)、[SaaS 图传输](../apps/web/src/saas/graphRuns.ts)、[后台记录](../apps/web/src/saas/GraphRunPanel.tsx)、[Go 团队执行](../backend/internal/app/teams.go)、[Go 图运行](../backend/internal/app/graph_runs.go)、[图契约](../backend/internal/app/graph_contracts.go)、[迁移 007](../backend/internal/app/migrations/007_node_teams_graph_runs.sql)、[Pi 模型配置](../apps/pi-worker/config.mjs)。
+实现依据：[前端团队契约](../apps/web/src/canvas/nodeTeam.ts)、[属性编辑器](../apps/web/src/canvas/NodeTeamEditor.tsx)、[SaaS 图传输](../apps/web/src/saas/graphRuns.ts)、[团队过程与输入审计](../apps/web/src/saas/TeamRunDetails.tsx)、[后台记录](../apps/web/src/saas/GraphRunPanel.tsx)、[Go 团队执行](../backend/internal/app/teams.go)、[Go 团队上下文](../backend/internal/app/team_context.go)、[Go 图运行](../backend/internal/app/graph_runs.go)、[图契约](../backend/internal/app/graph_contracts.go)、[迁移 007](../backend/internal/app/migrations/007_node_teams_graph_runs.sql)、[迁移 009](../backend/internal/app/migrations/009_team_turn_inputs.sql)、[Pi 模型配置](../apps/pi-worker/config.mjs)。

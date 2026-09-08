@@ -1,5 +1,7 @@
 # AwwO SaaS API v1
 
+适用分支：`codex/awwo-node-setup-20260908`；worktree：`/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-node-setup-20260908`。更新日期：2026-09-08。本文记录实现契约，不代表本轮真实模型或生产验收已通过。
+
 实现：`backend/internal/app/`。本地前端同源代理 `/api/v1`；直接访问 Go 默认为 `http://127.0.0.1:8087/api/v1`。所有受保护端点使用 `awwo_session` HttpOnly cookie；health、注册和登录不要求已有会话。JSON 写请求使用 `Content-Type: application/json`，未声明的字段会被拒绝。请求携带 Origin 时必须与 `AWWO_PUBLIC_ORIGIN` 一致，跨站 Fetch 请求被拒绝；非浏览器客户端可省略 Origin，仍需有效登录 cookie。不会通过 JSON 返回模型密钥或原始登录 session token；邀请创建响应单独返回一次邀请凭据。
 
 集合响应保留 `{"items":[]}`；六类租户资源列表和四类平台管理列表增加 `nextCursor`、`snapshot`，客户端必须翻页才能取得后续记录。单对象直接返回。错误结构为 `{"error":{"code":"not_found","message":"Resource not found"}}`。跨租户资源返回 404；权限不足 403；未登录 401；CAS/幂等/会话占用冲突 409；当前提示词和指令超过模型保守上下文预算时返回 413 / context_limit；配额或限流 429；模型不可用 503。分页契约见下文，其他未声明分页的集合不自动获得此契约。
@@ -137,19 +139,67 @@ SaaS 属性面板的“保存并准备运行”先完成画布保存，再调用
 | GET /sessions | 可选 canvasId、sessionId、limit、cursor | 会话列表；两个身份过滤可联合使用 |
 | POST /sessions | canvasId, nodeId, agentId, title? | 三者必须在同一租户且节点确实存在于已保存画布 |
 | GET /sessions/{id} | 无 | 会话元数据 |
-| GET /sessions/{id}/messages | 无 | items[{id,sessionId,role,content,createdAt}] |
+| GET /sessions/{id}/messages | 无 | items[{id,sessionId,runId,role,content,createdAt}]；runId 关联原运行与团队过程 |
 | POST /runs | sessionId, prompt, operationId | 202；operationId 必须 8–200 字节，也可用 Idempotency-Key header |
 | GET /runs | 可选 sessionId、operationId、active、limit、cursor | 运行列表，用于恢复受理结果不确定的请求与查询活动运行 |
 | GET /runs/{id} | 无 | status/output/terminal/error 等 |
-| GET /runs/{id}/turns | 无 | `{items}`，按 ordinal 排序的团队成员回合；含成员、角色、模型、轮次、配置、状态、输出与错误，单 Agent 返回空列表 |
+| GET /runs/{id}/turns | 无 | `{items}`，按 ordinal 排序的团队成员回合；含成员、模型、状态、输出及输入审计，详见下文；单 Agent 返回空列表 |
 | GET /runs/{id}/events | Last-Event-ID 或 after 查询参数 | text/event-stream，持久事件重放 |
 | POST /runs/{id}/cancel | 无 | 幂等取消；状态以回读运行记录为准 |
 
 同一个 operationId 与同样 session/prompt 返回既有 run；相同 key 换内容返回 409，不启动第二次模型执行。不同 operationId 对同一活跃 session 返回 session_busy。租户每日调用数和并发上限由后端检查；团队每一次实际成员模型调用都单独占用和核算额度。运行接收时冻结节点团队配置，后续编辑不改变已受理运行。
 
+团队手动运行还在准入事务中冻结同租户、同 Session 已 `completed` 的问答；整图则在图准入时冻结每个节点的对应历史。快照中的历史不随晚到结果或 Agent 编辑变化。`shared` 可接收这些问答及本次已成功成员的输出，`task` 不接收此前问答或普通前人成果；汇总、审核、第二轮起返工仍需注入该操作必需的成员结果。这些显式操作数不取消 task 的跨运行历史隔离。历史只恢复用户提问与该 run 的最终结果，不恢复过去每名成员的完整过程。
+
+SaaS 普通聊天按输入原文提交 prompt，不自动附加旧节点任务或 JSON 输出要求，聊天回答不覆盖节点交付物。“执行节点任务”、局部和整图入口继续构造节点任务及字段契约。两种入口不增加 `/runs` 请求字段；服务器始终从持久画布和会话读取团队配置。
+
 run 对象包含 `{id,tenantId,sessionId,operationId,status,output,outputAvailable,terminal,error,createdAt,updatedAt}`。运行状态：queued、running、completed、failed、cancelled、interrupted。`terminal` 是状态派生值；`outputAvailable` 仅说明有文本，部分输出不等于成功。服务重启产生 interrupted，不能把它自动归为 completed。
 
 SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、running、text_delta、completed、failed、cancelled、interrupted；文本增量使用 delta 字段。关闭 SSE 不等价于取消，取消必须走 cancel API。重连只补读事件，不重新执行任务。普通 HTTP 接受请求也不等价于运行完成。
+
+### 成员输入审计
+
+`GET /tenants/{tenantId}/runs/{id}/turns` 返回 `{items: [...]}`，每项包含：
+
+| 字段 | 类型与含义 |
+| --- | --- |
+| `id, memberId, memberName, role` | string；本次回合身份、成员标识、显示名称与职责 |
+| `round, ordinal` | integer；团队轮次与本次 run 中的调用顺序 |
+| `status, output, error` | string；成员状态、已持久输出及错误；终态与 run 使用相同状态集合 |
+| `model, runtime, config` | 已解析的公开模型、运行时及成员配置；不含密钥或供应商连接秘密 |
+| `createdAt, updatedAt` | 服务端时间 |
+| `prompt` | string；该回合真实保存的当前输入，包含实际选入的带来源成员结果及操作要求 |
+| `systemPrompt` | string 或 null；实际准备的成员系统指令，旧记录没有证据时为 null |
+| `messages` | `{role,content}[]` 或 null；role 为 user 或 assistant，content 为 string；实际准备的历史消息，task 为 `[]`，旧记录为 null |
+| `context` | 以下审计对象或 null；旧记录为 null |
+
+`context` 的固定形状为：
+
+```json
+{
+  "version": 1,
+  "mode": "shared",
+  "historyMessages": 2,
+  "historyAvailable": 6,
+  "historyTruncated": true,
+  "upstreamMembers": [
+    {"memberId": "worker-1", "memberName": "执行者", "round": 1, "ordinal": 1}
+  ],
+  "upstreamAvailable": 1,
+  "upstreamTruncated": false,
+  "purpose": "review"
+}
+```
+
+这是字段示例，不是某次实测结果。`mode` 为成员的 `task/shared`；`purpose` 为 `work/aggregate/review/revise`。`historyMessages` 是实际发送的历史消息条数，一对完整问答为 2 条；`historyAvailable` 是受理时该共享 Session 的已完成消息总数，task 为 0。`upstreamMembers` 只列实际选入的本次成员结果来源，`upstreamAvailable` 是该阶段可使用的上游结果数量。两个 `Truncated` 布尔值表示按容量或历史窗口丢弃过完整上下文，并不表示发送了文本片段；这些数量不是 token 用量或价格。
+
+成员模型分别应用自己的预算：先保留当前任务及完整系统指令，普通共享上下文保留能放入的近期完整成员结果，再选入近期完整问答对。历史快照最多 50 对，并受 262144 字节上限约束；单条消息超过 Pi 的 32768 个 UTF-16 单元限制时丢弃整对。团队图节点不按未调用的主模型提前裁掉大容量成员可用的历史。必要审核/汇总/返工操作数不能完整放入时，run 以 `context_limit` 失败，不额外调用模型；受理 `202` 不能被当作这些成员已完成容量检查或已执行。
+
+系统指令中的成员名称是显示标签，职责说明工作范围，成员专属指令定义的人格优先于显示标签和父节点人格。历史 assistant 消息标明是此前团队结果；上游成员输出以带来源的 JSON 数据呈现，不将别人的发言当作当前成员的身份或系统指令。审计展示准备并冻结的实际请求字段，不能仅凭 queued 回合存在就宣称已经调用了供应商。
+
+迁移 `009_team_turn_inputs.sql` 的三个新列可空；旧 prompt 原样保留，旧 `systemPrompt/messages/context` 返回 null。客户端不得把 null 渲染成“实际没有历史”，也不得用当前配置重建并冒充当时输入。接口不含整个 run 的 status，观察端同时读取 `GET /runs/{id}`，终态后停止轮询。消息列表的 `runId` 可将重新加载的用户/助手消息关联回此接口，不需要猜测“最新运行”。所有读取继续验证当前租户与资源权限。
+
+运行状态读取成功后立即更新，不等待成员接口成功。成员读取失败或格式无效时暂停读取并提供重试；保留的数据明确显示为旧记录，不继续宣称自动更新。运行状态本身读取失败时标明“上次确认状态”；401/403/404 清空已缓存记录。
 
 ## 节点团队与后台整图
 
