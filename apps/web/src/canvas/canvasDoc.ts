@@ -1,3 +1,4 @@
+import { canvasStorage } from './canvasStorage';
 // The persisted canvas document.
 //
 // Product model (owner, 2026-08): THE NODE IS THE AGENT SESSION. Each tile on the infinite
@@ -22,6 +23,7 @@ import { reconcileEdges } from './ports';
 import type { ViewportState } from './viewport';
 import { normalizeContract, type NodeContract } from './nodeContracts';
 import type { AgentTemplateId } from './agentTemplates';
+import { sanitizeNodeTeam, type NodeTeam } from './nodeTeam';
 
 export type AgentKind = 'llm' | 'coding' | 'image';
 
@@ -52,6 +54,8 @@ export interface SessionNode extends CanvasNodeBase {
   effort: string;
   /** Persona / system prompt draft. Synced to the bound agent's instructions bundle on bind. */
   persona: string;
+  /** Optional collaboration plan; the primary binding remains the legacy conversation owner. */
+  team?: NodeTeam;
   binding: AgentBinding | null;
   /** A bind attempt whose outcome was UNKNOWN (request sent, response lost). Persisted so the
    *  tile keeps warning across reloads — a blind retry could hire a duplicate agent.
@@ -331,11 +335,15 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
 
   if (r.kind === 'session') {
     const contract = normalizeContract(r.contract);
+    const team = r.team == null ? undefined : sanitizeNodeTeam(r.team);
     const threads = sanitizeThreads(r.threads);
     const templateId = AGENT_TEMPLATE_IDS.includes(r.templateId as AgentTemplateId) ? r.templateId as AgentTemplateId : undefined;
     // A declared but unreadable schema must not silently become a legacy session with
     // unrestricted context/result ports. The loader preserves the raw document for recovery.
     if (r.contract != null && !contract) return null;
+    // A malformed team must never become a single-agent run. The loader preserves the
+    // original payload and reports corrupt status when this node cannot be recovered.
+    if (r.team != null && !team) return null;
     // An unrecognised agent kind is coerced rather than dropped: the tile's persona, binding
     // and thread are the operator's real work, and losing them to a typo'd enum would be worse
     // than showing it as an LLM tile they can switch back.
@@ -362,6 +370,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       model: str(r.model),
       effort: str(r.effort),
       persona: str(r.persona),
+      ...(team ? { team } : {}),
       binding,
       bindAttempt: r.bindAttempt === 'unknown' ? 'unknown' : null,
       issueId: typeof r.issueId === 'string' && r.issueId ? r.issueId : null,
@@ -471,7 +480,7 @@ export type CanvasLoadStatus = 'ok' | 'empty' | 'corrupt';
 
 function preserveCorrupt(raw: string, err: unknown, source: string): void {
   try {
-    localStorage.setItem(CANVAS_BACKUP_KEY, raw);
+    canvasStorage().setItem(CANVAS_BACKUP_KEY, raw);
   } catch {
     /* backup best-effort — the log below still names the loss */
   }
@@ -538,8 +547,8 @@ export function migrateFromLegacy(): CanvasDocument | null {
   let current: string | null = null;
   let legacy: string | null = null;
   try {
-    current = localStorage.getItem(CANVAS_STORAGE_KEY);
-    legacy = localStorage.getItem(LEGACY_WORKFLOW_STORAGE_KEY);
+    current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
+    legacy = canvasStorage().getItem(LEGACY_WORKFLOW_STORAGE_KEY);
   } catch {
     return null;
   }
@@ -571,16 +580,16 @@ function describeNonDocument(raw: unknown): string | null {
   return null;
 }
 
-export function loadDocumentWithStatus(): { doc: CanvasDocument; status: CanvasLoadStatus } {
+export function loadDocumentWithStatus({ readOnly = false }: { readOnly?: boolean } = {}): { doc: CanvasDocument; status: CanvasLoadStatus } {
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(CANVAS_STORAGE_KEY);
+    raw = canvasStorage().getItem(CANVAS_STORAGE_KEY);
   } catch {
     // Storage itself unreadable (privacy mode / policy): nothing to back up.
     return { doc: emptyDocument(), status: 'corrupt' };
   }
   if (!raw) {
-    const migrated = migrateFromLegacy();
+    const migrated = readOnly ? null : migrateFromLegacy();
     if (migrated) return { doc: migrated, status: 'ok' };
     return { doc: emptyDocument(), status: 'empty' };
   }
@@ -588,7 +597,7 @@ export function loadDocumentWithStatus(): { doc: CanvasDocument; status: CanvasL
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    preserveCorrupt(raw, err, 'canvas document');
+    if (!readOnly) preserveCorrupt(raw, err, 'canvas document');
     return { doc: emptyDocument(), status: 'corrupt' };
   }
 
@@ -603,24 +612,30 @@ export function loadDocumentWithStatus(): { doc: CanvasDocument; status: CanvasL
   // document, and must not be laundered into "you have an empty canvas".
   const shape = describeNonDocument(parsed);
   if (shape) {
-    preserveCorrupt(raw, new Error(`not a canvas document (${shape})`), 'canvas document');
+    if (!readOnly) preserveCorrupt(raw, new Error(`not a canvas document (${shape})`), 'canvas document');
     return { doc: emptyDocument(), status: 'corrupt' };
   }
   const declaredNodes = ((parsed as { nodes: unknown[] }).nodes).length;
   const doc = sanitizeDocument(parsed);
   if (declaredNodes > 0 && doc.nodes.length === 0) {
-    preserveCorrupt(raw, new Error(`all ${declaredNodes} stored node(s) failed sanitisation`), 'canvas document');
+    if (!readOnly) preserveCorrupt(raw, new Error(`all ${declaredNodes} stored node(s) failed sanitisation`), 'canvas document');
     return { doc: emptyDocument(), status: 'corrupt' };
   }
   // PARTIAL loss is still loss: the surviving nodes are kept (dropping them too would turn a
   // small defect into a total wipe), but the original payload is preserved so the dropped ones
   // remain recoverable rather than vanishing silently.
   if (declaredNodes > doc.nodes.length) {
-    preserveCorrupt(
+    if (!readOnly) preserveCorrupt(
       raw,
       new Error(`${declaredNodes - doc.nodes.length} of ${declaredNodes} stored node(s) failed sanitisation`),
       'canvas document',
     );
+    const invalidTeam = (parsed as { nodes: unknown[] }).nodes.some(rawNode => {
+      if (!rawNode || typeof rawNode !== 'object') return false;
+      const candidate = rawNode as Record<string, unknown>;
+      return candidate.kind === 'session' && candidate.team != null && !sanitizeNodeTeam(candidate.team);
+    });
+    if (invalidTeam) return { doc, status: 'corrupt' };
   }
   return { doc, status: 'ok' };
 }
@@ -631,7 +646,7 @@ export function loadDocument(): CanvasDocument {
 
 export function saveDocument(doc: CanvasDocument): boolean {
   try {
-    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
     return true;
   } catch {
     return false;

@@ -35,6 +35,7 @@ describe('AwwO draft workspace', () => {
       onFocusNode={vi.fn()} onAddAgent={vi.fn()} onCreateTemplate={onTemplate}
       onSearch={vi.fn()} onOpenSettings={vi.fn()}><div /></AgentWorkspace>);
     expect(within(screen.getByRole('complementary', { name: '工作区导航' })).getByText('AwwO')).toBeTruthy();
+    expect(screen.getByRole('contentinfo')).toHaveTextContent('本地画布');
     expect(onTemplate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '创建产品研发画布' }));
     expect(onTemplate).toHaveBeenCalledOnce();

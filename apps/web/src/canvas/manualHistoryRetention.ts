@@ -1,6 +1,7 @@
 import { fetchConversationMessages } from '../canvasAgentChat';
 import type { SessionNode } from './canvasDoc';
 import type { CanvasRunJournal } from './runJournal';
+import { canvasStorage } from './canvasStorage';
 import { hasManualRecoveryCapacity, persistRecoveredManualConversation, pruneNativeBackedManualConversations,
   type NativeManualHistoryProof } from './runRecoveryDocument';
 
@@ -16,18 +17,20 @@ async function readNativeHistory(gatewayBase: string, node: SessionNode, signal?
 export async function prepareManualHistoryCapacity(
   gatewayBase: string, node: SessionNode, userText: string, stillCurrent: () => boolean,
 ): Promise<boolean> {
-  if (hasManualRecoveryCapacity(node, userText)) return true;
+  const storage = canvasStorage();
+  if (hasManualRecoveryCapacity(node, userText, storage)) return true;
   const proof = await readNativeHistory(gatewayBase, node);
   if (!stillCurrent() || !proof) return false;
-  if (!pruneNativeBackedManualConversations(node, proof)) return false;
-  return hasManualRecoveryCapacity(node, userText);
+  if (!pruneNativeBackedManualConversations(node, proof, storage)) return false;
+  return hasManualRecoveryCapacity(node, userText, storage);
 }
 
 /** Called before clearing the journal; absent native proof preserves the durable fallback. */
 export async function persistManualHistoryWithNativeProof(
   gatewayBase: string, node: SessionNode, journal: CanvasRunJournal, signal?: AbortSignal,
 ): Promise<boolean> {
+  const storage = canvasStorage();
   const proof = await readNativeHistory(gatewayBase, node, signal);
   if (signal?.aborted) return false;
-  return persistRecoveredManualConversation(node, journal, localStorage, proof);
+  return persistRecoveredManualConversation(node, journal, storage, proof);
 }

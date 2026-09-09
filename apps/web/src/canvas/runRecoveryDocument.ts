@@ -1,3 +1,5 @@
+import { canvasStorage } from './canvasStorage';
+import { nodeTeamFingerprint } from './nodeTeam';
 import type { CanvasDocument, CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
 import type { CanvasRunJournal } from './runJournal';
@@ -21,6 +23,7 @@ export interface RecoveredConversationTurn {
   nativeRunId?: string;
   nativeSource?: 'issue_description';
   presentation?: TurnPresentation;
+  runId?: string;
 }
 
 interface DurableManualTurn {
@@ -104,7 +107,7 @@ function nativeHistoryContains(record: DurableManualTurn, proof?: NativeManualHi
   const matches = (turn: RecoveredConversationTurn, role: 'user' | 'agent', text: string) => {
     if (turn.role !== role || turn.text !== text || turn.nativeSource === 'issue_description') return false;
     if (record.operationId && turn.nativeOperationId && turn.nativeOperationId !== record.operationId) return false;
-    if (record.runId && turn.nativeRunId && turn.nativeRunId !== record.runId) return false;
+    if (record.runId && [turn.nativeRunId, turn.runId].some(id => id && id !== record.runId)) return false;
     return Boolean((record.operationId && turn.nativeOperationId === record.operationId)
       || (record.runId && turn.nativeRunId === record.runId));
   };
@@ -115,7 +118,7 @@ function nativeHistoryContains(record: DurableManualTurn, proof?: NativeManualHi
 
 /** Remove only records whose complete role/text pair is independently stored natively. */
 export function pruneNativeBackedManualConversations(
-  node: SessionNode, proof: NativeManualHistoryProof, storage: RecoveryStorage = localStorage,
+  node: SessionNode, proof: NativeManualHistoryProof, storage: RecoveryStorage = canvasStorage(),
 ): boolean {
   const key = manualRecoveryKey(node);
   const records = readManualRecords(node, storage);
@@ -128,7 +131,7 @@ export function pruneNativeBackedManualConversations(
 
 /** Known capacity gate before dispatch; future output size remains unknown until execution. */
 export function hasManualRecoveryCapacity(
-  node: SessionNode, userText: string, storage: Pick<Storage, 'getItem'> = localStorage,
+  node: SessionNode, userText: string, storage: Pick<Storage, 'getItem'> = canvasStorage(),
 ): boolean {
   const records = readManualRecords(node, storage);
   if (!records || records.length >= MAX_MANUAL_RECOVERIES_PER_SESSION) return false;
@@ -142,7 +145,7 @@ export function hasManualRecoveryCapacity(
 export function persistRecoveredManualConversation(
   node: SessionNode,
   journal: CanvasRunJournal,
-  storage: RecoveryStorage = localStorage,
+  storage: RecoveryStorage = canvasStorage(),
   nativeHistory?: NativeManualHistoryProof | null,
 ): boolean {
   const key = manualRecoveryKey(node);
@@ -170,45 +173,59 @@ export function persistRecoveredManualConversation(
 function mergeManualRecord(
   existing: RecoveredConversationTurn[],
   record: DurableManualTurn,
-  consumedPairs: Set<number>,
+  consumedTurns: Set<RecoveredConversationTurn>,
 ): RecoveredConversationTurn[] {
   const hasExecutionIdentity = (turn: RecoveredConversationTurn) => Boolean(turn.nativeOperationId
-    || turn.recoveryOperationId || turn.nativeRunId || turn.recoveryRunId);
+    || turn.recoveryOperationId || turn.nativeRunId || turn.recoveryRunId || turn.runId);
   const matchesIdentity = (turn: RecoveredConversationTurn) => {
     const operations = [turn.nativeOperationId, turn.recoveryOperationId].filter(Boolean);
-    const runs = [turn.nativeRunId, turn.recoveryRunId].filter(Boolean);
+    const runs = [turn.nativeRunId, turn.recoveryRunId, turn.runId].filter(Boolean);
     // One matching identifier must not hide a conflicting identifier on the same turn.
     if (record.operationId && operations.some(id => id !== record.operationId)) return false;
     if (record.runId && runs.some(id => id !== record.runId)) return false;
     return Boolean((record.operationId && operations.includes(record.operationId))
       || (record.runId && runs.includes(record.runId)));
   };
-  const userIndex = existing.findIndex(turn => turn.role === 'user' && turn.text === record.userText && matchesIdentity(turn));
-  const agentIndex = existing.findIndex(turn => turn.role === 'agent' && turn.text === record.agentText && matchesIdentity(turn));
-  const userPresent = !record.userText.trim() || userIndex >= 0;
-  const agentPresent = !record.agentText.trim() || agentIndex >= 0;
-  if (userIndex >= 0) consumedPairs.add(userIndex);
-  if (agentIndex >= 0) consumedPairs.add(agentIndex);
-  // A native user comment can exist before the Agent's stdout reaches stored history.
-  // Deduplicate each required side independently, so that comment cannot erase the reply.
-  if (userPresent && agentPresent) return existing;
+  const matchesReply = (turn: RecoveredConversationTurn) => turn.role === 'agent'
+    && (turn.text === record.agentText || (record.state !== 'done' && Boolean(record.agentText.trim())
+      && turn.text.startsWith(record.agentText)));
+  let userIndex = existing.findIndex(turn => turn.role === 'user' && turn.text === record.userText && matchesIdentity(turn));
+  let agentIndex = existing.findIndex(turn => matchesReply(turn) && matchesIdentity(turn));
   const visible = existing.map((turn, index) => ({ turn, index })).filter(item => item.turn.role !== 'system');
+
+  // A legacy user may have been restored before the recovered reply acquired its durable ID.
+  // Associate only that immediately adjacent untagged side, never a different known execution.
+  if (userIndex < 0 && agentIndex >= 0) {
+    const preceding = visible[visible.findIndex(item => item.index === agentIndex) - 1];
+    if (preceding?.turn.role === 'user' && preceding.turn.text === record.userText
+      && !hasExecutionIdentity(preceding.turn) && !consumedTurns.has(preceding.turn)) userIndex = preceding.index;
+  }
+  if (userIndex >= 0 && agentIndex < 0) {
+    const following = visible[visible.findIndex(item => item.index === userIndex) + 1];
+    if (following && matchesReply(following.turn) && !hasExecutionIdentity(following.turn)
+      && !consumedTurns.has(following.turn)) agentIndex = following.index;
+  }
   for (let index = 0; userIndex < 0 && agentIndex < 0 && index < visible.length; index += 1) {
     const user = visible[index];
     const agent = visible[index + 1];
-    if (consumedPairs.has(user.index) || user.turn.role !== 'user' || user.turn.text !== record.userText) continue;
-    // Only pre-identity history may use the old exact-text pair fallback. Repeated prompts
-    // and replies belonging to distinct operations are distinct conversation rounds.
+    if (consumedTurns.has(user.turn) || user.turn.role !== 'user' || user.turn.text !== record.userText) continue;
+    // Exact-text fallback is only for pre-identity history. Repeated prompts belonging to
+    // known different operations are distinct rounds, even when both bodies are identical.
     if (hasExecutionIdentity(user.turn) || (agent?.turn.role === 'agent' && hasExecutionIdentity(agent.turn))) continue;
-    if (record.agentText && (!agent || consumedPairs.has(agent.index) || agent.turn.role !== 'agent'
-      || agent.turn.text !== record.agentText)) continue;
-    consumedPairs.add(user.index);
-    if (record.agentText && agent) consumedPairs.add(agent.index);
-    return existing;
+    if (agent?.turn.role === 'agent' && (consumedTurns.has(agent.turn)
+      || (record.agentText.trim() && !matchesReply(agent.turn)))) continue;
+    userIndex = user.index;
+    if (record.agentText.trim() && agent?.turn.role === 'agent') agentIndex = agent.index;
   }
+  const userPresent = !record.userText.trim() || userIndex >= 0;
+  const agentPresent = !record.agentText.trim() || agentIndex >= 0;
+  if (userIndex >= 0) consumedTurns.add(existing[userIndex]);
+  if (agentIndex >= 0) consumedTurns.add(existing[agentIndex]);
+  if (userPresent && agentPresent) return existing;
+
   const identity = {
     ...(record.operationId ? { recoveryOperationId: record.operationId } : {}),
-    ...(record.runId ? { recoveryRunId: record.runId } : {}),
+    ...(record.runId ? { recoveryRunId: record.runId, runId: record.runId } : {}),
     createdAt: record.startedAt,
   };
   const recovered: RecoveredConversationTurn[] = [];
@@ -218,17 +235,12 @@ function mergeManualRecord(
     ...(record.state === 'done' ? {} : { tone: 'warn' as const }),
     ...identity,
   });
-  // A blocked local request may never become a native comment. Preserve it before later
-  // native replies, instead of appending it as the apparent latest turn/preview. Native
-  // order is authoritative; absent/equal timestamps are not a reason to reorder it.
+  // Native order is authoritative. Insert a missing side beside its known partner, or use
+  // a strictly newer native timestamp to keep old local failures before later exchanges.
   const later = existing.findIndex(turn => Number.isFinite(turn.createdAt) && turn.createdAt! > record.startedAt);
   const insertion = userIndex >= 0 ? userIndex + 1 : agentIndex >= 0 ? agentIndex : later < 0 ? existing.length : later;
-  const merged = [...existing.slice(0, insertion), ...recovered, ...existing.slice(insertion)];
-  const shiftedPairs = [...consumedPairs].map(index => index >= insertion ? index + recovered.length : index);
-  consumedPairs.clear();
-  shiftedPairs.forEach(index => consumedPairs.add(index));
-  for (let index = 0; index < recovered.length; index += 1) consumedPairs.add(insertion + index);
-  return merged;
+  recovered.forEach(turn => consumedTurns.add(turn));
+  return [...existing.slice(0, insertion), ...recovered, ...existing.slice(insertion)];
 }
 
 /** Overlay locally recovered stdout onto a freshly restored server transcript.
@@ -237,14 +249,14 @@ function mergeManualRecord(
 export function mergePersistedManualConversations(
   node: SessionNode,
   serverTurns: ReadonlyArray<RecoveredConversationTurn>,
-  storage: Pick<Storage, 'getItem'> = localStorage,
+  storage: Pick<Storage, 'getItem'> = canvasStorage(),
 ): RecoveredConversationTurn[] | null {
   const records = readManualRecords(node, storage);
   if (!records) return null;
   let merged = [...serverTurns];
-  const consumedPairs = new Set<number>();
+  const consumedTurns = new Set<RecoveredConversationTurn>();
   for (const record of records.slice().sort((a, b) => a.startedAt - b.startedAt)) {
-    merged = mergeManualRecord(merged, record, consumedPairs);
+    merged = mergeManualRecord(merged, record, consumedTurns);
   }
   return merged;
 }
@@ -312,6 +324,7 @@ function nodeInput(node: CanvasNode, inScope: boolean) {
     model: node.model,
     effort: node.effort,
     persona: node.persona,
+    ...(node.team ? { team: nodeTeamFingerprint(node.team) } : {}),
     binding: node.binding ? { companyId: node.binding.companyId, agentId: node.binding.agentId } : null,
     activeThreadId: activeThreadId(node),
     contract: node.contract ? {

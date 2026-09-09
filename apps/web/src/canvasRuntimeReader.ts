@@ -1,10 +1,11 @@
+import { canvasFetch } from './saas/canvasBridge';
 import { paperclipApiBase } from './paperclipBridge';
 
 /** Adapt the live Node registry to RuntimePicker's existing inventory contract.
  * Registered adapters are not a claim that their CLI is logged in or executable.
  * Codex uses the gateway's host CLI catalog; other adapters retain their registry contract.
  */
-export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: typeof fetch = fetch) {
+export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: typeof fetch = canvasFetch) {
   const apiBase = base.replace(/\/+$/, '');
   async function get(path: string, signal?: AbortSignal | null, requestBase = apiBase, timeoutMs = 10_000): Promise<unknown> {
     const timeout = AbortSignal.timeout(timeoutMs);
@@ -68,6 +69,7 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
         name: item.type,
         supports_model_selection: item.modelsCount > 0 || Boolean(companyId && (await modelIds(item.type, init?.signal, companyId)).length),
         supports_effort_selection: false,
+        ...(item.supportsNodeTeams === true ? { supports_node_teams: true } : {}),
       }))) };
     }
     const models = /^\/api\/agents\/([^/]+)\/models$/.exec(path);

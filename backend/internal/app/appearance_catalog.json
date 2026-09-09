@@ -1,0 +1,333 @@
+{
+  "schema_version": "0.1.0",
+  "canvases": [
+    "light",
+    "dark"
+  ],
+  "default_preset": "default",
+  "custom_preset_id": "custom",
+  "tokens": [
+    {
+      "id": "accent",
+      "label": "Accent",
+      "css_var": "--accent",
+      "soft_var": "--accent-soft",
+      "soft_alpha": 0.14,
+      "group": "accent"
+    },
+    {
+      "id": "bg_base",
+      "label": "Background",
+      "css_var": "--bg-base",
+      "group": "surface"
+    },
+    {
+      "id": "bg_sidebar",
+      "label": "Sidebar",
+      "css_var": "--bg-sidebar",
+      "group": "surface"
+    },
+    {
+      "id": "bg_card",
+      "label": "Card",
+      "css_var": "--bg-card",
+      "group": "surface"
+    },
+    {
+      "id": "border_light",
+      "label": "Border",
+      "css_var": "--border-light",
+      "group": "surface"
+    },
+    {
+      "id": "text_primary",
+      "label": "Text",
+      "css_var": "--text-primary",
+      "group": "text"
+    },
+    {
+      "id": "text_secondary",
+      "label": "Muted text",
+      "css_var": "--text-secondary",
+      "group": "text"
+    },
+    {
+      "id": "warn",
+      "label": "Warning",
+      "css_var": "--warn",
+      "soft_var": "--warn-soft",
+      "soft_alpha": 0.14,
+      "group": "status"
+    },
+    {
+      "id": "danger",
+      "label": "Danger",
+      "css_var": "--danger-bg",
+      "group": "status"
+    },
+    {
+      "id": "agent_running",
+      "label": "Agent running",
+      "css_var": "--agent-running",
+      "soft_var": "--agent-running-soft",
+      "soft_alpha": 0.2,
+      "group": "status"
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "label": "Default",
+      "description": "The stock SuperClaw indigo look.",
+      "swatch": "#7a8cff",
+      "overrides": {
+        "light": {},
+        "dark": {}
+      }
+    },
+    {
+      "id": "midnight",
+      "label": "Midnight",
+      "description": "Deep blue-black surfaces with an indigo accent.",
+      "swatch": "#7c8cff",
+      "overrides": {
+        "light": {
+          "bg_base": "#f6f7fc",
+          "bg_sidebar": "#f6f7fc",
+          "bg_card": "#ffffff",
+          "border_light": "#dde2ef",
+          "text_primary": "#181d2e",
+          "text_secondary": "#5b6478",
+          "accent": "#4f5fd6"
+        },
+        "dark": {
+          "bg_base": "#0a0e1a",
+          "bg_sidebar": "#0a0e1a",
+          "bg_card": "#121829",
+          "border_light": "#242e48",
+          "text_primary": "#e8ecf5",
+          "text_secondary": "#9aa6c2",
+          "accent": "#7c8cff"
+        }
+      }
+    },
+    {
+      "id": "slate",
+      "label": "Slate",
+      "description": "Neutral cool graphite with a steel-blue accent.",
+      "swatch": "#8aa3c8",
+      "overrides": {
+        "light": {
+          "bg_base": "#f6f7f9",
+          "bg_sidebar": "#f6f7f9",
+          "bg_card": "#ffffff",
+          "border_light": "#e1e5ea",
+          "text_primary": "#1b1e24",
+          "text_secondary": "#5c6470",
+          "accent": "#3f5b86"
+        },
+        "dark": {
+          "bg_base": "#0e1013",
+          "bg_sidebar": "#0e1013",
+          "bg_card": "#181b21",
+          "border_light": "#2b313b",
+          "text_primary": "#e9ebef",
+          "text_secondary": "#9aa1ac",
+          "accent": "#8aa3c8"
+        }
+      }
+    },
+    {
+      "id": "emerald",
+      "label": "Emerald",
+      "description": "Deep forest surfaces with an emerald accent.",
+      "swatch": "#34d27f",
+      "overrides": {
+        "light": {
+          "bg_base": "#f3faf6",
+          "bg_sidebar": "#f3faf6",
+          "bg_card": "#ffffff",
+          "border_light": "#d7e8de",
+          "text_primary": "#0f1d16",
+          "text_secondary": "#4f6a5c",
+          "accent": "#0f9d58"
+        },
+        "dark": {
+          "bg_base": "#07120d",
+          "bg_sidebar": "#07120d",
+          "bg_card": "#0e1d16",
+          "border_light": "#1f3529",
+          "text_primary": "#e6f1ea",
+          "text_secondary": "#93b4a2",
+          "accent": "#34d27f"
+        }
+      }
+    },
+    {
+      "id": "ocean",
+      "label": "Ocean",
+      "description": "Dark teal surfaces with a cyan accent.",
+      "swatch": "#2dd4bf",
+      "overrides": {
+        "light": {
+          "bg_base": "#f0f9fb",
+          "bg_sidebar": "#f0f9fb",
+          "bg_card": "#ffffff",
+          "border_light": "#d2e8ec",
+          "text_primary": "#0c1d22",
+          "text_secondary": "#4d6a72",
+          "accent": "#0e7490"
+        },
+        "dark": {
+          "bg_base": "#06131a",
+          "bg_sidebar": "#06131a",
+          "bg_card": "#0d2029",
+          "border_light": "#1d3742",
+          "text_primary": "#e2f0f4",
+          "text_secondary": "#92b3bd",
+          "accent": "#2dd4bf"
+        }
+      }
+    },
+    {
+      "id": "violet",
+      "label": "Violet",
+      "description": "Deep plum surfaces with a violet accent.",
+      "swatch": "#a78bfa",
+      "overrides": {
+        "light": {
+          "bg_base": "#f8f5fd",
+          "bg_sidebar": "#f8f5fd",
+          "bg_card": "#ffffff",
+          "border_light": "#e6ddf2",
+          "text_primary": "#1c1428",
+          "text_secondary": "#5f5278",
+          "accent": "#7c3aed"
+        },
+        "dark": {
+          "bg_base": "#110a1a",
+          "bg_sidebar": "#110a1a",
+          "bg_card": "#1b1228",
+          "border_light": "#302244",
+          "text_primary": "#ece6f5",
+          "text_secondary": "#ab9bc6",
+          "accent": "#a78bfa"
+        }
+      }
+    },
+    {
+      "id": "rose",
+      "label": "Rose",
+      "description": "Warm wine surfaces with a rose accent.",
+      "swatch": "#f472a6",
+      "overrides": {
+        "light": {
+          "bg_base": "#fdf4f8",
+          "bg_sidebar": "#fdf4f8",
+          "bg_card": "#ffffff",
+          "border_light": "#f0dbe5",
+          "text_primary": "#281019",
+          "text_secondary": "#7a5160",
+          "accent": "#c2185b"
+        },
+        "dark": {
+          "bg_base": "#150a10",
+          "bg_sidebar": "#150a10",
+          "bg_card": "#22121b",
+          "border_light": "#3c2331",
+          "text_primary": "#f3e7ee",
+          "text_secondary": "#c69bae",
+          "accent": "#f472a6"
+        }
+      }
+    },
+    {
+      "id": "amber",
+      "label": "Amber",
+      "description": "Warm ember surfaces with an amber accent.",
+      "swatch": "#f0a93a",
+      "overrides": {
+        "light": {
+          "bg_base": "#fdf8f0",
+          "bg_sidebar": "#fdf8f0",
+          "bg_card": "#ffffff",
+          "border_light": "#efe2cd",
+          "text_primary": "#271f12",
+          "text_secondary": "#6e6450",
+          "accent": "#b8730a"
+        },
+        "dark": {
+          "bg_base": "#14100a",
+          "bg_sidebar": "#14100a",
+          "bg_card": "#201810",
+          "border_light": "#38291b",
+          "text_primary": "#f3ece0",
+          "text_secondary": "#bcaa8e",
+          "accent": "#f0a93a"
+        }
+      }
+    },
+    {
+      "id": "high_contrast",
+      "label": "High contrast",
+      "description": "Maximum text and border contrast for readability.",
+      "swatch": "#ffffff",
+      "overrides": {
+        "light": {
+          "bg_base": "#ffffff",
+          "bg_sidebar": "#ffffff",
+          "bg_card": "#ffffff",
+          "border_light": "#8a8a8a",
+          "text_primary": "#000000",
+          "text_secondary": "#2e2e2e",
+          "accent": "#1d4ed8"
+        },
+        "dark": {
+          "bg_base": "#000000",
+          "bg_sidebar": "#000000",
+          "bg_card": "#0d0d0d",
+          "border_light": "#6a6a6a",
+          "text_primary": "#ffffff",
+          "text_secondary": "#e2e2e2",
+          "accent": "#93b4ff"
+        }
+      }
+    },
+    {
+      "id": "oled",
+      "label": "OLED black",
+      "description": "True-black surfaces for OLED displays (dark canvas).",
+      "swatch": "#0a0a0a",
+      "overrides": {
+        "light": {},
+        "dark": {
+          "bg_base": "#000000",
+          "bg_sidebar": "#000000",
+          "bg_card": "#0b0b0b",
+          "border_light": "#1c1c1c",
+          "text_primary": "#f4f4f4",
+          "text_secondary": "#a8a8a8",
+          "accent": "#7c8cff"
+        }
+      }
+    },
+    {
+      "id": "cyber",
+      "label": "Cyber",
+      "description": "Deep-space navy surfaces with a cyan accent (ClawHunt cyber, dark canvas).",
+      "swatch": "#00d4ff",
+      "overrides": {
+        "light": {},
+        "dark": {
+          "bg_base": "#08081a",
+          "bg_sidebar": "#0b0b20",
+          "bg_card": "#0f1530",
+          "border_light": "#1e2747",
+          "text_primary": "#eef2fb",
+          "text_secondary": "#b8c2e0",
+          "accent": "#00d4ff"
+        }
+      }
+    }
+  ]
+}

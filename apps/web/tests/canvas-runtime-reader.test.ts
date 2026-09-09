@@ -85,3 +85,14 @@ describe('standalone canvas runtime discovery', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+it('advertises node team execution only for explicit runtime capability', async () => {
+  const read = createCanvasRuntimeReader('/runtime-registry', vi.fn(async () => Response.json([
+    { type: 'pi', loaded: true, modelsCount: 2, supportsNodeTeams: true },
+    { type: 'legacy', loaded: true, modelsCount: 2 },
+  ])));
+  expect(await read('/api/agents')).toEqual({ agents: [
+    { name: 'pi', supports_model_selection: true, supports_effort_selection: false, supports_node_teams: true },
+    { name: 'legacy', supports_model_selection: true, supports_effort_selection: false },
+  ] });
+});

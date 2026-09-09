@@ -1,6 +1,10 @@
 # Agent Graph
 
-AwwO supports two collaboration modes. **Workflow** runs the same-round data connections once. **Review Graph** repeats that DAG using explicit feedback from the preceding round, until the selected reviewer approves or the round limit is reached.
+The native AwwO workspace supports two graph collaboration modes. **Workflow** runs the same-round data connections once. **Review Graph** repeats that DAG using explicit feedback from the preceding round, until the selected reviewer approves or the round limit is reached.
+
+## SaaS runtime boundary
+
+The Go/Pi SaaS workspace supports one-pass DAG execution and each node's multi-agent team. Team-level review inside a node is separate from the cross-node Review Graph described below. The Go graph scheduler does not yet execute graph review policies, feedback edges or HTML workflow contracts. The SaaS UI hides new native-only configuration and rejects unsupported graph runs; the API independently rejects them before quota allocation or model calls. Imported configurations remain stored and can be initialized or used for manual conversations. Open the native workspace to run a supported native Review Graph.
 
 ## Start a review loop
 

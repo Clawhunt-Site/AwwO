@@ -188,6 +188,12 @@
 .canvas-root .awwo-input-drawer > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 11px; }
 .canvas-root .awwo-node-delivery-drawer:has(.canvas-inspector) { position: absolute; inset: 0 0 0 auto; width: min(340px, 100%); z-index: 9; box-shadow: -4px 0 16px #0001; }
 .canvas-root .awwo-node .canvas-inspector { border: 0; background: var(--awwo-card); color: var(--awwo-ink); }
+.canvas-root .awwo-node .canvas-inspector-input,
+.canvas-root .awwo-node .canvas-inspector-persona { background: var(--awwo-soft); color: var(--awwo-ink); border-color: var(--awwo-line); }
+.canvas-root .awwo-node .canvas-inspector-input::placeholder,
+.canvas-root .awwo-node .canvas-inspector-persona::placeholder { color: var(--awwo-muted); }
+.canvas-root .awwo-node .canvas-inspector-input:focus,
+.canvas-root .awwo-node .canvas-inspector-persona:focus { border-color: var(--awwo-teal); }
 .canvas-root .awwo-node .canvas-inspector-head { padding: 10px 12px; }
 .canvas-root .awwo-node .canvas-inspector-title { font-size: 12px; }
 :root[data-theme='dark'] .canvas-root .canvas-tile.awwo-node { --awwo-card: #222925; --awwo-soft: #29332c; }

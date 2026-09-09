@@ -1,3 +1,4 @@
+import { canvasFetch } from '../saas/canvasBridge';
 // Gateway transport for graph runs — a thin adapter turning ONE session-node execution into ONE
 // turn on that node's own gateway conversation, riding the exact SSE client the tile composers
 // use (streamAgentConversation).
@@ -29,6 +30,7 @@ import {
 import * as sessions from './sessions';
 import { activeThreadId, sessionStoreKey } from './nodeThreads';
 import { beginConversationPresentation, updateConversationPresentation } from './conversationPresentation';
+import { canvasStorage } from './canvasStorage';
 
 const STATUS_LABEL: Record<string, string> = {
   succeeded: '已完成',
@@ -69,7 +71,7 @@ export async function cancelConversationRunViaGateway(
 ): Promise<NativeCancelResult> {
   try {
     const base = gatewayBase.replace(/\/+$/, '');
-    const response = await fetch(
+    const response = await canvasFetch(
       `${base}/conversations/${encodeURIComponent(binding.companyId)}/agents/${encodeURIComponent(binding.agentId)}/issues/${encodeURIComponent(issueId)}/cancel`,
       {
         method: 'POST',
@@ -102,6 +104,7 @@ export async function execAgentViaGateway(
   const { onIssueId, onRunAccepted, onCancelFailure, operationId, signal } = opts;
   const binding = node.binding;
   const storeKey = sessionStoreKey(node);
+  const storage = canvasStorage();
   if (!binding) return { ok: false, output: '', detail: '节点未绑定真实 Agent' };
   // A queued same-Agent execution can reach the executor only after the operator stopped the
   // graph. Do not append a phantom transcript turn or POST a new upstream mutation.
@@ -113,9 +116,9 @@ export async function execAgentViaGateway(
   const token = beginStream(storeKey);
   const mirroring = () => isStreamCurrent(storeKey, token);
   const presentation = opts.presentation ? JSON.parse(JSON.stringify(opts.presentation)) as sessions.TurnPresentation : undefined;
-  if (operationId && presentation) beginConversationPresentation(node, operationId, message, presentation);
+  if (operationId && presentation) beginConversationPresentation(node, operationId, message, presentation, storage);
   const identity = operationId ? { recoveryOperationId: operationId } : {};
-  sessions.appendTurn(storeKey, { role: 'user', text: message, ...identity, ...(presentation ? { presentation: { displayText: presentation.displayText, inputKind: presentation.inputKind } } : {}) });
+  const userTurnId = sessions.appendTurn(storeKey, { role: 'user', text: message, ...identity, ...(presentation ? { presentation: { displayText: presentation.displayText, inputKind: presentation.inputKind } } : {}) });
   const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '', ...identity, ...(presentation ? { presentation: { outputContract: presentation.outputContract, outputState: 'streaming' } } : {}) });
   sessions.setStreaming(storeKey, true);
   sessions.setStatus(storeKey, 'queued');
@@ -193,7 +196,11 @@ export async function execAgentViaGateway(
       case 'accepted':
         reportIssue(f.issueId);
         runId = f.runId;
-        if (operationId && presentation) updateConversationPresentation(node, operationId, { issueId: f.issueId, runId: f.runId });
+        if (operationId && presentation) updateConversationPresentation(node, operationId, { issueId: f.issueId, runId: f.runId }, storage);
+        if (mirroring() && f.runId) {
+          sessions.attachTurnRun(storeKey, userTurnId, f.runId);
+          sessions.attachTurnRun(storeKey, agentTurnId, f.runId);
+        }
         onRunAccepted?.({ issueId: f.issueId, runId: f.runId });
         beginCancellation();
         if (mirroring() && !f.runVisible) sessions.patchTurn(storeKey, agentTurnId, COPY.thinking, 'info');
@@ -247,6 +254,7 @@ export async function execAgentViaGateway(
   try {
     await streamAgentConversation(gatewayBase, binding.companyId, binding.agentId, message, onFrame, {
       issueId,
+      nodeId: node.id,
       operationId,
       signal: transport.signal,
     });
@@ -257,7 +265,7 @@ export async function execAgentViaGateway(
     const outputState = final?.kind === 'done' && final.status === 'succeeded' && text.trim()
       ? opts.deferFinalPresentation ? 'streaming' : 'final' : 'failed';
     if (presentation) {
-      if (operationId) updateConversationPresentation(node, operationId, { issueId: issueId ?? null, runId, outputText: text, outputState });
+      if (operationId) updateConversationPresentation(node, operationId, { issueId: issueId ?? null, runId, outputText: text, outputState }, storage);
       // Finalize while this stream still owns its turn, before endStream releases ownership.
       if (mirroring()) sessions.patchPresentation(storeKey, agentTurnId, { outputContract: presentation.outputContract, outputState });
     }

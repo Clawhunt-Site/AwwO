@@ -1,0 +1,91 @@
+name: awwo-saas
+services:
+  database:
+    image: postgres:18.4-bookworm
+    environment:
+      POSTGRES_USER: awwo
+      POSTGRES_DB: awwo
+      POSTGRES_PASSWORD: ${AWWO_DB_PASSWORD:?Set a dedicated database password}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U awwo -d awwo]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [private]
+  pi:
+    build:
+      context: ../..
+      dockerfile: deploy/saas/pi.Dockerfile
+    # Only the Pi container receives these optional profile-specific credentials.
+    env_file:
+      - path: ${AWWO_PI_PROFILES_ENV_FILE:-./pi-profiles.env}
+        required: false
+    environment:
+      AWWO_PI_HOST: 0.0.0.0
+      AWWO_PI_PORT: 8097
+      AWWO_PI_TOKEN: ${AWWO_PI_TOKEN:?Set a dedicated internal token}
+      AWWO_PI_PROVIDER: ${AWWO_PI_PROVIDER:-}
+      AWWO_PI_MODEL: ${AWWO_PI_MODEL:-}
+      AWWO_PI_BASE_URL: ${AWWO_PI_BASE_URL:-}
+      AWWO_PI_API_KEY: ${AWWO_PI_API_KEY:-}
+      AWWO_PI_MODELS_JSON: ${AWWO_PI_MODELS_JSON:-}
+      AWWO_PI_MAX_CONCURRENCY: ${AWWO_PI_MAX_CONCURRENCY:-4}
+      AWWO_PI_CONTEXT_WINDOW: ${AWWO_PI_CONTEXT_WINDOW:-32768}
+      AWWO_PI_MAX_TOKENS: ${AWWO_PI_MAX_TOKENS:-4096}
+      AWWO_PI_TIMEOUT_MS: ${AWWO_PI_TIMEOUT_MS:-120000}
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    init: true
+    restart: unless-stopped
+    networks: [private, egress]
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/saas/api.Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      AWWO_LISTEN_ADDR: 0.0.0.0:8087
+      AWWO_PUBLIC_ORIGIN: ${AWWO_PUBLIC_ORIGIN:?Set the HTTPS public origin}
+      AWWO_DATABASE_URL: ${AWWO_DATABASE_URL:?Set the dedicated PostgreSQL connection URL}
+      AWWO_PI_URL: http://pi:8097
+      AWWO_PI_SESSION_WAIT: ${AWWO_PI_SESSION_WAIT:-5s}
+      AWWO_PI_TOKEN: ${AWWO_PI_TOKEN:?Set a dedicated internal token}
+      AWWO_BOOTSTRAP_ADMIN_EMAIL: ${AWWO_BOOTSTRAP_ADMIN_EMAIL:?Set the initial administrator email}
+      AWWO_BOOTSTRAP_ADMIN_PASSWORD: ${AWWO_BOOTSTRAP_ADMIN_PASSWORD:?Set an initial administrator password}
+      AWWO_TRUSTED_PROXY_CIDRS: ${AWWO_TRUSTED_PROXY_CIDRS:-}
+    depends_on:
+      database: { condition: service_healthy }
+      pi: { condition: service_started }
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    restart: unless-stopped
+    networks: [private]
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/saas/web.Dockerfile
+    ports:
+      - 127.0.0.1:${AWWO_INGRESS_PORT:-8189}:8080
+    depends_on: [api]
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    networks: [private]
+volumes:
+  postgres-data:
+networks:
+  private:
+    internal: true
+  egress:

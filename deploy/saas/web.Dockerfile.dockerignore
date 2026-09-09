@@ -1,0 +1,14 @@
+**
+!apps/
+!apps/web/
+!apps/web/**
+!deploy/
+!deploy/saas/
+!deploy/saas/nginx.conf
+apps/web/node_modules
+apps/web/dist
+apps/web/dist-saas
+apps/web/.env
+apps/web/.env.*
+apps/web/.local
+apps/web/coverage

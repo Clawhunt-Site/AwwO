@@ -242,6 +242,8 @@ describe('RunControls', () => {
     fireEvent.click(screen.getByText('▶ 运行图'));
     expect(onStart).not.toHaveBeenCalled();
     const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('1 个节点待配置');
+    fireEvent.click(screen.getByRole('button', { name: '展开问题' }));
     expect(alert.textContent).toContain('前端实现');
     expect(alert.textContent).toContain('未绑定');
   });

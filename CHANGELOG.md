@@ -6,6 +6,134 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — online integration of native review and SaaS teams
+
+- **What changed:** Preserve online graph review, HTML deliveries and logging controls while integrating main's tenant-scoped Go/Pi execution, member histories, initialization and cancellation. Keep native review and SaaS graph admission distinct and retain both test inventories.
+- **Why:** The online and main histories diverged in shared canvas execution and persistence. Selecting one side would drop existing behavior or apply an unsupported execution protocol.
+- **Impact:** Native graph review remains available. SaaS preserves native graph metadata but refuses unsupported review/feedback/HTML workflows instead of treating them as ordinary DAGs. Application source and release references are separate from deployment acceptance.
+- **Verification:** Isolated integration checks and exact source/target review are recorded in docs/awwo-online-sync-20260909.md; approval and push are separate gates.
+- **Files:** Shared canvas execution/planning/controls/journals, SaaS capability guard, corresponding regressions and version/test metadata.
+
+### Fixed — native and SaaS conversation synchronization
+
+- **What changed:** Reconcile the `0.3.1` native conversation lifecycle with Go/Pi SaaS teams, preserving readable replies, accepted drafts, durable history and member execution identities. Use native settlement only for native runs; keep asynchronous display/history writes in their captured SaaS namespace. Preserve both test inventories and release histories.
+- **Why:** Both branches changed the shared canvas lifecycle. Combining them without runtime and identity checks could lock completed SaaS runs, lose history or misattribute a member record.
+- **Impact:** Native Codex and SaaS retain their own execution confirmation protocols. Scope-limited runs show prerequisite failures on the selected dependent without marking an unexecuted upstream as blocked. This is a local synchronization candidate, not an online promotion.
+- **Verification:** Exact input commits, local checks, resolved conflicts and approval state are recorded in `docs/awwo-main-sync-20260908.md`.
+- **Files:** Shared canvas/transport/history components, their regression tests, Web package scripts and synchronization documentation.
+
+### Fixed — exact team cancellation and clean stopped status
+
+- **What changed:** Cancel every unfinished Pi member by its submitted turn ID with an independent two-second cleanup deadline, before releasing its invocation slot. Record deliberate cancellation without a false runtime error; preserve actual provider failures, malformed events, broken streams and timeouts.
+- **Why:** Public run IDs did not match Pi's active member keys, and a cancelled stream could appear as a red runtime failure.
+- **Impact:** Parallel siblings clean up independently; completed calls remain complete and unrelated calls are untouched. Cancellation is bounded and best effort when the worker is unreachable.
+- **Verification:** Strict worker fixtures deliberately ignore stream closure and require exact DELETE IDs. Final PostgreSQL race: 25 top-level / 27 subcases; vet and local protocol stack pass. Real browser stop confirms one cancelled member, no subsequent member, empty error, preserved partial output and zero Pi/invocation activity. Codex GPT-5.5 and Gemini final reviews both PASS.
+- **Files:** `backend/internal/app/runs.go`, `backend/internal/app/teams.go`, `backend/internal/app/team_cancel_test.go`.
+
+### Fixed — team conversation history and visible member execution
+
+- **What changed:** Show each member's ordered output and actual input audit beside its conversation reply and in background task records. Preserve run identities through streaming, refresh and failed-run recovery. Share completed exchanges within the same session according to each member's context setting, and apply member persona instructions independently. Separate natural chat from the explicit node-task action.
+- **Why:** The chat showed only the final member, discarded prior team conversation history, and appended stale task forms and JSON contracts to follow-up questions, obscuring whether earlier members ran.
+- **Impact:** Tenant/session boundaries, immutable run snapshots and per-model context limits remain enforced. Chat preserves published deliverables. Required task inputs still gate task execution; old input audits remain explicitly unavailable.
+- **Verification:** Related frontend/canvas 76 files / 753 tests, PostgreSQL race 25 top-level / 27 subcases, Pi 27, protocol stack 1, typecheck, build and vet pass. Five real GPT-5.6 runs / ten member calls verify both personas, handoff, continuous history, new-session isolation and task/chat delivery separation; nine passing screenshots, one diagnostic screenshot and exact review status are in [the acceptance report](docs/awwo-team-conversation-acceptance-20260908.md).
+- **Files:** `backend/internal/app/{team_context,teams,runs,graph_runs,resources}.go`, migration 009; `apps/web/src/{canvas,saas}/`, conversation transports and identity/recovery tests; node-team/API documentation and acceptance report.
+
+### Fixed — automatic SaaS node initialization
+
+- **What changed:** Save node configuration and prepare its real Agent/session in one action; automatically prepare nodes before graph, scoped and conversation execution. Use default Pi/model when omitted, preserve old sessions on configuration changes, and make notices dismissible. Keep SaaS configuration outside the scaled canvas with visible save/close controls in narrow windows.
+- **Why:** Template nodes remained drafts after saving, and the separate binding workflow repeatedly blocked execution with a persistent warning. Narrow-window configuration actions could be covered by the footer; missing task input could be mislabeled as an unbound Agent.
+- **Impact:** Tenant membership, canvas versions and active-run locks govern initialization. Repeated compatible initialization reuses identities; uncertain responses retain drafts and require reconciliation. Existing local runtime behavior remains compatible.
+- **Verification:** Web 1,066, SaaS 200, Go race 48 top-level/45 subcases, Pi 27, launcher 8, local protocol stack 1, typecheck/build and independent review pass. Real browser acceptance covers default preparation, actual GPT-5.6 execution, team configuration and session history; see [acceptance evidence](docs/awwo-node-setup-acceptance-20260908.md). One concurrent Web invitation test timed out; isolated case and final independent full suite passed.
+- **Files:** `backend/internal/app/node_setup.go`, migration 008 and authorization/regression tests; `apps/web/src/{canvas,saas}/`, four new test files; SaaS API, architecture, design standards, development and node-team documentation.
+
+### Added — node teams and durable graph orchestration
+
+- **What changed:** Add 1–8 configurable members per canvas node, four collaboration modes, independent Pi model profiles, persisted member turns, background graph dispatch, versioned admission and operation cancellation recovery.
+- **Why:** A single session per node and browser-owned downstream dispatch could not represent team collaboration or continue a graph after the page closed.
+- **Impact:** Existing single-Agent documents remain compatible; team settings and execution snapshots stay tenant scoped. Model-call budgets and timeouts bound collaboration. This is local text inference; engineering tools and distributed execution are outside this delivery.
+- **Verification:** [Node-team acceptance report](docs/awwo-node-teams-acceptance-20260908.md): PostgreSQL/race 42 top-level + 42 subcases, Web 1,052 and SaaS 177 tests (overlapping), Pi 27, typecheck/build and the final local stack pass; real GPT-5.6 four-mode, close/reopen, cancellation and manual-chat evidence includes 11 screenshots.
+- **Files:** `backend/internal/app/{teams,graph_runs,graph_contracts}.go`, migration 007; `apps/pi-worker/`; `apps/web/src/{canvas,saas}/`; `docs/awwo-node-teams.md`; `scripts/awwo-node-teams-acceptance.mjs`.
+
+### Documentation — real-provider local acceptance evidence
+
+- **What changed:** Record current AwwO Go/Pi SaaS acceptance, 57 composite UI cases, 72 screenshot records, real model/database evidence, backup restore, and both browser-discovered fixes.
+- **Why:** Source review and protocol fixtures do not prove the existing frontend works against an external model or that every deployment capability is ready.
+- **Impact:** The report accepts the tested local text collaboration core and explicitly retains engineering-tool, background-graph, UI edge-case, container and public deployment gaps. It does not certify production readiness or unrelated inherited workspaces.
+- **Verification:** Current Web/SaaS/Gateway/Go/Pi suites, negative HTTP cases, real UI/Pi requests, download integrity and local backup restore passed within their stated scopes; report links, screenshot hashes and cleanup are checked.
+- **Files:** `docs/awwo-real-provider-acceptance-20260908.md`; local evidence in `.local/awwo-saas/acceptance-20260908/`.
+
+### Fixed — SaaS mobile canvas controls
+
+- **What changed:** Wrap mobile canvas account controls below the workspace title and place run status in the control group flow.
+- **Why:** The 390px browser acceptance viewport showed a vertically compressed workspace name and a run notice overlapping the account controls.
+- **Impact:** The SaaS canvas at widths up to 760px keeps navigation, workspace selection, account, logout and run controls visible. Existing desktop rules and runtime behavior are unchanged.
+- **Verification:** CSS parsing and scoped-rule checks, SaaS build, actual 390×843 CSS viewport screenshots and account dialog interaction pass; desktop canvas was checked afterward. Evidence: `.local/awwo-saas/acceptance-20260908/frontend-mobile-fix-report.md` and screenshots 66–68.
+- **Files:** `apps/web/src/saas/saas.css`.
+
+### Fixed — cancelled conversation recovery order
+
+- **What changed:** Anchor locally recovered cancelled output after its matching persisted user message; preserve the latest completed reply and avoid duplicate turns across repeated refreshes.
+- **Why:** Real Go/Pi/GPT-5.6 browser acceptance reproduced an old cancelled response appearing after a newer successful response and replacing its card preview.
+- **Impact:** Session history and card previews keep chronological order, including repeated prompts and server replies longer than cached partial output. No API or database schema change.
+- **Verification:** Three regression cases failed before the fix and passed afterward; four new regressions and related tests pass. Full SaaS suite: 65 files / 612 tests; original Web suite: 91 files / 1,009 tests (overlapping suites), static checks, typecheck and SaaS build pass. Browser refresh/repeated refresh and a subsequent real two-node graph succeeded. Evidence: `.local/awwo-saas/acceptance-20260908/frontend-recovery-fix-report.md`.
+- **Files:** `apps/web/src/canvas/runRecoveryDocument.ts`, `apps/web/tests/canvas-recovery-document.test.ts`, `apps/web/tests/canvas-tile-history.test.tsx`.
+
+### Fixed — Fable acceptance gaps in the Go/Pi SaaS integration
+
+- **What changed:** Add signed pagination to all six tenant resource lists and page controls to the original workspace panel; expose additional workspace creation and canvas rename/delete with version and active-run guards. Restore the original appearance catalog, custom colors and import/export with per-user PostgreSQL persistence. Localize run errors and make history/active-run lookups independent of the old 200-row window. Add isolated HTTP fault controls and an explicit real-provider acceptance entry.
+- **Why:** Acceptance found inaccessible records beyond 200, missing frontend actions/settings, untranslated failure states and insufficient repeatable negative test conditions.
+- **Impact:** Existing canvas documents and account boundaries remain authoritative. Concurrent canvas/appearance writes use CAS; unknown save outcomes require reload. Test fault controls stay outside the application API. No merge, remote publication or external inference is included.
+- **Verification:** Real PostgreSQL/race/vet (26 top-level + 22 subtests), SaaS/legacy component suites, typecheck/build, 21 script tests and 14 real HTTP negative-flow checks. Computer Use stopped after the registration form because Chrome returned empty accessibility state and no screenshot. Real provider configuration, remaining GUI scenarios and container/runtime acceptance are still open. Independent review results and exact evidence are recorded in `docs/awwo-fable-remediation-20260907.md`.
+- **Files:** `backend/internal/app/{tenant_pagination,appearance}.go`, migrations 005/006 and lifecycle handlers; `apps/web/src/{saas,account,settings}/**`, canvas conversation adapters and regressions; `scripts/awwo-saas-{browser-fixture,acceptance-faults,fixture-control,real-provider-acceptance}*`; backend and SaaS documentation.
+
+### Fixed — Computer Use acceptance findings
+
+- **What changed:** Persist consumed send drafts with the run snapshot; preserve structured login errors for localization; count blocked nodes within the selected run scope; allow cloud run reconciliation while retaining conflict drafts and detached-run snapshots; compare canvas documents independently of JSON object key order.
+- **Why:** Real browser actions reproduced sent prompts returning after refresh, English errors on the Chinese login page, a blocked count larger than the selected graph, inaccessible completed runs when an older draft remained, and repeated same-version draft warnings after undoing a plan.
+- **Impact:** The original canvas, tenant/account controls and Go/Pi contracts are preserved. Recovery keeps unsent drafts and does not dispatch waiting downstream nodes. Object-key normalization retains actual value, timestamp and array-order differences. No merge, push, external inference or deployment is included.
+- **Verification:** Five defects have focused regressions and original-scenario Computer Use verification. The final combined Web suites, builds and independent reviews are recorded in `docs/awwo-computer-use-acceptance-20260907.md`. The GUI exercised 16 Go/Pi SDK/local-provider runs: 13 completed and 3 intentionally cancelled, with database and provider evidence. The report distinguishes covered flows, unexecuted branches, Chrome automation limitations and production gates.
+- **Files:** `apps/web/src/canvas/CanvasSurface.tsx`, `apps/web/src/canvas/runGraph.ts`, `apps/web/src/saas/{SaaSApp.tsx,canvasDraft.ts}`, related canvas/API/draft tests, and the Computer Use acceptance report and coverage matrix.
+
+### Fixed — SaaS acceptance authorization and lifecycle failures
+
+- **What changed:** Normalize graph revisions before the first run; recheck tenant mutation authorization inside transactions; commit cancellation state/events/audit together; enforce timed SSE authorization during historical replay; reject admission after detected worker lease loss; return 400 for malformed Pi HTTP targets; honor local-launcher shutdown across asynchronous startup phases.
+- **Why:** Adversarial acceptance reproduced false cross-tab conflicts, late writes after revocation, continued private event replay, stranded queued runs, a Pi process crash, and services launching after cancellation.
+- **Impact:** Existing canvas and API contracts remain usable with stricter admission and lifecycle handling. Single Go worker, periodic SSE revocation and explicit local-provider fixture boundaries remain in force. No merge, release, external inference or deployment is included.
+- **Verification:** 58 SaaS-related frontend files/554 cases and original 91 files/1003 cases (47 overlapping files); Gateway 36 files/389 cases; Go 22 top-level plus 16 subcases with real PostgreSQL/race/vet; Pi 22, SaaS scripts 8 and original scripts 12; final-binary API smoke and Go/Pi/SDK/PostgreSQL stack; both Web builds/typecheck, browser protocol acceptance and dependency/config checks. Full findings, evidence and remaining gates are recorded in `docs/awwo-saas-acceptance-20260907.md`.
+- **Files:** `apps/web/src/canvas/CanvasSurface.tsx` and first-run regressions; `backend/internal/app/{app,invitations,resources,planning,runs}.go` and authorization/lease regressions; `apps/pi-worker/{server,worker.test,http-boundary.test}.mjs`; `scripts/awwo-saas-{dev,scripts.test}.mjs`; SaaS architecture and acceptance documents.
+
+### Added — original frontend SaaS account and administration integration
+
+- **What changed:** Connected the original account/workspace panel to Go profile and membership APIs; added expiring, revocable, single-use invitations with explicit acceptance. Reused the original canvas for readers with mutation boundaries, restored shared language/theme preferences, exposed server-owned Pi runtime status, and added platform quota forms, cursor pagination and complete JSON export. Added an isolated browser protocol fixture and updated API, architecture, development and acceptance documentation.
+- **Why:** The Go/Pi foundation needed the original frontend interactions and role-specific behavior connected to real persisted APIs.
+- **Impact:** Tenant and platform permissions remain distinct. Invitations do not send email or elevate existing members. Reader history stays available while editing/execution is disabled. Export follows a creation-time boundary and is not a consistent database backup. Real provider configuration and public deployment remain separate acceptance gates.
+- **Verification:** 57 frontend files / 552 tests; 18 Go top-level tests plus 5 admission cases with race/vet; complete Go/Pi/PostgreSQL protocol stack; live API smoke; typecheck/build; browser account/invite/preferences/admin export and two-node Pi protocol execution, history, refresh recovery and cancellation. See `docs/awwo-saas-verification.md` for limits and review evidence.
+- **Files:** `backend/internal/app/{invitations,pagination,app,resources,database}.go`, migrations 003/004 and tests; `apps/web/src/{account,canvas,saas}/**`, `CanvasAccountControl.tsx` and related tests; `scripts/awwo-saas-{smoke,browser-fixture}.mjs`; `backend/README.md`; `docs/awwo-saas-*.md`.
+
+### Fixed — saved canvas position and unassigned membership controls
+
+- **What changed:** Retain normalized saved pan/zoom during first layout; show an explicit localized unassigned role so a valid role can be selected directly. Make draft acknowledgement tests wait for the registered real save callback.
+- **Why:** Initial auto-fit overwrote a returning user's position, while a fallback role hid the unassigned state. The draft test had unrelated mount/debounce timing dependencies.
+- **Impact:** Explicit Fit and new-graph auto-fit remain available. No production draft-save or preview logic changed.
+- **Verification:** Added viewport/first-preview component regressions and bilingual null-role assignment tests; draft tests passed three repeated runs; complete 57-file, 552-test regression passed. Codex and Gemini independently passed final remediation review.
+- **Files:** `apps/web/src/canvas/CanvasSurface.tsx`, `apps/web/src/account/AccountWorkspacePanel.tsx`, and related canvas/account/draft tests.
+
+### Documentation — frontend-driven SaaS delivery standards
+
+- **What changed:** Added AwwO-specific design/development standards and a frontend integration inventory, with the existing canvas as the implementation and acceptance baseline.
+- **Why:** The SaaS foundation and its new shell do not yet cover every original account, invitation, language, theme or settings interaction. The inherited SuperClaw workflow also needs an explicit applicability check against AwwO's actual branches.
+- **Impact:** Documents ownership, API/data/runtime boundaries, environment configuration, review and human merge gates, remaining integration work and evidence levels. No runtime behavior or release version changed.
+- **Verification:** Documentation is checked against the recorded implementation snapshot and existing acceptance evidence; links and formatting are checked separately. This entry does not claim any additional frontend or real-provider capability passed.
+- **Files:** `docs/awwo-saas-design-standards.md`, `docs/awwo-saas-frontend-contract.md`, `docs/awwo-saas-architecture.md`, `README.md`, and `CHANGELOG.md`.
+
+### Added — Go + Pi multi-tenant SaaS foundation
+
+- **What changed:** Added an independent Go/PostgreSQL API for accounts, tenant membership and roles, versioned canvas documents, agents, persistent sessions, idempotent runs, durable SSE, cancellation, quotas, platform administration and audit. Added a private Pi 0.85.1 execution service with isolated per-run processes, bounded input/history and server-owned model configuration. Added a SaaS user/admin entrypoint that reuses the existing canvas, templates and planner, plus local setup/start/test scripts and a four-service deployment template.
+- **Why:** AwwO's local Codex workflow assumed one trusted machine. A public SaaS needs server-owned identity, data isolation, execution state and provider credentials while retaining the existing product interface.
+- **Impact:** SaaS uses `setup:saas` / `dev:saas`; the original local mode remains separately available. This foundation supports one Go API instance. Real provider acceptance, background whole-graph scheduling, engineering execution sandboxes, attachments, email, billing and public deployment remain explicit subsequent work.
+- **Verification:** Real PostgreSQL/race and authorization tests, real Pi SDK with local protocol providers, complete Go/Pi/PostgreSQL integration, canvas/type/build tests and local browser acceptance. Exact results, corrected findings and unavailable checks are recorded in `docs/awwo-saas-verification.md`; configured health is not a real model inference result.
+- **Files:** `backend/**`, `apps/pi-worker/**`, `apps/web/src/saas/**`, scoped adapters in `apps/web/src/canvas/**`, `apps/web/tests/saas-*`, `scripts/awwo-saas-*`, `deploy/saas/**`, and `docs/awwo-saas-*.md`.
+
 ## [0.4.0] - 2026-09-08
 
 - Add bounded Agent Graph review alongside sequential workflows: explicit feedback connections carry validated previous-round outputs, a boolean review verdict approves or requests revision, and a configurable 1–5 round limit prevents unlimited execution.

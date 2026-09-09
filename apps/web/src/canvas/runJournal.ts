@@ -1,7 +1,10 @@
+import { canvasStorage } from './canvasStorage';
+import { canvasFetch } from '../saas/canvasBridge';
 import type { RunNodeState, RunNodeStatus } from './runGraph';
 import { validateNodeOutput, type RunSummary } from './runGraph';
 import type { CanvasNode } from './canvasDoc';
 import { fetchConversationOperation } from '../canvasAgentChat';
+import { observeCloudGraph } from '../saas/graphRuns';
 
 export const CANVAS_RUN_JOURNAL_KEY = 'awwo.canvas.active-run.v1';
 
@@ -25,6 +28,8 @@ export interface CanvasRunJournal {
   startedAt: number;
   scope: string[];
   inputFingerprint?: string;
+  /** Accepted cloud graphs continue scheduling while all observers are detached. */
+  serverGraph?: { id?: string; tenantId: string; canvasId: string; cancelRequested?: boolean };
   /** Manual replies remain transcript evidence until explicitly published. */
   manual?: boolean;
   /** Exact operator turn needed to reconstruct a detached manual conversation. */
@@ -43,7 +48,7 @@ const states = new Set<RunNodeState>(['waiting', 'running', 'done', 'failed', 'b
 const text = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value : null;
 
 /** Invalid/torn storage never becomes an active lock. */
-export function loadRunJournal(storage: Pick<Storage, 'getItem'> = localStorage): CanvasRunJournal | null {
+export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage()): CanvasRunJournal | null {
   let raw: unknown;
   try { raw = JSON.parse(storage.getItem(CANVAS_RUN_JOURNAL_KEY) || 'null'); } catch { return null; }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -67,6 +72,8 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = localStorage)
     };
   }
   if (!scope.length || scope.length > 1000 || scope.some(id => !Object.hasOwn(nodes, id))) return null;
+  const graph = value.serverGraph as Record<string, unknown> | undefined;
+  if (graph && (!text(graph.tenantId) || !text(graph.canvasId) || (graph.id !== undefined && !text(graph.id)))) return null;
   let review: CanvasRunJournal['review'];
   if (value.review !== undefined) {
     const r = value.review as NonNullable<CanvasRunJournal['review']>;
@@ -79,10 +86,12 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = localStorage)
         || !states.has(turn.state) || ['waiting', 'running'].includes(turn.state))) return null;
     review = r;
   }
-  return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes, ...(review ? { review } : {}), ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
+  return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes, ...(review ? { review } : {}),
+    ...(graph ? { serverGraph: { tenantId: String(graph.tenantId), canvasId: String(graph.canvasId), ...(graph.id ? { id: String(graph.id) } : {}), ...(graph.cancelRequested === true ? { cancelRequested: true } : {}) } } : {}),
+    ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
 }
 
-export function saveRunJournal(journal: CanvasRunJournal, storage: Pick<Storage, 'setItem'> = localStorage): boolean {
+export function saveRunJournal(journal: CanvasRunJournal, storage: Pick<Storage, 'setItem'> = canvasStorage()): boolean {
   try { storage.setItem(CANVAS_RUN_JOURNAL_KEY, JSON.stringify(journal)); return true; } catch { return false; }
 }
 
@@ -90,9 +99,9 @@ type JournalClearStorage = Pick<Storage, 'removeItem'> & Partial<Pick<Storage, '
 
 /** Delete only the journal the caller finished. Passing an expected id prevents a stale tab or
  * recovery callback from clearing a newer run. Existing `clearRunJournal(storage)` calls remain
- * supported; `clearRunJournal(expectedId)` uses localStorage. */
-export function clearRunJournal(storageOrExpected: JournalClearStorage | string = localStorage, expectedId?: string): boolean {
-  const storage = typeof storageOrExpected === 'string' ? localStorage : storageOrExpected;
+ * supported; `clearRunJournal(expectedId)` uses canvasStorage(). */
+export function clearRunJournal(storageOrExpected: JournalClearStorage | string = canvasStorage(), expectedId?: string): boolean {
+  const storage = typeof storageOrExpected === 'string' ? canvasStorage() : storageOrExpected;
   const expected = typeof storageOrExpected === 'string' ? storageOrExpected : expectedId;
   try {
     if (expected) {
@@ -126,6 +135,10 @@ export function journalSummary(journal: CanvasRunJournal): RunSummary {
 
 /** One read-only recovery pass. A missing identity or network failure always keeps the lock. */
 export async function reconcileRunJournal(journal: CanvasRunJournal, nodes: ReadonlyArray<CanvasNode>, base: string, signal?: AbortSignal): Promise<CanvasRunJournal> {
+  if (journal.serverGraph) {
+    try { return await observeCloudGraph(journal, signal); }
+    catch { return journal; } // Network/auth uncertainty cannot turn an accepted graph green.
+  }
   let next = journal;
   for (const item of Object.values(journal.nodes)) {
     if (signal?.aborted) break;
@@ -184,7 +197,7 @@ export async function reconcileRunJournal(journal: CanvasRunJournal, nodes: Read
         data = { runId, ...recovered };
       } else {
         const path = [item.companyId!, 'agents', item.agentId!, 'issues', issueId!, 'runs', runId!].map(encodeURIComponent).join('/');
-        const response = await fetch(`${base.replace(/\/+$/, '')}/conversations/${path}`, { credentials: 'include', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
+        const response = await canvasFetch(`${base.replace(/\/+$/, '')}/conversations/${path}`, { credentials: 'include', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
         if (!response.ok) throw new Error('read failed');
         data = await response.json() as { runId?: unknown; status?: unknown; terminal?: unknown; output?: unknown; outputAvailable?: unknown };
       }

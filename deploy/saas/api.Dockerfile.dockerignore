@@ -1,0 +1,9 @@
+**
+!backend/
+!backend/**
+backend/**/.env
+backend/**/.env.*
+backend/**/.local
+backend/**/node_modules
+backend/**/dist
+backend/**/build

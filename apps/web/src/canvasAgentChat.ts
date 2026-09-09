@@ -1,3 +1,4 @@
+import { canvasFetch } from './saas/canvasBridge';
 // P3d part 3 — apps/web client for a REAL per-agent conversation, streamed from
 // the gateway BFF (which orchestrates the zero-server issue+wake+WS pipeline).
 //
@@ -50,6 +51,7 @@ export function normalizeFrame(data: unknown): AgentChatFrame {
 }
 
 export interface StreamOpts {
+  nodeId?: string;
   /** Reuse the agent's dedicated conversation issue (continuity across turns). */
   issueId?: string;
   /** Stable identity for exactly one upstream mutation, persisted before POST. */
@@ -79,7 +81,7 @@ export async function prepareConversationOperation(
 ): Promise<Response> {
   const base = (gatewayBase || '').replace(/\/+$/, '');
   const parts = [companyId, 'agents', agentId, 'operations', operationId, 'prepare'].map(encodeURIComponent).join('/');
-  return fetch(`${base}/conversations/${parts}`, {
+  return canvasFetch(`${base}/conversations/${parts}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     credentials: 'include',
@@ -115,9 +117,9 @@ export async function streamAgentConversation(
       }
       operationPrepared = true;
     }
-    res = await fetch(url, {
+    res = await canvasFetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(opts.nodeId ? { 'X-Awwo-Node-Id': opts.nodeId } : {}) },
       credentials: 'include',
       body: JSON.stringify({ message, ...(opts.issueId ? { issueId: opts.issueId } : {}), ...(opts.operationId ? { operationId: opts.operationId } : {}) }),
       signal: opts.signal,
@@ -164,7 +166,7 @@ export async function fetchConversationOperation(
 ): Promise<ConversationOperationStatus> {
   const base = gatewayBase.replace(/\/+$/, '');
   const parts = [companyId, 'agents', agentId, 'operations', operationId].map(encodeURIComponent).join('/');
-  const response = await fetch(`${base}/conversations/${parts}`, { headers: { Accept: 'application/json' }, credentials: 'include', signal });
+  const response = await canvasFetch(`${base}/conversations/${parts}`, { headers: { Accept: 'application/json' }, credentials: 'include', signal });
   if (!response.ok) throw new Error(`operation recovery responded ${response.status}`);
   const value = await response.json() as Partial<ConversationOperationStatus>;
   if (value.operationId !== operationId || !['not_started', 'in_flight', 'accepted', 'terminal', 'rejected', 'uncertain'].includes(String(value.state))
@@ -196,6 +198,7 @@ export interface ConversationSummary {
 
 /** A stored transcript turn, normalized from an issue comment. */
 export interface StoredMessage {
+  runId?: string;
   role: 'user' | 'agent';
   text: string;
   /** Native comment time, when available, for ordering locally recovered turns. */
@@ -212,17 +215,31 @@ export async function fetchConversationIndex(
   gatewayBase: string,
   companyId: string,
   signal?: AbortSignal,
+  issueId?: string,
 ): Promise<ConversationSummary[] | null> {
   try {
-    const res = await fetch(`${gatewayBase}/conversations/${encodeURIComponent(companyId)}`, {
+    const records: unknown[] = [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    do {
+    const query = new URLSearchParams();
+    if (issueId) query.set('issueId', issueId);
+    if (cursor) query.set('cursor', cursor);
+    const res = await canvasFetch(`${gatewayBase}/conversations/${encodeURIComponent(companyId)}${query.size ? `?${query}` : ''}`, {
       headers: { Accept: 'application/json' },
       credentials: 'include',
       signal,
     });
     if (!res.ok) return null;
-    const body = (await res.json()) as { conversations?: unknown };
+    const body = (await res.json()) as { conversations?: unknown; nextCursor?: unknown };
     if (!Array.isArray(body?.conversations)) return null;
-    return body.conversations
+    records.push(...body.conversations);
+    if (body.nextCursor != null && typeof body.nextCursor !== 'string') return null;
+    cursor = body.nextCursor || undefined;
+    if (cursor && (cursors.has(cursor) || cursors.size >= 1000)) return null;
+    if (cursor) cursors.add(cursor);
+    } while (cursor);
+    return records
       .map((raw): ConversationSummary | null => {
         const d = (raw ?? {}) as Record<string, unknown>;
         const issueId = typeof d.issueId === 'string' ? d.issueId : '';
@@ -248,7 +265,7 @@ export async function fetchConversationMessages(
   signal?: AbortSignal,
 ): Promise<StoredMessage[] | null> {
   try {
-    const res = await fetch(
+    const res = await canvasFetch(
       `${gatewayBase}/conversations/${encodeURIComponent(companyId)}/issues/${encodeURIComponent(issueId)}/messages`,
       { headers: { Accept: 'application/json' }, credentials: 'include', signal },
     );
@@ -267,10 +284,15 @@ export async function fetchConversationMessages(
         const role: StoredMessage['role'] = typeof d.authorAgentId === 'string' && d.authorAgentId ? 'agent' : 'user';
         const createdAt = typeof d.createdAt === 'string' ? Date.parse(d.createdAt) : NaN;
         const nativeOperationId = nativeConversationOperation(d.metadata);
+        // Both transports return server-owned run identities. Keep the SaaS selector for
+        // member details and the native provenance used to prove durable history retention.
+        const nativeRunId = typeof d.createdByRunId === 'string' && d.createdByRunId ? d.createdByRunId
+          : typeof d.runId === 'string' && d.runId ? d.runId : undefined;
         return { role, text, ...(Number.isFinite(createdAt) ? { createdAt } : {}),
+          ...(typeof d.runId === 'string' && d.runId ? { runId: d.runId } : {}),
           ...(typeof d.id === 'string' && d.id ? { nativeCommentId: d.id } : {}),
           ...(nativeOperationId ? { nativeOperationId } : {}),
-          ...(typeof d.createdByRunId === 'string' && d.createdByRunId ? { nativeRunId: d.createdByRunId } : {}),
+          ...(nativeRunId ? { nativeRunId } : {}),
           ...(d.source === 'issue_description' ? { nativeSource: 'issue_description' as const } : {}),
         };
       })

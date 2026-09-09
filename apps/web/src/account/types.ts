@@ -1,7 +1,7 @@
 export type AccountLocale = 'en' | 'zh';
 
 export type WorkspaceDeploymentMode = 'local_trusted' | 'authenticated';
-export type HumanCompanyRole = 'owner' | 'admin' | 'operator' | 'viewer';
+export type HumanCompanyRole = 'owner' | 'admin' | 'operator' | 'viewer' | 'member' | 'reader';
 export type CompanyMembershipStatus = 'pending' | 'active' | 'suspended' | 'archived';
 
 export type ClawHuntIdentity = {
@@ -73,15 +73,20 @@ export type CompanyMember = {
   user: AccountProfile | null;
   grants: CompanyMemberGrant[];
   removal?: { canArchive: boolean; reason: string | null };
+  editable?: boolean;
 };
 
 export type CompanyMembersResponse = {
   members: CompanyMember[];
+  /** Omitted by legacy backends that do not support cursor pagination. */
+  nextCursor?: string | null;
   access: {
     currentUserRole: HumanCompanyRole | null;
     canManageMembers: boolean;
     canInviteUsers: boolean;
     canApproveJoinRequests: boolean;
+    assignableRoles?: HumanCompanyRole[];
+    canChangeStatus?: boolean;
   };
 };
 
@@ -96,7 +101,12 @@ export type CompanyUserDirectoryResponse = {
 export type CompanyInviteListResponse = {
   invites: unknown[];
   nextOffset: number | null;
+  nextCursor?: string | null;
 };
+
+export type AccountPageOptions = { cursor?: string };
+
+export type WorkspaceInviteSummary = { id: string; role: HumanCompanyRole; expiresAt: string; status: string };
 
 export type CompanyInviteCreated = {
   id: string;
@@ -114,13 +124,16 @@ export interface AccountApi {
   listCompanies(): Promise<AccountCompany[]>;
   getProfile(): Promise<AccountProfile>;
   updateProfile(input: { name: string; image?: string | null }): Promise<AccountProfile>;
-  listMembers(companyId: string): Promise<CompanyMembersResponse>;
+  listMembers(companyId: string, page?: AccountPageOptions): Promise<CompanyMembersResponse>;
   listUserDirectory(companyId: string): Promise<CompanyUserDirectoryResponse>;
-  listInvites(companyId: string): Promise<CompanyInviteListResponse>;
+  listInvites(companyId: string, page?: AccountPageOptions): Promise<CompanyInviteListResponse>;
   createHumanInvite(companyId: string, role: HumanCompanyRole): Promise<CompanyInviteCreated>;
   updateMember(
     companyId: string,
     memberId: string,
     input: { membershipRole?: HumanCompanyRole; status?: Exclude<CompanyMembershipStatus, 'archived'> },
   ): Promise<CompanyMember>;
+  addMember?(companyId: string, input: { email: string; role: HumanCompanyRole }): Promise<void>;
+  removeMember?(companyId: string, userId: string): Promise<void>;
+  revokeInvite?(companyId: string, inviteId: string): Promise<void>;
 }

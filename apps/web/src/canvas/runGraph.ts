@@ -18,6 +18,7 @@
 import type { CanvasEdge, CanvasNode, FormNode, SessionNode } from './canvasDoc';
 import { parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
 import { reconcileEdges } from './ports';
+import { validateNodeTeam } from './nodeTeam';
 
 export type RunNodeState = 'waiting' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled' | 'cached';
 
@@ -107,7 +108,7 @@ export function findCycle(nodes: ReadonlyArray<CanvasNode>, edges: ReadonlyArray
 }
 
 /** Pre-flight problems that make a run impossible — reported up front, never mid-run. */
-export type PreflightIssueCode = 'empty_graph' | 'empty_scope' | 'unbound_nodes' | 'multiple_inputs' | 'missing_inputs' | 'cycle';
+export type PreflightIssueCode = 'empty_graph' | 'empty_scope' | 'unbound_nodes' | 'multiple_inputs' | 'missing_inputs' | 'cycle' | 'invalid_team';
 export interface PreflightIssue {
   code: PreflightIssueCode;
   values: Record<string, string | number | string[]>;
@@ -119,6 +120,7 @@ export function preflightGraphIssue(
   nodes: ReadonlyArray<CanvasNode>,
   edges: ReadonlyArray<CanvasEdge>,
   scope?: ReadonlyArray<string>,
+  options: { conversation?: boolean } = {},
 ): PreflightIssue | null {
   if (nodes.length === 0) return { code: 'empty_graph', values: {}, message: '画布上还没有节点。' };
   // Only nodes that will actually EXECUTE are validated. Refusing a whole run because an unwired
@@ -133,7 +135,11 @@ export function preflightGraphIssue(
   }
   const validEdges = reconcileEdges(nodes, edges);
   for (const node of runnable) {
-    if (node.kind !== 'session' || !node.contract) continue;
+    if (node.kind === 'session' && node.team) {
+      const issues = validateNodeTeam(node.team);
+      if (issues.length) return { code: 'invalid_team', values: { nodeTitle: node.title, detail: issues[0].message }, message: `「${node.title}」协作配置无效：${issues[0].message}` };
+    }
+    if (options.conversation || node.kind !== 'session' || !node.contract) continue;
     // Wired fields are checked once their actual values arrive. A missing or incompatible
     // source port must never stand in for a required value during preflight.
     const local: ContractField[] = [];
@@ -148,6 +154,7 @@ export function preflightGraphIssue(
     const errors = validateContractFields(local);
     if (errors.length) return { code: 'missing_inputs', values: { nodeTitle: node.title, errors, fields: local.filter(field => validateContractFields([field]).length).map(field => field.label || field.id) }, message: `「${node.title}」输入未就绪：${errors.join(' ')}` };
   }
+  if (options.conversation) return null;
   const cyclic = findCycle(nodes, edges);
   if (cyclic.length) {
     // Kahn leftovers include nodes DOWNSTREAM of a cycle, not only its members — say so.
@@ -307,7 +314,8 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
   const set = (nodeId: string, status: RunNodeStatus) => {
     if (status.state === 'done') summary.done += 1;
     if (status.state === 'failed') summary.failed += 1;
-    if (status.state === 'blocked') summary.blocked += 1;
+    // Blocked counts share the same execution scope as the summary total.
+    if (status.state === 'blocked' && (!inScope || inScope.has(nodeId))) summary.blocked += 1;
     if (status.state === 'cancelled') summary.cancelled += 1;
     if (status.state === 'cached') summary.cached += 1;
     onStatus(nodeId, status);

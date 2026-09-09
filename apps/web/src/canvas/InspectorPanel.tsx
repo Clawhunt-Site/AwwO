@@ -1,3 +1,4 @@
+import { canvasFetch } from '../saas/canvasBridge';
 // InspectorPanel — the per-node configuration dock for the session canvas.
 //
 // Ported from the verified WorkflowConfigPanel (since-deleted apps/web/src/studio/WorkflowConfigPanel.tsx),
@@ -24,6 +25,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { RuntimePicker, type RuntimeValue } from '../RuntimePicker';
+import { NodeTeamEditor } from './NodeTeamEditor';
+import { validateNodeTeam } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import {
@@ -46,8 +49,12 @@ export interface InspectorPanelProps {
   readJson?: ReadJson;
   /** The canvas is executing a graph snapshot. Configuration mutations must wait. */
   readOnly?: boolean;
+  /** Permission locks can explain themselves without claiming a graph is running. */
+  readOnlyMessage?: string;
   /** Persist the edited node into the canvas document. */
   onSave: (next: CanvasNode) => void;
+  /** SaaS saves and prepares this node in its current workspace in one operation. */
+  onInitialize?: (draft: SessionNode) => Promise<void>;
   /** A binding landed — the surface can re-project the live world so the new agent appears. */
   onBound?: (node: SessionNode) => void;
   /**
@@ -135,7 +142,9 @@ export function InspectorPanel({
   apiBase,
   readJson,
   readOnly = false,
+  readOnlyMessage,
   onSave,
+  onInitialize,
   onBound,
   onCreateCompany,
   onCloseLockChange,
@@ -147,9 +156,20 @@ export function InspectorPanel({
   readOnlyRef.current = readOnly;
   const closeLockCallbackRef = useRef(onCloseLockChange);
   closeLockCallbackRef.current = onCloseLockChange;
+  const initializeRequest = useRef<symbol | null>(null);
+  const currentNodeId = useRef(node.id);
+  currentNodeId.current = node.id;
+  const [initialization, setInitialization] = useState<'idle' | 'pending' | 'done' | 'error'>('idle');
+  const [initializationError, setInitializationError] = useState('');
+  useEffect(() => {
+    initializeRequest.current = null;
+    setInitialization('idle'); setInitializationError('');
+    return () => { initializeRequest.current = null; };
+  }, [node.id]);
   // Local draft — committed on 保存 (or as part of 绑定, which saves first so a mid-bind close
   // never loses the operator's edits).
   const [draft, setDraft] = useState<CanvasNode>(node);
+  const [teamCatalogValid, setTeamCatalogValid] = useState(!('team' in node && node.team));
   // Keyed on the node IDENTITY, not the whole node: after a bind we setDraft(bound) AND
   // onSave(bound), so the parent re-renders with the same id — resetting here would be a no-op
   // at best and a clobber of a fresher draft at worst.
@@ -159,16 +179,19 @@ export function InspectorPanel({
   // must be DISTINGUISHABLE from "no runtimes exist" — an empty dropdown with no explanation
   // reads as a product with zero runtimes rather than as a kernel that is down.
   const [runtimes, setRuntimes] = useState<string[]>([]);
+  const [teamsAvailable, setTeamsAvailable] = useState(false);
   const [runtimesError, setRuntimesError] = useState(false);
   useEffect(() => {
     if (!readJson) return;
     let stale = false;
     setRuntimesError(false);
+    setTeamsAvailable(false);
     void readJson('/api/agents')
       .then((d) => {
         if (stale) return;
         const list = Array.isArray(d?.agents) ? d.agents : [];
         setRuntimes(list.map((a: { name?: unknown }) => String(a?.name ?? '')).filter(Boolean));
+        setTeamsAvailable(list.some((agent: { name?: unknown; supports_node_teams?: unknown }) => agent.name === 'pi' && agent.supports_node_teams === true));
       })
       .catch(() => {
         if (!stale) setRuntimesError(true);
@@ -203,28 +226,53 @@ export function InspectorPanel({
   // values shown), partly correctness — bindAgent's closure snapshot must not drift from what the
   // operator sees (typing during the await would otherwise be clobbered on resolve).
   const isBinding = bind.phase === 'binding';
-  const busy = isBinding || readOnly || Boolean(heldBinding);
-  const closeLocked = isBinding || Boolean(heldBinding);
+  const busy = isBinding || initialization === 'pending' || readOnly || Boolean(heldBinding);
+  const closeLocked = isBinding || initialization === 'pending' || Boolean(heldBinding);
   useEffect(() => {
     closeLockCallbackRef.current?.(closeLocked);
   }, [closeLocked, onCloseLockChange]);
   // Separate unmount cleanup from lock updates: moving binding -> held must never emit
   // a transient false that could allow the host to discard a real server response.
   useEffect(() => () => closeLockCallbackRef.current?.(false), []);
-  const mutationLocked = () => readOnlyRef.current || bindingRef.current || Boolean(heldBindingRef.current);
+  const mutationLocked = () => readOnlyRef.current || bindingRef.current || Boolean(initializeRequest.current) || Boolean(heldBindingRef.current);
   const editDraft = (next: CanvasNode) => {
-    if (!mutationLocked()) setDraft(next);
+    if (!mutationLocked()) { setDraft(next); setInitialization('idle'); setInitializationError(''); }
   };
 
-  const save = () => {
+  const save = async () => {
     if (mutationLocked()) return;
+    if (onInitialize && sessionDraft?.agentKind === 'image') return;
+    if (sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
+    if (onInitialize && sessionDraft) {
+      if (initialization === 'done') { onClose(); return; }
+      const request = Symbol('initialize-node');
+      const nodeId = sessionDraft.id;
+      initializeRequest.current = request;
+      setInitialization('pending'); setInitializationError('');
+      closeLockCallbackRef.current?.(true);
+      try {
+        await onInitialize(sessionDraft);
+        if (initializeRequest.current !== request || currentNodeId.current !== nodeId) return;
+        initializeRequest.current = null;
+        setInitialization('done');
+        closeLockCallbackRef.current?.(false);
+        if (!readOnlyRef.current) onClose();
+      } catch (error) {
+        if (initializeRequest.current !== request || currentNodeId.current !== nodeId) return;
+        initializeRequest.current = null;
+        setInitialization('error');
+        setInitializationError(error instanceof Error && error.message ? error.message : t('inspector.initializeUnknownError'));
+        closeLockCallbackRef.current?.(false);
+      }
+      return;
+    }
     onSave(draft);
     onClose();
   };
   const close = () => {
     // A held response lives in this panel until it can be persisted. Closing now would lose
     // the identity of an agent the server already created and invite a duplicate hire.
-    if (bindingRef.current || heldBindingRef.current) return;
+    if (bindingRef.current || initializeRequest.current || heldBindingRef.current) return;
     onClose();
   };
 
@@ -272,6 +320,7 @@ export function InspectorPanel({
 
   const bindAgent = async () => {
     if (!sessionDraft || mutationLocked()) return;
+    if (sessionDraft.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     // Only ever POST to a company that is actually in the live list: a selection left over from a
     // company that has since disappeared must fall back to a real one, never be sent as-is.
     const companyId = liveCompanies.some((c) => c.id === bindCompanyId)
@@ -331,13 +380,13 @@ export function InspectorPanel({
       <header className="canvas-inspector-head">
         <div className="canvas-inspector-title">{t('inspector.dialog', { title: node.title })}</div>
         <button type="button" className="canvas-inspector-close" aria-label={t('inspector.close')} disabled={closeLocked}
-          title={closeLocked ? t('inspector.closeLocked') : undefined} onClick={close}>
+          title={closeLocked ? t(onInitialize ? 'inspector.initializing' : 'inspector.closeLocked') : undefined} onClick={close}>
           ✕
         </button>
       </header>
 
       <div className="canvas-inspector-body">
-        {readOnly ? <div className="canvas-inspector-hint" role="status">{t('inspector.readOnly')}</div> : null}
+        {readOnly ? <div className="canvas-inspector-hint" role="status">{readOnlyMessage || t('inspector.readOnly')}</div> : null}
         <label className="canvas-inspector-label" htmlFor="cv-cfg-title">
           {t('inspector.name')}
         </label>
@@ -361,20 +410,21 @@ export function InspectorPanel({
                   role="radio"
                   aria-checked={sessionDraft.agentKind === kind}
                   className={`canvas-inspector-seg-item${sessionDraft.agentKind === kind ? ' is-on' : ''}`}
-                  disabled={busy}
+                  disabled={busy || Boolean(onInitialize && kind === 'image')}
                   onClick={() => editDraft({ ...sessionDraft, agentKind: kind })}
                 >
                   {t(kind === 'coding' ? 'node.coding' : kind === 'image' ? 'node.image' : 'node.llm')}
                 </button>
               ))}
             </div>
+            {onInitialize && <div className="canvas-inspector-hint">{t('inspector.piTaskTypes')}</div>}
 
             <div className="canvas-inspector-label">{t('inspector.runtime')}</div>
             {readJson ? (
               <div className="canvas-inspector-runtime">
                 <RuntimePicker
                   runtimes={runtimes}
-                  value={{ backend: sessionDraft.runtime, model: sessionDraft.model, effort: sessionDraft.effort }}
+                  value={{ backend: sessionDraft.runtime || (onInitialize ? 'pi' : ''), model: sessionDraft.model, effort: sessionDraft.effort }}
                   onChange={(v: RuntimeValue) =>
                     editDraft({ ...sessionDraft, runtime: v.backend, model: v.model, effort: v.effort })
                   }
@@ -391,6 +441,7 @@ export function InspectorPanel({
             ) : (
               <div className="canvas-inspector-hint">{t('inspector.runtimeUnavailable')}</div>
             )}
+            {onInitialize && <div className="canvas-inspector-hint">{t('inspector.serviceDefaults')}</div>}
 
             <label className="canvas-inspector-label" htmlFor="cv-cfg-persona">
               {t('inspector.persona')}
@@ -400,12 +451,19 @@ export function InspectorPanel({
               className="canvas-inspector-persona"
               aria-label={t('inspector.persona')}
               rows={5}
-              placeholder={t('inspector.personaPlaceholder')}
+              placeholder={t(onInitialize ? 'inspector.initializePersonaPlaceholder' : 'inspector.personaPlaceholder')}
               value={sessionDraft.persona}
               disabled={busy}
               onChange={(e) => editDraft({ ...sessionDraft, persona: e.target.value })}
             />
 
+            <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
+              disabled={busy} onValidityChange={setTeamCatalogValid}
+              onChange={team => editDraft({ ...sessionDraft, team })} />
+            {onInitialize ? <div className="canvas-inspector-initialization" role="status">
+              <div className="canvas-inspector-label">{t('inspector.currentWorkspace', { workspace: liveCompanies[0]?.name || t('workspace.name') })}</div>
+              <div className="canvas-inspector-hint">{t(initialization === 'pending' ? 'inspector.initializing' : initialization === 'done' ? 'inspector.initialized' : 'inspector.initializeOnSave')}</div>
+            </div> : <>
             <div className="canvas-inspector-label">{t('inspector.bindReal')}</div>
             {sessionDraft.bindAttempt === 'unknown' && !sessionDraft.binding ? (
               <div className="canvas-inspector-outcome canvas-inspector-outcome--warn">
@@ -446,7 +504,7 @@ export function InspectorPanel({
                 <button
                   type="button"
                   className="canvas-inspector-bind"
-                  disabled={busy || !sessionDraft.runtime.trim()}
+                  disabled={busy || !sessionDraft.runtime.trim() || Boolean(sessionDraft.team && !teamCatalogValid)}
                   title={!sessionDraft.runtime.trim() ? t('inspector.chooseRuntime') : undefined}
                   onClick={() => void bindAgent()}
                 >
@@ -464,6 +522,8 @@ export function InspectorPanel({
             {heldBinding ? <button type="button" className="canvas-inspector-bind" disabled={readOnly || isBinding} onClick={resumeBinding}>
               {t('inspector.saveBinding')}
             </button> : null}
+            </>}
+            {initializationError && <div className="canvas-inspector-outcome canvas-inspector-outcome--err" role="alert">{t('inspector.initializeFailed', { detail: initializationError })}</div>}
           </>
         ) : formDraft ? (
           <>
@@ -512,8 +572,8 @@ export function InspectorPanel({
       </div>
 
       <footer className="canvas-inspector-foot">
-        <button type="button" className="canvas-inspector-save" disabled={busy} onClick={save}>
-          {t('common.save')}
+        <button type="button" className="canvas-inspector-save" disabled={busy || Boolean(onInitialize && sessionDraft?.agentKind === 'image') || Boolean(sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length))} onClick={() => void save()}>
+          {t(onInitialize && sessionDraft ? initialization === 'pending' ? 'inspector.initializing' : initialization === 'done' ? 'common.close' : 'inspector.saveAndInitialize' : 'common.save')}
         </button>
         <button type="button" className="canvas-inspector-cancel" disabled={closeLocked} onClick={close}>
           {t('common.cancel')}
@@ -537,7 +597,7 @@ async function syncPersona(apiBase: string, agentId: string, persona: string): P
   try {
     const base = normalizeBase(apiBase);
     if (!isAllowedBase(base)) return false;
-    const res = await fetch(`${base}/agents/${encodeURIComponent(agentId)}/instructions-bundle/file`, {
+    const res = await canvasFetch(`${base}/agents/${encodeURIComponent(agentId)}/instructions-bundle/file`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       credentials: 'include',

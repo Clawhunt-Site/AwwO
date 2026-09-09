@@ -36,9 +36,10 @@ export interface TileComposerProps {
   onSend: (text: string, onAccepted?: () => void) => void;
   /** The host acknowledges only after the message has a durable execution record. */
   deferClear?: boolean;
+  notice?: string;
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, draft, onDraftChange, onSend, deferClear = false }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, draft, onDraftChange, onSend, deferClear = false, notice }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const [localInput, setLocalInput] = useState('');
   const input = draft ?? localInput;
@@ -67,7 +68,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, draft,
           {blockedReason || t('composer.unbound')}
         </div>
       ) : (
-        <div className="canvas-composer-notice">{t('composer.notice')}</div>
+        <div className="canvas-composer-notice">{notice ?? t('composer.notice')}</div>
       )}
       <div className="canvas-composer-row">
         <textarea

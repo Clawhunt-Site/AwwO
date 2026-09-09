@@ -119,7 +119,7 @@ export function RunTimeline({
           const ended = run?.endedAt;
           const barLeft = started ? ((started - origin) / span) * 100 : 0;
           const barWidth = started ? (((ended ?? now) - started) / span) * 100 : 0;
-          const elapsed = started != null ? fmtElapsed((ended ?? now) - started) : state === 'done' ? '0:00' : '—';
+          const elapsed = started != null ? fmtElapsed((ended ?? now) - started) : '—';
           const runtime =
             node.kind === 'form'
               ? t('timeline.form')

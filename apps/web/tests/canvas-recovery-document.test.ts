@@ -270,6 +270,86 @@ describe('canvas run document recovery', () => {
     expect(JSON.parse([...values.values()][0]!).records).toHaveLength(1);
   });
 
+  it('keeps cancelled partial output with its server user turn before a later completed reply', () => {
+    const doc = graph();
+    const node = doc.nodes[0] as SessionNode;
+    const cancelled = journal(doc, true);
+    cancelled.manualMessage = 'Write a long explanation';
+    cancelled.nodes.a.state = 'cancelled';
+    cancelled.nodes.a.output = '{"result":"Partial';
+    const completed = journal(doc, true);
+    completed.startedAt = 200;
+    completed.manualMessage = 'Reply with RESUME_OK';
+    completed.nodes.a.runId = 'later-run';
+    completed.nodes.a.output = '{"result":"RESUME_OK"}';
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+    };
+    expect(persistRecoveredManualConversation(node, cancelled, storage)).toBe(true);
+    expect(persistRecoveredManualConversation(node, completed, storage)).toBe(true);
+    const server = [
+      { role: 'user' as const, text: cancelled.manualMessage },
+      { role: 'user' as const, text: completed.manualMessage },
+      { role: 'agent' as const, text: completed.nodes.a.output! },
+    ];
+
+    const merged = mergePersistedManualConversations(node, server, storage)!;
+
+    expect(merged).toEqual([
+      server[0],
+      expect.objectContaining({ role: 'agent', text: cancelled.nodes.a.output, tone: 'warn', recoveryRunId: 'run-a' }),
+      server[1], server[2],
+    ]);
+    expect(mergePersistedManualConversations(node, merged, storage)).toEqual(merged);
+    expect(server).toHaveLength(3);
+  });
+
+  it('anchors repeated cancelled prompts to separate server turns without shifting later matches', () => {
+    const doc = graph();
+    const node = doc.nodes[0] as SessionNode;
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+    };
+    for (let index = 0; index < 2; index += 1) {
+      const cancelled = journal(doc, true);
+      cancelled.startedAt += index;
+      cancelled.manualMessage = 'Same prompt';
+      Object.assign(cancelled.nodes.a, { state: 'cancelled', runId: `cancelled-${index}`, output: 'Same partial output' });
+      expect(persistRecoveredManualConversation(node, cancelled, storage)).toBe(true);
+    }
+    const merged = mergePersistedManualConversations(node, [
+      { role: 'user', text: 'Same prompt' },
+      { role: 'user', text: 'Same prompt' },
+      { role: 'user', text: 'Latest request' },
+      { role: 'agent', text: 'Latest result' },
+    ], storage)!;
+    expect(merged.map(turn => turn.text)).toEqual([
+      'Same prompt', 'Same partial output', 'Same prompt', 'Same partial output', 'Latest request', 'Latest result',
+    ]);
+    expect(mergePersistedManualConversations(node, [], storage)?.map(turn => turn.text)).toEqual([
+      'Same prompt', 'Same partial output', 'Same prompt', 'Same partial output',
+    ]);
+    expect(mergePersistedManualConversations(node, merged, storage)).toEqual(merged);
+  });
+
+  it('keeps the complete server reply when cancellation cached only its streamed prefix', () => {
+    const saved = journal(graph(), true);
+    saved.manualMessage = 'Please continue';
+    saved.nodes.a.state = 'cancelled';
+    saved.nodes.a.output = 'Partial';
+    const history = [
+      { role: 'user' as const, text: 'Please continue' },
+      { role: 'agent' as const, text: 'Partial output completed on the server' },
+      { role: 'user' as const, text: 'Next request' },
+      { role: 'agent' as const, text: 'Latest result' },
+    ];
+    expect(mergeRecoveredManualConversation(history, saved, 'a')).toEqual(history);
+  });
+
   it('does not expose locally recovered turns after the node is rebound to another Agent', () => {
     const doc = graph();
     const node = doc.nodes[0] as SessionNode;
