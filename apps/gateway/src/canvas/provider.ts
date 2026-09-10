@@ -103,7 +103,14 @@ export function parsePlannerOutput(output: string): unknown {
     if (event.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') finalText = item.text;
   }
   if (!completed || !finalText || finalText.length > MAX_PLAN_LENGTH) throw new PlannerError('invalid_output');
-  const trimmed = finalText.trim();
+  return parsePlanObject(finalText);
+}
+
+/** Validate a canvas plan object (shared by Codex CLI and OpenAI-compatible HTTP). */
+export function parsePlanObject(raw: string): unknown {
+  if (Buffer.byteLength(raw) > MAX_OUTPUT_BYTES) throw new PlannerError('invalid_output');
+  const trimmed = raw.trim();
+  if (trimmed.length > MAX_PLAN_LENGTH) throw new PlannerError('invalid_output');
   const fence = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   let plan: unknown;
   try { plan = JSON.parse(fence ? fence[1]! : trimmed); } catch { throw new PlannerError('invalid_output'); }
@@ -120,6 +127,10 @@ export function createCanvasPlanner(config: CanvasPlannerConfig, deps: PlannerDe
   return {
     async status() {
       if (config.provider === 'disabled') return { available: false, provider: 'disabled', error: '当前环境未启用 AI 画布规划。' };
+      if (config.provider === 'openai') {
+        if (config.apiKey && config.baseUrl && config.model) return { available: true, provider: 'openai' };
+        return { available: false, provider: 'openai', error: 'OpenAI-compatible planner is not configured (need OPENAI_API_KEY + base URL + model).' };
+      }
       try {
         if (await resolveCommand(config.cliPath)) return { available: true, provider: 'codex' };
       } catch { /* Presence only; do not expose filesystem or configuration errors. */ }
@@ -128,6 +139,7 @@ export function createCanvasPlanner(config: CanvasPlannerConfig, deps: PlannerDe
     async plan(request, signal) {
       if (config.provider === 'disabled') throw new PlannerError('unavailable');
       if (signal?.aborted) throw new PlannerError('cancelled');
+      if (config.provider === 'openai') return planWithOpenAI(config, request, signal);
       const command = await resolveCommand(config.cliPath);
       if (!command) throw new PlannerError('unavailable');
       const cwd = await mkdtemp(join(tmpdir(), 'awwo-canvas-planner-'));
@@ -190,4 +202,57 @@ export function createCanvasPlanner(config: CanvasPlannerConfig, deps: PlannerDe
       }
     },
   };
+}
+
+
+async function planWithOpenAI(config: CanvasPlannerConfig, request: PlanningRequest, signal?: AbortSignal): Promise<unknown> {
+  if (!config.apiKey || !config.baseUrl || !config.model) throw new PlannerError('unavailable');
+  if (signal?.aborted) throw new PlannerError('cancelled');
+  const url = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const body = {
+    model: config.model,
+    temperature: 0,
+    messages: [
+      { role: 'system', content: PLANNER_INSTRUCTION },
+      { role: 'user', content: `Canvas context and protocol:\n${request.context}\n\nCurrent user request:\n${request.prompt}\n` },
+    ],
+  };
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'ClawHuntAwwo/1.0',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (response.status === 429) throw new PlannerError('usage_limit_exceeded');
+    if (response.status === 401 || response.status === 403) throw new PlannerError('execution_failed');
+    const raw = await response.text();
+    if (!response.ok) {
+      // Never echo provider bodies (may contain auth diagnostics).
+      throw new PlannerError(response.status >= 500 ? 'execution_failed' : 'invalid_output');
+    }
+    if (Buffer.byteLength(raw) > MAX_OUTPUT_BYTES) throw new PlannerError('invalid_output');
+    let parsed: any;
+    try { parsed = JSON.parse(raw); } catch { throw new PlannerError('invalid_output'); }
+    const content = parsed?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) throw new PlannerError('invalid_output');
+    return parsePlanObject(content);
+  } catch (error) {
+    if (error instanceof PlannerError) throw error;
+    if (signal?.aborted || controller.signal.aborted) {
+      throw new PlannerError(signal?.aborted ? 'cancelled' : 'timeout');
+    }
+    throw new PlannerError('execution_failed');
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
 }
