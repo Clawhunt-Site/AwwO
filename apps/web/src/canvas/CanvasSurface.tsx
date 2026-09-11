@@ -28,7 +28,7 @@ import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid } from 'luc
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant } from './CanvasAssistant';
 import { applyCanvasPlan, canvasPlanRevision } from './canvasPlan';
-import { loadPlanningConversation, savePlanningConversation, requestCanvasPlan, readPlannerStatus } from './canvasPlanning';
+import { loadPlanningConversation, savePlanningConversation, requestCanvasPlan, readPlannerStatus, type PlanProgress } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
@@ -1361,6 +1361,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [assistantOpen, setAssistantOpen] = useState(true);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState('');
+  // Progress observed for the in-flight plan only; cleared with every new request so a finished
+  // run never leaves stale counts next to the next one.
+  const [planningProgress, setPlanningProgress] = useState<PlanProgress | undefined>(undefined);
   const [plannerStatus, setPlannerStatus] = useState<{ available: boolean; provider: string; error?: string } | null>(null);
   const [lastPlanRevision, setLastPlanRevision] = useState<string | null>(null);
   const [planningFitId, setPlanningFitId] = useState('');
@@ -1400,9 +1403,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     planningRequest.current = { id, controller, prompt };
     setPlanningBusy(true);
     setPlanningError('');
+    setPlanningProgress(undefined);
     setPlanning(previous => ({ draft: '', messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt }].slice(-60) }));
     try {
-      const plan = await planRequest(prompt, snapshot, planning.messages, controller.signal, locale);
+      const plan = await planRequest(prompt, snapshot, planning.messages, controller.signal, locale, progress => {
+        // A superseded or cancelled request must not repaint the current one's progress.
+        if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
+        setPlanningProgress(progress);
+      });
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (canvasPlanRevision(docRef.current) !== revision || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale');
@@ -1429,7 +1437,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       appendPlanningMessage(`${id}-assistant`, message, 'error');
       setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
     } finally {
-      if (planningRequest.current?.id === id) { planningRequest.current = null; setPlanningBusy(false); }
+      if (planningRequest.current?.id === id) { planningRequest.current = null; setPlanningBusy(false); setPlanningProgress(undefined); }
     }
   };
   const cancelPlanning = () => {
@@ -1439,6 +1447,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     planningRequest.current = null;
     request.controller.abort();
     setPlanningBusy(false);
+    setPlanningProgress(undefined);
     setPlanningError('');
     appendPlanningMessage(`${request.id}-cancelled`, surfaceNotice(t, 'plan_cancelled'));
     setPlanning(previous => ({ ...previous, draft: previous.draft || request.prompt }));
@@ -1448,6 +1457,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     && Boolean(lastCommit.current?.label.startsWith('ai:'));
   const assistantProps = {
     messages: planning.messages, draft: planning.draft, busy: planningBusy, error: planningError,
+    progress: planningProgress,
     onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
     onSend: () => { void sendPlanningMessage(); }, onCancel: cancelPlanning,
     onUndo: () => {

@@ -6,6 +6,7 @@ import type { CanvasDocument } from './canvasDoc';
 import { CANVAS_PLAN_PROTOCOL, parseCanvasPlan, type CanvasPlan } from './canvasPlan';
 import type { UiLocale } from '../locale';
 import { canvasText } from './i18n';
+import { readSseFrames } from '../sse';
 
 export interface PlanningMessage {
   id: string;
@@ -15,6 +16,20 @@ export interface PlanningMessage {
 }
 export interface PlanningConversation { draft: string; messages: PlanningMessage[] }
 export const PLANNING_STORAGE_KEY = 'awwo.canvas.planning.v1';
+
+/** Observed planner progress. Every field is a real measurement, never an estimated percentage:
+ * the runtime does not know the plan's final length, so a progress bar would be fabricated. */
+export interface PlanProgress {
+  /** queued = accepted, waiting for a runtime slot; running = runtime started, nothing emitted yet;
+   *  streaming = the plan text is actually arriving; validating = stream ended, checking the proposal. */
+  stage: 'queued' | 'running' | 'streaming' | 'validating';
+  /** Characters of plan text received so far. */
+  characters: number;
+  /** Nodes the streamed proposal has declared so far (counted from completed add_node markers). */
+  nodes: number;
+}
+export type PlanProgressReporter = (progress: PlanProgress) => void;
+
 
 /** Keep the shared structural protocol, with only the Go host's supported operations/types. */
 function planningProtocol(saas: boolean): string {
@@ -105,17 +120,59 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
   ].join('\n\n');
 }
 
-export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal, locale: UiLocale = 'zh'): Promise<CanvasPlan> {
+/** Read a progress-reporting planner stream. The host that produced the stream owns the run
+ * lifecycle (including stall detection and cancellation); this only projects frames to the UI
+ * and returns the single proposal frame. An ended stream without a proposal is a failure, never
+ * an empty plan — the canvas must not change on a lost connection. */
+async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale,
+  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<unknown> {
+  let proposal: { plan: unknown } | null = null;
+  let failure = '';
+  await readSseFrames(body, (_event, frame: any) => {
+    if (proposal || failure) return;
+    if (frame?.type === 'progress') {
+      const count = (value: unknown, fallback: number) =>
+        typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
+      observed.last = {
+        stage: frame.stage === 'queued' || frame.stage === 'running' || frame.stage === 'validating' ? frame.stage : 'streaming',
+        characters: count(frame.characters, observed.last.characters),
+        nodes: count(frame.nodes, observed.last.nodes),
+      };
+      onProgress?.(observed.last);
+    } else if (frame?.type === 'plan') proposal = { plan: frame.plan };
+    else if (frame?.type === 'error') failure = typeof frame.error === 'string' && frame.error.trim() ? frame.error : canvasText(locale, 'planning.unavailable');
+  });
+  if (failure) throw new Error(failure);
+  if (!proposal) throw new Error(canvasText(locale, 'planning.interrupted'));
+  return (proposal as { plan: unknown }).plan;
+}
+
+export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
+  locale: UiLocale = 'zh', onProgress?: PlanProgressReporter): Promise<CanvasPlan> {
   const saas = currentSaaSCanvas() !== null;
   const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan`, {
     method: 'POST', credentials: 'include', signal,
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' },
     body: JSON.stringify({ prompt, context: buildPlanningContext(doc, messages, locale) }),
   });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(typeof payload?.error === 'string' ? payload.error : canvasText(locale, 'planning.unavailable'));
-  if (!payload || !Object.hasOwn(payload, 'plan')) throw new Error(canvasText(locale, 'planning.invalidResponse'));
-  const plan = parseCanvasPlan(payload.plan);
+  // A progress stream carries its own terminal frames, so its transport status is already 200.
+  // Probed defensively: a non-streaming planner (and a minimal test double) may expose neither
+  // headers nor a body, and must keep taking the plain JSON path rather than throwing here.
+  const contentType = typeof response.headers?.get === 'function' ? response.headers.get('content-type') : null;
+  const streaming = response.ok && Boolean(response.body) && (contentType || '').includes('text/event-stream');
+  const observed = { last: { stage: 'queued', characters: 0, nodes: 0 } as PlanProgress };
+  let raw: unknown;
+  if (streaming) {
+    raw = await readPlanStream(response.body!, locale, observed, onProgress);
+  } else {
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(typeof payload?.error === 'string' ? payload.error : canvasText(locale, 'planning.unavailable'));
+    if (!payload || !Object.hasOwn(payload, 'plan')) throw new Error(canvasText(locale, 'planning.invalidResponse'));
+    raw = payload.plan;
+  }
+  // Keep the measured counts; only the stage advances. Zeroing them would misreport the work done.
+  onProgress?.({ ...observed.last, stage: 'validating' });
+  const plan = parseCanvasPlan(raw);
   if (saas) assertSaaSPlan(plan, locale);
   return plan;
 }

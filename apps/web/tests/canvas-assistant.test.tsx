@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
 import { canvasText } from '../src/canvas/i18n';
 
@@ -88,6 +88,34 @@ describe('canvas assistant UI', () => {
     expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveAttribute('placeholder', '描述你想调整的结构…');
     expect(screen.getByRole('button', { name: '修改画布' })).toBeDisabled();
     expect(screen.queryByRole('group', { name: '需求示例' })).toBeNull();
+  });
+
+  it('shows the observed planning stage and measured counts, and no invented progress ratio', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<Harness draft="做一个看板" busy />);
+      const status = screen.getByRole('status');
+      // Before the run reports anything, elapsed time alone proves it is still alive.
+      expect(status).toHaveTextContent('正在生成画布');
+      expect(status).toHaveTextContent('0 秒');
+      act(() => { vi.advanceTimersByTime(3_000); });
+      expect(screen.getByRole('status')).toHaveTextContent('3 秒');
+
+      rerender(<Harness draft="做一个看板" busy progress={{ stage: 'running', characters: 0, nodes: 0 }} />);
+      expect(screen.getByRole('status')).toHaveTextContent('已启动，等待首个输出');
+      rerender(<Harness draft="做一个看板" busy progress={{ stage: 'streaming', characters: 820, nodes: 3 }} />);
+      const streaming = screen.getByRole('status');
+      expect(streaming).toHaveTextContent('正在接收方案');
+      expect(streaming).toHaveTextContent('已规划 3 个节点');
+      expect(streaming).toHaveTextContent('已接收 820 字');
+      expect(streaming.textContent).not.toMatch(/%/);
+      rerender(<Harness draft="做一个看板" busy progress={{ stage: 'validating', characters: 820, nodes: 3 }} />);
+      expect(screen.getByRole('status')).toHaveTextContent('正在校验结构方案');
+
+      // A finished request must not leave a progress readout or a running clock behind.
+      rerender(<Harness draft="做一个看板" busy={false} />);
+      expect(screen.queryByRole('status')).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 
   it('exposes close, undo and runtime controls only through the supplied callbacks and slot', () => {

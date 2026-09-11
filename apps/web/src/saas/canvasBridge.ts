@@ -25,6 +25,43 @@ export async function flushSaaSCanvas(): Promise<number | void> {
   return saveCanvas();
 }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+
+/** Backstop for a dead event stream, NOT a model deadline. The server already bounds the work
+ * itself (Go `RunTimeout` defaults to 180s, the Pi model call to 120s) and reports `failed` when
+ * it expires, so this window is deliberately set above those defaults: a slow first token must
+ * never be mistaken for a dead run. It only fires when no event arrives at all — meaning the
+ * stream, not the model, stopped — and then cancels the run rather than spinning forever.
+ * Both server deadlines are environment-configurable; raising them past this window would make
+ * this backstop fire first, so keep it above whatever `AWWO_RUN_TIMEOUT` is deployed. */
+export const PLAN_STALL_TIMEOUT_MS = 240_000;
+/** Opening the event stream is a single request, not model work, so it gets a much shorter bound. */
+export const PLAN_OPEN_TIMEOUT_MS = 30_000;
+/** Progress frames are coalesced: the model streams per token, but the UI only needs a readable
+ * refresh rate. Stage changes are always emitted immediately. */
+export const PLAN_PROGRESS_INTERVAL_MS = 250;
+// Whole quoted JSON literals only, so "disconnect" never counts as "connect" and a field's
+// `type` value (text/markdown/number/boolean/file/html) can never collide with an operation name.
+const ADD_NODE_LITERAL = '"add_node"';
+const ADD_NODE_MARKER = /"add_node"/g;
+/** Nodes the partially streamed proposal has declared so far — a measurement, not an estimate. */
+export const countPlannedNodes = (text: string): number => text.match(ADD_NODE_MARKER)?.length ?? 0;
+
+/** Count markers across a stream without rescanning the whole proposal on every chunk (which is
+ * quadratic over a 100k-character plan). Only the new chunk is scanned, prefixed by the tail that
+ * a marker could still be split across; that tail is shorter than the marker, so no match can lie
+ * wholly inside it and none is counted twice. */
+export function createPlannedNodeCounter(): (chunk: string) => number {
+  const overlap = ADD_NODE_LITERAL.length - 1;
+  let tail = '';
+  let total = 0;
+  return (chunk: string) => {
+    if (!chunk) return total;
+    const window = tail + chunk;
+    total += countPlannedNodes(window);
+    tail = window.slice(-overlap);
+    return total;
+  };
+}
 const operationStatus = (operationId: string, run?: any) => ({ operationId,
   state: !run ? 'not_started' : run.terminal ? 'terminal' : 'accepted',
   issueId: run?.sessionId ?? null, runId: run?.id ?? null, terminal: run?.terminal ?? false,
@@ -65,32 +102,128 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       if (active !== scope || init.signal?.aborted) throw new Error(canvasText('工作区已切换或操作已取消。', 'The workspace changed or the operation was cancelled.'));
       const operationId = crypto.randomUUID();
       const run = await post(`/canvases/${encodeURIComponent(scope.canvasId)}/plan`, { prompt: body.prompt, context: body.context, operationId });
-      const cancel = () => { void api(`${base}/runs/${encodeURIComponent(run.id)}/cancel`, { method: 'POST', body: '{}' }).catch(() => {}); };
+      // A user cancel and the stall backstop can land together; cancelling once keeps that race
+      // from issuing a second request the server would only have to discard.
+      let cancelRequested = false;
+      const cancel = () => {
+        if (cancelRequested) return;
+        cancelRequested = true;
+        void api(`${base}/runs/${encodeURIComponent(run.id)}/cancel`, { method: 'POST', body: '{}' }).catch(() => {});
+      };
       init.signal?.addEventListener('abort', cancel, { once: true });
+      // The stall watchdog aborts only this event read, so a caller cancel and a lost stream stay
+      // distinguishable; the caller's own signal is relayed rather than reused.
+      const reader = new AbortController();
+      const relay = () => reader.abort();
+      init.signal?.addEventListener('abort', relay, { once: true });
+      const release = () => {
+        init.signal?.removeEventListener('abort', cancel);
+        init.signal?.removeEventListener('abort', relay);
+      };
+      let response: Response;
+      // Opening the event stream is bounded too: a proxy that accepts the connection and never
+      // answers must not leave the caller waiting without limit either.
+      const opening = setTimeout(() => reader.abort(), PLAN_OPEN_TIMEOUT_MS);
       try {
         if (init.signal?.aborted) { cancel(); throw new Error(canvasText('已取消规划', 'Planning was cancelled.')); }
-        const response = await fetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: init.signal });
+        response = await fetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: reader.signal });
         if (!response.ok || !response.body) throw new Error(canvasText('无法读取规划运行，请稍后重试。', 'The planning run could not be read. Please try again.'));
+      } catch (error) {
+        release();
+        // Only the watchdog firing (not a caller cancel) leaves an unobservable run to stop.
+        if (reader.signal.aborted && !init.signal?.aborted) cancel();
+        throw error instanceof Error && error.message
+          ? error
+          : new Error(canvasText('无法读取规划运行，请稍后重试。', 'The planning run could not be read. Please try again.'));
+      } finally { clearTimeout(opening); }
+      const upstream = response.body;
+      const encoder = new TextEncoder();
+      // Progress is reported as a stream so the caller can show what the run is really doing.
+      // The terminal frame is the proposal itself, or an explicit error — never an empty plan.
+      const stream = new ReadableStream<Uint8Array>({ async start(controller) {
+        let closed = false;
         let output = '';
+        let stage: 'queued' | 'running' | 'streaming' = 'queued';
+        let nodes = 0;
+        let lastEmit = 0;
+        let lastStage = '';
         let completed = false;
         let failure = '';
-        await readSseFrames(response.body, (_event, event: any) => {
-          if (completed || failure) return;
-          if (event.type === 'text_delta') output += event.delta || '';
-          else if (event.type === 'completed') {
-            if (typeof event.text === 'string') {
-              if (!event.text.startsWith(output)) { failure = canvasText('规划结果与流式输出不一致。', 'The plan does not match the streamed output.'); return; }
-              output = event.text;
+        let stalled = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const countNodes = createPlannedNodeCounter();
+        // A caller that stops reading cancels the stream, after which enqueue/close throw. Progress
+        // reporting must never turn that into an unhandled stream error.
+        const emit = (frame: unknown) => {
+          if (closed) return;
+          try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`)); }
+          catch { closed = true; }
+        };
+        // Coalescing must never hide a stage change or the final measured totals, so both bypass it.
+        const progress = (force: boolean) => {
+          const now = Date.now();
+          if (!force && stage === lastStage && now - lastEmit < PLAN_PROGRESS_INTERVAL_MS) return;
+          lastEmit = now;
+          lastStage = stage;
+          emit({ type: 'progress', stage, characters: output.length, nodes });
+        };
+        const watch = () => { clearTimeout(timer); timer = setTimeout(() => { stalled = true; reader.abort(); }, PLAN_STALL_TIMEOUT_MS); };
+        try {
+          watch();
+          progress(true); // The run is accepted: say so before the model produces anything.
+          await readSseFrames(upstream, (_event, event: any) => {
+            if (completed || failure) return;
+            watch(); // Any frame proves the run is still observably alive.
+            if (event.type === 'text_delta') {
+              const delta = typeof event.delta === 'string' ? event.delta : '';
+              if (!delta) return;
+              output += delta;
+              nodes = countNodes(delta);
+              stage = 'streaming';
+              progress(false);
+            } else if (event.type === 'queued' || event.type === 'running') {
+              stage = event.type;
+              progress(true);
+            } else if (event.type === 'completed') {
+              if (typeof event.text === 'string') {
+                if (!event.text.startsWith(output)) { failure = canvasText('规划结果与流式输出不一致。', 'The plan does not match the streamed output.'); return; }
+                output = event.text;
+              }
+              // The authoritative text may extend past the deltas, so settle the count on the whole.
+              nodes = countPlannedNodes(output);
+              completed = true;
+            } else if (['failed', 'interrupted', 'cancelled'].includes(event.type)) {
+              failure = canvasErrorMessage(event.message, event.code) || canvasText('规划未完成，请重试。', 'Planning did not complete. Please try again.');
             }
-            completed = true;
-          } else if (['failed', 'interrupted', 'cancelled'].includes(event.type)) failure = canvasErrorMessage(event.message, event.code) || canvasText('规划未完成，请重试。', 'Planning did not complete. Please try again.');
-        });
-        if (failure) throw new Error(failure);
-        if (!completed) throw new Error(canvasText('规划连接中断；当前画布保持原样。', 'The planning connection was interrupted. The canvas has not changed.'));
-        // The caller still applies its existing strict protocol and graph validation.
-        try { return json({ plan: JSON.parse(output.trim()) }); }
-        catch { throw new Error(canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.')); }
-      } finally { init.signal?.removeEventListener('abort', cancel); }
+          });
+        } catch {
+          // An aborted read is only a failure of observation; the branches below report which one.
+        } finally { clearTimeout(timer); }
+        try {
+          if (stalled) {
+            // Do not leave a run the caller can no longer observe: it would also block the next plan.
+            cancel();
+            emit({ type: 'error', error: canvasText(
+              `规划已超过 ${Math.round(PLAN_STALL_TIMEOUT_MS / 1000)} 秒没有任何进展，已停止本次运行；当前画布保持原样。`,
+              `Planning reported no progress for ${Math.round(PLAN_STALL_TIMEOUT_MS / 1000)} seconds and the run was stopped. The canvas has not changed.`) });
+          } else if (failure) emit({ type: 'error', error: failure });
+          else if (!completed) {
+            emit({ type: 'error', error: canvasText('规划连接中断；当前画布保持原样。', 'The planning connection was interrupted. The canvas has not changed.') });
+          } else {
+            progress(true); // Report the true final totals, which coalescing may have withheld.
+            // The caller still applies its existing strict protocol and graph validation.
+            let plan: unknown;
+            let parsed = false;
+            try { plan = JSON.parse(output.trim()); parsed = true; } catch { parsed = false; }
+            if (parsed) emit({ type: 'plan', plan });
+            else emit({ type: 'error', error: canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.') });
+          }
+        } finally {
+          release();
+          if (!closed) { closed = true; try { controller.close(); } catch { /* already cancelled by the caller */ } }
+        }
+      } });
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
     }
     if (/^\/companies\/[^/]+\/agent-hires$/.test(path)) {
       const { name, role, title, adapterType, adapterConfig } = body;

@@ -31,8 +31,10 @@
 .awwo-assistant-send { background: var(--awwo-accent, #286454); color: var(--assistant-on-accent); }
 .awwo-assistant-send:hover:not(:disabled) { filter: brightness(.95); }
 .awwo-assistant-cancel { color: var(--awwo-ink, #232c29); background: var(--awwo-accent-soft, #edf4ee); }
-.awwo-assistant-progress { display: flex; align-items: center; gap: 7px; color: var(--awwo-muted, #68736d); font-size: 12px; margin-top: 4px; }
+.awwo-assistant-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--awwo-muted, #68736d); font-size: 12px; margin-top: 4px; }
 .awwo-assistant-progress svg { animation: awwo-assistant-spin 1s linear infinite; }
+/* The measured facts stay visually secondary to the stage, and never reflow the composer. */
+.awwo-assistant-progress-facts { font-variant-numeric: tabular-nums; opacity: 0.78; }
 .awwo-assistant-examples { display: flex; flex-direction: column; align-items: flex-start; width: 100%; max-width: 640px; gap: 3px; margin-top: 20px; }
 .awwo-assistant-examples button { max-width: 100%; padding: 4px 1px; text-align: left; border: 0; border-radius: 3px; color: var(--awwo-muted, #68736d); background: transparent; font-size: 12px; line-height: 1.65; }
 .awwo-assistant-examples button:hover:not(:disabled) { color: var(--awwo-accent, #286454); text-decoration: underline; text-underline-offset: 3px; }

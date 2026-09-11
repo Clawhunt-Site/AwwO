@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowUp, Loader2, Square, Undo2, X } from 'lucide-react';
 import './canvas-assistant.css';
-import { useCanvasI18n } from './i18n';
+import { useCanvasI18n, type CanvasTextKey } from './i18n';
+import type { PlanProgress } from './canvasPlanning';
 
 export interface CanvasAssistantMessage {
   id: string;
@@ -23,11 +24,20 @@ export interface CanvasAssistantProps {
   onUndo?: () => void;
   canUndo?: boolean;
   runtimeControls?: ReactNode;
+  /** Last progress the host observed for the in-flight plan; absent until the run reports. */
+  progress?: PlanProgress;
 }
+
+const STAGE_LABEL: Record<PlanProgress['stage'], CanvasTextKey> = {
+  queued: 'assistant.stageQueued',
+  running: 'assistant.stageRunning',
+  streaming: 'assistant.stageStreaming',
+  validating: 'assistant.stageValidating',
+};
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
 export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
-  onClose, onUndo, canUndo = false, runtimeControls }: CanvasAssistantProps) {
+  onClose, onUndo, canUndo = false, runtimeControls, progress }: CanvasAssistantProps) {
   const { t } = useCanvasI18n();
   const examples = [t('assistant.exampleSaas'), t('assistant.exampleData'), t('assistant.exampleContent')];
   const welcome = mode === 'welcome';
@@ -42,6 +52,17 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
     // Scroll only the conversation region, never the surrounding canvas or page.
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [messages.length, lastMessage?.content, lastMessage?.status, busy]);
+
+  // Elapsed time is the one progress fact available even before the run emits anything, so a
+  // silent model is still visibly alive. It is measured from this request, never accumulated.
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (!busy) { setElapsedSeconds(0); return; }
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
 
   const send = () => { if (canSend) onSend(); };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -79,8 +100,18 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
           value={draft} disabled={busy} rows={3} maxLength={8000}
           onChange={event => onDraftChange(event.target.value)} onKeyDown={onKeyDown}
           onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} />
-        {busy ? <div className="awwo-assistant-progress" role="status">
-          <Loader2 size={14} aria-hidden="true" />{t(welcome ? 'assistant.generating' : 'assistant.modifying')}
+        {busy ? <div className="awwo-assistant-progress" role="status" aria-label={t('assistant.progressDetail')}>
+          <Loader2 size={14} aria-hidden="true" />
+          <span className="awwo-assistant-progress-stage">
+            {progress ? t(STAGE_LABEL[progress.stage]) : t(welcome ? 'assistant.generating' : 'assistant.modifying')}
+          </span>
+          <span className="awwo-assistant-progress-facts">
+            {[
+              t('assistant.progressElapsed', { seconds: elapsedSeconds }),
+              ...(progress && progress.nodes > 0 ? [t('assistant.progressNodes', { count: progress.nodes })] : []),
+              ...(progress && progress.characters > 0 ? [t('assistant.progressCharacters', { count: progress.characters })] : []),
+            ].join(' · ')}
+          </span>
         </div> : null}
         <div className="awwo-assistant-composer-actions">
           {busy ? <button type="button" className="awwo-assistant-cancel" onClick={onCancel}><Square size={12} aria-hidden="true" />{t('assistant.cancel')}</button> : null}

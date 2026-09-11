@@ -114,8 +114,9 @@ describe('canvas planner client requests', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe('/fixture-gateway/canvas/plan');
+    // The client reads either a progress stream or a single JSON body, so it accepts both.
     expect(options).toMatchObject({ method: 'POST', credentials: 'include', signal,
-      headers: { 'content-type': 'application/json', accept: 'application/json' } });
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' } });
     const body = JSON.parse(options.body);
     expect(body.prompt).toBe('请组织这个项目');
     expect(body.context).toContain('USER_INPUT_CONTEXT_ALLOWED');
