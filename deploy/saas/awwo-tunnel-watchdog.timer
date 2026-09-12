@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the AwwO tunnel watchdog every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=awwo-tunnel-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=AwwO tunnel watchdog (restores routing when the connector silently loses its edge connections)
+After=cloudflared-awwo.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/awwo-tunnel-watchdog.sh

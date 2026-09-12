@@ -89,6 +89,55 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8087/api/v1/tenants/t/
 Do **not** run the account/graph acceptance flows against this host: they create users, workspaces
 and invites that cannot be removed through the API.
 
+### An unauthenticated request to the public URL proves nothing
+
+Cloudflare Access answers an unauthenticated request with `302` **at the edge**, before the tunnel
+is consulted. So a `302` from `https://awwo.clawhunt.store/` says only that Access is configured —
+a tunnel that cannot reach the origin at all still returns `302` to a request without a session
+cookie, while every real user gets `502`. A deploy verified only by "origin is 200 locally" plus
+"public URL redirects" is therefore **not** verified end to end; that combination missed a
+multi-hour 502 outage on 2026-09-12.
+
+Until a Cloudflare Access **Bypass** policy exists for one harmless path (`/api/v1/health` is the
+natural choice), the only way to exercise the whole path is a browser session that already passed
+Access, or Access service-token headers (`CF-Access-Client-Id` / `CF-Access-Client-Secret`; a token
+is stored at SSM `/awwo/cf-access-token`). Adding that bypass is the single change that makes both
+deploy verification and automated monitoring possible without a credential.
+
+What *can* be checked from the host is whether requests are arriving at all:
+
+```bash
+curl -s http://127.0.0.1:20241/ready        # {"status":200,"readyConnections":4,...}
+tail -5 /srv/awwo/saas-staging/run/nginx-web/access.log   # are real requests reaching the origin?
+```
+
+An access log whose newest entries are all your own probes, while users report `502`, means the
+requests are not reaching the origin — look at the tunnel, not the application.
+
+## Known failure mode: the connector silently loses its edge connections
+
+On 2026-09-10 this tunnel's QUIC paths failed (`timeout: no recent network activity`); connections
+0–2 died and never re-registered, Cloudflare stopped routing to the connector, and the site served
+`502` for hours with every application service healthy. It went unnoticed because
+`cloudflared_tunnel_ha_connections` still reported `4` — **that Prometheus gauge is not a reliable
+liveness signal**. `GET /ready` reports the real registration count and is what to trust.
+
+Mitigations now in place:
+
+- cloudflared is kept current (the 2026.8.3 build exhibited this; upgraded to 2026.9.1). It runs
+  with `--no-autoupdate`, so upgrades are manual: `dpkg -i` the release `.deb` from GitHub, keeping
+  a copy of the previous binary in `/srv/awwo/saas-staging/backups/` for rollback.
+- `awwo-tunnel-watchdog.timer` runs `/usr/local/bin/awwo-tunnel-watchdog.sh` every two minutes. It
+  restarts the tunnel only when the origin is healthy **and** `/ready` is unreachable or reports too
+  few connections, with a 10-minute cooldown so it cannot flap. It deliberately never touches the
+  web or API units: if the origin is down, the tunnel is not the fault. Set `EDGE_URL` (and
+  optionally `ACCESS_HEADER_FILE`) in the unit to upgrade it to a true end-to-end check once an
+  Access bypass or service token is available.
+
+Verify the watchdog itself by fault injection, not by reading it:
+`systemctl stop cloudflared-awwo && /usr/local/bin/awwo-tunnel-watchdog.sh` should log the restart
+and report `readyConnections=4` afterwards.
+
 ## Roll back
 
 Point `ExecStart=` and the nginx `root` back at the previous release directory, `daemon-reload`,
