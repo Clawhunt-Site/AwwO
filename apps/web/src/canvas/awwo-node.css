@@ -175,6 +175,8 @@
 .canvas-root .awwo-deliverables-empty { color: var(--awwo-muted); text-align: center; padding: 45px 8px; }
 .canvas-root .awwo-deliverable { border: 1px solid var(--awwo-line); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
 .canvas-root .awwo-deliverable-title { margin: 0; padding: 9px 12px; background: var(--awwo-soft); font-size: 12px; font-weight: 600; }
+/* A stored file deliverable: the body is a download action, not previewable text. */
+.canvas-root .awwo-deliverable-file { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--awwo-accent, #286454); text-decoration: underline; text-underline-offset: 3px; }
 .canvas-root .awwo-deliverable-body { padding: 10px 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .canvas-root .awwo-deliverable-body p { margin: 0 0 8px; }
 .canvas-root .awwo-deliverable-body h1, .canvas-root .awwo-deliverable-body h2 { font-size: 15px; margin: 0 0 10px; }

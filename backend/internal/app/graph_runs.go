@@ -290,7 +290,9 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 		return
 	}
 	var raw []byte
-	if e = a.db.QueryRow(ctx, "SELECT document FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&raw); e != nil {
+	var canvasID string
+	// The canvas scopes any file deliverable this graph stores, so it is read with the document.
+	if e = a.db.QueryRow(ctx, "SELECT canvas_id,document FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&canvasID, &raw); e != nil {
 		return
 	}
 	var d graphDocument
@@ -365,17 +367,25 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 					continue
 				}
 				state, detail := "failed", code
+				recorded := out
 				if rs == "completed" {
 					state = "done"
-					if _, err := graphOutput(n, out); err != nil {
+					vals, files, err := graphOutputFiles(n, out)
+					if err != nil {
 						state, detail = "failed", err.Error()
+					} else if stored, storeErr := a.storeArtifacts(ctx, tid, canvasID, s.RunID, n.ID, out, vals, files); storeErr != nil {
+						// The deliverable content could not be made durable, so the node must not
+						// report success with a reference that resolves to nothing.
+						state, detail = "failed", "deliverable_storage_failed"
+					} else {
+						recorded = stored
 					}
 				} else if rs == "cancelled" {
 					state = "cancelled"
 				} else if rs == "interrupted" {
 					detail = "interrupted"
 				}
-				a.setGraphNode(ctx, tid, id, n.ID, state, out, detail)
+				a.setGraphNode(ctx, tid, id, n.ID, state, recorded, detail)
 				continue
 			}
 			if s.State != "waiting" {

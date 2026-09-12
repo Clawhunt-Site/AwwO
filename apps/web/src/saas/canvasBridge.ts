@@ -46,6 +46,22 @@ const ADD_NODE_MARKER = /"add_node"/g;
 /** Nodes the partially streamed proposal has declared so far — a measurement, not an estimate. */
 export const countPlannedNodes = (text: string): number => text.match(ADD_NODE_MARKER)?.length ?? 0;
 
+/** Marks a `file` deliverable whose bytes the server actually holds, rather than a bare path. */
+export const ARTIFACT_REF_PREFIX = 'awwo-file:';
+// Server ids are "a" + base64url (RawURLEncoding of 24 bytes). Validated rather than interpolated
+// blindly, so a malformed deliverable value can never build a request to another path.
+const ARTIFACT_ID = /^a[A-Za-z0-9_-]{8,128}$/;
+
+/** Resolve a stored deliverable to its download URL, or null when this value is not a stored file
+ * (a native/local reference, or no cloud workspace is active). Never guesses an id. */
+export function storedArtifactUrl(value: string): string | null {
+  const scope = active;
+  if (!scope || typeof value !== 'string' || !value.startsWith(ARTIFACT_REF_PREFIX)) return null;
+  const id = value.slice(ARTIFACT_REF_PREFIX.length).trim();
+  if (!ARTIFACT_ID.test(id)) return null;
+  return `${API_BASE}${tenantPath(scope.tenant.id)}/artifacts/${encodeURIComponent(id)}`;
+}
+
 /** Count markers across a stream without rescanning the whole proposal on every chunk (which is
  * quadratic over a 100k-character plan). Only the new chunk is scanned, prefixed by the tail that
  * a marker could still be split across; that tail is shorter than the marker, so no match can lie

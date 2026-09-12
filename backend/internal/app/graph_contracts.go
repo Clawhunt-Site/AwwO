@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type graphField struct {
@@ -252,10 +253,72 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 	}
 	return d, scope, nil
 }
+
+// A stored file deliverable is referenced by this prefix instead of inline content, so a
+// downstream node and the browser both receive a retrievable handle rather than a whole payload.
+const artifactRefPrefix = "awwo-file:"
+
+// Bounds on model-produced files. The runtime is a text model, so a deliverable is text (code,
+// Markdown, CSV, JSON, SVG); these caps keep one node from filling the tenant's database.
+const (
+	maxArtifactBytes    = 256 * 1024
+	maxArtifactsPerNode = 8
+	maxArtifactNameLen  = 200
+)
+
+// A file the model produced, parsed and validated but not yet stored. Kept separate from the field
+// values so contract validation stays a pure function with no database access.
+type pendingArtifact struct {
+	FieldID string
+	Name    string
+	Content string
+}
+
+// Reject anything that could escape its display name or be read as a path. The name is only ever
+// shown and used as a download filename; it never becomes a filesystem path.
+func artifactName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" || len(name) > maxArtifactNameLen {
+		return "", fmt.Errorf("File name must be 1-%d characters", maxArtifactNameLen)
+	}
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return "", errors.New("File name must not contain a path")
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return "", errors.New("File name must not contain control characters")
+		}
+	}
+	return name, nil
+}
+
 func graphOutput(n graphNode, output string) (map[string]string, error) {
+	vals, _, err := graphOutputFiles(n, output)
+	return vals, err
+}
+
+func hasFileOutput(n graphNode) bool {
+	if n.Contract == nil {
+		return false
+	}
+	for _, f := range n.Contract.Outputs {
+		if f.Type == "file" {
+			return true
+		}
+	}
+	return false
+}
+
+// graphOutputFiles parses a node's output against its contract. A `file` output may be either a
+// plain string (a reference the caller supplied itself) or an object {name, content}, which is
+// returned as a pending artifact for the caller to store. Values for pending artifacts hold the
+// file name so a pure validation caller sees a real value; the storing caller replaces them with
+// the artifact reference.
+func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingArtifact, error) {
 	vals := map[string]string{}
+	var files []pendingArtifact
 	if n.Contract == nil || len(n.Contract.Outputs) == 0 {
-		return vals, nil
+		return vals, files, nil
 	}
 	fields := n.Contract.Outputs
 	single := len(fields) == 1 && (fields[0].Type == "text" || fields[0].Type == "markdown")
@@ -269,17 +332,17 @@ func graphOutput(n graphNode, output string) (map[string]string, error) {
 		_, exists := obj[fields[0].ID]
 		if err != nil || !exists {
 			vals[fields[0].ID] = output
-			return vals, fieldValue(fields[0], output)
+			return vals, files, fieldValue(fields[0], output)
 		}
 	}
 	if err != nil || obj == nil {
-		return vals, errors.New("Output must be a JSON object keyed by output field IDs")
+		return vals, files, errors.New("Output must be a JSON object keyed by output field IDs")
 	}
 	for _, f := range fields {
 		v, ok := obj[f.ID]
 		if !ok {
 			if f.Required {
-				return vals, fmt.Errorf("Missing output %s", f.ID)
+				return vals, files, fmt.Errorf("Missing output %s", f.ID)
 			}
 			continue
 		}
@@ -287,27 +350,64 @@ func graphOutput(n graphNode, output string) (map[string]string, error) {
 		case "number":
 			num, ok := v.(float64)
 			if !ok {
-				return vals, fmt.Errorf("Output %s requires number", f.ID)
+				return vals, files, fmt.Errorf("Output %s requires number", f.ID)
 			}
 			vals[f.ID] = strconv.FormatFloat(num, 'f', -1, 64)
 		case "boolean":
 			b, ok := v.(bool)
 			if !ok {
-				return vals, fmt.Errorf("Output %s requires boolean", f.ID)
+				return vals, files, fmt.Errorf("Output %s requires boolean", f.ID)
 			}
 			vals[f.ID] = strconv.FormatBool(b)
+		case "file":
+			// Either a reference string the caller already owns, or real content to store.
+			if s, isText := v.(string); isText {
+				vals[f.ID] = s
+				break
+			}
+			object, isObject := v.(map[string]any)
+			if !isObject {
+				return vals, files, fmt.Errorf("Output %s requires a string or {name, content}", f.ID)
+			}
+			for key := range object {
+				if key != "name" && key != "content" {
+					return vals, files, fmt.Errorf("Output %s allows only name and content", f.ID)
+				}
+			}
+			rawName, hasName := object["name"].(string)
+			content, hasContent := object["content"].(string)
+			if !hasName || !hasContent {
+				return vals, files, fmt.Errorf("Output %s requires string name and content", f.ID)
+			}
+			name, nameErr := artifactName(rawName)
+			if nameErr != nil {
+				return vals, files, fmt.Errorf("Output %s: %w", f.ID, nameErr)
+			}
+			if len(content) > maxArtifactBytes {
+				return vals, files, fmt.Errorf("Output %s exceeds the %d KiB file limit", f.ID, maxArtifactBytes/1024)
+			}
+			if !utf8.ValidString(content) {
+				return vals, files, fmt.Errorf("Output %s must be valid UTF-8 text", f.ID)
+			}
+			if len(files) >= maxArtifactsPerNode {
+				return vals, files, fmt.Errorf("A node may deliver at most %d files", maxArtifactsPerNode)
+			}
+			files = append(files, pendingArtifact{FieldID: f.ID, Name: name, Content: content})
+			// The name keeps this field non-empty for validation; the storing caller replaces it
+			// with the artifact reference once the bytes are durable.
+			vals[f.ID] = name
 		default:
 			s, ok := v.(string)
 			if !ok {
-				return vals, fmt.Errorf("Output %s requires string", f.ID)
+				return vals, files, fmt.Errorf("Output %s requires string", f.ID)
 			}
 			vals[f.ID] = s
 		}
 		if e := fieldValue(f, vals[f.ID]); e != nil {
-			return vals, e
+			return vals, files, e
 		}
 	}
-	return vals, nil
+	return vals, files, nil
 }
 func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (string, error) {
 	nodes := map[string]graphNode{}
@@ -367,7 +467,16 @@ func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (strin
 				fields = append(fields, map[string]any{"id": f.ID, "label": f.Label, "type": f.Type, "required": f.Required, "help": f.Help, "placeholder": f.Placeholder})
 			}
 			b, _ := json.Marshal(fields)
-			parts = append(parts, "【输出格式】\n"+string(b)+"\nReturn a JSON object keyed by field ID, with declared JSON number/boolean types and strings for all other fields. A single text/markdown output may be plain text. Field help and placeholder are guidance, never existing results.")
+			instruction := "【输出格式】\n" + string(b) + "\nReturn a JSON object keyed by field ID, with declared JSON number/boolean types and strings for all other fields. A single text/markdown output may be plain text. Field help and placeholder are guidance, never existing results."
+			// Without this the model has no way to deliver a real file: it would emit a path that
+			// resolves to nothing. Stated only when the contract actually declares a file output.
+			if hasFileOutput(n) {
+				instruction += fmt.Sprintf("\nFor a `file` output, return {\"name\":\"<filename>\",\"content\":\"<the complete file text>\"}"+
+					" — content is the actual file body, which is stored and becomes downloadable. Keep it under %d KiB,"+
+					" at most %d files, and never claim a file exists without supplying its content. Do not return a path.",
+					maxArtifactBytes/1024, maxArtifactsPerNode)
+			}
+			parts = append(parts, instruction)
 		}
 	}
 	parts = append(parts, "请按本节点职责完成任务，并按声明的格式给出最终输出。")

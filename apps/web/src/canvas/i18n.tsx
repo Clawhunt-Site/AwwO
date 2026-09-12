@@ -6,6 +6,9 @@ const EN = {
   'contract.html': 'HTML (.html)',
   'contract.htmlPlaceholder': 'Complete HTML document with html, head, and body',
   'deliverable.downloadFormat': 'Download .{format}',
+  // A stored deliverable is real bytes the server holds, so the label promises a download
+  // rather than describing a path the user cannot open.
+  'deliverable.downloadFile': 'Download file',
   'deliverable.downloadFailed': 'Download failed. Try again.',
   'deliverable.htmlSource': 'HTML source',
   'wire.connection': '{from} → {to} · {kind} · {state}',
@@ -536,6 +539,7 @@ const ZH: Record<CanvasTextKey, string> = {
   'contract.html': 'HTML (.html)',
   'contract.htmlPlaceholder': '完整的 HTML 文档（包含 html、head 和 body）',
   'deliverable.downloadFormat': '下载 .{format}',
+  'deliverable.downloadFile': '下载文件',
   'deliverable.downloadFailed': '下载失败，请重试',
   'deliverable.htmlSource': 'HTML 源码',
   'wire.connection': '{from} → {to} · {kind} · {state}',

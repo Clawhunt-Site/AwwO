@@ -9,6 +9,7 @@ import { activeNodeThread } from './nodeThreads';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable } from './htmlDeliverable';
+import { storedArtifactUrl } from '../saas/canvasBridge';
 
 /** A display/copy reference only; recognizing a path never reads or opens a file. */
 function localFilePath(value: string, plainFile = false): string | null {
@@ -132,7 +133,10 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
       </article> : <div data-testid={`canvas-tile-output-${node.id}`}>
         {publishedFields.map(field => {
           const value = parsed!.values[field.id];
-          const filePath = field.type === 'file' ? localFilePath(value, true) : null;
+          // A stored deliverable is bytes the server holds, so it offers a real download; a local
+          // reference stays a path, and neither is presented as the other.
+          const artifactUrl = field.type === 'file' ? storedArtifactUrl(value) : null;
+          const filePath = field.type === 'file' && !artifactUrl ? localFilePath(value, true) : null;
           return <article className="awwo-deliverable" key={field.id}>
           <h3 className="awwo-deliverable-title">{field.label || field.id}</h3>
           {(field.type === 'html' || field.type === 'markdown') && Boolean(value.trim()) && !output.partial && <button type="button" onClick={() => download(field, value)}>
@@ -143,6 +147,9 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
               ? <pre aria-label={t('deliverable.htmlSource')} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 }}><code>{value}</code></pre>
               : field.type === 'markdown'
               ? <DeliverableMarkdown>{value}</DeliverableMarkdown>
+              : artifactUrl ? <a className="awwo-deliverable-file" href={artifactUrl} download rel="noreferrer">
+                  <Download size={13} aria-hidden="true" />{t('deliverable.downloadFile')}
+                </a>
               : filePath ? <LocalFileReference key={filePath} path={filePath} />
               : <span style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</span>}
           </div>

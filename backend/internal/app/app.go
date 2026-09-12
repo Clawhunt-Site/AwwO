@@ -190,6 +190,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.getCanvas, 1))
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.updateCanvas, 2))
 	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.deleteCanvas, 2))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/artifacts", a.tenant(a.listArtifacts, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}", a.tenant(a.downloadArtifact, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/agents", a.tenant(a.listAgents, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/agents", a.tenant(a.createAgent, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/agents/{id}", a.tenant(a.getAgent, 1))
