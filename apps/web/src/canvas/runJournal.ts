@@ -4,7 +4,7 @@ import type { RunNodeState, RunNodeStatus } from './runGraph';
 import { validateNodeOutput, type RunSummary } from './runGraph';
 import type { CanvasNode } from './canvasDoc';
 import { fetchConversationOperation } from '../canvasAgentChat';
-import { observeCloudGraph } from '../saas/graphRuns';
+import { observeCloudGraph, validGraphCollaboration, type GraphCollaborationSnapshot, type GraphCollaborationPhase, type GraphRunSnapshot } from '../saas/graphRuns';
 
 export const CANVAS_RUN_JOURNAL_KEY = 'awwo.canvas.active-run.v1';
 
@@ -20,6 +20,9 @@ export interface CanvasRunJournalNode {
   state: RunNodeState;
   detail?: string;
   output?: string;
+  partial?: boolean;
+  phase?: GraphCollaborationPhase;
+  round?: number;
 }
 
 export interface CanvasRunJournal {
@@ -29,7 +32,9 @@ export interface CanvasRunJournal {
   scope: string[];
   inputFingerprint?: string;
   /** Accepted cloud graphs continue scheduling while all observers are detached. */
-  serverGraph?: { id?: string; tenantId: string; canvasId: string; cancelRequested?: boolean };
+  serverGraph?: { id?: string; tenantId: string; canvasId: string; cancelRequested?: boolean; status?: GraphRunSnapshot['status'] };
+  /** Run-level collaboration never rewrites the native document execution policy. */
+  collaboration?: GraphCollaborationSnapshot;
   /** Manual replies remain transcript evidence until explicitly published. */
   manual?: boolean;
   /** Exact operator turn needed to reconstruct a detached manual conversation. */
@@ -62,6 +67,7 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage
     const nodeId = text(item.nodeId);
     const threadId = text(item.threadId);
     if (!nodeId || nodeId !== key || !threadId || typeof item.state !== 'string' || !states.has(item.state as RunNodeState)) return null;
+    if (item.partial !== undefined && typeof item.partial !== 'boolean') return null;
     nodes[key] = {
       nodeId, threadId,
       companyId: text(item.companyId), agentId: text(item.agentId), issueId: text(item.issueId), runId: text(item.runId),
@@ -69,11 +75,19 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage
       state: item.state as RunNodeState,
       ...(typeof item.detail === 'string' ? { detail: item.detail } : {}),
       ...(typeof item.output === 'string' ? { output: item.output } : {}),
+      ...(typeof item.partial === 'boolean' ? { partial: item.partial } : {}),
+      ...(['proposal', 'review', 'synthesis'].includes(String(item.phase)) ? { phase: item.phase as GraphCollaborationPhase } : {}),
+      ...(Number.isInteger(item.round) && Number(item.round) >= 0 && Number(item.round) <= 3 ? { round: Number(item.round) } : {}),
     };
   }
   if (!scope.length || scope.length > 1000 || scope.some(id => !Object.hasOwn(nodes, id))) return null;
   const graph = value.serverGraph as Record<string, unknown> | undefined;
   if (graph && (!text(graph.tenantId) || !text(graph.canvasId) || (graph.id !== undefined && !text(graph.id)))) return null;
+  if (value.collaboration != null && (!graph || !validGraphCollaboration(value.collaboration, scope))) return null;
+  if (graph?.status !== undefined && !['queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted'].includes(String(graph.status))) return null;
+  if (value.collaboration != null) for (const turn of (value.collaboration as GraphCollaborationSnapshot).turns) {
+    if (nodes[turn.nodeId]?.issueId && turn.sessionId && nodes[turn.nodeId].issueId !== turn.sessionId) return null;
+  }
   let review: CanvasRunJournal['review'];
   if (value.review !== undefined) {
     const r = value.review as NonNullable<CanvasRunJournal['review']>;
@@ -87,7 +101,8 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage
     review = r;
   }
   return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes, ...(review ? { review } : {}),
-    ...(graph ? { serverGraph: { tenantId: String(graph.tenantId), canvasId: String(graph.canvasId), ...(graph.id ? { id: String(graph.id) } : {}), ...(graph.cancelRequested === true ? { cancelRequested: true } : {}) } } : {}),
+    ...(graph ? { serverGraph: { tenantId: String(graph.tenantId), canvasId: String(graph.canvasId), ...(graph.id ? { id: String(graph.id) } : {}), ...(graph.cancelRequested === true ? { cancelRequested: true } : {}), ...(graph.status ? { status: graph.status as GraphRunSnapshot['status'] } : {}) } } : {}),
+    ...(value.collaboration != null ? { collaboration: value.collaboration as GraphCollaborationSnapshot } : {}),
     ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
 }
 
@@ -129,7 +144,7 @@ export function patchRunJournalNode(
 export function journalSummary(journal: CanvasRunJournal): RunSummary {
   const scoped = journal.scope.map(id => journal.nodes[id]).filter(Boolean);
   const count = (state: RunNodeState) => scoped.filter(node => node.state === state).length;
-  return { ok: count('done') === scoped.length && (!journal.review || journal.review.outcome === 'approved'), done: count('done'), failed: count('failed'), blocked: count('blocked'), cancelled: count('cancelled'), cached: Object.values(journal.nodes).filter(n => n.state === 'cached').length, total: scoped.length,
+  return { ok: count('done') === scoped.length && (!journal.review || journal.review.outcome === 'approved') && (!journal.collaboration || journal.serverGraph?.status === 'completed'), done: count('done'), failed: count('failed'), blocked: count('blocked'), cancelled: count('cancelled'), cached: Object.values(journal.nodes).filter(n => n.state === 'cached').length, total: scoped.length,
     ...(journal.review ? { review: { rounds: journal.review.round, outcome: journal.review.outcome === 'running' ? 'interrupted' as const : journal.review.outcome } } : {}) };
 }
 

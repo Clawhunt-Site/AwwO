@@ -39,6 +39,7 @@ import { restoreHistory, sendMessage, statusLabel } from './sessionTransport';
 import { TileComposer } from './TileComposer';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
+import { collaborationInputSummary, htmlPreviewSummary } from './readableTranscript';
 import { ContractFields } from './ContractFields';
 import { emptyContract, type ContractField } from './nodeContracts';
 import { NodeDeliverables } from './NodeDeliverables';
@@ -135,10 +136,15 @@ export function runBadgeText(
 }
 
 /** Summarize declared JSON delivery values; ordinary transcript text keeps its last line. */
-function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<ContractField, 'id'>> = []): string {
+function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<ContractField, 'id'>> = [], displayLocale?: UiLocale): string {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const raw = turns[i].text;
     if (!raw) continue;
+    if (displayLocale) {
+      const summary = collaborationInputSummary(turns[i], displayLocale)
+        || (turns[i].role === 'agent' ? htmlPreviewSummary(raw, displayLocale) : null);
+      if (summary) return summary;
+    }
     if (turns[i].role === 'agent' && outputs.length) {
       const trimmed = raw.trim();
       const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -149,6 +155,10 @@ function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<Con
           for (const field of outputs) {
             if (!Object.hasOwn(values, field.id)) continue;
             const value = values[field.id];
+            if (displayLocale && typeof value === 'string') {
+              const summary = htmlPreviewSummary(value, displayLocale);
+              if (summary) return summary;
+            }
             if (typeof value !== 'string' && typeof value !== 'boolean'
               && !(typeof value === 'number' && Number.isFinite(value))) continue;
             const line = String(value).split('\n').map(part => part.trim()).find(Boolean);
@@ -474,8 +484,8 @@ export function SessionTile({
       const filled = node.fields.find((f) => f.value.trim());
       return filled ? `${filled.label || t('common.field')}: ${filled.value.trim()}` : t('tile.emptyField');
     }
-    return liveTail || node.preview;
-  }, [node, liveTail, t]);
+    return livePreview(session.turns, node.contract?.outputs, locale) || htmlPreviewSummary(node.preview, locale) || node.preview;
+  }, [node, session.turns, locale, t]);
 
   const bind =
     node.kind === 'session'
@@ -608,7 +618,12 @@ export function SessionTile({
         </div> : null}
       </div>
 
-      {compact && node.kind === 'session' ? <button className="awwo-compact-open" style={{ fontSize: Math.min(16, 11 / Math.max(.4, scale)) }} type="button" aria-label={t('tile.openSession', { title: node.title })} onClick={() => onToggleFocus?.(nodeId)}>
+      {compact && node.kind === 'session' ? <button className="awwo-compact-open" style={{ fontSize: Math.min(16, 11 / Math.max(.4, scale)) }} type="button" aria-label={t('tile.openSession', { title: node.title })} onClick={event => {
+        // The tile's pointerdown already toggled additive selection. Opening here would replace
+        // that group with this one focused node immediately after the user's modifier-click.
+        if (event.shiftKey || event.metaKey || event.ctrlKey) return;
+        onToggleFocus?.(nodeId);
+      }}>
         <span className="awwo-compact-summary">{preview || (node.lastOutput ? t('tile.deliveryUpdated') : currentThread?.lastOutput ? t('tile.historicalAvailable') : node.contract?.outputs.length ? t('tile.deliverySummary', { fields: node.contract.outputs.map(field => field.label).join(' / ') }) : t('tile.noDeliverables'))}</span>
         <span className="awwo-compact-footer"><span>{node.team ? <span className="node-team-badge" data-testid={`node-team-badge-${nodeId}`}>{node.team.members.length} Agent · {nodeTeamModeLabel(node.team.mode, locale)}</span>
           : <>{getNodeThreads(node).length} Session{node.lastOutput || currentThread?.lastOutput ? t('tile.hasDeliverables') : ''}</>}</span><span>{t('tile.open')}<ChevronRight size={13} /></span></span>

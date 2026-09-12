@@ -25,7 +25,7 @@ it('compacts session geometry without mutating persisted workspace dimensions or
   expect((compact as SessionNode).contract).toBe(node.contract);
   expect((compact as SessionNode).threads).toBe(node.threads);
   expect(compact.lastOutput).toBe(node.lastOutput);
-  expect(presentationNodes(nodes, node.id)[0]).toBe(node);
+  expect(presentationNodes(nodes, node.id)[0]).toMatchObject({ w: 960, h: node.h });
 });
 
 it('expands only the focused session and preserves form node geometry and identity', () => {
@@ -41,7 +41,7 @@ it('expands only the focused session and preserves form node geometry and identi
 
 it('reserves drawer space only as a focused minimum without adding it again to saved expanded width', () => {
   const small = { ...session(), w: 560, h: 420 };
-  expect(presentationNodes([small], small.id)[0]).toMatchObject({ w: 820, h: 420 });
+  expect(presentationNodes([small], small.id)[0]).toMatchObject({ w: 960, h: 420 });
   const large = { ...small, w: 1040, h: 720 };
   expect(presentationNodes([large], large.id)[0]).toMatchObject({ w: 1040, h: 720 });
   expect(presentationNodes([large], null)[0]).toMatchObject({ w: 260, h: 128 });

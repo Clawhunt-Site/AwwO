@@ -486,7 +486,7 @@ export function applyRecoveredDocument(
     // invalidation so a newly observed id cannot erase an existing manual publication.
     if (next.kind === 'session' && item.issueId) next = updateThreadIssueId(next, item.threadId, item.issueId);
     if (journal.manual || !inputsMatch || !selected.has(node.id)) return next;
-    const currentOutput = ['done', 'failed', 'cancelled'].includes(item.state) && item.output ? item : null;
+    const currentOutput = (journal.collaboration || ['done', 'failed', 'cancelled'].includes(item.state)) && item.output ? item : null;
     // A later interrupted round must not hide the last inspectable attempt. Retain it only
     // for the exact same Session/binding, always as partial evidence, never as approval.
     const priorOutput = !currentOutput && item.state !== 'running' && journal.review
@@ -504,7 +504,8 @@ export function applyRecoveredDocument(
         text: evidence.output,
         at: journal.startedAt,
         source: 'run' as const,
-        ...(currentOutput?.state === 'done' && (!journal.review || journal.review.outcome === 'approved') ? {} : { partial: true }),
+        ...(currentOutput?.state === 'done' && (journal.collaboration ? currentOutput.partial === false : !currentOutput.partial) && (!journal.review || journal.review.outcome === 'approved')
+          && (!journal.collaboration || (journal.serverGraph?.status === 'completed' && node.id === journal.collaboration.synthesizerNodeId)) ? {} : { partial: true }),
       },
     };
   });

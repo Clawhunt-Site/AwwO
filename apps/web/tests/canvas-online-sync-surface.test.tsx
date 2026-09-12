@@ -24,24 +24,22 @@ function graph(): CanvasDocument {
   })) };
 }
 
-it.each(['review', 'feedback', 'html'] as const)('preserves imported native %s data and refuses SaaS dispatch before initialization', async kind => {
+it.each(['review', 'feedback'] as const)('preserves imported native %s data and refuses SaaS dispatch before initialization', async kind => {
   const doc = graph();
   if (kind === 'review') doc.execution = { mode: 'review', maxRounds: 3, reviewerNodeId: 'reviewer', verdictFieldId: 'approved' };
   if (kind === 'feedback') doc.edges = [{ id: 'feedback', fromNode: 'reviewer', fromPort: 'result', toNode: 'author', toPort: 'context', dataType: 'text', kind: 'feedback' }];
-  if (kind === 'html' && doc.nodes[0].kind === 'session') doc.nodes[0].contract = { version: 1, inputs: [], outputs: [{ id: 'page', label: 'Page', type: 'html', required: true, value: '' }] };
   canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
   const initialize = vi.fn(async () => doc); configureSaaSCanvasInitialize(initialize);
   render(<CanvasSurface storageMode="cloud" />);
   expect(screen.queryByRole('combobox', { name: '协作模式' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /运行图|开始互审/ }));
-  await screen.findByText(/此 SaaS 工作区暂不支持图审阅/);
+  await screen.findByText(/支持框选组件后互审优化/);
   expect(initialize).not.toHaveBeenCalled();
   expect(loadRunJournal()).toBeNull();
   expect(vi.mocked(fetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   const saved = loadDocumentWithStatus().doc;
   expect(saved.execution).toEqual(doc.execution);
   expect(saved.edges).toEqual(doc.edges);
-  if (kind === 'html') expect(saved.nodes[0]).toMatchObject({ contract: doc.nodes[0].kind === 'session' ? doc.nodes[0].contract : undefined });
 });
 
 it('retains native review settings for readers while disabling mutations', async () => {
@@ -57,16 +55,18 @@ it('checks the canonical initialization response before recording or submitting 
   const initialize = vi.fn(async () => ({ ...doc, execution: { mode: 'review' as const, maxRounds: 3, reviewerNodeId: 'reviewer', verdictFieldId: 'approved' } }));
   configureSaaSCanvasInitialize(initialize); render(<CanvasSurface storageMode="cloud" />);
   fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
-  await screen.findByText(/此 SaaS 工作区暂不支持图审阅/);
+  await screen.findByText(/支持框选组件后互审优化/);
   expect(initialize).toHaveBeenCalledOnce(); expect(loadRunJournal()).toBeNull();
   expect(vi.mocked(fetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
 });
 
-it('keeps an existing HTML field readable without offering new unsupported SaaS field types', () => {
+it('offers HTML output contracts in SaaS and preserves the existing source', () => {
   const text = { id: 'body', label: 'Body', type: 'text' as const, value: 'saved', required: false };
   const onChange = vi.fn(); const view = render(<ContractFields fields={[text]} onChange={onChange} label="Output" />);
-  expect(screen.queryByRole('option', { name: /HTML/ })).toBeNull();
+  expect(screen.getByRole('option', { name: /HTML/ })).toBeEnabled();
+  fireEvent.change(screen.getByRole('combobox', { name: /Body/ }), { target: { value: 'html' } });
+  expect(onChange).toHaveBeenCalledWith([{ ...text, type: 'html' }]); onChange.mockClear();
   view.rerender(<ContractFields fields={[{ ...text, type: 'html', value: '<!doctype html><html><head></head><body>Saved</body></html>' }]} onChange={onChange} label="Output" />);
-  expect(screen.getByRole('option', { name: /HTML/ })).toBeDisabled();
+  expect(screen.getByRole('option', { name: /HTML/ })).toBeEnabled();
   expect(screen.getByDisplayValue(/<!doctype html>/)).toBeInTheDocument(); expect(onChange).not.toHaveBeenCalled();
 });

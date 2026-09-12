@@ -47,6 +47,8 @@ export function TeamRunDetails(props: TeamRunDetailsProps) {
 function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }: TeamRunDetailsProps) {
   const { locale, t } = useSaaSPreferences();
   const [open, setOpen] = useState(defaultOpen);
+  const [manuallyOpened, setManuallyOpened] = useState(false);
+  const [observedTurns, setObservedTurns] = useState(false);
   const [record, setRecord] = useState<TeamRunRecord | null>(null);
   const [turns, setTurns] = useState<TeamTurn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -75,7 +77,7 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
         const result = await api<unknown>(`${path}/turns`, { signal: controller.signal });
         if (controller.signal.aborted) return;
         if (!validTurns(result)) throw new Error(locale === 'zh' ? '成员记录响应无效。' : 'Invalid member turn response.');
-        setTurns(result.items); setError(null);
+        setTurns(result.items); setObservedTurns(true); setError(null);
         if (isActive(next.status)) timer = setTimeout(() => void poll(), 2000);
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -88,13 +90,16 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
     return () => { controller.abort(); clearTimeout(timer); };
   }, [tenantId, runId, open, refresh, runStatus, locale]);
 
+  // A successful single-Agent call has no member process to automatically disclose.
+  // Keep its status/history available on demand, and never hide errors or real team turns.
+  const expanded = open && !(!manuallyOpened && observedTurns && record?.status === 'completed' && !turns.length && error === null);
   return <section className="saas-team-run-details" aria-label={t('运行过程', 'Run process')}>
-    <button type="button" className="saas-team-run-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-      <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+    <button type="button" className="saas-team-run-toggle" aria-expanded={expanded} onClick={() => { setManuallyOpened(!expanded); setOpen(!expanded); }}>
+      <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
       <strong>{turns.length ? t('团队协作过程', 'Team collaboration') : t('运行过程', 'Run process')}</strong>
       {record && <span>{runReadFailed ? t('上次确认：', 'Last confirmed: ') : ''}{status(record.status)}{turns.length ? ` · ${turns.length} ${t('次成员调用', 'member calls')}` : ''}{error !== null ? t(' · 读取已暂停', ' · Reading paused') : ''}</span>}
     </button>
-    {open && <div className="saas-team-run-content">
+    {expanded && <div className="saas-team-run-content">
       {loading && !record && error === null && <p role="status">{t('正在读取运行记录…', 'Loading run records…')}</p>}
       {error !== null && <p className="saas-team-error" role="alert">{saasErrorMessage(error, locale)} <button type="button" disabled={loading} onClick={() => setRefresh(value => value + 1)}>{t('重试读取记录', 'Retry reading records')}</button></p>}
       {record && <p className="saas-team-run-status" role="status">{runReadFailed ? t('上次确认的运行状态：', 'Last confirmed run status: ') : t('运行状态：', 'Run status: ')}{status(record.status)}{error !== null

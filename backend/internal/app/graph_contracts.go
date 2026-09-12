@@ -75,6 +75,10 @@ func fieldValue(f graphField, v string) error {
 		return nil
 	}
 	switch f.Type {
+	case "html":
+		if !completeHTMLDocument(v) {
+			return fmt.Errorf("Field %s requires a complete HTML document with html, head and body", f.ID)
+		}
 	case "number":
 		n, e := strconv.ParseFloat(v, 64)
 		if e != nil || math.IsNaN(n) || math.IsInf(n, 0) {
@@ -88,7 +92,7 @@ func fieldValue(f graphField, v string) error {
 	return nil
 }
 func fieldType(t string) string {
-	if t == "markdown" {
+	if t == "markdown" || t == "html" {
 		return "text"
 	}
 	return t
@@ -197,7 +201,7 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 					}
 					ids[f.ID] = true
 					switch f.Type {
-					case "text", "markdown", "number", "boolean", "file":
+					case "text", "markdown", "html", "number", "boolean", "file":
 					default:
 						return d, nil, errors.New("Unsupported contract field type")
 					}
@@ -321,7 +325,7 @@ func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingA
 		return vals, files, nil
 	}
 	fields := n.Contract.Outputs
-	single := len(fields) == 1 && (fields[0].Type == "text" || fields[0].Type == "markdown")
+	single := len(fields) == 1 && (fields[0].Type == "text" || fields[0].Type == "markdown" || fields[0].Type == "html")
 	text := strings.TrimSpace(output)
 	if strings.HasPrefix(text, "```") && strings.HasSuffix(text, "```") {
 		text = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(text, "```json"), "```"), "```"))
@@ -467,7 +471,7 @@ func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (strin
 				fields = append(fields, map[string]any{"id": f.ID, "label": f.Label, "type": f.Type, "required": f.Required, "help": f.Help, "placeholder": f.Placeholder})
 			}
 			b, _ := json.Marshal(fields)
-			instruction := "【输出格式】\n" + string(b) + "\nReturn a JSON object keyed by field ID, with declared JSON number/boolean types and strings for all other fields. A single text/markdown output may be plain text. Field help and placeholder are guidance, never existing results."
+			instruction := "【输出格式】\n" + string(b) + "\nReturn a JSON object keyed by field ID, with declared JSON number/boolean types and strings for all other fields. A single text/markdown output may be plain text. A single HTML output may be a complete HTML document; HTML requires explicit html, head and body tags, never a path or fragment. HTML deliverables should use self-contained inline CSS and inline SVG/data images, with no external libraries or scripts needed for presentation. Field help and placeholder are guidance, never existing results."
 			// Without this the model has no way to deliver a real file: it would emit a path that
 			// resolves to nothing. Stated only when the contract actually declares a file output.
 			if hasFileOutput(n) {

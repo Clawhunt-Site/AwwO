@@ -46,15 +46,6 @@ func onlineGraphRejectedCases() []onlineGraphCase {
 	}{{"feedback", "feedback"}, {"future-kind", "conditional"}, {"empty-kind", ""}, {"null-kind", nil}, {"number-kind", 3}, {"object-kind", map[string]any{"type": "data"}}} {
 		tests = append(tests, onlineGraphCase{kind.name, func(doc map[string]any) { doc["edges"].([]map[string]any)[0]["kind"] = kind.value }, "edge kinds"})
 	}
-	for _, side := range []string{"inputs", "outputs"} {
-		tests = append(tests, onlineGraphCase{"html-" + side, func(doc map[string]any) {
-			// Remove the legacy edge to isolate HTML validation from port validation.
-			doc["edges"] = []map[string]any{}
-			doc["nodes"].([]any)[1].(map[string]any)["contract"] = map[string]any{
-				"version": 1, side: []map[string]any{{"id": "page", "type": "html", "value": "<html><head></head><body>saved</body></html>"}},
-			}
-		}, "Unsupported contract field type"})
-	}
 	return tests
 }
 

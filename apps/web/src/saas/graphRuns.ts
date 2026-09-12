@@ -13,6 +13,28 @@ export interface GraphNodeResult {
   detail?: string;
   runId?: string;
   sessionId?: string;
+  partial?: boolean;
+  phase?: GraphCollaborationPhase;
+  round?: number;
+}
+export type GraphCollaborationPhase = 'proposal' | 'review' | 'synthesis';
+export interface GraphCollaborationPolicy { goal: string; rounds: number; synthesizerNodeId: string }
+export interface GraphCollaborationTurn {
+  ordinal: number;
+  nodeId: string;
+  phase: GraphCollaborationPhase;
+  round: number;
+  status: 'waiting' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  runId?: string;
+  sessionId?: string;
+  output?: string;
+  error?: string;
+}
+export interface GraphCollaborationSnapshot extends GraphCollaborationPolicy {
+  maxModelCalls: number;
+  phase: GraphCollaborationPhase;
+  round: number;
+  turns: GraphCollaborationTurn[];
 }
 export interface GraphRunSnapshot {
   id: string;
@@ -25,6 +47,37 @@ export interface GraphRunSnapshot {
   nodes: GraphNodeResult[];
   createdAt: string;
   error?: string;
+  collaboration?: GraphCollaborationSnapshot | null;
+}
+
+const collaborationPhases = new Set(['proposal', 'review', 'synthesis']);
+const collaborationStatuses = new Set(['waiting', 'queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted']);
+/** Validate stored/server metadata without converting malformed collaboration into a plain DAG. */
+export function validGraphCollaboration(value: unknown, scope: readonly string[]): value is GraphCollaborationSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(scope)) return false;
+  const item = value as GraphCollaborationSnapshot;
+  if (typeof item.goal !== 'string' || !item.goal.trim() || !Number.isInteger(item.rounds) || item.rounds < 1 || item.rounds > 3
+    || scope.length < 2 || scope.length > 6 || new Set(scope).size !== scope.length || !scope.includes(item.synthesizerNodeId)
+    || item.maxModelCalls !== 2 * scope.length * item.rounds + 1 || !collaborationPhases.has(item.phase)
+    || !Number.isInteger(item.round) || item.round < 0 || item.round > item.rounds
+    || !Array.isArray(item.turns) || item.turns.length > item.maxModelCalls) return false;
+  const ordinals = new Set<number>();
+  const sessions = new Map<string, string>();
+  for (const turn of item.turns) {
+    if (!turn || typeof turn !== 'object' || !scope.includes(turn.nodeId) || !Number.isInteger(turn.ordinal)
+      || turn.ordinal < 1 || turn.ordinal > item.maxModelCalls || ordinals.has(turn.ordinal)
+      || !collaborationPhases.has(turn.phase) || !collaborationStatuses.has(turn.status)
+      || !Number.isInteger(turn.round) || turn.round < 1 || turn.round > item.rounds
+      || ['runId', 'sessionId', 'output', 'error'].some(key => turn[key as keyof GraphCollaborationTurn] !== undefined && typeof turn[key as keyof GraphCollaborationTurn] !== 'string')
+      || (['running', 'completed'].includes(turn.status) && !turn.runId)
+      || (turn.phase === 'synthesis' && turn.nodeId !== item.synthesizerNodeId)) return false;
+    ordinals.add(turn.ordinal);
+    if (turn.sessionId) {
+      if (sessions.has(turn.nodeId) && sessions.get(turn.nodeId) !== turn.sessionId) return false;
+      sessions.set(turn.nodeId, turn.sessionId);
+    }
+  }
+  return true;
 }
 export interface TeamTurn {
   id: string;
@@ -73,16 +126,20 @@ export function graphAdmissionRejected(error: unknown): boolean {
   ));
 }
 
-export async function submitCloudGraph(operationId: string, scope: readonly string[]): Promise<GraphRunSnapshot> {
+export async function submitCloudGraph(operationId: string, scope: readonly string[], collaboration?: GraphCollaborationPolicy): Promise<GraphRunSnapshot> {
   const captured = currentSaaSCanvas();
   if (!captured) throw new GraphNotSubmittedError('Cloud canvas is unavailable');
+  const requestedScope = [...scope];
+  const requestedCollaboration = collaboration ? { ...collaboration } : undefined;
+  if (requestedCollaboration && !validGraphCollaboration({ ...requestedCollaboration, maxModelCalls: 2 * requestedScope.length * requestedCollaboration.rounds + 1,
+    phase: 'proposal', round: 0, turns: [] }, requestedScope)) throw new GraphNotSubmittedError('Invalid collaboration policy or selection');
   let documentVersion: number | void;
   try { documentVersion = await flushSaaSCanvas(); }
   catch (error) { throw new GraphNotSubmittedError(error instanceof Error ? error.message : 'Canvas saving failed'); }
   if (captured !== currentSaaSCanvas()) throw new GraphNotSubmittedError('The active workspace changed before submission');
   if (!Number.isInteger(documentVersion) || Number(documentVersion) < 1) throw new GraphNotSubmittedError('The saved canvas version is unavailable');
   return api<GraphRunSnapshot>(graphPath(captured.tenant.id, captured.canvasId), {
-    method: 'POST', body: JSON.stringify({ operationId, scope, documentVersion }),
+    method: 'POST', body: JSON.stringify({ operationId, scope: requestedScope, documentVersion, ...(requestedCollaboration ? { collaboration: requestedCollaboration } : {}) }),
   });
 }
 
@@ -106,18 +163,47 @@ export async function observeCloudGraph(journal: CanvasRunJournal, signal?: Abor
 }
 
 export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRunSnapshot): CanvasRunJournal {
-  if (!journal.serverGraph || snapshot.canvasId !== journal.serverGraph.canvasId || snapshot.operationId !== journal.id) {
+  if (!journal.serverGraph || snapshot.canvasId !== journal.serverGraph.canvasId || snapshot.operationId !== journal.id
+    || (journal.serverGraph.id && journal.serverGraph.id !== snapshot.id)) {
     throw new Error('Graph run identity does not match the recovery journal');
+  }
+  const collaboration = snapshot.collaboration;
+  if (collaboration || journal.collaboration) {
+    if (!validGraphCollaboration(collaboration, snapshot.scope) || snapshot.scope.length !== journal.scope.length
+      || snapshot.scope.some(id => !journal.scope.includes(id))) throw new Error('Collaboration scope or metadata does not match the recovery journal');
+    if (journal.collaboration && (collaboration.goal !== journal.collaboration.goal || collaboration.rounds !== journal.collaboration.rounds
+      || collaboration.synthesizerNodeId !== journal.collaboration.synthesizerNodeId)) throw new Error('Collaboration policy changed after admission');
+    if ((journal.collaboration && (collaboration.round < journal.collaboration.round
+      || journal.collaboration.turns.some(old => !collaboration.turns.some(turn => turn.ordinal === old.ordinal))))
+      || (journal.serverGraph.status && !['queued', 'running'].includes(journal.serverGraph.status) && snapshot.status !== journal.serverGraph.status)) {
+      throw new Error('Collaboration snapshot regressed');
+    }
+    if (snapshot.document && journal.inputFingerprint?.startsWith('v1:')
+      && runInputFingerprint(snapshot.document, journal.scope) !== journal.inputFingerprint) throw new Error('Collaboration document changed after admission');
+    for (const turn of collaboration.turns) {
+      const previous = journal.collaboration?.turns.find(old => old.ordinal === turn.ordinal);
+      const sessionId = journal.nodes[turn.nodeId]?.issueId;
+      if ((sessionId && turn.sessionId && sessionId !== turn.sessionId)
+        || (previous && (previous.nodeId !== turn.nodeId || previous.phase !== turn.phase || previous.round !== turn.round
+          || (previous.runId && previous.runId !== turn.runId) || (previous.sessionId && previous.sessionId !== turn.sessionId)
+          || (['completed', 'failed', 'cancelled', 'interrupted'].includes(previous.status) && previous.status !== turn.status)))) {
+        throw new Error('Collaboration turn identity changed after admission');
+      }
+    }
   }
   const nodes = Object.fromEntries(Object.entries(journal.nodes).map(([id, node]) => [id, { ...node }]));
   for (const result of snapshot.nodes) {
     const previous = nodes[result.nodeId];
     if (!previous) continue;
+    if (collaboration && previous.issueId && result.sessionId && previous.issueId !== result.sessionId) throw new Error('Collaboration node Session changed');
     nodes[result.nodeId] = { ...previous, state: result.state,
       ...(typeof result.output === 'string' ? { output: result.output } : {}),
       ...(result.detail ? { detail: result.detail } : {}),
       ...(result.runId ? { runId: result.runId } : {}),
       ...(result.sessionId ? { issueId: result.sessionId } : {}),
+      ...(collaboration ? { partial: snapshot.status !== 'completed' || result.partial !== false || result.nodeId !== collaboration.synthesizerNodeId }
+        : result.partial !== undefined ? { partial: result.partial } : {}),
+      ...(result.phase ? { phase: result.phase } : {}), ...(result.round !== undefined ? { round: result.round } : {}),
     };
   }
   // A terminal graph cannot keep an unobserved node perpetually waiting.
@@ -127,7 +213,8 @@ export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRun
       node.detail = snapshot.error || snapshot.status;
     }
   }
-  return { ...journal, serverGraph: { ...journal.serverGraph, id: snapshot.id }, nodes };
+  return { ...journal, serverGraph: { ...journal.serverGraph, id: snapshot.id, ...(collaboration ? { status: snapshot.status } : {}) }, nodes,
+    ...(collaboration ? { collaboration: structuredClone(collaboration) } : {}) };
 }
 
 export async function cancelCloudGraph(journal: CanvasRunJournal): Promise<{ confirmed: boolean; graphId?: string; status: string }> {
@@ -154,5 +241,5 @@ export function graphRecoveryJournal(snapshot: GraphRunSnapshot, tenantId: strin
         ...(typeof item.output === 'string' ? { output: item.output } : {}), ...(item.detail ? { detail: item.detail } : {}) }];
     })),
   };
-  return result;
+  return mergeGraphSnapshot(result, snapshot);
 }

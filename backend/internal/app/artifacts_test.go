@@ -233,6 +233,34 @@ func TestPostgresArtifactsAreStoredScopedAndDownloadable(t *testing.T) {
 	}
 }
 
+func TestPostgresArtifactsRetainMixedContractTypes(t *testing.T) {
+	h := newHarness(t, "")
+	ctx := context.Background()
+	owner, tid, _ := h.register(t, "artifact-types@example.test")
+	canvas := h.request(t, owner, "POST", "/tenants/"+tid+"/canvases", map[string]any{"name": "Typed files", "document": map[string]any{}}, 201)
+	n := fileNode(true)
+	n.Contract.Outputs = append(n.Contract.Outputs, graphField{ID: "score", Type: "number", Required: true}, graphField{ID: "approved", Type: "boolean", Required: true})
+	raw := "```json\n{\"summary\":\"A plan\",\"artifact\":{\"name\":\"plan.md\",\"content\":\"# Plan\"},\"score\":42,\"approved\":true}\n```"
+	vals, files, e := graphOutputFiles(n, raw)
+	if e != nil {
+		t.Fatal(e)
+	}
+	stored, e := h.a.storeArtifacts(ctx, tid, canvas["id"].(string), "typed-run", "node", raw, vals, files)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = graphOutput(n, stored); e != nil {
+		t.Fatal("stored artifact broke its own output contract", stored, e)
+	}
+	var values map[string]any
+	if e = json.Unmarshal([]byte(stored), &values); e != nil {
+		t.Fatal(e)
+	}
+	if values["score"] != float64(42) || values["approved"] != true {
+		t.Fatal("typed fields stringified", values)
+	}
+}
+
 func TestPostgresArtifactStorageIsIdempotentPerNodeField(t *testing.T) {
 	h := newHarness(t, "")
 	ctx := context.Background()

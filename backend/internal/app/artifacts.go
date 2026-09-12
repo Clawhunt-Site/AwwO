@@ -10,6 +10,8 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // storeArtifacts persists a node's file deliverables and rewrites their field values into stable
@@ -28,6 +30,23 @@ func (a *App) storeArtifacts(ctx context.Context, tid, canvasID, runID, nodeID, 
 		return "", e
 	}
 	defer tx.Rollback(ctx)
+	recorded, e := storeArtifactsTx(ctx, tx, tid, canvasID, runID, nodeID, output, vals, files)
+	if e != nil {
+		return "", e
+	}
+	if e = tx.Commit(ctx); e != nil {
+		return "", e
+	}
+	return recorded, nil
+}
+
+// Callers that publish a larger delivery atomically can reuse the same storage
+// transaction, so a cancelled graph never publishes an otherwise orphaned file.
+func storeArtifactsTx(ctx context.Context, tx pgx.Tx, tid, canvasID, runID, nodeID, output string, vals map[string]string, files []pendingArtifact) (string, error) {
+	if len(files) == 0 {
+		return output, nil
+	}
+	var e error
 	refs := make(map[string]string, len(files))
 	for _, file := range files {
 		sum := sha256.Sum256([]byte(file.Content))
@@ -44,19 +63,29 @@ func (a *App) storeArtifacts(ctx context.Context, tid, canvasID, runID, nodeID, 
 		refs[file.FieldID] = artifactRefPrefix + id
 	}
 	// Only the file fields change; every other validated value is recorded exactly as parsed.
-	recorded := make(map[string]string, len(vals))
+	// Preserve the original JSON types of non-file fields: flattening validated
+	// numbers and booleans into transport strings would invalidate the contract
+	// when this stored artifact is read by another node.
+	originalText := strings.TrimSpace(output)
+	if strings.HasPrefix(originalText, "```") && strings.HasSuffix(originalText, "```") {
+		originalText = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(originalText, "```json"), "```"), "```"))
+	}
+	var original map[string]json.RawMessage
+	if e = json.Unmarshal([]byte(originalText), &original); e != nil {
+		return "", e
+	}
+	recorded := make(map[string]json.RawMessage, len(vals))
 	for id, value := range vals {
 		if ref, ok := refs[id]; ok {
-			recorded[id] = ref
-			continue
+			recorded[id], _ = json.Marshal(ref)
+		} else if source, ok := original[id]; ok {
+			recorded[id] = source
+		} else {
+			recorded[id], _ = json.Marshal(value)
 		}
-		recorded[id] = value
 	}
 	encoded, e := json.Marshal(recorded)
 	if e != nil {
-		return "", e
-	}
-	if e = tx.Commit(ctx); e != nil {
 		return "", e
 	}
 	return string(encoded), nil

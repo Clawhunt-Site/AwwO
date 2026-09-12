@@ -1,5 +1,29 @@
 import { normalizeContract, parseContractOutput, type ContractField } from './nodeContracts';
-import type { Turn } from './sessions';
+import type { CollaborationMessageContext, Turn } from './sessions';
+import { isCompleteHtmlDocument } from './htmlDeliverable';
+
+/** Match explicit transport metadata to this exact stored message and Session. */
+export function collaborationMessageContext(value: unknown, runId: string | undefined, sessionId: string): CollaborationMessageContext | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const context = value as CollaborationMessageContext;
+  if (!runId || context.runId !== runId || context.sessionId !== sessionId || typeof context.nodeId !== 'string' || !context.nodeId
+    || !['proposal', 'review', 'synthesis'].includes(context.phase) || !Number.isInteger(context.round) || context.round < 1 || context.round > 3
+    || typeof context.goal !== 'string' || !context.goal.trim() || context.goal.length > 4000) return undefined;
+  return { nodeId: context.nodeId, sessionId, runId, phase: context.phase, round: context.round, goal: context.goal };
+}
+
+export function collaborationInputSummary(turn: Pick<Turn, 'role' | 'runId' | 'nativeRunId' | 'collaboration'>, locale: 'zh' | 'en'): string | null {
+  if (turn.role !== 'user' || !turn.collaboration || (turn.runId && turn.nativeRunId && turn.runId !== turn.nativeRunId)) return null;
+  const context = collaborationMessageContext(turn.collaboration, turn.runId || turn.nativeRunId, turn.collaboration.sessionId);
+  if (!context) return null;
+  const phase = { proposal: ['提案', 'Proposal'], review: ['互审', 'Peer review'], synthesis: ['汇总', 'Synthesis'] }[context.phase][locale === 'zh' ? 0 : 1];
+  return `${locale === 'zh' ? `第 ${context.round} 轮` : `Round ${context.round}`} · ${phase}\n${context.goal}`;
+}
+
+/** Complete HTML is summarized as a document, without asserting run success or publishing it. */
+export function htmlPreviewSummary(text: string, locale: 'zh' | 'en'): string | null {
+  return isCompleteHtmlDocument(text) ? locale === 'zh' ? 'HTML 文档 · 打开预览' : 'HTML document · Open preview' : null;
+}
 
 export interface ReadableOutput {
   fields: Array<{ field: ContractField; value: string }>;

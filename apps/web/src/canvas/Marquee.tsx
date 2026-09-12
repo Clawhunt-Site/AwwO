@@ -30,6 +30,8 @@ export interface MarqueeApi {
 }
 
 export interface UseMarqueeOptions {
+  /** Explicit selection tool; Shift+drag remains available in pan mode. */
+  enabled?: boolean;
   nodes: ReadonlyArray<CanvasNode>;
   /** The `.canvas-root` element — used to locate `.canvas-viewport` for client→world math. */
   rootRef: RefObject<HTMLElement | null>;
@@ -38,7 +40,7 @@ export interface UseMarqueeOptions {
   onSelect: (ids: string[], additive: boolean) => void;
 }
 
-export function useMarquee({ nodes, rootRef, view, onSelect }: UseMarqueeOptions): MarqueeApi {
+export function useMarquee({ nodes, rootRef, view, onSelect, enabled = false }: UseMarqueeOptions): MarqueeApi {
   const [rect, setRect] = useState<WorldRect | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -64,13 +66,14 @@ export function useMarquee({ nodes, rootRef, view, onSelect }: UseMarqueeOptions
 
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (!e.shiftKey || e.button !== 0) return false;
+      if ((!e.shiftKey && !enabled) || e.button !== 0) return false;
       // Only the bare background starts a marquee — a shift-press on a tile belongs to the tile.
       if (!isBackgroundTarget(e.target)) return false;
       teardownRef.current?.();
       const additive = e.metaKey || e.ctrlKey;
       const start = toWorld(e.clientX, e.clientY);
       const pointerId = e.pointerId;
+      const captureTarget = e.currentTarget;
       let live: WorldRect = { x: start.x, y: start.y, w: 0, h: 0 };
       setRect(live);
 
@@ -81,6 +84,12 @@ export function useMarquee({ nodes, rootRef, view, onSelect }: UseMarqueeOptions
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', cancel);
+        captureTarget.removeEventListener('lostpointercapture', lostCapture);
+        try {
+          if (!captureTarget.hasPointerCapture || captureTarget.hasPointerCapture(pointerId)) {
+            captureTarget.releasePointerCapture?.(pointerId);
+          }
+        } catch { /* Capture may already have been released by the browser or DOM teardown. */ }
         teardownRef.current = null;
         setRect(null);
       };
@@ -94,6 +103,9 @@ export function useMarquee({ nodes, rootRef, view, onSelect }: UseMarqueeOptions
         if (pe.pointerId !== pointerId) return;
         teardown(); // aborted → no selection change at all
       };
+      const lostCapture = (event: Event) => {
+        if ('pointerId' in event && event.pointerId === pointerId) teardown();
+      };
       const up = (pe: PointerEvent) => {
         if (pe.pointerId !== pointerId) return;
         const finished = live;
@@ -105,10 +117,14 @@ export function useMarquee({ nodes, rootRef, view, onSelect }: UseMarqueeOptions
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
       window.addEventListener('pointercancel', cancel);
+      captureTarget.addEventListener('lostpointercapture', lostCapture);
       teardownRef.current = teardown;
+      // The viewport skips its own capture when we claim the press. Own it here so moving over
+      // an opaque deliverable iframe cannot swallow pointerup and leave a suspended marquee.
+      try { captureTarget.setPointerCapture?.(pointerId); } catch { /* Older engines retain the window-listener fallback. */ }
       return true;
     },
-    [toWorld],
+    [toWorld, enabled],
   );
 
   return { rect, onBackgroundPointerDown };

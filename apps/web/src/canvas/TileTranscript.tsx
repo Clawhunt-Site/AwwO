@@ -17,7 +17,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { HistoryState, Turn } from './sessions';
 import { useCanvasI18n } from './i18n';
-import { collapseHistoricalInput, readableOutput } from './readableTranscript';
+import { collapseHistoricalInput, collaborationInputSummary, htmlPreviewSummary, readableOutput } from './readableTranscript';
 import './readable-transcript.css';
 
 const markdownComponents: Components = {
@@ -37,11 +37,16 @@ function RawDetails({ label, text }: { label: string; text: string }) {
 }
 
 function TurnContent({ turn, streaming }: { turn: Turn; streaming: boolean }) {
-  const { t } = useCanvasI18n();
+  const { locale, t } = useCanvasI18n();
   if (turn.role === 'user') {
     if (turn.nativeSource === 'issue_description') {
       return <RawDetails label={t('transcript.conversationContext')} text={turn.text} />;
     }
+    const collaboration = collaborationInputSummary(turn, locale);
+    if (collaboration) return <>
+      <div>{collaboration}</div>
+      <RawDetails label={t('transcript.executionDetails')} text={turn.text} />
+    </>;
     const presentation = turn.presentation;
     if (presentation?.inputKind === 'legacy-execution') {
       return <RawDetails label={t('transcript.legacyExecution')} text={turn.text} />;
@@ -63,12 +68,26 @@ function TurnContent({ turn, streaming }: { turn: Turn; streaming: boolean }) {
     }
   }
   const output = readableOutput(turn);
+  // A complete document is a display shape, not proof that a run or collaboration succeeded.
+  const confirmedHtml = turn.presentation?.outputState === 'final'
+    && turn.tone !== 'error' && turn.tone !== 'warn' && !output.invalid
+    && (!turn.collaboration || turn.collaboration.phase === 'synthesis');
+  const htmlSummary = t(confirmedHtml ? 'transcript.htmlReady' : 'transcript.htmlUnconfirmed');
+  if (turn.role === 'agent' && htmlPreviewSummary(turn.text, locale)) {
+    return <>
+      {output.invalid ? <div className="canvas-transcript-format-notice" role="status">{t('transcript.invalidOutput')}</div> : null}
+      <div>{htmlSummary}</div>
+      <RawDetails label={t('transcript.htmlSource')} text={turn.text} />
+    </>;
+  }
   if (output.fields.length) {
     return <>
       <div className="canvas-transcript-fields">
         {output.fields.map(({ field, value }) => <section className="canvas-transcript-field" key={field.id}>
           <h3>{field.label || field.id}</h3>
-          {field.type === 'markdown'
+          {field.type === 'html' && htmlPreviewSummary(value, locale)
+            ? <div>{htmlSummary}</div>
+            : field.type === 'markdown'
             ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{value}</ReactMarkdown></div>
             : field.type === 'file'
               ? <code className="canvas-transcript-field-value">{value}</code>

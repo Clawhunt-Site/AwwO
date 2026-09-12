@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const graphJSON = `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'document',g.document,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb))`
+const graphJSON = `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'document',g.document,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId')) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb)) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
 
 func (a *App) listGraphRuns(w http.ResponseWriter, r *http.Request) {
 	v, e := rowsJSON(r.Context(), a.db, "SELECT "+graphJSON+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND ($3='' OR g.operation_id=$3) ORDER BY g.created_at DESC,g.id DESC LIMIT 50", r.PathValue("tenantId"), r.PathValue("canvasId"), r.URL.Query().Get("operationId"))
@@ -21,9 +21,10 @@ func (a *App) getGraphRun(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		OperationID     string   `json:"operationId"`
-		Scope           []string `json:"scope"`
-		DocumentVersion *int64   `json:"documentVersion"`
+		OperationID     string               `json:"operationId"`
+		Scope           []string             `json:"scope"`
+		DocumentVersion *int64               `json:"documentVersion"`
+		Collaboration   *collaborationPolicy `json:"collaboration,omitempty"`
 	}
 	if !a.decode(w, r, &b) {
 		return
@@ -34,9 +35,10 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	}
 	tid, cid := r.PathValue("tenantId"), r.PathValue("canvasId")
 	request, _ := json.Marshal(struct {
-		Scope   []string
-		Version *int64
-	}{b.Scope, b.DocumentVersion})
+		Scope         []string
+		Version       *int64
+		Collaboration *collaborationPolicy `json:",omitempty"`
+	}{b.Scope, b.DocumentVersion, b.Collaboration})
 	hash := tokenHash(string(request))
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
@@ -95,7 +97,14 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "graph_busy", "Canvas already has an active graph run")
 		return
 	}
-	d, scope, e := parseGraph(raw, b.Scope)
+	var d graphDocument
+	var scope []string
+	seeds := map[string]string{}
+	if b.Collaboration != nil {
+		d, scope, seeds, e = parseCollaborationGraph(raw, b.Scope, b.Collaboration)
+	} else {
+		d, scope, e = parseGraph(raw, b.Scope)
+	}
 	if e != nil {
 		fail(w, 400, "invalid_graph", e.Error())
 		return
@@ -109,7 +118,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		needed[id] = true
 	}
 	for _, edge := range d.Edges {
-		if in[edge.ToNode] {
+		if b.Collaboration == nil && in[edge.ToNode] {
 			needed[edge.FromNode] = true
 		}
 	}
@@ -123,8 +132,12 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := randomID()
+	var collaborationRaw []byte
+	if b.Collaboration != nil {
+		collaborationRaw, _ = json.Marshal(b.Collaboration)
+	}
 	scopeRaw, _ := json.Marshal(scope)
-	_, e = tx.Exec(r.Context(), "INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued')", id, tid, cid, currentUser(r).ID, b.OperationID, hash, version, raw, scopeRaw)
+	_, e = tx.Exec(r.Context(), "INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status,collaboration) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10)", id, tid, cid, currentUser(r).ID, b.OperationID, hash, version, raw, scopeRaw, collaborationRaw)
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -201,6 +214,17 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+			if b.Collaboration != nil {
+				var busy bool
+				if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM runs WHERE tenant_id=$1 AND session_id=$2 AND status IN ('queued','running'))", tid, sid).Scan(&busy); e != nil {
+					a.dbError(w, e)
+					return
+				}
+				if busy {
+					fail(w, 409, "resource_in_use", "A selected Session already has an active run")
+					return
+				}
+			}
 			if team != nil {
 				history, available, err := completedTeamHistory(r.Context(), tx, tid, sid)
 				if err != nil {
@@ -221,6 +245,12 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		snapRaw, _ := json.Marshal(snap)
 		_, e = tx.Exec(r.Context(), "INSERT INTO graph_run_nodes(tenant_id,graph_id,node_id,ordinal,state,output,detail,session_id,execution_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9)", tid, id, n.ID, i, state, output, detail, sid, snapRaw)
 		if e != nil {
+			a.dbError(w, e)
+			return
+		}
+	}
+	if b.Collaboration != nil {
+		if e = seedCollaboration(r.Context(), tx, tid, id, scope, b.Collaboration, seeds); e != nil {
 			a.dbError(w, e)
 			return
 		}
@@ -291,8 +321,13 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 	}
 	var raw []byte
 	var canvasID string
+	var collaborationRaw []byte
 	// The canvas scopes any file deliverable this graph stores, so it is read with the document.
-	if e = a.db.QueryRow(ctx, "SELECT canvas_id,document FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&canvasID, &raw); e != nil {
+	if e = a.db.QueryRow(ctx, "SELECT canvas_id,document,collaboration FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&canvasID, &raw, &collaborationRaw); e != nil {
+		return
+	}
+	if len(collaborationRaw) > 0 {
+		a.executeCollaboration(ctx, tid, id, canvasID, raw, collaborationRaw)
 		return
 	}
 	var d graphDocument
@@ -438,6 +473,9 @@ func (a *App) setGraphNode(ctx context.Context, tid, gid, nid, state, output, de
 var errGraphCapacity = errors.New("graph_waiting_for_capacity")
 
 func (a *App) admitGraphNode(ctx context.Context, tid, gid, nid, prompt string) error {
+	return a.admitGraphChild(ctx, tid, gid, nid, prompt, nil)
+}
+func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string, turn *collaborationTurn) error {
 	tx, e := a.db.Begin(ctx)
 	if e != nil {
 		return e
@@ -478,12 +516,29 @@ func (a *App) admitGraphNode(ctx context.Context, tid, gid, nid, prompt string) 
 	if e != nil {
 		return e
 	}
-	if state != "waiting" {
+	if turn == nil && state != "waiting" {
 		return nil
+	}
+	if turn != nil {
+		var turnState string
+		if e = tx.QueryRow(ctx, "SELECT state FROM graph_collaboration_turns WHERE tenant_id=$1 AND graph_id=$2 AND ordinal=$3 FOR UPDATE", tid, gid, turn.Ordinal).Scan(&turnState); e != nil {
+			return e
+		}
+		if turnState != "waiting" {
+			return nil
+		}
 	}
 	var snap executionSnapshot
 	if json.Unmarshal(raw, &snap) != nil {
 		return errors.New("invalid_snapshot")
+	}
+	if turn != nil {
+		if snap.Team != nil {
+			return errors.New("collaboration_nested_team_unsupported")
+		}
+		if e = appendCollaborationHistory(ctx, tx, tid, gid, nid, &snap); e != nil {
+			return e
+		}
 	}
 	if len(prompt) > 128000 || (snap.Team == nil && len(prompt)+len(snap.Instructions)+snap.Overhead > snap.Budget) {
 		return errors.New("context_limit")
@@ -497,6 +552,9 @@ func (a *App) admitGraphNode(ctx context.Context, tid, gid, nid, prompt string) 
 	}
 	rid := randomID()
 	op := "graph:" + gid + ":" + tokenHash(nid)[:20]
+	if turn != nil {
+		op = collaborationOperationID(gid, *turn)
+	}
 	_, e = tx.Exec(ctx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status) VALUES($1,$2,$3,$4,$5,$6,'queued')", rid, tid, sid, op, tokenHash(prompt), prompt)
 	if e != nil {
 		return e
@@ -512,6 +570,11 @@ func (a *App) admitGraphNode(ctx context.Context, tid, gid, nid, prompt string) 
 	}
 	if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state='running',run_id=$4 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, nid, rid); e != nil {
 		return e
+	}
+	if turn != nil {
+		if _, e = tx.Exec(ctx, "UPDATE graph_collaboration_turns SET state='running',run_id=$4 WHERE tenant_id=$1 AND graph_id=$2 AND ordinal=$3 AND state='waiting'", tid, gid, turn.Ordinal, rid); e != nil {
+			return e
+		}
 	}
 	if e = audit(ctx, tx, actor, tid, "graph.node.accepted", rid); e != nil {
 		return e
@@ -730,8 +793,12 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 // transaction so completed deliverables and partial cancellation evidence survive.
 func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (string, error) {
 	var raw []byte
-	if e := tx.QueryRow(ctx, "SELECT document FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, gid).Scan(&raw); e != nil {
+	var collaborationRaw []byte
+	if e := tx.QueryRow(ctx, "SELECT document,collaboration FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, gid).Scan(&raw, &collaborationRaw); e != nil {
 		return "", e
+	}
+	if len(collaborationRaw) > 0 {
+		return reconcileCancelledCollaboration(ctx, tx, tid, gid)
 	}
 	var doc graphDocument
 	if e := json.Unmarshal(raw, &doc); e != nil {

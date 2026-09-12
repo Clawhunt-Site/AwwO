@@ -2,7 +2,7 @@ import type { CanvasEdge, CanvasNode } from './canvasDoc';
 
 export const COMPACT_SESSION_SIZE = { w: 260, h: 128 } as const;
 export const FOCUSED_SESSION_MIN_SIZE = { w: 560, h: 420 } as const;
-export const DELIVERY_DRAWER_WIDTH = 260;
+export const DELIVERY_DRAWER_WIDTH = 400;
 
 /**
  * Geometry for the current canvas view only. Persisted workspace sizes and session contents

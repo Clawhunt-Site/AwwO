@@ -46,6 +46,8 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
   };
   if (error instanceof SaaSApiError && codes[error.code]) return codes[error.code][locale === 'zh' ? 0 : 1];
   const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const missingCandidate = raw.match(/^Missing (?:completed|valid) cached input from (.+)$/s);
+  if (missingCandidate && locale === 'zh') return `「${missingCandidate[1]}」还没有可用的完整产物。请先完成该节点的任务，再开始互审。`;
   const known: Record<string, [string, string]> = {
     'Pi service token is not configured': ['Pi 服务认证尚未配置。', 'Pi service authentication is not configured.'],
     'Pi service is unavailable': ['Pi 执行服务暂不可用。', 'The Pi execution service is unavailable.'],

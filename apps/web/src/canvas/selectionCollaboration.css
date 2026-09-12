@@ -1,0 +1,18 @@
+.canvas-root .awwo-selection-collaboration { --awwo-card: var(--awwo-surface, #fffefa); --awwo-line: var(--awwo-border, #dce4de); position: absolute; z-index: 30; left: 50%; top: 16px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); border: 1px solid var(--awwo-line); border-radius: 14px; background: var(--awwo-card); color: var(--awwo-ink); box-shadow: 0 8px 30px #0001; padding: 9px 12px; }
+.canvas-root .awwo-selection-actions { display: flex; align-items: center; gap: 10px; font-size: 12px; flex-wrap: wrap; }
+.canvas-root .awwo-selection-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 5px 9px; border: 1px solid var(--awwo-line); border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
+.canvas-root .awwo-selection-actions button.awwo-selection-start { background: var(--awwo-accent, #147d6f); color: white; border-color: transparent; }
+.canvas-root .awwo-selection-actions button:disabled { opacity: .45; cursor: default; }
+.canvas-root .awwo-selection-budget, .canvas-root .awwo-selection-collaboration p { color: var(--awwo-muted); font-size: 11px; }
+.canvas-root .awwo-selection-collaboration p { margin: 8px 0 2px; }
+.canvas-root .awwo-selection-settings { border-top: 1px solid var(--awwo-line); margin-top: 9px; padding-top: 9px; max-width: 580px; }
+.canvas-root .awwo-selection-settings label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; flex: 1; min-width: 0; }
+.canvas-root .awwo-selection-settings > div { display: flex; gap: 14px; margin-top: 9px; }
+.canvas-root .awwo-selection-settings textarea, .canvas-root .awwo-selection-settings select { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid var(--awwo-line); border-radius: 7px; color: inherit; background: var(--awwo-card); }
+.canvas-root .awwo-collaboration-flow { position: absolute; inset: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.canvas-root .awwo-collaboration-flow path { fill: none; stroke: var(--awwo-accent, #147d6f); stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-dasharray: 7 6; animation: awwo-review-flow 800ms linear infinite; }
+.canvas-root .awwo-collaboration-flow path.awwo-collaboration-arrow { stroke-dasharray: none; animation: none; }
+@keyframes awwo-review-flow { to { stroke-dashoffset: -26; } }
+@media (prefers-reduced-motion: reduce) { .canvas-root .awwo-collaboration-flow path { animation: none; } }
+@media (max-width: 600px) { .canvas-root .awwo-selection-collaboration { width: calc(100% - 32px); box-sizing: border-box; } .canvas-root .awwo-selection-budget { flex-basis: 100%; } }
+.canvas-root[data-selection-tool] .canvas-viewport, .canvas-root[data-selection-tool] .canvas-world { cursor: crosshair; }

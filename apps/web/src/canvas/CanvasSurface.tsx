@@ -4,7 +4,7 @@ import { saasErrorMessage } from '../saas/api';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
 import { currentSaaSCanvas, initializeSaaSCanvas } from '../saas/canvasBridge';
-import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected } from '../saas/graphRuns';
+import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, type GraphCollaborationPolicy } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
 // One infinite canvas whose nodes ARE agent sessions: each tile holds a live conversation that
@@ -24,7 +24,8 @@ import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionR
 //   * the corrupt-document backup and the empty-first-run rule are inherited from canvasDoc.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid } from 'lucide-react';
+import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2 } from 'lucide-react';
+import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant } from './CanvasAssistant';
 import { applyCanvasPlan, canvasPlanRevision } from './canvasPlan';
@@ -562,7 +563,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setRuns(next.nodes);
       setReviewRound(next.review?.round ?? 0);
       setRunStartedAt(next.startedAt);
-      setTimelineOpen(true);
+      if (!next.collaboration) setTimelineOpen(true);
       const recovered = applyRecoveredDocument(docRef.current, { ...next, inputFingerprint: next.inputFingerprint ?? '' });
       docRef.current = recovered; setDoc(recovered);
       // Persist the complete batch before deleting its recovery journal.
@@ -602,6 +603,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         clearRunJournal(next.id); journal.current = null;
         setRecovering(false); setRunning(false);
         setRunSummary(journalSummary(next));
+        if (next.collaboration && next.serverGraph?.status === 'completed') {
+          const leadId = next.collaboration.synthesizerNodeId;
+          const result = docRef.current.nodes.find(node => node.id === leadId);
+          if (result?.kind === 'session' && result.lastOutput && !result.lastOutput.partial) {
+            const opened = { ...docRef.current, nodes: docRef.current.nodes.map(node => node.id === leadId ? { ...node, deliverablesOpen: true } : node) };
+            if (saveLocalDocument(opened)) { docRef.current = opened; setDoc(opened); }
+            focusNode(leadId);
+          }
+        }
         setHandoffNote(surfaceNotice(t, Object.values(next.nodes).some(node => node.detail === 'recovery_input_changed') ? 'recovery_input_changed' : next.serverGraph ? 'graph_recovery_complete' : 'recovery_complete'));
       }
     }, () => {
@@ -611,7 +621,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     });
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [readOnly, recovering, patchDoc, saveLocalDocument, t]);
+  }, [readOnly, recovering, patchDoc, saveLocalDocument, t, focusNode]);
   useEffect(() => {
     if (!running) return undefined;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -645,8 +655,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
   }, [locale, t, saveLocalDocument]);
 
-  const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string) => {
+  const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
     if (readOnlyRef.current) return Promise.resolve();
+    const collaborationRevision = collaboration ? canvasPlanRevision(docRef.current) : undefined;
     // Ownership can arrive after another edit. A manual send belongs to the exact Session
     // and draft that initiated it, never whichever Session happens to be selected later.
     const submittedNode = manualMessage && scope?.length === 1
@@ -659,6 +670,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // Synchronous re-entrancy guard on the REF: React state commits asynchronously, so a double
     // click could otherwise start two overlapping runs whose callbacks interleave into one map.
     if (!mounted.current || currentSaaSCanvas() !== cloudScope || readOnlyRef.current || setupRequest.current || runAbort.current || journal.current) return;
+    if (collaboration && (!cloudScope || manualMessage || !scope || scope.length < 2 || scope.length > 6
+      || !scope.includes(collaboration.synthesizerNodeId)
+      || collaborationRevision !== canvasPlanRevision(docRef.current)
+      || scope.some(id => { const node = docRef.current.nodes.find(n => n.id === id); return node?.kind !== 'session' || Boolean(node.team); }))) {
+      setHandoffNote(locale === 'zh' ? '选区已变化或不能互审，请重新选择 2–6 个独立 Agent。' : 'The selection changed or cannot be reviewed. Select 2–6 individual Agents again.'); return;
+    }
     const durable = loadRunJournal();
     if (durable) {
       journal.current = durable;
@@ -702,8 +719,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setHandoffNote(locale === 'zh' ? '此工作区未提供节点团队执行能力，请使用 SaaS 工作区运行。' : 'This workspace cannot execute node teams. Run this canvas in a SaaS workspace.'); return;
     }
     const refuseUnsupportedGraph = (document: CanvasDocument) => {
-      if (!currentSaaSCanvas() || manualMessage || !unsupportedSaaSGraph(document)) return false;
-      setHandoffNote(locale === 'zh' ? '此 SaaS 工作区暂不支持图审阅、反馈连线或 HTML 交付类型，请在原生工作区运行该图。已有配置已保留。' : 'This SaaS workspace does not yet support graph review, feedback connections or HTML deliverable fields. Run this graph in a native workspace. Its configuration is preserved.');
+      if (!currentSaaSCanvas() || manualMessage || collaboration || !unsupportedSaaSGraph(document)) return false;
+      setHandoffNote(locale === 'zh' ? '此工作区支持框选组件后互审优化；已有原生互审策略及反馈连线请在原生工作区运行。配置已保留。' : 'Select components to review and improve them here. Existing native review policies and feedback connections require a native workspace. Their configuration is preserved.');
       return true;
     };
     if (refuseUnsupportedGraph(docRef.current)) return;
@@ -714,8 +731,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (refuseUnsupportedGraph(runDocument)) return;
     const runNodes = runDocument.nodes;
     const runEdges = reconcileEdges(runNodes, runDocument.edges);
-    const reviewPolicy = !manualMessage ? runDocument.execution : undefined;
-    const problem = preflightIssueMessage(t, reviewPolicy
+    const reviewPolicy = !manualMessage && !collaboration ? runDocument.execution : undefined;
+    const problem = collaboration ? '' : preflightIssueMessage(t, reviewPolicy
       ? preflightReviewGraphIssue(runNodes, runEdges, reviewPolicy, scope)
       : preflightGraphIssue(runNodes, runEdges.filter(edge => edge.kind !== 'feedback'), scope, { conversation: Boolean(currentSaaSCanvas() && manualMessage) }), locale);
     if (problem) { refusedRevision.current = canvasPlanRevision(runDocument); setHandoffNote(problem); return; }
@@ -725,9 +742,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const executing = new Set(scope ?? runNodes.map(n => n.id));
     const pending: CanvasRunJournal = { version: 1, id: crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(runDocument, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(runNodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
     if (reviewPolicy) pending.review = { round: 0, maxRounds: reviewPolicy.maxRounds, outcome: 'running', turns: [] };
+    if (collaboration) pending.collaboration = { ...collaboration, maxModelCalls: 2 * executing.size * collaboration.rounds + 1, phase: 'proposal', round: 0, turns: [] };
     const cloud = currentSaaSCanvas();
     if (cloud && !manualMessage) pending.serverGraph = { tenantId: cloud.tenant.id, canvasId: cloud.canvasId };
-    const prepared = prepareRunDocument(runDocument, [...executing], Boolean(manualMessage));
+    // Collaboration admission needs the exact saved upstream candidates, including selected peers.
+    // The shared execution lock prevents consuming them while the server is accepting the run.
+    const prepared = collaboration ? runDocument : prepareRunDocument(runDocument, [...executing], Boolean(manualMessage));
     const acceptedManualNode = manualMessage ? runNodes.find(node => executing.has(node.id)) : undefined;
     if (!saveLocalDocument(prepared)) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
     if (!saveRunJournal(pending)) {
@@ -759,12 +779,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setReviewRound(0);
     setRunStartedAt(Date.now());
     setNow(Date.now());
-    setTimelineOpen(true);
+    setTimelineOpen(!collaboration);
     if (pending.serverGraph) {
       const submissionStorage = canvasStorage();
       let admitted = false;
       try {
-        const accepted = await submitCloudGraph(pending.id, pending.scope);
+        const accepted = await submitCloudGraph(pending.id, pending.scope, collaboration);
         admitted = true;
         const stored = loadRunJournal(submissionStorage);
         const recovered = mergeGraphSnapshot(stored?.id === pending.id ? stored : pending, accepted);
@@ -779,7 +799,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           clearRunJournal(submissionStorage, pending.id);
           if (currentSaaSCanvas() !== cloud) return;
           journal.current = null; setRunning(false);
-          setHandoffNote(error instanceof Error ? error.message : String(error)); runAbort.current = null; return;
+          setHandoffNote(saasErrorMessage(error, locale)); runAbort.current = null; return;
         }
         if (currentSaaSCanvas() !== cloud) return;
         setHandoffNote(error instanceof Error ? error.message : surfaceNotice(t, 'run_identity_unconfirmed'));
@@ -1237,6 +1257,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [addMenu, setAddMenu] = useState<{ at: { x: number; y: number }; world: { x: number; y: number } } | null>(null);
   const [barMode, setBarMode] = useState<CommandBarMode | null>(null);
   const [minimapOpen, setMinimapOpen] = useState(true);
+  const [selectionTool, setSelectionTool] = useState(false);
 
   const { companies, refresh: refreshCompanies } = useLiveCompanies(paperclipApiBase());
 
@@ -1246,6 +1267,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // onConnect leaves the ports visible but inert (they are the graph's structure, not a control).
   const wiring = useWiring({ nodes: renderNodes, edges, onConnect: readOnly || running || initializing ? undefined : onConnect, rootRef, view });
   const marquee = useMarquee({
+    enabled: selectionTool,
     nodes: renderNodes,
     rootRef,
     view,
@@ -1271,6 +1293,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // Unwind outermost-first so one Escape never closes two things at once.
       if (addMenu) setAddMenu(null);
       else if (barMode) setBarMode(null);
+      else if (selectionTool) setSelectionTool(false);
       else if (inspectorId) { if (!inspectorCloseLocked.current) setInspectorId(null); }
       else if (focusedId) unfocus();
       else setSelection([]);
@@ -1509,7 +1532,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
-    <div className="canvas-root" data-read-only={readOnly || undefined} ref={rootRef}>
+    <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} ref={rootRef}>
       <CanvasViewport
         view={view}
         onViewChange={setView}
@@ -1536,9 +1559,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
               }
         }
       >
-        <WirePlane nodes={renderNodes} edges={edges} runs={runs} running={running} round={doc.execution ? reviewRound : 0} scale={view.scale}
+        <WirePlane nodes={renderNodes} edges={edges} runs={journal.current?.collaboration ? {} : runs} running={running && !journal.current?.collaboration} round={doc.execution ? reviewRound : 0} scale={view.scale}
           selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={readOnly || running || initializing ? undefined : setSelectedEdgeId}
           preview={wiring.wireDrag} onDisconnect={readOnly || running || initializing ? undefined : disconnect} />
+        <CollaborationFlow nodes={renderNodes} collaboration={journal.current?.collaboration} running={running} scale={view.scale} />
         {nodes.map((node) => (
           <SessionTile
             key={node.id}
@@ -1587,9 +1611,17 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
 
+      {!running && <SelectionCollaboration key={selection.join(':')} nodes={nodes.filter(node => selection.includes(node.id))}
+        disabled={readOnly || initializing || bindingLocked} available={Boolean(cloudScope)}
+        onStart={(ids, policy) => { void startRun(ids, undefined, undefined, undefined, policy); }} />}
+      {running && journal.current?.collaboration && <CollaborationStatus nodes={nodes} collaboration={journal.current.collaboration} />}
+
       {initializing && <div className="awwo-handoff-note" role="status">{locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…'}</div>}
       {!initializing && handoffNote && <div className="awwo-handoff-note" role="alert"><span>{handoffNote}</span><button type="button" aria-label={locale === 'zh' ? '关闭提示' : 'Dismiss notice'} onClick={() => setHandoffNote('')}>×</button></div>}
       <div className="awwo-view-tools" role="toolbar" aria-label={viewText.toolbar}>
+        <button type="button" aria-label={locale === 'zh' ? '框选组件' : 'Select components'} title={locale === 'zh' ? '框选组件（也可按住 Shift 拖动）' : 'Select components (or Shift + drag)'} aria-pressed={selectionTool}
+          onClick={() => setSelectionTool(value => !value)}><MousePointer2 size={16} /></button>
+        <span className="awwo-tool-separator" />
         <button aria-label={viewText.zoomOut} title={viewText.zoomOut} onClick={() => zoomBy(1 / 1.2)}><Minus size={16} /></button>
         <span>{Math.round(view.scale * 100)}%</span>
         <button aria-label={viewText.zoomIn} title={viewText.zoomIn} onClick={() => zoomBy(1.2)}><Plus size={16} /></button>

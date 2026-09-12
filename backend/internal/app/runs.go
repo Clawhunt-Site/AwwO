@@ -130,6 +130,17 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// Admission shares the tenant lock with graph creation. A Session reserved
+	// by a collaboration cannot accept an interleaved manual turn between phases.
+	var reserved bool
+	if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM graph_run_nodes n JOIN graph_runs g ON g.tenant_id=n.tenant_id AND g.id=n.graph_id WHERE n.tenant_id=$1 AND n.session_id=$2 AND g.collaboration IS NOT NULL AND g.status IN ('queued','running'))", tid, b.SessionID).Scan(&reserved); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if reserved {
+		fail(w, 409, "resource_in_use", "This Session belongs to an active collaboration")
+		return
+	}
 	var active, today int
 	if e = tx.QueryRow(r.Context(), "SELECT count(*) FROM runs WHERE tenant_id=$1 AND status IN ('queued','running')", tid).Scan(&active); e != nil {
 		a.dbError(w, e)

@@ -134,6 +134,16 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 - **Verification:** Real PostgreSQL/race and authorization tests, real Pi SDK with local protocol providers, complete Go/Pi/PostgreSQL integration, canvas/type/build tests and local browser acceptance. Exact results, corrected findings and unavailable checks are recorded in `docs/awwo-saas-verification.md`; configured health is not a real model inference result.
 - **Files:** `backend/**`, `apps/pi-worker/**`, `apps/web/src/saas/**`, scoped adapters in `apps/web/src/canvas/**`, `apps/web/tests/saas-*`, `scripts/awwo-saas-*`, `deploy/saas/**`, and `docs/awwo-saas-*.md`.
 
+## [0.5.0] - 2026-09-12
+
+### Added — rendered artifacts and selected-Agent collaboration
+
+- **What changed:** Render actual HTML and Markdown in each component's deliverable drawer, with source, download and an enlarged view. Select 2–6 independent Agent nodes for bounded proposal, peer-review and synthesis rounds in their existing Sessions, with actual turn history and animated directional handoffs.
+- **Why:** Reading source alone hid the delivered page, while ordinary DAG execution did not let a selected group critique and improve one shared solution.
+- **Impact:** HTML contracts work in SaaS. Static previews isolate scripts and external resources; candidate outputs remain partial until the synthesizer completes successfully. Server admission, Session reservations, cancellation and restart recovery prevent unrelated dispatch or repeated paid calls. Final artifact publication and graph completion share one transaction. Nested teams are excluded from this selected-node mode.
+- **Verification:** PostgreSQL integration and affected frontend regression evidence, browser/model checks and release status are recorded in `docs/awwo-selection-collaboration-20260912.md`. A local release candidate is not deployment proof.
+- **Files:** Canvas delivery/selection controls, SaaS graph journal/recovery, Go graph coordination/contracts/artifacts, migration 011, related tests and user guide.
+
 ## [0.4.0] - 2026-09-08
 
 - Add bounded Agent Graph review alongside sequential workflows: explicit feedback connections carry validated previous-round outputs, a boolean review verdict approves or requests revision, and a configurable 1–5 round limit prevents unlimited execution.

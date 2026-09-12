@@ -65,3 +65,42 @@ Cancellation reconciles the committed child status and output in the same transa
 Initialization uses the saved node title as the Agent name and persona as instructions. Empty runtime/model resolve to Pi and its configured default model. Pi text and coding nodes are supported; image nodes, unsupported runtimes/models, explicit effort, unsupported tools and invalid teams are rejected. A selected session requires Pi configuration health, but initialization makes no inference requests. Agent rows, session rows, current thread identities and updated canvas bindings commit together. Compatible existing Agents/sessions are reused. Changed effective settings, including team-only changes recorded in the session setup snapshot, create a new Agent and current conversation while preserving the old Agent, session, messages and historical threads. The service never rewrites a shared Agent during initialization.
 
 Initialization increments the canvas version only if its document changes. A compatible retry at the current version returns the unchanged canonical record and creates no duplicate Agent or session. If the response was lost, GET the canvas to recover the committed identities before retrying with its latest version; retrying the stale version is rejected. Nodes outside scope and historical threads retain their stored data. Initialization does not synchronize unrelated transcript previews on an otherwise compatible current thread.
+
+Selected-node collaboration (migration 011): the existing graph-run POST also accepts
+`collaboration: {goal, rounds, synthesizerNodeId}` with an explicit scope of 2–6 distinct
+Session nodes. The goal is required (up to 8000 Unicode characters), rounds must be 1–3,
+and the synthesizer must belong to the scope. Nested node teams are rejected so the
+displayed model-call maximum is exactly `2 * scope.length * rounds + 1`.
+
+Each round runs every selected node's proposal, then every selected node's Markdown
+critique of that complete proposal round. The next proposal round receives all previous
+critiques. A final call on the selected synthesizer combines the last proposals and
+critiques using its own original output contract. All calls preserve each node's existing
+Session, frozen Agent configuration, and the Session's preceding completed collaboration
+turns. This is bounded deliberation; completion means a contracted synthesis was produced,
+not that every Agent agreed or that a mathematically optimal solution was proved.
+
+The original canvas document, execution policy, edges and contracts are unchanged. Only
+this explicit run-level mode ignores workflow scheduling and feedback edges. Required
+inputs are checked before admission against saved values and complete cached upstream
+outputs. Missing or partial cached dependencies cause zero dispatch, including legacy
+uncontracted inputs. No unselected Session is created or run. Selected Sessions cannot
+accept interleaved manual runs while the collaboration is active. The original DAG mode
+retains its execution-policy and feedback guards.
+
+Snapshots add `collaboration: {goal, rounds, synthesizerNodeId, maxModelCalls, phase, round,
+turns}`. Each ordered turn has `ordinal` (starting at 1), `nodeId`, `phase`
+(`proposal|review|synthesis`), `round`, `status`, `runId`, `sessionId`, `output` and `error`.
+Unadmitted turns have an empty run ID. The synthesis uses the configured final round
+number. The ordinary graph response omits `collaboration`. Candidate node outputs carry
+`partial: true`; only the successful whole graph's synthesizer carries `partial: false`.
+Critiques never replace node deliverables. Stop, failure and interruption retain the latest
+partial candidate bytes and all turn evidence. Existing exact-operation cancellation,
+tenant quota/role checks, worker lease and no-replay restart recovery apply to every turn.
+
+HTML input/output fields are now supported with the same explicit `html`, `head`, `body`
+document-shape gate used by the browser. A single HTML output may be a document directly;
+multiple outputs use a field-keyed JSON object. Validation executes no HTML or network
+requests. HTML and Markdown ports both transport text. Generated file content is stored
+only for the final collaboration synthesis; candidate file bodies remain in turn history.
+Stored file outputs preserve JSON number and boolean types of other contract fields.

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ArrowUpFromLine, Download } from 'lucide-react';
+import { ArrowUpFromLine } from 'lucide-react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { SessionNode } from './canvasDoc';
@@ -8,7 +8,7 @@ import { emptyContract, parseContractOutput, validateContractFields, type Contra
 import { activeNodeThread } from './nodeThreads';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
-import { downloadTextDeliverable } from './htmlDeliverable';
+import { ArtifactPreview, StoredArtifactPreview } from './ArtifactPreview';
 import { storedArtifactUrl } from '../saas/canvasBridge';
 
 /** A display/copy reference only; recognizing a path never reads or opens a file. */
@@ -56,8 +56,10 @@ const deliveryMarkdownComponents: Components = {
   a: ({ node: _node, href, children, ...props }) => {
     const path = href ? localFilePath(href) : null;
     return path ? <LocalFileReference key={path} path={path}>{children}</LocalFileReference>
-      : <a {...props} href={href}>{children}</a>;
+      : <a {...props} href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
   },
+  // Untrusted Markdown must not make credentialed image requests from the workbench origin.
+  img: ({ alt }) => <span>{alt || '🖼'}</span>,
 };
 
 function DeliverableMarkdown({ children }: { children: string }) {
@@ -74,7 +76,6 @@ export interface NodeDeliverablesProps {
 export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverablesProps) {
   const { locale, t } = useCanvasI18n();
   const [publishErrors, setPublishErrors] = useState<string[]>([]);
-  const [downloadError, setDownloadError] = useState(false);
   const deliverableTitle = getAgentTemplateForNode(node, locale)?.deliverableTitle;
   const contract = node.contract ?? emptyContract();
   const output = node.lastOutput ?? activeNodeThread(node).lastOutput;
@@ -85,11 +86,6 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
   const publishedFields = parsed ? contract.outputs.filter(field => Object.hasOwn(parsed.values, field.id)) : [];
   // A malformed or legacy result remains visible as evidence, without manufacturing fields.
   const showRawOutput = output && (!contract.outputs.length || Boolean(parsed?.errors.length) || !publishedFields.length);
-  const download = (field: ContractField, value: string) => {
-    if (field.type !== 'html' && field.type !== 'markdown') return;
-    try { downloadTextDeliverable(value, field.label || field.id, field.type); setDownloadError(false); }
-    catch { setDownloadError(true); }
-  };
 
   const updateFields = (fields: ContractField[]) => {
     if (locked) return;
@@ -139,17 +135,14 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
           const filePath = field.type === 'file' && !artifactUrl ? localFilePath(value, true) : null;
           return <article className="awwo-deliverable" key={field.id}>
           <h3 className="awwo-deliverable-title">{field.label || field.id}</h3>
-          {(field.type === 'html' || field.type === 'markdown') && Boolean(value.trim()) && !output.partial && <button type="button" onClick={() => download(field, value)}>
-            <Download size={13} aria-hidden="true" />{t('deliverable.downloadFormat', { format: field.type === 'html' ? 'html' : 'md' })}
-          </button>}
-          <div className={`awwo-deliverable-body${field.type === 'markdown' ? ' awwo-markdown-preview' : ''}`}>
-            {field.type === 'html'
-              ? <pre aria-label={t('deliverable.htmlSource')} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 }}><code>{value}</code></pre>
-              : field.type === 'markdown'
-              ? <DeliverableMarkdown>{value}</DeliverableMarkdown>
-              : artifactUrl ? <a className="awwo-deliverable-file" href={artifactUrl} download rel="noreferrer">
-                  <Download size={13} aria-hidden="true" />{t('deliverable.downloadFile')}
-                </a>
+          <div className={`awwo-deliverable-body${field.type === 'html' || field.type === 'markdown' || artifactUrl ? ' awwo-deliverable-with-preview' : ''}`}>
+            {field.type === 'html' || field.type === 'markdown'
+              ? <ArtifactPreview key={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
+                  title={field.label || field.id} canDownload={Boolean(value.trim()) && !output.partial}
+                  renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
+              : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}
+                  identity={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}`}
+                  renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : filePath ? <LocalFileReference key={filePath} path={filePath} />
               : <span style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</span>}
           </div>
@@ -157,7 +150,6 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
         })}
       </div>}
     </>}
-    {downloadError ? <p role="alert">{t('deliverable.downloadFailed')}</p> : null}
     <details className="awwo-deliverables-editor">
       <summary>{t('deliverable.editForm')}</summary>
       <ContractFields fields={contract.outputs} label={t('deliverable.outputLabel')} readOnly={locked} onChange={updateFields} />

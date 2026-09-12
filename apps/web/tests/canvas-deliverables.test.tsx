@@ -20,15 +20,21 @@ const node = (over: Partial<SessionNode> = {}): SessionNode => ({
 describe('node deliverables', () => {
   const html = '<!doctype html><html><head><title>页面</title></head><body><script>window.__unsafe = true</script><img src="https://example.com/private.png"><h1>交付页面</h1></body></html>';
 
-  it('renders HTML as escaped source without creating executable or fetching elements', () => {
+  it('defaults to an isolated HTML preview while keeping exact source available', () => {
     const { container } = render(<NodeDeliverables node={node({
       contract: { version: 1, inputs: [], outputs: [field({ type: 'html', value: '' })] },
       lastOutput: { text: html, at: 1, source: 'run' },
     })} readOnly />);
-    expect(screen.getByLabelText('HTML 源码')).toHaveTextContent(html);
-    expect(container.querySelector('script, img, iframe')).toBeNull();
+    const preview = screen.getByTitle('交付说明 · HTML 预览');
+    expect(preview).toHaveAttribute('sandbox', '');
+    expect(preview.getAttribute('srcdoc')).toContain('<h1>交付页面</h1>');
+    expect(preview.getAttribute('srcdoc')).not.toContain('window.__unsafe');
+    expect(container.querySelector('script, img')).toBeNull();
     expect(screen.getByRole('button', { name: '下载 .html' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '交付页面' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '源码', exact: true }));
+    expect(screen.getByLabelText('HTML 源码')).toHaveTextContent(html);
+    expect(container.querySelector('iframe')).toBeNull();
   });
 
   it.each(['html', 'markdown'] as const)('downloads exactly the published %s source with matching file type', async type => {

@@ -473,6 +473,14 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Session not found")
 		return
 	}
-	v, e := rowsJSON(r.Context(), a.db, "SELECT jsonb_build_object('id',id,'sessionId',session_id,'role',role,'content',content,'runId',run_id,'createdAt',created_at) FROM messages WHERE tenant_id=$1 AND session_id=$2 ORDER BY created_at,id", r.PathValue("tenantId"), r.PathValue("id"))
+	// Display metadata comes from the actual graph turn, never markers in message content.
+	// Keep the stored prompt and peer evidence unchanged for audit and model history.
+	v, e := rowsJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',m.id,'sessionId',m.session_id,'role',m.role,'content',m.content,'runId',m.run_id,'createdAt',m.created_at) ||
+		CASE WHEN m.role='user' AND g.collaboration IS NOT NULL AND n.session_id=m.session_id THEN
+		jsonb_build_object('collaboration',jsonb_build_object('nodeId',t.node_id,'sessionId',m.session_id,'runId',m.run_id,'phase',t.phase,'round',t.round,'goal',g.collaboration->>'goal')) ELSE '{}'::jsonb END
+		FROM messages m LEFT JOIN graph_collaboration_turns t ON t.tenant_id=m.tenant_id AND t.run_id=m.run_id
+		LEFT JOIN graph_runs g ON g.tenant_id=t.tenant_id AND g.id=t.graph_id
+		LEFT JOIN graph_run_nodes n ON n.tenant_id=t.tenant_id AND n.graph_id=t.graph_id AND n.node_id=t.node_id
+		WHERE m.tenant_id=$1 AND m.session_id=$2 ORDER BY m.created_at,m.id`, r.PathValue("tenantId"), r.PathValue("id"))
 	a.replyList(w, v, e)
 }

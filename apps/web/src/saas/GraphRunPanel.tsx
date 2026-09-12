@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, saasErrorMessage } from './api';
-import { graphPath, graphIsActive, type GraphRunSnapshot } from './graphRuns';
+import { graphPath, graphIsActive, validGraphCollaboration, type GraphRunSnapshot, type GraphCollaborationPhase } from './graphRuns';
 import { TeamRunDetails } from './TeamRunDetails';
 import { useSaaSPreferences } from './preferences';
 import './graph-runs.css';
@@ -21,6 +21,8 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
   const current = items.find(item => item.id === selected) || items[0];
   const node = current?.nodes.find(item => item.nodeId === nodeId) || current?.nodes.find(item => item.runId) || current?.nodes[0];
   const active = items.some(graphIsActive);
+  const phase = (value: GraphCollaborationPhase) => ({ proposal: t('提案与修订', 'Proposal / revision'), review: t('交叉评议', 'Peer review'), synthesis: t('最终汇总', 'Final synthesis') }[value]);
+  const nodeTitle = (id: string) => current?.document?.nodes.find(item => item.id === id)?.title || id;
   const status = (value: string) => ({ queued: t('排队中', 'Queued'), waiting: t('等待上游', 'Waiting'), running: t('运行中', 'Running'),
     completed: t('完成', 'Completed'), done: t('完成', 'Completed'), failed: t('失败', 'Failed'), cancelled: t('已停止', 'Cancelled'),
     interrupted: t('已中断', 'Interrupted'), blocked: t('上游阻断', 'Blocked'), cached: t('沿用已有结果', 'Cached'), 'Graph cancelled': t('已停止', 'Cancelled') }[value] || value);
@@ -30,7 +32,8 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
       try {
         const result = await api<{ items: GraphRunSnapshot[] }>(graphPath(tenantId, canvasId), { signal: controller.signal });
         if (controller.signal.aborted) return;
-        if (!Array.isArray(result.items) || result.items.some(item => !item || typeof item.id !== 'string' || !Array.isArray(item.nodes))) throw new Error('Invalid graph run response');
+        if (!Array.isArray(result.items) || result.items.some(item => !item || typeof item.id !== 'string' || !Array.isArray(item.nodes)
+          || (item.collaboration != null && !validGraphCollaboration(item.collaboration, item.scope)))) throw new Error('Invalid graph run response');
         setItems(result.items); setError(null);
       } catch (error) { if (!controller.signal.aborted) setError(error); }
       if (!controller.signal.aborted) timer = setTimeout(() => void poll(), open ? 2000 : 5000);
@@ -62,12 +65,29 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
           }}>{t('停止整个任务', 'Stop entire task')}</button>}
         </div>
         {current.error && <p role="alert">{status(current.error)}</p>}
+        {current.collaboration && <section aria-label={t('选中节点互审过程', 'Selected-node collaboration')}>
+          <h3>{t('互审与汇总', 'Peer review and synthesis')}</h3>
+          <p>{current.collaboration.goal}</p>
+          <p>{phase(current.collaboration.phase)} · {t('第', 'Round')} {current.collaboration.round}/{current.collaboration.rounds}</p>
+          <p>{current.collaboration.turns.filter(turn => turn.runId).length}/{current.collaboration.maxModelCalls} {t('次调用已受理', 'calls admitted')} · {t('汇总节点：', 'Synthesizer: ')}{nodeTitle(current.collaboration.synthesizerNodeId)}</p>
+          {current.status === 'completed' && <p>{t('交叉评议后的汇总已完成。汇总结果尚未经过额外一轮独立复核。', 'Synthesis after peer review is complete. The synthesis has not had an additional independent review.')}</p>}
+          <ol>{[...current.collaboration.turns].sort((a, b) => a.ordinal - b.ordinal).map(turn => <li key={turn.ordinal}>
+            <details open={turn.status === 'running' || turn.status === 'failed' || turn.status === 'interrupted'}>
+              <summary>#{turn.ordinal} · {nodeTitle(turn.nodeId)} · {phase(turn.phase)} · {t('第', 'Round')} {turn.round} · {status(turn.status)}</summary>
+              {turn.runId ? <><p>{t('运行：', 'Run: ')}<code>{turn.runId}</code></p><p>Session: <code>{turn.sessionId || t('身份尚未读回', 'Identity not yet observed')}</code></p></>
+                : <p>{t('此步骤尚未派发模型调用。', 'No model call has been dispatched for this step.')}</p>}
+              {turn.output && <><p>{turn.phase === 'review' ? t('评议记录，不作为正式交付物', 'Review evidence; not a published deliverable')
+                : turn.phase === 'synthesis' && current.status === 'completed' ? t('汇总结果', 'Synthesis result') : t('候选结果', 'Candidate result')}</p><pre>{turn.output}</pre></>}
+              {turn.error && <p>{turn.error}</p>}
+            </details>
+          </li>)}</ol>
+        </section>}
         <nav aria-label={t('运行节点', 'Run nodes')}>{current.nodes.map(item => <button key={item.nodeId} aria-pressed={node?.nodeId === item.nodeId} onClick={() => setNodeId(item.nodeId)}>
           {current.document?.nodes.find(n => n.id === item.nodeId)?.title || item.nodeId} · {status(item.state)}
         </button>)}</nav>
-        {node && <><p>{node.detail && status(node.detail)}</p>{node.output && <details open><summary>{t('节点最终结果', 'Node result')}</summary><pre>{node.output}</pre></details>}</>}
-        {node?.runId ? <TeamRunDetails tenantId={tenantId} runId={node.runId} runStatus={node.state} defaultOpen />
-          : <p>{t('此节点还没有实际调用记录。', 'This node has no model call record yet.')}</p>}
+        {node && <><p>{node.detail && status(node.detail)}</p>{node.output && <details open><summary>{node.partial || (current.collaboration && (current.status !== 'completed' || node.nodeId !== current.collaboration.synthesizerNodeId)) ? t('节点候选结果', 'Node candidate result') : t('节点最终结果', 'Node result')}</summary><pre>{node.output}</pre></details>}</>}
+        {!current.collaboration && (node?.runId ? <TeamRunDetails tenantId={tenantId} runId={node.runId} runStatus={node.state} defaultOpen />
+          : <p>{t('此节点还没有实际调用记录。', 'This node has no model call record yet.')}</p>)}
       </>}
     </section>}
   </div>;

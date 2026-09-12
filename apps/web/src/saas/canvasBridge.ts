@@ -259,7 +259,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
     if (history) {
       if (decodeURIComponent(history[1]) !== scope.tenant.id) return json({ error: canvasText('租户与当前画布不一致', 'The workspace does not match the current canvas.') }, 403);
       const result = await request(`/sessions/${history[2]}/messages`);
-      return json({ complete: true, messages: result.items.map((item: any) => ({ body: item.content, runId: item.runId, ...(item.role === 'assistant' || item.role === 'agent' ? { authorAgentId: 'pi' } : {}) })) });
+      return json({ complete: true, messages: result.items.map((item: any) => ({ body: item.content, runId: item.runId,
+        ...(item.collaboration ? { collaboration: item.collaboration } : {}),
+        ...(item.role === 'assistant' || item.role === 'agent' ? { authorAgentId: 'pi' } : {}) })) });
     }
     const index = /^\/conversations\/([^/]+)$/.exec(path);
     if (index) {

@@ -4,7 +4,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
-import { currentSaaSCanvas } from '../saas/canvasBridge';
 
 const FIELD_TYPES: Array<{ value: ContractFieldType; label: CanvasTextKey }> = [
   { value: 'text', label: 'contract.text' },
@@ -78,7 +77,6 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
   const nextField = useRef(0);
   const errors = validateContractFields(resolvedFields ?? fields);
   const patch = (id: string, update: Partial<ContractField>) => {
-    if (update.type === 'html' && currentSaaSCanvas()) return;
     if (!readOnly) onChange(fields.map((field) => field.id === id ? { ...field, ...update } : field));
   };
   const add = () => {
@@ -101,8 +99,7 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
             disabled={readOnly} onChange={(event) => patch(field.id, { label: event.target.value })} />
           <select aria-label={t('contract.fieldType', { name })} value={field.type} disabled={readOnly}
             onChange={(event) => patch(field.id, { type: event.target.value as ContractFieldType })}>
-            {FIELD_TYPES.filter(type => type.value !== 'html' || !currentSaaSCanvas() || field.type === 'html')
-              .map((type) => <option key={type.value} value={type.value} disabled={type.value === 'html' && Boolean(currentSaaSCanvas())}>{t(type.label)}</option>)}
+            {FIELD_TYPES.map((type) => <option key={type.value} value={type.value}>{t(type.label)}</option>)}
           </select>
           <button type="button" className="awwo-field-remove" aria-label={t('contract.removeField', { name })} disabled={readOnly}
             onClick={() => !readOnly && onChange(fields.filter((candidate) => candidate.id !== field.id))}>

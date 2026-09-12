@@ -189,11 +189,32 @@ describe('durable team run details', () => {
   it('uses a general run label for single-agent records and rejects malformed or foreign responses', async () => {
     let phase = 'single';
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === path ? record('completed', phase === 'foreign' ? 'foreign-run' : 'run-a') : phase === 'malformed' ? { items: [{ id: 'broken' }] } : { items: [] })));
-    const rendered = render(view({ defaultOpen: true })); await screen.findByText('This run has no member collaboration records.');
+    const rendered = render(view({ defaultOpen: true }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Run process/ })).toHaveAttribute('aria-expanded', 'false'));
+    expect(screen.queryByText('This run has no member collaboration records.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Run process/ }));
+    await screen.findByText('This run has no member collaboration records.');
     expect(screen.getByRole('button', { name: /Run process/ })).toBeVisible(); expect(screen.queryByText('Team collaboration')).toBeNull();
     phase = 'malformed'; rendered.rerender(view({ defaultOpen: true, runStatus: 'new' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid member turn response.');
     phase = 'foreign'; fireEvent.click(screen.getByRole('button', { name: 'Retry reading records' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Invalid run record response.'));
+  });
+
+  it('observes active single-Agent calls, then folds empty completed details while preserving manual inspection', async () => {
+    vi.useFakeTimers(); let completed = false;
+    const fetcher = vi.fn(async (url: string) => json(url === path ? record(completed ? 'completed' : 'running') : { items: [] }));
+    vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true })); await flushTimers();
+    expect(screen.getByText(/No member records yet/)).toBeVisible();
+    completed = true; await flushTimers(2000);
+    const toggle = screen.getByRole('button', { name: /Run process/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveTextContent('Completed');
+    expect(screen.queryByText('This run has no member collaboration records.')).toBeNull();
+    fireEvent.click(toggle); await flushTimers();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Run status: Completed');
+    expect(screen.getByText('This run has no member collaboration records.')).toBeVisible();
+    const calls = fetcher.mock.calls.length; await flushTimers(6000); expect(fetcher).toHaveBeenCalledTimes(calls);
   });
 });

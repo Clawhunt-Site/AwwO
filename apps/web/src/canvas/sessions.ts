@@ -25,6 +25,16 @@ import type { NodeContract } from './nodeContracts';
 export type TurnRole = 'user' | 'agent' | 'system';
 export type TurnTone = 'info' | 'warn' | 'error';
 
+/** Server-attested graph turn identity; message-body markers never create this metadata. */
+export interface CollaborationMessageContext {
+  nodeId: string;
+  sessionId: string;
+  runId: string;
+  phase: 'proposal' | 'review' | 'synthesis';
+  round: number;
+  goal: string;
+}
+
 /** Display metadata never replaces the exact execution text or publishes a delivery. */
 export interface TurnPresentation {
   displayText?: string;
@@ -39,6 +49,7 @@ export interface Turn {
   text: string;
   tone?: TurnTone;
   presentation?: TurnPresentation;
+  collaboration?: CollaborationMessageContext;
   nativeCommentId?: string;
   nativeOperationId?: string;
   nativeRunId?: string;
