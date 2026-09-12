@@ -1,0 +1,19 @@
+{
+  "name": "@awwo/openai-agents-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test --test-concurrency=1 *.test.mjs",
+    "check": "node --check server.mjs && node --check runner.mjs && node --check agent-task.mjs && node --check config.mjs && node --check tools.mjs && node --check errors.mjs && node --check agent-runtime.mjs"
+  },
+  "dependencies": {
+    "@openai/agents": "0.18.0",
+    "openai": "7.15.0",
+    "zod": "4.6.2"
+  }
+}
