@@ -5,6 +5,7 @@ try {
   await Promise.all([
     run('npm', ['ci', '--prefix', 'apps/web']),
     run('npm', ['ci', '--ignore-scripts', '--prefix', 'apps/pi-worker']),
+    run('npm', ['ci', '--ignore-scripts', '--prefix', 'apps/openai-agents-worker']),
     run('go', ['mod', 'download'], { cwd: `${root}/backend` }),
   ]);
   await run('go', ['build', '-o', '../.local/awwo-saas/bin/awwo-api', './cmd/api'], { cwd: `${root}/backend` });

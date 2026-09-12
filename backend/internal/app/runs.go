@@ -24,51 +24,73 @@ type piHealth struct {
 	Status   string         `json:"status"`
 	Limits   map[string]any `json:"limits"`
 	Models   []piModel      `json:"models"`
+	Tools    []runtimeTool  `json:"tools,omitempty"`
+}
+type runtimeTool struct {
+	ID               string `json:"id"`
+	ContextTextBytes int    `json:"contextTextBytes"`
 }
 type piModel struct {
 	ID                   string `json:"id"`
 	Name                 string `json:"name"`
 	Provider             string `json:"provider"`
+	Runtime              string `json:"runtime"`
 	MaxContextTextBytes  int    `json:"maxContextTextBytes"`
 	MessageOverheadBytes int    `json:"messageOverheadBytes"`
 }
 
-func (a *App) probePI(ctx context.Context) (piHealth, error) {
-	var h piHealth
-	if a.cfg.PIToken == "" {
-		return h, errors.New("Pi service token is not configured")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	req, e := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(a.cfg.PIURL, "/")+"/health", nil)
-	if e != nil {
-		return h, e
-	}
-	resp, e := a.client.Do(req)
-	if e != nil {
-		return h, errors.New("Pi service is unavailable")
-	}
-	defer resp.Body.Close()
-	if e = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&h); e != nil || resp.StatusCode != 200 || !h.Ready {
-		return h, errors.New("Pi provider is not configured or available")
-	}
-	return h, nil
-}
+func (a *App) probePI(ctx context.Context) (piHealth, error) { return a.probeRuntime(ctx, runtimePI) }
 func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
-	h, e := a.probePI(r.Context())
-	models := []map[string]string{}
-	if h.Model != "" {
-		models = append(models, map[string]string{"id": h.Model, "provider": h.Provider})
+	type discovery struct {
+		h   piHealth
+		err error
 	}
-	if len(h.Models) > 0 {
-		models = []map[string]string{}
-		for _, m := range h.Models {
-			models = append(models, map[string]string{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": "pi"})
+	results := make(chan struct {
+		runtime string
+		discovery
+	}, 2)
+	for _, id := range []string{runtimePI, runtimeOpenAIAgents} {
+		go func(id string) {
+			h, err := a.probeRuntime(r.Context(), id)
+			results <- struct {
+				runtime string
+				discovery
+			}{id, discovery{h, err}}
+		}(id)
+	}
+	found := map[string]discovery{}
+	for range 2 {
+		result := <-results
+		found[result.runtime] = result.discovery
+	}
+	models, runtimes := []map[string]string{}, []map[string]any{}
+	available, configured := false, false
+	for _, id := range []string{runtimePI, runtimeOpenAIAgents} {
+		result := found[id]
+		h := result.h
+		_, _, configError := a.runtimeEndpoint(id)
+		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": false, "tools": enabledRuntimeTools(h, id)}
+		if result.err != nil {
+			descriptor["reason"] = result.err.Error()
+		} else {
+			descriptor["defaultModel"] = h.Model
+			seen := map[string]bool{}
+			for _, m := range h.Models {
+				models = append(models, map[string]string{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": id})
+				seen[m.ID] = true
+			}
+			if !seen[h.Model] {
+				models = append(models, map[string]string{"id": h.Model, "name": h.Model, "provider": h.Provider, "runtime": id})
+			}
 		}
+		available = available || result.err == nil
+		configured = configured || configError == nil
+		runtimes = append(runtimes, descriptor)
 	}
-	v := map[string]any{"engine": "pi", "configured": a.cfg.PIToken != "" && h.Ready, "available": e == nil, "plannerAvailable": e == nil, "models": models, "modelConnectivityVerified": false, "limits": h.Limits}
-	if e != nil {
-		v["reason"] = e.Error()
+	pi := found[runtimePI]
+	v := map[string]any{"engine": runtimePI, "configured": configured, "available": available, "plannerAvailable": pi.err == nil, "models": models, "runtimes": runtimes, "modelConnectivityVerified": false, "limits": pi.h.Limits}
+	if !available {
+		v["reason"] = "No configured runtime is available"
 	}
 	writeJSON(w, 200, v)
 }
@@ -143,8 +165,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
 		return
 	}
-	var model, instructions, kind string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind)
+	var model, instructions, kind, runtime string
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -162,16 +184,6 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "session_busy", "This session already has an active run")
 		return
 	}
-	health, e := a.probePI(r.Context())
-	if e != nil {
-		fail(w, 503, "runtime_unavailable", e.Error())
-		return
-	}
-	budget, overhead := health.contextLimits()
-	if _, _, ok := health.modelLimits(model); !ok {
-		fail(w, 409, "model_unavailable", "Agent model differs from the configured Pi model")
-		return
-	}
 	var document []byte
 	var nodeID string
 	if e = tx.QueryRow(r.Context(), "SELECT c.document,s.node_id FROM node_sessions s JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2", tid, b.SessionID).Scan(&document, &nodeID); e != nil {
@@ -183,19 +195,20 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_team", e.Error())
 		return
 	}
-	if e = validateTeamModels(team, health); e != nil {
-		fail(w, 400, "invalid_team", e.Error())
+	if !savedRuntimeMatches(document, nodeID, runtime) {
+		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 		return
 	}
-	if model == "" {
-		model = health.Model
+	snapshot, e := a.runtimeSnapshot(r.Context(), runtimeCatalog{}, runtime, model, instructions, team)
+	if e != nil {
+		a.runtimeAdmissionError(w, e)
+		return
 	}
-	budget, overhead, _ = health.modelLimits(model)
+	budget, overhead := snapshot.Budget, snapshot.Overhead
 	if team == nil && len(b.Prompt)+len(instructions)+overhead > budget {
-		fail(w, 413, "context_limit", "Prompt and instructions exceed the configured model context budget")
+		fail(w, 413, "context_limit", "Prompt and instructions exceed the selected runtime context budget")
 		return
 	}
-	snapshot := executionSnapshot{Instructions: instructions, Model: model, Budget: budget, Overhead: overhead, Team: team, Health: health}
 	if team != nil {
 		history, available, err := completedTeamHistory(r.Context(), tx, tid, b.SessionID)
 		if err != nil {
@@ -310,12 +323,18 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	} else {
 		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions), budget, overhead)
 	}
-	body, e := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": "pi"})
+	body, e := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": defaultRuntime(snapshot.Runtime)})
 	if e != nil {
 		a.finish(tid, id, "failed", "", "invalid_request")
 		return
 	}
-	resp, e := a.admitPI(ctx, body)
+	runtimeCompleted := false
+	defer func() {
+		if !runtimeCompleted {
+			a.cancelRuntime(defaultRuntime(snapshot.Runtime), id)
+		}
+	}()
+	resp, e := a.admitRuntime(ctx, defaultRuntime(snapshot.Runtime), body)
 	if e != nil {
 		if errors.Is(e, errSessionBusy) {
 			a.finish(tid, id, "failed", "", "runtime_session_busy")
@@ -383,6 +402,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				output.Reset()
 				output.WriteString(ev.Text)
 			}
+			runtimeCompleted = true
 			a.finish(tid, id, "completed", output.String(), "")
 			return
 		case "failed":
@@ -573,19 +593,25 @@ func (a *App) cancelExecution(id string) {
 	if cancel != nil {
 		cancel()
 	}
-	a.cancelPI(id)
+	// The active single-Agent request or each team turn performs its own
+	// bounded cleanup against the exact worker and submitted ID.
 }
 
-// A Pi request is keyed by its submitted runId. Team members submit their turn
+// A worker request is keyed by its submitted runId. Team members submit their turn
 // ID, whereas a single-Agent request submits the public run ID.
-func (a *App) cancelPI(id string) {
+func (a *App) cancelPI(id string) { a.cancelRuntime(runtimePI, id) }
+func (a *App) cancelRuntime(runtime, id string) {
+	endpoint, token, err := a.runtimeEndpoint(runtime)
+	if err != nil {
+		return
+	}
 	ctx, done := context.WithTimeout(context.Background(), 2*time.Second)
 	defer done()
-	req, e := http.NewRequestWithContext(ctx, "DELETE", strings.TrimRight(a.cfg.PIURL, "/")+"/internal/runs/"+id, nil)
+	req, e := http.NewRequestWithContext(ctx, "DELETE", endpoint+"/internal/runs/"+id, nil)
 	if e != nil {
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+a.cfg.PIToken)
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, e := a.client.Do(req)
 	if e == nil {
 		resp.Body.Close()
@@ -773,14 +799,21 @@ var errSessionBusy = errors.New("Pi session cleanup did not finish within admiss
 // a child. Only that response may be retried. Network errors, RUN_BUSY, capacity
 // errors and streams already accepted with HTTP 200 are never retried here.
 func (a *App) admitPI(ctx context.Context, body []byte) (*http.Response, error) {
+	return a.admitRuntime(ctx, runtimePI, body)
+}
+func (a *App) admitRuntime(ctx context.Context, runtime string, body []byte) (*http.Response, error) {
+	endpoint, token, err := a.runtimeEndpoint(runtime)
+	if err != nil {
+		return nil, err
+	}
 	deadline := time.Now().Add(a.cfg.PIAdmissionWait)
 	delay := 50 * time.Millisecond
 	for {
-		req, e := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(a.cfg.PIURL, "/")+"/internal/runs", bytes.NewReader(body))
+		req, e := http.NewRequestWithContext(ctx, "POST", endpoint+"/internal/runs", bytes.NewReader(body))
 		if e != nil {
 			return nil, e
 		}
-		req.Header.Set("Authorization", "Bearer "+a.cfg.PIToken)
+		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
 		resp, e := a.client.Do(req)
 		if e != nil {

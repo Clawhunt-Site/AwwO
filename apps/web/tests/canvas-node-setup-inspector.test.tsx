@@ -35,7 +35,7 @@ describe('SaaS node configuration save', () => {
     const p = props({ onInitialize: initialize, onClose: close, onCloseLockChange: value => { locked = value; } });
     render(<InspectorPanel {...p} />);
     expect(screen.getByText('当前工作区：当前项目')).toBeInTheDocument();
-    expect(screen.getByText('未指定时使用服务端默认 Pi 运行时与模型。')).toBeInTheDocument();
+    expect(screen.getByText('未指定执行框架时使用 Pi；未指定模型时使用所选执行框架的服务端默认模型。')).toBeInTheDocument();
     expect(screen.queryByText('绑定真实 Agent')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('绑定到公司')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '绑定并创建真实 Agent' })).not.toBeInTheDocument();
@@ -78,7 +78,7 @@ describe('SaaS node configuration save', () => {
     const p = props({ node: { ...createSessionNode('image', { x: 0, y: 0 }), id: 'image-draft' } });
     render(<InspectorPanel {...p} />);
     expect(screen.getByRole('radio', { name: '图像 Agent' })).toBeDisabled();
-    expect(screen.getByText('Pi 当前支持文本与编程任务；图像任务尚不可用。')).toBeInTheDocument();
+    expect(screen.getByText('Pi 和 OpenAI Agents JS 支持文本与编程任务；图像任务及单独设置思考强度尚不可用。')).toBeInTheDocument();
     expect(screen.getByLabelText('人设 / 系统提示词')).toHaveAttribute('placeholder', '这个 Agent 是谁、偏好什么、必须遵守什么…（保存时生效）');
     expect(screen.getByRole('button', { name: '保存并准备运行' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '保存并准备运行' }));
@@ -149,7 +149,7 @@ describe('SaaS node configuration save', () => {
     const p = props({ onInitialize: vi.fn().mockRejectedValue(null), liveCompanies: [] });
     render(<LocaleProvider locale="en"><InspectorPanel {...p} /></LocaleProvider>);
     expect(screen.queryByText('Create company')).not.toBeInTheDocument();
-    expect(screen.getByText('Unspecified settings use the server’s default Pi runtime and model.')).toBeInTheDocument();
+    expect(screen.getByText('An unspecified runtime uses Pi. An unspecified model uses the selected runtime’s server default.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save and prepare to run' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed. Your draft is kept: Saving could not complete. Try again.');
   });

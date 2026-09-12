@@ -211,7 +211,7 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 			if n.Binding == nil || n.Binding.AgentID == "" {
 				return d, nil, errors.New("Runnable node is not bound to an agent")
 			}
-			if n.Runtime != "" && n.Runtime != "pi" {
+			if !validRuntime(defaultRuntime(n.Runtime)) {
 				return d, nil, errors.New("Unsupported node runtime")
 			}
 			if err := validateTeam(n.Team); err != nil {

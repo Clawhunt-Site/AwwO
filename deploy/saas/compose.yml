@@ -46,6 +46,43 @@ services:
     init: true
     restart: unless-stopped
     networks: [private, egress]
+  openai-agents:
+    build:
+      context: ../..
+      dockerfile: deploy/saas/openai-agents.Dockerfile
+    # Only this worker receives its optional profile-specific credentials.
+    env_file:
+      - path: ${AWWO_OPENAI_AGENTS_PROFILES_ENV_FILE:-./openai-agents-profiles.env}
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      AWWO_OPENAI_AGENTS_HOST: 0.0.0.0
+      AWWO_OPENAI_AGENTS_PORT: 8098
+      AWWO_OPENAI_AGENTS_TOKEN: ${AWWO_OPENAI_AGENTS_TOKEN:?Set a dedicated OpenAI Agents internal token}
+      AWWO_OPENAI_AGENTS_PROVIDER: ${AWWO_OPENAI_AGENTS_PROVIDER:-openai}
+      AWWO_OPENAI_AGENTS_MODEL: ${AWWO_OPENAI_AGENTS_MODEL:-}
+      AWWO_OPENAI_AGENTS_BASE_URL: ${AWWO_OPENAI_AGENTS_BASE_URL:-}
+      AWWO_OPENAI_AGENTS_API_KEY: ${AWWO_OPENAI_AGENTS_API_KEY:-}
+      AWWO_OPENAI_AGENTS_PROTOCOL: ${AWWO_OPENAI_AGENTS_PROTOCOL:-chat_completions}
+      AWWO_OPENAI_AGENTS_MODELS_JSON: ${AWWO_OPENAI_AGENTS_MODELS_JSON:-}
+      AWWO_OPENAI_AGENTS_TOOLS_JSON: ${AWWO_OPENAI_AGENTS_TOOLS_JSON:-[]}
+      AWWO_OPENAI_AGENTS_MAX_CONCURRENCY: ${AWWO_OPENAI_AGENTS_MAX_CONCURRENCY:-4}
+      AWWO_OPENAI_AGENTS_CONTEXT_WINDOW: ${AWWO_OPENAI_AGENTS_CONTEXT_WINDOW:-32768}
+      AWWO_OPENAI_AGENTS_MAX_TOKENS: ${AWWO_OPENAI_AGENTS_MAX_TOKENS:-4096}
+      AWWO_OPENAI_AGENTS_TIMEOUT_MS: ${AWWO_OPENAI_AGENTS_TIMEOUT_MS:-120000}
+      AWWO_OPENAI_AGENTS_CANCEL_GRACE_MS: ${AWWO_OPENAI_AGENTS_CANCEL_GRACE_MS:-2000}
+      AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES: ${AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES:-1048576}
+      OPENAI_AGENTS_DISABLE_TRACING: "1"
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    init: true
+    restart: unless-stopped
+    networks: [private, egress]
   api:
     build:
       context: ../..
@@ -58,12 +95,15 @@ services:
       AWWO_PI_URL: http://pi:8097
       AWWO_PI_SESSION_WAIT: ${AWWO_PI_SESSION_WAIT:-5s}
       AWWO_PI_TOKEN: ${AWWO_PI_TOKEN:?Set a dedicated internal token}
+      AWWO_OPENAI_AGENTS_URL: http://openai-agents:8098
+      AWWO_OPENAI_AGENTS_TOKEN: ${AWWO_OPENAI_AGENTS_TOKEN:?Set a dedicated OpenAI Agents internal token}
       AWWO_BOOTSTRAP_ADMIN_EMAIL: ${AWWO_BOOTSTRAP_ADMIN_EMAIL:?Set the initial administrator email}
       AWWO_BOOTSTRAP_ADMIN_PASSWORD: ${AWWO_BOOTSTRAP_ADMIN_PASSWORD:?Set an initial administrator password}
       AWWO_TRUSTED_PROXY_CIDRS: ${AWWO_TRUSTED_PROXY_CIDRS:-}
     depends_on:
       database: { condition: service_healthy }
       pi: { condition: service_started }
+      openai-agents: { condition: service_started }
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

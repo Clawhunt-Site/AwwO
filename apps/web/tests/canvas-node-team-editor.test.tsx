@@ -3,17 +3,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { NodeTeamEditor } from '../src/canvas/NodeTeamEditor';
-import { createNodeTeam } from '../src/canvas/nodeTeam';
+import { createNodeTeam, type NodeTeamRuntime, type NodeTeamTool } from '../src/canvas/nodeTeam';
 import { InspectorPanel } from '../src/canvas/InspectorPanel';
 import { LocaleProvider as CanvasI18nProvider } from '../src/canvas/i18n';
 import { SessionTile } from '../src/canvas/SessionTile';
 const readJson = vi.fn(async (path: string) => path.endsWith('/models') ? { models: ['model-a', 'model-b'] } : { agents: [{ name: 'pi', supports_model_selection: true, supports_node_teams: true }] });
 function session(): SessionNode { return { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'node-a', title: '研究', persona: 'Check the source.', model: 'model-a', runtime: 'pi' }; }
-function Harness({ initial = session(), disabled = false, available = true, read = readJson, onChange = vi.fn() }: {
-  initial?: SessionNode; disabled?: boolean; available?: boolean; read?: typeof readJson; onChange?: ReturnType<typeof vi.fn>;
+function Harness({ initial = session(), disabled = false, available = true, read = readJson, onChange = vi.fn(), runtimes, runtimeTools }: {
+  initial?: SessionNode; disabled?: boolean; available?: boolean; read?: (path: string) => Promise<any>; onChange?: ReturnType<typeof vi.fn>;
+  runtimes?: NodeTeamRuntime[]; runtimeTools?: Partial<Record<NodeTeamRuntime, NodeTeamTool[]>>;
 }) {
   const [node, setNode] = useState(initial);
-  return <NodeTeamEditor node={node} available={available} readJson={read} disabled={disabled} onChange={team => { onChange(team); setNode({ ...node, team }); }} />;
+  return <NodeTeamEditor node={node} available={available} readJson={read} runtimes={runtimes} runtimeTools={runtimeTools} disabled={disabled} onChange={team => { onChange(team); setNode({ ...node, team }); }} />;
 }
 function member(index: number) { return within(screen.getByRole('group', { name: `Agent ${index}` })); }
 async function enable() { fireEvent.click(screen.getByRole('checkbox', { name: '启用多 Agent 协作' })); await waitFor(() => expect(member(1).getByLabelText('模型')).not.toBeDisabled()); }
@@ -90,18 +91,18 @@ describe('node team configuration', () => {
     rerender(<Harness initial={initial} disabled={false} onChange={save} />); expect(member(1).getByLabelText('职责')).toHaveValue('执行者');
   });
   it('does not enable teams when the host lacks Pi', () => {
-    render(<Harness available={false} />); expect(screen.getByRole('checkbox')).toBeDisabled(); expect(screen.getByText(/当前运行环境未提供 Pi/)).toBeInTheDocument();
+    render(<Harness available={false} />); expect(screen.getByRole('checkbox')).toBeDisabled(); expect(screen.getByText(/当前运行环境未提供团队/)).toBeInTheDocument();
   });
   it('requires explicit team capability even when a legacy host lists Pi', async () => {
     const legacyRead = vi.fn(async () => ({ agents: [{ name: 'pi' }] }));
     render(<InspectorPanel node={session()} liveCompanies={[]} apiBase="/api" readJson={legacyRead} onSave={vi.fn()} onClose={vi.fn()} />);
     await waitFor(() => expect(legacyRead).toHaveBeenCalled());
     expect(screen.getByRole('checkbox', { name: '启用多 Agent 协作' })).toBeDisabled();
-    expect(screen.getByText(/当前运行环境未提供 Pi/)).toBeInTheDocument();
+    expect(screen.getByText(/当前运行环境未提供团队/)).toBeInTheDocument();
   });
   it('reports catalog failure and retries without inventing model options', async () => {
     const read = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ models: ['model-a'] }); render(<Harness read={read} />);
-    fireEvent.click(screen.getByRole('checkbox')); await screen.findByText(/Pi 模型清单读取失败/); expect(member(1).getByLabelText('模型')).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox')); await screen.findByText(/模型清单读取失败/); expect(member(1).getByLabelText('模型')).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '重试模型清单' })); await waitFor(() => expect(member(1).getByLabelText('模型')).not.toBeDisabled()); expect(read).toHaveBeenCalledTimes(2);
   });
   it('blocks inspector save for stale models/invalid limits and saves corrected team settings', async () => {
@@ -120,5 +121,70 @@ describe('node team configuration', () => {
     expect(screen.getByText(/Shared session history includes completed user exchanges/)).toHaveTextContent('not every earlier member response');
     unmount(); render(<CanvasI18nProvider locale="en"><SessionTile node={initial} compact scale={1} focused={false} /></CanvasI18nProvider>);
     expect(screen.getByTestId('node-team-badge-node-a')).toHaveTextContent('2 Agent · Parallel and aggregate');
+  });
+});
+
+const mixedRuntimes: NodeTeamRuntime[] = ['pi', 'openai-agents'];
+const allowedTools: Partial<Record<NodeTeamRuntime, NodeTeamTool[]>> = { 'openai-agents': ['calculator', 'current_time'] };
+const mixedRead = async (path: string) => ({ models: path.includes('/openai-agents/') ? ['agents-only', 'shared-id'] : ['model-a', 'pi-only', 'shared-id'] });
+describe('OpenAI Agents JS team configuration', () => {
+  it('loads each member runtime catalog, resets portable settings and allows only advertised tools', async () => {
+    const save = vi.fn(); const read = vi.fn(mixedRead);
+    render(<Harness read={read} onChange={save} runtimes={mixedRuntimes} runtimeTools={allowedTools} />); await enable();
+    fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'openai-agents' } });
+    await waitFor(() => expect(member(2).getByLabelText('模型')).not.toBeDisabled());
+    expect(read).toHaveBeenCalledWith('/api/agents/openai-agents/models');
+    expect(within(member(2).getByLabelText('模型')).getAllByRole('option').map(option => option.getAttribute('value'))).toEqual(['', 'agents-only', 'shared-id']);
+    expect(member(2).getByRole('option', { name: '使用此执行框架的服务默认模型' })).toHaveValue('');
+    expect(member(1).queryByRole('checkbox', { name: /计算器/ })).toBeNull();
+    fireEvent.change(member(2).getByLabelText('模型'), { target: { value: 'agents-only' } });
+    fireEvent.click(member(2).getByRole('checkbox', { name: /计算器/ }));
+    fireEvent.click(member(2).getByRole('checkbox', { name: /当前时间/ }));
+    expect(save.mock.lastCall![0].members[1]).toMatchObject({ runtime: 'openai-agents', model: 'agents-only', tools: ['calculator', 'current_time'] });
+    expect(screen.queryByLabelText('思考强度')).toBeNull();
+    fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'pi' } });
+    expect(save.mock.lastCall![0].members[1]).toMatchObject({ runtime: 'pi', model: '', tools: [] });
+    expect(member(2).queryByRole('checkbox', { name: /计算器/ })).toBeNull();
+    await waitFor(() => expect(member(2).getByLabelText('模型')).not.toBeDisabled());
+  });
+  it('changing the team default resets inherited members but retains explicit Pi members', async () => {
+    const initial = session(); initial.team = createNodeTeam(initial); initial.team.members[1].runtime = 'pi'; initial.team.members[1].model = 'pi-only';
+    const save = vi.fn(); render(<Harness initial={initial} read={mixedRead} runtimes={mixedRuntimes} runtimeTools={allowedTools} onChange={save} />);
+    await waitFor(() => expect(member(1).getByLabelText('模型')).not.toBeDisabled());
+    fireEvent.change(screen.getByLabelText('团队默认执行框架'), { target: { value: 'openai-agents' } });
+    expect(save.mock.lastCall![0]).toMatchObject({ runtime: 'openai-agents', members: [expect.objectContaining({ runtime: '', model: '', tools: [] }), expect.objectContaining({ runtime: 'pi', model: 'pi-only' })] });
+    await waitFor(() => expect(member(1).getByLabelText('模型')).not.toBeDisabled());
+    expect(member(1).getByRole('option', { name: 'agents-only' })).toBeInTheDocument();
+    expect(member(2).queryByRole('option', { name: 'agents-only' })).toBeNull();
+  });
+  it('ignores late catalogs after runtime changes and preserves unknown saved models visibly', async () => {
+    let resolveAgents!: (value: unknown) => void;
+    const read = vi.fn((path: string): Promise<any> => path.includes('/openai-agents/') ? new Promise(resolve => { resolveAgents = resolve; }) : mixedRead(path));
+    render(<Harness read={read} runtimes={mixedRuntimes} />); await enable();
+    fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'openai-agents' } });
+    expect(member(2).getByLabelText('模型')).toBeDisabled();
+    fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'pi' } });
+    await waitFor(() => expect(member(2).getByLabelText('模型')).not.toBeDisabled());
+    resolveAgents({ models: ['late-agents-model'] });
+    await waitFor(() => expect(member(2).getByRole('option', { name: 'pi-only' })).toBeInTheDocument());
+    expect(screen.queryByRole('option', { name: 'late-agents-model' })).toBeNull();
+  });
+  it('keeps saved models and tools visible when the catalog changes, blocking save until corrected', async () => {
+    const node = session(); node.team = createNodeTeam(node); node.team.members[1] = { ...node.team.members[1], runtime: 'openai-agents', model: 'retired-agents', tools: ['calculator'] };
+    const validity = vi.fn();
+    render(<NodeTeamEditor node={node} available runtimes={mixedRuntimes} runtimeTools={{ 'openai-agents': [] }} readJson={mixedRead} onChange={vi.fn()} onValidityChange={validity} />);
+    await screen.findByText(/此模型不在当前 OpenAI Agents JS 模型清单/);
+    expect(member(2).getByLabelText('模型')).toHaveValue('retired-agents');
+    expect(member(2).getByRole('checkbox', { name: /计算器/ })).toBeChecked();
+    expect(screen.getByRole('alert')).toHaveTextContent('当前服务目录未提供此工具');
+    expect(validity).toHaveBeenLastCalledWith(false);
+  });
+  it('preserves tools during read-only viewing and guards synthetic changes', async () => {
+    const node = { ...session(), runtime: 'openai-agents', model: 'agents-only' }; node.team = createNodeTeam(node); node.team.members[0].tools = ['calculator'];
+    const save = vi.fn(); render(<Harness initial={node} read={mixedRead} disabled runtimes={mixedRuntimes} runtimeTools={allowedTools} onChange={save} />);
+    await screen.findAllByRole('option', { name: 'agents-only' });
+    const calculator = member(1).getByRole('checkbox', { name: /计算器/ }); expect(calculator).toBeChecked(); expect(calculator).toBeDisabled();
+    fireEvent.click(calculator); fireEvent.change(member(1).getByLabelText('执行框架'), { target: { value: 'pi' } });
+    expect(save).not.toHaveBeenCalled();
   });
 });

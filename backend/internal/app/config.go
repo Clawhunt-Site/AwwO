@@ -13,6 +13,7 @@ import (
 
 type Config struct {
 	Env, DatabaseURL, ListenAddr, PublicOrigin, PIURL, PIToken, AdminEmail, AdminPassword string
+	OpenAIAgentsURL, OpenAIAgentsToken                                                    string
 	SessionTTL, RunTimeout                                                                time.Duration
 	PIAdmissionWait                                                                       time.Duration
 	MaxBodyBytes                                                                          int64
@@ -23,6 +24,7 @@ type Config struct {
 func ConfigFromEnv() (Config, error) {
 	c := Config{Env: env("APP_ENV", "development"), DatabaseURL: os.Getenv("AWWO_DATABASE_URL"), ListenAddr: env("AWWO_LISTEN_ADDR", "127.0.0.1:8087"), PublicOrigin: env("AWWO_PUBLIC_ORIGIN", "http://127.0.0.1:5189"), PIURL: env("AWWO_PI_URL", "http://127.0.0.1:8097"), PIToken: os.Getenv("AWWO_PI_TOKEN"), AdminEmail: os.Getenv("AWWO_BOOTSTRAP_ADMIN_EMAIL"), AdminPassword: os.Getenv("AWWO_BOOTSTRAP_ADMIN_PASSWORD"), SessionTTL: 24 * time.Hour, RunTimeout: 180 * time.Second, MaxBodyBytes: 2 << 20, AuthRequestsPerMinute: 10}
 	c.PIAdmissionWait = 5 * time.Second
+	c.OpenAIAgentsURL, c.OpenAIAgentsToken = os.Getenv("AWWO_OPENAI_AGENTS_URL"), os.Getenv("AWWO_OPENAI_AGENTS_TOKEN")
 	for key, dst := range map[string]*time.Duration{"AWWO_SESSION_TTL": &c.SessionTTL, "AWWO_RUN_TIMEOUT": &c.RunTimeout, "AWWO_PI_SESSION_WAIT": &c.PIAdmissionWait} {
 		if s := os.Getenv(key); s != "" {
 			v, e := time.ParseDuration(s)
@@ -86,6 +88,18 @@ func (c Config) Validate() error {
 	}
 	if c.PIToken != "" && len(c.PIToken) < 32 {
 		return errors.New("AWWO_PI_TOKEN must be at least 32 characters")
+	}
+	if (c.OpenAIAgentsURL == "") != (c.OpenAIAgentsToken == "") {
+		return errors.New("AWWO_OPENAI_AGENTS_URL and AWWO_OPENAI_AGENTS_TOKEN must be configured together")
+	}
+	if c.OpenAIAgentsURL != "" {
+		u, e := url.Parse(c.OpenAIAgentsURL)
+		if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return errors.New("invalid AWWO_OPENAI_AGENTS_URL")
+		}
+		if len(c.OpenAIAgentsToken) < 32 || strings.ContainsAny(c.OpenAIAgentsToken, "\r\n") {
+			return errors.New("AWWO_OPENAI_AGENTS_TOKEN must be at least 32 characters")
+		}
 	}
 	if strings.Contains(c.PublicOrigin, "example.com") && c.Env != "development" {
 		return errors.New("replace the public origin placeholder")

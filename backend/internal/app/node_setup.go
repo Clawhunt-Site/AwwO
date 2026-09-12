@@ -114,20 +114,34 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_scope", e.Error())
 		return
 	}
-	var health piHealth
-	if len(selected) > 0 {
-		health, e = a.probePI(r.Context())
-		if e != nil {
-			fail(w, 503, "runtime_unavailable", e.Error())
-			return
-		}
-	}
+	catalog := runtimeCatalog{}
 	changed := false
 	for i, original := range nodes {
 		if !selected[i] {
 			continue
 		}
-		updated, err := a.initializeNode(r.Context(), tx, tid, cid, original, health)
+		var selection struct{ Runtime, Model, Persona string }
+		if json.Unmarshal(original, &selection) != nil {
+			fail(w, 400, "invalid_node_setup", "Invalid node configuration")
+			return
+		}
+		var identity struct{ ID string }
+		_ = json.Unmarshal(original, &identity)
+		team, err := savedNodeTeam(raw, identity.ID)
+		if err != nil {
+			fail(w, 400, "invalid_node_setup", err.Error())
+			return
+		}
+		if _, err = a.runtimeSnapshot(r.Context(), catalog, selection.Runtime, selection.Model, selection.Persona, team); err != nil {
+			var input setupError
+			if errors.As(err, &input) {
+				fail(w, 400, "invalid_node_setup", input.message)
+				return
+			}
+			a.runtimeAdmissionError(w, err)
+			return
+		}
+		updated, err := a.initializeNode(r.Context(), tx, tid, cid, original, catalog)
 		if err != nil {
 			var input setupError
 			if errors.As(err, &input) {
@@ -201,7 +215,7 @@ func setupScope(nodes []json.RawMessage, scope []string) (map[int]bool, error) {
 	return selected, nil
 }
 
-func setupConfig(raw json.RawMessage, health piHealth) (setupConfiguration, error) {
+func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguration, error) {
 	var n struct{ ID, Title, Runtime, Model, Persona, AgentKind, Effort string }
 	if json.Unmarshal(raw, &n) != nil {
 		return setupConfiguration{}, invalidSetup("Node configuration contains invalid field types")
@@ -212,14 +226,18 @@ func setupConfig(raw json.RawMessage, health piHealth) (setupConfiguration, erro
 	if n.AgentKind == "" {
 		n.AgentKind = "llm"
 	}
-	if n.Runtime != "pi" || (n.AgentKind != "llm" && n.AgentKind != "coding") || n.Effort != "" {
-		return setupConfiguration{}, invalidSetup("Only Pi text/coding nodes without an explicit effort setting are supported")
+	if !validRuntime(n.Runtime) || (n.AgentKind != "llm" && n.AgentKind != "coding") || n.Effort != "" {
+		return setupConfiguration{}, invalidSetup("Only supported runtime text/coding nodes without an explicit effort setting are supported")
+	}
+	health, ok := catalog[n.Runtime]
+	if !ok {
+		return setupConfiguration{}, invalidSetup("Node runtime is unavailable")
 	}
 	if n.Model == "" {
 		n.Model = health.Model
 	}
 	if n.Model == "" {
-		return setupConfiguration{}, invalidSetup("Pi has no default model configured")
+		return setupConfiguration{}, invalidSetup("Runtime has no default model configured")
 	}
 	if _, _, ok := health.modelLimits(n.Model); !ok {
 		return setupConfiguration{}, invalidSetup("Node selects an unavailable model")
@@ -236,24 +254,15 @@ func setupConfig(raw json.RawMessage, health piHealth) (setupConfiguration, erro
 	if err != nil {
 		return setupConfiguration{}, invalidSetup(err.Error())
 	}
-	if err = validateTeamModels(team, health); err != nil {
+	team, err = resolveTeam(team, n.Runtime, n.Model, catalog)
+	if err != nil {
 		return setupConfiguration{}, invalidSetup(err.Error())
-	}
-	// Persist the effective member values, so an inheritance spelling change
-	// does not spuriously fork a conversation with identical execution settings.
-	if team != nil {
-		for i := range team.Members {
-			team.Members[i].Runtime = "pi"
-			if team.Members[i].Model == "" {
-				team.Members[i].Model = n.Model
-			}
-		}
 	}
 	return setupConfiguration{Name: name, AgentKind: n.AgentKind, Runtime: n.Runtime, Model: n.Model, Persona: n.Persona, Team: team}, nil
 }
 
-func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, raw json.RawMessage, health piHealth) (json.RawMessage, error) {
-	config, err := setupConfig(raw, health)
+func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, raw json.RawMessage, catalog runtimeCatalog) (json.RawMessage, error) {
+	config, err := setupConfig(raw, catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -268,13 +277,13 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 	}
 	oldConfig := setupConfiguration{Runtime: "pi"}
 	if old != nil {
-		if err = tx.QueryRow(ctx, "SELECT name,model,instructions FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, old.AgentID).Scan(&oldConfig.Name, &oldConfig.Model, &oldConfig.Persona); noRows(err) {
+		if err = tx.QueryRow(ctx, "SELECT name,model,instructions,runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, old.AgentID).Scan(&oldConfig.Name, &oldConfig.Model, &oldConfig.Persona, &oldConfig.Runtime); noRows(err) {
 			return nil, missingSetupReference()
 		} else if err != nil {
 			return nil, err
 		}
 		if oldConfig.Model == "" {
-			oldConfig.Model = health.Model
+			oldConfig.Model = catalog[oldConfig.Runtime].Model
 		}
 		old.CompanyID, old.AgentName = tid, oldConfig.Name
 	}
@@ -296,7 +305,7 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		return nil, invalidSetup("Active thread and node conversation must agree before initialization")
 	}
 	configRaw, _ := json.Marshal(config)
-	changed := old != nil && (oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Persona != config.Persona)
+	changed := old != nil && (oldConfig.Runtime != config.Runtime || oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Persona != config.Persona)
 	if sid != "" {
 		if len(priorSnapshot) > 0 {
 			changed = changed || !equalJSON(priorSnapshot, configRaw)
@@ -307,7 +316,7 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 	binding := old
 	if old == nil || changed {
 		binding = &setupBinding{CompanyID: tid, AgentID: randomID(), AgentName: config.Name}
-		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions) VALUES($1,$2,$3,$4,$5)", binding.AgentID, tid, config.Name, config.Model, config.Persona); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions,runtime) VALUES($1,$2,$3,$4,$5,$6)", binding.AgentID, tid, config.Name, config.Model, config.Persona, config.Runtime); err != nil {
 			return nil, err
 		}
 	}

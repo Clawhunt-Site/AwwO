@@ -11,6 +11,7 @@
     "build:saas": "npm run build:saas --prefix apps/web",
     "test:saas:scripts": "node --test scripts/awwo-saas-scripts.test.mjs",
     "test:saas:pi": "npm test --prefix apps/pi-worker",
+    "test:saas:openai-agents": "npm test --prefix apps/openai-agents-worker",
     "test:saas:backend": "node scripts/awwo-saas-test-backend.mjs",
     "test:saas:smoke": "node scripts/awwo-saas-smoke.mjs",
     "test:saas:stack": "node --test scripts/awwo-saas-stack.test.mjs",

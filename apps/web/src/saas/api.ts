@@ -17,6 +17,8 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number };
 export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[] };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
+/** API Agent runtime is persisted independently of a canvas draft. Legacy records default to Pi. */
+export type SaaSAgent = { id: string; tenantId: string; name: string; runtime?: 'pi' | 'openai-agents'; model: string; instructions?: string; status?: string };
 export const tenantPath = (tenantId: string, suffix = '') => `/tenants/${encodeURIComponent(tenantId)}${suffix}`;
 
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
