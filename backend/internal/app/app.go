@@ -161,7 +161,7 @@ func (a *App) Handler() http.Handler {
 			fail(w, 503, "database_unavailable", "Database unavailable")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"status": "ok", "environment": a.cfg.Env})
+		writeJSON(w, 200, map[string]any{"status": "ok", "environment": a.cfg.Env, "revision": BuildRevision()})
 	})
 	m.HandleFunc("GET /api/v1/runtime", a.auth(a.runtime))
 	m.HandleFunc("POST /api/v1/auth/register", a.authRate(a.register))
