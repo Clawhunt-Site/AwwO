@@ -100,8 +100,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_graph", e.Error())
 		return
 	}
-	health, e := a.probePI(r.Context())
-	hasSession := false
+	catalog := runtimeCatalog{}
 	in := map[string]bool{}
 	needed := map[string]bool{}
 	for _, id := range scope {
@@ -112,15 +111,6 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		if in[edge.ToNode] {
 			needed[edge.FromNode] = true
 		}
-	}
-	for _, n := range d.Nodes {
-		if in[n.ID] && n.Kind == "session" {
-			hasSession = true
-		}
-	}
-	if e != nil && hasSession {
-		fail(w, 503, "runtime_unavailable", e.Error())
-		return
 	}
 	id := randomID()
 	scopeRaw, _ := json.Marshal(scope)
@@ -153,8 +143,8 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 404, "not_found", "Node binding does not belong to this workspace")
 				return
 			}
-			var model, instructions string
-			e = tx.QueryRow(r.Context(), "SELECT model,instructions FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions)
+			var model, instructions, runtime string
+			e = tx.QueryRow(r.Context(), "SELECT model,instructions,runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions, &runtime)
 			if noRows(e) {
 				fail(w, 404, "not_found", "Node agent not found in workspace")
 				return
@@ -168,19 +158,15 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, "invalid_team", e.Error())
 				return
 			}
-			if e = validateTeamModels(team, health); e != nil {
-				fail(w, 400, "invalid_team", e.Error())
+			if !savedRuntimeMatches(raw, n.ID, runtime) {
+				fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 				return
 			}
-			if model == "" {
-				model = health.Model
-			}
-			budget, overhead, ok := health.modelLimits(model)
-			if !ok {
-				fail(w, 409, "model_unavailable", "Node model is unavailable")
+			snap, e = a.runtimeSnapshot(r.Context(), catalog, runtime, model, instructions, team)
+			if e != nil {
+				a.runtimeAdmissionError(w, e)
 				return
 			}
-			snap = executionSnapshot{Instructions: instructions, Model: model, Budget: budget, Overhead: overhead, Team: team, Health: health}
 			sid = n.IssueID
 			if sid != "" {
 				var exists bool
@@ -214,7 +200,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					a.dbError(w, err)
 					return
 				}
-				history = boundedHistoryWithLimits(history, len(instructions), budget, overhead)
+				history = boundedHistoryWithLimits(history, len(instructions), snap.Budget, snap.Overhead)
 				snap.History = &history
 			}
 		}

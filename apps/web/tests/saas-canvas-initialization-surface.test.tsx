@@ -31,10 +31,10 @@ function seed(bound = false) {
     ...(bound ? { runtime: 'pi', model: 'profile-main', binding: { companyId: tenant.id, agentId: 'old-agent', agentName: 'Draft node' }, issueId: 'old-session' } : {}) };
   canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes: [node], view: { x: 0, y: 0, scale: 1 } }));
 }
-function canonical(document: CanvasDocument): CanvasDocument {
+function canonical(document: CanvasDocument, runtime = 'pi', model = 'profile-main'): CanvasDocument {
   return sanitizeDocument({ ...document, nodes: document.nodes.map(node => node.kind !== 'session' ? node : { ...node,
-    ...(node.threads ? { threads: node.threads.map(thread => thread.id !== node.activeThreadId ? thread : { ...thread, binding: { companyId: tenant.id, agentId: 'new-agent', agentName: node.title }, issueId: 'new-session', runtime: 'pi', model: 'profile-main' }) } : {}),
-    runtime: 'pi', model: 'profile-main', binding: { companyId: tenant.id, agentId: 'new-agent', agentName: node.title }, issueId: 'new-session',
+    ...(node.threads ? { threads: node.threads.map(thread => thread.id !== node.activeThreadId ? thread : { ...thread, binding: { companyId: tenant.id, agentId: 'new-agent', agentName: node.title }, issueId: 'new-session', runtime, model }) } : {}),
+    runtime, model, binding: { companyId: tenant.id, agentId: 'new-agent', agentName: node.title }, issueId: 'new-session',
   }) });
 }
 async function openInspector() {
@@ -69,6 +69,35 @@ it('saves edited configuration synchronously, preserves the old thread and adopt
   expect(received.nodes[0]).toMatchObject({ persona: 'Updated persona', binding: null, issueId: null });
   expect(getNodeThreads(received.nodes[0] as SessionNode).some(thread => thread.issueId === 'old-session' && thread.binding?.agentId === 'old-agent')).toBe(true);
   expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({ binding: { agentId: 'new-agent' }, issueId: 'new-session', persona: 'Updated persona' });
+});
+it('persists a node runtime change through initialization and preserves the prior Pi conversation', async () => {
+  seed(true); let received!: CanvasDocument;
+  const mixedReader = async (path: string) => path === '/api/agents'
+    ? { agents: ['pi', 'openai-agents'].map(name => ({ name, supports_model_selection: true, supports_node_teams: true, supports_effort_selection: false, model_catalog_source: 'saas_runtime', tools: [] })) }
+    : { source: 'saas_runtime', models: path.includes('/openai-agents/') ? ['agents-only'] : ['profile-main'] };
+  configureSaaSCanvasInitialize(async scope => {
+    expect(scope).toEqual(['Draft node']); received = loadDocumentWithStatus().doc;
+    return canonical(received, 'openai-agents', 'agents-only');
+  });
+  const view = render(<CanvasSurface storageMode="cloud" runtimeReadJson={mixedReader} />); await openInspector();
+  fireEvent.click(screen.getByLabelText('Runtime'));
+  fireEvent.click(await screen.findByRole('option', { name: 'OpenAI Agents JS' }));
+  await waitFor(() => expect(screen.getByLabelText('模型')).not.toBeDisabled());
+  fireEvent.click(screen.getByLabelText('模型'));
+  expect(screen.queryByRole('option', { name: 'profile-main' })).toBeNull();
+  fireEvent.click(await screen.findByRole('option', { name: 'agents-only' }));
+  fireEvent.click(screen.getByRole('button', { name: /保存配置|保存并准备运行/ }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '节点配置 — Draft node' })).toBeNull());
+  expect(received.nodes[0]).toMatchObject({ runtime: 'openai-agents', model: 'agents-only', effort: '', binding: null, issueId: null });
+  const saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
+  expect(saved).toMatchObject({ runtime: 'openai-agents', model: 'agents-only', binding: { agentId: 'new-agent' }, issueId: 'new-session' });
+  expect(getNodeThreads(saved)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ runtime: 'pi', model: 'profile-main', issueId: 'old-session', binding: expect.objectContaining({ agentId: 'old-agent' }) }),
+    expect.objectContaining({ runtime: 'openai-agents', model: 'agents-only', issueId: 'new-session', binding: expect.objectContaining({ agentId: 'new-agent' }) }),
+  ]));
+  view.unmount(); render(<CanvasSurface storageMode="cloud" runtimeReadJson={mixedReader} />); await openInspector();
+  expect(screen.getByLabelText('Runtime')).toHaveTextContent('OpenAI Agents JS');
+  await waitFor(() => expect(screen.getByLabelText('模型')).toHaveTextContent('agents-only'));
 });
 it('allows a SaaS draft composer while retaining its text until initialization and durable run acceptance', async () => {
   seed(); let reject!: (error: Error) => void;

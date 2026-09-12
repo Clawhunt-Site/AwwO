@@ -91,3 +91,28 @@ describe('node team persistence and execution freshness', () => {
     expect(nodeTeamTurnEstimate({ ...team, mode: 'review', maxRounds: 3 })).toBe(6);
   });
 });
+
+it('round-trips OpenAI Agents JS models and allowlisted tools with the node and thread runtime', () => {
+  const original = node(); original.runtime = 'openai-agents'; original.model = 'agents-model'; original.team = createNodeTeam(original);
+  original.team.members[0].tools = ['calculator', 'current_time'];
+  original.team.members[1] = { ...original.team.members[1], runtime: 'pi', model: 'catalog-model' };
+  const restored = sanitizeDocument(JSON.parse(JSON.stringify({ ...emptyDocument(), nodes: [original] }))).nodes[0] as SessionNode;
+  expect(restored).toMatchObject({ runtime: 'openai-agents', model: 'agents-model', team: original.team });
+  expect(validateNodeTeam(restored.team, { pi: ['catalog-model'], 'openai-agents': ['agents-model'] })).toEqual([]);
+  expect(validateNodeTeam(restored.team, { pi: ['catalog-model'], 'openai-agents': ['other-model'] }).map(issue => issue.path)).toContain('members.0.model');
+});
+it('rejects Pi tools, duplicate tools and arbitrary tool identifiers while preserving safe tool ordering', () => {
+  const team = node().team!;
+  team.members[0].tools = ['calculator']; expect(sanitizeNodeTeam(team)).toBeNull();
+  team.runtime = 'openai-agents'; expect(sanitizeNodeTeam(team)?.members[0].tools).toEqual(['calculator']);
+  team.members[0].tools = ['calculator', 'calculator']; expect(sanitizeNodeTeam(team)).toBeNull();
+  (team.members[0] as any).tools = ['shell']; expect(sanitizeNodeTeam(team)).toBeNull();
+});
+it('invalidates execution outputs when the runtime or tool authorization changes', () => {
+  const before = document(); const after = structuredClone(before); const changed = after.nodes[0] as SessionNode;
+  changed.team!.members[0].runtime = 'openai-agents'; changed.team!.members[0].tools = ['calculator'];
+  expect(invalidateOutputs(before, after).nodes.map(item => item.lastOutput)).toEqual([null, null]);
+  expect(runInputFingerprint(after, ['team-node'])).not.toBe(runInputFingerprint(before, ['team-node']));
+  const withTools = structuredClone(after); (after.nodes[0] as SessionNode).team!.members[0].tools = [];
+  expect(runInputFingerprint(after, ['team-node'])).not.toBe(runInputFingerprint(withTools, ['team-node']));
+});

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -36,6 +35,8 @@ type nodeTeam struct {
 	Members        []teamMember `json:"members"`
 }
 type executionSnapshot struct {
+	Runtime          string             `json:"runtime,omitempty"`
+	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`
 	Instructions     string             `json:"instructions"`
 	Model            string             `json:"model"`
 	Budget           int                `json:"budget"`
@@ -50,7 +51,7 @@ func validateTeam(t *nodeTeam) error {
 	if t == nil {
 		return nil
 	}
-	if t.Version != 1 || t.Runtime != "pi" || t.MaxRounds < 1 || t.MaxRounds > 8 || t.MaxTurns < 1 || t.MaxTurns > 64 || t.TimeoutSeconds < 10 || t.TimeoutSeconds > 1800 || len(t.Members) < 1 || len(t.Members) > 8 {
+	if t.Version != 1 || !validRuntime(t.Runtime) || t.MaxRounds < 1 || t.MaxRounds > 8 || t.MaxTurns < 1 || t.MaxTurns > 64 || t.TimeoutSeconds < 10 || t.TimeoutSeconds > 1800 || len(t.Members) < 1 || len(t.Members) > 8 {
 		return errors.New("Invalid team version, runtime, bounds or member count")
 	}
 	switch t.Mode {
@@ -64,7 +65,7 @@ func validateTeam(t *nodeTeam) error {
 	}
 	ids := map[string]bool{}
 	for _, m := range t.Members {
-		if strings.TrimSpace(m.ID) == "" || utf8.RuneCountInString(m.ID) > 128 || ids[m.ID] || strings.TrimSpace(m.Name) == "" || utf8.RuneCountInString(m.Name) > 128 || strings.TrimSpace(m.Role) == "" || utf8.RuneCountInString(m.Role) > 512 || utf8.RuneCountInString(m.Instructions) > 16000 || utf8.RuneCountInString(m.Model) > 256 || (m.Runtime != "" && m.Runtime != "pi") || len(m.Tools) > 0 || (m.Context != "task" && m.Context != "shared") {
+		if strings.TrimSpace(m.ID) == "" || utf8.RuneCountInString(m.ID) > 128 || ids[m.ID] || strings.TrimSpace(m.Name) == "" || utf8.RuneCountInString(m.Name) > 128 || strings.TrimSpace(m.Role) == "" || utf8.RuneCountInString(m.Role) > 512 || utf8.RuneCountInString(m.Instructions) > 16000 || utf8.RuneCountInString(m.Model) > 256 || !validRuntime(memberRuntime(t, m)) || !validRuntimeTools(memberRuntime(t, m), m.Tools) || (m.Context != "task" && m.Context != "shared") {
 			return errors.New("Invalid member identity, runtime, model, context or tools")
 		}
 		ids[m.ID] = true
@@ -92,18 +93,8 @@ func (h piHealth) modelLimits(model string) (int, int, bool) {
 	return 0, 0, false
 }
 func validateTeamModels(t *nodeTeam, h piHealth) error {
-	if err := validateTeam(t); err != nil {
-		return err
-	}
-	if t == nil {
-		return nil
-	}
-	for _, m := range t.Members {
-		if _, _, ok := h.modelLimits(m.Model); !ok {
-			return fmt.Errorf("Team member %s selects an unavailable model", m.Name)
-		}
-	}
-	return nil
+	_, err := resolveTeam(t, runtimePI, h.Model, runtimeCatalog{runtimePI: h})
+	return err
 }
 func savedNodeTeam(raw []byte, nodeID string) (*nodeTeam, error) {
 	var d struct {
@@ -118,7 +109,7 @@ func savedNodeTeam(raw []byte, nodeID string) (*nodeTeam, error) {
 	}
 	for _, n := range d.Nodes {
 		if n.ID == nodeID {
-			if n.Runtime != "" && n.Runtime != "pi" {
+			if !validRuntime(defaultRuntime(n.Runtime)) {
 				return nil, errors.New("Unsupported node runtime")
 			}
 			if len(n.Team) == 0 || string(n.Team) == "null" {
@@ -348,14 +339,28 @@ func (a *App) executeTeam(ctx context.Context, tid, rid, sid, prompt string, sna
 	a.finish(tid, rid, "completed", output, "")
 }
 func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap executionSnapshot, m teamMember, round, ordinal int, input teamTurnInput) (result string, resultErr error) {
-	if m.Model == "" {
-		m.Model = snap.Model
+	if m.Runtime == "" {
+		m.Runtime = memberRuntime(snap.Team, m)
 	}
-	m.Runtime = "pi"
-	budget, overhead, ok := snap.Health.modelLimits(m.Model)
+	health, ok := snap.memberHealth(m.Runtime)
+	if !ok || !validRuntime(m.Runtime) || !validRuntimeTools(m.Runtime, m.Tools) {
+		return "", errors.New("runtime_unavailable")
+	}
+	if m.Model == "" {
+		m.Model = health.Model
+		if m.Runtime == defaultRuntime(snap.Runtime) {
+			m.Model = snap.Model
+		}
+	}
+	budget, overhead, ok := health.modelLimits(m.Model)
 	if !ok {
 		return "", errors.New("model_unavailable")
 	}
+	toolBytes, ok := health.toolBudget(m.Tools)
+	if !ok {
+		return "", errors.New("tool_unavailable")
+	}
+	budget -= toolBytes
 	prompt, instructions, history, inputContext, err := prepareTeamInput(snap, m, input, budget, overhead)
 	if err != nil {
 		return "", err
@@ -363,7 +368,11 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	messagesRaw, _ := json.Marshal(history)
 	contextRaw, _ := json.Marshal(inputContext)
 	id := randomID()
-	body, _ := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid + "_" + tokenHash(m.ID)[:16], "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": m.Model, "runtime": "pi"})
+	request := map[string]any{"runId": id, "tenantId": tid, "sessionId": sid + "_" + tokenHash(m.ID)[:16], "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": m.Model, "runtime": m.Runtime}
+	if len(m.Tools) > 0 {
+		request["tools"] = m.Tools
+	}
+	body, _ := json.Marshal(request)
 	if len(body) > 1<<20 {
 		return "", errors.New("context_limit")
 	}
@@ -424,10 +433,10 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	// Parallel members clean up independently before their slots are released.
 	defer func() {
 		if status != "completed" {
-			a.cancelPI(id)
+			a.cancelRuntime(m.Runtime, id)
 		}
 	}()
-	resp, e := a.admitPI(ctx, body)
+	resp, e := a.admitRuntime(ctx, m.Runtime, body)
 	if e != nil {
 		if contextFailure(e) {
 			return "", e

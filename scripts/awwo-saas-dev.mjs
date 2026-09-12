@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { root, stateDir, loadLocalEnv, startDatabase, run, assertPortFree, waitForHttp } from './awwo-saas-lib.mjs';
+import { root, stateDir, loadLocalEnv, startDatabase, run, assertPortFree, waitForHttp, serviceEnvironments } from './awwo-saas-lib.mjs';
 
 export async function runDevelopment({
   runtime = process, logger = console, spawnChild = spawn, runCommand = run,
@@ -41,33 +41,37 @@ export async function runDevelopment({
   try {
     const { env, envFile, managedDatabase } = await loadEnv();
     if (await finishIfStopping()) return;
-    await Promise.all([Number(env.AWWO_API_PORT), Number(env.AWWO_PI_PORT), Number(env.VITE_AWWO_WEB_PORT)].map(assertFree));
+    await Promise.all([Number(env.AWWO_API_PORT), Number(env.AWWO_PI_PORT), Number(env.AWWO_OPENAI_AGENTS_PORT), Number(env.VITE_AWWO_WEB_PORT)].map(assertFree));
     if (await finishIfStopping()) return;
     if (managedDatabase) database = await startDb(env);
     if (await finishIfStopping()) return;
     if (runtime.argv.includes('--database-only')) {
       logger.log(`Local PostgreSQL ready on 127.0.0.1:${env.AWWO_LOCAL_DB_PORT}. Configuration: ${envFile}`);
     } else {
-      await runCommand('go', ['build', '-o', path.join(stateDir, 'bin', 'awwo-api'), './cmd/api'], { cwd: path.join(root, 'backend'), env });
+      const serviceEnv = serviceEnvironments(env);
+      await runCommand('go', ['build', '-o', path.join(stateDir, 'bin', 'awwo-api'), './cmd/api'], { cwd: path.join(root, 'backend'), env: serviceEnv.build });
       if (await finishIfStopping()) return;
-      function launch(command, args, label) {
+      function launch(command, args, label, childEnv) {
         if (stopping) throw new Error('Local startup was cancelled');
-        const child = spawnChild(command, args, { cwd: root, env, stdio: 'inherit' });
+        const child = spawnChild(command, args, { cwd: root, env: childEnv, stdio: 'inherit' });
         children.push(child);
         child.on('error', error => { logger.error(`${label}: ${error.message}`); void stop(1); });
         child.on('exit', () => { if (!stopping) { logger.error(`${label} exited`); void stop(1); } });
         return child;
       }
-      const pi = launch(runtime.execPath, ['apps/pi-worker/server.mjs'], 'Pi worker');
+      const pi = launch(runtime.execPath, ['apps/pi-worker/server.mjs'], 'Pi worker', serviceEnv.pi);
       await waitHttp(`${env.AWWO_PI_URL}/health`, pi, 30000, { allowUnconfiguredPi: true });
       if (await finishIfStopping()) return;
-      const api = launch(path.join(stateDir, 'bin', 'awwo-api'), [], 'Go API');
+      const openAIAgents = launch(runtime.execPath, ['apps/openai-agents-worker/server.mjs'], 'OpenAI Agents worker', serviceEnv.openAIAgents);
+      await waitHttp(`${env.AWWO_OPENAI_AGENTS_URL}/health`, openAIAgents, 30000, { allowUnconfiguredRuntime: 'openai-agents' });
+      if (await finishIfStopping()) return;
+      const api = launch(path.join(stateDir, 'bin', 'awwo-api'), [], 'Go API', serviceEnv.api);
       await waitHttp(`${env.AWWO_API_TARGET}/api/v1/health`, api);
       if (await finishIfStopping()) return;
-      const web = launch(runtime.execPath, ['apps/web/node_modules/vite/bin/vite.js', '--config', 'apps/web/vite.saas.config.mjs', '--host', '127.0.0.1', '--port', env.VITE_AWWO_WEB_PORT, '--strictPort'], 'SaaS web');
+      const web = launch(runtime.execPath, ['apps/web/node_modules/vite/bin/vite.js', '--config', 'apps/web/vite.saas.config.mjs', '--host', '127.0.0.1', '--port', env.VITE_AWWO_WEB_PORT, '--strictPort'], 'SaaS web', serviceEnv.web);
       await waitHttp(env.AWWO_PUBLIC_ORIGIN, web);
       if (await finishIfStopping()) return;
-      logger.log(`AwwO SaaS ready: ${env.AWWO_PUBLIC_ORIGIN}\nAdmin: ${env.AWWO_BOOTSTRAP_ADMIN_EMAIL}; password is in ${envFile}\nPi provider credentials are configured in the same local file. No Agent run is started automatically.`);
+      logger.log(`AwwO SaaS ready: ${env.AWWO_PUBLIC_ORIGIN}\nAdmin: ${env.AWWO_BOOTSTRAP_ADMIN_EMAIL}; password is in ${envFile}\nPi and OpenAI Agents provider credentials are configured in the same local file. No Agent run is started automatically.`);
     }
   } catch (error) {
     if (!stopping) { logger.error(error.message); await stop(1); }

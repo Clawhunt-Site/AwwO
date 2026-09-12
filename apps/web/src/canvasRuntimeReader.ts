@@ -34,18 +34,20 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
     return { models: ids, source: 'codex_app_server', model_capabilities: Object.fromEntries(capabilities) };
   }
 
-  async function modelIds(type: string, signal?: AbortSignal | null, selectedCompany?: string): Promise<string[]> {
+  async function modelCatalog(type: string, signal?: AbortSignal | null, selectedCompany?: string): Promise<{ models: string[]; source?: string }> {
     let companyId = selectedCompany;
     if (!companyId) {
       const companies = await get('/companies', signal);
       if (!Array.isArray(companies)) throw new Error('Invalid workspace registry response.');
       companyId = companies.find(item => typeof item?.id === 'string' && item.status !== 'archived')?.id;
     }
-    if (!companyId) return [];
-    const data = await get(`/companies/${encodeURIComponent(companyId)}/adapters/${encodeURIComponent(type)}/models`, signal);
-    if (!Array.isArray(data)) throw new Error('Invalid model registry response.');
-    return data.map(item => typeof item === 'string' ? item : item?.id)
-      .filter((id): id is string => typeof id === 'string' && Boolean(id.trim()));
+    if (!companyId) return { models: [] };
+    const data = await get(`/companies/${encodeURIComponent(companyId)}/adapters/${encodeURIComponent(type)}/models`, signal) as any;
+    const saas = data?.source === 'saas_runtime';
+    const models = saas ? data.models : data;
+    if (!Array.isArray(models)) throw new Error('Invalid model registry response.');
+    return { models: [...new Set<string>(models.map(item => typeof item === 'string' ? item : item?.id)
+      .filter((id): id is string => typeof id === 'string' && Boolean(id.trim())))], ...(saas ? { source: 'saas_runtime' } : {}) };
   }
 
   return async function readCanvasRuntime(path: string, init?: RequestInit): Promise<any> {
@@ -58,7 +60,7 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
       // A zero static count does not mean model selection is unsupported: dynamic adapters
       // (for example pi_local) populate their catalog through the company model endpoint.
       let companyId: string | undefined;
-      if (adapters.some(item => item.type !== 'codex_local' && !(item.modelsCount > 0))) {
+      if (adapters.some(item => item.type !== 'codex_local' && !item.supportsModelSelection && !(item.modelsCount > 0))) {
         const companies = await get('/companies', init?.signal);
         if (!Array.isArray(companies)) throw new Error('Invalid workspace registry response.');
         companyId = companies.find(item => typeof item?.id === 'string' && item.status !== 'archived')?.id;
@@ -67,9 +69,10 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
         name: item.type, supports_model_selection: true, supports_effort_selection: true, model_catalog_source: 'codex_app_server',
       } : ({
         name: item.type,
-        supports_model_selection: item.modelsCount > 0 || Boolean(companyId && (await modelIds(item.type, init?.signal, companyId)).length),
+        supports_model_selection: item.supportsModelSelection === true || item.modelsCount > 0 || Boolean(companyId && (await modelCatalog(item.type, init?.signal, companyId)).models.length),
         supports_effort_selection: false,
         ...(item.supportsNodeTeams === true ? { supports_node_teams: true } : {}),
+        ...(item.modelCatalogSource === 'saas_runtime' ? { model_catalog_source: 'saas_runtime', tools: Array.isArray(item.tools) ? item.tools : [] } : {}),
       }))) };
     }
     const models = /^\/api\/agents\/([^/]+)\/models$/.exec(path);
@@ -77,6 +80,6 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
     // Discovery never changes the workspace selected for binding or member administration.
     const type = decodeURIComponent(models[1]);
     if (type === 'codex_local') return codexModels(init?.signal);
-    return { models: await modelIds(type, init?.signal) };
+    return modelCatalog(type, init?.signal);
   };
 }

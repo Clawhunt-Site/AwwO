@@ -30,6 +30,14 @@ files when distributing a runtime image. Source reference:
 This runtime dependency is distinct from the older Pi code attributed under
 `third_party/clawwork/`; it does not change that attribution or AwwO's own license.
 
+The independent `apps/openai-agents-worker` service uses the official
+`@openai/agents` JavaScript SDK `0.18.0`, `openai` `7.15.0`, and `zod` `4.6.2`.
+Their package metadata declares MIT. Preserve the installed packages' license
+files when distributing the runtime image. Source reference:
+`openai/openai-agents-js` release `v0.18.0`. This dependency is an optional
+execution runtime behind AwwO's Go control plane and does not change AwwO's own
+license.
+
 ## Existing fusion boundary
 
 The first fusion release keeps each upstream runtime isolated. SuperClaw exposes

@@ -26,7 +26,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { RuntimePicker, type RuntimeValue } from '../RuntimePicker';
 import { NodeTeamEditor } from './NodeTeamEditor';
-import { validateNodeTeam } from './nodeTeam';
+import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import {
@@ -180,18 +180,25 @@ export function InspectorPanel({
   // reads as a product with zero runtimes rather than as a kernel that is down.
   const [runtimes, setRuntimes] = useState<string[]>([]);
   const [teamsAvailable, setTeamsAvailable] = useState(false);
+  const [teamRuntimes, setTeamRuntimes] = useState<NodeTeamRuntime[]>([]);
+  const [teamTools, setTeamTools] = useState<Partial<Record<NodeTeamRuntime, NodeTeamTool[]>>>({});
   const [runtimesError, setRuntimesError] = useState(false);
   useEffect(() => {
     if (!readJson) return;
     let stale = false;
     setRuntimesError(false);
     setTeamsAvailable(false);
+    setTeamRuntimes([]); setTeamTools({});
     void readJson('/api/agents')
       .then((d) => {
         if (stale) return;
         const list = Array.isArray(d?.agents) ? d.agents : [];
         setRuntimes(list.map((a: { name?: unknown }) => String(a?.name ?? '')).filter(Boolean));
-        setTeamsAvailable(list.some((agent: { name?: unknown; supports_node_teams?: unknown }) => agent.name === 'pi' && agent.supports_node_teams === true));
+        const teamAgents = list.filter((agent: { name: NodeTeamRuntime; supports_node_teams?: unknown }) => NODE_TEAM_RUNTIMES.includes(agent.name) && agent.supports_node_teams === true);
+        setTeamsAvailable(teamAgents.length > 0);
+        setTeamRuntimes(teamAgents.map((agent: { name: NodeTeamRuntime }) => agent.name));
+        setTeamTools(Object.fromEntries(teamAgents.map((agent: { name: NodeTeamRuntime; tools?: unknown }) => [agent.name,
+          agent.name === 'openai-agents' && Array.isArray(agent.tools) ? agent.tools.filter(tool => NODE_TEAM_TOOLS.includes(tool)) : []])));
       })
       .catch(() => {
         if (!stale) setRuntimesError(true);
@@ -424,6 +431,7 @@ export function InspectorPanel({
               <div className="canvas-inspector-runtime">
                 <RuntimePicker
                   runtimes={runtimes}
+                  runtimeLabels={Object.fromEntries(NODE_TEAM_RUNTIMES.map(runtime => [runtime, nodeTeamRuntimeLabel(runtime)]))}
                   value={{ backend: sessionDraft.runtime || (onInitialize ? 'pi' : ''), model: sessionDraft.model, effort: sessionDraft.effort }}
                   onChange={(v: RuntimeValue) =>
                     editDraft({ ...sessionDraft, runtime: v.backend, model: v.model, effort: v.effort })
@@ -458,6 +466,7 @@ export function InspectorPanel({
             />
 
             <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
+              runtimes={teamRuntimes} runtimeTools={teamTools}
               disabled={busy} onValidityChange={setTeamCatalogValid}
               onChange={team => editDraft({ ...sessionDraft, team })} />
             {onInitialize ? <div className="canvas-inspector-initialization" role="status">
