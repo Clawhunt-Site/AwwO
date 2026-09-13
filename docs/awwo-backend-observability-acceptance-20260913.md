@@ -155,6 +155,10 @@ Go 日志中 `awwo/backend/cmd/api` 的 package `skip` 表示该入口包没有�
 
 这证明本地 exporter、关联与指标对账链路实际工作，并不表示已经部署生产 collector 或保证永不丢 span。队列满、导出超时允许丢遥测的设计边界仍保留。OpenAI 托管 tracing 仍关闭，成功的是本次自托管 OTLP 路径。
 
+实际采集中记录到 **1 次 Go trace 导出错误**（`api-metrics-final.prom` 中 `awwo_telemetry_export_errors_total 1`）；固定错误日志没有保留底层原因，不能将本次验收描述为零导出错误或零遥测丢失。12 次业务调用的账本和完整模型父子链仍全部可核对，后续接收继续正常。浏览器切换期间另有取消请求被记录为 `status_class=cancelled`；本轮 scrape 没有 5xx 请求样本。这里不把取消请求、被拒绝的未授权请求和 100 次成功延迟采样混为同一结果。
+
+**提交后重启验收通过。** 从干净代码提交 `9e43228cf0e3455b04ecb589c0f153521088679b` 构建的新 Go 二进制，其 `vcs.revision` 匹配、`vcs.modified=false`。重启本次隔离运行栈后，三个管理端点均为 200；租户用量与两个浏览器调用账本保持完全一致；24h ledger 窗口重建为 12 次，而进程调用计数重新开始。该检查没有发起新模型调用。原始证据：[restart-acceptance.json](../.local/backend-evidence/restart-acceptance.json)。本地试用入口是 `http://127.0.0.1:5389`；这不改变 online 发布状态。
+
 ## 8. 未通过入口与范围外事项
 
 已执行检查中的客户端阻断：浏览器直接展示 invocations JSON 返回 `ERR_BLOCKED_BY_CLIENT`，未计为通过；业务 UI 点击、HTTP API 和后台运行结果通过。客户端 JSON 展示不作为 backend API 返回正确性的替代证据。
