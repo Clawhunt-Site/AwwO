@@ -6,6 +6,46 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — preserve collaboration contracts and metrics during backend integration
+
+- **What changed:** Integrate backend observability and Pi/OpenAI Agents execution with the current HTML deliverable and selected-node collaboration baseline. Preserve the frozen HTML contract for proposal/synthesis, use a persona-preserving critique policy for review turns, and emit collaboration graph/node metrics only after committed state transitions. Replayed completed turns cannot reset later node state. Isolate rounding fixtures so pricing tests do not depend on randomized map iteration.
+- **Why:** The two approved histories overlap in graph serialization and migrations; blindly choosing either side would lose HTML validation, review semantics or migration identity checks. Collaboration terminal paths also bypassed the newly introduced metric hooks.
+- **Impact:** Existing frontend functionality and both migration-011 histories are preserved. Selected-node collaboration remains separate from nested node teams; no production schema or deployment is changed by this local integration.
+- **Verification:** Combined Go/PostgreSQL race, mixed-runtime HTML collaboration dispatch, migration history/identity, transaction rollback and metric replay tests; Pi 47, OpenAI Agents 54, launcher 11 and dual-SDK stack 1; SaaS 375 and broader Canvas/runtime 982 tests (overlapping suites), typecheck/build/vet and independent review. Exact final counts and evidence are in `docs/awwo-main-observability-merge-20260913.md`.
+- **Files:** `backend/internal/app/{database,graph_contracts,graph_runs,graph_collaboration}.go`, graph policy/collaboration/migration regression tests, `creator.md` and merge acceptance documentation.
+
+### Added — backend observability and durable invocation usage
+
+- **What changed:** Add private loopback metrics and self-hosted OTLP instrumentation for Go, Pi and OpenAI Agents; persist nullable invocation usage/timing with frozen integer micro-USD pricing; expose four role-scoped usage/observability read APIs and immutable 24h/30d metric snapshots. Reconcile the two historical migration-011 schemas through identified additive migrations 012–014, retain the ledger after completed-canvas deletion, and bind usage pagination to transaction visibility.
+- **Why:** Model calls and multi-Agent execution needed measurable backend behavior without turning missing provider usage into zero cost, leaking tenant data, changing historical prices or losing usage when business records are deleted.
+- **Impact:** Exporters default off and management ports remain loopback. Reader/member responses omit cost keys; sensitive platform reads are audited. Pricing is operator-supplied estimation, automatic retention deletion is not implemented, and uncertain accepted calls are not replayed. This scope does not deploy monitoring services, frontend RUM, notifications or production infrastructure.
+- **Verification:** Full Go/PostgreSQL race passed (121 top-level / 252 including subtests, zero test failures/skips, 137.330s), Pi 47, OpenAI Agents 54, launcher 11 and dual-SDK protocol stack 1 all passed. Final frozen-price/cursor regressions passed (3 top-level / 5 including subtests, 5.492s). Four real gpt-5.6 graphs plus one Computer Use team run completed 12 invocations with reported provider usage; three management scrapes returned 200 and business metrics routes stayed isolated. Actual OTLP verified 12 parent chains, 13 linked asynchronous roots, ledger/window agreement and content privacy. One hundred local health/usage requests had zero errors. Actual provider pricing remains unset; direct browser JSON viewing was client-blocked. See `docs/awwo-backend-observability-acceptance-20260913.md` for five screenshots and exact boundaries. These checks do not imply a push or deployment.
+- **Files:** `backend/internal/app/{observability*,invocation_ledger*,usage*,pricing*,migration_identity*,runs,teams,graph_runs,runtime_workers}.go`, migrations 012–014, API startup/config, both runtime workers, SaaS launcher/Compose configuration and `docs/awwo-backend-observability.md`.
+
+### Fixed — graph delivery contracts take precedence over persona formatting
+
+- **What changed:** Freeze a server-owned output policy alongside persona instructions and apply it to single-Agent and team dispatch, including the review envelope. Generate policy and plain-text eligibility from the same fields as validation, account for its context cost before model admission, and refresh existing internal planner sessions with the corrected field-format rules.
+- **Why:** A real two-node plan asked its first Agent for concise plain text while its template required multiple JSON fields. The model completed, delivery validation failed, and the downstream node was blocked.
+- **Impact:** Identity and content instructions remain member-specific; delivery formatting follows the frozen contract. Multi-field outputs remain strictly validated. Ordinary chat is unaffected. Previously accepted runs keep their original snapshots; retry a failed graph as a new run to use the fix.
+- **Verification:** Full Go/PostgreSQL race suite (89 top-level / 187 including subtests, zero failures/skips) and vet; six captured dispatch scenarios; real gpt-5.6 Pi, OpenAI Agents, mixed sequential and mixed review graphs; Computer Use planning, two-node execution and persisted downstream delivery. See `docs/awwo-graph-contract-repair-20260913.md` for exact scope and release boundaries.
+- **Files:** `backend/internal/app/{graph_contracts,graph_runs,planning,team_context,teams}.go`, two graph output regression files, and node-team/acceptance documentation.
+
+### Tests — native canvas run identity and settlement fixtures
+
+- **What changed:** Bring the run-entry fixtures up to date with the visible Pi label, accepted issue/run callbacks and identity-scoped settlement confirmation; assert pending journals are retained and executions are not duplicated.
+- **Why:** Two extended frontend regressions used stale mocks and failed before exercising the current lifecycle.
+- **Impact:** Test-only repair; native and SaaS product behavior stays governed by the existing execution protocols.
+- **Verification:** Reproduced both baseline failures; focused 6/6 and extended canvas/SaaS 1114/1114 pass with zero skips, plus SaaS typecheck/build.
+- **Files:** `apps/web/tests/canvas-run-entry.test.tsx`.
+
+### Added — OpenAI Agents JS runtime for SaaS node teams
+
+- **What changed:** Add an isolated `@openai/agents` worker beside Pi, expose runtime-scoped model/tool catalogs, persist each Agent runtime, and route every frozen team member to its selected worker. Keep sequential, parallel, debate and review orchestration in the Go control plane. Show each member's actual runtime, input, instructions, system prompt, context sources and output in the existing canvas.
+- **Why:** AwwO needed a second execution framework without losing tenant boundaries, exact member order, member-specific instructions, quota accounting or compatibility with existing Pi Agents.
+- **Impact:** A node can mix Pi and OpenAI Agents members. OpenAI Agents supports OpenAI-compatible Chat Completions or Responses endpoints and the allowlisted `calculator` and `current_time` tools. One admitted member turn produces at most one upstream model request; tool output is final for that turn. Historical Agents migrate to Pi and unavailable runtime/model combinations require an explicit correction.
+- **Verification:** OpenAI Agents worker 34 tests, full Go PostgreSQL race/vet, focused and full SaaS Web tests, SaaS typecheck/build, nine launcher tests, dual-worker protocol stack, Compose config, real `gpt-5.6` mixed-runtime sequential execution, real calculator tool execution, database invocation-count checks and Chrome Computer Use acceptance pass. Exact evidence and remaining release gates are recorded in `docs/awwo-openai-agents-acceptance-20260912.md`.
+- **Files:** `apps/openai-agents-worker/`; `backend/internal/app/{runtime_workers,runs,teams,node_setup,resources}.go`; migration 011; runtime/team Web controls and tests; SaaS scripts/Compose/environment examples; OpenAI Agents architecture and acceptance documentation.
+
 ### Fixed — online integration of native review and SaaS teams
 
 - **What changed:** Preserve online graph review, HTML deliveries and logging controls while integrating main's tenant-scoped Go/Pi execution, member histories, initialization and cancellation. Keep native review and SaaS graph admission distinct and retain both test inventories.

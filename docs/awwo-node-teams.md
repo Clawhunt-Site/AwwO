@@ -1,12 +1,12 @@
 # AwwO 节点团队与后台整图运行
 
-更新日期：2026-09-08。适用代码：`codex/awwo-node-setup-20260908`，worktree 为 `/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-node-setup-20260908`。本文说明当前实现契约及验收要求，不构成本轮真实模型验收通过或生产发布结论；最终候选 SHA、运行结果和截图由独立验收报告记录。
+更新日期：2026-09-13。本文说明节点团队与图交付契约；本次格式优先级修复基于 `016b67d6b64910d585b423b446a7c0225ea73c16`，实际验证范围见 [修复验收记录](awwo-graph-contract-repair-20260913.md)。本文不构成生产发布结论。
 
 ## 1. 产品与架构
 
-一个画布节点仍代表一个有输入、输出和会话的任务单元。Session 节点可保留原来的单 Agent，也可配置一个 1–8 人的 Agent 团队。团队内部由 Go 按固定模式组织多次 Pi 文本推理，最后向节点发布一个结果；节点之间继续遵守原连线和字段契约。
+一个画布节点仍代表一个有输入、输出和会话的任务单元。Session 节点可保留原来的单 Agent，也可配置一个 1–8 人的 Agent 团队。团队内部由 Go 按固定模式组织成员推理，最后向节点发布一个结果；节点之间继续遵守原连线和字段契约。
 
-这里的执行框架（Harness）当前只有 Pi。每个节点设置默认 Pi，每个成员可以继承该设置或明确选择 Pi；模型、职责、专属指令及普通轮次的上下文共享方式可独立设置。这些成员是节点内的配置和调用身份，并非新建租户用户，也不是多个常驻自治进程。自然语言规划助手目前创建、修改普通画布结构，**尚不创建或修改 `team`**；本次团队配置通过原节点属性面板完成。
+执行框架（Harness）支持 Pi 与 OpenAI Agents。每个节点设置默认框架，每个成员可以继承或选择可用框架；模型、职责、专属指令及普通轮次的上下文共享方式可独立设置，模型目录按框架区分。这些成员是节点内的配置和调用身份，并非新建租户用户，也不是多个常驻自治进程。自然语言规划助手目前创建、修改普通画布结构，**尚不创建或修改 `team`**；团队配置通过原节点属性面板完成。框架能力与工具边界以 [OpenAI Agents 接入说明](awwo-openai-agents-acceptance-20260912.md) 为准。
 
 ```mermaid
 flowchart TD
@@ -18,22 +18,30 @@ flowchart TD
   DAG --> Single[单 Agent 运行]
   DAG --> Team[节点团队协调器]
   Team --> Turn[成员调用与审核记录]
-  Single --> Pi[内部 Pi supervisor]
-  Turn --> Pi
-  Pi --> Child[每次调用的独立 Node 子进程]
+  Single --> Worker[按冻结 runtime 路由内部 Pi / OpenAI Agents worker]
+  Turn --> Worker
+  Worker --> Child[每次调用的独立 Node 子进程]
   Child --> Model[服务端目录中的模型]
   Turn --> DB
   DAG --> Result[校验节点最终输出并解锁下游]
   DB --> View[后台运行与协作记录面板]
 ```
 
-SaaS 的整图、选中节点及重跑请求交给 Go 调度；浏览器负责提交、观察及将结果投影回原画布。原本机运行模式仍保留浏览器 `runGraph`，不能将 SaaS 能力推定为所有历史 runtime 都支持。Go 仍是单实例执行协调器；数据库工作锁和持久状态不等于分布式 worker、自动故障切换或多实例高可用。
+SaaS 的整图、选中节点及重跑请求交给 Go 调度；浏览器负责提交、观察及将结果投影回原画布。Go 按每位成员的有效 runtime 路由到 Pi 或 OpenAI Agents JS worker，SDK 不自行决定成员顺序或 handoff。原本机运行模式仍保留浏览器 `runGraph`，不能将 SaaS 能力推定为所有历史 runtime 都支持。Go 仍是单实例执行协调器；数据库工作锁和持久状态不等于分布式 worker、自动故障切换或多实例高可用。
 
-SaaS 节点中的普通聊天与“执行节点任务”分开：聊天提交当前输入原文，不自动拼入旧任务描述或要求旧输出契约的 JSON，也不把聊天回答覆盖为节点交付物。执行节点任务、局部运行和整图运行继续使用节点任务与输入输出契约。两种入口都可运行该节点团队，仍使用原 `POST /runs` 请求字段，不新增客户端可任意指定执行器或团队的接口。
+SaaS 节点中的普通聊天与“执行节点任务”分开：聊天通过 `POST /runs` 提交当前输入原文，不自动拼入旧任务描述或要求旧输出契约的 JSON，也不把聊天回答覆盖为节点交付物。执行节点任务、局部运行和整图运行通过 `POST /canvases/{id}/graph-runs` 使用节点任务与输入输出契约。两种入口都可运行该节点团队，执行器及团队从受权限和版本约束的服务端配置解析。
+
+### 交付格式与专属指令的边界
+
+节点或成员的专属指令决定身份、职责和字段内容；服务端在图受理时冻结的 `outputPolicy` 决定交付格式，并追加到实际系统提示中。即使专属指令写着“只写一句话”“不要 JSON”，多个输出字段仍须返回以字段 ID 为键的 JSON，对应的一句话放在字段值中。只有契约**总共一个** text/markdown 输出字段时才允许纯文本；“一个必填字段加一个可选字段”仍是多字段。
+
+Go 对输出进行原有类型及必填校验，通过后才向下游传递对应字段。审核模式的模型外层响应保持 `{approved, output, feedback}`，其中 `output` 字符串装入符合节点契约的最终交付。无效输出仍失败，不通过自动包裹文本来伪造有效交付。策略、任务、历史和审核外层说明均计入模型准入预算。
+
+规划助手应通过字段操作表达“只要一个文本输出”，不能用 persona 覆盖模板格式。已有内部规划会话在下一次规划时更新规范；已受理图及成员调用保留旧快照。部署修复后需创建新的运行来重试历史失败任务。成员实际身份、指令和系统提示继续在协作记录中按调用逐条展示。
 
 ## 2. 配置契约
 
-`SessionNode.team` 是可选字段，随原画布 JSON 保存、导出和恢复。执行仍需有效的主 Agent 和会话身份，SaaS 通过“保存并准备运行”自动准备，用户无需再选择公司或点击绑定；运行图、局部运行和手动发送也会先初始化对应节点。空 runtime/model 由 Pi 服务默认值补齐，团队成员空模型继承准备后的主 Agent 模型。删除 `team` 恢复单 Agent 模式，不删除单 Agent 配置。
+`SessionNode.team` 是可选字段，随原画布 JSON 保存、导出和恢复。执行仍需有效的主 Agent 和会话身份，SaaS 通过“保存并准备运行”自动准备，用户无需再选择公司或点击绑定；运行图、局部运行和手动发送也会先初始化对应节点。节点 runtime 为空时默认 Pi；团队成员空 runtime 继承团队，空模型取该成员有效 runtime 的默认模型，同 runtime 时可继承主 Agent 的显式模型。删除 `team` 恢复单 Agent 模式，不删除单 Agent 配置。
 
 初始化将有效团队配置纳入 `node_sessions.setup_snapshot`。与已初始化快照相比，团队、人格、模型等有效配置变化会创建新的 Agent / 当前会话，清空当前旧交付并保留历史 Agent、会话、消息及 run 快照；“继承”与相同显式模型/runtime 按解析后的值比较。团队仍是节点级配置，切换历史会话不会切换一份独立团队配置，也不会改写旧 run 的执行快照。
 
@@ -66,17 +74,17 @@ SaaS 节点中的普通聊天与“执行节点任务”分开：聊天提交当
 | --- | --- |
 | `version` | 固定 `1` |
 | `mode` | `sequential`、`parallel`、`debate`、`review` |
-| `runtime` | 节点团队执行框架，固定 `pi` |
+| `runtime` | 节点团队默认执行框架：`pi` 或 `openai-agents` |
 | `maxRounds` | 整数 1–8；只影响 debate / review，其他模式保存该值但不使用 |
 | `maxTurns` | 整数 1–64，且至少为成员数；**最多模型调用次数，不是 token 或货币预算** |
 | `timeoutSeconds` | 整数 10–1800，节点团队总体时间上限；Go 外层运行超时和 Pi 单次超时仍可更早结束 |
 | `members` | 1–8 个，列表顺序决定执行角色；review 至少 2 个 |
 | 成员 `id` / `name` | 各最多 128 个 Unicode 码点；ID 必须非空且团队内唯一，名称去除首尾空白后非空 |
 | 成员 `role` / `instructions` | 职责非空且最多 512 码点；专属指令可空，最多 16000 码点 |
-| 成员 `runtime` | `""` 继承节点团队默认；或 `"pi"` |
-| 成员 `model` | 可空，最多 256 码点；非空必须是服务端模型目录 ID |
+| 成员 `runtime` | `""` 继承节点团队默认；或 `"pi"` / `"openai-agents"` |
+| 成员 `model` | 可空，最多 256 码点；非空必须属于有效 runtime 的服务端模型目录 |
 | 成员 `context` | `task` 仅当前任务；`shared` 加入同 Session 此前已完成问答快照及本次此前已完成的成员输出；特殊汇总/审核/返工规则见下一节 |
-| 成员 `tools` | 当前只能为 `[]`；不开放文件、Shell 或任意工具 |
+| 成员 `tools` | Pi 只能为 `[]`；OpenAI Agents 可选 worker health 启用的 `calculator/current_time` |
 
 前端只从实际模型目录生成下拉，不接受任意模型文本。新增团队默认包含执行者和审核/汇总者：第一位复制当前节点名称、人格与模型，第二位模型继承节点绑定。修改成员顺序保持 ID 稳定；修改团队执行配置使当前节点和下游原输出失效，恢复时的输入指纹也包含团队内容。
 
@@ -115,11 +123,11 @@ Pi 的活动调用以成员 turn ID 为键。取消父运行会停止其上下�
 
 ## 4. 模型目录与实际 Pi 执行
 
-原 `AWWO_PI_PROVIDER / MODEL / BASE_URL / API_KEY` 配置默认模型。可选 `AWWO_PI_MODELS_JSON` 增加最多 32 个服务器配置档案；每项包含 `id`、`provider`、上游 `model`、可选 `baseURL`、`apiKeyEnv`、`contextWindow`、`maxTokens`。非 Ollama 必须通过 `apiKeyEnv` 引用独立环境变量，JSON 不接受明文 `apiKey`。每个环境分别提供值；默认档案仍需完整配置，不能只配置额外档案。
+Pi 使用 `AWWO_PI_*` 配置默认模型及可选目录。OpenAI Agents 使用独立的 `AWWO_OPENAI_AGENTS_*` 变量、模型目录和 service token；其 `provider=openai` 表示 OpenAI 兼容协议，并显式选择 `chat_completions` 或 `responses`。目录 JSON 通过 `apiKeyEnv` 引用独立环境变量，不接受明文 `apiKey`。每个环境分别提供值；默认档案仍需完整配置，不能只配置额外档案。
 
-公开选择 ID 与供应商实际模型名可以不同。Pi health 返回公开目录（ID、模型名、provider、runtime 和容量），Go `GET /api/v1/runtime` 返回前端可选目录；浏览器不接收 API key、base URL 或秘密环境变量。SaaS adapter 声明 `supportsNodeTeams: true`，由 `canvasRuntimeReader` 转成 `supports_node_teams` 才启用属性面板；能力字段表示实现可配置，不表示模型已实际连通。`modelConnectivityVerified: false` 仍明确区分配置就绪与真实调用。
+公开选择 ID 与供应商实际模型名可以不同。各 worker health 返回公开目录（ID、模型名、provider、runtime 和容量），Go `GET /api/v1/runtime` 聚合前端可选目录与每个 runtime 实际启用的工具；浏览器不接收 API key、base URL 或秘密环境变量。SaaS adapter 声明 `supportsNodeTeams: true`，由 `canvasRuntimeReader` 转成 `supports_node_teams` 才启用属性面板；能力字段表示实现可配置，不表示模型已实际连通。`modelConnectivityVerified: false` 仍明确区分配置就绪与真实调用。
 
-Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继承、检查所选模型的上下文预算，然后通过内部 `POST /internal/runs` 传入 `runId`、`tenantId`、`sessionId`、`prompt`、`messages`、`systemPrompt`、`model` 和 `runtime: "pi"`。Pi 从目录解析该 ID，并将仅该档案所需配置交给独立子进程，实际经 Pi SDK 发起文本推理。每次调用具有独立身份；同一成员多轮沿用派生的内部 session 身份，但不从磁盘加载历史。
+Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继承、检查对应 runtime 的模型和工具上下文预算，然后将 `runId`、`tenantId`、`sessionId`、`prompt`、`messages`、该成员独立的 `systemPrompt`、`model`、`runtime` 和工具 ID 发给对应 worker。worker 从自身目录解析 ID，并将仅该档案所需配置交给独立子进程。每次调用具有独立身份；同一成员多轮沿用派生的内部 session 身份，但历史仍由 Go 传入，不从磁盘加载。OpenAI Agents 工具结果直接作为成员输出，不触发第二次模型总结。
 
 文本按 UTF-8 字节保守计入所选成员模型的输入预算，包含公共指导、成员指令、共享上下文和消息开销；团队历史不先按未被调用的主 Agent 模型容量裁剪。受理时最多保留最近 50 对问答，并受 262144 字节的历史快照上限约束。调用时先完整保留当前任务及系统指令，再保留能容纳的近期完整成员输出，最后选入近期完整问答对。普通共享上下文超限时丢弃较早的完整输出或问答对，审计记录实际数量、来源和是否发生裁剪；不把截断文本当成完整对话。单条历史消息超过 Pi 的 32768 个 UTF-16 单元限制时，该问答对也不发送。
 
@@ -158,7 +166,7 @@ Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继
 
 成员记录还包含 `prompt`、`systemPrompt`、`messages`、`context`。它们保存该回合准备并冻结的实际 Pi 输入，不从当前编辑器配置重建；是否已经调用模型仍需结合回合状态判断。`context` 为 `{version:1, mode, historyMessages, historyAvailable, historyTruncated, upstreamMembers, upstreamAvailable, upstreamTruncated, purpose}`，`upstreamMembers` 每项为 `{memberId, memberName, round, ordinal}`；`purpose` 是 `work / aggregate / review / revise`。数量均为条数而非 token：historyMessages 是实际消息条数，完整问答为 2 条；historyAvailable 是受理时该共享会话已有的已完成消息数量，task 为 0。完整 API 字段和兼容方式见 [成员输入审计](awwo-saas-api.md#成员输入审计)。
 
-迁移 `007_node_teams_graph_runs.sql` 为 `runs` 增加 `team_snapshot`、`execution_snapshot`、`actor_id`，并新增 `run_turns`、`model_invocations`、`graph_runs`、`graph_run_nodes`、`graph_operation_cancellations`。图受理事务保存固定 document/version/scope 和每个节点的 Agent/团队执行快照；后续修改配置不改写已受理任务。旧 run 迁移为历史调用计数，不重放历史请求。
+迁移 `007_node_teams_graph_runs.sql` 为 `runs` 增加 `team_snapshot`、`execution_snapshot`、`actor_id`，并新增 `run_turns`、`model_invocations`、`graph_runs`、`graph_run_nodes`、`graph_operation_cancellations`。迁移 `011_agent_runtimes.sql` 为 Agent 保存 runtime，历史值默认 Pi。图受理事务保存固定 document/version/scope 和每个节点的 Agent/团队执行快照；后续修改配置不改写已受理任务。旧 run 迁移为历史调用计数，不重放历史请求。
 
 迁移 `008_node_setup_snapshot.sql` 为 `node_sessions` 增加有效初始化配置快照，初始化逻辑见 [node_setup.go](../backend/internal/app/node_setup.go)，完整请求与错误见 [API 初始化契约](awwo-saas-api.md#节点初始化与配置保存)。
 
@@ -192,4 +200,4 @@ Go 校验最多 200 节点、2000 连线、字段版本/类型、端口、必填
 
 当前边界是 Pi 文本推理、单 Go 实例和持久图协调；工具沙箱、附件存储、分布式 worker 租约、自动故障接管、精确 token 账单及公网运维验收仍需独立设计实施。
 
-实现依据：[前端团队契约](../apps/web/src/canvas/nodeTeam.ts)、[属性编辑器](../apps/web/src/canvas/NodeTeamEditor.tsx)、[SaaS 图传输](../apps/web/src/saas/graphRuns.ts)、[团队过程与输入审计](../apps/web/src/saas/TeamRunDetails.tsx)、[后台记录](../apps/web/src/saas/GraphRunPanel.tsx)、[Go 团队执行](../backend/internal/app/teams.go)、[Go 团队上下文](../backend/internal/app/team_context.go)、[Go 图运行](../backend/internal/app/graph_runs.go)、[图契约](../backend/internal/app/graph_contracts.go)、[迁移 007](../backend/internal/app/migrations/007_node_teams_graph_runs.sql)、[迁移 009](../backend/internal/app/migrations/009_team_turn_inputs.sql)、[Pi 模型配置](../apps/pi-worker/config.mjs)。
+实现依据：[前端团队契约](../apps/web/src/canvas/nodeTeam.ts)、[属性编辑器](../apps/web/src/canvas/NodeTeamEditor.tsx)、[SaaS runtime 目录](../apps/web/src/saas/runtimeCatalog.ts)、[SaaS 图传输](../apps/web/src/saas/graphRuns.ts)、[团队过程与输入审计](../apps/web/src/saas/TeamRunDetails.tsx)、[后台记录](../apps/web/src/saas/GraphRunPanel.tsx)、[Go 团队执行](../backend/internal/app/teams.go)、[Go runtime 路由](../backend/internal/app/runtime_workers.go)、[Go 图运行](../backend/internal/app/graph_runs.go)、[迁移 011](../backend/internal/app/migrations/011_agent_runtimes.sql)、[Pi 模型配置](../apps/pi-worker/config.mjs)、[OpenAI Agents worker](../apps/openai-agents-worker/README.md)。

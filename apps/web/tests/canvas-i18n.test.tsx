@@ -28,6 +28,10 @@ describe('AwwO locale foundation', () => {
   it('provides typed translated canvas text with interpolation', () => {
     expect(canvasText('en', 'workspace.connectionCount', { count: 3 })).toBe('3 connections');
     expect(canvasText('zh', 'workspace.connectionCount', { count: 3 })).toBe('3 条连接');
+    expect(canvasText('en', 'workspace.agentCount', { count: 1 })).toBe('Agent nodes: 1');
+    expect(canvasText('zh', 'workspace.agentCount', { count: 1 })).toBe('Agent 节点：1');
+    expect(canvasText('en', 'workspace.connectedCount', { count: 1 })).toBe('Connected Agent nodes: 1');
+    expect(canvasText('zh', 'workspace.connectedCount', { count: 1 })).toBe('已连接 Agent 节点：1');
     const wrapper = ({ children }: { children: ReactNode }) => <LocaleProvider locale="en">{children}</LocaleProvider>;
     const { result } = renderHook(() => useCanvasI18n(), { wrapper });
     expect(result.current.locale).toBe('en');

@@ -1,0 +1,6 @@
+**
+!apps/
+!apps/openai-agents-worker/
+!apps/openai-agents-worker/*.mjs
+!apps/openai-agents-worker/package.json
+!apps/openai-agents-worker/package-lock.json

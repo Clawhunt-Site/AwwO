@@ -24,51 +24,75 @@ type piHealth struct {
 	Status   string         `json:"status"`
 	Limits   map[string]any `json:"limits"`
 	Models   []piModel      `json:"models"`
+	Tools    []runtimeTool  `json:"tools,omitempty"`
+}
+type runtimeTool struct {
+	ID               string `json:"id"`
+	ContextTextBytes int    `json:"contextTextBytes"`
 }
 type piModel struct {
 	ID                   string `json:"id"`
 	Name                 string `json:"name"`
 	Provider             string `json:"provider"`
+	ProviderModel        string `json:"providerModel,omitempty"`
+	Protocol             string `json:"protocol,omitempty"`
+	Runtime              string `json:"runtime"`
 	MaxContextTextBytes  int    `json:"maxContextTextBytes"`
 	MessageOverheadBytes int    `json:"messageOverheadBytes"`
 }
 
-func (a *App) probePI(ctx context.Context) (piHealth, error) {
-	var h piHealth
-	if a.cfg.PIToken == "" {
-		return h, errors.New("Pi service token is not configured")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	req, e := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(a.cfg.PIURL, "/")+"/health", nil)
-	if e != nil {
-		return h, e
-	}
-	resp, e := a.client.Do(req)
-	if e != nil {
-		return h, errors.New("Pi service is unavailable")
-	}
-	defer resp.Body.Close()
-	if e = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&h); e != nil || resp.StatusCode != 200 || !h.Ready {
-		return h, errors.New("Pi provider is not configured or available")
-	}
-	return h, nil
-}
+func (a *App) probePI(ctx context.Context) (piHealth, error) { return a.probeRuntime(ctx, runtimePI) }
 func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
-	h, e := a.probePI(r.Context())
-	models := []map[string]string{}
-	if h.Model != "" {
-		models = append(models, map[string]string{"id": h.Model, "provider": h.Provider})
+	type discovery struct {
+		h   piHealth
+		err error
 	}
-	if len(h.Models) > 0 {
-		models = []map[string]string{}
-		for _, m := range h.Models {
-			models = append(models, map[string]string{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": "pi"})
+	results := make(chan struct {
+		runtime string
+		discovery
+	}, 2)
+	for _, id := range []string{runtimePI, runtimeOpenAIAgents} {
+		go func(id string) {
+			h, err := a.probeRuntime(r.Context(), id)
+			results <- struct {
+				runtime string
+				discovery
+			}{id, discovery{h, err}}
+		}(id)
+	}
+	found := map[string]discovery{}
+	for range 2 {
+		result := <-results
+		found[result.runtime] = result.discovery
+	}
+	models, runtimes := []map[string]string{}, []map[string]any{}
+	available, configured := false, false
+	for _, id := range []string{runtimePI, runtimeOpenAIAgents} {
+		result := found[id]
+		h := result.h
+		_, _, configError := a.runtimeEndpoint(id)
+		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": false, "tools": enabledRuntimeTools(h, id)}
+		if result.err != nil {
+			descriptor["reason"] = result.err.Error()
+		} else {
+			descriptor["defaultModel"] = h.Model
+			seen := map[string]bool{}
+			for _, m := range h.Models {
+				models = append(models, map[string]string{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": id})
+				seen[m.ID] = true
+			}
+			if !seen[h.Model] {
+				models = append(models, map[string]string{"id": h.Model, "name": h.Model, "provider": h.Provider, "runtime": id})
+			}
 		}
+		available = available || result.err == nil
+		configured = configured || configError == nil
+		runtimes = append(runtimes, descriptor)
 	}
-	v := map[string]any{"engine": "pi", "configured": a.cfg.PIToken != "" && h.Ready, "available": e == nil, "plannerAvailable": e == nil, "models": models, "modelConnectivityVerified": false, "limits": h.Limits}
-	if e != nil {
-		v["reason"] = e.Error()
+	pi := found[runtimePI]
+	v := map[string]any{"engine": runtimePI, "configured": configured, "available": available, "plannerAvailable": pi.err == nil, "models": models, "runtimes": runtimes, "modelConnectivityVerified": false, "limits": pi.h.Limits}
+	if !available {
+		v["reason"] = "No configured runtime is available"
 	}
 	writeJSON(w, 200, v)
 }
@@ -154,8 +178,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
 		return
 	}
-	var model, instructions, kind string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind)
+	var model, instructions, kind, runtime string
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -173,16 +197,6 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "session_busy", "This session already has an active run")
 		return
 	}
-	health, e := a.probePI(r.Context())
-	if e != nil {
-		fail(w, 503, "runtime_unavailable", e.Error())
-		return
-	}
-	budget, overhead := health.contextLimits()
-	if _, _, ok := health.modelLimits(model); !ok {
-		fail(w, 409, "model_unavailable", "Agent model differs from the configured Pi model")
-		return
-	}
 	var document []byte
 	var nodeID string
 	if e = tx.QueryRow(r.Context(), "SELECT c.document,s.node_id FROM node_sessions s JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2", tid, b.SessionID).Scan(&document, &nodeID); e != nil {
@@ -194,19 +208,20 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_team", e.Error())
 		return
 	}
-	if e = validateTeamModels(team, health); e != nil {
-		fail(w, 400, "invalid_team", e.Error())
+	if !savedRuntimeMatches(document, nodeID, runtime) {
+		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 		return
 	}
-	if model == "" {
-		model = health.Model
+	snapshot, e := a.runtimeSnapshot(r.Context(), runtimeCatalog{}, runtime, model, instructions, team)
+	if e != nil {
+		a.runtimeAdmissionError(w, e)
+		return
 	}
-	budget, overhead, _ = health.modelLimits(model)
+	budget, overhead := snapshot.Budget, snapshot.Overhead
 	if team == nil && len(b.Prompt)+len(instructions)+overhead > budget {
-		fail(w, 413, "context_limit", "Prompt and instructions exceed the configured model context budget")
+		fail(w, 413, "context_limit", "Prompt and instructions exceed the selected runtime context budget")
 		return
 	}
-	snapshot := executionSnapshot{Instructions: instructions, Model: model, Budget: budget, Overhead: overhead, Team: team, Health: health}
 	if team != nil {
 		history, available, err := completedTeamHistory(r.Context(), tx, tid, b.SessionID)
 		if err != nil {
@@ -247,21 +262,33 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	a.dispatch(tid, id, b.SessionID, b.Prompt, instructions, kind, budget, overhead)
+	a.dispatch(tid, id, b.SessionID, b.Prompt, instructions, kind, budget, overhead, r.Context())
 	writeJSON(w, 202, v)
 }
-func (a *App) dispatch(tid, id, sid, prompt, instructions, kind string, budget, overhead int) {
+func (a *App) dispatch(tid, id, sid, prompt, instructions, kind string, budget, overhead int, parents ...context.Context) {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), a.cfg.RunTimeout)
+	parent := context.Background()
+	if len(parents) > 0 {
+		parent = parents[0]
+	}
+	traceCtx, endTrace := a.startAsyncTrace(parent, "awwo.run.execute", kind, "unknown")
+	ctx, cancel := context.WithTimeout(traceCtx, a.cfg.RunTimeout)
 	a.running[id] = cancel
 	a.tasks.Add(1)
 	a.mu.Unlock()
 	go func() {
 		defer a.tasks.Done()
+		defer func() {
+			c, done := context.WithTimeout(context.Background(), time.Second)
+			defer done()
+			outcome := "interrupted"
+			_ = a.db.QueryRow(c, "SELECT status FROM runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&outcome)
+			endTrace(outcome)
+		}()
 		defer cancel()
 		defer func() { a.mu.Lock(); delete(a.running, id); a.mu.Unlock() }()
 		a.execute(ctx, tid, id, sid, prompt, instructions, kind, budget, overhead)
@@ -277,8 +304,9 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		return
 	}
 	defer tx.Rollback(context.Background())
-	tag, e := tx.Exec(ctx, "UPDATE runs SET status='running',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='queued'", tid, id)
-	if e != nil || tag.RowsAffected() == 0 {
+	var queuedAt time.Time
+	e = tx.QueryRow(ctx, "UPDATE runs SET status='running',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='queued' RETURNING created_at", tid, id).Scan(&queuedAt)
+	if e != nil {
 		return
 	}
 	if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, `{"type":"running"}`); e != nil {
@@ -287,6 +315,11 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	if e = tx.Commit(ctx); e != nil {
 		return
 	}
+	queueDuration := time.Since(queuedAt)
+	if queueDuration < 0 {
+		queueDuration = 0
+	}
+	a.observeQueue(kind, "started", queueDuration)
 	var snapshot executionSnapshot
 	var snapshotRaw []byte
 	if e = a.db.QueryRow(ctx, "SELECT execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&snapshotRaw); e != nil {
@@ -301,11 +334,13 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
 		return
 	}
-	if e = a.reserveInvocation(ctx, tid, id, id); e != nil {
+	facts := invocationMetadata(snapshot, nil)
+	facts.Timing.QueueMs = int64ptr(queueDuration.Milliseconds())
+	if e = a.reserveInvocation(ctx, tid, id, id, facts); e != nil {
 		a.finish(tid, id, "failed", "", e.Error())
 		return
 	}
-	defer a.settleRunInvocation(tid, id)
+	finish := func(status, output, code string) { a.finishWithFacts(tid, id, status, output, code, facts) }
 	var history []json.RawMessage
 	if snapshot.History != nil {
 		history = *snapshot.History
@@ -313,7 +348,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		history, e = rowsJSON(ctx, a.db, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND m.run_id<>$3 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid, id)
 	}
 	if e != nil {
-		a.finish(tid, id, "failed", "", "history_unavailable")
+		finish("failed", "", "history_unavailable")
 		return
 	}
 	if kind == "planner" {
@@ -321,29 +356,55 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	} else {
 		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions), budget, overhead)
 	}
-	body, e := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": "pi"})
+	body, e := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": defaultRuntime(snapshot.Runtime)})
 	if e != nil {
-		a.finish(tid, id, "failed", "", "invalid_request")
+		finish("failed", "", "invalid_request")
 		return
 	}
-	resp, e := a.admitPI(ctx, body)
+	runtimeCompleted := false
+	defer func() {
+		if !runtimeCompleted {
+			a.cancelRuntime(defaultRuntime(snapshot.Runtime), id)
+		}
+	}()
+	if e = a.markInvocationAdmission(ctx, tid, id, facts, "unknown"); e != nil {
+		finish("failed", "", "accounting_commit_failed")
+		return
+	}
+	admissionStart := time.Now()
+	resp, e := a.admitRuntime(ctx, defaultRuntime(snapshot.Runtime), body)
+	facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
+	if errors.Is(e, errSessionBusy) {
+		facts.Admission = "rejected_before_start"
+	}
 	if e != nil {
 		if errors.Is(e, errSessionBusy) {
-			a.finish(tid, id, "failed", "", "runtime_session_busy")
+			finish("failed", "", "runtime_session_busy")
 		} else if ctx.Err() != nil {
-			a.finish(tid, id, "cancelled", "", "")
+			finish("cancelled", "", "")
 		} else {
-			a.finish(tid, id, "failed", "", "runtime_unavailable")
+			finish("failed", "", "runtime_unavailable")
 		}
 		return
 	}
 	defer resp.Body.Close()
+	facts.Admission = "accepted"
+	if resp.StatusCode != http.StatusOK {
+		facts.Admission = "unknown"
+		if resp.StatusCode == 400 || resp.StatusCode == 401 || resp.StatusCode == 413 || resp.StatusCode == 422 || resp.StatusCode == 429 || resp.StatusCode == 503 {
+			facts.Admission = "rejected_before_start"
+		}
+	}
+	if e = a.markInvocationAdmission(ctx, tid, id, facts, facts.Admission); e != nil {
+		finish("failed", "", "accounting_commit_failed")
+		return
+	}
 	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		code := "runtime_rejected"
 		if resp.StatusCode == 413 {
 			code = "context_limit"
 		}
-		a.finish(tid, id, "failed", "", code)
+		finish("failed", "", code)
 		return
 	}
 	scanner := bufio.NewScanner(resp.Body)
@@ -355,20 +416,24 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			continue
 		}
 		var ev struct {
-			Type    string `json:"type"`
-			Delta   string `json:"delta"`
-			Text    string `json:"text"`
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Type          string          `json:"type"`
+			Delta         string          `json:"delta"`
+			Text          string          `json:"text"`
+			Code          string          `json:"code"`
+			Message       string          `json:"message"`
+			Observability json.RawMessage `json:"observability"`
 		}
 		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev) != nil {
-			a.finish(tid, id, "failed", output.String(), "invalid_runtime_event")
+			finish("failed", output.String(), "invalid_runtime_event")
 			return
+		}
+		if ev.Type == "completed" || ev.Type == "failed" || ev.Type == "cancelled" {
+			facts.receive(ev.Observability, a.cfg.RunTimeout)
 		}
 		switch ev.Type {
 		case "text_delta":
 			if output.Len()+len(ev.Delta) > 2<<20 {
-				a.finish(tid, id, "failed", output.String(), "output_limit")
+				finish("failed", output.String(), "output_limit")
 				return
 			}
 			output.WriteString(ev.Delta)
@@ -378,32 +443,33 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				continue
 			}
 			if !a.appendDelta(ctx, tid, id, ev.Delta) {
-				a.finish(tid, id, "failed", output.String(), "event_persistence_failed")
+				finish("failed", output.String(), "event_persistence_failed")
 				return
 			}
 		case "completed":
 			if !strings.HasPrefix(ev.Text, output.String()) {
-				a.finish(tid, id, "failed", output.String(), "inconsistent_runtime_output")
+				finish("failed", output.String(), "inconsistent_runtime_output")
 				return
 			}
 			if len(ev.Text) > 2<<20 {
-				a.finish(tid, id, "failed", output.String(), "output_limit")
+				finish("failed", output.String(), "output_limit")
 				return
 			}
 			if ev.Text != "" {
 				output.Reset()
 				output.WriteString(ev.Text)
 			}
-			a.finish(tid, id, "completed", output.String(), "")
+			runtimeCompleted = true
+			finish("completed", output.String(), "")
 			return
 		case "failed":
-			a.finish(tid, id, "failed", output.String(), "runtime_failed")
+			finish("failed", output.String(), "runtime_failed")
 			return
 		case "cancelled":
-			a.finish(tid, id, "cancelled", output.String(), "")
+			finish("cancelled", output.String(), "")
 			return
 		default:
-			a.finish(tid, id, "failed", output.String(), "invalid_runtime_event")
+			finish("failed", output.String(), "invalid_runtime_event")
 			return
 		}
 	}
@@ -414,9 +480,9 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			status = "failed"
 			code = "run_timeout"
 		}
-		a.finish(tid, id, status, output.String(), code)
+		finish(status, output.String(), code)
 	} else {
-		a.finish(tid, id, "failed", output.String(), "runtime_stream_ended")
+		finish("failed", output.String(), "runtime_stream_ended")
 	}
 }
 func (a *App) appendDelta(ctx context.Context, tid, id, delta string) bool {
@@ -436,10 +502,13 @@ func (a *App) appendDelta(ctx context.Context, tid, id, delta string) bool {
 	return tx.Commit(ctx) == nil
 }
 func (a *App) finish(tid, id, status, output, code string) {
+	a.finishWithFacts(tid, id, status, output, code, nil)
+}
+func (a *App) finishWithFacts(tid, id, status, output, code string, facts *invocationFacts) {
 	if e := a.persistExecution(func(ctx context.Context) error {
-		return a.finishOnce(ctx, tid, id, status, output, code)
+		return a.finishOnce(ctx, tid, id, status, output, code, facts)
 	}); e != nil {
-		a.log.Error("run finalization interrupted; restart recovery required", "runId", id)
+		a.log.Error("run finalization interrupted; restart recovery required", "event", "run_finalize_failed")
 	}
 }
 
@@ -447,9 +516,23 @@ func (a *App) finish(tid, id, status, output, code string) {
 // Shutdown or loss of our single-worker lease stops retrying. Start recovers the
 // remaining uncertain records before allowing another invocation.
 func (a *App) persistExecution(write func(context.Context) error) error {
-	for {
+	for attempt := 0; ; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		err := write(ctx)
+		traceCtx, endCommit := a.startLedgerTrace(ctx, "invocation_terminal_commit")
+		started := time.Now()
+		err := write(traceCtx)
+		outcome := "committed"
+		dbOutcome := "success"
+		if err != nil {
+			outcome = "retryable_error"
+			dbOutcome = "error"
+			if attempt >= 4 {
+				outcome = "permanent_error"
+			}
+		}
+		a.observeLedger("invocation_terminal_commit", outcome)
+		a.observeDB("invocation_terminal_commit", dbOutcome, time.Since(started))
+		endCommit(outcome)
 		cancel()
 		if err == nil {
 			return nil
@@ -457,14 +540,43 @@ func (a *App) persistExecution(write func(context.Context) error) error {
 		a.mu.Lock()
 		closed := a.closed
 		a.mu.Unlock()
-		if closed {
+		if closed || attempt >= 4 {
 			return err
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code string) error {
+func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code string, observations ...*invocationFacts) error {
+	var facts *invocationFacts
+	if len(observations) > 0 {
+		facts = observations[0]
+	}
+	var committed func()
+	var runChanged bool
+	runKind, runRuntime := "unknown", "unknown"
+	settle := func(tx pgx.Tx) error {
+		if facts != nil {
+			var err error
+			committed, err = a.settleInvocation(ctx, tx, tid, id, status, code, facts)
+			if err != nil {
+				return err
+			}
+		}
+		return settleExecutionRecords(ctx, tx, tid, id, status)
+	}
+	commit := func(tx pgx.Tx) error {
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		if committed != nil {
+			committed()
+		}
+		if runChanged {
+			a.observeRun(runKind, runRuntime, status)
+		}
+		return nil
+	}
 	tx, e := a.db.Begin(ctx)
 	if e != nil {
 		return e
@@ -496,13 +608,25 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 			}
 			return e
 		}
-		if e = settleExecutionRecords(ctx, tx, tid, id, status); e != nil {
+		if e = settle(tx); e != nil {
 			return e
 		}
-		return tx.Commit(ctx)
+		return commit(tx)
 	}
 	if e != nil {
 		return e
+	}
+	runChanged = true
+	var snapshotRaw json.RawMessage
+	if e = tx.QueryRow(ctx, "SELECT CASE WHEN EXISTS(SELECT 1 FROM graph_run_nodes g WHERE g.tenant_id=r.tenant_id AND g.run_id=r.id) THEN 'graph' ELSE s.kind END,r.execution_snapshot FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND r.id=$2", tid, id).Scan(&runKind, &snapshotRaw); e != nil {
+		return e
+	}
+	var snap executionSnapshot
+	if json.Unmarshal(snapshotRaw, &snap) == nil {
+		runRuntime = snapshotRuntime(snap)
+		if snap.Team != nil && runKind != "graph" {
+			runKind = "team"
+		}
 	}
 	event := map[string]string{"type": status}
 	if status == "completed" {
@@ -519,10 +643,10 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 	if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, data); e != nil {
 		return e
 	}
-	if e = settleExecutionRecords(ctx, tx, tid, id, status); e != nil {
+	if e = settle(tx); e != nil {
 		return e
 	}
-	return tx.Commit(ctx)
+	return commit(tx)
 }
 
 func settleExecutionRecords(ctx context.Context, tx pgx.Tx, tid, id, status string) error {
@@ -531,8 +655,7 @@ func settleExecutionRecords(ctx context.Context, tx pgx.Tx, tid, id, status stri
 	if _, e := tx.Exec(ctx, "UPDATE run_turns SET status=$3,error=CASE WHEN $3='interrupted' THEN 'execution_interrupted' ELSE error END,updated_at=now() WHERE tenant_id=$1 AND run_id=$2 AND status IN ('queued','running')", tid, id, status); e != nil {
 		return e
 	}
-	_, e := tx.Exec(ctx, "UPDATE model_invocations SET status=$3,updated_at=now() WHERE tenant_id=$1 AND run_id=$2 AND status='running'", tid, id, status)
-	return e
+	return settleAbandonedInvocations(ctx, tx, tid, id, status)
 }
 func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
@@ -584,19 +707,25 @@ func (a *App) cancelExecution(id string) {
 	if cancel != nil {
 		cancel()
 	}
-	a.cancelPI(id)
+	// The active single-Agent request or each team turn performs its own
+	// bounded cleanup against the exact worker and submitted ID.
 }
 
-// A Pi request is keyed by its submitted runId. Team members submit their turn
+// A worker request is keyed by its submitted runId. Team members submit their turn
 // ID, whereas a single-Agent request submits the public run ID.
-func (a *App) cancelPI(id string) {
+func (a *App) cancelPI(id string) { a.cancelRuntime(runtimePI, id) }
+func (a *App) cancelRuntime(runtime, id string) {
+	endpoint, token, err := a.runtimeEndpoint(runtime)
+	if err != nil {
+		return
+	}
 	ctx, done := context.WithTimeout(context.Background(), 2*time.Second)
 	defer done()
-	req, e := http.NewRequestWithContext(ctx, "DELETE", strings.TrimRight(a.cfg.PIURL, "/")+"/internal/runs/"+id, nil)
+	req, e := http.NewRequestWithContext(ctx, "DELETE", endpoint+"/internal/runs/"+id, nil)
 	if e != nil {
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+a.cfg.PIToken)
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, e := a.client.Do(req)
 	if e == nil {
 		resp.Body.Close()
@@ -784,20 +913,48 @@ var errSessionBusy = errors.New("Pi session cleanup did not finish within admiss
 // a child. Only that response may be retried. Network errors, RUN_BUSY, capacity
 // errors and streams already accepted with HTTP 200 are never retried here.
 func (a *App) admitPI(ctx context.Context, body []byte) (*http.Response, error) {
+	return a.admitRuntime(ctx, runtimePI, body)
+}
+func (a *App) admitRuntime(ctx context.Context, runtime string, body []byte) (*http.Response, error) {
+	endpoint, token, err := a.runtimeEndpoint(runtime)
+	if err != nil {
+		return nil, err
+	}
 	deadline := time.Now().Add(a.cfg.PIAdmissionWait)
 	delay := 50 * time.Millisecond
 	for {
-		req, e := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(a.cfg.PIURL, "/")+"/internal/runs", bytes.NewReader(body))
+		attemptStart := time.Now()
+		var selector struct {
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal(body, &selector)
+		requestCtx, endAttempt := a.startInternalTrace(ctx, runtime, selector.Model)
+		observe := func(outcome string) {
+			a.observeAdmission(runtime, outcome, time.Since(attemptStart))
+			endAttempt(outcome)
+		}
+		req, e := http.NewRequestWithContext(requestCtx, "POST", endpoint+"/internal/runs", bytes.NewReader(body))
 		if e != nil {
+			observe("rejected_invalid")
 			return nil, e
 		}
-		req.Header.Set("Authorization", "Bearer "+a.cfg.PIToken)
+		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
+		a.injectWorkerTrace(req, runtime)
 		resp, e := a.client.Do(req)
 		if e != nil {
+			observe("transport_unknown")
 			return nil, e
 		}
 		if resp.StatusCode != 409 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+			outcome := "rejected_invalid"
+			if resp.StatusCode == 200 {
+				outcome = "accepted"
+			}
+			if resp.StatusCode == 429 || resp.StatusCode == 503 {
+				outcome = "rejected_capacity"
+			}
+			observe(outcome)
 			return resp, nil
 		}
 		var rejection struct {
@@ -806,8 +963,10 @@ func (a *App) admitPI(ctx context.Context, body []byte) (*http.Response, error) 
 			} `json:"error"`
 		}
 		if e = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&rejection); e != nil || rejection.Error.Code != "SESSION_BUSY" {
+			observe("rejected_busy")
 			return resp, nil
 		}
+		observe("session_busy")
 		resp.Body.Close()
 		remaining := time.Until(deadline)
 		if remaining <= 0 {

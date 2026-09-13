@@ -1,7 +1,8 @@
+const businessEvent = ({ observability, ...event }) => event;
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { access, mkdir, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
@@ -25,7 +26,7 @@ async function close(server) {
   await done;
 }
 
-async function provider(t, { mode = 'success', protocol = 'openai', beforeReply } = {}) {
+async function provider(t, { mode = 'success', protocol = 'openai', beforeReply, usage, multilineUsage = false } = {}) {
   const requests = [];
   let notifyRequest;
   const received = new Promise((resolve) => { notifyRequest = resolve; });
@@ -66,6 +67,7 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply 
         send({ content: 'from Pi' });
         send({}, 'stop');
       }
+      if (usage !== undefined) res.write(JSON.stringify({ choices: [], usage }, null, multilineUsage ? 2 : undefined).split('\n').map(line => `data: ${line}`).join('\n') + '\n\n');
       res.write('data: [DONE]\n\n');
     }
     res.end();
@@ -113,8 +115,11 @@ test('model catalog preserves the default, resolves only IDs, and exposes safe m
   assert.ok(config.models.every(Object.isFrozen));
   const health = publicHealth(config);
   assert.equal(health.model, ENV.AWWO_PI_MODEL);
+  assert.equal(health.models[0].providerModel, ENV.AWWO_PI_MODEL);
+  assert.equal(health.models[0].protocol, 'chat_completions');
+  assert.equal(resolveModelConfig(config, 'reviewer').protocol, health.models[1].protocol);
   assert.deepEqual(health.models[1], {
-    id: 'reviewer', name: 'review-model', provider: 'anthropic', runtime: 'pi',
+    id: 'reviewer', name: 'review-model', providerModel: 'review-model', protocol: 'anthropic_messages', provider: 'anthropic', runtime: 'pi',
     contextWindow: 8192, maxOutputTokens: 512, maxContextTextBytes: 7424, messageOverheadBytes: 32,
   });
   const serialized = JSON.stringify(health);
@@ -312,7 +317,7 @@ test('real Pi SDK streams OpenAI-compatible output, restores role-based history,
   const request = { ...REQUEST, systemPrompt: 'server-owned assistant instructions', messages: [{ role: 'user', content: 'previous user text' }, { role: 'assistant', content: 'previous assistant text' }] };
   const { handle, events } = await run(t, configuration(model.baseURL), request);
   await handle.done;
-  assert.deepEqual(events.at(-1), { type: 'completed', text: 'Hello from Pi' });
+  assert.deepEqual(businessEvent(events.at(-1)), { type: 'completed', text: 'Hello from Pi' });
   assert.equal(events.filter((event) => event.type === 'text_delta').map((event) => event.delta).join(''), 'Hello from Pi');
   assert.equal(model.requests.length, 1);
   const sent = model.requests[0];
@@ -331,7 +336,7 @@ test('real Pi SDK reaches the configured Anthropic protocol', { timeout: 20000 }
   const model = await provider(t, { protocol: 'anthropic' });
   const { handle, events } = await run(t, configuration(model.baseURL, { AWWO_PI_PROVIDER: 'anthropic' }));
   await handle.done;
-  assert.deepEqual(events.at(-1), { type: 'completed', text: 'Hello from Pi' });
+  assert.deepEqual(businessEvent(events.at(-1)), { type: 'completed', text: 'Hello from Pi' });
   assert.equal(model.requests.length, 1);
   assert.equal(new URL(model.requests[0].url, 'http://localhost').pathname, '/v1/messages');
 });
@@ -368,7 +373,7 @@ test('deadline forcibly bounds an unresponsive model run', { timeout: 20000 }, a
   const model = await provider(t, { mode: 'stall' });
   const { handle, events } = await run(t, configuration(model.baseURL, { AWWO_PI_TIMEOUT_MS: '1000' }));
   await handle.done;
-  assert.deepEqual(events.at(-1), { type: 'failed', code: 'DEADLINE_EXCEEDED', message: 'The model request timed out.' });
+  assert.deepEqual(businessEvent(events.at(-1)), { type: 'failed', code: 'DEADLINE_EXCEEDED', message: 'The model request timed out.' });
   assert.throws(() => process.kill(handle.pid, 0), /ESRCH/);
 });
 
@@ -376,7 +381,7 @@ test('the UTF-8 output limit terminates an actual Pi child without returning an 
   const model = await provider(t, { mode: 'oversize' });
   const { handle, events } = await run(t, configuration(model.baseURL, { AWWO_PI_MAX_OUTPUT_BYTES: '1024' }));
   await handle.done;
-  assert.deepEqual(events.at(-1), { type: 'failed', code: 'OUTPUT_LIMIT', message: 'The model output exceeded the configured limit.' });
+  assert.deepEqual(businessEvent(events.at(-1)), { type: 'failed', code: 'OUTPUT_LIMIT', message: 'The model output exceeded the configured limit.' });
   assert.equal(events.some(event => event.type === 'completed'), false);
   assert.ok(events.filter(event => event.type === 'text_delta').reduce((bytes, event) => bytes + Buffer.byteLength(event.delta), 0) <= 1024);
   assert.equal(model.requests.length, 1);
@@ -511,7 +516,7 @@ test('HTTP to isolated Pi to model protocol returns the documented SSE completio
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type'), /^text\/event-stream/);
   const events = (await response.text()).split('\n').filter((line) => line.startsWith('data: ')).map((line) => JSON.parse(line.slice(6)));
-  assert.deepEqual(events.at(-1), { type: 'completed', text: 'Hello from Pi' });
+  assert.deepEqual(businessEvent(events.at(-1)), { type: 'completed', text: 'Hello from Pi' });
   assert.equal(events.filter((event) => event.type === 'completed').length, 1);
   assert.equal(events.filter((event) => event.type === 'text_delta').map((event) => event.delta).join(''), 'Hello from Pi');
   // No sleep or cleanup polling: a terminal response permits the next turn.
@@ -553,4 +558,81 @@ test('terminal delivery waits for an actual child to stop and frees the same ses
   }
   assert.equal(handles.length, 3);
   assert.equal(new Set(handles.map(handle => handle.pid)).size, 3);
+});
+
+for (const [name, usage, status] of [
+  ['missing', undefined, 'unavailable'],
+  ['explicit zero', { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, 'reported'],
+  ['partial', { prompt_tokens: 9 }, 'partial'],
+  ['cached and reasoning', { prompt_tokens: 19, completion_tokens: 7, total_tokens: 26, prompt_tokens_details: { cached_tokens: 3 }, completion_tokens_details: { reasoning_tokens: 2 } }, 'reported'],
+]) test(`real Pi provider usage preserves ${name} across IPC and cleanup`, async t => {
+  const fixture = await provider(t, { usage, multilineUsage: name === 'cached and reasoning' });
+  const { handle, events } = await run(t, configuration(fixture.baseURL));
+  await handle.done;
+  const terminal = events.at(-1);
+  assert.equal(terminal.type, 'completed');
+  const observation = terminal.observability;
+  assert.equal(observation.version, 1); assert.equal(observation.usage.status, status);
+  assert.equal(observation.usage.inputTokens, usage?.prompt_tokens ?? null);
+  assert.equal(observation.usage.outputTokens, usage?.completion_tokens ?? null);
+  assert.equal(observation.usage.reasoningTokens, usage?.completion_tokens_details?.reasoning_tokens ?? null);
+  assert.ok(observation.timing.workerTotalMs >= observation.timing.setupMs + observation.timing.providerMs - 1);
+  assert.ok(observation.timing.providerTtftMs !== null);
+  assert.ok(observation.timing.workerFirstDeltaMs >= observation.timing.providerTtftMs);
+  assert.equal(fixture.requests.length, 1);
+  const metadata = publicHealth(configuration(fixture.baseURL)).models[0];
+  assert.equal(metadata.providerModel, fixture.requests[0].body.model);
+  assert.equal(metadata.protocol, 'chat_completions');
+  assert.equal(fixture.requests[0].url, '/v1/chat/completions');
+  for (const key of ['traceparent', 'tracestate', 'baggage']) assert.equal(fixture.requests[0].headers[key], undefined);
+  await assert.rejects(access(handle.directory));
+});
+
+test('Pi shutdown waits for a pending launch to release capacity and publish its terminal', { timeout: 5000 }, async t => {
+  let announce, unblock, cancelled = false, released = false;
+  const admitted = new Promise(resolve => { announce = resolve; });
+  const launch = new Promise(resolve => { unblock = resolve; });
+  const app = createPiServer(loadConfig(ENV), { startRun: async ({ onExit, onEvent }) => {
+    announce(); await launch;
+    return { done: Promise.resolve(), cancel() { cancelled = true; released = true; onExit(); onEvent({ type: 'cancelled' }); } };
+  } });
+  const url = await listen(app.server); t.after(() => { unblock(); return app.close(); });
+  const response = await fetch(url + '/internal/runs', { method: 'POST', headers: { authorization: 'Bearer ' + TOKEN, 'content-type': 'application/json' }, body: JSON.stringify(REQUEST) });
+  const body = response.text(); await admitted;
+  let stopped = false; const closing = app.close().then(() => { stopped = true; });
+  await sleep(30); assert.equal(stopped, false); assert.equal(released, false);
+  unblock(); await closing;
+  assert.equal(cancelled, true); assert.equal(released, true); assert.equal(stopped, true);
+  assert.match(await body, /"type":"cancelled"/);
+  assert.match(app.observability.metrics(), /outcome="cancelled"/);
+  assert.match(app.observability.metrics(), /awwo_worker_active 0/);
+});
+
+test('Pi rejects a request whose body finishes after shutdown starts', { timeout: 5000 }, async t => {
+  let announce, unblock;
+  const admitted = new Promise(resolve => { announce = resolve; });
+  const launch = new Promise(resolve => { unblock = resolve; });
+  let starts = 0;
+  const app = createPiServer(loadConfig(ENV), { startRun: async ({ onExit, onEvent }) => {
+    starts++; announce(); await launch;
+    return { cancel() { onExit(); onEvent({ type: 'cancelled' }); } };
+  } });
+  const url = await listen(app.server); t.after(() => { unblock(); return app.close(); });
+  const headers = { authorization: 'Bearer ' + TOKEN, 'content-type': 'application/json' };
+  const active = await fetch(url + '/internal/runs', { method: 'POST', headers, body: JSON.stringify(REQUEST) });
+  const activeBody = active.text(); await admitted;
+  const awaitingBody = once(app.server, 'request');
+  const request = httpRequest(url + '/internal/runs', { method: 'POST', headers });
+  t.after(() => request.destroy());
+  const received = new Promise((resolve, reject) => {
+    request.on('error', reject);
+    request.on('response', response => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
+  });
+  const payload = JSON.stringify({ ...REQUEST, runId: 'late_run', sessionId: 'late_session' });
+  request.write(payload.slice(0, 1)); await awaitingBody;
+  const closing = app.close();
+  request.end(payload.slice(1));
+  assert.equal(await received, 503);
+  assert.equal(starts, 1);
+  unblock(); await closing; await activeBody;
 });

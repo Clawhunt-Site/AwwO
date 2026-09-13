@@ -42,7 +42,10 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if _, e = tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS awwo_schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"); e != nil {
 		return e
 	}
-	for index, path := range []string{"migrations/001_initial.sql", "migrations/002_planning.sql", "migrations/003_invitations.sql", "migrations/004_admin_pagination.sql", "migrations/005_tenant_pagination.sql", "migrations/006_user_appearance.sql", "migrations/007_node_teams_graph_runs.sql", "migrations/008_node_setup_snapshot.sql", "migrations/009_team_turn_inputs.sql", "migrations/010_artifacts.sql", "migrations/011_graph_collaboration.sql"} {
+	// Version 11 had two historical meanings. New databases start with runtime
+	// identity; reconciliation below verifies either legacy schema before adding
+	// its missing counterpart without rewriting the recorded version 11.
+	for index, path := range []string{"migrations/001_initial.sql", "migrations/002_planning.sql", "migrations/003_invitations.sql", "migrations/004_admin_pagination.sql", "migrations/005_tenant_pagination.sql", "migrations/006_user_appearance.sql", "migrations/007_node_teams_graph_runs.sql", "migrations/008_node_setup_snapshot.sql", "migrations/009_team_turn_inputs.sql", "migrations/010_artifacts.sql", "migrations/011_agent_runtimes.sql"} {
 		var exists bool
 		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM awwo_schema_migrations WHERE version=$1)", index+1).Scan(&exists); e != nil {
 			return e
@@ -59,6 +62,15 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 				return e
 			}
 		}
+	}
+	if e = reconcileMigrationIdentity(ctx, tx); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 13, "migrations/013_model_observability.sql"); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 14, "migrations/014_usage_snapshot_identity.sql"); e != nil {
+		return e
 	}
 	return tx.Commit(ctx)
 }
@@ -104,6 +116,6 @@ func noRows(e error) bool { return errors.Is(e, pgx.ErrNoRows) }
 
 const tenantJSON = `jsonb_build_object('id',t.id,'name',t.name,'status',t.status,'maxConcurrentRuns',t.max_concurrent_runs,'maxRunsPerDay',t.max_runs_per_day,'createdAt',t.created_at)`
 const canvasJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'document',document,'version',version,'createdAt',created_at,'updatedAt',updated_at)`
-const agentJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'status','active','model',model,'role',role,'title',title,'instructions',instructions,'adapterType','pi','adapterConfig',jsonb_build_object('model',model),'createdAt',created_at)`
+const agentJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'status','active','model',model,'role',role,'title',title,'instructions',instructions,'runtime',runtime,'adapterType',runtime,'adapterConfig',jsonb_build_object('model',model),'createdAt',created_at)`
 const sessionJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'canvasId',canvas_id,'nodeId',node_id,'agentId',agent_id,'title',title,'createdAt',created_at)`
 const runJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'sessionId',session_id,'operationId',operation_id,'status',status,'output',output,'outputAvailable',length(output)>0,'terminal',status NOT IN ('queued','running'),'error',error,'createdAt',created_at,'updatedAt',updated_at)`

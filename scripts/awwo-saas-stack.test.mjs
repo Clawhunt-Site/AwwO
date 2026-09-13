@@ -42,7 +42,7 @@ function messagesText(messages) {
   return messages.map(m => typeof m.content === 'string' ? m.content : (m.content ?? []).map(p => p.text ?? '').join('')).join('\n');
 }
 
-test('HTTP → Go → real Pi SDK → local protocol fixture → PostgreSQL, SSE, history, cancel and planner', { timeout: 120_000 }, async (t) => {
+test('HTTP → Go → Pi and OpenAI Agents SDKs → local protocol fixture → PostgreSQL, SSE, history, cancel and planner', { timeout: 120_000 }, async (t) => {
   // Read the existing local configuration only. Never create credentials,
   // initialize databases or alter the persistent launcher environment here.
   const saved = parseEnv(await readFile(path.join(stateDir, '.env'), 'utf8'));
@@ -75,7 +75,7 @@ test('HTTP → Go → real Pi SDK → local protocol fixture → PostgreSQL, SSE
       const text = messagesText(body.messages); const last = messagesText(body.messages.slice(-1));
       res.writeHead(200, { 'content-type': 'text/event-stream' }); res.flushHeaders();
       if (last.includes('hold-open')) { res.on('close', () => { cancelledConnections++; }); return; }
-      let output = last.includes('second-turn') ? 'Second persisted response' : 'First persisted response';
+      let output = last.includes('second-turn') ? 'Second persisted response' : last.includes('openai-agents-turn') ? 'OpenAI Agents persisted response' : 'First persisted response';
       if (text.includes('Awwo canvas planner')) output = JSON.stringify({ version: 1, summary: 'Add backend node', operations: [{ type: 'add_node', ref: 'api', templateId: 'backend' }] });
       if (last.includes('reject-plan')) output = JSON.stringify({ version: 1, summary: 'Unsafe proposal', operations: [{ type: 'exec', command: 'must never execute' }] });
       const send = (delta, finish_reason = null) => res.write(`data: ${JSON.stringify({ id: 'stack_completion', object: 'chat.completion.chunk', created: 1, model: 'stack-test-model', choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
@@ -83,23 +83,31 @@ test('HTTP → Go → real Pi SDK → local protocol fixture → PostgreSQL, SSE
     } catch (error) { res.destroy(error); }
   });
   fixture.listen(0, '127.0.0.1'); await once(fixture, 'listening');
-  const apiPort = await freePort(), piPort = await freePort(); assert.notEqual(apiPort, piPort);
-  const apiURL = `http://127.0.0.1:${apiPort}`, piURL = `http://127.0.0.1:${piPort}`;
+  const apiPort = await freePort(), piPort = await freePort(), openAIAgentsPort = await freePort();
+  assert.equal(new Set([apiPort, piPort, openAIAgentsPort]).size, 3);
+  const apiURL = `http://127.0.0.1:${apiPort}`, piURL = `http://127.0.0.1:${piPort}`, openAIAgentsURL = `http://127.0.0.1:${openAIAgentsPort}`;
+  const openAIAgentsToken = randomBytes(32).toString('base64url');
   const env = { ...process.env, APP_ENV: 'development', AWWO_DATABASE_URL: scoped.href, AWWO_LISTEN_ADDR: `127.0.0.1:${apiPort}`,
     AWWO_PUBLIC_ORIGIN: apiURL, AWWO_PI_URL: piURL, AWWO_PI_HOST: '127.0.0.1', AWWO_PI_PORT: String(piPort),
     AWWO_PI_TOKEN: randomBytes(32).toString('base64url'), AWWO_PI_PROVIDER: 'openai', AWWO_PI_MODEL: 'stack-test-model',
     AWWO_PI_API_KEY: 'stack-fixture-key', AWWO_PI_BASE_URL: `http://127.0.0.1:${fixture.address().port}/v1`,
     AWWO_PI_TIMEOUT_MS: '15000', AWWO_PI_CANCEL_GRACE_MS: '100', AWWO_PI_CONTEXT_WINDOW: '65536',
+    AWWO_OPENAI_AGENTS_URL: openAIAgentsURL, AWWO_OPENAI_AGENTS_HOST: '127.0.0.1', AWWO_OPENAI_AGENTS_PORT: String(openAIAgentsPort),
+    AWWO_OPENAI_AGENTS_TOKEN: openAIAgentsToken, AWWO_OPENAI_AGENTS_PROVIDER: 'openai', AWWO_OPENAI_AGENTS_MODEL: 'stack-test-model',
+    AWWO_OPENAI_AGENTS_API_KEY: 'stack-fixture-key', AWWO_OPENAI_AGENTS_BASE_URL: `http://127.0.0.1:${fixture.address().port}/v1`,
+    AWWO_OPENAI_AGENTS_PROTOCOL: 'chat_completions', AWWO_OPENAI_AGENTS_TOOLS_JSON: '[]', AWWO_OPENAI_AGENTS_TIMEOUT_MS: '15000',
+    AWWO_OPENAI_AGENTS_CANCEL_GRACE_MS: '100', AWWO_OPENAI_AGENTS_CONTEXT_WINDOW: '65536',
     AWWO_RUN_TIMEOUT: '20s', AWWO_AUTH_REQUESTS_PER_MINUTE: '100', AWWO_BOOTSTRAP_ADMIN_EMAIL: '', AWWO_BOOTSTRAP_ADMIN_PASSWORD: '',
   };
   const binary = path.join(dir, 'awwo-api');
   await command('go', ['build', '-o', binary, './cmd/api'], { cwd: path.join(root, 'backend'), env });
   const pi = child(process.execPath, ['apps/pi-worker/server.mjs'], { env }); workers.push(pi);
+  const openAIAgents = child(process.execPath, ['apps/openai-agents-worker/server.mjs'], { env }); workers.push(openAIAgents);
   let api = child(binary, [], { env }); workers.push(api);
   async function ready(url, p) {
     await waitFor(async () => { if (p.exitCode !== null || p.startError) throw new Error(`Service exited: ${p.output()}`); try { return (await fetch(url, { signal: AbortSignal.timeout(500) })).ok; } catch { return false; } }, 'service readiness');
   }
-  await Promise.all([ready(`${apiURL}/api/v1/health`, api), ready(`${piURL}/health`, pi)]);
+  await Promise.all([ready(`${apiURL}/api/v1/health`, api), ready(`${piURL}/health`, pi), ready(`${openAIAgentsURL}/health`, openAIAgents)]);
   let cookie = '';
   async function request(method, endpoint, body, expected = 200) {
     const res = await fetch(`${apiURL}/api/v1${endpoint}`, { method, headers: { origin: apiURL, ...(cookie ? { cookie } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
@@ -125,7 +133,16 @@ test('HTTP → Go → real Pi SDK → local protocol fixture → PostgreSQL, SSE
   const secondProvider = requests.find(r => messagesText(r.messages.slice(-1)).includes('second-turn'));
   assert.ok(messagesText(secondProvider.messages).includes('first-turn')); assert.ok(messagesText(secondProvider.messages).includes('First persisted response'));
   const messages = (await request('GET', `${prefix}/sessions/${session.id}/messages`)).value.items; assert.equal(messages.length, 4);
-  const same = (await request('POST', `${prefix}/runs`, { sessionId: session.id, prompt: 'first-turn', operationId: 'stack-first-operation' })).value; assert.equal(same.id, first.id); assert.equal(requests.length, 2);
+  const oaCanvas = (await request('POST', `${prefix}/canvases`, { name: 'OpenAI Agents canvas', document: { nodes: [{ id: 'oa-node', runtime: 'openai-agents' }], edges: [] } }, 201)).value;
+  const oaAgent = (await request('POST', `${prefix}/agents`, { name: 'OpenAI Agents member', adapterType: 'openai-agents', model: 'stack-test-model', instructions: 'OPENAI-AGENTS-SYSTEM-PROMPT' }, 201)).value;
+  assert.equal(oaAgent.runtime, 'openai-agents');
+  const oaSession = (await request('POST', `${prefix}/sessions`, { canvasId: oaCanvas.id, nodeId: 'oa-node', agentId: oaAgent.id, title: 'OpenAI Agents thread' }, 201)).value;
+  const oaRun = (await request('POST', `${prefix}/runs`, { sessionId: oaSession.id, prompt: 'openai-agents-turn', operationId: 'stack-openai-agents-operation' }, 202)).value;
+  assert.equal((await finished(oaRun)).output, 'OpenAI Agents persisted response');
+  const oaProvider = requests.find(r => messagesText(r.messages.slice(-1)).includes('openai-agents-turn'));
+  assert.ok(oaProvider, 'OpenAI Agents worker must reach the provider fixture');
+  assert.ok(messagesText(oaProvider.messages).includes('OPENAI-AGENTS-SYSTEM-PROMPT'), 'the persisted Agent instructions must become the SDK system prompt');
+  const same = (await request('POST', `${prefix}/runs`, { sessionId: session.id, prompt: 'first-turn', operationId: 'stack-first-operation' })).value; assert.equal(same.id, first.id); assert.equal(requests.length, 3);
   const active = await execute('hold-open', 'stack-cancel-operation'); await waitFor(() => requests.some(r => messagesText(r.messages.slice(-1)).includes('hold-open')), 'actual provider request before cancel');
   await request('POST', `${prefix}/runs/${active.id}/cancel`);
   // Deliberately no delay or cleanup polling between cancellation and new admission.
@@ -140,5 +157,5 @@ test('HTTP → Go → real Pi SDK → local protocol fixture → PostgreSQL, SSE
   await stop(api); api = child(binary, [], { env }); workers.push(api); await ready(`${apiURL}/api/v1/health`, api);
   assert.equal((await request('GET', `${prefix}/runs/${first.id}`)).value.output, 'First persisted response');
   assert.equal((await request('GET', `${prefix}/sessions/${session.id}/messages`)).value.items.length, 7, 'cancelled prompt is retained in durable history but excluded from model context');
-  t.diagnostic('Passed real Go HTTP + PostgreSQL + Pi child/SDK + local OpenAI protocol fixture. No external inference or production service was exercised.');
+  t.diagnostic('Passed real Go HTTP + PostgreSQL + Pi and OpenAI Agents child/SDK paths + local OpenAI protocol fixture. No external inference or production service was exercised.');
 });

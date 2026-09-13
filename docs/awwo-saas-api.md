@@ -79,16 +79,16 @@
 | DELETE /canvases/{id} | 无 | 成功 204；关联节点或规划 run 为 queued/running 时 409 / resource_in_use，拒绝时不改运行、事件或审计 |
 | POST /canvases/{id}/plan | prompt, context, operationId | 202，创建持久规划 run；空画布也可使用，共享运行限额和 SSE |
 | GET /agents | limit?, cursor? | Pi Agent 列表，`{items,nextCursor,snapshot}` |
-| POST /agents | name, role?, title?, model?, adapterConfig?:{model}, instructions?, adapterType? | adapterType 省略或为 pi；model 非空时优先，否则取 adapterConfig.model；role 是 Agent 工作角色文本，不是用户权限 |
+| POST /agents | name, role?, title?, model?, adapterConfig?:{model}, instructions?, adapterType? | adapterType 省略时为 pi，也可为 openai-agents；model 非空时优先，否则取 adapterConfig.model；role 是 Agent 工作角色文本，不是用户权限 |
 | GET /agents/{id} | 无 | 已保存的 Agent 定义 |
 | PUT /agents/{id} | 同创建字段 | 更新定义 |
 | PUT /agents/{id}/instructions | content | 保存纯文本指令，不能上传可执行扩展 |
 | DELETE /agents/{id} | 无 | 已被 session 引用时拒绝 |
-| GET /runtime（不带 tenant 前缀） | 无 | engine, configured, available, plannerAvailable, models[{id,provider}], modelConnectivityVerified, limits, reason?；登录即可 |
+| GET /runtime（不带 tenant 前缀） | 无 | Pi 兼容字段及 runtimes[{id,name,configured,available,supportsEffortSelection:false,tools,reason?}]、models[{id,provider,runtime}]；登录即可 |
 
-Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructions,adapterType:'pi',adapterConfig:{model},createdAt}`；原绑定适配器使用 adapterConfig.model。服务器保存的非空 model 必须属于服务端模型目录才能运行；目录包含默认模型与 `AWWO_PI_MODELS_JSON` 配置档。前端不能在 Agent 定义中提供工具、模型 URL、工作目录或环境变量。内部 planner Agent 与 session 不出现在普通 Agent / session 列表。
+Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructions,runtime,adapterType,adapterConfig:{model},createdAt}`，其中 runtime 与 adapterType 同为 `pi | openai-agents`；原绑定适配器使用 adapterConfig.model。更新请求省略 adapterType 时保留既有 runtime；已有 session 的 Agent 不允许原地切换 runtime，应通过节点初始化创建新 Agent/Session。服务器保存的非空 model 必须属于对应 runtime 的服务端模型目录才能运行。前端不能在 Agent 定义中提供工具、模型 URL、工作目录或环境变量。内部 planner Agent 与 session 不出现在普通 Agent / session 列表。
 
-`runtime.available` 和 `plannerAvailable` 表示 Pi 配置健康探测通过；`modelConnectivityVerified` 当前固定为 false，不在探测时执行推理。Pi health 可读时 `limits` 含 `contextWindow`、`maxOutputTokens`、`maxContextTextBytes`、`messageOverheadBytes` 及 `promptChars/systemPromptChars/historyMessageChars/historyMessages/totalTextChars/bodyBytes` 传输限制，不可读时可为 null。RuntimeSettings 展示引擎、服务状态、模型和原因并支持刷新；模型连接仍由服务管理员配置，不提供浏览器秘密写接口。真实 provider 是否可用必须另做实际运行验收。
+每个 `runtimes[].available` 表示对应 worker 配置健康探测通过；`plannerAvailable` 仍以 Pi 为准。`modelConnectivityVerified` 当前固定为 false，不在探测时执行推理。models 按 runtime 归属，tools 只包含对应 health 实际启用的固定 ID。Pi 兼容 `limits` 在 Pi 可读时返回，不可读时可为 null。RuntimeSettings 展示两个框架的配置、服务状态、模型和原因并支持刷新；模型连接仍由服务管理员配置，不提供浏览器秘密写接口。真实 provider 是否可用必须另做实际运行验收。
 
 规划返回标准 run。Go 在规划完成并验证 JSON/操作白名单后才发布规范化 JSON 到 completed.text / run.output，不把未验证规划 delta 暴露给前端；原画布随后验证 schema、图引用、环路和当前版本，合法结果直接应用并保存，提供撤销，没有第二个应用确认按钮。
 
@@ -122,7 +122,7 @@ Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructi
 
 Go 在事务中重新检查 member 以上权限、租户 active 状态及画布归属，锁定画布并比较版本。过期版本返回 `409 version_conflict`；当前画布存在 queued/running 的图、节点或规划任务时返回 `409 resource_in_use`。已有 Agent 绑定必须属于当前租户；当前及历史会话还需属于当前画布和节点，并与声明的 Agent 引用一致。伪造或跨范围引用返回 `404 not_found`。选中节点全部成功后才提交，有任一错误则整体回滚。
 
-选中 session 节点时需要 Pi health 可读，失败返回 `503 runtime_unavailable`，健康检查不会执行推理。空 runtime 解析为 `pi`，空 model 解析为 Pi 当前默认模型，非空 model 必须在服务目录；支持 `llm` 与 `coding`，不接受图像类型、其他 runtime 或非空 effort。非法节点、团队或模型返回 `400 invalid_node_setup`。初始化不占用模型调用次数，也不证明供应商真实推理连通。
+选中 session 节点时需要其节点和成员涉及的所有 worker health 可读，失败返回 `503 runtime_unavailable`，健康检查不会执行推理。空 runtime 解析为 `pi`，空 model 解析为有效 runtime 当前默认模型，非空 model 必须属于该 runtime 目录；支持 `llm` 与 `coding`，不接受图像类型、其他 runtime 或非空 effort。非法节点、团队、模型或工具返回 `400 invalid_node_setup`。初始化不占用模型调用次数，也不证明供应商真实推理连通。
 
 响应为 `{id,tenantId,name,document,version,createdAt,updatedAt}`。document 回填实际 `runtime/model/binding/issueId/activeThreadId/threads`；客户端必须使用这份 canonical 文档及其版本继续执行。首次准备创建 Agent 与 node Session；与已初始化的有效配置快照相比，名称、类型、模型、人格或团队变化会建立新的 Agent / 当前会话，保留历史身份与消息，清空新会话的旧交付。成员继承值在 `node_sessions.setup_snapshot` 中按实际值比较；仅把“继承”改写为相同显式值不会额外分叉。team 仍为节点级配置，旧 run 的执行快照保持不变。
 

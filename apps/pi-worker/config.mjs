@@ -1,3 +1,4 @@
+import { loadObservabilityConfig } from './observability.mjs';
 const DEFAULTS = Object.freeze({
   openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com',
@@ -42,6 +43,10 @@ function profileInteger(value, fallback, minimum, maximum) {
   return value;
 }
 
+function providerProtocol(provider) {
+  return provider === 'anthropic' ? 'anthropic_messages' : 'chat_completions';
+}
+
 function loadProfiles(serialized, env, defaultProfile, missing) {
   if (serialized === undefined || serialized === '') return Object.freeze([defaultProfile]);
   // Configuration errors must not fall back to an unintended provider. Error
@@ -73,7 +78,7 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
       const contextWindow = profileInteger(value.contextWindow, defaultProfile.contextWindow, 4096, 2_000_000);
       const maxTokens = profileInteger(value.maxTokens, defaultProfile.maxTokens, 128, 32_768);
       if (maxTokens + 256 >= contextWindow) throw new Error();
-      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, baseURL, apiKey, contextWindow, maxTokens }));
+      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, protocol: providerProtocol(value.provider), baseURL, apiKey, contextWindow, maxTokens }));
       ids.add(value.id);
     }
     return Object.freeze(profiles);
@@ -81,6 +86,8 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
 }
 
 export function loadConfig(env = process.env) {
+  const environment = env.APP_ENV ?? 'development';
+  if (!['development', 'staging', 'production'].includes(environment)) throw new Error('APP_ENV must be development, staging, or production');
   const provider = (env.AWWO_PI_PROVIDER ?? '').trim();
   const model = (env.AWWO_PI_MODEL ?? '').trim();
   const apiKey = (env.AWWO_PI_API_KEY ?? '').trim();
@@ -95,8 +102,9 @@ export function loadConfig(env = process.env) {
   const contextWindow = integer(env.AWWO_PI_CONTEXT_WINDOW, 32_768, 4096, 2_000_000, 'AWWO_PI_CONTEXT_WINDOW');
   const maxTokens = integer(env.AWWO_PI_MAX_TOKENS, 4096, 128, 32_768, 'AWWO_PI_MAX_TOKENS');
   if (maxTokens + 256 >= contextWindow) missing.push('AWWO_PI_MAX_TOKENS');
-  const models = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, apiKey, baseURL, contextWindow, maxTokens }), missing);
+  const models = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens }), missing);
   return Object.freeze({
+    observability: loadObservabilityConfig(env, 'pi', environment),
     host: env.AWWO_PI_HOST ?? '127.0.0.1',
     port: integer(env.AWWO_PI_PORT, 8097, 0, 65535, 'AWWO_PI_PORT'),
     token, provider, model, apiKey, baseURL,
@@ -120,6 +128,8 @@ export function publicHealth(config, activeRuns = 0) {
     models: config.models.filter((profile) => profile.id && profile.provider).map((profile) => ({
       id: profile.id,
       name: profile.model,
+      providerModel: profile.model,
+      protocol: profile.protocol,
       provider: profile.provider,
       runtime: 'pi',
       contextWindow: profile.contextWindow,
@@ -129,6 +139,9 @@ export function publicHealth(config, activeRuns = 0) {
     })),
     activeRuns,
     version: '0.1.0',
+    telemetryProtocolVersion: 1,
+    metricsEnabled: config.observability.enabled,
+    selfHostedTracingEnabled: config.observability.tracing,
     piVersion: '0.85.1',
     // Configuration readiness only; no network/model inference occurs here.
     modelConnectivityVerified: false,

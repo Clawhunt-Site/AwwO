@@ -24,18 +24,25 @@ type strictTurnPI struct {
 }
 
 func newStrictTurnPI(t *testing.T, run func(http.ResponseWriter, *http.Request, observedPiCall, <-chan struct{}, *strictTurnPI)) *strictTurnPI {
+	return newStrictTurnRuntime(t, runtimePI, run)
+}
+func newStrictTurnRuntime(t *testing.T, runtime string, run func(http.ResponseWriter, *http.Request, observedPiCall, <-chan struct{}, *strictTurnPI)) *strictTurnPI {
 	t.Helper()
+	token := strings.Repeat("s", 32)
+	if runtime == runtimeOpenAIAgents {
+		token = strings.Repeat("o", 32)
+	}
 	p := &strictTurnPI{active: map[string]chan struct{}{"unrelated-run": make(chan struct{})}, entered: make(chan observedPiCall, 8)}
 	p.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "models": []map[string]any{{"id": "alternate", "maxContextTextBytes": 262144}}})
+			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "models": []map[string]any{{"id": "test-model", "runtime": runtime, "maxContextTextBytes": 262144}, {"id": "alternate", "runtime": runtime, "maxContextTextBytes": 262144}}})
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(401)
 			return
 		}
 		if r.Method == "DELETE" {
-			if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("s", 32) {
-				w.WriteHeader(401)
-				return
-			}
 			id := strings.TrimPrefix(r.URL.Path, "/internal/runs/")
 			p.mu.Lock()
 			p.requests = append(p.requests, id)
@@ -53,12 +60,21 @@ func newStrictTurnPI(t *testing.T, run func(http.ResponseWriter, *http.Request, 
 			w.WriteHeader(202)
 			return
 		}
-		var b observedPiCall
-		if e := json.NewDecoder(r.Body).Decode(&b); e != nil {
+		var request struct {
+			observedPiCall
+			Runtime string `json:"runtime"`
+		}
+		if e := json.NewDecoder(r.Body).Decode(&request); e != nil {
 			t.Error(e)
 			w.WriteHeader(400)
 			return
 		}
+		if request.Runtime != runtime {
+			t.Error("strict worker received wrong runtime")
+			w.WriteHeader(400)
+			return
+		}
+		b := request.observedPiCall
 		cancelled := make(chan struct{})
 		p.mu.Lock()
 		p.active[b.RunID] = cancelled

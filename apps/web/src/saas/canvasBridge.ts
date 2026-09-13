@@ -1,4 +1,5 @@
-import { api, API_BASE, tenantPath, type Tenant } from './api';
+import { api, API_BASE, tenantPath, type Tenant, type SaaSAgent } from './api';
+import { runtimeDefinitions, runtimeModels, type SaaSRuntimeStatus } from './runtimeCatalog';
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
@@ -102,10 +103,20 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
     if (companyScope && decodeURIComponent(companyScope[1]) !== scope.tenant.id) return json({ error: canvasText('租户与当前画布不一致', 'The workspace does not match the current canvas.') }, 403);
     if (path === '/companies') return json([{ id: scope.tenant.id, name: scope.tenant.name, status: scope.tenant.status }]);
     if (path === '/adapters') {
-      const runtime = await api<any>('/runtime', { signal: init.signal });
-      return json([{ type: 'pi', loaded: true, disabled: false, supportsNodeTeams: true, modelsCount: runtime.models?.length || 0 }]);
+      const runtime = await api<SaaSRuntimeStatus>('/runtime', { signal: init.signal });
+      return json(runtimeDefinitions(runtime).map(item => ({ type: item.id,
+        loaded: item.available && item.configured, disabled: !item.available || !item.configured,
+        supportsNodeTeams: true, supportsModelSelection: true, supportsEffortSelection: false,
+        modelCatalogSource: 'saas_runtime', tools: item.tools, modelsCount: runtimeModels(runtime, item.id).length,
+        ...(item.reason ? { reason: item.reason } : {}) })));
     }
-    if (/\/adapters\/[^/]+\/models$/.test(path)) return json((await api<any>('/runtime', { signal: init.signal })).models || []);
+    const modelCatalog = /\/adapters\/([^/]+)\/models$/.exec(path);
+    if (modelCatalog) {
+      const runtime = await api<SaaSRuntimeStatus>('/runtime', { signal: init.signal });
+      const selected = runtimeDefinitions(runtime).find(item => item.id === decodeURIComponent(modelCatalog[1]));
+      if (!selected) return json({ error: canvasText('所选执行框架不在服务目录中。', 'The selected runtime is absent from the service catalog.') }, 404);
+      return json({ source: 'saas_runtime', models: runtimeModels(runtime, selected.id) });
+    }
     if (path === '/canvas/planner') {
       const runtime = await api<any>('/runtime', { signal: init.signal });
       const available = runtime.available === true && runtime.plannerAvailable === true;
@@ -243,8 +254,8 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
     }
     if (/^\/companies\/[^/]+\/agent-hires$/.test(path)) {
       const { name, role, title, adapterType, adapterConfig } = body;
-      const agent = await post('/agents', { name, role, title, adapterType, adapterConfig });
-      return json({ agent: { ...agent, status: 'idle' } }, 201);
+      const agent: SaaSAgent = await post('/agents', { name, role, title, adapterType, adapterConfig });
+      return json({ agent: { ...agent, adapterType: agent.runtime || 'pi', status: 'idle' } }, 201);
     }
     const instructions = /^\/agents\/([^/]+)\/instructions-bundle\/file$/.exec(path);
     if (instructions) return json(await request(`/agents/${instructions[1]}/instructions`, { method: 'PUT', body: JSON.stringify({ content: body.content }) }));

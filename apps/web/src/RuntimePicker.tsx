@@ -71,6 +71,7 @@ export function RuntimePicker({
   lang = 'zh',
   allowInherit = false,
   disabled = false,
+  runtimeLabels = {},
 }: {
   runtimes: string[];
   value: RuntimeValue;
@@ -81,6 +82,7 @@ export function RuntimePicker({
   // lead runtime" — used for per-slot overrides that default to the lead.
   allowInherit?: boolean;
   disabled?: boolean;
+  runtimeLabels?: Record<string, string>;
 }) {
   const t = COPY[lang];
   const { backend, model, effort } = value;
@@ -153,8 +155,9 @@ export function RuntimePicker({
   const usesRelay = agentInfo?.uses_relay_packages === true;
   const supportsModel = agentInfo?.supports_model_selection === true;
   const supportsEffort = agentInfo?.supports_effort_selection === true;
-  const usesLiveCatalog = agentInfo?.model_catalog_source === 'codex_app_server';
-  const liveCatalogReady = catalog?.backend === backend && catalog.status === 'ready' && catalog.source === 'codex_app_server' && modelCatalog.length > 0;
+  const usesLiveCatalog = agentInfo?.model_catalog_source === 'codex_app_server' || agentInfo?.model_catalog_source === 'saas_runtime';
+  const liveCatalogReady = catalog?.backend === backend && catalog.status === 'ready' && catalog.source === agentInfo?.model_catalog_source
+    && (agentInfo?.model_catalog_source === 'saas_runtime' || modelCatalog.length > 0);
   const liveCatalogBlocked = usesLiveCatalog && !liveCatalogReady;
   const liveCatalogFailed = liveCatalogBlocked && catalog?.backend === backend && catalog.status !== 'loading';
   const capabilityFor = (selectedModel: string) => liveCatalogReady && modelCatalog.includes(selectedModel) && Object.prototype.hasOwnProperty.call(catalog.capabilities, selectedModel)
@@ -171,7 +174,7 @@ export function RuntimePicker({
       : [];
 
   // Switching the runtime resets model + effort (neither is portable across runtimes).
-  const setBackend = (next: string) => onChange({ backend: next, model: '', effort: '' });
+  const setBackend = (next: string) => { if (!disabled) onChange({ backend: next, model: '', effort: '' }); };
   const setModel = (next: string) => {
     if (disabled || liveCatalogBlocked || (usesLiveCatalog && next !== '' && !modelCatalog.includes(next))) return;
     onChange({ ...value, model: next, effort: usesLiveCatalog && !capabilityFor(next)?.effort_levels.includes(effort) ? '' : effort });
@@ -194,7 +197,8 @@ export function RuntimePicker({
         placeholder={allowInherit ? undefined : t.pickRuntime}
         options={[
           ...(allowInherit ? [{ value: '', label: t.inherit }] : []),
-          ...toOptions(runtimes),
+          ...(backend && !runtimes.includes(backend) ? [{ value: backend, label: runtimeLabels[backend] || backend, disabled: true }] : []),
+          ...runtimes.map(runtime => ({ value: runtime, label: runtimeLabels[runtime] || runtime })),
         ]}
         onChange={setBackend}
         disabled={disabled}
@@ -265,7 +269,7 @@ export function RuntimePicker({
       ) : null}
       {liveCatalogFailed ? (
         <span role="status">
-          {t.catalogUnavailable}{' '}
+          {agentInfo?.model_catalog_source === 'saas_runtime' ? (lang === 'zh' ? '所选执行框架的模型目录暂不可用，请重试。' : 'The selected runtime’s model catalog is unavailable. Please retry.') : t.catalogUnavailable}{' '}
           <button type="button" disabled={disabled} onClick={() => setCatalogAttempt((attempt) => attempt + 1)}>{t.catalogRetry}</button>
         </span>
       ) : null}

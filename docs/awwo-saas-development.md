@@ -48,7 +48,7 @@ AWWO_PI_API_KEY=YOUR_PRIVATE_KEY
 
 `AWWO_PI_CONTEXT_WINDOW` 与 `AWWO_PI_MAX_TOKENS` 分别声明实际模型上下文和单次输出上限，默认 32768 / 4096。Pi 按 UTF-8 字节保守预留输出与消息开销，这不是精确 tokenizer；上下文超限返回明确错误，不能为消除错误而声明模型不支持的容量。复杂画布应选择足够上下文的模型，或精简规划上下文。
 
-服务端维护可用模型目录，节点及团队成员从目录选择。成员模型空值继承已绑定主 Agent 的模型，主 Agent 使用默认模型时再落到服务默认。租户不能指定任意 base URL、工作目录、秘密环境变量或 shell。当前执行范围为 Pi 文本推理与结构化交付，成员 tools 为空；工程文件需要独立沙箱和存储。
+服务端按 runtime 维护可用模型目录，节点及团队成员从对应目录选择。成员 runtime 空值继承团队；成员模型空值取有效 runtime 的默认模型，同 runtime 时可沿用主 Agent 显式模型。租户不能指定任意 base URL、工作目录、秘密环境变量或 shell。Pi tools 为空；OpenAI Agents 只开放服务端启用的 `calculator/current_time` 固定只读函数。工程文件需要独立沙箱和存储。
 
 默认配置外可增加模型档案，以下仅为占位示例，不含真实秘密：
 
@@ -65,7 +65,7 @@ AWWO_REVIEWER_API_KEY=YOUR_PRIVATE_KEY
 
 原画布规划助手在点击“生成画布”后提交持久规划 run；合法结果自动应用并显示“已更新画布”，支持撤销，没有额外应用确认按钮。planner 尚不创建或修改 team。SaaS 整图运行先保存画布、初始化节点身份，再提交 canonical 文档版本及 scope，由 Go 持久调度；关闭页面后已受理图继续运行，后台记录面板可查询节点与成员结果。原本机模式仍由浏览器 runGraph 调度。
 
-SaaS 属性面板编辑名称、人格、模型后点击“保存并准备运行”即可，不再另选公司或绑定 Agent。runtime/model 留空使用服务默认 Pi/模型；当前只能选择文本或编程任务，图像禁用。保存及首次整图、局部运行、手动会话发送都会调用 `POST canvases/{id}/initialize`，先准备 Agent / Session 再进行运行校验。初始化只探测 Pi health 和写数据库，不调用模型；配置健康与真实推理仍分别验收。
+SaaS 属性面板编辑名称、人格、runtime、模型后点击“保存并准备运行”即可，不再另选公司或绑定 Agent。runtime 留空默认 Pi，模型从有效 runtime 补齐；当前只能选择文本或编程任务，图像禁用。保存及首次整图、局部运行、手动会话发送都会调用 `POST canvases/{id}/initialize`，先准备 Agent / Session 再进行运行校验。初始化只探测所需 worker health 和写数据库，不调用模型；配置健康与真实推理仍分别验收。
 
 重复初始化使用当前版本且有效文档未变时，不重复建 Agent / Session 或提升版本；有效模型、人格、类型、名称及 team 变化会建立新当前会话，旧历史仍保留。迁移 008 保存有效初始化快照。后端拒绝 reader、跨租户/画布引用、陈旧版本，以及存在活动图/节点/规划任务的初始化请求。属性面板等待期间锁定控件；明确拒绝时修正草稿再保存。若提示“节点准备结果尚未确认”，保留或导出本地草稿，重新加载核对云端版本与会话后继续，不反复点击创建，也不把旧草稿覆盖未知的新状态。完整字段见 [API 初始化契约](awwo-saas-api.md#节点初始化与配置保存)。
 
@@ -91,6 +91,11 @@ SaaS 属性面板编辑名称、人格、模型后点击“保存并准备运行
 | AWWO_BOOTSTRAP_ADMIN_EMAIL / PASSWORD | 受控创建平台管理员 |
 | AWWO_SESSION_TTL / AWWO_RUN_TIMEOUT | 登录有效期与 Go 运行超时 |
 | AWWO_PI_SESSION_WAIT | 取消后 Pi 同一会话清理的有界等待，默认 5s；只重试明确未受理的 SESSION_BUSY |
+| AWWO_OPENAI_AGENTS_URL / HOST / PORT | 可选 OpenAI Agents JS 内部服务地址与监听，默认本地 8098 |
+| AWWO_OPENAI_AGENTS_TOKEN | Go 与 OpenAI Agents worker 的独立认证秘密，至少 32 字符，不与 Pi 共用 |
+| AWWO_OPENAI_AGENTS_PROVIDER / MODEL / BASE_URL / API_KEY / PROTOCOL | OpenAI 兼容默认模型连接；协议为 chat_completions 或 responses |
+| AWWO_OPENAI_AGENTS_MODELS_JSON / TOOLS_JSON | 可选模型目录与固定工具 allowlist；目录密钥只用 apiKeyEnv 引用 |
+| AWWO_OPENAI_AGENTS_CONTEXT_WINDOW / MAX_TOKENS / TIMEOUT_MS / CANCEL_GRACE_MS / MAX_CONCURRENCY / MAX_OUTPUT_BYTES | OpenAI Agents worker 的容量、取消和资源边界 |
 | AWWO_TRUSTED_PROXY_CIDRS | 精确的可信代理地址/CIDR，逗号分隔；默认不信任转发头 |
 
 staging / production 使用同一配置 schema，要求 HTTPS Origin 与 Secure cookie，不复用开发账号、数据库、模型秘密。Go 单实例协调图和团队任务；租户模型准入次数持久化，实例认证限流及执行所有权仍不具备多副本协调能力。

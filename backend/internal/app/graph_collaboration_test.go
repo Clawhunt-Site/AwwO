@@ -190,8 +190,11 @@ func TestPostgresCollaborationSessionsEvidenceAndFinalBoundary(t *testing.T) {
 		t.Fatal("round evidence missing")
 	}
 	for _, call := range observed {
-		if call.SystemPrompt != "ORIGINAL-INSTRUCTIONS" {
+		if !strings.Contains(call.SystemPrompt, "ORIGINAL-INSTRUCTIONS") {
 			t.Fatal("persona changed", call.SystemPrompt)
+		}
+		if strings.Contains(call.SystemPrompt, "Server-owned collaboration review policy") != strings.HasPrefix(call.Prompt, "[AwwO collaboration review ") {
+			t.Fatal("critique policy leaked to another phase", call.SystemPrompt)
 		}
 	}
 }

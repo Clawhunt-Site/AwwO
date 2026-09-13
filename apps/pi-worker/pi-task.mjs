@@ -1,3 +1,4 @@
+import { createProviderObserver } from './usage.mjs';
 // This fixed, trusted entrypoint is forked once per run by runner.mjs.
 // Provider credentials arrive over private IPC, never in argv or global env.
 import { createHash } from 'node:crypto';
@@ -22,14 +23,16 @@ async function cancel() {
   }
 }
 
-async function run({ request, modelConfig, directory, agentDir }) {
+async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) {
   let unsubscribe;
+  const observer = createProviderObserver(modelConfig.protocol === 'anthropic_messages' ? 'anthropic' : 'chat_completions', { acceptedAtNs });
+  const terminal = event => emit({ ...event, observability: observer.snapshot(event.type) });
   try {
     const [{ InMemoryCredentialStore }, { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager }] = await Promise.all([
       import('@earendil-works/pi-ai'),
       import('@earendil-works/pi-coding-agent'),
     ]);
-    if (cancelled) return await emit({ type: 'cancelled' });
+    if (cancelled) return await terminal({ type: 'cancelled' });
     const credentials = new InMemoryCredentialStore();
     const modelRuntime = await ModelRuntime.create({
       credentials,
@@ -39,7 +42,7 @@ async function run({ request, modelConfig, directory, agentDir }) {
       signal: controller.signal,
     });
     const providerId = 'awwo-configured';
-    const api = modelConfig.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
+    const api = modelConfig.protocol === 'anthropic_messages' ? 'anthropic-messages' : 'openai-completions';
     modelRuntime.registerProvider(providerId, {
       name: 'AWWO configured model',
       baseUrl: modelConfig.baseURL,
@@ -108,9 +111,9 @@ async function run({ request, modelConfig, directory, agentDir }) {
     // streamFunction hook keeps this application-only context free of local paths,
     // while retaining Pi's authenticated model stream and agent lifecycle.
     const piStream = activeSession.agent.streamFunction;
-    activeSession.agent.streamFunction = (selectedModel, context, options) => piStream(selectedModel, { ...context, systemPrompt }, { ...options, maxRetries: 0 });
+    activeSession.agent.streamFunction = (selectedModel, context, options) => piStream(selectedModel, { ...context, systemPrompt }, { ...options, maxRetries: 0, fetch: observer.fetch });
     if (activeSession.agent.state.tools.length !== 0) throw new Error('Unexpected tools enabled');
-    if (cancelled) { await cancel(); return await emit({ type: 'cancelled' }); }
+    if (cancelled) { await cancel(); return await terminal({ type: 'cancelled' }); }
     let text = '';
     let finalMessage;
     let forbiddenTool = false;
@@ -131,14 +134,14 @@ async function run({ request, modelConfig, directory, agentDir }) {
     });
     await activeSession.prompt(request.prompt, { expandPromptTemplates: false });
     await eventQueue;
-    if (forbiddenTool) return await emit({ type: 'failed', code: 'TOOLS_DISABLED', message: 'Tool execution is disabled.' });
-    if (cancelled || finalMessage?.stopReason === 'aborted') return await emit({ type: 'cancelled' });
+    if (forbiddenTool) return await terminal({ type: 'failed', code: 'TOOLS_DISABLED', message: 'Tool execution is disabled.' });
+    if (cancelled || finalMessage?.stopReason === 'aborted') return await terminal({ type: 'cancelled' });
     if (!finalMessage || finalMessage.stopReason !== 'stop') throw new Error('Model did not complete successfully');
     text = finalMessage.content.filter((part) => part.type === 'text').map((part) => part.text).join('');
     if (!text.trim()) throw new Error('Model returned no answer');
-    await emit({ type: 'completed', text });
+    await terminal({ type: 'completed', text });
   } catch {
-    await emit(cancelled ? { type: 'cancelled' } : { type: 'failed', code: 'MODEL_ERROR', message: 'The model request failed. Check the server provider configuration.' });
+    await terminal(cancelled ? { type: 'cancelled' } : { type: 'failed', code: 'MODEL_ERROR', message: 'The model request failed. Check the server provider configuration.' });
   } finally {
     unsubscribe?.();
     activeSession?.dispose();

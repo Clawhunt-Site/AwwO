@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"net/http"
 	"time"
+	"unicode/utf16"
 )
 
 const graphJSON = `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'document',g.document,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId')) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb)) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
@@ -109,8 +110,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_graph", e.Error())
 		return
 	}
-	health, e := a.probePI(r.Context())
-	hasSession := false
+	catalog := runtimeCatalog{}
 	in := map[string]bool{}
 	needed := map[string]bool{}
 	for _, id := range scope {
@@ -121,15 +121,6 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		if b.Collaboration == nil && in[edge.ToNode] {
 			needed[edge.FromNode] = true
 		}
-	}
-	for _, n := range d.Nodes {
-		if in[n.ID] && n.Kind == "session" {
-			hasSession = true
-		}
-	}
-	if e != nil && hasSession {
-		fail(w, 503, "runtime_unavailable", e.Error())
-		return
 	}
 	id := randomID()
 	var collaborationRaw []byte
@@ -166,8 +157,8 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 404, "not_found", "Node binding does not belong to this workspace")
 				return
 			}
-			var model, instructions string
-			e = tx.QueryRow(r.Context(), "SELECT model,instructions FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions)
+			var model, instructions, runtime string
+			e = tx.QueryRow(r.Context(), "SELECT model,instructions,runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions, &runtime)
 			if noRows(e) {
 				fail(w, 404, "not_found", "Node agent not found in workspace")
 				return
@@ -181,19 +172,18 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, "invalid_team", e.Error())
 				return
 			}
-			if e = validateTeamModels(team, health); e != nil {
-				fail(w, 400, "invalid_team", e.Error())
+			if !savedRuntimeMatches(raw, n.ID, runtime) {
+				fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 				return
 			}
-			if model == "" {
-				model = health.Model
-			}
-			budget, overhead, ok := health.modelLimits(model)
-			if !ok {
-				fail(w, 409, "model_unavailable", "Node model is unavailable")
+			snap, e = a.runtimeSnapshot(r.Context(), catalog, runtime, model, instructions, team)
+			if e != nil {
+				a.runtimeAdmissionError(w, e)
 				return
 			}
-			snap = executionSnapshot{Instructions: instructions, Model: model, Budget: budget, Overhead: overhead, Team: team, Health: health}
+			// Freeze the output policy separately from persona instructions. Team members
+			// retain their own personas without overriding this server-owned format.
+			snap.OutputPolicy = graphOutputPolicy(n)
 			sid = n.IssueID
 			if sid != "" {
 				var exists bool
@@ -238,7 +228,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					a.dbError(w, err)
 					return
 				}
-				history = boundedHistoryWithLimits(history, len(instructions), budget, overhead)
+				history = boundedHistoryWithLimits(history, len(graphSystemPrompt(snap.Instructions, snap.OutputPolicy)), snap.Budget, snap.Overhead)
 				snap.History = &history
 			}
 		}
@@ -271,21 +261,33 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	a.dispatchGraph(tid, id)
+	a.dispatchGraph(tid, id, r.Context())
 	writeJSON(w, 202, v)
 }
-func (a *App) dispatchGraph(tid, id string) {
+func (a *App) dispatchGraph(tid, id string, parents ...context.Context) {
 	a.mu.Lock()
 	if a.closed || a.running["graph:"+id] != nil {
 		a.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	parent := context.Background()
+	if len(parents) > 0 {
+		parent = parents[0]
+	}
+	traceCtx, endTrace := a.startAsyncTrace(parent, "awwo.graph.execute", "graph", "mixed")
+	ctx, cancel := context.WithCancel(traceCtx)
 	a.running["graph:"+id] = cancel
 	a.tasks.Add(1)
 	a.mu.Unlock()
 	go func() {
 		defer a.tasks.Done()
+		defer func() {
+			c, done := context.WithTimeout(context.Background(), time.Second)
+			defer done()
+			outcome := "interrupted"
+			_ = a.db.QueryRow(c, "SELECT status FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&outcome)
+			endTrace(outcome)
+		}()
 		defer cancel()
 		defer func() { a.mu.Lock(); delete(a.running, "graph:"+id); a.mu.Unlock() }()
 		for ctx.Err() == nil {
@@ -376,7 +378,10 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 			if interrupted {
 				final = "interrupted"
 			}
-			_, _ = a.db.Exec(ctx, "UPDATE graph_runs SET status=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, final)
+			tag, e := a.db.Exec(ctx, "UPDATE graph_runs SET status=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, final)
+			if e == nil && tag.RowsAffected() == 1 {
+				a.observeGraph(final)
+			}
 			return
 		}
 		for _, n := range d.Nodes {
@@ -467,7 +472,21 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 	}
 }
 func (a *App) setGraphNode(ctx context.Context, tid, gid, nid, state, output, detail string) {
-	_, _ = a.db.Exec(ctx, "UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND state IN ('waiting','running') AND EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND id=$2 AND status='running')", tid, gid, nid, state, output, detail)
+	var runID *string
+	err := a.db.QueryRow(ctx, "UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND state IN ('waiting','running') AND state<>$4 AND EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND id=$2 AND status='running') RETURNING run_id", tid, gid, nid, state, output, detail).Scan(&runID)
+	if err == nil {
+		a.observeGraphNodeState(state)
+		if runID != nil {
+			var created time.Time
+			var raw json.RawMessage
+			if a.db.QueryRow(ctx, "SELECT created_at,execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", tid, *runID).Scan(&created, &raw) == nil {
+				var snap executionSnapshot
+				if json.Unmarshal(raw, &snap) == nil {
+					a.observeGraphNode(snapshotRuntime(snap), state, time.Since(created))
+				}
+			}
+		}
+	}
 }
 
 var errGraphCapacity = errors.New("graph_waiting_for_capacity")
@@ -536,11 +555,17 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		if snap.Team != nil {
 			return errors.New("collaboration_nested_team_unsupported")
 		}
+		// A graph critique is discussion, not a deliverable. Override only this
+		// turn snapshot; proposal and synthesis retain the frozen contract.
+		if turn.Phase == "review" {
+			snap.OutputPolicy = "Server-owned collaboration review policy: Return Markdown critique only. This turn is discussion, not a node deliverable; do not follow the original output schema. Preserve the configured persona and review responsibilities."
+		}
 		if e = appendCollaborationHistory(ctx, tx, tid, gid, nid, &snap); e != nil {
 			return e
 		}
 	}
-	if len(prompt) > 128000 || (snap.Team == nil && len(prompt)+len(snap.Instructions)+snap.Overhead > snap.Budget) {
+	instructions := graphSystemPrompt(snap.Instructions, snap.OutputPolicy)
+	if len(prompt) > 128000 || (snap.Team == nil && (len(prompt)+len(instructions)+snap.Overhead > snap.Budget || len(utf16.Encode([]rune(instructions))) > 32768)) {
 		return errors.New("context_limit")
 	}
 	var busy bool
@@ -582,7 +607,8 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
-	a.dispatch(tid, rid, sid, prompt, snap.Instructions, "node", snap.Budget, snap.Overhead)
+	a.observeGraphNodeState("running")
+	a.dispatch(tid, rid, sid, prompt, instructions, "graph", snap.Budget, snap.Overhead, ctx)
 	return nil
 }
 func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
@@ -607,7 +633,13 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := []string{}
+	var cancelledNodes int64
 	if status == "queued" || status == "running" {
+		cancelledNodes, e = collaborationCancellationTransitionCount(r.Context(), tx, tid, id)
+		if e != nil {
+			a.dbError(w, e)
+			return
+		}
 		rows, e := tx.Query(r.Context(), "UPDATE runs SET status='cancelled',error='',updated_at=now() WHERE tenant_id=$1 AND id IN(SELECT run_id FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2) AND status IN ('queued','running') RETURNING id", tid, id)
 		if e != nil {
 			a.dbError(w, e)
@@ -650,6 +682,12 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	for i := int64(0); i < cancelledNodes; i++ {
+		a.observeGraphNodeState("cancelled")
+	}
+	if cancelledNodes > 0 {
+		a.observeGraph("cancelled")
 	}
 	a.mu.Lock()
 	stop := a.running["graph:"+id]
@@ -726,7 +764,13 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := []string{}
+	var cancelledNodes int64
 	if gid != "" && (status == "queued" || status == "running") {
+		cancelledNodes, e = collaborationCancellationTransitionCount(r.Context(), tx, tid, gid)
+		if e != nil {
+			a.dbError(w, e)
+			return
+		}
 		rows, err := tx.Query(r.Context(), "UPDATE runs SET status='cancelled',error='',updated_at=now() WHERE tenant_id=$1 AND id IN (SELECT run_id FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2) AND status IN ('queued','running') RETURNING id", tid, gid)
 		if err != nil {
 			a.dbError(w, err)
@@ -769,6 +813,12 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	for i := int64(0); i < cancelledNodes; i++ {
+		a.observeGraphNodeState("cancelled")
+	}
+	if cancelledNodes > 0 {
+		a.observeGraph("cancelled")
 	}
 	if gid != "" {
 		a.mu.Lock()

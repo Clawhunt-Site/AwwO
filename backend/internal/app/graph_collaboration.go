@@ -333,17 +333,23 @@ func (a *App) completeCollaborationTurn(ctx context.Context, tid, gid, cid strin
 	if status != "running" {
 		return nil
 	}
+	turnChange, e := tx.Exec(ctx, "UPDATE graph_collaboration_turns SET state='completed' WHERE tenant_id=$1 AND graph_id=$2 AND ordinal=$3 AND state='running'", tid, gid, t.Ordinal)
+	if e != nil || turnChange.RowsAffected() == 0 {
+		return e
+	}
 	if t.Phase == "synthesis" {
 		output, e = storeArtifactsTx(ctx, tx, tid, cid, t.RunID, t.NodeID, output, vals, files)
 		if e != nil {
 			return e
 		}
 	}
-	if _, e = tx.Exec(ctx, "UPDATE graph_collaboration_turns SET state='completed' WHERE tenant_id=$1 AND graph_id=$2 AND ordinal=$3 AND state='running'", tid, gid, t.Ordinal); e != nil {
-		return e
-	}
-	if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state='waiting' WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, t.NodeID); e != nil {
-		return e
+	nodeState, changedNodes := "waiting", int64(0)
+	if t.Phase != "synthesis" {
+		change, err := tx.Exec(ctx, "UPDATE graph_run_nodes SET state='waiting' WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND state<>'waiting'", tid, gid, t.NodeID)
+		if err != nil {
+			return err
+		}
+		changedNodes = change.RowsAffected()
 	}
 	if t.Phase != "review" {
 		if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET output=$4 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, t.NodeID, output); e != nil {
@@ -351,14 +357,27 @@ func (a *App) completeCollaborationTurn(ctx context.Context, tid, gid, cid strin
 		}
 	}
 	if t.Phase == "synthesis" {
+		if e = tx.QueryRow(ctx, "SELECT count(*) FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND state<>'done'", tid, gid).Scan(&changedNodes); e != nil {
+			return e
+		}
 		if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state='done',detail='' WHERE tenant_id=$1 AND graph_id=$2", tid, gid); e != nil {
 			return e
 		}
+		nodeState = "done"
 		if _, e = tx.Exec(ctx, "UPDATE graph_runs SET status='completed',error='',updated_at=now() WHERE tenant_id=$1 AND id=$2", tid, gid); e != nil {
 			return e
 		}
 	}
-	return tx.Commit(ctx)
+	if e = tx.Commit(ctx); e != nil {
+		return e
+	}
+	for range changedNodes {
+		a.observeGraphNodeState(nodeState)
+	}
+	if t.Phase == "synthesis" {
+		a.observeGraph("completed")
+	}
+	return nil
 }
 func (a *App) failCollaborationTurn(ctx context.Context, tid, gid string, t collaborationTurn, state, detail string) {
 	if state != "cancelled" && state != "interrupted" {
@@ -388,6 +407,10 @@ func (a *App) finishCollaboration(ctx context.Context, tid, gid, status, detail 
 	if status == "cancelled" {
 		nodeState = "cancelled"
 	}
+	var changedNodes int64
+	if e = tx.QueryRow(ctx, "SELECT count(*) FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND state<>$3", tid, gid, nodeState).Scan(&changedNodes); e != nil {
+		return
+	}
 	if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state=$3,detail=$4 WHERE tenant_id=$1 AND graph_id=$2", tid, gid, nodeState, detail); e != nil {
 		return
 	}
@@ -397,8 +420,23 @@ func (a *App) finishCollaboration(ctx context.Context, tid, gid, status, detail 
 	if _, e = tx.Exec(ctx, "UPDATE graph_runs SET status=$3,error=$4,updated_at=now() WHERE tenant_id=$1 AND id=$2", tid, gid, status, detail); e != nil {
 		return
 	}
-	_ = tx.Commit(ctx)
+	if e = tx.Commit(ctx); e != nil {
+		return
+	}
+	for range changedNodes {
+		a.observeGraphNodeState(nodeState)
+	}
+	a.observeGraph(status)
 }
+
+// The caller holds the graph lock and emits these transitions only after its
+// enclosing cancellation transaction commits. Replayed terminal graphs use zero.
+func collaborationCancellationTransitionCount(ctx context.Context, tx pgx.Tx, tid, gid string) (int64, error) {
+	var count int64
+	err := tx.QueryRow(ctx, "SELECT count(*) FROM graph_run_nodes n JOIN graph_runs g ON g.tenant_id=n.tenant_id AND g.id=n.graph_id WHERE n.tenant_id=$1 AND n.graph_id=$2 AND g.collaboration IS NOT NULL AND n.state<>'cancelled'", tid, gid).Scan(&count)
+	return count, err
+}
+
 func reconcileCancelledCollaboration(ctx context.Context, tx pgx.Tx, tid, gid string) (string, error) {
 	// Cancellation is a graph decision. A completed child cannot turn unfinished
 	// review/synthesis phases into a completed collaboration.

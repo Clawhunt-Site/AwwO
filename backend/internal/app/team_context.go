@@ -93,6 +93,17 @@ func renderTeamPrompt(input teamTurnInput, upstream []teamOutput) string {
 // pairs. Required review/aggregation operands must all fit, or no call is made.
 func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput, budget, overhead int) (string, string, []json.RawMessage, teamContextAudit, error) {
 	system := teamSystemPrompt(snap.Instructions, m)
+	if snap.OutputPolicy != "" {
+		system += "\n\n" + snap.OutputPolicy
+		if input.Purpose == "review" {
+			// Review uses an orchestration envelope; the approved deliverable is
+			// serialized inside its output string, never substituted for the verdict.
+			system += "\n\nServer-owned review protocol for this call: Return ONLY strict JSON {\"approved\":boolean,\"output\":string,\"feedback\":string}. " +
+				"For this review call, the graph output contract above applies to the deliverable serialized INSIDE the output string, not to the outer review response. " +
+				"When approved, output must contain the complete final deliverable satisfying that contract; otherwise supply actionable feedback. " +
+				"This review envelope takes precedence over persona format directions and the graph contract's outer-envelope instruction."
+		}
+	}
 	upstream := input.Upstream
 	if m.Context == "task" && !input.Required {
 		upstream = nil

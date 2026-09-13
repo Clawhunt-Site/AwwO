@@ -271,7 +271,7 @@ func (b *agentInput) valid() bool {
 	if b.Model == "" {
 		b.Model = b.AdapterConfig.Model
 	}
-	return cleanName(b.Name) && len(b.Role) <= 200 && len(b.Title) <= 200 && len(b.Model) <= 200 && len(b.Instructions) <= 32000 && (b.AdapterType == "" || b.AdapterType == "pi")
+	return cleanName(b.Name) && len(b.Role) <= 200 && len(b.Title) <= 200 && len(b.Model) <= 200 && len(b.Instructions) <= 32000 && validRuntime(defaultRuntime(b.AdapterType))
 }
 func (a *App) listAgents(w http.ResponseWriter, r *http.Request) {
 	a.tenantList(w, r, "agents")
@@ -286,11 +286,11 @@ func (a *App) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !b.valid() {
-		fail(w, 400, "invalid_input", "Invalid Pi agent definition")
+		fail(w, 400, "invalid_input", "Invalid runtime agent definition")
 		return
 	}
 	a.mutateObject(w, r, "agent.created", randomID(), 201, func(tx pgx.Tx, id string) (json.RawMessage, error) {
-		return oneJSON(r.Context(), tx, "INSERT INTO agents(id,tenant_id,name,role,title,model,instructions) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING "+agentJSON, id, r.PathValue("tenantId"), b.Name, b.Role, b.Title, b.Model, b.Instructions)
+		return oneJSON(r.Context(), tx, "INSERT INTO agents(id,tenant_id,name,role,title,model,instructions,runtime) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING "+agentJSON, id, r.PathValue("tenantId"), b.Name, b.Role, b.Title, b.Model, b.Instructions, defaultRuntime(b.AdapterType))
 	})
 }
 func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
@@ -299,11 +299,26 @@ func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !b.valid() {
-		fail(w, 400, "invalid_input", "Invalid Pi agent definition")
+		fail(w, 400, "invalid_input", "Invalid runtime agent definition")
 		return
 	}
 	a.mutateObject(w, r, "agent.updated", r.PathValue("id"), 200, func(tx pgx.Tx, id string) (json.RawMessage, error) {
-		return oneJSON(r.Context(), tx, "UPDATE agents SET name=$3,role=$4,title=$5,model=$6,instructions=$7 WHERE tenant_id=$1 AND id=$2 AND NOT internal RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Name, b.Role, b.Title, b.Model, b.Instructions)
+		if b.AdapterType != "" {
+			var previous string
+			if err := tx.QueryRow(r.Context(), "SELECT runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal FOR UPDATE", r.PathValue("tenantId"), id).Scan(&previous); err != nil {
+				return nil, err
+			}
+			if previous != b.AdapterType {
+				var bound bool
+				if err := tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM node_sessions WHERE tenant_id=$1 AND agent_id=$2)", r.PathValue("tenantId"), id).Scan(&bound); err != nil {
+					return nil, err
+				}
+				if bound {
+					return nil, setupError{"resource_in_use", "Initialize a new node Agent to change the runtime of a linked conversation"}
+				}
+			}
+		}
+		return oneJSON(r.Context(), tx, "UPDATE agents SET name=$3,role=$4,title=$5,model=$6,instructions=$7,runtime=COALESCE(NULLIF($8,''),runtime) WHERE tenant_id=$1 AND id=$2 AND NOT internal RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Name, b.Role, b.Title, b.Model, b.Instructions, b.AdapterType)
 	})
 }
 func (a *App) agentInstructions(w http.ResponseWriter, r *http.Request) {
@@ -335,6 +350,10 @@ func (a *App) mutateObject(w http.ResponseWriter, r *http.Request, action, id st
 		return
 	}
 	v, e := f(tx, id)
+	if input, ok := e.(setupError); ok {
+		fail(w, 409, input.code, input.message)
+		return
+	}
 	if noRows(e) {
 		fail(w, 404, "not_found", "Resource not found")
 		return
