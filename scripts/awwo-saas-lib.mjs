@@ -38,13 +38,18 @@ export function serviceEnvironments(env) {
   const piCredentials = new Set(['AWWO_PI_API_KEY', ...modelCredentialNames(env, 'AWWO_PI_MODELS_JSON')]);
   const openAIAgentsCredentials = new Set(['AWWO_OPENAI_AGENTS_API_KEY', ...modelCredentialNames(env, 'AWWO_OPENAI_AGENTS_MODELS_JSON')]);
   const modelCredentials = new Set([...piCredentials, ...openAIAgentsCredentials, 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']);
-  const base = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('AWWO_') && !key.startsWith('VITE_AWWO_') && !modelCredentials.has(key)));
+  const base = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('AWWO_') && !key.startsWith('VITE_AWWO_') && !key.startsWith('OTEL_') && !modelCredentials.has(key)));
   const select = predicate => Object.fromEntries(Object.entries(env).filter(([key]) => predicate(key) && !modelCredentials.has(key)));
-  const pi = { ...base, ...select(key => key.startsWith('AWWO_PI_')) };
-  const openAIAgents = { ...base, ...select(key => key.startsWith('AWWO_OPENAI_AGENTS_')) };
+  const telemetry = select(key => ['AWWO_METRICS_ENABLED','AWWO_OTEL_ENABLED','AWWO_REVISION','OTEL_EXPORTER_OTLP_ENDPOINT','OTEL_SERVICE_NAME','OTEL_RESOURCE_ATTRIBUTES','OTEL_TRACES_SAMPLER','OTEL_TRACES_SAMPLER_ARG'].includes(key) || key.startsWith('AWWO_TRACE_REF_'));
+  // One dotenv drives three processes, each with its own loopback listener.
+  // The general address is the API address; worker overrides are launcher-only.
+  const pi = { ...base, ...telemetry, OTEL_SERVICE_NAME: 'awwo-pi-worker', ...select(key => key.startsWith('AWWO_PI_')) };
+  if (env.AWWO_LOCAL_PI_METRICS_LISTEN_ADDR) pi.AWWO_METRICS_LISTEN_ADDR = env.AWWO_LOCAL_PI_METRICS_LISTEN_ADDR;
+  const openAIAgents = { ...base, ...telemetry, OTEL_SERVICE_NAME: 'awwo-openai-agents-worker', ...select(key => key.startsWith('AWWO_OPENAI_AGENTS_')) };
+  if (env.AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR) openAIAgents.AWWO_METRICS_LISTEN_ADDR = env.AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR;
   for (const key of piCredentials) if (Object.hasOwn(env, key)) pi[key] = env[key];
   for (const key of openAIAgentsCredentials) if (Object.hasOwn(env, key)) openAIAgents[key] = env[key];
-  const api = { ...base, ...select(key => key.startsWith('AWWO_')
+  const api = { ...base, ...telemetry, OTEL_SERVICE_NAME: 'awwo-api', ...select(key => key.startsWith('AWWO_')
     && !key.startsWith('AWWO_PI_') && !key.startsWith('AWWO_OPENAI_AGENTS_')
     && key !== 'AWWO_LOCAL_DB_PASSWORD'),
     ...select(key => ['AWWO_PI_URL', 'AWWO_PI_TOKEN', 'AWWO_PI_SESSION_WAIT', 'AWWO_OPENAI_AGENTS_URL', 'AWWO_OPENAI_AGENTS_TOKEN'].includes(key)) };

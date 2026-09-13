@@ -1,3 +1,5 @@
+import { createWorkerObservability } from './observability.mjs';
+import { parentObservability } from './usage.mjs';
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -30,6 +32,7 @@ async function readBody(request) {
 export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
   const active = new Map();
   const sessions = new Set();
+  const observability = createWorkerObservability(config, () => active.size);
   let shuttingDown = false;
   const server = createServer(async (request, response) => {
     let pathname;
@@ -62,6 +65,7 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
       return;
     }
     if (response.destroyed) return;
+    if (shuttingDown) return json(response, 503, { error: { code: 'RUNTIME_UNAVAILABLE', message: 'The worker is stopping.' } });
     let modelConfig;
     try { modelConfig = resolveModelConfig(config, body.model); } catch {
       return json(response, 400, { error: { code: 'MODEL_NOT_FOUND', message: 'Select a model from the configured model catalog.' } });
@@ -75,7 +79,9 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
     // Go may wait for an older cancelled run's teardown and retry this request.
     if (sessions.has(sessionKey)) return json(response, 409, { error: { code: 'SESSION_BUSY', message: 'This conversation is still active or being cleaned up.' } });
     if (active.size >= config.maxConcurrency) return json(response, 429, { error: { code: 'CAPACITY_EXCEEDED', message: 'The model worker is at capacity.' } });
-    const entry = { handle: undefined, cancelRequested: false };
+    let resolveReleased;
+    const entry = { handle: undefined, cancelRequested: false, released: new Promise(resolve => { resolveReleased = resolve; }) };
+    const observed = observability.begin(modelConfig, request.headers.traceparent);
     active.set(body.runId, entry);
     sessions.add(sessionKey);
     response.writeHead(200, {
@@ -85,8 +91,9 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
       'X-Accel-Buffering': 'no',
     });
     response.flushHeaders();
-    const release = () => { active.delete(body.runId); sessions.delete(sessionKey); clearInterval(heartbeat); };
+    const release = () => { active.delete(body.runId); sessions.delete(sessionKey); clearInterval(heartbeat); resolveReleased(); };
     const emit = (event) => {
+      observed(event);
       if (response.destroyed || response.writableEnded) return;
       response.write(`data: ${JSON.stringify(event)}\n\n`);
       // A slow client must not create an unbounded process-memory queue.
@@ -106,7 +113,7 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
       if (entry.cancelRequested || response.destroyed) entry.handle.cancel();
     } catch {
       release();
-      emit({ type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.' });
+      emit({ type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.', observability: parentObservability(undefined, { totalMs: 0, outcome: 'failed' }) });
     }
   });
   server.requestTimeout = 15_000;
@@ -114,7 +121,7 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
   server.keepAliveTimeout = 5_000;
   server.maxRequestsPerSocket = 100;
   return {
-    server,
+    server, observability,
     async close() {
       shuttingDown = true;
       const stopped = new Promise((resolve) => server.close(resolve));
@@ -122,11 +129,14 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
       for (const entry of active.values()) {
         entry.cancelRequested = true;
         entry.handle?.cancel();
-        if (entry.handle) waits.push(entry.handle.done);
+        // Startup can still be awaiting a directory or fork. Include every
+        // admitted reservation, then apply cancellation once its handle exists.
+        waits.push(entry.released);
       }
       await Promise.allSettled(waits);
       server.closeAllConnections();
       await stopped;
+      await observability.close();
     },
   };
 }
@@ -134,6 +144,7 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = loadConfig();
   const app = createPiServer(config);
+  await app.observability.listen();
   app.server.listen(config.port, config.host, () => {
     console.log(JSON.stringify({ service: 'awwo-pi-worker', host: config.host, port: config.port, ...publicHealth(config) }));
   });

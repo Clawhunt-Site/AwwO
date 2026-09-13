@@ -83,3 +83,17 @@ test('upstream errors expose only safe structured codes', () => {
   assert.equal(result.code, 'MODEL_AUTHENTICATION'); assert.ok(!JSON.stringify(result).includes('private-'));
   assert.equal(classifyError(new Error('private-key')).code, 'MODEL_ERROR');
 });
+
+test('health freezes the upstream model separately from catalog identity for every configured protocol', () => {
+  const config = configuration({ AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([
+    { id: 'friendly-alias', provider: 'openai', model: 'upstream-b', protocol: 'responses', apiKeyEnv: 'PRIVATE_REF' },
+  ]), PRIVATE_REF: 'private-value' });
+  const health = publicHealth(config);
+  assert.equal(health.models[0].providerModel, 'fixture-model');
+  assert.equal(health.models[0].protocol, 'chat_completions');
+  const metadata = health.models.find(model => model.id === 'friendly-alias');
+  assert.equal(metadata.providerModel, resolveModelConfig(config, 'friendly-alias').model);
+  assert.equal(metadata.providerModel, 'upstream-b');
+  assert.equal(metadata.protocol, 'responses');
+  assert.ok(!JSON.stringify(metadata).includes('private-value'));
+});

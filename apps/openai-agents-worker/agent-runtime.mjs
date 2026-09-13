@@ -1,9 +1,10 @@
+import { createProviderObserver } from './usage.mjs';
 import { parseToolArguments, registeredTools } from './tools.mjs';
 import { RuntimeError } from './errors.mjs';
 
 // The SDK runs the agent and registered functions; Go owns cross-agent planning,
 // tenancy, durable history, retries/admission and model-call accounting.
-export async function executeAgent({ request, modelConfig, signal, emit }) {
+export async function executeAgent({ request, modelConfig, signal, emit, observer = createProviderObserver(modelConfig.protocol) }) {
   const sdk = await import('@openai/agents');
   const { default: OpenAI } = await import('openai');
   sdk.setTracingDisabled(true);
@@ -16,7 +17,7 @@ export async function executeAgent({ request, modelConfig, signal, emit }) {
     fetch: (input, init) => {
       const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
       if (url.href !== endpoint.href) throw new RuntimeError('MODEL_REQUEST_REJECTED');
-      return fetch(input, { ...init, redirect: 'error' });
+      return observer.fetch(input, { ...init, redirect: 'error' });
     },
   });
   const inner = modelConfig.protocol === 'responses'
@@ -61,7 +62,7 @@ export async function executeAgent({ request, modelConfig, signal, emit }) {
   const agent = new sdk.Agent({ name: 'AwwO configured agent',
     instructions: request.systemPrompt ?? 'You are a helpful assistant. Follow the user task using only explicitly provided information and registered tools.',
     model, tools, handoffs: [], toolUseBehavior: 'stop_on_first_tool',
-    modelSettings: { maxTokens: modelConfig.maxTokens, store: false, parallelToolCalls: false, retry: { maxRetries: 0 } },
+    modelSettings: { preserveRawUsage: true, maxTokens: modelConfig.maxTokens, store: false, parallelToolCalls: false, retry: { maxRetries: 0 } },
   });
   const runner = new sdk.Runner({ tracingDisabled: true, traceIncludeSensitiveData: false, toolNotFoundBehavior: 'raise_error', toolNameCollisionPolicy: 'error' });
   const input = request.messages.map(message => message.role === 'assistant' ? sdk.assistant(message.content) : sdk.user(message.content));
@@ -87,5 +88,5 @@ export async function executeAgent({ request, modelConfig, signal, emit }) {
   // With tools enabled, buffer provisional model text: a tool result is the final
   // answer and must not be confused with a preceding model preamble.
   if (text.length > streamed.length) await emit({ type: 'text_delta', delta: text.slice(streamed.length) });
-  await emit({ type: 'completed', text });
+  await emit({ type: 'completed', text, observability: observer.snapshot('completed') });
 }

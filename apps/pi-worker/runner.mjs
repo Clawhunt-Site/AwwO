@@ -1,3 +1,4 @@
+import { parentObservability } from './usage.mjs';
 import { fork } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,6 +20,10 @@ export function workerEnvironment(directory, executable = process.execPath) {
 }
 
 export async function startIsolatedRun({ config, request, onEvent, onExit }, { taskURL = TASK_URL } = {}) {
+  const acceptedAt = performance.now();
+  const acceptedAtNs = process.hrtime.bigint().toString();
+  let firstDeltaMs;
+  let childObservability;
   const modelConfig = resolveModelConfig(config, request.model);
   const directory = await mkdtemp(join(tmpdir(), 'awwo-pi-'));
   const agentDir = join(directory, 'agent');
@@ -79,8 +84,9 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       if (cancellation) return;
       outputBytes += Buffer.byteLength(event.delta);
       if (outputBytes > config.maxOutputBytes) stop('output_limit');
-      else onEvent({ type: 'text_delta', delta: event.delta });
+      else { firstDeltaMs ??= performance.now() - acceptedAt; onEvent({ type: 'text_delta', delta: event.delta }); }
     } else if (['completed', 'failed', 'cancelled'].includes(event.type)) {
+      childObservability = event.observability;
       if (cancellation) rememberTerminal(cancelledEvent());
       else if (event.type === 'completed' && typeof event.text === 'string' && Buffer.byteLength(event.text) <= config.maxOutputBytes) {
         rememberTerminal({ type: 'completed', text: event.text });
@@ -102,17 +108,22 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
     } finally {
       // Release the session and capacity before publishing the terminal event.
       // Its recipient may immediately submit the next turn on this session.
-      try { onExit?.(); onEvent(terminalEvent); } finally { resolveDone(); }
+      try {
+        onExit?.();
+        terminalEvent.observability = parentObservability(childObservability, { totalMs: performance.now() - acceptedAt, firstDeltaMs, outcome: terminalEvent.type });
+        onEvent(terminalEvent);
+      } finally { resolveDone(); }
     }
   });
   child.send({
     type: 'run',
+    acceptedAtNs,
     request,
     directory,
     agentDir,
     modelConfig: {
       provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL, apiKey: modelConfig.apiKey,
-      contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens,
+      contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };

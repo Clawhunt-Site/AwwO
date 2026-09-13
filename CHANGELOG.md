@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Added — backend observability and durable invocation usage
+
+- **What changed:** Add private loopback metrics and self-hosted OTLP instrumentation for Go, Pi and OpenAI Agents; persist nullable invocation usage/timing with frozen integer micro-USD pricing; expose four role-scoped usage/observability read APIs and immutable 24h/30d metric snapshots. Reconcile the two historical migration-011 schemas through identified additive migrations 012–014, retain the ledger after completed-canvas deletion, and bind usage pagination to transaction visibility.
+- **Why:** Model calls and multi-Agent execution needed measurable backend behavior without turning missing provider usage into zero cost, leaking tenant data, changing historical prices or losing usage when business records are deleted.
+- **Impact:** Exporters default off and management ports remain loopback. Reader/member responses omit cost keys; sensitive platform reads are audited. Pricing is operator-supplied estimation, automatic retention deletion is not implemented, and uncertain accepted calls are not replayed. This scope does not deploy monitoring services, frontend RUM, notifications or production infrastructure.
+- **Verification:** Full Go/PostgreSQL race passed (121 top-level / 252 including subtests, zero test failures/skips, 137.330s), Pi 47, OpenAI Agents 54, launcher 11 and dual-SDK protocol stack 1 all passed. Final frozen-price/cursor regressions passed (3 top-level / 5 including subtests, 5.492s). Four real gpt-5.6 graphs plus one Computer Use team run completed 12 invocations with reported provider usage; three management scrapes returned 200 and business metrics routes stayed isolated. Actual OTLP verified 12 parent chains, 13 linked asynchronous roots, ledger/window agreement and content privacy. One hundred local health/usage requests had zero errors. Actual provider pricing remains unset; direct browser JSON viewing was client-blocked. See `docs/awwo-backend-observability-acceptance-20260913.md` for five screenshots and exact boundaries. These checks do not imply a push or deployment.
+- **Files:** `backend/internal/app/{observability*,invocation_ledger*,usage*,pricing*,migration_identity*,runs,teams,graph_runs,runtime_workers}.go`, migrations 012–014, API startup/config, both runtime workers, SaaS launcher/Compose configuration and `docs/awwo-backend-observability.md`.
+
 ### Fixed — graph delivery contracts take precedence over persona formatting
 
 - **What changed:** Freeze a server-owned output policy alongside persona instructions and apply it to single-Agent and team dispatch, including the review envelope. Generate policy and plain-text eligibility from the same fields as validation, account for its context cost before model admission, and refresh existing internal planner sessions with the corrected field-format rules.

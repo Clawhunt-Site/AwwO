@@ -60,6 +60,15 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 			}
 		}
 	}
+	if e = reconcileMigrationIdentity(ctx, tx); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 13, "migrations/013_model_observability.sql"); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 14, "migrations/014_usage_snapshot_identity.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

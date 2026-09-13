@@ -231,21 +231,33 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	a.dispatchGraph(tid, id)
+	a.dispatchGraph(tid, id, r.Context())
 	writeJSON(w, 202, v)
 }
-func (a *App) dispatchGraph(tid, id string) {
+func (a *App) dispatchGraph(tid, id string, parents ...context.Context) {
 	a.mu.Lock()
 	if a.closed || a.running["graph:"+id] != nil {
 		a.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	parent := context.Background()
+	if len(parents) > 0 {
+		parent = parents[0]
+	}
+	traceCtx, endTrace := a.startAsyncTrace(parent, "awwo.graph.execute", "graph", "mixed")
+	ctx, cancel := context.WithCancel(traceCtx)
 	a.running["graph:"+id] = cancel
 	a.tasks.Add(1)
 	a.mu.Unlock()
 	go func() {
 		defer a.tasks.Done()
+		defer func() {
+			c, done := context.WithTimeout(context.Background(), time.Second)
+			defer done()
+			outcome := "interrupted"
+			_ = a.db.QueryRow(c, "SELECT status FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&outcome)
+			endTrace(outcome)
+		}()
 		defer cancel()
 		defer func() { a.mu.Lock(); delete(a.running, "graph:"+id); a.mu.Unlock() }()
 		for ctx.Err() == nil {
@@ -331,7 +343,10 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 			if interrupted {
 				final = "interrupted"
 			}
-			_, _ = a.db.Exec(ctx, "UPDATE graph_runs SET status=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, final)
+			tag, e := a.db.Exec(ctx, "UPDATE graph_runs SET status=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, final)
+			if e == nil && tag.RowsAffected() == 1 {
+				a.observeGraph(final)
+			}
 			return
 		}
 		for _, n := range d.Nodes {
@@ -422,7 +437,21 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 	}
 }
 func (a *App) setGraphNode(ctx context.Context, tid, gid, nid, state, output, detail string) {
-	_, _ = a.db.Exec(ctx, "UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND state IN ('waiting','running') AND EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND id=$2 AND status='running')", tid, gid, nid, state, output, detail)
+	var runID *string
+	err := a.db.QueryRow(ctx, "UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND state IN ('waiting','running') AND state<>$4 AND EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND id=$2 AND status='running') RETURNING run_id", tid, gid, nid, state, output, detail).Scan(&runID)
+	if err == nil {
+		a.observeGraphNodeState(state)
+		if runID != nil {
+			var created time.Time
+			var raw json.RawMessage
+			if a.db.QueryRow(ctx, "SELECT created_at,execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", tid, *runID).Scan(&created, &raw) == nil {
+				var snap executionSnapshot
+				if json.Unmarshal(raw, &snap) == nil {
+					a.observeGraphNode(snapshotRuntime(snap), state, time.Since(created))
+				}
+			}
+		}
+	}
 }
 
 var errGraphCapacity = errors.New("graph_waiting_for_capacity")
@@ -510,7 +539,8 @@ func (a *App) admitGraphNode(ctx context.Context, tid, gid, nid, prompt string) 
 	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
-	a.dispatch(tid, rid, sid, prompt, instructions, "node", snap.Budget, snap.Overhead)
+	a.observeGraphNodeState("running")
+	a.dispatch(tid, rid, sid, prompt, instructions, "graph", snap.Budget, snap.Overhead, ctx)
 	return nil
 }
 func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {

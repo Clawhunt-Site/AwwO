@@ -1,3 +1,4 @@
+const businessEvent = ({ observability, ...event }) => event;
 import assert from 'node:assert/strict';
 import { access } from 'node:fs/promises';
 import test from 'node:test';
@@ -9,7 +10,7 @@ test('official SDK chat stream preserves isolated instructions, history and sing
   const config = configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL });
   const input = request({ systemPrompt: 'You are Li Bai. Use only this persona.', messages: [{ role: 'user', content: 'Previous question' }, { role: 'assistant', content: 'Previous answer' }] });
   const task = await run(config, input, (event, released) => { if (event.type === 'completed') assert.equal(released, true); });
-  assert.deepEqual(await task.result, { type: 'completed', text: 'Hello from Agents' });
+  assert.deepEqual(businessEvent(await task.result), { type: 'completed', text: 'Hello from Agents' });
   assert.equal(task.events.filter(e => e.type === 'text_delta').map(e => e.delta).join(''), 'Hello from Agents');
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0].url, '/v1/chat/completions');
@@ -27,8 +28,10 @@ test('official SDK chat stream preserves isolated instructions, history and sing
 test('official SDK Responses protocol preserves instructions and produces real terminal output', { timeout: 15_000 }, async t => {
   const f = await fixture(t, { text: 'Responses fixture output' });
   const task = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: 'responses' }), request({ systemPrompt: 'Independent persona' }));
-  assert.deepEqual(await task.result, { type: 'completed', text: 'Responses fixture output' });
+  assert.deepEqual(businessEvent(await task.result), { type: 'completed', text: 'Responses fixture output' });
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].url, '/v1/responses');
+  const metadata = publicHealth(configuration({ AWWO_OPENAI_AGENTS_PROTOCOL: 'responses' })).models[0];
+  assert.equal(metadata.protocol, 'responses'); assert.equal(metadata.providerModel, f.calls[0].body.model);
   assert.equal(f.calls[0].body.instructions, 'Independent persona'); assert.equal(f.calls[0].body.store, false);
 });
 
@@ -81,7 +84,7 @@ test('precise cancellation terminates the child and removes its private director
   const f = await fixture(t, { mode: 'stall' });
   const task = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL }));
   await f.ready; task.cancel();
-  assert.deepEqual(await task.result, { type: 'cancelled' }); assert.equal(f.calls.length, 1);
+  assert.deepEqual(businessEvent(await task.result), { type: 'cancelled' }); assert.equal(f.calls.length, 1);
   await assert.rejects(access(task.directory)); assert.throws(() => process.kill(task.pid, 0), /ESRCH/);
 });
 
@@ -92,4 +95,38 @@ test('deadline and UTF-8 output bounds produce structured failures', { timeout: 
   const g = await fixture(t, { text: '漢'.repeat(400) });
   const limited = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: g.baseURL, AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES: '1024' }));
   assert.equal((await limited.result).code, 'OUTPUT_LIMIT');
+});
+
+for (const [name, usage, status] of [
+  ['missing', undefined, 'unavailable'],
+  ['explicit zero', { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, 'reported'],
+  ['partial', { prompt_tokens: 9 }, 'partial'],
+  ['cached and reasoning', { prompt_tokens: 19, completion_tokens: 7, total_tokens: 26, prompt_tokens_details: { cached_tokens: 3 }, completion_tokens_details: { reasoning_tokens: 2 } }, 'reported'],
+]) test(`real OpenAI Agents provider usage preserves ${name} across IPC and cleanup`, async t => {
+  const f = await fixture(t, { usage, multilineUsage: name === 'cached and reasoning' });
+  const task = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL }));
+  const terminal = await task.result;
+  assert.equal(terminal.type, 'completed');
+  const observation = terminal.observability;
+  assert.equal(observation.version, 1); assert.equal(observation.usage.status, status);
+  assert.equal(observation.usage.inputTokens, usage?.prompt_tokens ?? null);
+  assert.equal(observation.usage.outputTokens, usage?.completion_tokens ?? null);
+  assert.equal(observation.usage.reasoningTokens, usage?.completion_tokens_details?.reasoning_tokens ?? null);
+  assert.ok(observation.timing.workerTotalMs >= observation.timing.setupMs + observation.timing.providerMs - 1);
+  assert.ok(observation.timing.providerTtftMs !== null);
+  assert.ok(observation.timing.workerFirstDeltaMs >= observation.timing.providerTtftMs);
+  assert.equal(f.calls.length, 1);
+  for (const key of ['traceparent', 'tracestate', 'baggage']) assert.equal(f.calls[0].headers[key], undefined);
+  await assert.rejects(access(task.directory));
+});
+
+test('Responses raw usage comes from the provider and never SDK synthetic zeros', async t => {
+  for (const raw of [null, { input_tokens: 0, output_tokens: 0, total_tokens: 0 }, { input_tokens: 10, output_tokens: 5, total_tokens: 15 }]) {
+    const f = await fixture(t, { responseUsage: raw });
+    const task = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: 'responses' }));
+    const terminal = await task.result;
+    assert.equal(terminal.type, 'completed');
+    assert.equal(terminal.observability.usage.status, raw ? 'reported' : 'unavailable');
+    assert.equal(terminal.observability.usage.inputTokens, raw?.input_tokens ?? null);
+  }
 });

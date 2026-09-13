@@ -1,3 +1,4 @@
+import { loadObservabilityConfig } from './observability.mjs';
 import { toolMetadata, toolDefinitionBytes, validateToolNames } from './tools.mjs';
 const DEFAULTS = Object.freeze({ openai: 'https://api.openai.com/v1' });
 const PROTOCOLS = new Set(['chat_completions', 'responses']);
@@ -109,6 +110,7 @@ export function loadConfig(env = process.env) {
     }
   }
   return Object.freeze({
+    observability: loadObservabilityConfig(env, 'openai-agents', environment),
     host: env.AWWO_OPENAI_AGENTS_HOST ?? '127.0.0.1',
     port: integer(env.AWWO_OPENAI_AGENTS_PORT, 8098, 0, 65535, 'AWWO_OPENAI_AGENTS_PORT'),
     token, provider, model, apiKey, baseURL, protocol, environment,
@@ -137,6 +139,7 @@ export function publicHealth(config, activeRuns = 0) {
     models: config.models.filter((profile) => profile.id && profile.provider).map((profile) => ({
       id: profile.id,
       name: profile.model,
+      providerModel: profile.model,
       provider: profile.provider,
       runtime: 'openai-agents',
       protocol: profile.protocol,
@@ -147,6 +150,9 @@ export function publicHealth(config, activeRuns = 0) {
     })),
     activeRuns,
     version: '0.1.0',
+    telemetryProtocolVersion: 1,
+    metricsEnabled: config.observability.enabled,
+    selfHostedTracingEnabled: config.observability.tracing,
     sdkVersion: '0.18.0',
     // Configuration readiness only; no network/model inference occurs here.
     modelConnectivityVerified: false,

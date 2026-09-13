@@ -120,6 +120,9 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&h) != nil || !h.Ready || h.Model == "" {
 		return piHealth{}, errors.New("Runtime provider is not ready")
 	}
+	if len(h.Models) > 128 {
+		return piHealth{}, errors.New("Runtime model catalog exceeds limit")
+	}
 	seen, hasDefault := map[string]bool{}, false
 	for i, m := range h.Models {
 		// Legacy Pi catalogs did not publish runtime. Other workers must declare
@@ -127,7 +130,7 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		if m.Runtime == "" && runtime == runtimePI {
 			m.Runtime = runtimePI
 		}
-		if m.Runtime != runtime || m.ID == "" || seen[m.ID] {
+		if m.Runtime != runtime || m.ID == "" || len(m.ID) > 200 || len(m.Provider) > 200 || seen[m.ID] {
 			return piHealth{}, errors.New("Runtime model catalog is invalid")
 		}
 		seen[m.ID], h.Models[i] = true, m
@@ -146,6 +149,7 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	if _, ok := h.toolBudget(toolNames); !ok {
 		return piHealth{}, errors.New("Runtime tool budgets are invalid")
 	}
+	a.registerTelemetryModels(runtime, h.Models)
 	return h, nil
 }
 

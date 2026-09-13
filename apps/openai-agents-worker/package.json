@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test --test-concurrency=1 *.test.mjs",
-    "check": "node --check server.mjs && node --check runner.mjs && node --check agent-task.mjs && node --check config.mjs && node --check tools.mjs && node --check errors.mjs && node --check agent-runtime.mjs"
+    "check": "node --check server.mjs && node --check runner.mjs && node --check agent-task.mjs && node --check config.mjs && node --check tools.mjs && node --check errors.mjs && node --check agent-runtime.mjs && node --check usage.mjs && node --check observability.mjs"
   },
   "dependencies": {
     "@openai/agents": "0.18.0",

@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.19.0" },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test --test-concurrency=1 *.test.mjs",
-    "check": "node --check server.mjs && node --check runner.mjs && node --check pi-task.mjs && node --check config.mjs"
+    "check": "node --check server.mjs && node --check runner.mjs && node --check pi-task.mjs && node --check config.mjs && node --check usage.mjs && node --check observability.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.85.1",

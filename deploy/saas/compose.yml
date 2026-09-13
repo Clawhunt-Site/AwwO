@@ -1,4 +1,12 @@
 name: awwo-saas
+# Backend instrumentation only; collectors and scrape access are operated separately.
+x-backend-telemetry: &backend-telemetry
+  AWWO_METRICS_ENABLED: ${AWWO_METRICS_ENABLED:-false}
+  AWWO_OTEL_ENABLED: ${AWWO_OTEL_ENABLED:-false}
+  AWWO_REVISION: ${AWWO_REVISION:-unknown}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}
+  OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-0.05}
 services:
   database:
     image: postgres:18.4-bookworm
@@ -24,6 +32,9 @@ services:
       - path: ${AWWO_PI_PROFILES_ENV_FILE:-./pi-profiles.env}
         required: false
     environment:
+      <<: *backend-telemetry
+      APP_ENV: ${APP_ENV:-staging}
+      OTEL_SERVICE_NAME: awwo-pi-worker
       AWWO_PI_HOST: 0.0.0.0
       AWWO_PI_PORT: 8097
       AWWO_PI_TOKEN: ${AWWO_PI_TOKEN:?Set a dedicated internal token}
@@ -55,7 +66,9 @@ services:
       - path: ${AWWO_OPENAI_AGENTS_PROFILES_ENV_FILE:-./openai-agents-profiles.env}
         required: false
     environment:
+      <<: *backend-telemetry
       APP_ENV: ${APP_ENV:-staging}
+      OTEL_SERVICE_NAME: awwo-openai-agents-worker
       AWWO_OPENAI_AGENTS_HOST: 0.0.0.0
       AWWO_OPENAI_AGENTS_PORT: 8098
       AWWO_OPENAI_AGENTS_TOKEN: ${AWWO_OPENAI_AGENTS_TOKEN:?Set a dedicated OpenAI Agents internal token}
@@ -88,7 +101,12 @@ services:
       context: ../..
       dockerfile: deploy/saas/api.Dockerfile
     environment:
+      <<: *backend-telemetry
       APP_ENV: ${APP_ENV:-staging}
+      OTEL_SERVICE_NAME: awwo-api
+      AWWO_METRICS_LISTEN_ADDR: ${AWWO_METRICS_LISTEN_ADDR:-127.0.0.1:9101}
+      AWWO_MODEL_PRICING_JSON: ${AWWO_MODEL_PRICING_JSON:-}
+      AWWO_USAGE_RETENTION_DAYS: ${AWWO_USAGE_RETENTION_DAYS:-180}
       AWWO_LISTEN_ADDR: 0.0.0.0:8087
       AWWO_PUBLIC_ORIGIN: ${AWWO_PUBLIC_ORIGIN:?Set the HTTPS public origin}
       AWWO_DATABASE_URL: ${AWWO_DATABASE_URL:?Set the dedicated PostgreSQL connection URL}

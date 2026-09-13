@@ -55,6 +55,26 @@ test('local services receive only their own provider credentials', () => {
   assert.equal(scoped.pi.AWWO_OPENAI_AGENTS_TOKEN, undefined); assert.equal(scoped.openAIAgents.AWWO_PI_TOKEN, undefined);
 });
 
+test('observability is scoped to backend processes with distinct management listeners', () => {
+  const env = { APP_ENV: 'development', AWWO_METRICS_ENABLED: 'true', AWWO_METRICS_LISTEN_ADDR: '127.0.0.1:9201',
+    AWWO_LOCAL_PI_METRICS_LISTEN_ADDR: '127.0.0.1:9202', AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR: '127.0.0.1:9203',
+    AWWO_OTEL_ENABLED: 'true', OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:4318',
+    OTEL_EXPORTER_OTLP_HEADERS: 'secret=ambient-exporter-secret', AWWO_MODEL_PRICING_JSON: '{"version":"test"}' };
+  const scoped = serviceEnvironments(env);
+  assert.equal(scoped.api.AWWO_METRICS_LISTEN_ADDR, '127.0.0.1:9201');
+  assert.equal(scoped.pi.AWWO_METRICS_LISTEN_ADDR, '127.0.0.1:9202');
+  assert.equal(scoped.openAIAgents.AWWO_METRICS_LISTEN_ADDR, '127.0.0.1:9203');
+  for (const runtime of [scoped.api, scoped.pi, scoped.openAIAgents]) {
+    assert.equal(runtime.AWWO_OTEL_ENABLED, 'true'); assert.equal(runtime.OTEL_EXPORTER_OTLP_ENDPOINT, env.OTEL_EXPORTER_OTLP_ENDPOINT);
+    assert.equal(runtime.OTEL_EXPORTER_OTLP_HEADERS, undefined);
+  }
+  for (const runtime of [scoped.web, scoped.build]) {
+    assert.equal(runtime.AWWO_METRICS_ENABLED, undefined); assert.equal(runtime.OTEL_EXPORTER_OTLP_ENDPOINT, undefined);
+    assert.equal(runtime.OTEL_EXPORTER_OTLP_HEADERS, undefined); assert.equal(runtime.AWWO_MODEL_PRICING_JSON, undefined);
+  }
+  assert.equal(scoped.pi.AWWO_MODEL_PRICING_JSON, undefined); assert.equal(scoped.openAIAgents.AWWO_MODEL_PRICING_JSON, undefined);
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });

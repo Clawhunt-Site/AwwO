@@ -1,5 +1,12 @@
 # AwwO main synchronization candidate
 
+## Backend observability completion — 2026-09-13
+
+- Created by Codex at the repository owner's request to finish backend delivery.
+- Workspace: `/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-backend-observability-20260913`.
+- Detached baseline: `1ffef64ca29be7e79e2a6faf518548a34010f55c`.
+- Scope: Go and runtime metrics, content-free tracing, durable invocation usage, tenant/admin APIs, schema compatibility, local actual regression and evidence. Frontend implementation and operations-stack deployment are outside this delivery. Main/online and unrelated services are preserved.
+
 - Created by Codex for the repository owner on 2026-09-08.
 - Purpose: resolve conflicts between the completed Go/Pi SaaS work and the fetched main baseline in an isolated detached worktree.
 - Source: codex/awwo-node-setup-20260908 at b9a65390c237907f951232c4c03c758324546188.

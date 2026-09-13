@@ -1,3 +1,4 @@
+import { createProviderObserver } from './usage.mjs';
 // One trusted task per child, credentials only over IPC. No file-backed sessions.
 import { executeAgent } from './agent-runtime.mjs';
 import { classifyError } from './errors.mjs';
@@ -13,11 +14,13 @@ process.on('message', async message => {
   if (message?.type === 'cancel') { controller.abort(); return; }
   if (started || message?.type !== 'run') return;
   started = true;
+  const observer = createProviderObserver(message.modelConfig.protocol, { acceptedAtNs: message.acceptedAtNs });
+  const terminal = event => emit({ ...event, observability: observer.snapshot(event.type) });
   try {
-    if (controller.signal.aborted) return await emit({ type: 'cancelled' });
-    await executeAgent({ request: message.request, modelConfig: message.modelConfig, signal: controller.signal, emit });
+    if (controller.signal.aborted) return await terminal({ type: 'cancelled' });
+    await executeAgent({ request: message.request, modelConfig: message.modelConfig, signal: controller.signal, emit, observer });
   } catch (error) {
-    await emit(controller.signal.aborted ? { type: 'cancelled' } : classifyError(error));
+    await terminal(controller.signal.aborted ? { type: 'cancelled' } : classifyError(error));
   } finally {
     process.disconnect?.();
   }

@@ -39,6 +39,9 @@ func run() error {
 	if e = a.Start(ctx); e != nil {
 		return e
 	}
+	if e = a.StartObservability(ctx); e != nil {
+		return e
+	}
 	if e = a.BootstrapAdmin(ctx); e != nil {
 		return e
 	}

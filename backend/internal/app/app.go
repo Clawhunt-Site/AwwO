@@ -19,6 +19,8 @@ import (
 )
 
 type App struct {
+	obs         *observability
+	pricing     *ModelPricing
 	db          *pgxpool.Pool
 	cfg         Config
 	log         *slog.Logger
@@ -45,7 +47,13 @@ func New(db *pgxpool.Pool, c Config) *App {
 	if c.PIAdmissionWait == 0 {
 		c.PIAdmissionWait = 5 * time.Second
 	}
-	return &App{db: db, cfg: c, log: slog.Default(), client: &http.Client{Timeout: c.RunTimeout}, dummyHash: hashPassword(randomID()), cursorKey: []byte(randomID() + randomID()), running: map[string]context.CancelFunc{}, limits: map[string]rateEntry{}, authSlots: make(chan struct{}, 4), reauthEvery: 15 * time.Second}
+	a := &App{db: db, cfg: c, log: slog.Default(), client: &http.Client{Timeout: c.RunTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, dummyHash: hashPassword(randomID()), cursorKey: []byte(randomID() + randomID()), running: map[string]context.CancelFunc{}, limits: map[string]rateEntry{}, authSlots: make(chan struct{}, 4), reauthEvery: 15 * time.Second}
+	if a.cfg.UsageRetentionDays == 0 {
+		a.cfg.UsageRetentionDays = 180
+	}
+	a.pricing, _ = ParseModelPricing(c.ModelPricingJSON)
+	a.obs = newObservability(a)
+	return a
 }
 
 // A dedicated advisory lock makes the first release explicitly single-worker.
@@ -95,7 +103,7 @@ func (a *App) Start(ctx context.Context) error {
 	if _, e = tx.Exec(ctx, "UPDATE run_turns SET status='interrupted',error='API restarted before completion',updated_at=now() WHERE status IN ('queued','running')"); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET status='interrupted',updated_at=now() WHERE status='running'"); e != nil {
+	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET status='interrupted',usage_status='unknown',usage_source='none',usage_reason='worker_lost',cost_status='unknown',failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=now() WHERE status='running'"); e != nil {
 		return e
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -136,6 +144,7 @@ func (a *App) Start(ctx context.Context) error {
 	return a.recoverGraphs(ctx)
 }
 func (a *App) Close() {
+	defer a.closeObservability()
 	if a.leaseCancel != nil {
 		a.leaseCancel()
 	}
@@ -218,7 +227,8 @@ func (a *App) Handler() http.Handler {
 		m.HandleFunc("GET /api/v1/admin/"+kind, a.admin(a.adminList(kind)))
 	}
 	m.HandleFunc("PATCH /api/v1/admin/tenants/{id}", a.admin(a.adminTenant))
-	return a.security(m)
+	a.registerUsageRoutes(m)
+	return a.observeHTTP(m, a.security(m))
 }
 
 func (a *App) workerAvailable(w http.ResponseWriter) bool {
@@ -386,10 +396,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func fail(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	writeJSON(w, status, map[string]any{"error": map[string]any{"code": code, "message": message, "requestId": w.Header().Get("X-Request-ID"), "details": map[string]any{}}})
 }
 func (a *App) dbError(w http.ResponseWriter, e error) {
-	a.log.Error("database operation failed", "error", e)
+	a.log.Error("database operation failed", "error_class", "database_error")
 	fail(w, 500, "internal_error", "Could not complete the request")
 }
 func (a *App) replyOne(w http.ResponseWriter, v json.RawMessage, e error, status int) {

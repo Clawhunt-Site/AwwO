@@ -10,7 +10,7 @@ export const configuration = (overrides = {}) => loadConfig({
   AWWO_OPENAI_AGENTS_BASE_URL: 'http://127.0.0.1:1/v1',
   AWWO_OPENAI_AGENTS_CANCEL_GRACE_MS: '100', ...overrides,
 });
-export async function fixture(t, { mode = 'text', text = 'Hello from Agents', calls = [], tool = 'calculator', args = { expression: '(2+3)*4' }, status = 200, delay = 0 } = {}) {
+export async function fixture(t, { mode = 'text', text = 'Hello from Agents', calls = [], tool = 'calculator', args = { expression: '(2+3)*4' }, status = 200, delay = 0, usage, multilineUsage = false, responseUsage = { input_tokens: 2, output_tokens: 3, total_tokens: 5 } } = {}) {
   let received;
   const ready = new Promise(resolve => { received = resolve; });
   const server = createServer(async (req, res) => {
@@ -25,7 +25,7 @@ export async function fixture(t, { mode = 'text', text = 'Hello from Agents', ca
       if (mode === 'tool') {
         const serialized = typeof args === 'string' ? args : JSON.stringify(args);
         const item = { type: 'function_call', id: 'fc_fixture', call_id: 'call_fixture', name: tool, arguments: serialized, status: 'completed' };
-        const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'fixture-model', output: [item], usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 } };
+        const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'fixture-model', output: [item], usage: responseUsage };
         const event = (type, payload) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`);
         event('response.created', { response: { ...response, status: 'in_progress', output: [] } });
         event('response.output_item.added', { output_index: 0, item: { ...item, status: 'in_progress', arguments: '' } });
@@ -35,7 +35,7 @@ export async function fixture(t, { mode = 'text', text = 'Hello from Agents', ca
         event('response.completed', { response }); res.end(); return;
       }
       const message = { type: 'message', id: 'msg_fixture', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] };
-      const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'fixture-model', output: [message], usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 } };
+      const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'fixture-model', output: [message], usage: responseUsage };
       const event = (type, payload) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`);
       event('response.created', { response: { ...response, status: 'in_progress', output: [] } });
       event('response.output_item.added', { output_index: 0, item: { ...message, status: 'in_progress', content: [] } });
@@ -53,6 +53,7 @@ export async function fixture(t, { mode = 'text', text = 'Hello from Agents', ca
       const item = index => ({ index, id: `call_${index}`, type: 'function', function: { name: tool, arguments: typeof args === 'string' ? args : JSON.stringify(args) } });
       send({ tool_calls: mode === 'double-tool' ? [item(0), item(1)] : [item(0)] }); send({}, 'tool_calls');
     } else if (mode !== 'missing-finish') send({}, mode === 'length' ? 'length' : mode === 'refusal' ? 'content_filter' : 'stop');
+    if (usage !== undefined) res.write(JSON.stringify({ choices: [], usage }, null, multilineUsage ? 2 : undefined).split('\n').map(line => `data: ${line}`).join('\n') + '\n\n');
     res.end('data: [DONE]\n\n');
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');

@@ -1,3 +1,5 @@
+import { createWorkerObservability } from './observability.mjs';
+import { parentObservability } from './usage.mjs';
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -30,6 +32,7 @@ async function readBody(request) {
 export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun } = {}) {
   const active = new Map();
   const sessions = new Set();
+  const observability = createWorkerObservability(config, () => active.size);
   let shuttingDown = false;
   const server = createServer(async (request, response) => {
     let pathname;
@@ -81,6 +84,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
     if (active.size >= config.maxConcurrency) return json(response, 429, { error: { code: 'CAPACITY_EXCEEDED', message: 'The model worker is at capacity.' } });
     let resolveReleased;
     const entry = { handle: undefined, cancelRequested: false, released: new Promise(resolve => { resolveReleased = resolve; }) };
+    const observed = observability.begin(modelConfig, request.headers.traceparent);
     active.set(body.runId, entry);
     sessions.add(sessionKey);
     response.writeHead(200, {
@@ -92,6 +96,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
     response.flushHeaders();
     const release = () => { active.delete(body.runId); sessions.delete(sessionKey); clearInterval(heartbeat); resolveReleased(); };
     const emit = (event) => {
+      observed(event);
       if (response.destroyed || response.writableEnded) return;
       response.write(`data: ${JSON.stringify(event)}\n\n`);
       // A slow client must not create an unbounded process-memory queue.
@@ -111,7 +116,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
       if (entry.cancelRequested || response.destroyed) entry.handle.cancel();
     } catch {
       release();
-      emit({ type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.' });
+      emit({ type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.', observability: parentObservability(undefined, { totalMs: 0, outcome: 'failed' }) });
     }
   });
   server.requestTimeout = 15_000;
@@ -119,7 +124,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
   server.keepAliveTimeout = 5_000;
   server.maxRequestsPerSocket = 100;
   return {
-    server,
+    server, observability,
     async close() {
       shuttingDown = true;
       const stopped = new Promise((resolve) => server.close(resolve));
@@ -134,6 +139,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
       await Promise.allSettled(waits);
       server.closeAllConnections();
       await stopped;
+      await observability.close();
     },
   };
 }
@@ -141,6 +147,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = loadConfig();
   const app = createOpenAIAgentsServer(config);
+  await app.observability.listen();
   app.server.listen(config.port, config.host, () => {
     console.log(JSON.stringify({ service: 'awwo-openai-agents-worker', host: config.host, port: config.port, ...publicHealth(config) }));
   });

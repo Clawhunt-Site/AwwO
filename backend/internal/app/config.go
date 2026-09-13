@@ -12,6 +12,13 @@ import (
 )
 
 type Config struct {
+	MetricsEnabled, OTelEnabled                                                           bool
+	MetricsListenAddr, OTelEndpoint, OTelServiceName, OTelResourceAttributes, OTelSampler string
+	OTelSampleRatio                                                                       float64
+	TraceRefKey                                                                           []byte
+	TraceRefVersion                                                                       string
+	ModelPricingJSON                                                                      string
+	UsageRetentionDays                                                                    int
 	Env, DatabaseURL, ListenAddr, PublicOrigin, PIURL, PIToken, AdminEmail, AdminPassword string
 	OpenAIAgentsURL, OpenAIAgentsToken                                                    string
 	SessionTTL, RunTimeout                                                                time.Duration
@@ -50,6 +57,9 @@ func ConfigFromEnv() (Config, error) {
 			return c, errors.New("invalid AWWO_TRUSTED_PROXY_CIDRS")
 		}
 		c.TrustedProxyCIDRs = append(c.TrustedProxyCIDRs, p)
+	}
+	if err := c.observabilityFromEnv(); err != nil {
+		return c, err
 	}
 	return c, c.Validate()
 }
@@ -104,5 +114,5 @@ func (c Config) Validate() error {
 	if strings.Contains(c.PublicOrigin, "example.com") && c.Env != "development" {
 		return errors.New("replace the public origin placeholder")
 	}
-	return nil
+	return c.validateObservability()
 }

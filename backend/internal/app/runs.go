@@ -34,6 +34,8 @@ type piModel struct {
 	ID                   string `json:"id"`
 	Name                 string `json:"name"`
 	Provider             string `json:"provider"`
+	ProviderModel        string `json:"providerModel,omitempty"`
+	Protocol             string `json:"protocol,omitempty"`
 	Runtime              string `json:"runtime"`
 	MaxContextTextBytes  int    `json:"maxContextTextBytes"`
 	MessageOverheadBytes int    `json:"messageOverheadBytes"`
@@ -249,21 +251,33 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	a.dispatch(tid, id, b.SessionID, b.Prompt, instructions, kind, budget, overhead)
+	a.dispatch(tid, id, b.SessionID, b.Prompt, instructions, kind, budget, overhead, r.Context())
 	writeJSON(w, 202, v)
 }
-func (a *App) dispatch(tid, id, sid, prompt, instructions, kind string, budget, overhead int) {
+func (a *App) dispatch(tid, id, sid, prompt, instructions, kind string, budget, overhead int, parents ...context.Context) {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), a.cfg.RunTimeout)
+	parent := context.Background()
+	if len(parents) > 0 {
+		parent = parents[0]
+	}
+	traceCtx, endTrace := a.startAsyncTrace(parent, "awwo.run.execute", kind, "unknown")
+	ctx, cancel := context.WithTimeout(traceCtx, a.cfg.RunTimeout)
 	a.running[id] = cancel
 	a.tasks.Add(1)
 	a.mu.Unlock()
 	go func() {
 		defer a.tasks.Done()
+		defer func() {
+			c, done := context.WithTimeout(context.Background(), time.Second)
+			defer done()
+			outcome := "interrupted"
+			_ = a.db.QueryRow(c, "SELECT status FROM runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&outcome)
+			endTrace(outcome)
+		}()
 		defer cancel()
 		defer func() { a.mu.Lock(); delete(a.running, id); a.mu.Unlock() }()
 		a.execute(ctx, tid, id, sid, prompt, instructions, kind, budget, overhead)
@@ -279,8 +293,9 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		return
 	}
 	defer tx.Rollback(context.Background())
-	tag, e := tx.Exec(ctx, "UPDATE runs SET status='running',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='queued'", tid, id)
-	if e != nil || tag.RowsAffected() == 0 {
+	var queuedAt time.Time
+	e = tx.QueryRow(ctx, "UPDATE runs SET status='running',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='queued' RETURNING created_at", tid, id).Scan(&queuedAt)
+	if e != nil {
 		return
 	}
 	if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, `{"type":"running"}`); e != nil {
@@ -289,6 +304,11 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	if e = tx.Commit(ctx); e != nil {
 		return
 	}
+	queueDuration := time.Since(queuedAt)
+	if queueDuration < 0 {
+		queueDuration = 0
+	}
+	a.observeQueue(kind, "started", queueDuration)
 	var snapshot executionSnapshot
 	var snapshotRaw []byte
 	if e = a.db.QueryRow(ctx, "SELECT execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&snapshotRaw); e != nil {
@@ -303,11 +323,13 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
 		return
 	}
-	if e = a.reserveInvocation(ctx, tid, id, id); e != nil {
+	facts := invocationMetadata(snapshot, nil)
+	facts.Timing.QueueMs = int64ptr(queueDuration.Milliseconds())
+	if e = a.reserveInvocation(ctx, tid, id, id, facts); e != nil {
 		a.finish(tid, id, "failed", "", e.Error())
 		return
 	}
-	defer a.settleRunInvocation(tid, id)
+	finish := func(status, output, code string) { a.finishWithFacts(tid, id, status, output, code, facts) }
 	var history []json.RawMessage
 	if snapshot.History != nil {
 		history = *snapshot.History
@@ -315,7 +337,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		history, e = rowsJSON(ctx, a.db, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND m.run_id<>$3 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid, id)
 	}
 	if e != nil {
-		a.finish(tid, id, "failed", "", "history_unavailable")
+		finish("failed", "", "history_unavailable")
 		return
 	}
 	if kind == "planner" {
@@ -325,7 +347,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	body, e := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": defaultRuntime(snapshot.Runtime)})
 	if e != nil {
-		a.finish(tid, id, "failed", "", "invalid_request")
+		finish("failed", "", "invalid_request")
 		return
 	}
 	runtimeCompleted := false
@@ -334,24 +356,44 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			a.cancelRuntime(defaultRuntime(snapshot.Runtime), id)
 		}
 	}()
+	if e = a.markInvocationAdmission(ctx, tid, id, facts, "unknown"); e != nil {
+		finish("failed", "", "accounting_commit_failed")
+		return
+	}
+	admissionStart := time.Now()
 	resp, e := a.admitRuntime(ctx, defaultRuntime(snapshot.Runtime), body)
+	facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
+	if errors.Is(e, errSessionBusy) {
+		facts.Admission = "rejected_before_start"
+	}
 	if e != nil {
 		if errors.Is(e, errSessionBusy) {
-			a.finish(tid, id, "failed", "", "runtime_session_busy")
+			finish("failed", "", "runtime_session_busy")
 		} else if ctx.Err() != nil {
-			a.finish(tid, id, "cancelled", "", "")
+			finish("cancelled", "", "")
 		} else {
-			a.finish(tid, id, "failed", "", "runtime_unavailable")
+			finish("failed", "", "runtime_unavailable")
 		}
 		return
 	}
 	defer resp.Body.Close()
+	facts.Admission = "accepted"
+	if resp.StatusCode != http.StatusOK {
+		facts.Admission = "unknown"
+		if resp.StatusCode == 400 || resp.StatusCode == 401 || resp.StatusCode == 413 || resp.StatusCode == 422 || resp.StatusCode == 429 || resp.StatusCode == 503 {
+			facts.Admission = "rejected_before_start"
+		}
+	}
+	if e = a.markInvocationAdmission(ctx, tid, id, facts, facts.Admission); e != nil {
+		finish("failed", "", "accounting_commit_failed")
+		return
+	}
 	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		code := "runtime_rejected"
 		if resp.StatusCode == 413 {
 			code = "context_limit"
 		}
-		a.finish(tid, id, "failed", "", code)
+		finish("failed", "", code)
 		return
 	}
 	scanner := bufio.NewScanner(resp.Body)
@@ -363,20 +405,24 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			continue
 		}
 		var ev struct {
-			Type    string `json:"type"`
-			Delta   string `json:"delta"`
-			Text    string `json:"text"`
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Type          string          `json:"type"`
+			Delta         string          `json:"delta"`
+			Text          string          `json:"text"`
+			Code          string          `json:"code"`
+			Message       string          `json:"message"`
+			Observability json.RawMessage `json:"observability"`
 		}
 		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev) != nil {
-			a.finish(tid, id, "failed", output.String(), "invalid_runtime_event")
+			finish("failed", output.String(), "invalid_runtime_event")
 			return
+		}
+		if ev.Type == "completed" || ev.Type == "failed" || ev.Type == "cancelled" {
+			facts.receive(ev.Observability, a.cfg.RunTimeout)
 		}
 		switch ev.Type {
 		case "text_delta":
 			if output.Len()+len(ev.Delta) > 2<<20 {
-				a.finish(tid, id, "failed", output.String(), "output_limit")
+				finish("failed", output.String(), "output_limit")
 				return
 			}
 			output.WriteString(ev.Delta)
@@ -386,16 +432,16 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				continue
 			}
 			if !a.appendDelta(ctx, tid, id, ev.Delta) {
-				a.finish(tid, id, "failed", output.String(), "event_persistence_failed")
+				finish("failed", output.String(), "event_persistence_failed")
 				return
 			}
 		case "completed":
 			if !strings.HasPrefix(ev.Text, output.String()) {
-				a.finish(tid, id, "failed", output.String(), "inconsistent_runtime_output")
+				finish("failed", output.String(), "inconsistent_runtime_output")
 				return
 			}
 			if len(ev.Text) > 2<<20 {
-				a.finish(tid, id, "failed", output.String(), "output_limit")
+				finish("failed", output.String(), "output_limit")
 				return
 			}
 			if ev.Text != "" {
@@ -403,16 +449,16 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				output.WriteString(ev.Text)
 			}
 			runtimeCompleted = true
-			a.finish(tid, id, "completed", output.String(), "")
+			finish("completed", output.String(), "")
 			return
 		case "failed":
-			a.finish(tid, id, "failed", output.String(), "runtime_failed")
+			finish("failed", output.String(), "runtime_failed")
 			return
 		case "cancelled":
-			a.finish(tid, id, "cancelled", output.String(), "")
+			finish("cancelled", output.String(), "")
 			return
 		default:
-			a.finish(tid, id, "failed", output.String(), "invalid_runtime_event")
+			finish("failed", output.String(), "invalid_runtime_event")
 			return
 		}
 	}
@@ -423,9 +469,9 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			status = "failed"
 			code = "run_timeout"
 		}
-		a.finish(tid, id, status, output.String(), code)
+		finish(status, output.String(), code)
 	} else {
-		a.finish(tid, id, "failed", output.String(), "runtime_stream_ended")
+		finish("failed", output.String(), "runtime_stream_ended")
 	}
 }
 func (a *App) appendDelta(ctx context.Context, tid, id, delta string) bool {
@@ -445,10 +491,13 @@ func (a *App) appendDelta(ctx context.Context, tid, id, delta string) bool {
 	return tx.Commit(ctx) == nil
 }
 func (a *App) finish(tid, id, status, output, code string) {
+	a.finishWithFacts(tid, id, status, output, code, nil)
+}
+func (a *App) finishWithFacts(tid, id, status, output, code string, facts *invocationFacts) {
 	if e := a.persistExecution(func(ctx context.Context) error {
-		return a.finishOnce(ctx, tid, id, status, output, code)
+		return a.finishOnce(ctx, tid, id, status, output, code, facts)
 	}); e != nil {
-		a.log.Error("run finalization interrupted; restart recovery required", "runId", id)
+		a.log.Error("run finalization interrupted; restart recovery required", "event", "run_finalize_failed")
 	}
 }
 
@@ -456,9 +505,23 @@ func (a *App) finish(tid, id, status, output, code string) {
 // Shutdown or loss of our single-worker lease stops retrying. Start recovers the
 // remaining uncertain records before allowing another invocation.
 func (a *App) persistExecution(write func(context.Context) error) error {
-	for {
+	for attempt := 0; ; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		err := write(ctx)
+		traceCtx, endCommit := a.startLedgerTrace(ctx, "invocation_terminal_commit")
+		started := time.Now()
+		err := write(traceCtx)
+		outcome := "committed"
+		dbOutcome := "success"
+		if err != nil {
+			outcome = "retryable_error"
+			dbOutcome = "error"
+			if attempt >= 4 {
+				outcome = "permanent_error"
+			}
+		}
+		a.observeLedger("invocation_terminal_commit", outcome)
+		a.observeDB("invocation_terminal_commit", dbOutcome, time.Since(started))
+		endCommit(outcome)
 		cancel()
 		if err == nil {
 			return nil
@@ -466,14 +529,43 @@ func (a *App) persistExecution(write func(context.Context) error) error {
 		a.mu.Lock()
 		closed := a.closed
 		a.mu.Unlock()
-		if closed {
+		if closed || attempt >= 4 {
 			return err
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code string) error {
+func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code string, observations ...*invocationFacts) error {
+	var facts *invocationFacts
+	if len(observations) > 0 {
+		facts = observations[0]
+	}
+	var committed func()
+	var runChanged bool
+	runKind, runRuntime := "unknown", "unknown"
+	settle := func(tx pgx.Tx) error {
+		if facts != nil {
+			var err error
+			committed, err = a.settleInvocation(ctx, tx, tid, id, status, code, facts)
+			if err != nil {
+				return err
+			}
+		}
+		return settleExecutionRecords(ctx, tx, tid, id, status)
+	}
+	commit := func(tx pgx.Tx) error {
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		if committed != nil {
+			committed()
+		}
+		if runChanged {
+			a.observeRun(runKind, runRuntime, status)
+		}
+		return nil
+	}
 	tx, e := a.db.Begin(ctx)
 	if e != nil {
 		return e
@@ -505,13 +597,25 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 			}
 			return e
 		}
-		if e = settleExecutionRecords(ctx, tx, tid, id, status); e != nil {
+		if e = settle(tx); e != nil {
 			return e
 		}
-		return tx.Commit(ctx)
+		return commit(tx)
 	}
 	if e != nil {
 		return e
+	}
+	runChanged = true
+	var snapshotRaw json.RawMessage
+	if e = tx.QueryRow(ctx, "SELECT CASE WHEN EXISTS(SELECT 1 FROM graph_run_nodes g WHERE g.tenant_id=r.tenant_id AND g.run_id=r.id) THEN 'graph' ELSE s.kind END,r.execution_snapshot FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND r.id=$2", tid, id).Scan(&runKind, &snapshotRaw); e != nil {
+		return e
+	}
+	var snap executionSnapshot
+	if json.Unmarshal(snapshotRaw, &snap) == nil {
+		runRuntime = snapshotRuntime(snap)
+		if snap.Team != nil && runKind != "graph" {
+			runKind = "team"
+		}
 	}
 	event := map[string]string{"type": status}
 	if status == "completed" {
@@ -528,10 +632,10 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 	if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, data); e != nil {
 		return e
 	}
-	if e = settleExecutionRecords(ctx, tx, tid, id, status); e != nil {
+	if e = settle(tx); e != nil {
 		return e
 	}
-	return tx.Commit(ctx)
+	return commit(tx)
 }
 
 func settleExecutionRecords(ctx context.Context, tx pgx.Tx, tid, id, status string) error {
@@ -540,8 +644,7 @@ func settleExecutionRecords(ctx context.Context, tx pgx.Tx, tid, id, status stri
 	if _, e := tx.Exec(ctx, "UPDATE run_turns SET status=$3,error=CASE WHEN $3='interrupted' THEN 'execution_interrupted' ELSE error END,updated_at=now() WHERE tenant_id=$1 AND run_id=$2 AND status IN ('queued','running')", tid, id, status); e != nil {
 		return e
 	}
-	_, e := tx.Exec(ctx, "UPDATE model_invocations SET status=$3,updated_at=now() WHERE tenant_id=$1 AND run_id=$2 AND status='running'", tid, id, status)
-	return e
+	return settleAbandonedInvocations(ctx, tx, tid, id, status)
 }
 func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
@@ -809,17 +912,38 @@ func (a *App) admitRuntime(ctx context.Context, runtime string, body []byte) (*h
 	deadline := time.Now().Add(a.cfg.PIAdmissionWait)
 	delay := 50 * time.Millisecond
 	for {
-		req, e := http.NewRequestWithContext(ctx, "POST", endpoint+"/internal/runs", bytes.NewReader(body))
+		attemptStart := time.Now()
+		var selector struct {
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal(body, &selector)
+		requestCtx, endAttempt := a.startInternalTrace(ctx, runtime, selector.Model)
+		observe := func(outcome string) {
+			a.observeAdmission(runtime, outcome, time.Since(attemptStart))
+			endAttempt(outcome)
+		}
+		req, e := http.NewRequestWithContext(requestCtx, "POST", endpoint+"/internal/runs", bytes.NewReader(body))
 		if e != nil {
+			observe("rejected_invalid")
 			return nil, e
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
+		a.injectWorkerTrace(req, runtime)
 		resp, e := a.client.Do(req)
 		if e != nil {
+			observe("transport_unknown")
 			return nil, e
 		}
 		if resp.StatusCode != 409 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+			outcome := "rejected_invalid"
+			if resp.StatusCode == 200 {
+				outcome = "accepted"
+			}
+			if resp.StatusCode == 429 || resp.StatusCode == 503 {
+				outcome = "rejected_capacity"
+			}
+			observe(outcome)
 			return resp, nil
 		}
 		var rejection struct {
@@ -828,8 +952,10 @@ func (a *App) admitRuntime(ctx context.Context, runtime string, body []byte) (*h
 			} `json:"error"`
 		}
 		if e = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&rejection); e != nil || rejection.Error.Code != "SESSION_BUSY" {
+			observe("rejected_busy")
 			return resp, nil
 		}
+		observe("session_busy")
 		resp.Body.Close()
 		remaining := time.Until(deadline)
 		if remaining <= 0 {

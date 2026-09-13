@@ -146,7 +146,11 @@ var errInvocationQuota = errors.New("quota_exceeded")
 
 // Admission is serialized with tenant mutations. Every actual provider invocation,
 // including each team member, consumes one durable admission; uncertain calls are not retried.
-func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID string) error {
+func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID string, observations ...*invocationFacts) error {
+	var facts *invocationFacts
+	if len(observations) > 0 {
+		facts = observations[0]
+	}
 	for {
 		tx, e := a.db.Begin(ctx)
 		if e != nil {
@@ -183,7 +187,7 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID string) err
 			return e
 		}
 		if active < concurrent {
-			_, e = tx.Exec(ctx, "INSERT INTO model_invocations(id,tenant_id,run_id,status) VALUES($1,$2,$3,'running')", invID, tid, rid)
+			e = a.reserveInvocationFacts(ctx, tx, tid, rid, invID, facts)
 			if e == nil {
 				e = tx.Commit(ctx)
 			} else {
@@ -198,21 +202,6 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID string) err
 		case <-time.After(40 * time.Millisecond):
 		}
 	}
-}
-func (a *App) completeInvocation(tid, id, status string) {
-	_ = a.persistExecution(func(ctx context.Context) error {
-		_, e := a.db.Exec(ctx, "UPDATE model_invocations SET status=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, status)
-		return e
-	})
-}
-func (a *App) settleRunInvocation(tid, id string) {
-	ctx, c := context.WithTimeout(context.Background(), 5*time.Second)
-	defer c()
-	status := "failed"
-	if e := a.db.QueryRow(ctx, "SELECT status FROM runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&status); e != nil || status == "running" || status == "queued" {
-		status = "failed"
-	}
-	a.completeInvocation(tid, id, status)
 }
 
 type teamCall func(context.Context, teamMember, int, int, teamTurnInput) (string, error)
@@ -381,6 +370,11 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	if _, e := a.db.Exec(ctx, "INSERT INTO run_turns(id,tenant_id,run_id,member_id,member_name,role,round,ordinal,config,status,prompt,system_prompt,messages,context) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,$11,$12,$13)", id, tid, rid, m.ID, m.Name, m.Role, round, ordinal, config, prompt, instructions, messagesRaw, contextRaw); e != nil {
 		return "", errors.New("turn_persistence_failed")
 	}
+	facts := invocationMetadata(snap, &m)
+	facts.TurnID = id
+	turnStart := time.Now()
+	traceCtx, endTurnTrace := a.startTeamTrace(ctx, input.Purpose, m.Runtime, round)
+	ctx = traceCtx
 	output := ""
 	status := "failed"
 	code := ""
@@ -396,8 +390,10 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		return false
 	}
 	defer func() {
+		defer endTurnTrace(status)
 		// A member cannot contribute to aggregation until both its deliverable
 		// and released concurrency slot commit together.
+		var afterCommit func()
 		err := a.persistExecution(func(c context.Context) error {
 			tx, e := a.db.Begin(c)
 			if e != nil {
@@ -407,16 +403,20 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			if _, e = tx.Exec(c, "UPDATE run_turns SET status=$3,output=$4,error=$5,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status IN ('queued','running')", tid, id, status, output, code); e != nil {
 				return e
 			}
-			if _, e = tx.Exec(c, "UPDATE model_invocations SET status=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, status); e != nil {
+			afterCommit, e = a.settleInvocation(c, tx, tid, id, status, code, facts)
+			if e != nil {
 				return e
 			}
 			return tx.Commit(c)
 		})
 		if err != nil {
 			result, resultErr = "", errors.New("turn_persistence_failed")
+		} else if afterCommit != nil {
+			afterCommit()
+			a.observeTeamTurn(input.Purpose, m.Runtime, status, time.Since(turnStart))
 		}
 	}()
-	if e := a.reserveInvocation(ctx, tid, rid, id); e != nil {
+	if e := a.reserveInvocation(ctx, tid, rid, id, facts); e != nil {
 		code = e.Error()
 		contextFailure(e)
 		return "", e
@@ -437,7 +437,16 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			a.cancelRuntime(m.Runtime, id)
 		}
 	}()
+	if e := a.markInvocationAdmission(ctx, tid, id, facts, "unknown"); e != nil {
+		code = "accounting_commit_failed"
+		return "", errors.New(code)
+	}
+	admissionStart := time.Now()
 	resp, e := a.admitRuntime(ctx, m.Runtime, body)
+	facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
+	if errors.Is(e, errSessionBusy) {
+		facts.Admission = "rejected_before_start"
+	}
 	if e != nil {
 		if contextFailure(e) {
 			return "", e
@@ -446,6 +455,17 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		return "", errors.New(code)
 	}
 	defer resp.Body.Close()
+	facts.Admission = "accepted"
+	if resp.StatusCode != http.StatusOK {
+		facts.Admission = "unknown"
+		if resp.StatusCode == 400 || resp.StatusCode == 401 || resp.StatusCode == 413 || resp.StatusCode == 422 || resp.StatusCode == 429 || resp.StatusCode == 503 {
+			facts.Admission = "rejected_before_start"
+		}
+	}
+	if e = a.markInvocationAdmission(ctx, tid, id, facts, facts.Admission); e != nil {
+		code = "accounting_commit_failed"
+		return "", errors.New(code)
+	}
 	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		code = "runtime_rejected"
 		return "", errors.New(code)
@@ -457,10 +477,16 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
-		var ev struct{ Type, Delta, Text string }
+		var ev struct {
+			Type, Delta, Text string
+			Observability     json.RawMessage `json:"observability"`
+		}
 		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev) != nil {
 			code = "invalid_runtime_event"
 			return "", errors.New(code)
+		}
+		if ev.Type == "completed" || ev.Type == "failed" || ev.Type == "cancelled" {
+			facts.receive(ev.Observability, a.cfg.RunTimeout)
 		}
 		switch ev.Type {
 		case "text_delta":
