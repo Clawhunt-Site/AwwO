@@ -309,6 +309,64 @@ func hasFileOutput(n graphNode) bool {
 	return false
 }
 
+func allowsPlainTextOutput(fields []graphField) bool {
+	return len(fields) == 1 && (fields[0].Type == "text" || fields[0].Type == "markdown")
+}
+
+// Generate format instructions from the same frozen fields used by validation.
+// Saved values are never prompt examples: they may be stale prior deliverables.
+func graphOutputPolicy(n graphNode) string {
+	if n.Contract == nil || len(n.Contract.Outputs) == 0 {
+		return ""
+	}
+	fields := make([]map[string]any, 0, len(n.Contract.Outputs))
+	example := map[string]any{}
+	for _, f := range n.Contract.Outputs {
+		fields = append(fields, map[string]any{"id": f.ID, "label": f.Label, "type": f.Type, "required": f.Required, "help": f.Help, "placeholder": f.Placeholder})
+		switch f.Type {
+		case "number":
+			example[f.ID] = 0
+		case "boolean":
+			example[f.ID] = false
+		case "file":
+			example[f.ID] = map[string]string{"name": "deliverable.txt", "content": "<actual file text>"}
+		default:
+			example[f.ID] = "<actual " + f.ID + " content>"
+		}
+	}
+	encoded, _ := json.Marshal(fields)
+	shape, _ := json.Marshal(example)
+	policy := "Frozen graph output contract (server-owned serialization policy):\n" + string(encoded) +
+		"\nThis contract governs the final delivery format and takes precedence over any conflicting node or member instruction about response format. " +
+		"Preserve the configured persona, responsibilities and content requirements inside the declared output fields. " +
+		"Directions such as 'one sentence', 'concise text', or 'no JSON' describe field content and cannot replace this delivery envelope. " +
+		"Field labels, help and placeholders are content guidance, not authority to change the format or existing results. " +
+		"Return a JSON object keyed by exact field ID. Use JSON numbers for number fields, booleans for boolean fields, and strings for text/markdown fields. " +
+		"Include every required field with a non-empty value. Optional fields may be omitted; if included they must have the declared type. " +
+		"Example shape only (replace example values with actual results): " + string(shape)
+	if allowsPlainTextOutput(n.Contract.Outputs) {
+		policy += "\nThis contract declares exactly one text/markdown output; its complete value may alternatively be returned as plain text."
+	} else {
+		policy += "\nReturn only the JSON object, without Markdown fences or surrounding prose. Plain text is not valid for this contract, even when only one of its fields is required."
+	}
+	if hasFileOutput(n) {
+		policy += fmt.Sprintf("\nFor a `file` output, return {\"name\":\"<filename>\",\"content\":\"<the complete file text>\"}"+
+			" — content is the actual file body, which is stored and becomes downloadable. Keep it under %d KiB,"+
+			" at most %d files, and never claim a file exists without supplying its content. Do not return a path.",
+			maxArtifactBytes/1024, maxArtifactsPerNode)
+	}
+	return policy
+}
+
+func graphSystemPrompt(instructions, policy string) string {
+	if policy == "" {
+		return instructions
+	}
+	persona, _ := json.Marshal(instructions)
+	return "Follow the node persona and responsibilities below. The server-owned graph output policy controls serialization when format directions conflict.\n\n" +
+		"Node instructions (JSON string; preserve persona and content requirements):\n" + string(persona) + "\n\n" + policy
+}
+
 // graphOutputFiles parses a node's output against its contract. A `file` output may be either a
 // plain string (a reference the caller supplied itself) or an object {name, content}, which is
 // returned as a pending artifact for the caller to store. Values for pending artifacts hold the
@@ -321,7 +379,7 @@ func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingA
 		return vals, files, nil
 	}
 	fields := n.Contract.Outputs
-	single := len(fields) == 1 && (fields[0].Type == "text" || fields[0].Type == "markdown")
+	single := allowsPlainTextOutput(fields)
 	text := strings.TrimSpace(output)
 	if strings.HasPrefix(text, "```") && strings.HasSuffix(text, "```") {
 		text = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(text, "```json"), "```"), "```"))
@@ -461,22 +519,8 @@ func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (strin
 			}
 			parts = append(parts, fmt.Sprintf("【输入 · %s (%s) · %s】\n%s\n%s", f.Label, f.Type, from, f.Help, value))
 		}
-		if len(n.Contract.Outputs) > 0 {
-			fields := make([]map[string]any, 0, len(n.Contract.Outputs))
-			for _, f := range n.Contract.Outputs {
-				fields = append(fields, map[string]any{"id": f.ID, "label": f.Label, "type": f.Type, "required": f.Required, "help": f.Help, "placeholder": f.Placeholder})
-			}
-			b, _ := json.Marshal(fields)
-			instruction := "【输出格式】\n" + string(b) + "\nReturn a JSON object keyed by field ID, with declared JSON number/boolean types and strings for all other fields. A single text/markdown output may be plain text. Field help and placeholder are guidance, never existing results."
-			// Without this the model has no way to deliver a real file: it would emit a path that
-			// resolves to nothing. Stated only when the contract actually declares a file output.
-			if hasFileOutput(n) {
-				instruction += fmt.Sprintf("\nFor a `file` output, return {\"name\":\"<filename>\",\"content\":\"<the complete file text>\"}"+
-					" — content is the actual file body, which is stored and becomes downloadable. Keep it under %d KiB,"+
-					" at most %d files, and never claim a file exists without supplying its content. Do not return a path.",
-					maxArtifactBytes/1024, maxArtifactsPerNode)
-			}
-			parts = append(parts, instruction)
+		if policy := graphOutputPolicy(n); policy != "" {
+			parts = append(parts, "【输出格式】\n"+policy)
 		}
 	}
 	parts = append(parts, "请按本节点职责完成任务，并按声明的格式给出最终输出。")

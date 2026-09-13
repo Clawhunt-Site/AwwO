@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 )
 
-const plannerInstructions = `You are the Awwo canvas planner. Return one JSON object only: {"version":1,"summary":"...","operations":[...]}. Follow the structural protocol supplied in the user context. Only propose add_node, update_node, set_input, add_field, update_field, remove_field, remove_node, connect, disconnect operations. Never change execution bindings, runtime settings, credentials, model configuration or outputs. Never execute tools or claim work was executed. If context is insufficient return an empty operations array and ask in summary. Maximum 100 operations. The caller will validate and explicitly apply the proposal.`
+const plannerInstructions = `You are the Awwo canvas planner. Return one JSON object only: {"version":1,"summary":"...","operations":[...]}. Follow the structural protocol supplied in the user context. Only propose add_node, update_node, set_input, add_field, update_field, remove_field, remove_node, connect, disconnect operations. Never change execution bindings, runtime settings, credentials, model configuration or outputs. Node personas define identity, responsibilities and field content, while declared output contracts define serialization. Do not instruct a persona to bypass its template's output contract: a one-sentence or plain-text requirement describes content inside the output fields, not the outer response format. If exactly one raw text output is required, explicitly propose the supported field operations to make the output contract one text/markdown field instead of relying on a persona override. Never execute tools or claim work was executed. If context is insufficient return an empty operations array and ask in summary. Maximum 100 operations. The caller will validate and explicitly apply the proposal.`
 
 func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	var b struct {
@@ -64,6 +64,12 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	// Planner instructions are server-owned. Existing canvas sessions must use
+	// the current protocol too; already accepted runs retain their snapshots.
+	if _, e = tx.Exec(r.Context(), "UPDATE agents a SET instructions=$3 FROM node_sessions s WHERE s.tenant_id=$1 AND s.id=$2 AND s.kind='planner' AND a.tenant_id=s.tenant_id AND a.id=s.agent_id AND a.internal", tid, sid, plannerInstructions); e != nil {
 		a.dbError(w, e)
 		return
 	}

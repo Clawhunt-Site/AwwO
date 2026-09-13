@@ -38,6 +38,7 @@ type executionSnapshot struct {
 	Runtime          string             `json:"runtime,omitempty"`
 	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`
 	Instructions     string             `json:"instructions"`
+	OutputPolicy     string             `json:"outputPolicy,omitempty"`
 	Model            string             `json:"model"`
 	Budget           int                `json:"budget"`
 	Overhead         int                `json:"overhead"`

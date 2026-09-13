@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"net/http"
 	"time"
+	"unicode/utf16"
 )
 
 const graphJSON = `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'document',g.document,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb))`
@@ -167,6 +168,9 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				a.runtimeAdmissionError(w, e)
 				return
 			}
+			// Freeze the output policy separately from persona instructions. Team members
+			// retain their own personas without overriding this server-owned format.
+			snap.OutputPolicy = graphOutputPolicy(n)
 			sid = n.IssueID
 			if sid != "" {
 				var exists bool
@@ -200,7 +204,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					a.dbError(w, err)
 					return
 				}
-				history = boundedHistoryWithLimits(history, len(instructions), snap.Budget, snap.Overhead)
+				history = boundedHistoryWithLimits(history, len(graphSystemPrompt(snap.Instructions, snap.OutputPolicy)), snap.Budget, snap.Overhead)
 				snap.History = &history
 			}
 		}
@@ -471,7 +475,8 @@ func (a *App) admitGraphNode(ctx context.Context, tid, gid, nid, prompt string) 
 	if json.Unmarshal(raw, &snap) != nil {
 		return errors.New("invalid_snapshot")
 	}
-	if len(prompt) > 128000 || (snap.Team == nil && len(prompt)+len(snap.Instructions)+snap.Overhead > snap.Budget) {
+	instructions := graphSystemPrompt(snap.Instructions, snap.OutputPolicy)
+	if len(prompt) > 128000 || (snap.Team == nil && (len(prompt)+len(instructions)+snap.Overhead > snap.Budget || len(utf16.Encode([]rune(instructions))) > 32768)) {
 		return errors.New("context_limit")
 	}
 	var busy bool
@@ -505,7 +510,7 @@ func (a *App) admitGraphNode(ctx context.Context, tid, gid, nid, prompt string) 
 	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
-	a.dispatch(tid, rid, sid, prompt, snap.Instructions, "node", snap.Budget, snap.Overhead)
+	a.dispatch(tid, rid, sid, prompt, instructions, "node", snap.Budget, snap.Overhead)
 	return nil
 }
 func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {

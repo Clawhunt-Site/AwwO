@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed — graph delivery contracts take precedence over persona formatting
+
+- **What changed:** Freeze a server-owned output policy alongside persona instructions and apply it to single-Agent and team dispatch, including the review envelope. Generate policy and plain-text eligibility from the same fields as validation, account for its context cost before model admission, and refresh existing internal planner sessions with the corrected field-format rules.
+- **Why:** A real two-node plan asked its first Agent for concise plain text while its template required multiple JSON fields. The model completed, delivery validation failed, and the downstream node was blocked.
+- **Impact:** Identity and content instructions remain member-specific; delivery formatting follows the frozen contract. Multi-field outputs remain strictly validated. Ordinary chat is unaffected. Previously accepted runs keep their original snapshots; retry a failed graph as a new run to use the fix.
+- **Verification:** Full Go/PostgreSQL race suite (89 top-level / 187 including subtests, zero failures/skips) and vet; six captured dispatch scenarios; real gpt-5.6 Pi, OpenAI Agents, mixed sequential and mixed review graphs; Computer Use planning, two-node execution and persisted downstream delivery. See `docs/awwo-graph-contract-repair-20260913.md` for exact scope and release boundaries.
+- **Files:** `backend/internal/app/{graph_contracts,graph_runs,planning,team_context,teams}.go`, two graph output regression files, and node-team/acceptance documentation.
+
 ### Tests — native canvas run identity and settlement fixtures
 
 - **What changed:** Bring the run-entry fixtures up to date with the visible Pi label, accepted issue/run callbacks and identity-scoped settlement confirmation; assert pending journals are retained and executions are not duplicated.

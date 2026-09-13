@@ -47,3 +47,10 @@
 ## Isolated online integration preview — 2026-09-09
 
 Created by Codex for the user's request to push current main to online. This detached worktree materializes a merge-tree preview for conflict resolution and tests; it does not finalize a merge or update any named source/release ref. Inputs: main 48b96d7fd188d66215d313ddecdf2ad96ecb928d and online cd9b3b490e96529b5b3ee9e7c08a004b71fbe070. Scope: preserve both lines of work and prepare exact-SHA approval evidence.
+
+## Graph contract repair and actual acceptance — 2026-09-13
+
+- Created by Codex for the owner’s request to fix failures from actual acceptance.
+- Workspace: `/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-graph-contract-fix-20260913`.
+- Detached baseline: `016b67d6b64910d585b423b446a7c0225ea73c16`.
+- Scope: graph output contract repair, frontend fixture repair, regression checks, actual local model calls and Computer Use evidence. Main/online references and unrelated services are preserved; no merge or deployment is implied.
