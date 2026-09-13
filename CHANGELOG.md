@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Tests — native canvas run identity and settlement fixtures
+
+- **What changed:** Bring the run-entry fixtures up to date with the visible Pi label, accepted issue/run callbacks and identity-scoped settlement confirmation; assert pending journals are retained and executions are not duplicated.
+- **Why:** Two extended frontend regressions used stale mocks and failed before exercising the current lifecycle.
+- **Impact:** Test-only repair; native and SaaS product behavior stays governed by the existing execution protocols.
+- **Verification:** Reproduced both baseline failures; focused 6/6 and extended canvas/SaaS 1114/1114 pass with zero skips, plus SaaS typecheck/build.
+- **Files:** `apps/web/tests/canvas-run-entry.test.tsx`.
+
 ### Added — OpenAI Agents JS runtime for SaaS node teams
 
 - **What changed:** Add an isolated `@openai/agents` worker beside Pi, expose runtime-scoped model/tool catalogs, persist each Agent runtime, and route every frozen team member to its selected worker. Keep sequential, parallel, debate and review orchestration in the Go control plane. Show each member's actual runtime, input, instructions, system prompt, context sources and output in the existing canvas.

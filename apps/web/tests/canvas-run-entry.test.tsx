@@ -10,7 +10,15 @@ import { activeNodeThread, getNodeThreads } from '../src/canvas/nodeThreads';
 const execute = vi.fn(async (node: SessionNode) => ({ ok: true,
   output: JSON.stringify(Object.fromEntries((node.contract?.outputs ?? []).map(field => [field.id, `Result from ${node.title}`]))) }));
 const hire = vi.fn();
-vi.mock('../src/canvas/runTransport', () => ({ createGatewayExecutor: () => execute }));
+vi.mock('../src/canvas/runTransport', () => ({
+  createGatewayExecutor: (options: Parameters<typeof import('../src/canvas/runTransport').createGatewayExecutor>[0]) =>
+    async (node: SessionNode) => {
+      const identity = { issueId: `issue-${node.id}`, runId: `run-${node.id}` };
+      options.onIssueId?.(node.id, identity.issueId);
+      options.onRunAccepted?.(node.id, identity);
+      return execute(node);
+    },
+}));
 vi.mock('../src/canvasHire', async original => ({
   ...await original<typeof import('../src/canvasHire')>(),
   hireAgentIntoCompany: (...args: unknown[]) => hire(...args),
@@ -19,8 +27,10 @@ vi.mock('../src/canvasHire', async original => ({
 beforeEach(() => {
   cleanup(); resetAllSessions(); localStorage.clear(); vi.restoreAllMocks(); execute.mockClear(); hire.mockReset();
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  vi.stubGlobal('fetch', vi.fn(async (input: unknown) => new Response(JSON.stringify(
-    String(input).endsWith('/companies') ? [{ id: 'company', name: 'Test workspace' }] : {},
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => new Response(JSON.stringify(
+    String(input).endsWith('/settle') && init?.method === 'POST'
+      ? { confirmed: true, status: 'succeeded', holdId: `hold-${JSON.parse(String(init.body)).runId}` }
+      : String(input).endsWith('/companies') ? [{ id: 'company', name: 'Test workspace' }] : {},
   ), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 });
 afterEach(() => { cleanup(); resetAllSessions(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -38,7 +48,7 @@ async function bind(title: string) {
   fireEvent.click(screen.getByRole('button', { name: `打开 ${title}`, exact: true }));
   fireEvent.click(screen.getByRole('button', { name: '配置', exact: true }));
   fireEvent.click(await screen.findByRole('button', { name: 'Runtime', exact: true }));
-  fireEvent.click(screen.getByRole('option', { name: 'pi', exact: true }));
+  fireEvent.click(screen.getByRole('option', { name: 'Pi', exact: true }));
   hire.mockResolvedValueOnce({ outcome: 'created', agentId: `agent-${title}`, status: 'idle' });
   fireEvent.click(await screen.findByRole('button', { name: '绑定并创建真实 Agent' }));
   await waitFor(() => expect(loadDocumentWithStatus().doc.nodes.find(node => node.title === title))
@@ -65,6 +75,10 @@ describe('canvas run entry document freshness', () => {
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/画布已在其他标签页更新/)).toBeNull();
     expect(execute.mock.calls.map(([node]) => node.title)).toEqual(['A', 'B']);
+    await waitFor(() => expect(loadRunJournal()).toBeNull());
+    const settlementCalls = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/settle'));
+    expect(settlementCalls.map(([, init]) => JSON.parse(String(init?.body)).runId))
+      .toEqual(execute.mock.calls.map(([node]) => `run-${node.id}`));
   });
 
   it('still stops before dispatch when another tab changes the persisted graph', async () => {
@@ -124,16 +138,31 @@ describe('manual run acceptance persists composer drafts', () => {
     const operationId = loadRunJournal()!.nodes.manual.operationId;
     await act(async () => { detach({ ok: false, output: '', unconfirmed: true }); });
     firstPage.unmount(); resetAllSessions();
-    const fetchMock = vi.fn(async (input: unknown) => new Response(JSON.stringify(
-      String(input).endsWith(`/operations/${operationId}`)
-        ? { operationId, state: 'terminal', issueId: 'issue-manual', runId: 'run-manual', terminal: true,
-          status: 'succeeded', output: 'Recovered reply', outputAvailable: true, detail: null }
-        : String(input).endsWith('/companies') ? [{ id: 'company', name: 'Test workspace' }] : {},
-    ), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const settlementPath = '/conversations/company/agents/agent-manual/issues/issue-manual/settle';
+    let confirmSettlement!: (response: Response) => void;
+    const settlement = new Promise<Response>(resolve => { confirmSettlement = resolve; });
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith(settlementPath) && init?.method === 'POST') return settlement;
+      return new Response(JSON.stringify(
+        String(input).endsWith(`/operations/${operationId}`)
+          ? { operationId, state: 'terminal', issueId: 'issue-manual', runId: 'run-manual', terminal: true,
+            status: 'succeeded', output: 'Recovered reply', outputAvailable: true, detail: null }
+          : String(input).endsWith('/companies') ? [{ id: 'company', name: 'Test workspace' }] : {},
+      ), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
     vi.stubGlobal('fetch', fetchMock);
     render(<CanvasSurface />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(settlementPath),
+      expect.objectContaining({ method: 'POST', credentials: 'include', body: JSON.stringify({ runId: 'run-manual' }) })));
+    // A terminal read does not unlock the native run before the same turn is explicitly parked.
+    expect(loadRunJournal()?.nodes.manual.operationId).toBe(operationId);
+    expect(execute).toHaveBeenCalledOnce();
+    await act(async () => confirmSettlement(new Response(JSON.stringify({
+      confirmed: true, status: 'succeeded', holdId: 'hold-manual',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
     await waitFor(() => expect(loadRunJournal()).toBeNull());
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith(`/operations/${operationId}`))).toBe(true);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith(settlementPath))).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: '打开 Manual', exact: true }));
     expect(screen.getByTestId('composer-input')).toHaveValue('');
     expect(screen.getByTestId('composer-send')).toBeDisabled();
