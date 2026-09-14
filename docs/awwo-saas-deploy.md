@@ -144,11 +144,29 @@ cookie, while every real user gets `502`. A deploy verified only by "origin is 2
 "public URL redirects" is therefore **not** verified end to end; that combination missed a
 multi-hour 502 outage on 2026-09-12.
 
-Until a Cloudflare Access **Bypass** policy exists for one harmless path (`/api/v1/health` is the
-natural choice), the only way to exercise the whole path is a browser session that already passed
-Access, or Access service-token headers (`CF-Access-Client-Id` / `CF-Access-Client-Secret`; a token
-is stored at SSM `/awwo/cf-access-token`). Adding that bypass is the single change that makes both
-deploy verification and automated monitoring possible without a credential.
+Until either a Cloudflare Access **Bypass** policy exists for one harmless path (`/api/v1/health` is
+the natural choice) or an Access **service token** is issued, the only way to exercise the whole path
+is a browser session that already passed Access — which is what verified the 2026-09-14 deploys, via
+this host's own nginx access log showing an authenticated session fetching the new bundle.
+
+Two corrections, both established by checking rather than by reading this page:
+
+- SSM `/awwo/cf-access-token` is **not** an Access service token, so it cannot be sent as
+  `CF-Access-Client-Id` / `CF-Access-Client-Secret`. It is a Cloudflare **API** token (verified active
+  via `GET /client/v4/user/tokens/verify`) scoped to the zones `clawhunt.store` and `arxchibo.ccwu.cc`
+  and able to read the account's Access applications. The account has **zero** Access service tokens.
+- The PlatformEngineer SSO role can read that parameter perfectly well (it carries
+  `PowerUserAccess`, which includes `ssm:*`). An earlier conclusion that it could list but not read
+  was wrong: Git Bash on Windows rewrites a leading-slash argument into a Windows path, so
+  `--name /awwo/cf-access-token` reached the API as `C:/Program Files/Git/awwo/...` and genuinely did
+  not exist. Prefix such commands with `MSYS_NO_PATHCONV=1`. The plural `get-parameters` call is what
+  exposes this: a denied read appears in `InvalidParameters`, and so does a mangled name.
+
+The AwwO Access application is `AwwO Team Workspace` (`280318d5-ad96-4769-9c67-19bcfce46077`) on
+`awwo.clawhunt.store`. A path-scoped application is already the pattern in this account — there is one
+for `staging.clawhunt.store/v1/capabilities/submissions` — so scoping a policy to `/api/v1/health`
+means creating a second application whose hostname carries that path, since a policy applies to an
+application rather than to a path.
 
 What *can* be checked from the host is whether requests are arriving at all:
 
