@@ -279,7 +279,10 @@ test('child environment omits inherited host credentials and process hooks', () 
   for (const key of ['HOME', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'AWWO_PI_API_KEY', 'AWWO_PI_TOKEN', 'NODE_OPTIONS', 'NODE_PATH', 'HTTP_PROXY']) {
     assert.equal(Object.hasOwn(env, key), false);
   }
-  assert.equal(env.PI_CODING_AGENT_DIR, '/isolated-run/agent');
+  // Compare against the platform's own join: the worker builds this with node:path, so hard-coding
+  // a forward slash asserts the separator of whichever machine wrote the test rather than that the
+  // agent directory sits inside the run's own directory, which is the property that matters.
+  assert.equal(env.PI_CODING_AGENT_DIR, join('/isolated-run', 'agent'));
 });
 
 test('planner transport boundary accepts 128000 characters and rejects larger or oversized combined history', () => {

@@ -1,8 +1,9 @@
 # AwwO SaaS deployment — awwo.clawhunt.store
 
-Recorded on 2026-09-12 from an executed and verified deployment of `e05d2af`. This documents the
-deployment that actually exists; `docs/deploy-aws.md` describes a **different** application
-(`canvas.clawhunt.store`) and does not apply here.
+Recorded on 2026-09-12 from an executed and verified deployment of `e05d2af`, and re-verified on
+2026-09-14 by deploying `24fcb43` over `edb7f3a` (18 commits, including three unshipped migrations).
+This documents the deployment that actually exists; `docs/deploy-aws.md` describes a **different**
+application (`canvas.clawhunt.store`) and does not apply here.
 
 ## Where it runs
 
@@ -54,13 +55,32 @@ Package `awwo-api`, `html/`, `SOURCE_SHA` and `SHA256SUMS` into one tarball, upl
    copy `awwo-saas-api.service` plus `nginx-web.conf` into `/srv/awwo/saas-staging/backups/`. The
    host's PostgreSQL build ships only `initdb`/`pg_ctl`/`postgres`, so there is **no `pg_dump`** —
    the EBS snapshot is the database backup.
-2. Extract the release, `chown -R root:awwo`, dirs `0750`, files `0640`, `awwo-api` `0750`, then
-   verify `sha256sum -c SHA256SUMS`.
-3. Point `ExecStart=` (and `Description=`) in `awwo-saas-api.service` at the new release,
+2. Extract the release, then match what the live releases actually carry — `root:root`, dirs `755`,
+   files `644`, `awwo-api` `755` — and verify `sha256sum -c SHA256SUMS`. The release directory being
+   world-readable is not a leak: its parent `/srv/awwo/releases` is `drwxr-x---  awwo awwo`, which is
+   what restricts access. An earlier revision of this page prescribed `root:awwo` with `0750`/`0640`;
+   that is not what any deployed release has, so following it would have made the new release the
+   odd one out.
+3. The web bundle is built to `apps/web/dist-saas` and copied to the release's `html/` verbatim. Its
+   entry document is `saas.html`, not `index.html` — nginx names it in `index` and `try_files`, so
+   renaming it would 404 every route.
+4. Point `ExecStart=` **and** `Description=` in `awwo-saas-api.service` at the new release —
+   `sed -i 's|saas-<old>|saas-<new>|g'` catches `ExecStart` but not a `Description` that names the sha
+   without the `saas-` prefix, which is how a stale description survives a correct deploy. Then
    `systemctl daemon-reload`, `systemctl restart awwo-saas-api`. Migrations are embedded and applied
    by `Migrate()` before the API listens, so a listening API means they succeeded.
-4. Point `root` in `nginx-web.conf` (and `nginx-preview.conf`) at the new `html/`, `nginx -t`, then
-   `systemctl restart awwo-saas-web`.
+5. Point `root` in `nginx-web.conf` at the new `html/`, `nginx -t`, then
+   `systemctl restart awwo-saas-web`. `nginx-preview.conf` is a separate preview vhost that tracks its
+   own release and was on `saas-f3be5f7` at the time of writing; do not move it as a side effect of
+   deploying the main site.
+
+### Before switching, size the migrations rather than assuming they are cheap
+
+`Migrate()` runs every pending migration inside **one transaction** before the API listens, so a slow
+one is downtime and a locking one is an outage. Measure first: on 2026-09-14 the whole cluster was
+65 MB with no table file above 1 MB, so migrations 013–015 — which include two full-table `UPDATE`s
+and two non-concurrent `CREATE INDEX`es on `model_invocations` — applied in under two seconds. That
+was checked, not assumed; on a large table the same migrations would need a different plan.
 
 Leave `awwo-saas-pi` and `awwo-saas-database` alone unless the Pi worker or the PostgreSQL runtime
 actually changed; they may legitimately reference an older release directory.
