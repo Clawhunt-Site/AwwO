@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Performance — reduce live-run latency and database amplification
+
+- **What changed:** Wake each live run's SSE subscribers immediately after its queued, running, delta or terminal event commits, while retaining cursor-based PostgreSQL replay and a forced 15-second authorization heartbeat as a durable fallback. Persist a single-Agent delta and its replay event in one atomic SQL statement, and send only the new team-turn fragment from Go to PostgreSQL instead of rebinding the full accumulated output on every fragment.
+- **Why:** Fixed 150ms polling issued event and status queries for every idle stream and delayed visible output. Four database round trips per single-Agent delta and repeatedly transferring the full team output amplified latency and connection pressure as responses and concurrency grew.
+- **Impact:** Live committed output is delivered without polling delay. An idle stream's event/status reloads fall from about 13.3 to 0.13 queries per second; including the mandatory session/membership revalidation, its total steady database rate is about 0.2 queries per second. Durable reconnect, tenant isolation, authorization revalidation, cancellation and terminal-state behavior remain unchanged. The process-local signal relies on the existing enforced single-API-worker architecture; horizontal scaling still requires shared event notification.
+- **Verification:** Race-enabled PostgreSQL tests passed for commit-to-SSE wakeup (13.77 ms observed), forced authorization timing, terminal/cancel/admin/graph notification, atomic failure and terminal competition, and team-fragment persistence. The full Go/PostgreSQL race suite and `go vet` passed, along with Pi 47/47, OpenAI Agents 56/56 and the real local dual-worker stack test.
+- **Files:** `backend/internal/app/{app,runs,teams,graph_runs,admin,run_event_notify}.go`, notifier/integration tests and backend runtime documentation.
+
 ### Fixed — preserve collaboration contracts and metrics during backend integration
 
 - **What changed:** Integrate backend observability and Pi/OpenAI Agents execution with the current HTML deliverable and selected-node collaboration baseline. Preserve the frozen HTML contract for proposal/synthesis, use a persona-preserving critique policy for review turns, and emit collaboration graph/node metrics only after committed state transitions. Replayed completed turns cannot reset later node state. Isolate rounding fixtures so pricing tests do not depend on randomized map iteration.

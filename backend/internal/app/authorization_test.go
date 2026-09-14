@@ -140,9 +140,78 @@ func (w *gatedReplayWriter) Write(p []byte) (int, error) {
 	return w.ResponseRecorder.Write(p)
 }
 
+type phasedReplayWriter struct {
+	*httptest.ResponseRecorder
+	mu     sync.Mutex
+	writes int
+	first  *requestGate
+	second *requestGate
+}
+
+func (w *phasedReplayWriter) Write(p []byte) (int, error) {
+	if strings.HasPrefix(string(p), "id: ") {
+		w.mu.Lock()
+		w.writes++
+		write := w.writes
+		w.mu.Unlock()
+		if write == 1 {
+			w.first.wait()
+		}
+		if write == 2 {
+			w.second.wait()
+		}
+	}
+	return w.ResponseRecorder.Write(p)
+}
+
 func TestPostgresSSEReplayRechecksRevokedAccess(t *testing.T) {
 	for _, revocation := range []string{"membership_removed", "session_logout", "session_expired"} {
 		t.Run(revocation, func(t *testing.T) { assertReplayRevocation(t, revocation) })
+	}
+}
+
+func TestPostgresSSEHeartbeatForcesAuthorizationAfterReplayPhaseShift(t *testing.T) {
+	h := newHarness(t, "")
+	interval := 200 * time.Millisecond
+	h.a.reauthEvery = interval
+	owner, tid, _ := h.register(t, "phase-owner@example.test")
+	member, _, mid := h.register(t, "phase-member@example.test")
+	h.request(t, owner, "POST", "/tenants/"+tid+"/members", map[string]string{"email": "phase-member@example.test", "role": "reader"}, 201)
+	_, _, sid := h.fixture(t, owner, tid)
+	rid := randomID()
+	ctx := context.Background()
+	if _, err := h.db.Exec(ctx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status) VALUES($1,$2,$3,$1,'hash','test','running')", rid, tid, sid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(ctx, `INSERT INTO run_events(tenant_id,run_id,data) SELECT $1,$2,'{"type":"text_delta","delta":"phase"}'::jsonb FROM generate_series(1,2)`, tid, rid); err != nil {
+		t.Fatal(err)
+	}
+	first, second := newRequestGate(t), newRequestGate(t)
+	w := &phasedReplayWriter{ResponseRecorder: httptest.NewRecorder(), first: first, second: second}
+	r := httptest.NewRequest("GET", "/api/v1/tenants/"+tid+"/runs/"+rid+"/events", nil)
+	r.AddCookie(member)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.a.Handler().ServeHTTP(w, r)
+	}()
+	awaitTestSignal(t, first.reached)
+	// Let the ticker fire while the first event write is blocked. The access
+	// check immediately before the second write then moves nextAuth away from
+	// the ticker phase, reproducing the historical near-2x revocation window.
+	time.Sleep(interval + interval/2)
+	first.open()
+	awaitTestSignal(t, second.reached)
+	h.request(t, owner, "DELETE", "/tenants/"+tid+"/members/"+mid, nil, 204)
+	revokedAt := time.Now()
+	second.open()
+	select {
+	case <-done:
+		if elapsed := time.Since(revokedAt); elapsed > interval+50*time.Millisecond {
+			t.Fatalf("phase-shifted revocation took %s; expected at most one interval", elapsed)
+		}
+	case <-time.After(interval + 50*time.Millisecond):
+		t.Fatal("phase-shifted heartbeat did not force authorization within one interval")
 	}
 }
 

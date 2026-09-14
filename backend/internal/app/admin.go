@@ -90,6 +90,7 @@ func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, rid := range ids {
+		a.notifyRunEvent(rid)
 		a.cancelExecution(rid)
 	}
 	writeJSON(w, 200, v)

@@ -643,6 +643,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
+	a.notifyRunEvent(rid)
 	a.observeGraphNodeState("running")
 	a.dispatch(tid, rid, sid, prompt, instructions, "graph", snap.Budget, snap.Overhead, ctx)
 	return nil
@@ -718,6 +719,9 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	for _, rid := range ids {
+		a.notifyRunEvent(rid)
 	}
 	for i := int64(0); i < cancelledNodes; i++ {
 		a.observeGraphNodeState("cancelled")
@@ -849,6 +853,9 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	for _, id := range ids {
+		a.notifyRunEvent(id)
 	}
 	for i := int64(0); i < cancelledNodes; i++ {
 		a.observeGraphNodeState("cancelled")

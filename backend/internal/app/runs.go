@@ -301,6 +301,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	a.notifyRunEvent(id)
 	a.dispatch(tid, id, b.SessionID, b.Prompt, instructions, kind, budget, overhead, r.Context())
 	writeJSON(w, 202, v)
 }
@@ -354,6 +355,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	if e = tx.Commit(ctx); e != nil {
 		return
 	}
+	a.notifyRunEvent(id)
 	queueDuration := time.Since(queuedAt)
 	if queueDuration < 0 {
 		queueDuration = 0
@@ -562,20 +564,21 @@ func runContextOutcome(ctx context.Context) (status, code string, ended bool) {
 	return "cancelled", "", true
 }
 func (a *App) appendDelta(ctx context.Context, tid, id, delta string) bool {
-	tx, e := a.db.Begin(ctx)
-	if e != nil {
-		return false
-	}
-	defer tx.Rollback(ctx)
-	tag, e := tx.Exec(ctx, "UPDATE runs SET output=output||$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, delta)
+	data, _ := json.Marshal(map[string]string{"type": "text_delta", "delta": delta})
+	// One PostgreSQL statement keeps output and replay event atomic while
+	// avoiding BEGIN/UPDATE/INSERT/COMMIT round trips for every model delta.
+	tag, e := a.db.Exec(ctx, `WITH updated AS (
+		UPDATE runs SET output=output||$3,updated_at=now()
+		WHERE tenant_id=$1 AND id=$2 AND status='running'
+		RETURNING tenant_id,id
+	)
+	INSERT INTO run_events(tenant_id,run_id,data)
+	SELECT tenant_id,id,$4 FROM updated`, tid, id, delta, data)
 	if e != nil || tag.RowsAffected() == 0 {
 		return false
 	}
-	data, _ := json.Marshal(map[string]string{"type": "text_delta", "delta": delta})
-	if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, data); e != nil {
-		return false
-	}
-	return tx.Commit(ctx) == nil
+	a.notifyRunEvent(id)
+	return true
 }
 func (a *App) finish(tid, id, status, output, code string) {
 	a.finishWithFacts(tid, id, status, output, code, nil)
@@ -644,6 +647,9 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 	commit := func(tx pgx.Tx) error {
 		if err := tx.Commit(ctx); err != nil {
 			return err
+		}
+		if runChanged {
+			a.notifyRunEvent(id)
 		}
 		if committed != nil {
 			committed()
@@ -773,6 +779,9 @@ func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	if tag.RowsAffected() > 0 {
+		a.notifyRunEvent(id)
+	}
 	a.cancelExecution(id)
 	a.getRun(w, r)
 }
@@ -838,13 +847,13 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 	if e := controller.Flush(); e != nil {
 		return
 	}
-	tick := time.NewTicker(150 * time.Millisecond)
-	defer tick.Stop()
+	wake, unsubscribe := a.subscribeRunEvents(id)
+	defer unsubscribe()
 	heartbeat := time.NewTicker(a.reauthEvery)
 	defer heartbeat.Stop()
 	nextAuth := time.Now().Add(a.reauthEvery)
-	checkAccess := func() bool {
-		if time.Now().Before(nextAuth) {
+	checkAccess := func(force bool) bool {
+		if !force && time.Now().Before(nextAuth) {
 			return true
 		}
 		var valid bool
@@ -857,7 +866,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 		return e == nil && valid
 	}
 	for {
-		if !checkAccess() {
+		if !checkAccess(false) {
 			return
 		}
 		rows, e := a.db.Query(r.Context(), "SELECT id,data FROM run_events WHERE tenant_id=$1 AND run_id=$2 AND id>$3 ORDER BY id LIMIT 100", tid, id, cursor)
@@ -884,7 +893,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 		// Release the database connection before network writes or reauthorization.
 		// Backlog replay must obey the same deadline as an idle/live stream.
 		for _, event := range batch {
-			if !checkAccess() {
+			if !checkAccess(false) {
 				return
 			}
 			cursor = event.id
@@ -894,7 +903,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		count := len(batch)
-		if !checkAccess() {
+		if !checkAccess(false) {
 			return
 		}
 		if count > 0 {
@@ -902,7 +911,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if !checkAccess() {
+		if !checkAccess(false) {
 			return
 		}
 		if count == 100 {
@@ -921,9 +930,12 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-tick.C:
+		case <-wake:
 		case <-heartbeat.C:
-			if !checkAccess() {
+			// A fixed heartbeat must always hit PostgreSQL. Using the cached
+			// deadline here can phase-shift revocation checks to almost twice the
+			// configured interval after an authorization check during replay.
+			if !checkAccess(true) {
 				return
 			}
 			_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))

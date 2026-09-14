@@ -37,6 +37,7 @@ type App struct {
 	leaseLost   atomic.Bool
 	authSlots   chan struct{}
 	reauthEvery time.Duration
+	runEvents   runEventNotifier
 }
 type rateEntry struct {
 	start time.Time
@@ -47,7 +48,7 @@ func New(db *pgxpool.Pool, c Config) *App {
 	if c.PIAdmissionWait == 0 {
 		c.PIAdmissionWait = 5 * time.Second
 	}
-	a := &App{db: db, cfg: c, log: slog.Default(), client: &http.Client{Timeout: c.RunTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, dummyHash: hashPassword(randomID()), cursorKey: []byte(randomID() + randomID()), running: map[string]context.CancelFunc{}, limits: map[string]rateEntry{}, authSlots: make(chan struct{}, 4), reauthEvery: 15 * time.Second}
+	a := &App{db: db, cfg: c, log: slog.Default(), client: &http.Client{Timeout: c.RunTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, dummyHash: hashPassword(randomID()), cursorKey: []byte(randomID() + randomID()), running: map[string]context.CancelFunc{}, limits: map[string]rateEntry{}, authSlots: make(chan struct{}, 4), reauthEvery: 15 * time.Second, runEvents: runEventNotifier{subscribers: map[string]map[chan struct{}]struct{}{}}}
 	if a.cfg.UsageRetentionDays == 0 {
 		a.cfg.UsageRetentionDays = 180
 	}
@@ -108,6 +109,9 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return e
+	}
+	for _, p := range ids {
+		a.notifyRunEvent(p.id)
 	}
 	watch, cancel := context.WithCancel(context.Background())
 	a.leaseCancel = cancel

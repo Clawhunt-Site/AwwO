@@ -553,7 +553,9 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 				continue
 			}
 			output += delta
-			if _, e = a.db.Exec(ctx, "UPDATE run_turns SET output=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, output); e != nil {
+			// Send only the new fragment to PostgreSQL. The database still rewrites
+			// its growing text value, but request encoding and transfer stay bounded.
+			if _, e = a.db.Exec(ctx, "UPDATE run_turns SET output=output||$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, delta); e != nil {
 				if contextFailure(e) {
 					return "", e
 				}
