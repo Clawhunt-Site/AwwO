@@ -4,4 +4,9 @@ After=cloudflared-awwo.service
 
 [Service]
 Type=oneshot
+# The local view cannot see the edge having stopped routing to a connector that still believes it
+# is registered, which is how the 2026-09-12 outage stayed invisible. This probes the real public
+# path with Access service-token headers, so nothing has to be made public for it to work.
+Environment=EDGE_URL=https://awwo.clawhunt.store/api/v1/health
+Environment=ACCESS_HEADER_FILE=/srv/awwo/saas-staging/config/cf-access-headers
 ExecStart=/usr/local/bin/awwo-tunnel-watchdog.sh

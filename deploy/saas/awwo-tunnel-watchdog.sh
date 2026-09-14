@@ -20,10 +20,10 @@ ORIGIN_HOST=${ORIGIN_HOST:-awwo.clawhunt.store}
 MIN_CONNECTIONS=${MIN_CONNECTIONS:-1}
 COOLDOWN_SECONDS=${COOLDOWN_SECONDS:-600}
 STATE_FILE=${STATE_FILE:-/run/awwo-tunnel-watchdog.last-restart}
-# Optional true end-to-end check. Set EDGE_URL to a path that Cloudflare Access
-# does NOT gate (a Bypass policy on e.g. /api/v1/health), or supply Access
-# service-token headers in ACCESS_HEADER_FILE (curl -K format, mode 0600).
-# Without one of those, no request can pass Access and only local checks run.
+# Optional true end-to-end check. Set EDGE_URL to a path Cloudflare Access admits:
+# either a path with a Bypass policy, or one reachable with Access service-token
+# headers supplied in ACCESS_HEADER_FILE (curl -K format, mode 0600). Without one
+# of those, no request can pass Access and only local checks run.
 EDGE_URL=${EDGE_URL:-}
 ACCESS_HEADER_FILE=${ACCESS_HEADER_FILE:-}
 
@@ -55,6 +55,14 @@ if [ "${verdict}" = ok ] && [ -n "${EDGE_URL}" ]; then
   edge_code=$(curl "${args[@]}" "${EDGE_URL}" 2>/dev/null || echo 000)
   case "${edge_code}" in
     2*|3*) : ;;
+    401|403)
+      # Access refused the request itself, so the edge reached a policy and the tunnel is not
+      # what is broken. Restarting the connector cannot fix a missing service token or a policy
+      # that stopped admitting it, and doing so would hide the real fault behind a remedy that
+      # never works. Report it and leave the tunnel alone.
+      log "edge returned ${edge_code}: Access refused the probe (token or policy), not a tunnel fault"
+      exit 0
+      ;;
     *) verdict="edge returned ${edge_code} while the origin is healthy" ;;
   esac
 fi

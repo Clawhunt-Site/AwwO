@@ -162,11 +162,49 @@ Two corrections, both established by checking rather than by reading this page:
   not exist. Prefix such commands with `MSYS_NO_PATHCONV=1`. The plural `get-parameters` call is what
   exposes this: a denied read appears in `InvalidParameters`, and so does a mangled name.
 
-The AwwO Access application is `AwwO Team Workspace` (`280318d5-ad96-4769-9c67-19bcfce46077`) on
-`awwo.clawhunt.store`. A path-scoped application is already the pattern in this account — there is one
-for `staging.clawhunt.store/v1/capabilities/submissions` — so scoping a policy to `/api/v1/health`
-means creating a second application whose hostname carries that path, since a policy applies to an
-application rather than to a path.
+### The end-to-end check that now exists
+
+Since 2026-09-14 the whole path can be exercised without a browser and without making anything
+public. `/api/v1/health` has its own Access application, because a policy applies to an application
+rather than to a path:
+
+| Thing | Value |
+| --- | --- |
+| Main app (unchanged) | `AwwO Team Workspace` `280318d5-ad96-4769-9c67-19bcfce46077`, one `allow` policy over the team's emails |
+| Probe app | `awwo` `74272bc1-41f1-4c94-8038-29cb9910a772`, hostname `awwo.clawhunt.store/api/v1/health` |
+| Its only policy | `Service Auth AwwO deploy verify` `cedd42fd-4ed8-426f-88ff-34f4f90ba870`, action **Service Auth** (`non_identity`) |
+| Credentials | SSM `/awwo/cf-access-service-client-id` and `/awwo/cf-access-service-client-secret`, both SecureString |
+| On the host | `/srv/awwo/saas-staging/config/cf-access-headers`, `root:root` `0600`, curl `-K` format |
+
+This account uses Cloudflare's **reusable policy** model, so the application wizard offers only "add
+an existing policy" or "create new policy" — the action lives inside the policy, not on the
+application. The action needed is **Service Auth**, not Allow and not Bypass.
+
+```bash
+ID=$(MSYS_NO_PATHCONV=1 aws ssm get-parameter --profile clawhunt --region us-east-2   --name /awwo/cf-access-service-client-id --with-decryption --query Parameter.Value --output text)
+SECRET=$(MSYS_NO_PATHCONV=1 aws ssm get-parameter --profile clawhunt --region us-east-2   --name /awwo/cf-access-service-client-secret --with-decryption --query Parameter.Value --output text)
+curl -s -o /dev/null -w '%{http_code}
+' -H "CF-Access-Client-Id: $ID"   -H "CF-Access-Client-Secret: $SECRET" https://awwo.clawhunt.store/api/v1/health   # 200
+curl -s -o /dev/null -w '%{http_code}
+' https://awwo.clawhunt.store/api/v1/health # 403, still closed
+curl -s -o /dev/null -w '%{http_code}
+' https://awwo.clawhunt.store/              # 302, team login
+```
+
+Measured, not assumed: an unauthenticated request to the probe path returns **403**, not the `302`
+this page previously predicted — a path-scoped app whose only policy is Service Auth refuses rather
+than redirecting. The token is also confined to that path: the same headers on
+`/api/v1/admin/summary` still return `302`.
+
+The tunnel watchdog now uses this as its edge probe (`EDGE_URL` plus `ACCESS_HEADER_FILE` in its
+unit), which is the check that would have caught the 2026-09-12 outage without a human looking. It
+deliberately treats `401`/`403` from the probe as an Access fault and exits without restarting the
+connector: restarting cannot fix a rotated token or a policy that stopped admitting it, and doing so
+would bury the real fault under a remedy that never works. Verified both ways — wrong credentials log
+`Access refused the probe` and leave the tunnel alone, correct ones pass silently.
+
+Rotating the service token means updating the two SSM parameters **and** rewriting the host header
+file, since the host has no AWS CLI to fetch it itself.
 
 What *can* be checked from the host is whether requests are arriving at all:
 
