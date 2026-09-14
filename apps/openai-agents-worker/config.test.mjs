@@ -59,6 +59,36 @@ test('selected model context budget counts UTF-8, message framing and tool defin
   assert.equal(fitsContextBudget(request({ prompt: 'x'.repeat(budget - contextBytes + 1), tools: ['calculator','current_time'] }), config), false);
 });
 
+test('deployed output envelope matches the Pi runtime without shrinking admitted input', () => {
+  // A node's frozen output contract is runtime-agnostic, and a response that hits the output cap
+  // fails closed as MODEL_OUTPUT_LIMIT, so too small a cap loses a deliverable Pi would produce.
+  const deployed = configuration({ AWWO_OPENAI_AGENTS_CONTEXT_WINDOW: '131072', AWWO_OPENAI_AGENTS_MAX_TOKENS: '16384' });
+  const outputOnly = configuration({ AWWO_OPENAI_AGENTS_MAX_TOKENS: '16384' });
+  const admitted = config => config.contextWindow - config.maxTokens - 256;
+  assert.equal(deployed.ready, true);
+  assert.equal(publicHealth(deployed).limits.maxOutputTokens, 16384);
+  assert.equal(admitted(deployed), 114432);
+  assert.ok(admitted(deployed) > admitted(configuration()));
+  // Raising the output cap alone is not safe: the same subtraction gates admitted input.
+  assert.ok(admitted(outputOnly) < admitted(configuration()));
+  const prompt = 'x'.repeat(admitted(configuration()) - 32);
+  assert.equal(fitsContextBudget(request({ prompt }), deployed), true);
+  assert.equal(fitsContextBudget(request({ prompt }), outputOnly), false);
+  assert.throws(() => configuration({ AWWO_OPENAI_AGENTS_MAX_TOKENS: '32769' }), /outside its allowed range/);
+});
+
+test('a host-served model is only addressable by name, and only where the deployment gate allows it', () => {
+  // compose.yml maps host.docker.internal for Pi alone: this worker refuses that host over plain
+  // HTTP once deployed, so mapping it here would look like reachability and deliver none.
+  for (const environment of ['staging', 'production']) {
+    const config = configuration({ APP_ENV: environment, AWWO_OPENAI_AGENTS_BASE_URL: 'http://host.docker.internal:11434/v1' });
+    assert.equal(config.ready, false);
+    assert.ok(config.missing.includes('AWWO_OPENAI_AGENTS_BASE_URL_HTTPS'));
+  }
+  assert.equal(configuration({ APP_ENV: 'development', AWWO_OPENAI_AGENTS_BASE_URL: 'http://host.docker.internal:11434/v1' }).ready, true);
+  assert.equal(configuration({ APP_ENV: 'staging', AWWO_OPENAI_AGENTS_BASE_URL: 'https://host.docker.internal:11434/v1' }).ready, true);
+});
+
 test('child environment carries no parent secrets, user config, Node hooks or tracing credentials', () => {
   const env = workerEnvironment('/private/test-directory', '/runtime/node');
   assert.deepEqual(env, { PATH: '/runtime', TMPDIR: '/private/test-directory', LD_LIBRARY_PATH: '/runtime', OPENAI_AGENTS_DISABLE_TRACING: '1', OPENAI_AGENTS_DONT_LOG_MODEL_DATA: '1', OPENAI_AGENTS_DONT_LOG_TOOL_DATA: '1', NO_COLOR: '1' });

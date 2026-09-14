@@ -54,6 +54,14 @@ services:
       # Must stay below the api's AWWO_RUN_TIMEOUT and nginx's proxy_read_timeout, or a healthy
       # long generation is killed by the shortest link in the chain.
       AWWO_PI_TIMEOUT_MS: ${AWWO_PI_TIMEOUT_MS:-300000}
+    # Reaching a model on the Docker host needs a name for it: Linux containers get no
+    # host.docker.internal entry, and 127.0.0.1 is the container's own loopback, which is also the
+    # ollama provider default when AWWO_PI_BASE_URL is empty, so such a deployment silently
+    # addresses nothing. This only writes /etc/hosts; the route is Pi's egress membership below,
+    # which api, web and database do not have. Pi alone is mapped because the OpenAI Agents worker
+    # rejects a non-HTTPS non-loopback host outside APP_ENV=development.
+    extra_hosts:
+      - host.docker.internal:host-gateway
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
@@ -87,9 +95,19 @@ services:
       AWWO_OPENAI_AGENTS_MODELS_JSON: ${AWWO_OPENAI_AGENTS_MODELS_JSON:-}
       AWWO_OPENAI_AGENTS_TOOLS_JSON: ${AWWO_OPENAI_AGENTS_TOOLS_JSON:-[]}
       AWWO_OPENAI_AGENTS_MAX_CONCURRENCY: ${AWWO_OPENAI_AGENTS_MAX_CONCURRENCY:-4}
-      AWWO_OPENAI_AGENTS_CONTEXT_WINDOW: ${AWWO_OPENAI_AGENTS_CONTEXT_WINDOW:-32768}
-      AWWO_OPENAI_AGENTS_MAX_TOKENS: ${AWWO_OPENAI_AGENTS_MAX_TOKENS:-4096}
-      AWWO_OPENAI_AGENTS_TIMEOUT_MS: ${AWWO_OPENAI_AGENTS_TIMEOUT_MS:-120000}
+      # A node's frozen output contract does not change with its runtime: the same node can require
+      # a complete HTML document or a 256 KiB file body returned inline, and this worker fails a
+      # truncated answer closed as MODEL_OUTPUT_LIMIT instead of delivering it. At 4096 output
+      # tokens that contract is unsatisfiable here while it succeeds on Pi, so match Pi's envelope
+      # rather than making a node's deliverable depend on which runtime it happens to be bound to.
+      # The context window must rise with it: admitted input is contextWindow - maxTokens - 256, so
+      # raising output alone would cut accepted prompts from 28416 to 16128 bytes.
+      AWWO_OPENAI_AGENTS_CONTEXT_WINDOW: ${AWWO_OPENAI_AGENTS_CONTEXT_WINDOW:-131072}
+      AWWO_OPENAI_AGENTS_MAX_TOKENS: ${AWWO_OPENAI_AGENTS_MAX_TOKENS:-16384}
+      # The deadline moves with the envelope for the same reason it did for Pi: a budget sized for a
+      # 4096-token answer cannot produce a 16384-token one, and this worker fails such a run closed
+      # instead of returning what it had, so leaving it behind would trade truncation for timeout.
+      AWWO_OPENAI_AGENTS_TIMEOUT_MS: ${AWWO_OPENAI_AGENTS_TIMEOUT_MS:-300000}
       AWWO_OPENAI_AGENTS_CANCEL_GRACE_MS: ${AWWO_OPENAI_AGENTS_CANCEL_GRACE_MS:-2000}
       AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES: ${AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES:-1048576}
       OPENAI_AGENTS_DISABLE_TRACING: "1"

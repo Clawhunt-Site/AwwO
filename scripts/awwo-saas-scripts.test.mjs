@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { EventEmitter } from 'node:events';
+import { readFile } from 'node:fs/promises';
 import { parseEnv, port, resolveCommand, serviceEnvironments, waitForHttp } from './awwo-saas-lib.mjs';
 import { runDevelopment } from './awwo-saas-dev.mjs';
 test('local dotenv reads literal values without executing shell expressions', () => {
@@ -230,4 +231,43 @@ test('npm launches without a shell on Windows and is left untouched elsewhere', 
   // With no CLI anywhere, fail with the reason rather than a bare ENOENT from spawn.
   assert.throws(() => resolveCommand('npm', ['ci'], 'win32', () => false, { npm_execpath: installed }),
     /cannot be launched without a shell/);
+});
+
+// A Compose default is only a fallback: the shipped env files override it, so a knob raised in one
+// place and left behind in another is deployed at the stale value with nothing reporting it. All four
+// files that carry these knobs drifted at least once already, including the worker templates.
+test('capacity and timeout knobs cannot drift between compose and the shipped templates', async () => {
+  const read = async name => readFile(new URL(name, import.meta.url), 'utf8');
+  const compose = await read('../deploy/saas/compose.yml');
+  const deployment = parseEnv(await read('../deploy/saas/.env.example'));
+  const templates = {
+    pi: parseEnv(await read('../apps/pi-worker/.env.example')),
+    'openai-agents': parseEnv(await read('../apps/openai-agents-worker/.env.example')),
+  };
+  const service = name => compose.split(/^ {2}(?=\S)/m).find(block => block.startsWith(`${name}:`)) ?? '';
+  const fallback = (name, key) => new RegExp(`\\b${key}: \\$\\{${key}:-([^}]*)\\}`).exec(service(name))?.[1];
+  for (const [name, key] of [['pi', 'AWWO_PI_CONTEXT_WINDOW'], ['pi', 'AWWO_PI_MAX_TOKENS'], ['pi', 'AWWO_PI_TIMEOUT_MS'],
+    ['pi', 'AWWO_PI_MAX_CONCURRENCY'], ['api', 'AWWO_RUN_TIMEOUT'], ['openai-agents', 'AWWO_OPENAI_AGENTS_CONTEXT_WINDOW'],
+    ['openai-agents', 'AWWO_OPENAI_AGENTS_MAX_TOKENS'], ['openai-agents', 'AWWO_OPENAI_AGENTS_TIMEOUT_MS']]) {
+    const configured = fallback(name, key);
+    // Assert presence first: deleting a knob from both files would satisfy an equality check while
+    // comparing nothing, which is how a guard silently stops guarding.
+    assert.ok(configured, `${key} has no Compose default in the ${name} service`);
+    assert.ok(deployment[key] !== undefined, `${key} is absent from deploy/saas/.env.example`);
+    assert.equal(deployment[key], configured, key);
+    const template = templates[name];
+    if (template && template[key] !== undefined) assert.equal(template[key], configured, `${key} in the ${name} worker template`);
+  }
+  // One node contract runs on either runtime, so an output envelope that differs between them makes
+  // the same deliverable succeed or fail on the binding alone.
+  for (const knob of ['MAX_TOKENS', 'CONTEXT_WINDOW', 'TIMEOUT_MS']) {
+    assert.equal(fallback('pi', `AWWO_PI_${knob}`), fallback('openai-agents', `AWWO_OPENAI_AGENTS_${knob}`), knob);
+  }
+  // Only Pi may name the Docker host. extra_hosts can reach a service literally or through a merge
+  // key, so count every occurrence in the file rather than scanning service blocks alone: exactly one
+  // occurrence that sits inside pi leaves no room for an anchor to grant it elsewhere.
+  assert.equal((compose.match(/extra_hosts/g) ?? []).length, 1);
+  assert.match(service('pi'), /extra_hosts:\n\s+- host\.docker\.internal:host-gateway\n/);
+  for (const name of ['api', 'web', 'database']) assert.match(service(name), /networks: \[private\]\n/);
+  assert.match(compose, /^ {2}private:\n {4}internal: true$/m);
 });
