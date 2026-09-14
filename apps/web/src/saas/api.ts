@@ -40,6 +40,9 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     rate_limited: ['请求过于频繁，请稍后重试。', 'Too many requests. Please try again later.'],
     quota_exceeded: ['工作区运行额度不足，请联系管理员。', 'The workspace run quota has been reached. Contact an administrator.'],
     model_unavailable: ['所选模型不可用，请重新选择服务端提供的模型。', 'The selected model is unavailable. Choose a model offered by the server.'],
+    // Distinct from model_unavailable: the model exists but is not open to this
+    // workspace, so the fix is an administrator grant rather than another model.
+    model_not_allowed: ['此模型未向本工作区开放，请选择本工作区可用的模型或联系管理员。', 'This model is not available to this workspace. Choose one offered to it or contact an administrator.'],
     invite_used: ['此邀请已被其他账号领取。', 'This invitation was claimed by another account.'],
     invite_expired: ['邀请已过期，请索取新邀请。', 'This invitation has expired. Request a new one.'],
     invite_revoked: ['邀请已撤销，请索取新邀请。', 'This invitation was revoked. Request a new one.'],
@@ -57,6 +60,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     '画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。': ['画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。', 'This canvas changed in another page. Your unsynced draft is stored separately on this device. Reload to recover or export it without overwriting the cloud version.'],
     '草稿状态刚被另一个页面更新，请重新连接后核对。': ['草稿状态刚被另一个页面更新，请重新连接后核对。', 'Another page just changed this draft. Reconnect and check its state.'],
     '画布未同步，请先解决保存错误再运行。': ['画布未同步，请先解决保存错误再运行。', 'The canvas is not synced. Resolve the save error before running.'],
+    'No model is available to this workspace': ['本工作区当前没有可用模型，请联系管理员开放模型。', 'No model is available to this workspace. Ask an administrator to grant one.'],
   };
   if (known[raw]) return known[raw][locale === 'zh' ? 0 : 1];
   if (locale === 'en') {

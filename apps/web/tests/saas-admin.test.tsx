@@ -29,6 +29,65 @@ it('edits quota through Go without changing tenant status and reloads the first 
   expect(requests.filter(request => !request.init.method)).toHaveLength(2);
 });
 
+// An absent list and a present-but-empty list mean opposite things, so the
+// listing has to distinguish them: reading "None" as "All models" would let an
+// operator believe a blocked workspace is unrestricted.
+it('distinguishes an unrestricted workspace from one blocked from every model', async () => {
+  const rows = [tenant, { ...tenant, id: 't-blocked', name: 'Blocked', allowedModels: [] }, { ...tenant, id: 't-limited', name: 'Limited', allowedModels: ['granted-a', 'granted-b'] }];
+  vi.stubGlobal('fetch', vi.fn(async () => response({ items: rows, nextCursor: null })));
+  render(<SaaSPreferencesProvider><AdminPanel identity={identity}/></SaaSPreferencesProvider>);
+  await screen.findByText('Limited');
+  expect(screen.getByText('全部可用')).toBeVisible();
+  expect(screen.getByText('全部禁止')).toBeVisible();
+  expect(screen.getByText('granted-a, granted-b')).toBeVisible();
+});
+
+it('sends the model entitlement only when the operator edits it, and can both restrict and clear it', async () => {
+  const bodies: unknown[] = [];
+  const limited = { ...tenant, allowedModels: ['granted-a', 'granted-b'] };
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit = {}) => {
+    if (init.method === 'PATCH') { bodies.push(JSON.parse(String(init.body))); return response(limited); }
+    return response({ items: [limited], nextCursor: null });
+  }));
+  render(<SaaSPreferencesProvider><AdminPanel identity={identity}/></SaaSPreferencesProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: '编辑配额' }));
+  expect(screen.getByLabelText('限制可用模型')).toBeChecked();
+  expect(screen.getByLabelText('可用模型 ID（逗号或空格分隔）')).toHaveValue('granted-a, granted-b');
+  // Saving a quota without touching the entitlement must not rewrite it.
+  fireEvent.change(screen.getByLabelText('每日运行上限'), { target: { value: '99' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存配额' }));
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  expect(bodies[0]).toEqual({ maxConcurrentRuns: 2, maxRunsPerDay: 99 });
+
+  fireEvent.click(await screen.findByRole('button', { name: '编辑配额' }));
+  fireEvent.change(screen.getByLabelText('可用模型 ID（逗号或空格分隔）'), { target: { value: ' granted-a ' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存配额' }));
+  await waitFor(() => expect(bodies).toHaveLength(2));
+  expect(bodies[1]).toEqual({ maxConcurrentRuns: 2, maxRunsPerDay: 10, allowedModels: ['granted-a'] });
+
+  fireEvent.click(await screen.findByRole('button', { name: '编辑配额' }));
+  fireEvent.click(screen.getByLabelText('限制可用模型'));
+  expect(screen.queryByLabelText('可用模型 ID（逗号或空格分隔）')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '保存配额' }));
+  await waitFor(() => expect(bodies).toHaveLength(3));
+  expect(bodies[2]).toEqual({ maxConcurrentRuns: 2, maxRunsPerDay: 10, allowedModels: null });
+});
+
+it('refuses an oversized allowlist locally instead of sending one the server will reject', async () => {
+  const bodies: unknown[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit = {}) => {
+    if (init.method === 'PATCH') { bodies.push(JSON.parse(String(init.body))); return response(tenant); }
+    return response({ items: [tenant], nextCursor: null });
+  }));
+  render(<SaaSPreferencesProvider><AdminPanel identity={identity}/></SaaSPreferencesProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: '编辑配额' }));
+  fireEvent.click(screen.getByLabelText('限制可用模型'));
+  fireEvent.change(screen.getByLabelText('可用模型 ID（逗号或空格分隔）'), { target: { value: Array.from({ length: 65 }, (_, i) => `model-${i}`).join(' ') } });
+  fireEvent.click(screen.getByRole('button', { name: '保存配额' }));
+  await screen.findByRole('alert');
+  expect(bodies).toEqual([]);
+});
+
 it('follows opaque cursors, restores the previous page and resets on a new section', async () => {
   const fetch = vi.fn(async (url: string) => response({ items: [{ ...tenant, name: url.includes('cursor=') ? 'Tenant B' : 'Tenant A' }], nextCursor: url.includes('cursor=') ? null : 'opaque:token' }));
   vi.stubGlobal('fetch', fetch);

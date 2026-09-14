@@ -153,7 +153,7 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   if (!record) return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
   return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><span role="status">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span><button onClick={() => downloadDocument(record.document, record.name + '.json')}>{t('导出画布 JSON', 'Export canvas JSON')}</button></div>
     <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)} />
-    {settingsOpen && <RuntimeSettings onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <RuntimeSettings tenantId={tenant.id} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
 
@@ -180,7 +180,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const storage = canvasStorage(); scopedStorage.current = storage;
     try { const saved = readCanvasDrafts(storage); if (saved.length) setRecovery(saved); }
     catch (error) { setError(`无法读取本机草稿：${message(error)}`); return () => controller.abort(); }
-    Promise.all([api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }), api<any>('/runtime', { signal: controller.signal })])
+    Promise.all([api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }), api<any>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal })])
       .then(async ([value, health]) => {
         if (controller.signal.aborted) return;
         configureSaaSCanvas({ tenant, canvasId });
@@ -395,9 +395,12 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   };
   return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
-    {runtime && !runtime.available && <div className="saas-runtime-note" role="status">{t('Pi 执行尚未就绪：', 'Pi execution is not ready: ')}{runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('请由服务管理员配置模型。', 'Ask the service administrator to configure a model.')}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
+    {/* A workspace whose model entitlement resolves to nothing has an available
+        service and no runnable model, so the server states that as a reason. Keying
+        the note on the reason keeps the canvas from looking ready to execute. */}
+    {runtime && (!runtime.available || Boolean(runtime.reason)) && <div className="saas-runtime-note" role="status">{t('Pi 执行尚未就绪：', 'Pi execution is not ready: ')}{runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('请由服务管理员配置模型。', 'Ask the service administrator to configure a model.')}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
     <CanvasSurface storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)} />
-    {settingsOpen && <RuntimeSettings onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <RuntimeSettings tenantId={tenant.id} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
 

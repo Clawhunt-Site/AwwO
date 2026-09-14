@@ -111,6 +111,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_graph", e.Error())
 		return
 	}
+	entitlement, e := tenantModelEntitlement(r.Context(), tx, tid)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
 	catalog := runtimeCatalog{}
 	in := map[string]bool{}
 	needed := map[string]bool{}
@@ -189,7 +194,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 				return
 			}
-			snap, e = a.runtimeSnapshot(r.Context(), catalog, runtime, model, instructions, team)
+			snap, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, instructions, team)
 			if e != nil {
 				a.runtimeAdmissionError(w, e)
 				return
@@ -519,12 +524,18 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	defer tx.Rollback(context.Background())
 	var tenantStatus string
 	var concurrent int
-	e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&tenantStatus, &concurrent)
+	var restricted bool
+	var allowed []string
+	e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}') FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&tenantStatus, &concurrent, &restricted, &allowed)
 	if e != nil {
 		return e
 	}
 	if tenantStatus != "active" {
 		return errors.New("execution_revoked")
+	}
+	entitlement, e := newModelEntitlement(restricted, allowed)
+	if e != nil {
+		return e
 	}
 	var actor, gstatus string
 	e = tx.QueryRow(ctx, "SELECT actor_id,status FROM graph_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, gid).Scan(&actor, &gstatus)
@@ -567,6 +578,14 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	var snap executionSnapshot
 	if json.Unmarshal(raw, &snap) != nil {
 		return errors.New("invalid_snapshot")
+	}
+	// This node's catalog was frozen when the graph was admitted, which can be long
+	// before this child is created — and a graph still queued has no child to
+	// cancel at all. Re-stamping from the live row here is what keeps a narrowed
+	// allowlist from being outlived by an already pinned model; the error is not
+	// errGraphCapacity, so the node settles as failed rather than being retried.
+	if e = snap.restamp(entitlement); e != nil {
+		return e
 	}
 	if turn != nil {
 		if snap.Team != nil {

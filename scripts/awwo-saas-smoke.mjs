@@ -72,7 +72,7 @@ await admin(`/admin/tenants/${ta}`, 'PATCH', { maxConcurrentRuns: 0 }, 400);
 await admin(`/admin/tenants/${ta}`,'PATCH',{status:'suspended'});
 await alice(`/tenants/${ta}/canvases`,'POST',{name:'Suspended write',document},403);
 await admin(`/admin/tenants/${ta}`,'PATCH',{status:'active'});
-const runtime=await alice('/runtime');
+const runtime=await alice(`/tenants/${ta}/runtime`);
 assert.equal(runtime.engine,'pi');
 await alice('/auth/logout','POST',undefined,204);
 await alice('/auth/me','GET',undefined,401);

@@ -105,7 +105,7 @@ try {
   const chatNode = node('chat', '手动聊天 · 两位 Agent 讨论', team('debate'));
   chatNode.contract.inputs[0].value = '按当前用户消息回答；没有消息时回答已就绪。';
   canvases.push({ mode: 'chat', ...(await request('POST', `${prefix}/canvases`, { name: '手动聊天 · 团队执行', document: { ...backgroundDoc, nodes: [chatNode], edges: [] } }, 201)) });
-  evidence.provider = input.provider; evidence.model = input.model; evidence.models = (await request('GET', '/runtime')).models;
+  evidence.provider = input.provider; evidence.model = input.model; evidence.models = (await request('GET', `${prefix}/runtime`)).models;
   evidence.webURL = webURL; evidence.apiURL = apiURL; evidence.tenantId = tid; evidence.canvases = canvases.map(c => ({ id: c.id, mode: c.mode, name: c.name }));
   await writeFile(path.join(dir, '.browser-credentials.json'), JSON.stringify(credentials), { mode: 0o600 });
   await save();

@@ -171,7 +171,7 @@ func TestRuntimeDiscoveryAndStrictWorkerIdentity(t *testing.T) {
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = oa.URL, strings.Repeat("o", 32)
 	a := New(nil, c)
 	w := httptest.NewRecorder()
-	a.runtime(w, httptest.NewRequest("GET", "/api/v1/runtime", nil))
+	a.runtimeCatalogue(w, httptest.NewRequest("GET", "/api/v1/tenants/t/runtime", nil), modelEntitlement{})
 	var body struct {
 		Available, PlannerAvailable bool
 		Runtimes                    []struct {
@@ -205,7 +205,7 @@ func TestRuntimeDiscoveryAndStrictWorkerIdentity(t *testing.T) {
 	}
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = "", ""
 	a = New(nil, c)
-	if _, err := a.runtimeSnapshot(context.Background(), runtimeCatalog{}, runtimeOpenAIAgents, "", "", nil); err == nil {
+	if _, err := a.runtimeSnapshot(context.Background(), modelEntitlement{}, runtimeCatalog{}, runtimeOpenAIAgents, "", "", nil); err == nil {
 		t.Fatal("disabled runtime fell back to Pi")
 	}
 }

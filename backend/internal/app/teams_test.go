@@ -110,7 +110,10 @@ func TestTeamRejectsUnsupportedConfiguration(t *testing.T) {
 		}
 	}
 	team := fixtureTeam("sequential")
-	if validateTeamModels(&team, piHealth{Model: "test-model"}) == nil {
+	// Member models are only ever resolved against a catalog, which is where the
+	// workspace entitlement is stamped, so there is no model check left that can be
+	// reached with a bare unfiltered piHealth.
+	if _, err := resolveTeam(&team, runtimePI, "test-model", runtimeCatalog{runtimePI: piHealth{Model: "test-model"}}); err == nil {
 		t.Fatal("accepted unknown member model")
 	}
 }

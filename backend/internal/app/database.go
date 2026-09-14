@@ -72,6 +72,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 14, "migrations/014_usage_snapshot_identity.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 15, "migrations/015_tenant_model_allowlist.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
@@ -115,6 +118,13 @@ func audit(ctx context.Context, tx pgx.Tx, actor, tenant, action, id string) err
 func noRows(e error) bool { return errors.Is(e, pgx.ErrNoRows) }
 
 const tenantJSON = `jsonb_build_object('id',t.id,'name',t.name,'status',t.status,'maxConcurrentRuns',t.max_concurrent_runs,'maxRunsPerDay',t.max_runs_per_day,'createdAt',t.created_at)`
+
+// Only the platform-admin projection reveals the raw allowlist. A workspace
+// member reads its entitlement through the runtime catalogue instead, which is
+// already intersected with what a worker currently advertises, so a member is
+// never shown an id that cannot actually be selected.
+const adminTenantJSON = tenantJSON + `||jsonb_build_object('allowedModels',to_jsonb(t.allowed_models))`
+
 const canvasJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'document',document,'version',version,'createdAt',created_at,'updatedAt',updated_at)`
 const agentJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'status','active','model',model,'role',role,'title',title,'instructions',instructions,'runtime',runtime,'adapterType',runtime,'adapterConfig',jsonb_build_object('model',model),'createdAt',created_at)`
 const sessionJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'canvasId',canvas_id,'nodeId',node_id,'agentId',agent_id,'title',title,'createdAt',created_at)`

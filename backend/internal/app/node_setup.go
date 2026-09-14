@@ -114,6 +114,13 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_scope", e.Error())
 		return
 	}
+	// Read inside the transaction that already holds the canvas row, so the Agent
+	// rows this writes cannot be created against a stale entitlement.
+	entitlement, e := tenantModelEntitlement(r.Context(), tx, tid)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
 	catalog := runtimeCatalog{}
 	changed := false
 	for i, original := range nodes {
@@ -132,7 +139,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "invalid_node_setup", err.Error())
 			return
 		}
-		if _, err = a.runtimeSnapshot(r.Context(), catalog, selection.Runtime, selection.Model, selection.Persona, team); err != nil {
+		if _, err = a.runtimeSnapshot(r.Context(), entitlement, catalog, selection.Runtime, selection.Model, selection.Persona, team); err != nil {
 			var input setupError
 			if errors.As(err, &input) {
 				fail(w, 400, "invalid_node_setup", input.message)
@@ -234,10 +241,10 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguratio
 		return setupConfiguration{}, invalidSetup("Node runtime is unavailable")
 	}
 	if n.Model == "" {
-		n.Model = health.Model
+		n.Model = health.defaultModel()
 	}
 	if n.Model == "" {
-		return setupConfiguration{}, invalidSetup("Runtime has no default model configured")
+		return setupConfiguration{}, invalidSetup("Runtime has no default model available to this workspace")
 	}
 	if _, _, ok := health.modelLimits(n.Model); !ok {
 		return setupConfiguration{}, invalidSetup("Node selects an unavailable model")
@@ -282,8 +289,11 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		} else if err != nil {
 			return nil, err
 		}
+		// Resolve the stored Agent's implicit model the same way the new value
+		// resolves, or a narrowed entitlement would make every initialize look like
+		// a configuration change and fork the conversation each time.
 		if oldConfig.Model == "" {
-			oldConfig.Model = catalog[oldConfig.Runtime].Model
+			oldConfig.Model = catalog[oldConfig.Runtime].defaultModel()
 		}
 		old.CompanyID, old.AgentName = tid, oldConfig.Name
 	}

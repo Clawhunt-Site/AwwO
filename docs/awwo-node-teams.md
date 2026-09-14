@@ -125,7 +125,7 @@ Pi 的活动调用以成员 turn ID 为键。取消父运行会停止其上下�
 
 Pi 使用 `AWWO_PI_*` 配置默认模型及可选目录。OpenAI Agents 使用独立的 `AWWO_OPENAI_AGENTS_*` 变量、模型目录和 service token；其 `provider=openai` 表示 OpenAI 兼容协议，并显式选择 `chat_completions` 或 `responses`。目录 JSON 通过 `apiKeyEnv` 引用独立环境变量，不接受明文 `apiKey`。每个环境分别提供值；默认档案仍需完整配置，不能只配置额外档案。
 
-公开选择 ID 与供应商实际模型名可以不同。各 worker health 返回公开目录（ID、模型名、provider、runtime 和容量），Go `GET /api/v1/runtime` 聚合前端可选目录与每个 runtime 实际启用的工具；浏览器不接收 API key、base URL 或秘密环境变量。SaaS adapter 声明 `supportsNodeTeams: true`，由 `canvasRuntimeReader` 转成 `supports_node_teams` 才启用属性面板；能力字段表示实现可配置，不表示模型已实际连通。`modelConnectivityVerified: false` 仍明确区分配置就绪与真实调用。
+公开选择 ID 与供应商实际模型名可以不同。各 worker health 返回公开目录（ID、模型名、provider、runtime 和容量），Go `GET /api/v1/tenants/{tenantId}/runtime` 聚合前端可选目录与每个 runtime 实际启用的工具；浏览器不接收 API key、base URL 或秘密环境变量。SaaS adapter 声明 `supportsNodeTeams: true`，由 `canvasRuntimeReader` 转成 `supports_node_teams` 才启用属性面板；能力字段表示实现可配置，不表示模型已实际连通。`modelConnectivityVerified: false` 仍明确区分配置就绪与真实调用。
 
 Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继承、检查对应 runtime 的模型和工具上下文预算，然后将 `runId`、`tenantId`、`sessionId`、`prompt`、`messages`、该成员独立的 `systemPrompt`、`model`、`runtime` 和工具 ID 发给对应 worker。worker 从自身目录解析 ID，并将仅该档案所需配置交给独立子进程。每次调用具有独立身份；同一成员多轮沿用派生的内部 session 身份，但历史仍由 Go 传入，不从磁盘加载。OpenAI Agents 工具结果直接作为成员输出，不触发第二次模型总结。
 

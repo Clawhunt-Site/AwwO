@@ -20,7 +20,7 @@ flowchart LR
 
 ## 运行时与模型目录
 
-公开标识固定为 `pi` 和 `openai-agents`。`GET /api/v1/runtime` 保留 Pi 的兼容字段，并增加：
+公开标识固定为 `pi` 和 `openai-agents`。`GET /api/v1/tenants/{tenantId}/runtime` 保留 Pi 的兼容字段，并增加：
 
 ```json
 {

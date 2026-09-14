@@ -88,7 +88,7 @@ func (a *App) adminList(kind string) http.HandlerFunc {
 		}
 		type source struct{ table, projection, id string }
 		s := map[string]source{
-			"tenants": {"tenants t", tenantJSON, "t.id"},
+			"tenants": {"tenants t", adminTenantJSON, "t.id"},
 			"users":   {"users u", "jsonb_build_object('id',id,'email',email,'name',name,'platformRole',platform_role,'createdAt',created_at)", "u.id"},
 			"runs":    {"runs r", runJSON, "r.id"},
 			"audit":   {"audit_events a", "jsonb_build_object('id',id,'actorId',actor_id,'tenantId',tenant_id,'action',action,'resourceId',resource_id,'createdAt',created_at)", "a.id"},

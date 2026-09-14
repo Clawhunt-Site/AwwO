@@ -33,7 +33,7 @@ it('adapts backend runtimes to node/team capabilities and separate model catalog
   expect(await read('/api/agents/openai-agents/models')).toEqual({ source: 'saas_runtime', models: ['agents-model'] });
   expect(await read('/api/agents/pi/models')).toEqual({ source: 'saas_runtime', models: ['pi-model', 'legacy-pi'] });
   await expect(read('/api/agents/unknown/models')).rejects.toThrow('404');
-  expect(fetch.mock.calls.every(([url]) => url === '/api/v1/runtime')).toBe(true);
+  expect(fetch.mock.calls.every(([url]) => url === `/api/v1/tenants/${tenant.id}/runtime`)).toBe(true);
 });
 it('rejects unadvertised runtimes instead of borrowing the legacy Pi catalog', async () => {
   setup({ ...status, runtimes: undefined });
@@ -80,7 +80,7 @@ it('persists runtime through the legacy hiring bridge to the SaaS Agent API', as
 });
 it('shows independent runtime availability without requesting secrets or claiming model connectivity', async () => {
   localStorage.setItem('superclaw_locale', 'en'); setup({ ...status, runtimes: status.runtimes!.map(runtime => runtime.id === 'pi' ? { ...runtime, available: false } : runtime) });
-  render(<SaaSPreferencesProvider><RuntimeSettings onClose={vi.fn()} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><RuntimeSettings tenantId={tenant.id} onClose={vi.fn()} /></SaaSPreferencesProvider>);
   const pi = await screen.findByRole('region', { name: 'Pi' }); const agents = screen.getByRole('region', { name: 'OpenAI Agents JS' });
   expect(within(pi).getByText('Unavailable')).toBeVisible(); expect(within(pi).getByText('pi-model, legacy-pi')).toBeVisible();
   expect(within(agents).getByText('Configured')).toBeVisible(); expect(within(agents).getByText('agents-model')).toBeVisible();

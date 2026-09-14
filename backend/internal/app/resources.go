@@ -290,6 +290,9 @@ func (a *App) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mutateObject(w, r, "agent.created", randomID(), 201, func(tx pgx.Tx, id string) (json.RawMessage, error) {
+		if err := requireEntitledModel(r.Context(), tx, r.PathValue("tenantId"), b.Model); err != nil {
+			return nil, err
+		}
 		return oneJSON(r.Context(), tx, "INSERT INTO agents(id,tenant_id,name,role,title,model,instructions,runtime) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING "+agentJSON, id, r.PathValue("tenantId"), b.Name, b.Role, b.Title, b.Model, b.Instructions, defaultRuntime(b.AdapterType))
 	})
 }
@@ -303,6 +306,9 @@ func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mutateObject(w, r, "agent.updated", r.PathValue("id"), 200, func(tx pgx.Tx, id string) (json.RawMessage, error) {
+		if err := requireEntitledModel(r.Context(), tx, r.PathValue("tenantId"), b.Model); err != nil {
+			return nil, err
+		}
 		if b.AdapterType != "" {
 			var previous string
 			if err := tx.QueryRow(r.Context(), "SELECT runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal FOR UPDATE", r.PathValue("tenantId"), id).Scan(&previous); err != nil {
@@ -351,7 +357,13 @@ func (a *App) mutateObject(w http.ResponseWriter, r *http.Request, action, id st
 	}
 	v, e := f(tx, id)
 	if input, ok := e.(setupError); ok {
-		fail(w, 409, input.code, input.message)
+		// A model the workspace is not entitled to is an authorization failure, not
+		// a resource conflict, so it must not read as "try again later".
+		status := 409
+		if input.code == "model_not_allowed" {
+			status = 403
+		}
+		fail(w, status, input.code, input.message)
 		return
 	}
 	if noRows(e) {

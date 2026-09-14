@@ -123,6 +123,9 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	if len(h.Models) > 128 {
 		return piHealth{}, errors.New("Runtime model catalog exceeds limit")
 	}
+	// The entitlement belongs to the workspace, never to the worker: a worker that
+	// echoed this field could otherwise narrow or widen what a workspace may run.
+	h.Allowed = nil
 	seen, hasDefault := map[string]bool{}, false
 	for i, m := range h.Models {
 		// Legacy Pi catalogs did not publish runtime. Other workers must declare
@@ -153,12 +156,16 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	return h, nil
 }
 
-func (a *App) loadRuntime(ctx context.Context, catalog runtimeCatalog, runtime string) (piHealth, error) {
+// A probed catalog is entitlement-stamped before it is cached, so everything
+// downstream reads an already filtered catalog and no resolution step has to
+// consult the allowlist itself.
+func (a *App) loadRuntime(ctx context.Context, entitlement modelEntitlement, catalog runtimeCatalog, runtime string) (piHealth, error) {
 	if h, ok := catalog[runtime]; ok {
 		return h, nil
 	}
 	h, err := a.probeRuntime(ctx, runtime)
 	if err == nil {
+		h = entitlement.apply(h)
 		catalog[runtime] = h
 	}
 	return h, err
@@ -166,7 +173,9 @@ func (a *App) loadRuntime(ctx context.Context, catalog runtimeCatalog, runtime s
 
 // Freeze effective selectors and per-worker budgets once at admission. No
 // worker discovery or model fallback happens after any invocation is accepted.
-func (a *App) runtimeSnapshot(ctx context.Context, catalog runtimeCatalog, runtime, model, instructions string, team *nodeTeam) (executionSnapshot, error) {
+// The entitlement is a required argument rather than an ambient lookup so a new
+// admission path cannot compile without deciding which workspace it admits for.
+func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement, catalog runtimeCatalog, runtime, model, instructions string, team *nodeTeam) (executionSnapshot, error) {
 	runtime = defaultRuntime(runtime)
 	if !validRuntime(runtime) {
 		return executionSnapshot{}, invalidSetup("Unsupported node runtime")
@@ -174,20 +183,20 @@ func (a *App) runtimeSnapshot(ctx context.Context, catalog runtimeCatalog, runti
 	if err := validateTeam(team); err != nil {
 		return executionSnapshot{}, invalidSetup(err.Error())
 	}
-	h, err := a.loadRuntime(ctx, catalog, runtime)
+	h, err := a.loadRuntime(ctx, entitlement, catalog, runtime)
 	if err != nil {
 		return executionSnapshot{}, err
 	}
 	if model == "" {
-		model = h.Model
+		model = h.defaultModel()
 	}
 	budget, overhead, ok := h.modelLimits(model)
 	if !ok {
-		return executionSnapshot{}, setupError{"model_unavailable", "Node model is unavailable for its runtime"}
+		return executionSnapshot{}, setupError{"model_unavailable", "Node model is unavailable for its runtime or this workspace"}
 	}
 	if team != nil {
 		for _, m := range team.Members {
-			if _, err = a.loadRuntime(ctx, catalog, memberRuntime(team, m)); err != nil {
+			if _, err = a.loadRuntime(ctx, entitlement, catalog, memberRuntime(team, m)); err != nil {
 				return executionSnapshot{}, err
 			}
 		}
@@ -222,7 +231,7 @@ func resolveTeam(t *nodeTeam, parentRuntime, parentModel string, catalog runtime
 			return nil, errors.New("Member runtime is unavailable")
 		}
 		if m.Model == "" {
-			m.Model = h.Model
+			m.Model = h.defaultModel()
 			if m.Runtime == defaultRuntime(parentRuntime) && parentModel != "" {
 				m.Model = parentModel
 			}

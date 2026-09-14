@@ -9,13 +9,15 @@ it('refreshes the real inventory without exposing secret inputs or claiming infe
     .mockResolvedValueOnce(new Response(JSON.stringify({ engine: 'pi', available: true, configured: true, modelConnectivityVerified: false, models: [{ id: 'configured-model' }] })));
   vi.stubGlobal('fetch', fetch);
   const onClose = vi.fn();
-  render(<SaaSPreferencesProvider><RuntimeSettings onClose={onClose}/></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><RuntimeSettings tenantId="tenant-a" onClose={onClose}/></SaaSPreferencesProvider>);
   await screen.findByText('Unavailable');
   expect(screen.queryAllByRole('textbox')).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: 'Refresh runtime status' }));
   await screen.findByText('configured-model');
   expect(screen.getByText(/an actual canvas run verifies model connectivity/)).toBeVisible();
-  expect(fetch.mock.calls.map(call => call[0])).toEqual(['/api/v1/runtime', '/api/v1/runtime']);
+  // The catalogue is read per workspace so the server can apply that workspace's
+  // model entitlement; an unscoped read would answer with every model.
+  expect(fetch.mock.calls.map(call => call[0])).toEqual(['/api/v1/tenants/tenant-a/runtime', '/api/v1/tenants/tenant-a/runtime']);
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
   expect(onClose).toHaveBeenCalledOnce();
 });

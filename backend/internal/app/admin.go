@@ -14,11 +14,20 @@ func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 		Status     *string `json:"status"`
 		Concurrent *int    `json:"maxConcurrentRuns"`
 		Daily      *int    `json:"maxRunsPerDay"`
+		// Raw JSON, because a *[]string cannot tell "field absent" from an explicit
+		// null and the operator needs both: leave the entitlement alone versus
+		// remove the restriction entirely.
+		Allowed json.RawMessage `json:"allowedModels"`
 	}
 	if !a.decode(w, r, &b) {
 		return
 	}
-	if (b.Status == nil && b.Concurrent == nil && b.Daily == nil) || (b.Status != nil && *b.Status != "active" && *b.Status != "suspended") || (b.Concurrent != nil && (*b.Concurrent < 1 || *b.Concurrent > 100)) || (b.Daily != nil && (*b.Daily < 1 || *b.Daily > 100000)) {
+	next, setAllowed, allowedErr := normalizeAllowedModels(b.Allowed)
+	if allowedErr != nil {
+		fail(w, 400, "invalid_input", allowedErr.Error())
+		return
+	}
+	if (b.Status == nil && b.Concurrent == nil && b.Daily == nil && !setAllowed) || (b.Status != nil && *b.Status != "active" && *b.Status != "suspended") || (b.Concurrent != nil && (*b.Concurrent < 1 || *b.Concurrent > 100)) || (b.Daily != nil && (*b.Daily < 1 || *b.Daily > 100000)) {
 		fail(w, 400, "invalid_input", "Invalid tenant status or quota")
 		return
 	}
@@ -29,7 +38,12 @@ func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	id := r.PathValue("id")
-	v, e := oneJSON(r.Context(), tx, "UPDATE tenants t SET status=COALESCE($2,status),max_concurrent_runs=COALESCE($3,max_concurrent_runs),max_runs_per_day=COALESCE($4,max_runs_per_day) WHERE id=$1 RETURNING "+tenantJSON, id, b.Status, b.Concurrent, b.Daily)
+	// COALESCE cannot express "set to NULL", so the flag decides whether the column
+	// is written at all. Narrowing the entitlement deliberately cancels nothing:
+	// every model decision is re-authorized against the live row at the next
+	// admission, so a withdrawn model cannot be reached again, and revoking calls
+	// already admitted under the previous entitlement is what suspension is for.
+	v, e := oneJSON(r.Context(), tx, "UPDATE tenants t SET status=COALESCE($2,status),max_concurrent_runs=COALESCE($3,max_concurrent_runs),max_runs_per_day=COALESCE($4,max_runs_per_day),allowed_models=CASE WHEN $5 THEN $6::text[] ELSE allowed_models END WHERE id=$1 RETURNING "+adminTenantJSON, id, b.Status, b.Concurrent, b.Daily, setAllowed, next.column())
 	if noRows(e) {
 		fail(w, 404, "not_found", "Workspace not found")
 		return

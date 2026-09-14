@@ -77,8 +77,23 @@ func validateTeam(t *nodeTeam) error {
 	}
 	return nil
 }
+
+// An unentitled model has no budget at all, so every existing caller that only
+// asked "does this model exist" now also enforces the workspace allowlist.
 func (h piHealth) modelLimits(model string) (int, int, bool) {
-	if model == "" || model == h.Model {
+	if model == "" {
+		if h.Allowed == nil {
+			b, o := h.contextLimits()
+			return b, o, true
+		}
+		if model = h.defaultModel(); model == "" {
+			return 0, 0, false
+		}
+	}
+	if !h.permits(model) {
+		return 0, 0, false
+	}
+	if model == h.Model {
 		b, o := h.contextLimits()
 		return b, o, true
 	}
@@ -92,10 +107,6 @@ func (h piHealth) modelLimits(model string) (int, int, bool) {
 		}
 	}
 	return 0, 0, false
-}
-func validateTeamModels(t *nodeTeam, h piHealth) error {
-	_, err := resolveTeam(t, runtimePI, h.Model, runtimeCatalog{runtimePI: h})
-	return err
 }
 func savedNodeTeam(raw []byte, nodeID string) (*nodeTeam, error) {
 	var d struct {
@@ -146,7 +157,13 @@ var errInvocationQuota = errors.New("quota_exceeded")
 
 // Admission is serialized with tenant mutations. Every actual provider invocation,
 // including each team member, consumes one durable admission; uncertain calls are not retried.
-func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID string, observations ...*invocationFacts) error {
+//
+// This is the last gate before any paid call, so the model is re-checked here
+// against the live allowlist rather than against the snapshot that froze it. That
+// is what makes a narrowed entitlement stop a model pinned earlier — by a graph
+// node admitted before the narrowing, by a team turn later in the same run, or by
+// a graph resumed after a restart — without every such path having to remember to.
+func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model string, observations ...*invocationFacts) error {
 	var facts *invocationFacts
 	if len(observations) > 0 {
 		facts = observations[0]
@@ -158,7 +175,9 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID string, obs
 		}
 		var status, actor, runStatus string
 		var concurrent, daily int
-		e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&status, &concurrent, &daily)
+		var restricted bool
+		var allowed []string
+		e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}') FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&status, &concurrent, &daily, &restricted, &allowed)
 		if e == nil {
 			e = tx.QueryRow(ctx, "SELECT COALESCE(actor_id,''),status FROM runs WHERE tenant_id=$1 AND id=$2", tid, rid).Scan(&actor, &runStatus)
 		}
@@ -173,6 +192,15 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID string, obs
 			e = tx.QueryRow(ctx, "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2", tid, actor).Scan(&role)
 			if e == nil && role != "owner" && role != "admin" && role != "member" {
 				e = errors.New("execution_revoked")
+			}
+		}
+		// Ordered after the deliberate outcomes so a cancelled or revoked run keeps
+		// reporting its own cause, and before the quota so an unauthorized model is
+		// never described as a rate limit.
+		if e == nil {
+			entitlement, entitlementErr := newModelEntitlement(restricted, allowed)
+			if entitlementErr != nil || !entitlement.permits(model) {
+				e = errModelNotAllowed
 			}
 		}
 		var active, today int
@@ -349,7 +377,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		return "", errors.New("runtime_unavailable")
 	}
 	if m.Model == "" {
-		m.Model = health.Model
+		m.Model = health.defaultModel()
 		if m.Runtime == defaultRuntime(snap.Runtime) {
 			m.Model = snap.Model
 		}
@@ -428,7 +456,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			a.observeTeamTurn(input.Purpose, m.Runtime, status, time.Since(turnStart))
 		}
 	}()
-	if e := a.reserveInvocation(ctx, tid, rid, id, facts); e != nil {
+	if e := a.reserveInvocation(ctx, tid, rid, id, m.Model, facts); e != nil {
 		code = e.Error()
 		contextFailure(e)
 		return "", e

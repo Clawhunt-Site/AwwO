@@ -57,29 +57,50 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
       {exportCount === null ? <button onClick={exportAll}>{t('导出全部 JSON', 'Export all JSON')}</button> : <><span role="status">{t(`已读取 ${exportCount} 条`, `Read ${exportCount} records`)}</span><button onClick={() => exporting.current?.abort()}>{t('取消导出', 'Cancel export')}</button></>}
     </div>
     {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
-    {!rows ? <p role="status">{error ? t('数据加载失败，可刷新重试。', 'Loading failed. Refresh to retry.') : t('正在加载…', 'Loading…')}</p> : <div className="saas-table-wrap"><table><thead><tr>{tab === 'tenants' ? <><th>{t('工作区', 'Workspace')}</th><th>{t('状态', 'Status')}</th><th>{t('并发 / 每日次数', 'Concurrent / daily runs')}</th><th>{t('操作', 'Actions')}</th></> : tab === 'users' ? <><th>{t('用户', 'User')}</th><th>{t('邮箱', 'Email')}</th><th>{t('平台角色', 'Platform role')}</th></> : tab === 'runs' ? <><th>{t('运行', 'Run')}</th><th>{t('租户', 'Tenant')}</th><th>{t('状态', 'Status')}</th><th>{t('创建时间', 'Created')}</th></> : <><th>{t('操作', 'Action')}</th><th>{t('操作者', 'Actor')}</th><th>{t('租户', 'Tenant')}</th><th>{t('时间', 'Time')}</th></>}</tr></thead><tbody>{rows.map(row => <tr key={row.id}>{tab === 'tenants' ? <><td>{row.name}</td><td>{row.status === 'active' ? t('正常', 'Active') : t('已暂停', 'Suspended')}</td><td>{row.maxConcurrentRuns} / {row.maxRunsPerDay}</td><td className="saas-admin-actions"><button disabled={pending} onClick={() => setEditing(row)}>{t('编辑配额', 'Edit limits')}</button><button disabled={pending} onClick={() => changeStatus(row)}>{row.status === 'active' ? t('暂停工作区', 'Suspend workspace') : t('恢复工作区', 'Resume workspace')}</button></td></> : tab === 'users' ? <><td>{row.name}</td><td>{row.email}</td><td>{row.platformRole}</td></> : tab === 'runs' ? <><td>{row.id}</td><td>{row.tenantId}</td><td>{row.status}</td><td>{date(row.createdAt)}</td></> : <><td>{row.action}</td><td>{row.actorId || '—'}</td><td>{row.tenantId || '—'}</td><td>{date(row.createdAt)}</td></>}</tr>)}</tbody></table>{rows.length === 0 && <p>{t('暂无记录。', 'No records.')}</p>}</div>}
+    {!rows ? <p role="status">{error ? t('数据加载失败，可刷新重试。', 'Loading failed. Refresh to retry.') : t('正在加载…', 'Loading…')}</p> : <div className="saas-table-wrap"><table><thead><tr>{tab === 'tenants' ? <><th>{t('工作区', 'Workspace')}</th><th>{t('状态', 'Status')}</th><th>{t('并发 / 每日次数', 'Concurrent / daily runs')}</th><th>{t('可用模型', 'Available models')}</th><th>{t('操作', 'Actions')}</th></> : tab === 'users' ? <><th>{t('用户', 'User')}</th><th>{t('邮箱', 'Email')}</th><th>{t('平台角色', 'Platform role')}</th></> : tab === 'runs' ? <><th>{t('运行', 'Run')}</th><th>{t('租户', 'Tenant')}</th><th>{t('状态', 'Status')}</th><th>{t('创建时间', 'Created')}</th></> : <><th>{t('操作', 'Action')}</th><th>{t('操作者', 'Actor')}</th><th>{t('租户', 'Tenant')}</th><th>{t('时间', 'Time')}</th></>}</tr></thead><tbody>{rows.map(row => <tr key={row.id}>{tab === 'tenants' ? <><td>{row.name}</td><td>{row.status === 'active' ? t('正常', 'Active') : t('已暂停', 'Suspended')}</td><td>{row.maxConcurrentRuns} / {row.maxRunsPerDay}</td><td>{allowedModelsLabel(row.allowedModels, t)}</td><td className="saas-admin-actions"><button disabled={pending} onClick={() => setEditing(row)}>{t('编辑配额', 'Edit limits')}</button><button disabled={pending} onClick={() => changeStatus(row)}>{row.status === 'active' ? t('暂停工作区', 'Suspend workspace') : t('恢复工作区', 'Resume workspace')}</button></td></> : tab === 'users' ? <><td>{row.name}</td><td>{row.email}</td><td>{row.platformRole}</td></> : tab === 'runs' ? <><td>{row.id}</td><td>{row.tenantId}</td><td>{row.status}</td><td>{date(row.createdAt)}</td></> : <><td>{row.action}</td><td>{row.actorId || '—'}</td><td>{row.tenantId || '—'}</td><td>{date(row.createdAt)}</td></>}</tr>)}</tbody></table>{rows.length === 0 && <p>{t('暂无记录。', 'No records.')}</p>}</div>}
     <div className="saas-admin-tools"><button disabled={pending || !rows || cursors.length === 1} onClick={() => setCursors(value => value.slice(0, -1))}>{t('上一页', 'Previous')}</button><span>{t(`第 ${cursors.length} 页`, `Page ${cursors.length}`)}</span><button disabled={pending || !rows || !nextCursor} onClick={() => setCursors(value => [...value, nextCursor])}>{t('下一页', 'Next')}</button></div>
     {editing && <QuotaEditor row={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
   </main>;
+}
+
+/** An absent list is unrestricted, a present-but-empty list blocks everything.
+ * They must read differently or an operator cannot tell which one is stored. */
+function allowedModelsLabel(value: unknown, t: (zh: string, en: string) => string): string {
+  if (!Array.isArray(value)) return t('全部可用', 'All models');
+  return value.length === 0 ? t('全部禁止', 'None') : value.join(', ');
 }
 
 function QuotaEditor({ row, onClose, onSaved }: { row: AdminRow; onClose: () => void; onSaved: () => void }) {
   const { t, locale } = useSaaSPreferences();
   const [concurrent, setConcurrent] = useState(String(row.maxConcurrentRuns));
   const [daily, setDaily] = useState(String(row.maxRunsPerDay));
+  const [restricted, setRestricted] = useState(Array.isArray(row.allowedModels));
+  const [models, setModels] = useState(Array.isArray(row.allowedModels) ? row.allowedModels.join(', ') : '');
+  // The entitlement is only sent when the operator actually touched it, so editing
+  // a quota never rewrites an allowlist it was not shown editing.
+  const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   return <div className="saas-dialog-backdrop"><form className="saas-card" role="dialog" aria-modal="true" aria-labelledby="saas-quota-title" onSubmit={async event => {
     event.preventDefault();
     const c = Number(concurrent), d = Number(daily);
     if (!Number.isInteger(c) || c < 1 || c > 100 || !Number.isInteger(d) || d < 1 || d > 100000) { setError(t('请输入范围内的整数。', 'Enter whole numbers within the allowed range.')); return; }
+    // Commas and whitespace cannot appear in a worker model id, which is what makes
+    // them safe separators here.
+    const ids = models.split(/[\s,]+/).filter(Boolean);
+    if (touched && restricted && (ids.length > 64 || ids.some(id => id.length > 200))) { setError(t('最多 64 个模型 ID，每个不超过 200 字节。', 'At most 64 model ids, each up to 200 bytes.')); return; }
     setBusy(true); setError('');
-    try { await api(`/admin/tenants/${encodeURIComponent(row.id)}`, { method: 'PATCH', body: JSON.stringify({ maxConcurrentRuns: c, maxRunsPerDay: d }) }); onSaved(); }
+    const body: Record<string, unknown> = { maxConcurrentRuns: c, maxRunsPerDay: d };
+    if (touched) body.allowedModels = restricted ? ids : null;
+    try { await api(`/admin/tenants/${encodeURIComponent(row.id)}`, { method: 'PATCH', body: JSON.stringify(body) }); onSaved(); }
     catch (cause) { setError(cause); }
     finally { setBusy(false); }
   }}><h2 id="saas-quota-title">{t('编辑配额', 'Edit limits')} · {row.name}</h2><p>{t('新额度影响后续运行准入；减少额度不会终止已有运行。每日额度以 UTC 日期计算。', 'New limits apply to subsequent run admission. Lower limits do not terminate existing runs. Daily limits use UTC dates.')}</p>
     <label>{t('最大并发运行数', 'Maximum concurrent runs')}<input autoFocus required type="number" min="1" max="100" step="1" value={concurrent} onChange={event => setConcurrent(event.target.value)} /></label>
     <label>{t('每日运行上限', 'Daily run limit')}<input required type="number" min="1" max="100000" step="1" value={daily} onChange={event => setDaily(event.target.value)} /></label>
+    <label><input type="checkbox" checked={restricted} onChange={event => { setRestricted(event.target.checked); setTouched(true); }} />{t('限制可用模型', 'Restrict available models')}</label>
+    {restricted && <label>{t('可用模型 ID（逗号或空格分隔）', 'Allowed model ids (comma or space separated)')}<input value={models} onChange={event => { setModels(event.target.value); setTouched(true); }} /></label>}
+    <p>{t('留空表示禁止全部模型。被移除的模型在后续每次调用准入时都会被拒绝，但已经发出的调用不会被追溯终止；要立即掐断在途调用请暂停工作区。', 'An empty list blocks every model. A removed model is refused at every later invocation, but calls already sent are not terminated retroactively. Suspend the workspace to cut those off.')}</p>
     {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}<button type="submit" disabled={busy}>{busy ? t('保存中…', 'Saving…') : t('保存配额', 'Save limits')}</button><button type="button" disabled={busy} onClick={onClose}>{t('取消', 'Cancel')}</button>
   </form></div>;
 }

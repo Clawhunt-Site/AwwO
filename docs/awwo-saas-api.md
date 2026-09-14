@@ -84,11 +84,13 @@
 | PUT /agents/{id} | 同创建字段 | 更新定义 |
 | PUT /agents/{id}/instructions | content | 保存纯文本指令，不能上传可执行扩展 |
 | DELETE /agents/{id} | 无 | 已被 session 引用时拒绝 |
-| GET /runtime（不带 tenant 前缀） | 无 | Pi 兼容字段及 runtimes[{id,name,configured,available,supportsEffortSelection:false,tools,reason?}]、models[{id,provider,runtime}]；登录即可 |
+| GET /runtime | 无 | Pi 兼容字段及 runtimes[{id,name,configured,available,supportsEffortSelection:false,tools,reason?}]、models[{id,provider,runtime}]；reader 即可读，目录已按本工作区模型清单过滤 |
+
+Agent 写入（POST / PUT `/agents`）在保存前按本工作区模型清单授权：清单外的 model 返回 `403 model_not_allowed`。这是授权检查而非可用性检查，只读数据库、不探测 worker，所以 worker 故障不会阻挡编辑；模型是否真实存在仍由运行准入判定。
 
 Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructions,runtime,adapterType,adapterConfig:{model},createdAt}`，其中 runtime 与 adapterType 同为 `pi | openai-agents`；原绑定适配器使用 adapterConfig.model。更新请求省略 adapterType 时保留既有 runtime；已有 session 的 Agent 不允许原地切换 runtime，应通过节点初始化创建新 Agent/Session。服务器保存的非空 model 必须属于对应 runtime 的服务端模型目录才能运行。前端不能在 Agent 定义中提供工具、模型 URL、工作目录或环境变量。内部 planner Agent 与 session 不出现在普通 Agent / session 列表。
 
-每个 `runtimes[].available` 表示对应 worker 配置健康探测通过；`plannerAvailable` 仍以 Pi 为准。`modelConnectivityVerified` 当前固定为 false，不在探测时执行推理。models 按 runtime 归属，tools 只包含对应 health 实际启用的固定 ID。Pi 兼容 `limits` 在 Pi 可读时返回，不可读时可为 null。RuntimeSettings 展示两个框架的配置、服务状态、模型和原因并支持刷新；模型连接仍由服务管理员配置，不提供浏览器秘密写接口。真实 provider 是否可用必须另做实际运行验收。
+每个 `runtimes[].available` 表示对应 worker 配置健康探测通过；`plannerAvailable` 表示 Pi 可读**且**本工作区在其清单内至少解析出一个可用模型（planner Agent 不带显式 model）。工作区被限制到无模型时 `available` 仍为 true（服务本身健康），但 `models` 为空且 `reason` 为 `No model is available to this workspace`。本路由**没有**不带 tenant 前缀的版本：没有工作区就无法套用其模型清单，旧客户端请求 `/api/v1/runtime` 会得到 404。`modelConnectivityVerified` 当前固定为 false，不在探测时执行推理。models 按 runtime 归属，tools 只包含对应 health 实际启用的固定 ID。Pi 兼容 `limits` 在 Pi 可读时返回，不可读时可为 null。RuntimeSettings 展示两个框架的配置、服务状态、模型和原因并支持刷新；模型连接仍由服务管理员配置，不提供浏览器秘密写接口。真实 provider 是否可用必须另做实际运行验收。
 
 规划返回标准 run。Go 在规划完成并验证 JSON/操作白名单后才发布规范化 JSON 到 completed.text / run.output，不把未验证规划 delta 暴露给前端；原画布随后验证 schema、图引用、环路和当前版本，合法结果直接应用并保存，提供撤销，没有第二个应用确认按钮。
 
@@ -228,7 +230,9 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | GET /admin/users | limit?, cursor? | `{items,nextCursor,snapshot}`；用户和平台角色，不返回密码 hash |
 | GET /admin/runs | limit?, cursor? | `{items,nextCursor,snapshot}`；标准 run 对象 |
 | GET /admin/audit | limit?, cursor? | `{items,nextCursor,snapshot}`；id,actorId,tenantId,action,resourceId,createdAt |
-| PATCH /admin/tenants/{id} | status?, maxConcurrentRuns?, maxRunsPerDay? | 至少一项；status=active/suspended，并发整数 1–100，每日整数 1–100000；200 返回更新的 tenant |
+| PATCH /admin/tenants/{id} | status?, maxConcurrentRuns?, maxRunsPerDay?, allowedModels? | 至少一项；status=active/suspended，并发整数 1–100，每日整数 1–100000；200 返回更新的 tenant（含 allowedModels） |
+
+`allowedModels` 是本工作区的模型清单（entitlement），三态：字段缺省=不改动；`null`=解除限制；数组=替换为该清单。最多 64 个 ID，每个 ID 非空、≤200 字节、不含空白、控制字符或逗号；服务器去重并排序后存储。`null`（即未限制）表示 worker 公布的全部模型都可选，所有现存工作区默认如此；`[]` 表示禁止全部模型。清单是过滤器而非注册表：列了但 worker 未公布的 ID 既不会被提供也不会被运行。写入清单**不取消任何运行**：每次模型调用在扣减配额的同一事务里按 tenants 当前行重新授权（`FOR UPDATE`），被移除的模型无法再被调用一次——排队中的运行、图节点子运行、团队后续成员、重启后恢复的图，全部在各自的准入处以 `model_not_allowed` 终止；而已经发出的调用是在旧清单下被授权的，不会被追溯终止，需要立即掐断在途调用请改用暂停工作区。原始清单只在平台管理端投影（`GET /admin/tenants`、本 PATCH 的响应）出现；工作区成员通过 `GET /tenants/{tenantId}/runtime` 读取已与 worker 实际公布目录求交的结果。
 
 以上全部要求 platformRole=admin。租户 owner 并不能访问平台后台。每日限额按 UTC 日期计算；降低额度不主动中断正在进行的模型调用，但团队后续成员调用需再次通过准入。暂停租户禁止新增业务写入，并取消当前活跃运行、记录事件；Go 保留历史读取权限，当前 SaaS 暂停页提供切换工作区与退出。恢复不自动重新执行取消过的任务。
 

@@ -213,3 +213,29 @@ it('preserves a newer operation journal created while background graph discovery
   expect(loadRunJournal(storage)?.serverGraph).toEqual(newer.serverGraph);
   expect(writes).toEqual([]);
 });
+
+// A workspace restricted away from every model still has a healthy runtime
+// service, so the canvas must not look ready to execute just because the service
+// is up. The note is keyed on the server's reason, not on service availability.
+it.each([
+  { name: 'a workspace entitled to no model', runtime: { available: true, configured: true, plannerAvailable: false, models: [], reason: 'No model is available to this workspace' }, note: 'No model is available to this workspace. Ask an administrator to grant one.' },
+  { name: 'a workspace with an entitled model', runtime: { available: true, configured: true, plannerAvailable: true, models: [{ id: 'granted-model' }] }, note: null },
+])('states that execution is not ready for $name', async ({ runtime, note }) => {
+  localStorage.setItem('superclaw_locale', 'en');
+  const form = { ...createFormNode({ x: 0, y: 0 }), id: 'brief' };
+  const cloud = { ...record(0), document: { ...emptyDocument(), nodes: [form] } };
+  const identity = { user: { id: 'user-a', name: 'Alice', email: 'alice@example.test', platformRole: 'user' }, tenants: [tenant] };
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('/appearance')) return json(appearanceFixture);
+    if (url.endsWith('/auth/me')) return json(identity);
+    if (url.endsWith('/runtime')) return json(runtime);
+    if (url.endsWith('/graph-runs')) return json({ items: [] });
+    return json(cloud);
+  }));
+  window.history.replaceState({}, '', `/?tenant=${tenant.id}&canvas=${cloud.id}`);
+  render(<SaaSApp />);
+  await screen.findByTestId('canvas-tile-brief');
+  if (note) expect(await screen.findByText(new RegExp(note.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeVisible();
+  else expect(screen.queryByText(/Pi execution is not ready/)).toBeNull();
+});

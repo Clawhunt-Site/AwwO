@@ -25,6 +25,12 @@ type piHealth struct {
 	Limits   map[string]any `json:"limits"`
 	Models   []piModel      `json:"models"`
 	Tools    []runtimeTool  `json:"tools,omitempty"`
+	// Allowed is the workspace model entitlement frozen with this catalog. nil
+	// means unrestricted, so an omitted field keeps every persisted snapshot
+	// decoding exactly as it did before. It travels inside execution snapshots so
+	// a pinned catalog carries the entitlement it was admitted under, and
+	// admission re-reads the live row before creating any child from it.
+	Allowed *[]string `json:"allowedModels,omitempty"`
 }
 type runtimeTool struct {
 	ID               string `json:"id"`
@@ -42,7 +48,23 @@ type piModel struct {
 }
 
 func (a *App) probePI(ctx context.Context) (piHealth, error) { return a.probeRuntime(ctx, runtimePI) }
+
+// The catalogue is workspace scoped because advertising is part of the
+// entitlement: a model a workspace may not run must not be offered to it either,
+// which is what lets one workspace hold a private model while others are
+// restricted away from it.
 func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
+	entitlement, e := tenantModelEntitlement(r.Context(), a.db, r.PathValue("tenantId"))
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	a.runtimeCatalogue(w, r, entitlement)
+}
+
+// Worker discovery is separated from resolving whose entitlement applies so the
+// two concerns stay independently testable.
+func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitlement modelEntitlement) {
 	type discovery struct {
 		h   piHealth
 		err error
@@ -69,20 +91,22 @@ func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
 	available, configured := false, false
 	for _, id := range []string{runtimePI, runtimeOpenAIAgents} {
 		result := found[id]
-		h := result.h
+		h := entitlement.apply(result.h)
 		_, _, configError := a.runtimeEndpoint(id)
 		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": false, "tools": enabledRuntimeTools(h, id)}
 		if result.err != nil {
 			descriptor["reason"] = result.err.Error()
 		} else {
-			descriptor["defaultModel"] = h.Model
+			descriptor["defaultModel"] = h.defaultModel()
 			seen := map[string]bool{}
 			for _, m := range h.Models {
 				models = append(models, map[string]string{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": id})
 				seen[m.ID] = true
 			}
-			if !seen[h.Model] {
-				models = append(models, map[string]string{"id": h.Model, "name": h.Model, "provider": h.Provider, "runtime": id})
+			// A legacy catalog may omit its own default. Offer it only when the
+			// entitlement still resolves to it, never as an unfiltered fallback.
+			if fallback := h.defaultModel(); fallback != "" && !seen[fallback] {
+				models = append(models, map[string]string{"id": fallback, "name": fallback, "provider": h.Provider, "runtime": id})
 			}
 		}
 		available = available || result.err == nil
@@ -90,9 +114,15 @@ func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
 		runtimes = append(runtimes, descriptor)
 	}
 	pi := found[runtimePI]
-	v := map[string]any{"engine": runtimePI, "configured": configured, "available": available, "plannerAvailable": pi.err == nil, "models": models, "runtimes": runtimes, "modelConnectivityVerified": false, "limits": pi.h.Limits}
+	// configured/available stay service-level facts, but planning must not be
+	// offered when this workspace has no model to plan with: the planner Agent
+	// carries no explicit model, so an empty entitlement would fail at admission.
+	planner := pi.err == nil && entitlement.apply(pi.h).defaultModel() != ""
+	v := map[string]any{"engine": runtimePI, "configured": configured, "available": available, "plannerAvailable": planner, "models": models, "runtimes": runtimes, "modelConnectivityVerified": false, "limits": pi.h.Limits}
 	if !available {
 		v["reason"] = "No configured runtime is available"
+	} else if len(models) == 0 {
+		v["reason"] = "No model is available to this workspace"
 	}
 	writeJSON(w, 200, v)
 }
@@ -135,7 +165,16 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var concurrent, daily int
-	if e = tx.QueryRow(r.Context(), "SELECT max_concurrent_runs,max_runs_per_day FROM tenants WHERE id=$1", tid).Scan(&concurrent, &daily); e != nil {
+	var restricted bool
+	var allowed []string
+	// The entitlement rides along with the quota read, so admission cannot resolve
+	// a model without having loaded the workspace's allowlist first.
+	if e = tx.QueryRow(r.Context(), "SELECT max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}') FROM tenants WHERE id=$1", tid).Scan(&concurrent, &daily, &restricted, &allowed); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	entitlement, e := newModelEntitlement(restricted, allowed)
+	if e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -212,7 +251,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 		return
 	}
-	snapshot, e := a.runtimeSnapshot(r.Context(), runtimeCatalog{}, runtime, model, instructions, team)
+	snapshot, e := a.runtimeSnapshot(r.Context(), entitlement, runtimeCatalog{}, runtime, model, instructions, team)
 	if e != nil {
 		a.runtimeAdmissionError(w, e)
 		return
@@ -336,7 +375,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	facts := invocationMetadata(snapshot, nil)
 	facts.Timing.QueueMs = int64ptr(queueDuration.Milliseconds())
-	if e = a.reserveInvocation(ctx, tid, id, id, facts); e != nil {
+	if e = a.reserveInvocation(ctx, tid, id, id, snapshot.Model, facts); e != nil {
 		a.finish(tid, id, "failed", "", e.Error())
 		return
 	}

@@ -96,7 +96,7 @@ it('roundtrips a valid original appearance bundle and exports only confirmed fie
 it('uses one modal when opened from runtime settings and returns to the runtime page', async () => {
   locale(); const { RuntimeSettings } = await import('../src/saas/RuntimeSettings');
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith('/appearance') ? payload() : { engine: 'pi', available: true, configured: true, models: [] }))));
-  render(<SaaSPreferencesProvider><AppearanceScope userId="alice"><RuntimeSettings onClose={() => {}}/></AppearanceScope></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><AppearanceScope userId="alice"><RuntimeSettings tenantId="tenant-a" onClose={() => {}}/></AppearanceScope></SaaSPreferencesProvider>);
   await waitFor(() => expect(screen.getByText('Color scheme settings')).toBeEnabled()); fireEvent.click(screen.getByText('Color scheme settings'));
   expect(screen.getAllByRole('dialog')).toHaveLength(1); expect(screen.queryByText('Refresh runtime status')).toBeNull();
   expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus(); fireEvent.keyDown(document, { key: 'Escape' });

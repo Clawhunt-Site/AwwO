@@ -172,7 +172,6 @@ func (a *App) Handler() http.Handler {
 		}
 		writeJSON(w, 200, map[string]any{"status": "ok", "environment": a.cfg.Env, "revision": BuildRevision()})
 	})
-	m.HandleFunc("GET /api/v1/runtime", a.auth(a.runtime))
 	m.HandleFunc("POST /api/v1/auth/register", a.authRate(a.register))
 	m.HandleFunc("POST /api/v1/auth/login", a.authRate(a.login))
 	m.HandleFunc("POST /api/v1/auth/logout", a.auth(a.logout))
@@ -185,6 +184,10 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/auth/me", a.auth(func(w http.ResponseWriter, r *http.Request) { a.meResponse(w, r, currentUser(r), 200) }))
 	m.HandleFunc("GET /api/v1/tenants", a.auth(a.tenants))
 	m.HandleFunc("POST /api/v1/tenants", a.auth(a.createTenant))
+	// There is deliberately no unscoped catalogue route: without a workspace the
+	// handler cannot apply that workspace's model entitlement, and a stale client
+	// asking for one must get a visible 404 rather than the whole catalogue.
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runtime", a.tenant(a.runtime, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/members", a.tenant(a.members, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/members", a.tenant(a.addMember, 3))
 	m.HandleFunc("PATCH /api/v1/tenants/{tenantId}/members/{id}", a.tenant(a.updateMember, 3))
