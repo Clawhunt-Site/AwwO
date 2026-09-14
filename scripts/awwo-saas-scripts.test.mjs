@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { EventEmitter } from 'node:events';
-import { parseEnv, port, serviceEnvironments, waitForHttp } from './awwo-saas-lib.mjs';
+import { parseEnv, port, resolveCommand, serviceEnvironments, waitForHttp } from './awwo-saas-lib.mjs';
 import { runDevelopment } from './awwo-saas-dev.mjs';
 test('local dotenv reads literal values without executing shell expressions', () => {
   assert.deepEqual(parseEnv('# comment\nMODEL=abc\nKEY="a=b"\nEMPTY=\nLITERAL=$(touch danger)\n'), { MODEL:'abc',KEY:'a=b',EMPTY:'',LITERAL:'$(touch danger)' });
@@ -207,4 +207,27 @@ test('readiness failure exits with an error and cleans only its owned Pi and dat
   assert.deepEqual(fixture.children[0].child.signals, ['SIGTERM']);
   assert.deepEqual(fixture.commands.map(command => command.command), ['go', 'pg_ctl']);
   assert.deepEqual(fixture.commands[1].args, ['-D', '/test-only/owned-postgres', '-m', 'fast', '-w', 'stop']);
+});
+
+test('npm launches without a shell on Windows and is left untouched elsewhere', () => {
+  // Forward slashes so this asserts the same thing whichever platform runs it; path handles both.
+  const installed = 'C:/Users/dev/AppData/Roaming/npm/node_modules/npm/bin/npm-cli.js';
+  // A shell is the thing to avoid here, not an inconvenience: run() also passes argument paths built
+  // from the state directory, and this repository's own path contains a space and an apostrophe.
+  const win = resolveCommand('npm', ['ci', '--prefix', 'apps/web'], 'win32', () => true, { npm_execpath: installed });
+  assert.equal(win.command, process.execPath);
+  assert.equal(win.args[0].endsWith('npm-cli.js'), true);
+  assert.deepEqual(win.args.slice(1), ['ci', '--prefix', 'apps/web']);
+
+  // npm_execpath always names npm-cli.js, so asking for npx must reach its sibling, never npm.
+  const npx = resolveCommand('npx', ['tsc'], 'win32', () => true, { npm_execpath: installed });
+  assert.equal(npx.args[0].endsWith('npx-cli.js'), true);
+
+  // Other platforms resolve npm from PATH, and a real executable is never rewritten.
+  assert.deepEqual(resolveCommand('npm', ['ci'], 'linux', () => true, {}), { command: 'npm', args: ['ci'] });
+  assert.deepEqual(resolveCommand('go', ['build'], 'win32', () => true, {}), { command: 'go', args: ['build'] });
+
+  // With no CLI anywhere, fail with the reason rather than a bare ENOENT from spawn.
+  assert.throws(() => resolveCommand('npm', ['ci'], 'win32', () => false, { npm_execpath: installed }),
+    /cannot be launched without a shell/);
 });

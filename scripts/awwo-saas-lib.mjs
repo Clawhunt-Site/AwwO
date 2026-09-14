@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
@@ -95,9 +96,40 @@ export async function loadLocalEnv(environment = process.env) {
   if (!/^127\.0\.0\.1:\d+$/.test(resolved.AWWO_LISTEN_ADDR) || resolved.AWWO_PI_HOST !== '127.0.0.1' || resolved.AWWO_OPENAI_AGENTS_HOST !== '127.0.0.1' || resolved.VITE_AWWO_WEB_HOST !== '127.0.0.1') throw new Error('Local services must listen on 127.0.0.1');
   return { env: resolved, envFile, managedDatabase: !environment.AWWO_DATABASE_URL && !saved.AWWO_DATABASE_URL };
 }
+// Windows ships npm as npm.cmd, and since the fix for CVE-2024-27980 Node refuses to spawn a .cmd
+// without a shell, so setup:saas failed here with a bare ENOENT. Enabling a shell is the worse
+// trade: run() also carries argument paths built from stateDir, and this repository's own directory
+// contains a space and an apostrophe, so shell quoting would become a live hazard for every caller.
+// Running npm's own JS entry point under this same Node needs no shell and cannot be misquoted.
+// Takes platform and a probe so both branches are testable without a Windows host.
+export function resolveCommand(command, args, platform = process.platform, present = existsSync, environment = process.env) {
+  if (platform !== 'win32' || !/^(npm|npx)$/.test(command)) return { command, args };
+  // npm sets npm_execpath for its own lifecycle scripts, and these launchers are npm scripts, so
+  // this finds the npm actually in use under nvm, volta, corepack or a user-level install. The
+  // bundled tree beside the node binary is only a fallback, and on this machine it is a different
+  // npm than the one running.
+  const candidates = [];
+  const running = environment.npm_execpath;
+  // Take the directory, not the file: npm_execpath always names npm-cli.js, and npx-cli.js is its
+  // sibling, so asking for npx must not silently launch npm.
+  if (running && running.endsWith('.js')) candidates.push(path.join(path.dirname(running), `${command}-cli.js`));
+  candidates.push(path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', `${command}-cli.js`));
+  const cli = candidates.find(file => present(file));
+  if (!cli) {
+    throw new Error(`${command} cannot be launched without a shell on Windows and no ${command}-cli.js was found (looked in ${candidates.join(', ')}); run ${command} directly instead`);
+  }
+  return { command: process.execPath, args: [cli, ...args] };
+}
 export function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: root, stdio: 'inherit', ...options });
+    let resolved;
+    try {
+      resolved = resolveCommand(command, args);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const child = spawn(resolved.command, resolved.args, { cwd: root, stdio: 'inherit', ...options });
     child.on('error', reject);
     child.on('exit', (code, signal) => code === 0 ? resolve() : reject(new Error(`${command} failed (${code ?? signal})`)));
   });
