@@ -9,6 +9,14 @@ it('translates HTTP and recovered error codes using the current locale while pre
   expect(canvasErrorMessage('Pi execution failed', 'runtime_failed')).toContain('Model execution failed');
   document.documentElement.lang = 'zh-CN'; expect(canvasErrorMessage('Pi execution failed', 'runtime_failed')).toContain('模型执行失败');
   expect(canvasErrorMessage('diagnostic 123', 'unknown_provider')).toBe('diagnostic 123');
+  // A run that produced only a scratchpad is withheld deliberately, so it needs its
+  // own explanation instead of the generic execution failure.
+  expect(canvasErrorMessage('Pi execution failed', 'reasoning_only_output')).toContain('只返回了思考过程');
+  document.documentElement.lang = 'en'; expect(canvasErrorMessage('Pi execution failed', 'reasoning_only_output')).toContain('only its reasoning');
+  // An invalid plan is transient model drift with nothing applied, so the message has to
+  // say retrying is available; without that the reader cannot tell it from a fault to fix.
+  expect(canvasErrorMessage('invalid_canvas_plan')).toContain('retry');
+  document.documentElement.lang = 'zh-CN'; expect(canvasErrorMessage('invalid_canvas_plan')).toContain('重试');
 });
 it('keeps HTTP status and code when displaying a localized quota rejection', async () => {
   document.documentElement.lang = 'en'; configureSaaSCanvas({ tenant, canvasId: 'canvas-a' }); configureSaaSCanvasSave(async () => {});

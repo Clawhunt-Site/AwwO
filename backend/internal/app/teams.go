@@ -299,7 +299,19 @@ func runTeam(ctx context.Context, t nodeTeam, task string, call teamCall) (strin
 				return "", errors.New("invalid_review_verdict")
 			}
 			if *v.Approved {
-				return *v.Output, nil
+				// The approved string replaces the run's whole published text, so this is a
+				// write boundary and takes the same gate as the other two: a member that
+				// wrapped its scratchpad inside the verdict would otherwise bypass the
+				// envelope check, which only inspected the verdict's JSON shape. The reader
+				// helper is deliberately lenient about an unterminated span and about a span
+				// that leaves nothing behind, which is right when healing stored text and
+				// wrong here — it would publish that scratchpad, or report a completed run
+				// with no deliverable at all.
+				answer, delivered := reasoningAnswer(*v.Output)
+				if !delivered {
+					return "", errors.New("reasoning_only_output")
+				}
+				return answer, nil
 			}
 		}
 		return "", errors.New("review_rounds_exhausted")
@@ -480,6 +492,11 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 4096), 2<<20)
+	// A member's scratchpad is removed from its turn output but still counted, so
+	// the output cap keeps bounding what the provider produced rather than what
+	// survived stripping.
+	produced := 0
+	var reasoning reasoningStream
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -498,11 +515,16 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		}
 		switch ev.Type {
 		case "text_delta":
-			if len(output)+len(ev.Delta) > 2<<20 {
+			if produced+len(ev.Delta) > 2<<20 {
 				code = "output_limit"
 				return "", errors.New(code)
 			}
-			output += ev.Delta
+			produced += len(ev.Delta)
+			delta := reasoning.push(ev.Delta)
+			if delta == "" {
+				continue
+			}
+			output += delta
 			if _, e = a.db.Exec(ctx, "UPDATE run_turns SET output=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, output); e != nil {
 				if contextFailure(e) {
 					return "", e
@@ -511,11 +533,19 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 				return "", errors.New(code)
 			}
 		case "completed":
-			if len(ev.Text) > 2<<20 || !strings.HasPrefix(ev.Text, output) {
+			answer, delivered := reasoningAnswer(ev.Text)
+			if len(ev.Text) > 2<<20 || !strings.HasPrefix(answer, output) {
 				code = "inconsistent_runtime_output"
 				return "", errors.New(code)
 			}
-			output = ev.Text
+			if !delivered {
+				// A member that returned only a scratchpad has no candidate to
+				// aggregate; its turn output stays empty so nothing leaks into the
+				// next member's prompt.
+				code = "reasoning_only_output"
+				return "", errors.New(code)
+			}
+			output = answer
 			status = "completed"
 			return output, nil
 		case "cancelled":

@@ -420,6 +420,11 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 4096), 2<<20)
 	var output strings.Builder
+	// A reasoning model's scratchpad is removed from the deliverable but still
+	// counted here, so the output cap stays a bound on what the provider actually
+	// produced and a model that reasons past it still fails instead of running on.
+	produced := 0
+	var reasoning reasoningStream
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -442,32 +447,43 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		}
 		switch ev.Type {
 		case "text_delta":
-			if output.Len()+len(ev.Delta) > 2<<20 {
+			if produced+len(ev.Delta) > 2<<20 {
 				finish("failed", output.String(), "output_limit")
 				return
 			}
-			output.WriteString(ev.Delta)
+			produced += len(ev.Delta)
+			delta := reasoning.push(ev.Delta)
+			output.WriteString(delta)
 			// Structured proposals are emitted only after schema validation and
 			// normalization; unvalidated token fragments are not a canvas plan.
-			if kind == "planner" {
+			// A withheld delta has nothing to persist or replay either.
+			if kind == "planner" || delta == "" {
 				continue
 			}
-			if !a.appendDelta(ctx, tid, id, ev.Delta) {
+			if !a.appendDelta(ctx, tid, id, delta) {
 				finish("failed", output.String(), "event_persistence_failed")
 				return
 			}
 		case "completed":
-			if !strings.HasPrefix(ev.Text, output.String()) {
+			answer, delivered := reasoningAnswer(ev.Text)
+			if !strings.HasPrefix(answer, output.String()) {
 				finish("failed", output.String(), "inconsistent_runtime_output")
+				return
+			}
+			if !delivered {
+				// Only a scratchpad arrived. Storing it would leak model internals,
+				// and completing with nothing would claim a deliverable that does
+				// not exist, so neither the text nor a success is published.
+				finish("failed", "", "reasoning_only_output")
 				return
 			}
 			if len(ev.Text) > 2<<20 {
 				finish("failed", output.String(), "output_limit")
 				return
 			}
-			if ev.Text != "" {
+			if answer != "" {
 				output.Reset()
-				output.WriteString(ev.Text)
+				output.WriteString(answer)
 			}
 			runtimeCompleted = true
 			finish("completed", output.String(), "")

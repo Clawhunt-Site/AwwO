@@ -66,7 +66,9 @@ func storeArtifactsTx(ctx context.Context, tx pgx.Tx, tid, canvasID, runID, node
 	// Preserve the original JSON types of non-file fields: flattening validated
 	// numbers and booleans into transport strings would invalidate the contract
 	// when this stored artifact is read by another node.
-	originalText := strings.TrimSpace(output)
+	// graphOutputFiles validated a normalized copy, so normalize identically here or a
+	// leaked scratchpad would pass validation and then fail storage.
+	originalText := strings.TrimSpace(stripReasoningPreamble(output))
 	if strings.HasPrefix(originalText, "```") && strings.HasSuffix(originalText, "```") {
 		originalText = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(originalText, "```json"), "```"), "```"))
 	}

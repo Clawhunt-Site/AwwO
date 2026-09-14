@@ -392,6 +392,11 @@ func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingA
 	}
 	fields := n.Contract.Outputs
 	single := allowsPlainTextOutput(fields)
+	// Output stored before the runtime boundary stripped reasoning is healed here
+	// rather than rejected, so re-reading a node that already delivered cannot turn
+	// a settled canvas into a permanent failure. Every reader of this text applies
+	// the same idempotent normalization, so validation and storage cannot disagree.
+	output = stripReasoningPreamble(output)
 	text := strings.TrimSpace(output)
 	if strings.HasPrefix(text, "```") && strings.HasSuffix(text, "```") {
 		text = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(text, "```json"), "```"), "```"))
@@ -505,7 +510,9 @@ func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (strin
 	sources := map[string]string{}
 	for _, e := range deps {
 		src := nodes[e.FromNode]
-		out := outputs[e.FromNode]
+		// A contract-less upstream node's text is injected verbatim below, so its
+		// scratchpad must be removed before it becomes the next agent's prompt.
+		out := stripReasoningPreamble(outputs[e.FromNode])
 		if src.Contract != nil {
 			v, err := graphOutput(src, out)
 			if err != nil {

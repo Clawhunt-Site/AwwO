@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf16"
 )
@@ -144,7 +145,19 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			if n.Kind == "form" {
 				output = formOutput(n)
 			} else if n.LastOutput != nil && !n.LastOutput.Partial {
-				output = n.LastOutput.Text
+				// This text is recorded as the cached node's own deliverable and served
+				// back to the workspace, so a document saved before stripping existed
+				// must be healed here too and not only where the contract reads it.
+				output = stripReasoningPreamble(n.LastOutput.Text)
+				// A row saved before stripping existed may be nothing but a scratchpad, and
+				// heals to empty. Projecting that would hand a downstream agent an empty
+				// operand and settle the graph as completed, claiming a deliverable that was
+				// never produced. Blank for any reason is the same absence as no cached
+				// output at all, so it takes the same refusal: a row that was already blank
+				// before healing is no more of a deliverable than one that became blank.
+				if strings.TrimSpace(output) == "" {
+					state, detail = "blocked", "Cached upstream output holds no deliverable"
+				}
 			} else {
 				state, detail = "blocked", "Missing cached upstream output"
 			}
@@ -395,6 +408,10 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				if e != nil {
 					continue
 				}
+				// Normalize once here so the node's recorded deliverable, its stored
+				// artifacts and its contract validation all read the same text, even
+				// for a child settled before the runtime boundary stripped reasoning.
+				out = stripReasoningPreamble(out)
 				if rs == "queued" || rs == "running" {
 					a.mu.Lock()
 					_, executing := a.running[s.RunID]
@@ -881,7 +898,10 @@ func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (s
 		if r.state == "waiting" || r.state == "running" {
 			r.state, r.detail = "cancelled", "Graph cancelled"
 			if r.runStatus != "" {
-				r.output = r.runOutput
+				// graphOutput below validates a normalized copy, so project the same
+				// normalization: recording the raw text would let a child stored before
+				// stripping existed pass validation and still publish its scratchpad.
+				r.output = stripReasoningPreamble(r.runOutput)
 				switch r.runStatus {
 				case "completed":
 					r.state, r.detail = "done", "completed"

@@ -12,7 +12,11 @@ const runErrors: Record<string, [string, string]> = {
   runtime_unavailable: ['Pi 执行服务暂不可用，请稍后重试。', 'The Pi execution service is unavailable. Please try again later.'],
   runtime_session_busy: ['执行服务中的会话仍在运行，请稍后重试。', 'The runtime session is still busy. Please try again later.'],
   runtime_rejected: ['执行服务未接受此请求，请检查运行配置。', 'The runtime did not accept this request. Check the runtime configuration.'],
-  invalid_canvas_plan: ['规划结果无效，当前画布保持原样。', 'The plan is invalid. The canvas has not changed.'],
+  // Retrying is safe rather than guaranteed: nothing was applied, and the cause is malformed
+  // structure from the model rather than a fault in the canvas, so the same request may well
+  // succeed. Nothing is adjusted automatically on retry. Saying only that the plan was
+  // invalid left the reader unable to tell this from something they had to fix first.
+  invalid_canvas_plan: ['规划结果无效，当前画布保持原样，可直接重试。', 'The plan is invalid and nothing was applied to the canvas. You can retry.'],
   database_unavailable: ['暂时无法保存运行状态，请恢复运行状态后再试。', 'The run state could not be saved. Restore its state before retrying.'],
   history_unavailable: ['暂时无法读取会话历史，请稍后重试。', 'Conversation history is unavailable. Please try again later.'],
   invalid_runtime_event: ['执行服务返回了无效事件，请恢复运行状态。', 'The runtime returned an invalid event. Restore the run state.'],
@@ -25,6 +29,7 @@ const runErrors: Record<string, [string, string]> = {
   runtime_stream_ended: ['执行流提前结束，请恢复运行状态后核对输出。', 'The execution stream ended early. Restore the run state and check its output.'],
   event_persistence_failed: ['运行事件保存失败，请恢复运行状态后核对。', 'Run events could not be saved. Restore the run state and check it.'],
   inconsistent_runtime_output: ['执行输出校验失败，请恢复运行状态后核对。', 'The runtime output failed validation. Restore the run state and check it.'],
+  reasoning_only_output: ['模型只返回了思考过程，没有给出结果，请重试或换一个模型。', 'The model returned only its reasoning and no answer. Retry or choose another model.'],
 };
 
 /** Keep a stable code alongside localized text; unknown provider details remain intact. */

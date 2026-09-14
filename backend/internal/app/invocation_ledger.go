@@ -225,7 +225,7 @@ func invocationFailure(status, code string) string {
 		return "timeout"
 	case "runtime_failed":
 		return "provider"
-	case "invalid_runtime_event", "inconsistent_runtime_output", "output_limit", "invalid_canvas_plan":
+	case "invalid_runtime_event", "inconsistent_runtime_output", "output_limit", "invalid_canvas_plan", "reasoning_only_output":
 		return "protocol"
 	case "runtime_session_busy", "runtime_rejected":
 		return "capacity"

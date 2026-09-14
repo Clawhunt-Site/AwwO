@@ -99,9 +99,12 @@ func parseCollaborationGraph(raw []byte, scope []string, p *collaborationPolicy)
 			out := ""
 			if src.Kind == "form" {
 				out = formOutput(src)
-			} else if src.LastOutput != nil && !src.LastOutput.Partial && strings.TrimSpace(src.LastOutput.Text) != "" {
-				out = src.LastOutput.Text
-			} else {
+			} else if src.LastOutput != nil && !src.LastOutput.Partial {
+				// A cached deliverable can predate reasoning stripping, and a
+				// contract-less source reaches the seed prompt verbatim below.
+				out = stripReasoningPreamble(src.LastOutput.Text)
+			}
+			if strings.TrimSpace(out) == "" {
 				return bad("Missing completed cached input from " + src.Title)
 			}
 			if src.Contract != nil {
@@ -225,6 +228,9 @@ func (a *App) collaborationTurns(ctx context.Context, tid, gid string) ([]collab
 		if e = rows.Scan(&t.Ordinal, &t.NodeID, &t.Phase, &t.Round, &t.State, &t.RunID, &t.SessionID, &t.Output, &t.Error); e != nil {
 			return nil, e
 		}
+		// A prior turn's text becomes an operand inside the next agent's prompt, so it
+		// needs the same normalization graphPrompt applies to an upstream node.
+		t.Output = stripReasoningPreamble(t.Output)
 		turns = append(turns, t)
 	}
 	return turns, rows.Err()
@@ -282,6 +288,9 @@ func (a *App) executeCollaboration(ctx context.Context, tid, gid, cid string, ra
 			if e = a.db.QueryRow(ctx, "SELECT status,output,error FROM runs WHERE tenant_id=$1 AND id=$2", tid, t.RunID).Scan(&rs, &out, &code); e != nil {
 				return
 			}
+			// The retained candidate, the validated contract and the next turn's
+			// operands all read this text, so normalize it once at the source.
+			out = stripReasoningPreamble(out)
 			if rs == "queued" || rs == "running" {
 				a.mu.Lock()
 				_, executing := a.running[t.RunID]
