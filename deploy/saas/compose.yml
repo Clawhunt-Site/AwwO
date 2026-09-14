@@ -44,9 +44,16 @@ services:
       AWWO_PI_API_KEY: ${AWWO_PI_API_KEY:-}
       AWWO_PI_MODELS_JSON: ${AWWO_PI_MODELS_JSON:-}
       AWWO_PI_MAX_CONCURRENCY: ${AWWO_PI_MAX_CONCURRENCY:-4}
-      AWWO_PI_CONTEXT_WINDOW: ${AWWO_PI_CONTEXT_WINDOW:-32768}
-      AWWO_PI_MAX_TOKENS: ${AWWO_PI_MAX_TOKENS:-4096}
-      AWWO_PI_TIMEOUT_MS: ${AWWO_PI_TIMEOUT_MS:-120000}
+      # A canvas plan is one long structured JSON answer, so the output cap is the binding limit,
+      # not the context window. At 4096 output tokens a seven-node plan was cut off mid-string and
+      # the run failed as runtime_failed / invalid_canvas_plan; a measured real plan needs ~4.5k
+      # characters and 32 operations. Raise both, keeping maxTokens + 256 < contextWindow, and stay
+      # well inside what the served model advertises (qwen3.8-27b reports 262144).
+      AWWO_PI_CONTEXT_WINDOW: ${AWWO_PI_CONTEXT_WINDOW:-131072}
+      AWWO_PI_MAX_TOKENS: ${AWWO_PI_MAX_TOKENS:-16384}
+      # Must stay below the api's AWWO_RUN_TIMEOUT and nginx's proxy_read_timeout, or a healthy
+      # long generation is killed by the shortest link in the chain.
+      AWWO_PI_TIMEOUT_MS: ${AWWO_PI_TIMEOUT_MS:-300000}
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
@@ -112,6 +119,11 @@ services:
       AWWO_DATABASE_URL: ${AWWO_DATABASE_URL:?Set the dedicated PostgreSQL connection URL}
       AWWO_PI_URL: http://pi:8097
       AWWO_PI_SESSION_WAIT: ${AWWO_PI_SESSION_WAIT:-5s}
+      # Without this the Go default of 180s applies, which is shorter than a legitimate long
+      # generation and would cancel it. It must sit between AWWO_PI_TIMEOUT_MS (300s) and this
+      # deployment's nginx proxy_read_timeout (660s in ./nginx.conf) so the model layer is what
+      # gives up first. Raising it past nginx buys nothing: nginx cuts the response either way.
+      AWWO_RUN_TIMEOUT: ${AWWO_RUN_TIMEOUT:-600s}
       AWWO_PI_TOKEN: ${AWWO_PI_TOKEN:?Set a dedicated internal token}
       AWWO_OPENAI_AGENTS_URL: http://openai-agents:8098
       AWWO_OPENAI_AGENTS_TOKEN: ${AWWO_OPENAI_AGENTS_TOKEN:?Set a dedicated OpenAI Agents internal token}

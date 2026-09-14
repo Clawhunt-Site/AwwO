@@ -60,23 +60,52 @@ export function fixtureOutput(body) {
   const proof = `[${MODEL} / 本地协议验收]\n历史 user=${historyUsers}, assistant=${historyAssistants}；persona SHA256=${digest(systems).slice(0, 16)}。\n输入摘要：${prompt.slice(0, 200)}\n此文本来自确定性本地协议 fixture，无外部模型推理。`;
   // Parse only the existing runGraph output contract format, never pretend to
   // solve arbitrary JSON schemas or natural-language instructions.
-  const marker = prompt.lastIndexOf('【输出格式】');
-  if (marker >= 0) {
-    const fields = [...prompt.slice(marker).matchAll(/^- ("(?:\\.|[^"\\])*"): (text|markdown|number|boolean|file)[，,]/gm)];
-    if (fields.length > 64) throw new Error('Fixture supports at most 64 declared fields');
-    if (fields.length) {
-      const output = Object.create(null);
-      for (const field of fields) {
-        const id = JSON.parse(field[1]);
-        if (typeof id !== 'string' || id.length > 128) throw new Error('Invalid fixture field ID');
-        output[id] = field[2] === 'number' ? 42 : field[2] === 'boolean' ? true
-          : field[2] === 'file' ? 'fixture://awwo-protocol-fixture/no-file-created'
-          : `${proof}\n字段 ${id} 的协议测试值。`;
-      }
-      return JSON.stringify(output);
+  const declared = declaredOutputFields(prompt);
+  if (declared) {
+    if (declared.length > 64) throw new Error('Fixture supports at most 64 declared fields');
+    const output = Object.create(null);
+    for (const field of declared) {
+      const id = field?.id;
+      if (typeof id !== 'string' || id === '' || id.length > 128) throw new Error('Invalid fixture field ID');
+      output[id] = fixtureFieldValue(id, field?.type, proof);
     }
+    return JSON.stringify(output);
   }
   return proof;
+}
+
+const OUTPUT_FORMAT_MARKER = '【输出格式】';
+
+// graphPrompt writes the marker, a newline, one JSON array of declared fields, and then its prose
+// instructions. Parsing that array is the only supported shape: an earlier version of this fixture
+// matched a Markdown list that the product never emits, so every contract silently fell through to
+// plain text and the typed-output path went unexercised.
+function declaredOutputFields(prompt) {
+  const marker = prompt.lastIndexOf(OUTPUT_FORMAT_MARKER);
+  if (marker < 0) return null;
+  const rest = prompt.slice(marker + OUTPUT_FORMAT_MARKER.length).replace(/^\r?\n/, '');
+  let fields;
+  try {
+    // trim() so a CRLF prompt does not leave a stray carriage return on the array line.
+    fields = JSON.parse(rest.split('\n', 1)[0].trim());
+  } catch {
+    return null;
+  }
+  return Array.isArray(fields) && fields.length ? fields : null;
+}
+
+// A `file` output must carry real content: the contract accepts {name, content} and stores it as a
+// downloadable artifact, so returning a path would assert a deliverable that does not exist.
+function fixtureFieldValue(id, type, proof) {
+  switch (type) {
+    case 'number': return 42;
+    case 'boolean': return true;
+    case 'html': return `<!doctype html><html><head><meta charset="utf-8"><title>协议 fixture ${id}</title></head>`
+      + `<body><p>字段 ${id} 的协议测试文档。此文档由确定性本地 fixture 生成，无外部模型推理。</p></body></html>`;
+    case 'file': return { name: `${(id.replace(/[^A-Za-z0-9._-]/g, '_') || 'fixture').slice(0, 64)}.md`,
+      content: `${proof}\n字段 ${id} 的协议测试文件内容。\n` };
+    default: return `${proof}\n字段 ${id} 的协议测试值。`;
+  }
 }
 
 export function streamFixtureResponse(res, body, index, record) {
@@ -110,10 +139,29 @@ export function selfTest() {
   assert.match(fixtureOutput(body), /历史 user=1, assistant=1/);
   assert.match(fixtureOutput(body), /second-turn/);
   assert.match(fixtureOutput(body), /无外部模型推理/);
-  const contract = { ...body, messages: [...body.messages.slice(0, -1), { role: 'user', content: '【输出格式】\n- "result": markdown，必填\n- "count": number，必填\n- "valid": boolean，必填\n- "file": file，必填\n- "__proto__": text，必填' }] };
+  // This must stay byte-identical in shape to what graphPrompt emits: marker, newline, one JSON
+  // array line, then prose. Asserting against any other shape is how the parser went stale before.
+  const declaredFields = [
+    { id: 'result', label: 'Result', type: 'markdown', required: true, help: '', placeholder: '' },
+    { id: 'count', label: 'Count', type: 'number', required: true, help: '', placeholder: '' },
+    { id: 'valid', label: 'Valid', type: 'boolean', required: true, help: '', placeholder: '' },
+    { id: 'page', label: 'Page', type: 'html', required: true, help: '', placeholder: '' },
+    { id: 'file', label: 'File', type: 'file', required: true, help: '', placeholder: '' },
+    { id: '__proto__', label: 'Prototype', type: 'text', required: true, help: '', placeholder: '' },
+  ];
+  const contract = { ...body, messages: [...body.messages.slice(0, -1), { role: 'user',
+    content: `【输出格式】\n${JSON.stringify(declaredFields)}\nReturn a JSON object keyed by field ID.` }] };
   const output = JSON.parse(fixtureOutput(contract));
   assert.equal(output.count, 42); assert.equal(output.valid, true); assert.equal(typeof output.result, 'string');
-  assert.equal(typeof output.__proto__, 'string'); assert.equal(output.file, 'fixture://awwo-protocol-fixture/no-file-created');
+  assert.equal(typeof output.__proto__, 'string');
+  assert.match(output.page, /^<!doctype html><html><head>.*<\/body><\/html>$/);
+  // A real deliverable, not a path: the contract stores this content and serves it for download.
+  assert.equal(output.file.name, 'file.md'); assert.match(output.file.content, /协议测试文件内容/);
+  assert.deepEqual(Object.keys(fixtureFieldValue('f', 'file', 'p')), ['name', 'content']);
+  // A prompt without the marker, or with a non-array after it, stays plain text rather than
+  // inventing a schema.
+  assert.match(fixtureOutput({ ...body, messages: [...body.messages.slice(0, -1),
+    { role: 'user', content: '【输出格式】\n- "result": markdown，必填' }] }), /本地协议验收/);
   const planner = JSON.parse(fixtureOutput({ messages: [{ role: 'system', content: 'Awwo canvas planner' }, { role: 'user', content: '添加节点' }] }));
   assert.equal(planner.version, 1); assert.equal(planner.operations.length, 3);
   assert.deepEqual(planner.operations.map(op => op.type), ['add_node', 'add_node', 'connect']);
@@ -281,7 +329,7 @@ export async function start() {
     console.log('负向标记：[fixture:invalid-plan]（规划拒绝）、[fixture:provider-503]、[fixture:provider-disconnect]。标记会保留在规划上下文中，请使用专用测试画布。');
     console.log('随机测试管理员和故障控制token仅写入上述600 credentialsFile；node scripts/awwo-saas-fixture-control.mjs --credentials <file> --rules <json-file> 配置一次性精确API故障。默认无故障。');
     console.log('Persona/history证据：查看requestSummaryURL或临时requests.jsonl（仅测试文本摘要，无headers/API keys）。无需改用户模型配置。');
-    console.log('边界：确定性协议文本与现有【输出格式】字段类型；不支持任意JSON schema推理，不创建交付文件。请勿输入真实业务秘密。Ctrl-C清理本实例。');
+    console.log('边界：确定性协议文本与现有【输出格式】字段类型；不支持任意JSON schema推理。file 字段返回确定性占位内容，会被真实存成可下载交付物（非真实业务成果）。请勿输入真实业务秘密。Ctrl-C清理本实例。');
   } catch (error) { await cleanup(); throw error; }
 }
 

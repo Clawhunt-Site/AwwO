@@ -104,6 +104,53 @@ func TestFileOutputGuidanceOnlyWhenDeclared(t *testing.T) {
 	}
 }
 
+// The declared-output section is a cross-language contract: scripts/awwo-saas-browser-fixture.mjs
+// reads the single JSON array line that follows the marker. An earlier fixture matched a Markdown
+// list this code never emitted, so every contract silently fell back to plain text and the typed
+// output path went unexercised. Pin the emitted shape here so a change on this side fails loudly
+// instead of quietly disabling that fixture again.
+func TestOutputFormatSectionIsOneJSONArrayLine(t *testing.T) {
+	n := graphNode{ID: "writer", Kind: "session", Contract: &graphContract{Version: 1, Outputs: []graphField{
+		{ID: "summary", Label: "Summary", Type: "text", Required: true, Help: "one paragraph"},
+		{ID: "count", Label: "Count", Type: "number"},
+		{ID: "artifact", Label: "Artifact", Type: "file", Placeholder: "name.md"},
+	}}}
+	prompt, e := graphPrompt(n, graphDocument{Nodes: []graphNode{n}}, map[string]string{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	const marker = "【输出格式】"
+	at := strings.LastIndex(prompt, marker)
+	if at < 0 {
+		t.Fatalf("marker absent: %s", prompt)
+	}
+	rest := prompt[at+len(marker):]
+	if !strings.HasPrefix(rest, "\n") {
+		t.Fatalf("marker is not followed by a newline: %q", rest[:min(40, len(rest))])
+	}
+	line := strings.SplitN(rest[1:], "\n", 2)[0]
+	var declared []map[string]any
+	if err := json.Unmarshal([]byte(line), &declared); err != nil {
+		t.Fatalf("declared fields are not one JSON array line (%v): %q", err, line)
+	}
+	if len(declared) != len(n.Contract.Outputs) {
+		t.Fatalf("declared %d fields for %d outputs: %q", len(declared), len(n.Contract.Outputs), line)
+	}
+	for i, field := range declared {
+		want := n.Contract.Outputs[i]
+		if field["id"] != want.ID || field["type"] != want.Type || field["label"] != want.Label {
+			t.Fatalf("field %d lost its identity: %v", i, field)
+		}
+		// The fixture and any model reading this rely on every key being present, including the
+		// empty ones; omitting them would make an absent value indistinguishable from a false one.
+		for _, key := range []string{"id", "label", "type", "required", "help", "placeholder"} {
+			if _, ok := field[key]; !ok {
+				t.Fatalf("field %d is missing %s: %v", i, key, field)
+			}
+		}
+	}
+}
+
 func TestContentDispositionIsAlwaysASafeAttachment(t *testing.T) {
 	for _, name := range []string{`report"; drop=1.txt`, "line\nbreak.txt", "设计说明.md", strings.Repeat("n", 200)} {
 		got := contentDisposition(name)
