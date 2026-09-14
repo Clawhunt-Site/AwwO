@@ -74,6 +74,32 @@ Package `awwo-api`, `html/`, `SOURCE_SHA` and `SHA256SUMS` into one tarball, upl
    own release and was on `saas-f3be5f7` at the time of writing; do not move it as a side effect of
    deploying the main site.
 
+### Read the release the unit points at; never hardcode the one you expect
+
+On 2026-09-14 a second session deployed `d10ae41` to this host while a deploy of `df43e77` was being
+prepared. A `sed s|saas-<expected-old>|saas-<new>|` found nothing to replace, so the unit kept
+pointing at the other session's release and the restart was a no-op that only bounced the API for a
+second. Take the current release out of the unit and the nginx config at run time and substitute from
+that, so a deploy either moves the tip forward from wherever it actually is or fails loudly. Also
+record it: it is the rollback target, and it is not necessarily the release you last shipped.
+
+Releases are retained, so rolling back is `sed` from the new release back to the recorded one,
+`daemon-reload`, and restart. Confirm afterwards with `systemctl show -p ExecStart --value`.
+
+### Two ways a generated deploy script silently breaks
+
+Both of these cost a failed run on 2026-09-14 and neither is obvious from the error:
+
+- `set -e` plus a readiness loop. `R=$(curl ... )` inside `for i in $(seq ...)` aborts the whole
+  script the first time the API is not yet up — which is exactly when the loop exists — so the
+  rollback branch never runs. Either drop `set -e` for that stretch or end the command with `|| true`.
+- Control bytes from the generator. If the command text is produced by another language, a
+  backslash-digit can become a control byte and a backslash-zero can become NUL. A NUL anywhere in
+  the script makes the whole thing fail with `Exec format error: exit status 126` and no output at
+  all, which reads like a permissions problem. Write the commands without backslashes — `grep -o`
+  plus `cut` needs none where `sed` with a backreference does — and assert the generated text
+  contains no byte below 0x20 before sending it.
+
 ### Before switching, size the migrations rather than assuming they are cheap
 
 `Migrate()` runs every pending migration inside **one transaction** before the API listens, so a slow
