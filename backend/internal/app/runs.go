@@ -368,6 +368,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		}
 	}()
 	if e = a.markInvocationAdmission(ctx, tid, id, facts, "unknown"); e != nil {
+		if status, code, ended := runContextOutcome(ctx); ended {
+			finish(status, "", code)
+			return
+		}
 		finish("failed", "", "accounting_commit_failed")
 		return
 	}
@@ -380,8 +384,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	if e != nil {
 		if errors.Is(e, errSessionBusy) {
 			finish("failed", "", "runtime_session_busy")
-		} else if ctx.Err() != nil {
-			finish("cancelled", "", "")
+		} else if status, code, ended := runContextOutcome(ctx); ended {
+			// An expired deadline here is a timeout, not a cancellation; reporting it as the latter
+			// hid real admission timeouts behind a state that looks deliberate.
+			finish(status, "", code)
 		} else {
 			finish("failed", "", "runtime_unavailable")
 		}
@@ -396,6 +402,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		}
 	}
 	if e = a.markInvocationAdmission(ctx, tid, id, facts, facts.Admission); e != nil {
+		if status, code, ended := runContextOutcome(ctx); ended {
+			finish(status, "", code)
+			return
+		}
 		finish("failed", "", "accounting_commit_failed")
 		return
 	}
@@ -473,17 +483,28 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			return
 		}
 	}
-	if ctx.Err() != nil {
-		status := "cancelled"
-		code := ""
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			status = "failed"
-			code = "run_timeout"
-		}
+	if status, code, ended := runContextOutcome(ctx); ended {
 		finish(status, output.String(), code)
 	} else {
 		finish("failed", output.String(), "runtime_stream_ended")
 	}
+}
+
+// runContextOutcome reports how a run ended when its own context is what stopped it. Once the
+// context is done, every subsequent database write fails too, so any step that writes must consult
+// this before blaming the runtime: recording a user's cancellation as a runtime fault shows them a
+// failure they caused deliberately and mislabels the invocation's accounting. Every single-run path
+// here goes through it, including admission, so a deadline cannot be reported as a cancellation
+// depending on which step noticed. The team path enforces the same rule through its own
+// contextFailure closure, which additionally has to set the enclosing turn's status.
+func runContextOutcome(ctx context.Context) (status, code string, ended bool) {
+	if ctx.Err() == nil {
+		return "", "", false
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "failed", "run_timeout", true
+	}
+	return "cancelled", "", true
 }
 func (a *App) appendDelta(ctx context.Context, tid, id, delta string) bool {
 	tx, e := a.db.Begin(ctx)

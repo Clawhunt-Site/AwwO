@@ -353,3 +353,30 @@ func TestTeamPiCancellationHasIndependentDeadline(t *testing.T) {
 		t.Fatal("cleanup did not respect independent bounded deadline", elapsed)
 	}
 }
+
+// Once a run's context is done every database write fails, including the accounting write. A step
+// that blames the runtime for that turns a user's own cancellation into a reported fault, which is
+// exactly the defect this rule exists to prevent — so pin it here rather than only inside the one
+// integration path that happened to expose it.
+func TestRunContextOutcomeSeparatesCancellationFromFailure(t *testing.T) {
+	if status, code, ended := runContextOutcome(context.Background()); ended || status != "" || code != "" {
+		t.Fatalf("a live context reported an ending: %q %q %v", status, code, ended)
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	status, code, ended := runContextOutcome(cancelled)
+	if !ended || status != "cancelled" || code != "" {
+		t.Fatalf("cancellation is not reported as a clean cancel: %q %q %v", status, code, ended)
+	}
+
+	// A deadline is not the user's choice, so it stays a failure — with its own code, never the
+	// code of whichever write happened to notice first.
+	expired, stop := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer stop()
+	<-expired.Done()
+	status, code, ended = runContextOutcome(expired)
+	if !ended || status != "failed" || code != "run_timeout" {
+		t.Fatalf("an expired deadline is misreported: %q %q %v", status, code, ended)
+	}
+}

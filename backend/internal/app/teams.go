@@ -437,7 +437,12 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			a.cancelRuntime(m.Runtime, id)
 		}
 	}()
+	// A cancelled parent stops this context, which fails the accounting write too. Without this
+	// guard the member's turn reports a runtime fault for the user's own cancellation.
 	if e := a.markInvocationAdmission(ctx, tid, id, facts, "unknown"); e != nil {
+		if contextFailure(e) {
+			return "", e
+		}
 		code = "accounting_commit_failed"
 		return "", errors.New(code)
 	}
@@ -463,6 +468,9 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		}
 	}
 	if e = a.markInvocationAdmission(ctx, tid, id, facts, facts.Admission); e != nil {
+		if contextFailure(e) {
+			return "", e
+		}
 		code = "accounting_commit_failed"
 		return "", errors.New(code)
 	}
