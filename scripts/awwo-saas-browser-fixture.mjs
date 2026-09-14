@@ -76,22 +76,30 @@ export function fixtureOutput(body) {
 
 const OUTPUT_FORMAT_MARKER = '【输出格式】';
 
-// graphPrompt writes the marker, a newline, one JSON array of declared fields, and then its prose
-// instructions. Parsing that array is the only supported shape: an earlier version of this fixture
-// matched a Markdown list that the product never emits, so every contract silently fell through to
-// plain text and the typed-output path went unexercised.
+// graphOutputPolicy writes the declared fields as one JSON array line, surrounded by policy prose
+// whose amount and order are the server's business. So find the array by parsing, never by
+// position: the first version of this fixture matched a Markdown list the product never emitted,
+// and a fixed "line after the marker" broke the moment the server added a policy preamble. Both
+// failures were silent — every contract fell through to plain text and the typed-output path went
+// unexercised — which is why this reads the section defensively and the Go side pins the shape.
 function declaredOutputFields(prompt) {
   const marker = prompt.lastIndexOf(OUTPUT_FORMAT_MARKER);
   if (marker < 0) return null;
-  const rest = prompt.slice(marker + OUTPUT_FORMAT_MARKER.length).replace(/^\r?\n/, '');
-  let fields;
-  try {
-    // trim() so a CRLF prompt does not leave a stray carriage return on the array line.
-    fields = JSON.parse(rest.split('\n', 1)[0].trim());
-  } catch {
-    return null;
+  // The section ends at the blank line that separates prompt parts, so a later part cannot be
+  // mistaken for this contract's fields.
+  const section = prompt.slice(marker + OUTPUT_FORMAT_MARKER.length).split(/\r?\n[ \t]*\r?\n/, 1)[0];
+  for (const line of section.split('\n')) {
+    const text = line.trim();
+    if (!text.startsWith('[')) continue;
+    let fields;
+    try {
+      fields = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    if (Array.isArray(fields) && fields.length && fields.every(f => f && typeof f.id === 'string')) return fields;
   }
-  return Array.isArray(fields) && fields.length ? fields : null;
+  return null;
 }
 
 // A `file` output must carry real content: the contract accepts {name, content} and stores it as a
@@ -150,7 +158,10 @@ export function selfTest() {
     { id: '__proto__', label: 'Prototype', type: 'text', required: true, help: '', placeholder: '' },
   ];
   const contract = { ...body, messages: [...body.messages.slice(0, -1), { role: 'user',
-    content: `【输出格式】\n${JSON.stringify(declaredFields)}\nReturn a JSON object keyed by field ID.` }] };
+    content: `【输出格式】\nFrozen graph output contract (server-owned serialization policy):\n`
+      + `${JSON.stringify(declaredFields)}\nReturn a JSON object keyed by exact field ID. `
+      + `Example shape only (replace example values with actual results): {"result":"<actual result content>"}\n\n`
+      + '请按本节点职责完成任务，并按声明的格式给出最终输出。' }] };
   const output = JSON.parse(fixtureOutput(contract));
   assert.equal(output.count, 42); assert.equal(output.valid, true); assert.equal(typeof output.result, 'string');
   assert.equal(typeof output.__proto__, 'string');

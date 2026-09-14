@@ -124,17 +124,30 @@ func TestOutputFormatSectionIsOneJSONArrayLine(t *testing.T) {
 	if at < 0 {
 		t.Fatalf("marker absent: %s", prompt)
 	}
-	rest := prompt[at+len(marker):]
-	if !strings.HasPrefix(rest, "\n") {
-		t.Fatalf("marker is not followed by a newline: %q", rest[:min(40, len(rest))])
-	}
-	line := strings.SplitN(rest[1:], "\n", 2)[0]
+	// Policy prose surrounds the array and may grow, so locate it the way the fixture does: the one
+	// line inside this section that parses as a JSON array. Requiring a fixed position here would
+	// make this test fail on harmless prose edits while still missing the failure that matters.
+	section := strings.SplitN(prompt[at+len(marker):], "\n\n", 2)[0]
 	var declared []map[string]any
-	if err := json.Unmarshal([]byte(line), &declared); err != nil {
-		t.Fatalf("declared fields are not one JSON array line (%v): %q", err, line)
+	arrayLines := 0
+	for _, line := range strings.Split(section, "\n") {
+		text := strings.TrimSpace(line)
+		if !strings.HasPrefix(text, "[") {
+			continue
+		}
+		var parsed []map[string]any
+		if json.Unmarshal([]byte(text), &parsed) != nil || len(parsed) == 0 {
+			continue
+		}
+		arrayLines++
+		declared = parsed
+	}
+	// More than one candidate would make the fixture's choice arbitrary.
+	if arrayLines != 1 {
+		t.Fatalf("expected exactly one JSON array line in the section, found %d: %q", arrayLines, section)
 	}
 	if len(declared) != len(n.Contract.Outputs) {
-		t.Fatalf("declared %d fields for %d outputs: %q", len(declared), len(n.Contract.Outputs), line)
+		t.Fatalf("declared %d fields for %d outputs: %q", len(declared), len(n.Contract.Outputs), section)
 	}
 	for i, field := range declared {
 		want := n.Contract.Outputs[i]
