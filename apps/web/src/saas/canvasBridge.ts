@@ -176,6 +176,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
         let lastStage = '';
         let completed = false;
         let failure = '';
+        // The code is kept beside the message because the caller decides whether to retry, and a
+        // localized sentence is not something to match on. Only a malformed plan is worth retrying.
+        let failureCode = '';
         let stalled = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
         const countNodes = createPlannedNodeCounter();
@@ -221,6 +224,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
               completed = true;
             } else if (['failed', 'interrupted', 'cancelled'].includes(event.type)) {
               failure = canvasErrorMessage(event.message, event.code) || canvasText('规划未完成，请重试。', 'Planning did not complete. Please try again.');
+              failureCode = typeof event.code === 'string' ? event.code : '';
             }
           });
         } catch {
@@ -233,7 +237,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             emit({ type: 'error', error: canvasText(
               `规划已超过 ${Math.round(PLAN_STALL_TIMEOUT_MS / 1000)} 秒没有任何进展，已停止本次运行；当前画布保持原样。`,
               `Planning reported no progress for ${Math.round(PLAN_STALL_TIMEOUT_MS / 1000)} seconds and the run was stopped. The canvas has not changed.`) });
-          } else if (failure) emit({ type: 'error', error: failure });
+          } else if (failure) emit({ type: 'error', error: failure, ...(failureCode ? { code: failureCode } : {}) });
           else if (!completed) {
             emit({ type: 'error', error: canvasText('规划连接中断；当前画布保持原样。', 'The planning connection was interrupted. The canvas has not changed.') });
           } else {
@@ -243,7 +247,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             let parsed = false;
             try { plan = JSON.parse(output.trim()); parsed = true; } catch { parsed = false; }
             if (parsed) emit({ type: 'plan', plan });
-            else emit({ type: 'error', error: canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.') });
+            // Same cause as the server's own rejection — the model's structure, not the request — so
+            // it carries the same code and the caller may retry it on the same terms.
+            else emit({ type: 'error', code: 'invalid_canvas_plan', error: canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.') });
           }
         } finally {
           release();

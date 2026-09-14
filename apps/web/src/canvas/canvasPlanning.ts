@@ -22,7 +22,7 @@ export const PLANNING_STORAGE_KEY = 'awwo.canvas.planning.v1';
 export interface PlanProgress {
   /** queued = accepted, waiting for a runtime slot; running = runtime started, nothing emitted yet;
    *  streaming = the plan text is actually arriving; validating = stream ended, checking the proposal. */
-  stage: 'queued' | 'running' | 'streaming' | 'validating';
+  stage: 'queued' | 'running' | 'streaming' | 'validating' | 'retrying';
   /** Characters of plan text received so far. */
   characters: number;
   /** Nodes the streamed proposal has declared so far (counted from completed add_node markers). */
@@ -120,6 +120,21 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
   ].join('\n\n');
 }
 
+/** A planner failure that kept the server's code, so the caller can tell a malformed plan — worth
+ * one more attempt — from a runtime fault, a quota rejection or a cancellation, which are not. */
+class PlanFailure extends Error {
+  constructor(message: string, readonly code: string) {
+    super(message);
+    this.name = 'PlanFailure';
+  }
+}
+
+/** A plan the model produced but that does not hold up: the structure went wrong, nothing was
+ * applied, and the same request often succeeds. Nothing else is retried. */
+function malformedPlan(error: unknown): boolean {
+  return error instanceof PlanFailure && error.code === 'invalid_canvas_plan';
+}
+
 /** Read a progress-reporting planner stream. The host that produced the stream owns the run
  * lifecycle (including stall detection and cancellation); this only projects frames to the UI
  * and returns the single proposal frame. An ended stream without a proposal is a failure, never
@@ -128,28 +143,33 @@ async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale
   observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<unknown> {
   let proposal: { plan: unknown } | null = null;
   let failure = '';
+  let failureCode = '';
   await readSseFrames(body, (_event, frame: any) => {
     if (proposal || failure) return;
     if (frame?.type === 'progress') {
       const count = (value: unknown, fallback: number) =>
         typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
       observed.last = {
-        stage: frame.stage === 'queued' || frame.stage === 'running' || frame.stage === 'validating' ? frame.stage : 'streaming',
+        stage: frame.stage === 'queued' || frame.stage === 'running' || frame.stage === 'validating' || frame.stage === 'retrying' ? frame.stage : 'streaming',
         characters: count(frame.characters, observed.last.characters),
         nodes: count(frame.nodes, observed.last.nodes),
       };
       onProgress?.(observed.last);
     } else if (frame?.type === 'plan') proposal = { plan: frame.plan };
-    else if (frame?.type === 'error') failure = typeof frame.error === 'string' && frame.error.trim() ? frame.error : canvasText(locale, 'planning.unavailable');
+    else if (frame?.type === 'error') {
+      failure = typeof frame.error === 'string' && frame.error.trim() ? frame.error : canvasText(locale, 'planning.unavailable');
+      failureCode = typeof frame.code === 'string' ? frame.code : '';
+    }
   });
-  if (failure) throw new Error(failure);
+  if (failure) throw new PlanFailure(failure, failureCode);
   if (!proposal) throw new Error(canvasText(locale, 'planning.interrupted'));
   return (proposal as { plan: unknown }).plan;
 }
 
-export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
-  locale: UiLocale = 'zh', onProgress?: PlanProgressReporter): Promise<CanvasPlan> {
-  const saas = currentSaaSCanvas() !== null;
+/** One planning attempt: its own run on the host, its own progress stream. A rejected plan is
+ * reported as a PlanFailure carrying the reason so the caller can decide about another attempt. */
+async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
+  locale: UiLocale, saas: boolean, observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<CanvasPlan> {
   const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan`, {
     method: 'POST', credentials: 'include', signal,
     headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' },
@@ -160,7 +180,6 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
   // headers nor a body, and must keep taking the plain JSON path rather than throwing here.
   const contentType = typeof response.headers?.get === 'function' ? response.headers.get('content-type') : null;
   const streaming = response.ok && Boolean(response.body) && (contentType || '').includes('text/event-stream');
-  const observed = { last: { stage: 'queued', characters: 0, nodes: 0 } as PlanProgress };
   let raw: unknown;
   if (streaming) {
     raw = await readPlanStream(response.body!, locale, observed, onProgress);
@@ -172,9 +191,47 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
   }
   // Keep the measured counts; only the stage advances. Zeroing them would misreport the work done.
   onProgress?.({ ...observed.last, stage: 'validating' });
-  const plan = parseCanvasPlan(raw);
+  // A plan that does not conform to the protocol failed for the same reason the server's own check
+  // does — the model's structure came out wrong — so it is reported as the same retryable kind.
+  let plan: CanvasPlan;
+  try {
+    plan = parseCanvasPlan(raw);
+  } catch (error) {
+    throw new PlanFailure(error instanceof Error && error.message ? error.message : canvasText(locale, 'planning.invalidResponse'), 'invalid_canvas_plan');
+  }
+  // A capability violation is deliberately NOT retryable. The plan is well formed; the model chose an
+  // operation this workspace does not support, which the prompt already rules out, so it is a decision
+  // rather than a slip and asking again would spend another run to be told the same thing.
   if (saas) assertSaaSPlan(plan, locale);
   return plan;
+}
+
+export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
+  locale: UiLocale = 'zh', onProgress?: PlanProgressReporter): Promise<CanvasPlan> {
+  const saas = currentSaaSCanvas() !== null;
+  const observed = { last: { stage: 'queued', characters: 0, nodes: 0 } as PlanProgress };
+  // Exactly one more attempt, and only for a malformed plan. A second retry would let a persistently
+  // broken model spend the workspace's run quota in a loop, and retrying a runtime fault, a quota
+  // rejection or a cancellation would spend it on something that cannot succeed. Each attempt is its
+  // own run on the host, so what it costs stays visible rather than hidden inside one operation.
+  let diagnosis: unknown;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await planOnce(prompt, doc, messages, signal, locale, saas, observed, onProgress);
+    } catch (error) {
+      // The first failure describes what the model actually produced. The retry is our own
+      // mitigation, so if it fails too its reason must not replace that diagnosis — reporting
+      // "no plan was returned" for what was really an unsupported operation tells the reader
+      // nothing they can act on.
+      if (attempt > 0) throw diagnosis;
+      if (signal.aborted || !malformedPlan(error)) throw error;
+      diagnosis = error;
+      // The next attempt starts from nothing, so the counts restart with it; keeping the previous
+      // ones would report work that no longer exists.
+      observed.last = { stage: 'retrying', characters: 0, nodes: 0 };
+      onProgress?.(observed.last);
+    }
+  }
 }
 
 export async function readPlannerStatus(signal?: AbortSignal, locale: UiLocale = 'zh'): Promise<{ available: boolean; provider: string; error?: string }> {

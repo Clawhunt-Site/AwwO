@@ -133,12 +133,18 @@ describe('canvas planner client requests', () => {
   });
 
   it('rejects successful HTTP responses that contain no plan or an invalid plan', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ message: 'ok' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: { ...validPlan, version: 9 } }) });
-    vi.stubGlobal('fetch', fetchMock);
+    // A body with no plan at all is a broken planner rather than a bad plan, so it fails on the
+    // first attempt without spending another run.
+    const absent = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message: 'ok' }) });
+    vi.stubGlobal('fetch', absent);
     await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow('未返回有效方案');
+    expect(absent).toHaveBeenCalledOnce();
+    // A plan that does not conform is the model's structure going wrong, which is retried once and
+    // then reported. Both attempts have to be answered or the assertion would only prove the mock ran dry.
+    const nonconforming = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: { ...validPlan, version: 9 } }) });
+    vi.stubGlobal('fetch', nonconforming);
     await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow('仅支持协议 version: 1');
+    expect(nonconforming).toHaveBeenCalledTimes(2);
   });
 
   it('propagates cancellation and network errors without retrying or returning a fabricated plan', async () => {
@@ -202,4 +208,73 @@ describe('planning conversation recovery', () => {
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('storage disabled'); });
     expect(loadPlanningConversation()).toEqual({ draft: '', messages: [] });
   });
+});
+
+describe('a malformed plan gets exactly one more attempt', () => {
+  const sseResponse = (frames: unknown[]) => ({
+    ok: true,
+    headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'text/event-stream' : null) },
+    body: new ReadableStream<Uint8Array>({ start(controller) {
+      const encoder = new TextEncoder();
+      for (const frame of frames) controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`));
+      controller.close();
+    } }),
+  });
+  const planFrames = [{ type: 'progress', stage: 'streaming', characters: 12, nodes: 1 }, { type: 'plan', plan: validPlan }];
+
+  it('retries a plan the host rejected as malformed and reports the retry to the caller', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(sseResponse([{ type: 'error', code: 'invalid_canvas_plan', error: '规划结果无效' }]))
+      .mockResolvedValueOnce(sseResponse(planFrames));
+    vi.stubGlobal('fetch', fetchMock);
+    const reported: { stage: string; characters: number; nodes: number }[] = [];
+    expect(await requestCanvasPlan('生成', emptyDocument(), [], requestSignal(), 'zh', p => reported.push({ ...p }))).toEqual(validPlan);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The retry has to be visible: an attempt that silently starts over looks like a stall.
+    const retry = reported.find(entry => entry.stage === 'retrying');
+    expect(retry).toBeDefined();
+    // Counts restart with the attempt; carrying the abandoned one's totals would report work that
+    // no longer exists.
+    expect(retry).toMatchObject({ characters: 0, nodes: 0 });
+    // The second attempt then reports its own progress and ends in validation, so the caller sees a
+    // continuous account of what is happening rather than a gap.
+    const afterRetry = reported.slice(reported.indexOf(retry!) + 1);
+    expect(afterRetry.some(entry => entry.stage === 'streaming' && entry.characters > 0)).toBe(true);
+    expect(afterRetry.at(-1)?.stage).toBe('validating');
+  });
+
+  it('gives up after the second attempt rather than looping on a persistently broken model', async () => {
+    // Built per call: a stream body is consumed once, so reusing one response would make the second
+    // attempt look like a lost connection instead of a second malformed plan.
+    const fetchMock = vi.fn().mockImplementation(async () => sseResponse([{ type: 'error', code: 'invalid_canvas_plan', error: '规划结果无效' }]));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow('规划结果无效');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a runtime fault, a quota rejection or a cancelled run', async () => {
+    for (const frame of [
+      { type: 'error', code: 'runtime_failed', error: '模型执行失败' },
+      { type: 'error', code: 'quota_exceeded', error: '额度不足' },
+      { type: 'error', code: 'reasoning_only_output', error: '只返回了思考过程' },
+      { type: 'error', error: '规划连接中断' },
+    ]) {
+      const fetchMock = vi.fn().mockImplementation(async () => sseResponse([frame]));
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow();
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('does not retry after the caller cancelled, even for a malformed plan', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      return sseResponse([{ type: 'error', code: 'invalid_canvas_plan', error: '规划结果无效' }]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(requestCanvasPlan('生成', emptyDocument(), [], controller.signal)).rejects.toThrow('规划结果无效');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
 });

@@ -41,6 +41,9 @@ describe('planner host capability boundary after online integration', () => {
     activate(); reply(operation);
     await expect(requestCanvasPlan('Plan', doc, [], new AbortController().signal)).rejects.toThrow('画布未改变');
     expect(doc).toEqual(original);
+    // A well-formed plan that uses an unsupported operation is a decision the prompt already rules
+    // out, not malformed structure, so it must not spend a second run being told the same thing.
+    expect(vi.mocked(canvasFetch)).toHaveBeenCalledOnce();
     clearSaaSCanvas(); reply(operation);
     await expect(requestCanvasPlan('Plan', doc, [], new AbortController().signal)).resolves.toEqual(proposal(operation));
   });

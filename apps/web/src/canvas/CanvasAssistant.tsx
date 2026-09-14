@@ -33,6 +33,7 @@ const STAGE_LABEL: Record<PlanProgress['stage'], CanvasTextKey> = {
   running: 'assistant.stageRunning',
   streaming: 'assistant.stageStreaming',
   validating: 'assistant.stageValidating',
+  retrying: 'assistant.stageRetrying',
 };
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */

@@ -154,6 +154,7 @@ const EN = {
   // Observed planner progress. No percentage is shown: the final plan length is unknown while it
   // streams, so any completion ratio would be invented rather than measured.
   'assistant.stageQueued': 'Queued, waiting for a runtime slot',
+  'assistant.stageRetrying': 'The plan came back malformed; trying once more',
   'assistant.stageRunning': 'Runtime started, waiting for the first output',
   'assistant.stageStreaming': 'Receiving the plan',
   'assistant.stageValidating': 'Checking the proposed structure',
@@ -600,7 +601,7 @@ const ZH: Record<CanvasTextKey, string> = {
   'graph.result.interrupted': '互审在第 {rounds} 轮中断，未自动派发后续轮次。',
   'status.waiting': '等待上游', 'status.running': '运行中', 'status.done': '已完成', 'status.failed': '运行失败', 'status.blocked': '被上游阻断', 'status.cached': '沿用已存结果', 'status.cancelled': '已取消', 'status.bound': '已连接', 'status.unbound': '待配置',
   'assistant.title': '想一起搭建什么？', 'assistant.panelTitle': '画布助手', 'assistant.close': '关闭画布助手', 'assistant.conversation': '画布对话', 'assistant.applied': '已更新画布', 'assistant.stale': '画布已有新改动，请重新生成', 'assistant.empty': '描述想调整的结构，也可以直接编辑画布。', 'assistant.form': '画布需求表单', 'assistant.input': '画布需求', 'assistant.welcomePlaceholder': '描述你的目标、需要的能力和交付结果…', 'assistant.panelPlaceholder': '描述你想调整的结构…', 'assistant.generating': '正在生成画布…', 'assistant.modifying': '正在修改画布…', 'assistant.cancel': '取消',
-  'assistant.stageQueued': '已排队，等待执行资源', 'assistant.stageRunning': '已启动，等待首个输出', 'assistant.stageStreaming': '正在接收方案', 'assistant.stageValidating': '正在校验结构方案',
+  'assistant.stageQueued': '已排队，等待执行资源', 'assistant.stageRetrying': '返回的方案结构无效，正在自动重试一次', 'assistant.stageRunning': '已启动，等待首个输出', 'assistant.stageStreaming': '正在接收方案', 'assistant.stageValidating': '正在校验结构方案',
   'assistant.progressElapsed': '{seconds} 秒', 'assistant.progressNodes': '已规划 {count} 个节点', 'assistant.progressCharacters': '已接收 {count} 字',
   'assistant.progressDetail': '规划进度', 'assistant.generate': '生成画布', 'assistant.modify': '修改画布', 'assistant.undo': '撤销本次更改', 'assistant.examples': '需求示例', 'assistant.exampleSaas': '做一个有用户登录、权限和数据看板的 SaaS 产品', 'assistant.exampleData': '搭建一套从数据清洗、质量校验到分析报告的数据流程', 'assistant.exampleContent': '为新产品建立从品牌文案、视觉素材到交付验收的内容流程',
   'template.inputs': '模板输入', 'template.prepare': '准备什么', 'template.outputs': '模板输出', 'template.workflow': '工作步骤', 'template.how': '如何推进', 'template.criteria': '验收标准', 'template.itemCount': '{count} 项', 'template.evidenceHint': '执行时逐项验证，并记录证据与未完成项。',
