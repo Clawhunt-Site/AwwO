@@ -37,6 +37,11 @@ func TestOptionalRuntimeConfiguration(t *testing.T) {
 			t.Fatalf("invalid configuration accepted or leaked: %v", err)
 		}
 	}
+	// ConfigFromEnv reads the whole process environment, so this must pin every value its result
+	// depends on. Inheriting the host's APP_ENV made this fail on a machine where it is set to
+	// production: the default public origin is http, which Validate rejects outside development.
+	// What is under test is optional worker loading, not origin validation.
+	t.Setenv("APP_ENV", "development")
 	t.Setenv("AWWO_DATABASE_URL", c.DatabaseURL)
 	t.Setenv("AWWO_OPENAI_AGENTS_URL", "http://localhost:8098")
 	t.Setenv("AWWO_OPENAI_AGENTS_TOKEN", strings.Repeat("o", 32))
