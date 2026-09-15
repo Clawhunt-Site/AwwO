@@ -75,6 +75,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 15, "migrations/015_tenant_model_allowlist.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 16, "migrations/016_agent_effort.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
@@ -126,6 +129,6 @@ const tenantJSON = `jsonb_build_object('id',t.id,'name',t.name,'status',t.status
 const adminTenantJSON = tenantJSON + `||jsonb_build_object('allowedModels',to_jsonb(t.allowed_models))`
 
 const canvasJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'document',document,'version',version,'createdAt',created_at,'updatedAt',updated_at)`
-const agentJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'status','active','model',model,'role',role,'title',title,'instructions',instructions,'runtime',runtime,'adapterType',runtime,'adapterConfig',jsonb_build_object('model',model),'createdAt',created_at)`
+const agentJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'status','active','model',model,'role',role,'title',title,'instructions',instructions,'runtime',runtime,'effort',effort,'adapterType',runtime,'adapterConfig',jsonb_build_object('model',model,'effort',effort),'createdAt',created_at)`
 const sessionJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'canvasId',canvas_id,'nodeId',node_id,'agentId',agent_id,'title',title,'createdAt',created_at)`
 const runJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'sessionId',session_id,'operationId',operation_id,'status',status,'output',output,'outputAvailable',length(output)>0,'terminal',status NOT IN ('queued','running'),'error',error,'createdAt',created_at,'updatedAt',updated_at)`

@@ -79,12 +79,12 @@
 | DELETE /canvases/{id} | 无 | 成功 204；关联节点或规划 run 为 queued/running 时 409 / resource_in_use，拒绝时不改运行、事件或审计 |
 | POST /canvases/{id}/plan | prompt, context, operationId | 202，创建持久规划 run；空画布也可使用，共享运行限额和 SSE |
 | GET /agents | limit?, cursor? | Pi Agent 列表，`{items,nextCursor,snapshot}` |
-| POST /agents | name, role?, title?, model?, adapterConfig?:{model}, instructions?, adapterType? | adapterType 省略时为 pi，也可为 openai-agents；model 非空时优先，否则取 adapterConfig.model；role 是 Agent 工作角色文本，不是用户权限 |
+| POST /agents | name, role?, title?, model?, effort?, adapterConfig?:{model,effort}, instructions?, adapterType? | adapterType 省略时为 pi，也可为 openai-agents；model 与 effort 非空时优先，否则取 adapterConfig 中的同名字段；effort 为空表示不显式设置思考强度（由供应商默认），非空时必须是小写标识符，是否被该模型支持在节点初始化与运行准入时校验；role 是 Agent 工作角色文本，不是用户权限 |
 | GET /agents/{id} | 无 | 已保存的 Agent 定义 |
 | PUT /agents/{id} | 同创建字段 | 更新定义 |
 | PUT /agents/{id}/instructions | content | 保存纯文本指令，不能上传可执行扩展 |
 | DELETE /agents/{id} | 无 | 已被 session 引用时拒绝 |
-| GET /runtime | 无 | Pi 兼容字段及 runtimes[{id,name,configured,available,supportsEffortSelection:false,tools,reason?}]、models[{id,provider,runtime}]；reader 即可读，目录已按本工作区模型清单过滤 |
+| GET /runtime | 无 | Pi 兼容字段及 runtimes[{id,name,configured,available,supportsEffortSelection,effortInputMode:"select",tools,reason?}]、models[{id,name,provider,runtime,reasoningEfforts[],defaultReasoningEffort}]；supportsEffortSelection 仅在该 runtime 至少一个模型发布了思考强度档位时为 true，档位按模型给出且是封闭枚举，defaultReasoningEffort 只用于展示、不会写入请求；reader 即可读，目录已按本工作区模型清单过滤 |
 
 Agent 写入（POST / PUT `/agents`）在保存前按本工作区模型清单授权：清单外的 model 返回 `403 model_not_allowed`。这是授权检查而非可用性检查，只读数据库、不探测 worker，所以 worker 故障不会阻挡编辑；模型是否真实存在仍由运行准入判定。
 
@@ -124,9 +124,9 @@ Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructi
 
 Go 在事务中重新检查 member 以上权限、租户 active 状态及画布归属，锁定画布并比较版本。过期版本返回 `409 version_conflict`；当前画布存在 queued/running 的图、节点或规划任务时返回 `409 resource_in_use`。已有 Agent 绑定必须属于当前租户；当前及历史会话还需属于当前画布和节点，并与声明的 Agent 引用一致。伪造或跨范围引用返回 `404 not_found`。选中节点全部成功后才提交，有任一错误则整体回滚。
 
-选中 session 节点时需要其节点和成员涉及的所有 worker health 可读，失败返回 `503 runtime_unavailable`，健康检查不会执行推理。空 runtime 解析为 `pi`，空 model 解析为有效 runtime 当前默认模型，非空 model 必须属于该 runtime 目录；支持 `llm` 与 `coding`，不接受图像类型、其他 runtime 或非空 effort。非法节点、团队、模型或工具返回 `400 invalid_node_setup`。初始化不占用模型调用次数，也不证明供应商真实推理连通。
+选中 session 节点时需要其节点和成员涉及的所有 worker health 可读，失败返回 `503 runtime_unavailable`，健康检查不会执行推理。空 runtime 解析为 `pi`，空 model 解析为有效 runtime 当前默认模型，非空 model 必须属于该 runtime 目录；支持 `llm` 与 `coding`，不接受图像类型或其他 runtime。effort 为空表示不显式设置；非空 effort 必须是该节点模型在 worker 目录中发布的档位（团队成员按各自 runtime 与模型校验），否则拒绝而不是静默丢弃，默认档位也不会被回填。团队成员留空模型而继承节点模型时，一并继承节点的思考强度；成员指定自己的模型时只使用成员自己的档位。非法节点、团队、模型、思考强度或工具返回 `400 invalid_node_setup`。初始化不占用模型调用次数，也不证明供应商真实推理连通。
 
-响应为 `{id,tenantId,name,document,version,createdAt,updatedAt}`。document 回填实际 `runtime/model/binding/issueId/activeThreadId/threads`；客户端必须使用这份 canonical 文档及其版本继续执行。首次准备创建 Agent 与 node Session；与已初始化的有效配置快照相比，名称、类型、模型、人格或团队变化会建立新的 Agent / 当前会话，保留历史身份与消息，清空新会话的旧交付。成员继承值在 `node_sessions.setup_snapshot` 中按实际值比较；仅把“继承”改写为相同显式值不会额外分叉。team 仍为节点级配置，旧 run 的执行快照保持不变。
+响应为 `{id,tenantId,name,document,version,createdAt,updatedAt}`。document 回填实际 `runtime/model/binding/issueId/activeThreadId/threads`；客户端必须使用这份 canonical 文档及其版本继续执行。首次准备创建 Agent 与 node Session；与已初始化的有效配置快照相比，名称、类型、模型、思考强度、人格或团队变化会建立新的 Agent / 当前会话，保留历史身份与消息，清空新会话的旧交付。成员继承值在 `node_sessions.setup_snapshot` 中按实际值比较；仅把“继承”改写为相同显式值不会额外分叉。team 仍为节点级配置，旧 run 的执行快照保持不变。
 
 规范化后的文档无需变化时，初始化返回相同版本，不重复创建 Agent / Session，不仅为了复制新的预览而改写当前 thread。文档变化时版本加一并记录 `canvas.initialized`。这是按当前状态与 CAS 实现的重复调用保护，不提供 operationId 回放：响应丢失后用旧版本重试可能返回 409，应先 GET 核对 canonical 文档。
 

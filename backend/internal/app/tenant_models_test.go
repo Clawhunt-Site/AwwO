@@ -117,7 +117,7 @@ func TestEntitlementResolvesModelsWithoutFallingBackOutsideIt(t *testing.T) {
 func TestSnapshotRestampSurvivesPersistenceAndRefusesLostModels(t *testing.T) {
 	catalog := runtimeCatalog{runtimePI: {Model: "test-model", Models: []piModel{{ID: "test-model", MaxContextTextBytes: 262144}, {ID: "alternate", MaxContextTextBytes: 262144}}}}
 	team := fixtureTeam("sequential")
-	resolved, err := resolveTeam(&team, runtimePI, "test-model", catalog)
+	resolved, err := resolveTeam(&team, runtimePI, "test-model", "", catalog)
 	if err != nil {
 		t.Fatal(err)
 	}

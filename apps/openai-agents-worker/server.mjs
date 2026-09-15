@@ -3,7 +3,7 @@ import { parentObservability } from './usage.mjs';
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { authorizeTools, fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
+import { authorizeEffort, authorizeTools, fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { startIsolatedRun } from './runner.mjs';
 
 function json(response, status, body) {
@@ -72,6 +72,9 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
     let modelConfig;
     try { modelConfig = resolveModelConfig(config, body.model); } catch {
       return json(response, 400, { error: { code: 'MODEL_NOT_FOUND', message: 'Select a model from the configured model catalog.' } });
+    }
+    try { authorizeEffort(modelConfig, body); } catch {
+      return json(response, 400, { error: { code: 'EFFORT_NOT_SUPPORTED', message: 'Select a reasoning effort the configured model advertises, or none.' } });
     }
     if (!fitsContextBudget(body, modelConfig)) return json(response, 413, { error: {
       code: 'CONTEXT_LIMIT', message: 'The prompt and history exceed the configured model context budget. Shorten the conversation or configure a model with a larger supported context window.',

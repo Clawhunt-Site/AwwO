@@ -1,5 +1,5 @@
 import { api, API_BASE, tenantPath, type Tenant, type SaaSAgent } from './api';
-import { runtimeDefinitions, runtimeModels, type SaaSRuntimeStatus } from './runtimeCatalog';
+import { modelEffortCapability, runtimeDefinitions, runtimeModels, type SaaSRuntimeStatus } from './runtimeCatalog';
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
@@ -106,7 +106,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       const runtime: SaaSRuntimeStatus = await request('/runtime');
       return json(runtimeDefinitions(runtime).map(item => ({ type: item.id,
         loaded: item.available && item.configured, disabled: !item.available || !item.configured,
-        supportsNodeTeams: true, supportsModelSelection: true, supportsEffortSelection: false,
+        supportsNodeTeams: true, supportsModelSelection: true, supportsEffortSelection: item.supportsEffortSelection,
         modelCatalogSource: 'saas_runtime', tools: item.tools, modelsCount: runtimeModels(runtime, item.id).length,
         ...(item.reason ? { reason: item.reason } : {}) })));
     }
@@ -115,7 +115,8 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       const runtime: SaaSRuntimeStatus = await request('/runtime');
       const selected = runtimeDefinitions(runtime).find(item => item.id === decodeURIComponent(modelCatalog[1]));
       if (!selected) return json({ error: canvasText('所选执行框架不在服务目录中。', 'The selected runtime is absent from the service catalog.') }, 404);
-      return json({ source: 'saas_runtime', models: runtimeModels(runtime, selected.id) });
+      // Models carry their own effort contract so the picker scopes levels to the chosen model.
+      return json({ source: 'saas_runtime', models: runtimeModels(runtime, selected.id).map(model => ({ id: model.id, ...modelEffortCapability(model) })) });
     }
     if (path === '/canvas/planner') {
       const runtime: SaaSRuntimeStatus = await request('/runtime');

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionNode } from './canvasDoc';
 import { useCanvasI18n } from './i18n';
-import { NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, createNodeTeam, createNodeTeamMember, nodeTeamTurnEstimate, validateNodeTeam, type NodeTeam, type NodeTeamMember, type NodeTeamMode, type NodeTeamRuntime, type NodeTeamTool, type NodeTeamModelCatalogs } from './nodeTeam';
+import { NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, createNodeTeam, createNodeTeamMember, nodeTeamTurnEstimate, validateNodeTeam, type NodeTeam, type NodeTeamEffortCatalogs, type NodeTeamMember, type NodeTeamMode, type NodeTeamRuntime, type NodeTeamTool, type NodeTeamModelCatalogs } from './nodeTeam';
+
+/** An unset effort is omitted rather than stored as '' so saved teams keep their shape and fingerprint. */
+const normalizeMember = ({ effort, ...member }: NodeTeamMember): NodeTeamMember => effort ? { ...member, effort } : member;
 import './node-team.css';
 
 type ReadJson = (path: string) => Promise<any>;
@@ -10,12 +13,13 @@ const COPY = {
     title: '节点协作团队', enable: '启用多 Agent 协作', unavailable: '当前运行环境未提供团队执行能力。',
     mode: '协作方式', runtime: '团队默认执行框架', rounds: '最多轮数', turns: '最多模型调用次数', timeout: '节点超时（秒）',
     inherit: '继承团队默认', defaultModel: '继承节点已绑定模型', runtimeDefaultModel: '使用此执行框架的服务默认模型', model: '模型', memberRuntime: '执行框架',
+    effort: '思考强度', effortDefault: '不指定（使用模型默认）', effortNeedsModel: '留空模型时继承节点模型及其思考强度；选择明确的模型后才可单独设置。', effortUnavailable: '当前模型不提供：',
     name: '名称', role: '职责', instructions: '专属指令', context: '可见上下文', task: '仅当前任务（含节点输入）', shared: '当前会话历史与本次运行前序成果',
     add: '添加 Agent', remove: '删除 Agent', up: '上移 Agent', down: '下移 Agent', member: 'Agent',
     loading: '正在读取模型清单…', failed: '模型清单读取失败；确认连接后重试。', retry: '重试模型清单', unknownModel: '当前清单不可用：',
     tools: '当前成员仅能生成文本；工具、文件读写和 Shell 尚不可用。',
     toolLabel: '允许的工具', calculator: '计算器（受限算术表达式）', current_time: '当前时间（UTC）',
-    agentsNote: 'OpenAI Agents JS 由服务端执行，可按成员启用目录列出的受控工具。调用工具时，工具结果直接成为本成员结果，不再进行模型总结。不提供任意代码、文件或 Shell 执行。Pi 保持文本推理。两种框架目前均不支持单独设置思考强度。',
+    agentsNote: 'OpenAI Agents JS 由服务端执行，可按成员启用目录列出的受控工具。调用工具时，工具结果直接成为本成员结果，不再进行模型总结。不提供任意代码、文件或 Shell 执行。Pi 保持文本推理。思考强度仅在所选模型发布了档位时可选。',
     runtimeMissing: '此执行框架未在当前服务目录中启用。', toolMissing: '当前服务目录未提供此工具，请取消选择。',
     retained: '原有单 Agent 配置与会话保留。手动发送和画布运行都会执行团队；聊天主回复显示最终结果，运行过程可查看每位成员的实际发言。',
     contextNote: '共享会话历史指当前会话已完成的用户问答与团队最终结果，不包含此前所有成员的发言。仅当前任务不带这些历史或普通前序成果；汇总、审核及返工仍接收必要的团队结果和审核意见。实际提供或截取的内容可在运行过程中查看。',
@@ -34,12 +38,13 @@ const COPY = {
     title: 'Node collaboration team', enable: 'Enable multiple Agents', unavailable: 'The current runtime does not provide team execution.',
     mode: 'Collaboration mode', runtime: 'Team default harness', rounds: 'Maximum rounds', turns: 'Maximum model calls', timeout: 'Node timeout (seconds)',
     inherit: 'Inherit team default', defaultModel: 'Inherit bound node model', runtimeDefaultModel: 'Use this runtime’s server default model', model: 'Model', memberRuntime: 'Harness',
+    effort: 'Reasoning effort', effortDefault: 'Not set (model default)', effortNeedsModel: 'An empty model inherits the node model together with its reasoning effort; choose an explicit model to set a member effort.', effortUnavailable: 'Not offered by this model: ',
     name: 'Name', role: 'Responsibility', instructions: 'Member instructions', context: 'Visible context', task: 'Current task only (including node inputs)', shared: 'Current session history and earlier results in this run',
     add: 'Add Agent', remove: 'Remove Agent', up: 'Move Agent up', down: 'Move Agent down', member: 'Agent',
     loading: 'Loading model catalogs…', failed: 'Could not load models. Check the connection and retry.', retry: 'Retry model catalog', unknownModel: 'Unavailable in current catalog: ',
     tools: 'Members currently generate text only. Tools, file access, and Shell are unavailable.',
     toolLabel: 'Allowed tools', calculator: 'Calculator (restricted arithmetic)', current_time: 'Current time (UTC)',
-    agentsNote: 'OpenAI Agents JS runs on the server, with catalog-listed tools enabled per member. A tool call returns its result as that member’s output without another model summary. It does not provide arbitrary code, file, or Shell execution. Pi retains text inference. Neither runtime currently supports an explicit reasoning effort setting.',
+    agentsNote: 'OpenAI Agents JS runs on the server, with catalog-listed tools enabled per member. A tool call returns its result as that member’s output without another model summary. It does not provide arbitrary code, file, or Shell execution. Pi retains text inference. Reasoning effort is selectable only for a model that advertises levels.',
     runtimeMissing: 'This runtime is not enabled in the current service catalog.', toolMissing: 'This tool is absent from the current service catalog. Deselect it.',
     retained: 'Single-Agent settings and conversations are preserved. Both chat sends and canvas runs execute the team. The main reply shows the final result; run details show each member’s actual response.',
     contextNote: 'Shared session history includes completed user exchanges and final team replies in this session, not every earlier member response. Task only excludes that history and ordinary earlier results; aggregation, review and revision still receive required team results and feedback. Inspect run details to see the actual included or truncated content.',
@@ -71,12 +76,13 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
   disabledRef.current = disabled;
   const readRef = useRef(readJson);
   readRef.current = readJson;
-  const [catalogState, setCatalogState] = useState<{ key: string; models: NodeTeamModelCatalogs; failed: string[] } | null>(null);
+  const [catalogState, setCatalogState] = useState<{ key: string; models: NodeTeamModelCatalogs; efforts: NodeTeamEffortCatalogs; failed: string[] } | null>(null);
   const [retry, setRetry] = useState(0);
   const hasTeam = Boolean(team);
   const requestedRuntimes = team ? [...new Set([team.runtime, ...team.members.map(member => member.runtime || team.runtime)])].filter(runtime => NODE_TEAM_RUNTIMES.includes(runtime)).sort() : [];
   const catalogKey = `${node.id}:${requestedRuntimes.join(',')}:${retry}`;
   const catalogs = catalogState?.key === catalogKey ? catalogState.models : {};
+  const effortCatalogs: NodeTeamEffortCatalogs = catalogState?.key === catalogKey ? catalogState.efforts : {};
   const catalogFailed = catalogState?.key === catalogKey ? catalogState.failed : [];
   const catalogsReady = requestedRuntimes.every(runtime => catalogs[runtime] !== undefined);
   useEffect(() => {
@@ -87,16 +93,24 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
       try {
         const data = await read(`/api/agents/${encodeURIComponent(runtime)}/models`);
         if (!Array.isArray(data?.models) || data.models.some((model: unknown) => typeof model !== 'string' || !model.trim())) throw new Error('Invalid catalog');
-        return { runtime, models: [...new Set<string>(data.models)] };
-      } catch { return { runtime, models: null }; }
+        const models = [...new Set<string>(data.models)];
+        // Effort levels belong to one model. A malformed advertisement offers no level at all.
+        const capabilities: Record<string, { effort_levels?: unknown }> = data?.model_capabilities !== null && typeof data?.model_capabilities === 'object' ? data.model_capabilities : {};
+        const efforts: Record<string, string[]> = Object.fromEntries(models.flatMap(model => {
+          const levels = capabilities[model]?.effort_levels;
+          return Array.isArray(levels) && levels.length && levels.every(level => typeof level === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(level)) ? [[model, [...new Set<string>(levels)]]] : [];
+        }));
+        return { runtime, models, efforts };
+      } catch { return { runtime, models: null, efforts: null }; }
     })).then(results => {
       if (!stale) setCatalogState({ key: catalogKey,
         models: Object.fromEntries(results.filter(result => result.models !== null).map(result => [result.runtime, result.models])),
+        efforts: Object.fromEntries(results.filter(result => result.efforts !== null).map(result => [result.runtime, result.efforts])),
         failed: results.filter(result => result.models === null).map(result => result.runtime) });
     });
     return () => { stale = true; };
   }, [hasTeam, available, catalogKey]);
-  const issues = team ? validateNodeTeam(team, catalogs, locale) : [];
+  const issues = team ? validateNodeTeam(team, catalogs, locale, effortCatalogs) : [];
   if (team && !runtimes.includes(team.runtime)) issues.push({ path: 'runtime', message: t.runtimeMissing });
   team?.members.forEach((member, index) => {
     const runtime = member.runtime || team.runtime;
@@ -106,7 +120,7 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
   const issueLabel = (path: string) => {
     const fields: Record<string, string> = { mode: t.mode, runtime: t.runtime, maxRounds: t.rounds,
       maxTurns: t.turns, timeoutSeconds: t.timeout, name: t.name, role: t.role,
-      instructions: t.instructions, model: t.model, context: t.context, tools: t.toolLabel };
+      instructions: t.instructions, model: t.model, effort: t.effort, context: t.context, tools: t.toolLabel };
     const memberField = path.match(/^members\.(\d+)(?:\.(.+))?$/);
     if (memberField) return `${t.member} ${Number(memberField[1]) + 1}${fields[memberField[2]] ? ` · ${fields[memberField[2]]}` : ''}`;
     return fields[path] ?? t.title;
@@ -116,7 +130,7 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
   const change = (next: NodeTeam | undefined) => { if (!disabledRef.current) onChange(next); };
   const edit = (patch: Partial<NodeTeam>) => { if (team) change({ ...team, ...patch }); };
   const editMember = (index: number, patch: Partial<NodeTeamMember>) => {
-    if (team) edit({ members: team.members.map((member, position) => position === index ? { ...member, ...patch } : member) });
+    if (team) edit({ members: team.members.map((member, position) => position === index ? normalizeMember({ ...member, ...patch }) : member) });
   };
   const move = (index: number, offset: number) => {
     if (!team || index + offset < 0 || index + offset >= team.members.length) return;
@@ -137,7 +151,7 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
       <p className="canvas-inspector-hint">{t.descriptions[team.mode]}</p>
       <p className="canvas-inspector-hint">{t.contextNote}</p>
       <label>{t.runtime}<select className="canvas-inspector-input" value={team.runtime} disabled={disabled}
-        onChange={event => edit({ runtime: event.target.value as NodeTeamRuntime, members: team.members.map(member => member.runtime ? member : { ...member, model: '', tools: [] }) })}>
+        onChange={event => edit({ runtime: event.target.value as NodeTeamRuntime, members: team.members.map(member => member.runtime ? member : normalizeMember({ ...member, model: '', effort: '', tools: [] })) })}>
         {!runtimes.includes(team.runtime) ? <option value={team.runtime} disabled>{nodeTeamRuntimeLabel(team.runtime)} · {t.runtimeMissing}</option> : null}
         {runtimes.map(runtime => <option key={runtime} value={runtime}>{nodeTeamRuntimeLabel(runtime)}</option>)}
       </select></label>
@@ -158,6 +172,9 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
         {team.members.map((member, index) => {
           const runtime = member.runtime || team.runtime;
           const catalog = catalogs[runtime];
+          const runtimeEfforts = effortCatalogs[runtime] ?? {};
+          const effortLevels = member.model ? runtimeEfforts[member.model] ?? [] : [];
+          const runtimeOffersEffort = Object.keys(runtimeEfforts).length > 0;
           const tools = runtime === 'openai-agents' ? NODE_TEAM_TOOLS.filter(tool => (runtimeTools[runtime] ?? []).includes(tool) || member.tools.includes(tool)) : [];
           return <fieldset className="node-team-member" key={member.id} disabled={disabled}>
           <legend>{t.member} {index + 1}</legend>
@@ -169,16 +186,25 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
           <label>{t.name}<input className="canvas-inspector-input" value={member.name} maxLength={128} onChange={event => editMember(index, { name: event.target.value })} /></label>
           <label>{t.role}<input className="canvas-inspector-input" value={member.role} maxLength={512} onChange={event => editMember(index, { role: event.target.value })} /></label>
           <label>{t.instructions}<textarea className="canvas-inspector-persona" rows={3} value={member.instructions} maxLength={16000} onChange={event => editMember(index, { instructions: event.target.value })} /></label>
-          <label>{t.memberRuntime}<select className="canvas-inspector-input" value={member.runtime} onChange={event => editMember(index, { runtime: event.target.value as '' | NodeTeamRuntime, model: '', tools: [] })}>
+          <label>{t.memberRuntime}<select className="canvas-inspector-input" value={member.runtime} onChange={event => editMember(index, { runtime: event.target.value as '' | NodeTeamRuntime, model: '', effort: '', tools: [] })}>
             <option value="">{t.inherit}（{nodeTeamRuntimeLabel(team.runtime)}）</option>
             {member.runtime && !runtimes.includes(member.runtime) ? <option value={member.runtime} disabled>{nodeTeamRuntimeLabel(member.runtime)} · {t.runtimeMissing}</option> : null}
             {runtimes.map(runtime => <option key={runtime} value={runtime}>{nodeTeamRuntimeLabel(runtime)}</option>)}
           </select></label>
-          <label>{t.model}<select className="canvas-inspector-input" value={member.model} disabled={disabled || !catalog || !available} onChange={event => editMember(index, { model: event.target.value })}>
+          <label>{t.model}<select className="canvas-inspector-input" value={member.model} disabled={disabled || !catalog || !available}
+            // A level is not portable across models: keep it only when the newly chosen model offers it too.
+            onChange={event => editMember(index, { model: event.target.value, effort: member.effort && (runtimeEfforts[event.target.value] ?? []).includes(member.effort) ? member.effort : '' })}>
             <option value="">{runtime === (node.runtime || 'pi') ? t.defaultModel : t.runtimeDefaultModel}</option>
             {member.model && !catalog?.includes(member.model) ? <option value={member.model} disabled>{t.unknownModel}{member.model}</option> : null}
             {(catalog ?? []).map(model => <option key={model} value={model}>{model}</option>)}
           </select></label>
+          {effortLevels.length || member.effort ? <label>{t.effort}<select className="canvas-inspector-input" value={member.effort ?? ''} disabled={disabled || !available || !effortLevels.length}
+            onChange={event => editMember(index, { effort: event.target.value })}>
+            <option value="">{t.effortDefault}</option>
+            {member.effort && !effortLevels.includes(member.effort) ? <option value={member.effort} disabled>{t.effortUnavailable}{member.effort}</option> : null}
+            {effortLevels.map(level => <option key={level} value={level}>{level}</option>)}
+          </select></label> : null}
+          {!member.model && runtimeOffersEffort ? <p className="canvas-inspector-hint">{t.effortNeedsModel}</p> : null}
           {tools.length ? <div className="node-team-tools"><span>{t.toolLabel}</span>{tools.map(tool => <label key={tool}>
             <input type="checkbox" checked={member.tools.includes(tool)} disabled={disabled} onChange={event => editMember(index, { tools: event.target.checked ? [...member.tools, tool] : member.tools.filter(value => value !== tool) })} />{t[tool]}
           </label>)}</div> : null}

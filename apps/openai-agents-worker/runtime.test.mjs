@@ -130,3 +130,20 @@ test('Responses raw usage comes from the provider and never SDK synthetic zeros'
     assert.equal(terminal.observability.usage.inputTokens, raw?.input_tokens ?? null);
   }
 });
+
+for (const protocol of ['chat_completions', 'responses']) test(`${protocol} forwards only an explicitly admitted reasoning effort and never back-fills the advertised default`, { timeout: 15_000 }, async t => {
+  const f = await fixture(t, { text: 'Effortful answer' });
+  const config = configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: protocol, AWWO_OPENAI_AGENTS_REASONING_EFFORTS: 'low,high', AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT: 'low' });
+  const explicit = await run(config, request({ effort: 'high' }));
+  assert.deepEqual(businessEvent(await explicit.result), { type: 'completed', text: 'Effortful answer' });
+  const silent = await run(config, request({ runId: 'run-2', sessionId: 'session-2' }));
+  assert.deepEqual(businessEvent(await silent.result), { type: 'completed', text: 'Effortful answer' });
+  assert.equal(f.calls.length, 2);
+  const effortOf = body => protocol === 'responses' ? body.reasoning?.effort : body.reasoning_effort;
+  assert.equal(effortOf(f.calls[0].body), 'high');
+  assert.equal(effortOf(f.calls[1].body), undefined);
+  assert.ok(!('reasoning' in f.calls[1].body) && !('reasoning_effort' in f.calls[1].body));
+  await assert.rejects(run(config, request({ runId: 'run-3', sessionId: 'session-3', effort: 'medium' })), /not supported/);
+  await assert.rejects(run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: protocol }), request({ runId: 'run-4', sessionId: 'session-4', effort: 'low' })), /not supported/);
+  assert.equal(f.calls.length, 2);
+});

@@ -6,6 +6,9 @@ export const NODE_TEAM_RUNTIMES: readonly NodeTeamRuntime[] = ['pi', 'openai-age
 export const NODE_TEAM_TOOLS: readonly NodeTeamTool[] = ['calculator', 'current_time'];
 export const nodeTeamRuntimeLabel = (runtime: string): string => runtime === 'pi' ? 'Pi' : runtime === 'openai-agents' ? 'OpenAI Agents JS' : runtime;
 export type NodeTeamModelCatalogs = Partial<Record<NodeTeamRuntime, readonly string[]>>;
+/** Per runtime, the reasoning-effort levels each listed model advertises. A loaded runtime with no entry for a model offers no level. */
+export type NodeTeamEffortCatalogs = Partial<Record<NodeTeamRuntime, Readonly<Record<string, readonly string[]>>>>;
+const EFFORT_LEVEL = /^[a-z][a-z0-9_-]{0,31}$/;
 export interface NodeTeamMember {
   id: string;
   name: string;
@@ -15,6 +18,10 @@ export interface NodeTeamMember {
   runtime: '' | NodeTeamRuntime;
   /** Empty inherits the bound node model only within the same runtime, otherwise its server default. */
   model: string;
+  /** Reasoning effort for this member's explicitly chosen model. A level is valid only when that model advertises it
+   * and is never back-filled from a default. A member whose model is empty inherits the node model together with the
+   * node's effort (resolved by the server); an explicit member effort therefore requires an explicit model. */
+  effort?: string;
   context: 'task' | 'shared';
   tools: NodeTeamTool[];
 }
@@ -32,7 +39,7 @@ export const NODE_TEAM_MODES: readonly NodeTeamMode[] = ['sequential', 'parallel
 const record = (raw: unknown): Record<string, unknown> | null => raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
 
 /** Validate before execution/save, without coercing invalid imported configuration into a run. */
-export function validateNodeTeam(raw: unknown, allowedModels?: ReadonlyArray<string> | NodeTeamModelCatalogs, locale: 'zh' | 'en' = 'en'): NodeTeamIssue[] {
+export function validateNodeTeam(raw: unknown, allowedModels?: ReadonlyArray<string> | NodeTeamModelCatalogs, locale: 'zh' | 'en' = 'en', effortCatalogs?: NodeTeamEffortCatalogs): NodeTeamIssue[] {
   const issues: NodeTeamIssue[] = [];
   const issue = (path: string, message: string) => issues.push({ path, message });
   const message = (en: string, zh: string) => locale === 'zh' ? zh : en;
@@ -79,6 +86,16 @@ export function validateNodeTeam(raw: unknown, allowedModels?: ReadonlyArray<str
       const label = nodeTeamRuntimeLabel(runtime);
       issue(`${prefix}.model`, message(`This model is absent from the current ${label} catalog.`, `此模型不在当前 ${label} 模型清单中，请重新选择。`));
     }
+    if (member.effort !== undefined && (typeof member.effort !== 'string' || (member.effort !== '' && !EFFORT_LEVEL.test(member.effort)))) {
+      issue(`${prefix}.effort`, message('Reasoning effort must be a level from the model catalog.', '思考强度必须是模型目录列出的档位。'));
+    } else if (typeof member.effort === 'string' && member.effort) {
+      const runtimeEfforts = effortCatalogs?.[runtime];
+      if (typeof member.model !== 'string' || !member.model) {
+        issue(`${prefix}.effort`, message('Choose an explicit model before choosing its reasoning effort.', '请先选择明确的模型，再选择它的思考强度。'));
+      } else if (runtimeEfforts && !(runtimeEfforts[member.model] ?? []).includes(member.effort)) {
+        issue(`${prefix}.effort`, message(`The selected ${nodeTeamRuntimeLabel(runtime)} model does not offer this reasoning effort.`, `所选 ${nodeTeamRuntimeLabel(runtime)} 模型不提供此思考强度，请重新选择。`));
+      }
+    }
   }
   return issues;
 }
@@ -90,7 +107,9 @@ export function sanitizeNodeTeam(raw: unknown): NodeTeam | null {
   return { version: 1, mode: team.mode, runtime: team.runtime, maxRounds: team.maxRounds,
     maxTurns: team.maxTurns, timeoutSeconds: team.timeoutSeconds,
     members: team.members.map(member => ({ id: member.id, name: member.name, role: member.role,
-      instructions: member.instructions, runtime: member.runtime, model: member.model, context: member.context, tools: [...member.tools] })),
+      instructions: member.instructions, runtime: member.runtime, model: member.model,
+      // Omitted when unset so teams saved before effort existed keep their exact fingerprint.
+      ...(member.effort ? { effort: member.effort } : {}), context: member.context, tools: [...member.tools] })),
   };
 }
 export function nodeTeamFingerprint(team?: NodeTeam): string | null {

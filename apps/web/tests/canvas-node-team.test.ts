@@ -43,6 +43,23 @@ describe('node team persistence and execution freshness', () => {
     expect(validateNodeTeam(team, ['other-model']).map(issue => issue.path)).toEqual(expect.arrayContaining(['members.1.id', 'members.0.tools', 'members.0.model']));
     expect(sanitizeNodeTeam(team)).toBeNull();
   });
+  it('validates member reasoning effort against the explicit model catalog and leaves legacy teams unchanged', () => {
+    const legacy = node().team!;
+    expect(sanitizeNodeTeam(legacy)!.members.some(member => 'effort' in member)).toBe(false);
+    expect(nodeTeamFingerprint({ ...legacy, members: legacy.members.map(member => ({ ...member, effort: '' })) })).toBe(nodeTeamFingerprint(legacy));
+    const team = node().team!;
+    team.members[0] = { ...team.members[0], runtime: 'openai-agents', model: 'deep', effort: 'high' };
+    const efforts = { 'openai-agents': { deep: ['low', 'high'] } };
+    expect(validateNodeTeam(team, undefined, 'en', efforts)).toEqual([]);
+    expect(sanitizeNodeTeam(team)!.members[0].effort).toBe('high');
+    const withMember = (patch: object) => ({ ...team, members: [{ ...team.members[0], ...patch }, team.members[1]] });
+    expect(validateNodeTeam(withMember({ effort: 'medium' }), undefined, 'en', efforts).map(issue => issue.path)).toContain('members.0.effort');
+    expect(validateNodeTeam(withMember({ model: '' }), undefined, 'en', efforts).map(issue => issue.path)).toContain('members.0.effort');
+    expect(validateNodeTeam(withMember({ model: 'plain' }), undefined, 'en', efforts).map(issue => issue.path)).toContain('members.0.effort');
+    expect(validateNodeTeam(withMember({ effort: 'High' })).map(issue => issue.path)).toContain('members.0.effort');
+    expect(validateNodeTeam(withMember({ effort: 7 })).map(issue => issue.path)).toContain('members.0.effort');
+    expect(sanitizeNodeTeam(withMember({ effort: 'High' }))).toBeNull();
+  });
   it('uses Unicode character limits shared with the Go contract', () => {
     const team = node().team!; team.members[0].name = '审'.repeat(128); team.members[0].role = '责'.repeat(512);
     expect(validateNodeTeam(team)).toEqual([]);
@@ -60,11 +77,12 @@ describe('node team persistence and execution freshness', () => {
     const restored = loadDocumentWithStatus(); expect(restored.status).toBe('corrupt');
     expect(restored.doc.nodes.map(item => item.id)).toEqual(['downstream']); expect(localStorage.getItem(CANVAS_BACKUP_KEY)).toBe(raw);
   });
-  it.each(['mode', 'model', 'role', 'context', 'instructions', 'runtime', 'order', 'budget', 'disable'])('invalidates outputs and recovery when team %s changes', (field) => {
+  it.each(['mode', 'model', 'effort', 'role', 'context', 'instructions', 'runtime', 'order', 'budget', 'disable'])('invalidates outputs and recovery when team %s changes', (field) => {
     const before = document(); const next = structuredClone(before); const session = next.nodes[0] as SessionNode;
     switch (field) {
       case 'mode': session.team!.mode = 'parallel'; break;
       case 'model': session.team!.members[0].model = 'other-model'; break;
+      case 'effort': session.team!.members[0].effort = 'high'; break;
       case 'role': session.team!.members[0].role = 'Auditor'; break;
       case 'context': session.team!.members[0].context = 'task'; break;
       case 'instructions': session.team!.members[0].instructions = 'Check sources'; break;

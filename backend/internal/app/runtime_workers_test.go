@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -61,7 +62,7 @@ func TestRuntimeTeamResolutionAndLegacySnapshots(t *testing.T) {
 	team.Members[0].Tools = []string{"calculator", "current_time"}
 	team.Members[1].Runtime, team.Members[1].Model = runtimePI, ""
 	team.Members[2].Model = "shared"
-	resolved, err := resolveTeam(&team, runtimePI, "pi-only", catalog)
+	resolved, err := resolveTeam(&team, runtimePI, "pi-only", "", catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestRuntimeTeamResolutionAndLegacySnapshots(t *testing.T) {
 		bad := *resolved
 		bad.Members = append([]teamMember{}, resolved.Members...)
 		mutate(&bad)
-		if _, err := resolveTeam(&bad, runtimePI, "pi-only", catalog); err == nil {
+		if _, err := resolveTeam(&bad, runtimePI, "pi-only", "", catalog); err == nil {
 			t.Fatal("invalid runtime/model/tools pairing accepted")
 		}
 	}
@@ -96,7 +97,7 @@ func TestRuntimeTeamResolutionAndLegacySnapshots(t *testing.T) {
 		t.Fatal("legacy Pi budget used for another runtime")
 	}
 	withoutTools := runtimeCatalog{runtimePI: catalog[runtimePI], runtimeOpenAIAgents: {Model: "oa-default", Models: catalog[runtimeOpenAIAgents].Models}}
-	if _, err := resolveTeam(&team, runtimePI, "pi-only", withoutTools); err == nil {
+	if _, err := resolveTeam(&team, runtimePI, "pi-only", "", withoutTools); err == nil {
 		t.Fatal("tool accepted when operator has not enabled it")
 	}
 }
@@ -118,6 +119,10 @@ type runtimeCall struct {
 	Runtime  string   `json:"runtime"`
 	TenantID string   `json:"tenantId"`
 	Tools    []string `json:"tools"`
+	Effort   string   `json:"effort"`
+	// EffortPresent records whether the request carried an effort key at all, so
+	// "no level" cannot be confused with an explicit empty string.
+	EffortPresent bool `json:"-"`
 }
 
 func runtimeProvider(t *testing.T, runtime string, handle func(http.ResponseWriter, *http.Request, runtimeCall)) *httptest.Server {
@@ -138,7 +143,15 @@ func runtimeProvider(t *testing.T, runtime string, handle func(http.ResponseWrit
 					return []runtimeTool{{ID: "calculator", ContextTextBytes: 512}, {ID: "current_time", ContextTextBytes: 512}}
 				}
 				return nil
-			}(), "models": []map[string]any{{"id": model, "runtime": runtime, "maxContextTextBytes": 262144}, {"id": extra, "runtime": runtime, "maxContextTextBytes": 262144}, {"id": "shared", "runtime": runtime, "maxContextTextBytes": 262144}}})
+			}(), "models": []map[string]any{func() map[string]any {
+				// Only the OA default profile advertises effort levels, so tests can
+				// tell "runtime supports it" from "this model supports it".
+				m := map[string]any{"id": model, "runtime": runtime, "maxContextTextBytes": 262144}
+				if runtime == runtimeOpenAIAgents {
+					m["reasoningEfforts"], m["defaultReasoningEffort"] = []string{"low", "high"}, "low"
+				}
+				return m
+			}(), {"id": extra, "runtime": runtime, "maxContextTextBytes": 262144}, {"id": "shared", "runtime": runtime, "maxContextTextBytes": 262144}}})
 			return
 		}
 		if r.Method == "DELETE" {
@@ -146,10 +159,16 @@ func runtimeProvider(t *testing.T, runtime string, handle func(http.ResponseWrit
 			return
 		}
 		var call runtimeCall
-		if json.NewDecoder(r.Body).Decode(&call) != nil || call.Runtime != runtime {
+		var keys map[string]json.RawMessage
+		raw, readErr := io.ReadAll(r.Body)
+		if readErr != nil || json.Unmarshal(raw, &call) != nil || json.Unmarshal(raw, &keys) != nil || call.Runtime != runtime {
 			t.Error("request routed to wrong runtime")
 			w.WriteHeader(400)
 			return
+		}
+		_, call.EffortPresent = keys["effort"]
+		if runtime == runtimePI && call.EffortPresent {
+			t.Error("Pi request included an effort field")
 		}
 		if runtime == runtimePI && call.Tools != nil {
 			t.Error("Pi request included unsupported tools field")
@@ -185,13 +204,16 @@ func TestRuntimeDiscoveryAndStrictWorkerIdentity(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	for _, runtime := range body.Runtimes {
-		if !runtime.Available || !runtime.Configured || runtime.SupportsEffortSelection || !reflect.DeepEqual(runtime.Tools, runtimeTools(runtime.ID)) {
+		if !runtime.Available || !runtime.Configured || runtime.SupportsEffortSelection != (runtime.ID == runtimeOpenAIAgents) || !reflect.DeepEqual(runtime.Tools, runtimeTools(runtime.ID)) {
 			t.Fatal(runtime)
 		}
 	}
 	for _, m := range body.Models {
 		if !validRuntime(m.Runtime) {
 			t.Fatal("unscoped model", m)
+		}
+		if (m.ID == "oa-default") != (len(m.ReasoningEfforts) == 2 && m.DefaultReasoningEffort == "low") {
+			t.Fatal("per-model effort advertisement", m)
 		}
 	}
 	if strings.Contains(w.Body.String(), c.OpenAIAgentsToken) || strings.Contains(w.Body.String(), oa.URL) {
@@ -205,7 +227,7 @@ func TestRuntimeDiscoveryAndStrictWorkerIdentity(t *testing.T) {
 	}
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = "", ""
 	a = New(nil, c)
-	if _, err := a.runtimeSnapshot(context.Background(), modelEntitlement{}, runtimeCatalog{}, runtimeOpenAIAgents, "", "", nil); err == nil {
+	if _, err := a.runtimeSnapshot(context.Background(), modelEntitlement{}, runtimeCatalog{}, runtimeOpenAIAgents, "", "", "", nil); err == nil {
 		t.Fatal("disabled runtime fell back to Pi")
 	}
 }

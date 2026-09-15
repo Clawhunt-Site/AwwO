@@ -45,6 +45,41 @@ type piModel struct {
 	Runtime              string `json:"runtime"`
 	MaxContextTextBytes  int    `json:"maxContextTextBytes"`
 	MessageOverheadBytes int    `json:"messageOverheadBytes"`
+	// ReasoningEfforts is the closed set of reasoning-effort levels a worker
+	// advertises for this model. Empty means the model accepts no explicit level,
+	// so an effort on such a node is refused rather than silently dropped. The
+	// default is display metadata only: it is never back-filled into a request.
+	ReasoningEfforts       []string `json:"reasoningEfforts,omitempty"`
+	DefaultReasoningEffort string   `json:"defaultReasoningEffort,omitempty"`
+}
+
+// supportsEffort reports whether model accepts the exact effort level. An empty
+// effort is always acceptable: it means "no explicit setting", which every model
+// supports because the provider then applies its own default.
+func (h piHealth) supportsEffort(model, effort string) bool {
+	if effort == "" {
+		return true
+	}
+	for _, m := range h.Models {
+		if m.ID == model {
+			for _, level := range m.ReasoningEfforts {
+				if level == effort {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
+}
+
+func (h piHealth) supportsEffortSelection() bool {
+	for _, m := range h.Models {
+		if len(m.ReasoningEfforts) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) probePI(ctx context.Context) (piHealth, error) { return a.probeRuntime(ctx, runtimePI) }
@@ -87,26 +122,33 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 		result := <-results
 		found[result.runtime] = result.discovery
 	}
-	models, runtimes := []map[string]string{}, []map[string]any{}
+	models, runtimes := []map[string]any{}, []map[string]any{}
 	available, configured := false, false
 	for _, id := range []string{runtimePI, runtimeOpenAIAgents} {
 		result := found[id]
 		h := entitlement.apply(result.h)
 		_, _, configError := a.runtimeEndpoint(id)
-		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": false, "tools": enabledRuntimeTools(h, id)}
+		// Effort selection is a per-model fact taken from the worker catalog, so
+		// the same runtime can advertise it for one profile and refuse it for another.
+		// The picker treats the levels as a closed enum ("select"), never free text.
+		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": result.err == nil && h.supportsEffortSelection(), "effortInputMode": "select", "tools": enabledRuntimeTools(h, id)}
 		if result.err != nil {
 			descriptor["reason"] = result.err.Error()
 		} else {
 			descriptor["defaultModel"] = h.defaultModel()
 			seen := map[string]bool{}
 			for _, m := range h.Models {
-				models = append(models, map[string]string{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": id})
+				efforts := []string{}
+				if len(m.ReasoningEfforts) > 0 {
+					efforts = append(efforts, m.ReasoningEfforts...)
+				}
+				models = append(models, map[string]any{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": id, "reasoningEfforts": efforts, "defaultReasoningEffort": m.DefaultReasoningEffort})
 				seen[m.ID] = true
 			}
 			// A legacy catalog may omit its own default. Offer it only when the
 			// entitlement still resolves to it, never as an unfiltered fallback.
 			if fallback := h.defaultModel(); fallback != "" && !seen[fallback] {
-				models = append(models, map[string]string{"id": fallback, "name": fallback, "provider": h.Provider, "runtime": id})
+				models = append(models, map[string]any{"id": fallback, "name": fallback, "provider": h.Provider, "runtime": id, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""})
 			}
 		}
 		available = available || result.err == nil
@@ -217,8 +259,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
 		return
 	}
-	var model, instructions, kind, runtime string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime)
+	var model, instructions, kind, runtime, effort string
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -251,7 +293,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 		return
 	}
-	snapshot, e := a.runtimeSnapshot(r.Context(), entitlement, runtimeCatalog{}, runtime, model, instructions, team)
+	snapshot, e := a.runtimeSnapshot(r.Context(), entitlement, runtimeCatalog{}, runtime, model, effort, instructions, team)
 	if e != nil {
 		a.runtimeAdmissionError(w, e)
 		return
@@ -397,7 +439,11 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	} else {
 		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions), budget, overhead)
 	}
-	body, e := json.Marshal(map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": defaultRuntime(snapshot.Runtime)})
+	request := map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": defaultRuntime(snapshot.Runtime)}
+	if snapshot.Effort != "" {
+		request["effort"] = snapshot.Effort
+	}
+	body, e := json.Marshal(request)
 	if e != nil {
 		finish("failed", "", "invalid_request")
 		return

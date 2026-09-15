@@ -180,10 +180,16 @@ export function RuntimePicker({
     onChange({ ...value, model: next, effort: usesLiveCatalog && !capabilityFor(next)?.effort_levels.includes(effort) ? '' : effort });
   };
   const setEffort = (next: string) => {
-    if (disabled || liveCatalogBlocked || (usesLiveCatalog && (!capability || (next !== '' && !effortLevels.includes(next))))) return;
+    // Clearing is always allowed, so a stale saved level can be removed; a new level must be advertised.
+    if (disabled || liveCatalogBlocked || (next !== '' && usesLiveCatalog && (!capability || !effortLevels.includes(next)))) return;
     onChange({ ...value, effort: next });
   };
-  const effortDisabled = disabled || liveCatalogBlocked || (usesLiveCatalog && effortLevels.length === 0);
+  // A saved level the runtime or model no longer advertises stays visible and is never selectable. It can be
+  // cleared in place when the runtime stopped advertising effort or the chosen model is known; for an unknown
+  // saved model the control stays disabled (no capabilities are invented) and choosing a model resets it.
+  const staleEffort = effort !== '' && !effortLevels.includes(effort);
+  const clearableStale = staleEffort && (!supportsEffort || (liveCatalogReady && Boolean(capability)));
+  const effortDisabled = disabled || liveCatalogBlocked || (usesLiveCatalog && effortLevels.length === 0 && !clearableStale);
 
   return (
     <>
@@ -246,8 +252,8 @@ export function RuntimePicker({
           disabled={disabled}
         />
       ) : null}
-      {backend && supportsEffort ? (
-        effortMode === 'text' ? (
+      {backend && (supportsEffort || effort !== '') ? (
+        effortMode === 'text' && supportsEffort ? (
           <ComboInput
             key={`${backend}:effort`}
             ariaLabel={t.effort}
@@ -261,7 +267,7 @@ export function RuntimePicker({
             key={`${backend}:effort`}
             ariaLabel={t.effort}
             value={effort}
-            options={[{ value: '', label: effortDefault }, ...toOptions(effortLevels)]}
+            options={[{ value: '', label: effortDefault }, ...(staleEffort ? [{ value: effort, label: `${effort} · ${t.savedModel}`, disabled: true }] : []), ...toOptions(effortLevels)]}
             onChange={setEffort}
             disabled={effortDisabled}
           />

@@ -22,8 +22,30 @@ function integer(value, fallback, minimum, maximum, name) {
   return parsed;
 }
 
-const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'protocol']);
+const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'protocol', 'reasoningEfforts', 'defaultReasoningEffort']);
 const MODEL_SELECTOR = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$/;
+// The reasoning-effort vocabulary the provider protocols accept. A profile
+// advertises a subset; a request may only name a level its profile advertises,
+// and a profile that advertises nothing refuses every explicit level (fail-closed).
+export const EFFORT_LEVELS = Object.freeze(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+
+// Returns { reasoningEfforts, defaultReasoningEffort } or throws. `levels` is an
+// array (profile JSON) or a comma-separated string (environment); the default
+// is optional display-only metadata and, when set, must be an advertised level.
+export function parseEfforts(levels, fallback) {
+  const list = levels === undefined || levels === '' ? [] : typeof levels === 'string' ? levels.split(',').map(level => level.trim()).filter(Boolean) : levels;
+  if (!Array.isArray(list) || list.length > EFFORT_LEVELS.length || list.some(level => !EFFORT_LEVELS.includes(level)) || new Set(list).size !== list.length) {
+    throw new Error('Invalid reasoning effort levels');
+  }
+  const defaultEffort = fallback === undefined ? '' : fallback;
+  // The default is optional display metadata, exactly as the control plane accepts
+  // it: empty is always allowed, and a non-empty default must be an advertised level
+  // (so a model without levels can have no default at all).
+  if (typeof defaultEffort !== 'string' || (defaultEffort !== '' && !list.includes(defaultEffort))) {
+    throw new Error('Invalid default reasoning effort');
+  }
+  return { reasoningEfforts: Object.freeze([...list]), defaultReasoningEffort: defaultEffort };
+}
 
 function validBaseURL(baseURL) {
   try {
@@ -73,7 +95,11 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
       const contextWindow = profileInteger(value.contextWindow, defaultProfile.contextWindow, 4096, 2_000_000);
       const maxTokens = profileInteger(value.maxTokens, defaultProfile.maxTokens, 128, 32_768);
       if (maxTokens + 256 >= contextWindow) throw new Error();
-      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, baseURL, apiKey, contextWindow, maxTokens, protocol: value.protocol ?? defaultProfile.protocol }));
+      problem = `profile ${index + 1} has invalid reasoning effort levels or default`;
+      // Efforts are never inherited from the default profile: they describe one
+      // provider model, and a profile that says nothing supports no explicit level.
+      const efforts = parseEfforts(value.reasoningEfforts, value.defaultReasoningEffort);
+      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, baseURL, apiKey, contextWindow, maxTokens, protocol: value.protocol ?? defaultProfile.protocol, ...efforts }));
       ids.add(value.id);
     }
     return Object.freeze(profiles);
@@ -102,7 +128,10 @@ export function loadConfig(env = process.env) {
   const contextWindow = integer(env.AWWO_OPENAI_AGENTS_CONTEXT_WINDOW, 32_768, 4096, 2_000_000, 'AWWO_OPENAI_AGENTS_CONTEXT_WINDOW');
   const maxTokens = integer(env.AWWO_OPENAI_AGENTS_MAX_TOKENS, 4096, 128, 32_768, 'AWWO_OPENAI_AGENTS_MAX_TOKENS');
   if (maxTokens + 256 >= contextWindow) missing.push('AWWO_OPENAI_AGENTS_MAX_TOKENS');
-  const models = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, apiKey, baseURL, contextWindow, maxTokens, protocol }), missing);
+  let efforts;
+  try { efforts = parseEfforts(env.AWWO_OPENAI_AGENTS_REASONING_EFFORTS, env.AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT); }
+  catch { throw new Error(`AWWO_OPENAI_AGENTS_REASONING_EFFORTS must list distinct levels from ${EFFORT_LEVELS.join(', ')} and AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT, when set, must be one of them`); }
+  const models = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, apiKey, baseURL, contextWindow, maxTokens, protocol, ...efforts }), missing);
   for (const profile of models) {
     if (environment !== 'development' && validBaseURL(profile.baseURL)) {
       const u = new URL(profile.baseURL);
@@ -135,6 +164,9 @@ export function publicHealth(config, activeRuns = 0) {
     runtime: 'openai-agents',
     tracingEnabled: false,
     maxModelCallsPerRun: 1,
+    // True when at least one profile advertises levels. The control plane still
+    // decides per model: a request naming a level its profile lacks is refused.
+    supportsEffortSelection: config.models.some((profile) => profile.reasoningEfforts.length > 0),
     tools: config.enabledTools.map(toolMetadata),
     models: config.models.filter((profile) => profile.id && profile.provider).map((profile) => ({
       id: profile.id,
@@ -147,6 +179,8 @@ export function publicHealth(config, activeRuns = 0) {
       maxOutputTokens: profile.maxTokens,
       maxContextTextBytes: Math.max(0, profile.contextWindow - profile.maxTokens - 256),
       messageOverheadBytes: 32,
+      reasoningEfforts: [...profile.reasoningEfforts],
+      defaultReasoningEffort: profile.defaultReasoningEffort,
     })),
     activeRuns,
     version: '0.1.0',
@@ -167,11 +201,12 @@ export function publicHealth(config, activeRuns = 0) {
 }
 
 export function validateRequest(value) {
-  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'model', 'runtime', 'tools']);
+  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'model', 'runtime', 'tools', 'effort']);
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error('Invalid request fields');
   }
   if (value.model !== undefined && (typeof value.model !== 'string' || !MODEL_SELECTOR.test(value.model))) throw new Error('Invalid model selector');
+  if (value.effort !== undefined && (typeof value.effort !== 'string' || !EFFORT_LEVELS.includes(value.effort))) throw new Error('Invalid effort selector');
   if (value.runtime !== undefined && value.runtime !== 'openai-agents') throw new Error('Invalid runtime selector');
   validateToolNames(value.tools ?? []);
   for (const field of ['runId', 'tenantId', 'sessionId']) {
@@ -216,4 +251,13 @@ export function authorizeTools(config, request) {
   const names = validateToolNames(request.tools ?? []);
   if (names.some(name => !config.enabledTools.includes(name))) throw new Error('Tool is not enabled by the service');
   return names;
+}
+
+// An explicit effort is only honoured when the selected profile advertises that
+// exact level. No level is ever substituted: the advertised default is display
+// metadata for the control plane, never a value this worker back-fills.
+export function authorizeEffort(modelConfig, request) {
+  if (request.effort === undefined) return '';
+  if (!modelConfig.reasoningEfforts.includes(request.effort)) throw new Error('Effort is not supported by the selected model');
+  return request.effort;
 }

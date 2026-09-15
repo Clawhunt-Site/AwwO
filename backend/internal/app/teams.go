@@ -22,6 +22,7 @@ type teamMember struct {
 	Instructions string   `json:"instructions"`
 	Runtime      string   `json:"runtime"`
 	Model        string   `json:"model"`
+	Effort       string   `json:"effort,omitempty"`
 	Context      string   `json:"context"`
 	Tools        []string `json:"tools"`
 }
@@ -40,6 +41,7 @@ type executionSnapshot struct {
 	Instructions     string             `json:"instructions"`
 	OutputPolicy     string             `json:"outputPolicy,omitempty"`
 	Model            string             `json:"model"`
+	Effort           string             `json:"effort,omitempty"`
 	Budget           int                `json:"budget"`
 	Overhead         int                `json:"overhead"`
 	Team             *nodeTeam          `json:"team,omitempty"`
@@ -66,7 +68,7 @@ func validateTeam(t *nodeTeam) error {
 	}
 	ids := map[string]bool{}
 	for _, m := range t.Members {
-		if strings.TrimSpace(m.ID) == "" || utf8.RuneCountInString(m.ID) > 128 || ids[m.ID] || strings.TrimSpace(m.Name) == "" || utf8.RuneCountInString(m.Name) > 128 || strings.TrimSpace(m.Role) == "" || utf8.RuneCountInString(m.Role) > 512 || utf8.RuneCountInString(m.Instructions) > 16000 || utf8.RuneCountInString(m.Model) > 256 || !validRuntime(memberRuntime(t, m)) || !validRuntimeTools(memberRuntime(t, m), m.Tools) || (m.Context != "task" && m.Context != "shared") {
+		if strings.TrimSpace(m.ID) == "" || utf8.RuneCountInString(m.ID) > 128 || ids[m.ID] || strings.TrimSpace(m.Name) == "" || utf8.RuneCountInString(m.Name) > 128 || strings.TrimSpace(m.Role) == "" || utf8.RuneCountInString(m.Role) > 512 || utf8.RuneCountInString(m.Instructions) > 16000 || utf8.RuneCountInString(m.Model) > 256 || !validEffortLevel(m.Effort) || !validRuntime(memberRuntime(t, m)) || !validRuntimeTools(memberRuntime(t, m), m.Tools) || (m.Context != "task" && m.Context != "shared") {
 			return errors.New("Invalid member identity, runtime, model, context or tools")
 		}
 		ids[m.ID] = true
@@ -379,7 +381,11 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	if m.Model == "" {
 		m.Model = health.defaultModel()
 		if m.Runtime == defaultRuntime(snap.Runtime) {
+			// Mirrors resolveTeam for snapshots persisted before members were resolved.
 			m.Model = snap.Model
+			if m.Effort == "" {
+				m.Effort = snap.Effort
+			}
 		}
 	}
 	budget, overhead, ok := health.modelLimits(m.Model)
@@ -399,6 +405,9 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	contextRaw, _ := json.Marshal(inputContext)
 	id := randomID()
 	request := map[string]any{"runId": id, "tenantId": tid, "sessionId": sid + "_" + tokenHash(m.ID)[:16], "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": m.Model, "runtime": m.Runtime}
+	if m.Effort != "" {
+		request["effort"] = m.Effort
+	}
 	if len(m.Tools) > 0 {
 		request["tools"] = m.Tools
 	}

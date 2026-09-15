@@ -3,7 +3,7 @@ import { fork } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { authorizeTools, fitsContextBudget, resolveModelConfig, validateRequest } from './config.mjs';
+import { authorizeEffort, authorizeTools, fitsContextBudget, resolveModelConfig, validateRequest } from './config.mjs';
 import { failureEvent } from './errors.mjs';
 
 export const TASK_URL = new URL('./agent-task.mjs', import.meta.url);
@@ -30,6 +30,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
   let firstDeltaMs;
   let childObservability;
   const modelConfig = resolveModelConfig(config, request.model);
+  authorizeEffort(modelConfig, request);
   if (!config.ready || !fitsContextBudget(request, modelConfig)) throw new Error('Invalid runtime admission');
   const directory = await mkdtemp(join(tmpdir(), 'awwo-openai-agents-'));
   let child;

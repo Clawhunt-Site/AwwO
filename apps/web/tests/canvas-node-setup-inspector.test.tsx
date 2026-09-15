@@ -78,7 +78,7 @@ describe('SaaS node configuration save', () => {
     const p = props({ node: { ...createSessionNode('image', { x: 0, y: 0 }), id: 'image-draft' } });
     render(<InspectorPanel {...p} />);
     expect(screen.getByRole('radio', { name: '图像 Agent' })).toBeDisabled();
-    expect(screen.getByText('Pi 和 OpenAI Agents JS 支持文本与编程任务；图像任务及单独设置思考强度尚不可用。')).toBeInTheDocument();
+    expect(screen.getByText('Pi 和 OpenAI Agents JS 支持文本与编程任务；图像任务尚不可用。仅当所选模型提供思考强度档位时才可选择。')).toBeInTheDocument();
     expect(screen.getByLabelText('人设 / 系统提示词')).toHaveAttribute('placeholder', '这个 Agent 是谁、偏好什么、必须遵守什么…（保存时生效）');
     expect(screen.getByRole('button', { name: '保存并准备运行' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '保存并准备运行' }));

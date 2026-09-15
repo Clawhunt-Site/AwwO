@@ -40,6 +40,43 @@ describe('node team configuration', () => {
     expect(member(1).getByLabelText('模型')).toHaveValue('model-a');
     fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'pi' } }); expect(member(2).getByLabelText('模型')).toHaveValue('');
   });
+  it('offers member reasoning effort only for an explicit model that advertises levels and resets it with the model or harness', async () => {
+    const save = vi.fn();
+    const read = vi.fn(async (path: string) => path.includes('/openai-agents/')
+      ? { source: 'saas_runtime', models: ['deep', 'plain'], model_capabilities: { deep: { effort_levels: ['low', 'high'], default_effort: 'low' }, plain: { effort_levels: [], default_effort: '' } } }
+      : { models: ['model-a', 'model-b'] });
+    render(<Harness onChange={save} read={read} runtimes={['pi', 'openai-agents']} runtimeTools={{ 'openai-agents': [] }} />); await enable();
+    expect(member(2).queryByLabelText('思考强度')).toBeNull();
+    fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'openai-agents' } });
+    await waitFor(() => expect(member(2).getByLabelText('模型')).not.toBeDisabled());
+    expect(member(2).getByText('留空模型时继承节点模型及其思考强度；选择明确的模型后才可单独设置。')).toBeInTheDocument();
+    expect(member(2).queryByLabelText('思考强度')).toBeNull();
+    fireEvent.change(member(2).getByLabelText('模型'), { target: { value: 'deep' } });
+    expect(within(member(2).getByLabelText('思考强度')).getAllByRole('option').map(option => option.getAttribute('value'))).toEqual(['', 'low', 'high']);
+    expect(save.mock.lastCall![0].members[1]).not.toHaveProperty('effort');
+    fireEvent.change(member(2).getByLabelText('思考强度'), { target: { value: 'high' } });
+    expect(save.mock.lastCall![0].members[1]).toMatchObject({ runtime: 'openai-agents', model: 'deep', effort: 'high' });
+    fireEvent.change(member(2).getByLabelText('模型'), { target: { value: 'plain' } });
+    expect(save.mock.lastCall![0].members[1]).not.toHaveProperty('effort');
+    expect(member(2).queryByLabelText('思考强度')).toBeNull();
+    fireEvent.change(member(2).getByLabelText('模型'), { target: { value: 'deep' } });
+    fireEvent.change(member(2).getByLabelText('思考强度'), { target: { value: 'low' } });
+    fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'pi' } });
+    expect(save.mock.lastCall![0].members[1]).toMatchObject({ runtime: 'pi', model: '', tools: [] });
+    expect(save.mock.lastCall![0].members[1]).not.toHaveProperty('effort');
+    expect(member(1).queryByLabelText('思考强度')).toBeNull();
+  });
+  it('keeps an unadvertised saved member effort visible and blocks it instead of dropping it', async () => {
+    const read = vi.fn(async (path: string) => path.includes('/openai-agents/')
+      ? { source: 'saas_runtime', models: ['deep'], model_capabilities: { deep: { effort_levels: ['low'], default_effort: 'low' } } }
+      : { models: ['model-a', 'model-b'] });
+    const initial = session(); initial.team = createNodeTeam(initial);
+    initial.team.members[1] = { ...initial.team.members[1], runtime: 'openai-agents', model: 'deep', effort: 'xhigh' };
+    render(<Harness initial={initial} read={read} runtimes={['pi', 'openai-agents']} runtimeTools={{ 'openai-agents': [] }} />);
+    await waitFor(() => expect(member(2).getByLabelText('思考强度')).not.toBeDisabled());
+    expect(member(2).getByRole('option', { name: '当前模型不提供：xhigh' })).toHaveAttribute('value', 'xhigh');
+    expect(screen.getByRole('alert')).toHaveTextContent('思考强度');
+  });
   it('reorders stable member identities and removes only the chosen member', async () => {
     const save = vi.fn(); render(<Harness onChange={save} />); await enable();
     const original = save.mock.lastCall![0].members.map((item: { id: string }) => item.id);

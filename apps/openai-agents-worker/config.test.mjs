@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { authorizeTools, fitsContextBudget, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
+import { authorizeEffort, authorizeTools, fitsContextBudget, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { workerEnvironment } from './runner.mjs';
 import { calculate, executeTool, parseToolArguments, ToolInputError, validateToolNames } from './tools.mjs';
 import { classifyError } from './errors.mjs';
@@ -126,4 +126,34 @@ test('health freezes the upstream model separately from catalog identity for eve
   assert.equal(metadata.providerModel, 'upstream-b');
   assert.equal(metadata.protocol, 'responses');
   assert.ok(!JSON.stringify(metadata).includes('private-value'));
+});
+
+test('reasoning effort levels are advertised per profile, never inherited, and refused when unadvertised', () => {
+  const config = configuration({
+    AWWO_OPENAI_AGENTS_REASONING_EFFORTS: 'low, medium,high', AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT: 'medium',
+    SECOND_KEY: 'k', AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([
+      { id: 'plain', provider: 'openai', model: 'plain-model', apiKeyEnv: 'SECOND_KEY' },
+      { id: 'deep', provider: 'openai', model: 'deep-model', apiKeyEnv: 'SECOND_KEY', reasoningEfforts: ['high', 'xhigh'], defaultReasoningEffort: 'high' },
+    ]),
+  });
+  const health = publicHealth(config);
+  assert.equal(health.supportsEffortSelection, true);
+  assert.deepEqual(health.models.map(m => [m.id, m.reasoningEfforts, m.defaultReasoningEffort]), [
+    ['fixture-model', ['low', 'medium', 'high'], 'medium'], ['plain', [], ''], ['deep', ['high', 'xhigh'], 'high'],
+  ]);
+  assert.equal(publicHealth(configuration()).supportsEffortSelection, false);
+  assert.equal(authorizeEffort(resolveModelConfig(config, undefined), request({ effort: 'high' })), 'high');
+  assert.equal(authorizeEffort(resolveModelConfig(config, 'deep'), request()), '');
+  assert.throws(() => authorizeEffort(resolveModelConfig(config, 'plain'), request({ effort: 'medium' })), /not supported/);
+  assert.throws(() => authorizeEffort(resolveModelConfig(config, 'deep'), request({ effort: 'low' })), /not supported/);
+  assert.throws(() => validateRequest(request({ effort: 'extreme' })), /Invalid effort/);
+  assert.throws(() => validateRequest(request({ effort: 1 })), /Invalid effort/);
+  // The default is optional display metadata, exactly as the control plane accepts it.
+  assert.deepEqual(publicHealth(configuration({ AWWO_OPENAI_AGENTS_REASONING_EFFORTS: 'low,high' })).models[0], { ...publicHealth(configuration({ AWWO_OPENAI_AGENTS_REASONING_EFFORTS: 'low,high' })).models[0], reasoningEfforts: ['low', 'high'], defaultReasoningEffort: '' });
+  assert.equal(configuration({ SECOND_KEY: 'k', AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([{ id: 'x', provider: 'openai', model: 'm', apiKeyEnv: 'SECOND_KEY', reasoningEfforts: ['low'] }]) }).models[1].defaultReasoningEffort, '');
+  assert.throws(() => configuration({ AWWO_OPENAI_AGENTS_REASONING_EFFORTS: 'low,low' }), /REASONING_EFFORTS/);
+  assert.throws(() => configuration({ AWWO_OPENAI_AGENTS_REASONING_EFFORTS: 'low', AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT: 'high' }), /REASONING_EFFORTS/);
+  assert.throws(() => configuration({ AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT: 'high' }), /REASONING_EFFORTS/);
+  assert.throws(() => configuration({ SECOND_KEY: 'k', AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([{ id: 'x', provider: 'openai', model: 'm', apiKeyEnv: 'SECOND_KEY', reasoningEfforts: ['ultra'] }]) }), /reasoning effort/);
+  assert.throws(() => configuration({ SECOND_KEY: 'k', AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([{ id: 'x', provider: 'openai', model: 'm', apiKeyEnv: 'SECOND_KEY', reasoningEfforts: ['low'], defaultReasoningEffort: 'high' }]) }), /reasoning effort/);
 });

@@ -24,6 +24,7 @@ type setupConfiguration struct {
 	AgentKind string    `json:"agentKind"`
 	Runtime   string    `json:"runtime"`
 	Model     string    `json:"model"`
+	Effort    string    `json:"effort,omitempty"`
 	Persona   string    `json:"persona"`
 	Team      *nodeTeam `json:"team,omitempty"`
 }
@@ -127,7 +128,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 		if !selected[i] {
 			continue
 		}
-		var selection struct{ Runtime, Model, Persona string }
+		var selection struct{ Runtime, Model, Effort, Persona string }
 		if json.Unmarshal(original, &selection) != nil {
 			fail(w, 400, "invalid_node_setup", "Invalid node configuration")
 			return
@@ -139,7 +140,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "invalid_node_setup", err.Error())
 			return
 		}
-		if _, err = a.runtimeSnapshot(r.Context(), entitlement, catalog, selection.Runtime, selection.Model, selection.Persona, team); err != nil {
+		if _, err = a.runtimeSnapshot(r.Context(), entitlement, catalog, selection.Runtime, selection.Model, selection.Effort, selection.Persona, team); err != nil {
 			var input setupError
 			if errors.As(err, &input) {
 				fail(w, 400, "invalid_node_setup", input.message)
@@ -233,8 +234,8 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguratio
 	if n.AgentKind == "" {
 		n.AgentKind = "llm"
 	}
-	if !validRuntime(n.Runtime) || (n.AgentKind != "llm" && n.AgentKind != "coding") || n.Effort != "" {
-		return setupConfiguration{}, invalidSetup("Only supported runtime text/coding nodes without an explicit effort setting are supported")
+	if !validRuntime(n.Runtime) || (n.AgentKind != "llm" && n.AgentKind != "coding") || !validEffortLevel(n.Effort) {
+		return setupConfiguration{}, invalidSetup("Only supported runtime text/coding nodes with a well-formed effort setting are supported")
 	}
 	health, ok := catalog[n.Runtime]
 	if !ok {
@@ -249,6 +250,11 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguratio
 	if _, _, ok := health.modelLimits(n.Model); !ok {
 		return setupConfiguration{}, invalidSetup("Node selects an unavailable model")
 	}
+	// Effort is admitted per model from the worker catalog. A model that advertises
+	// no levels refuses every explicit effort; nothing is back-filled from a default.
+	if !health.supportsEffort(n.Model, n.Effort) {
+		return setupConfiguration{}, invalidSetup("Node selects a reasoning effort its model does not advertise")
+	}
 	name := strings.TrimSpace(n.Title)
 	if name == "" {
 		name = "Agent " + n.ID
@@ -261,11 +267,11 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguratio
 	if err != nil {
 		return setupConfiguration{}, invalidSetup(err.Error())
 	}
-	team, err = resolveTeam(team, n.Runtime, n.Model, catalog)
+	team, err = resolveTeam(team, n.Runtime, n.Model, n.Effort, catalog)
 	if err != nil {
 		return setupConfiguration{}, invalidSetup(err.Error())
 	}
-	return setupConfiguration{Name: name, AgentKind: n.AgentKind, Runtime: n.Runtime, Model: n.Model, Persona: n.Persona, Team: team}, nil
+	return setupConfiguration{Name: name, AgentKind: n.AgentKind, Runtime: n.Runtime, Model: n.Model, Effort: n.Effort, Persona: n.Persona, Team: team}, nil
 }
 
 func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, raw json.RawMessage, catalog runtimeCatalog) (json.RawMessage, error) {
@@ -284,7 +290,7 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 	}
 	oldConfig := setupConfiguration{Runtime: "pi"}
 	if old != nil {
-		if err = tx.QueryRow(ctx, "SELECT name,model,instructions,runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, old.AgentID).Scan(&oldConfig.Name, &oldConfig.Model, &oldConfig.Persona, &oldConfig.Runtime); noRows(err) {
+		if err = tx.QueryRow(ctx, "SELECT name,model,instructions,runtime,effort FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, old.AgentID).Scan(&oldConfig.Name, &oldConfig.Model, &oldConfig.Persona, &oldConfig.Runtime, &oldConfig.Effort); noRows(err) {
 			return nil, missingSetupReference()
 		} else if err != nil {
 			return nil, err
@@ -315,7 +321,7 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		return nil, invalidSetup("Active thread and node conversation must agree before initialization")
 	}
 	configRaw, _ := json.Marshal(config)
-	changed := old != nil && (oldConfig.Runtime != config.Runtime || oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Persona != config.Persona)
+	changed := old != nil && (oldConfig.Runtime != config.Runtime || oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Effort != config.Effort || oldConfig.Persona != config.Persona)
 	if sid != "" {
 		if len(priorSnapshot) > 0 {
 			changed = changed || !equalJSON(priorSnapshot, configRaw)
@@ -326,7 +332,7 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 	binding := old
 	if old == nil || changed {
 		binding = &setupBinding{CompanyID: tid, AgentID: randomID(), AgentName: config.Name}
-		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions,runtime) VALUES($1,$2,$3,$4,$5,$6)", binding.AgentID, tid, config.Name, config.Model, config.Persona, config.Runtime); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions,runtime,effort) VALUES($1,$2,$3,$4,$5,$6,$7)", binding.AgentID, tid, config.Name, config.Model, config.Persona, config.Runtime, config.Effort); err != nil {
 			return nil, err
 		}
 	}
@@ -480,7 +486,7 @@ func configureSetupThread(thread map[string]json.RawMessage, binding *setupBindi
 	putJSON(thread, "runtime", config.Runtime)
 	putJSON(thread, "model", config.Model)
 	putJSON(thread, "persona", config.Persona)
-	putJSON(thread, "effort", "")
+	putJSON(thread, "effort", config.Effort)
 }
 
 func clearSetupOutputValues(node map[string]json.RawMessage) {

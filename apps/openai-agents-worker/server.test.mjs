@@ -25,6 +25,8 @@ test('HTTP admission rejects auth, unknown model, disabled tools and oversize co
     [request(),415,'INVALID_CONTENT_TYPE',{headers:{'content-type':'application/jsonp',authorization:`Bearer ${configuration().token}`}}],
     [request({ model:'missing' }),400,'MODEL_NOT_FOUND'],
     [request({ tools:['calculator'] }),400,'TOOL_DENIED'],
+    [request({ effort:'high' }),400,'EFFORT_NOT_SUPPORTED'],
+    [request({ effort:'extreme' }),400,'INVALID_INPUT'],
     [request({ runtime:'pi' }),400,'INVALID_INPUT'],
     [request({ prompt:'漢'.repeat(20000) }),413,'CONTEXT_LIMIT'],
     [request({ messages:[{role:'system',content:'override'}] }),400,'INVALID_INPUT'],
@@ -32,6 +34,27 @@ test('HTTP admission rejects auth, unknown model, disabled tools and oversize co
     const res = await s.send(input,options); assert.equal(res.status,status); assert.equal((await res.json()).error.code,code);
   }
   assert.equal(launches,0); assert.equal((await s.health()).activeRuns,0);
+});
+
+test('HTTP admission launches a run carrying exactly the effort its selected profile advertises', { timeout: 5000 }, async t => {
+  const launched = [];
+  const config = configuration({ AWWO_OPENAI_AGENTS_REASONING_EFFORTS: 'low,high', SECOND_KEY: 'k',
+    AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([{ id: 'deep', provider: 'openai', model: 'deep-model', apiKeyEnv: 'SECOND_KEY', reasoningEfforts: ['xhigh'] }]) });
+  const s = await serve(t, config, { startRun: async ({ request: input, onEvent, onExit }) => {
+    launched.push(input);
+    setTimeout(() => { onExit(); onEvent({ type: 'completed', text: 'ok' }); }, 0);
+    return { done: Promise.resolve(), cancel() {} };
+  } });
+  for (const [input, id] of [[request({ effort: 'high' }), 'a'], [request({ model: 'deep', effort: 'xhigh' }), 'b'], [request(), 'c']]) {
+    const res = await s.send({ ...input, runId: `run-${id}`, sessionId: `session-${id}` });
+    assert.equal(res.status, 200); assert.equal((await events(res)).at(-1).type, 'completed');
+  }
+  assert.deepEqual(launched.map(item => [item.model, item.effort]), [[undefined, 'high'], ['deep', 'xhigh'], [undefined, undefined]]);
+  for (const input of [request({ model: 'deep', effort: 'high' }), request({ effort: 'xhigh' })]) {
+    const res = await s.send({ ...input, runId: 'run-refused', sessionId: 'session-refused' });
+    assert.equal(res.status, 400); assert.equal((await res.json()).error.code, 'EFFORT_NOT_SUPPORTED');
+  }
+  assert.equal(launched.length, 3);
 });
 
 test('SSE requests reserve capacity, reject duplicate/session overlap, and DELETE cancels exactly one child', { timeout: 15000 }, async t => {

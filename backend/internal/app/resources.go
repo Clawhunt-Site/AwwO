@@ -256,13 +256,16 @@ func (a *App) deleteCanvas(w http.ResponseWriter, r *http.Request) {
 }
 
 type agentInput struct {
-	Name          string `json:"name"`
-	Role          string `json:"role"`
-	Title         string `json:"title"`
-	Model         string `json:"model"`
-	AdapterType   string `json:"adapterType"`
+	Name  string `json:"name"`
+	Role  string `json:"role"`
+	Title string `json:"title"`
+	Model string `json:"model"`
+	// Effort is optional on update: omitted keeps the stored level, "" clears it.
+	Effort        *string `json:"effort"`
+	AdapterType   string  `json:"adapterType"`
 	AdapterConfig struct {
-		Model string `json:"model"`
+		Model  string  `json:"model"`
+		Effort *string `json:"effort"`
 	} `json:"adapterConfig"`
 	Instructions string `json:"instructions"`
 }
@@ -271,7 +274,16 @@ func (b *agentInput) valid() bool {
 	if b.Model == "" {
 		b.Model = b.AdapterConfig.Model
 	}
-	return cleanName(b.Name) && len(b.Role) <= 200 && len(b.Title) <= 200 && len(b.Model) <= 200 && len(b.Instructions) <= 32000 && validRuntime(defaultRuntime(b.AdapterType))
+	if b.Effort == nil {
+		b.Effort = b.AdapterConfig.Effort
+	}
+	return cleanName(b.Name) && len(b.Role) <= 200 && len(b.Title) <= 200 && len(b.Model) <= 200 && (b.Effort == nil || validEffortLevel(*b.Effort)) && len(b.Instructions) <= 32000 && validRuntime(defaultRuntime(b.AdapterType))
+}
+func (b *agentInput) effortOrEmpty() string {
+	if b.Effort == nil {
+		return ""
+	}
+	return *b.Effort
 }
 func (a *App) listAgents(w http.ResponseWriter, r *http.Request) {
 	a.tenantList(w, r, "agents")
@@ -293,7 +305,7 @@ func (a *App) createAgent(w http.ResponseWriter, r *http.Request) {
 		if err := requireEntitledModel(r.Context(), tx, r.PathValue("tenantId"), b.Model); err != nil {
 			return nil, err
 		}
-		return oneJSON(r.Context(), tx, "INSERT INTO agents(id,tenant_id,name,role,title,model,instructions,runtime) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING "+agentJSON, id, r.PathValue("tenantId"), b.Name, b.Role, b.Title, b.Model, b.Instructions, defaultRuntime(b.AdapterType))
+		return oneJSON(r.Context(), tx, "INSERT INTO agents(id,tenant_id,name,role,title,model,instructions,runtime,effort) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING "+agentJSON, id, r.PathValue("tenantId"), b.Name, b.Role, b.Title, b.Model, b.Instructions, defaultRuntime(b.AdapterType), b.effortOrEmpty())
 	})
 }
 func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
@@ -324,7 +336,7 @@ func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		return oneJSON(r.Context(), tx, "UPDATE agents SET name=$3,role=$4,title=$5,model=$6,instructions=$7,runtime=COALESCE(NULLIF($8,''),runtime) WHERE tenant_id=$1 AND id=$2 AND NOT internal RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Name, b.Role, b.Title, b.Model, b.Instructions, b.AdapterType)
+		return oneJSON(r.Context(), tx, "UPDATE agents SET name=$3,role=$4,title=$5,model=$6,instructions=$7,runtime=COALESCE(NULLIF($8,''),runtime),effort=COALESCE($9,effort) WHERE tenant_id=$1 AND id=$2 AND NOT internal RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Name, b.Role, b.Title, b.Model, b.Instructions, b.AdapterType, b.Effort)
 	})
 }
 func (a *App) agentInstructions(w http.ResponseWriter, r *http.Request) {

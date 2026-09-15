@@ -246,3 +246,10 @@ Point `ExecStart=` and the nginx `root` back at the previous release directory, 
 restart `awwo-saas-api` and `awwo-saas-web`. Additive migrations (a new table) leave the previous
 binary working against the newer schema, so a schema rollback is not required; restore the EBS
 snapshot only if data itself is wrong.
+
+Rolling back across migration 016 (reasoning effort) is schema-compatible but not behaviour-neutral. A
+pre-016 API binary ignores `agents.effort`, so runs of an Agent with an explicit effort silently use the
+provider default, and it rejects a stored canvas whose team members carry an `effort` key with
+`400 invalid_team`. Before such a binary serves traffic, list the affected Agents with
+`SELECT tenant_id,id,model,effort FROM agents WHERE effort<>''` and either accept the downgrade
+explicitly or clear those levels first.

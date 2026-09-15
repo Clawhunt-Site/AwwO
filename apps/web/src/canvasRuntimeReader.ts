@@ -34,7 +34,7 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
     return { models: ids, source: 'codex_app_server', model_capabilities: Object.fromEntries(capabilities) };
   }
 
-  async function modelCatalog(type: string, signal?: AbortSignal | null, selectedCompany?: string): Promise<{ models: string[]; source?: string }> {
+  async function modelCatalog(type: string, signal?: AbortSignal | null, selectedCompany?: string): Promise<{ models: string[]; source?: string; model_capabilities?: Record<string, { effort_levels: string[]; default_effort: string }> }> {
     let companyId = selectedCompany;
     if (!companyId) {
       const companies = await get('/companies', signal);
@@ -46,8 +46,18 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
     const saas = data?.source === 'saas_runtime';
     const models = saas ? data.models : data;
     if (!Array.isArray(models)) throw new Error('Invalid model registry response.');
-    return { models: [...new Set<string>(models.map(item => typeof item === 'string' ? item : item?.id)
-      .filter((id): id is string => typeof id === 'string' && Boolean(id.trim())))], ...(saas ? { source: 'saas_runtime' } : {}) };
+    const ids = [...new Set<string>(models.map(item => typeof item === 'string' ? item : item?.id)
+      .filter((id): id is string => typeof id === 'string' && Boolean(id.trim())))];
+    if (!saas) return { models: ids };
+    // Effort levels are part of the model, never of the runtime: a level is offered only for the
+    // model that advertised it, and a malformed advertisement yields no selectable level at all.
+    const capabilities: Record<string, { effort_levels: string[]; default_effort: string }> = {};
+    for (const item of models) {
+      if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !ids.includes(item.id)) continue;
+      const levels: string[] = Array.isArray(item.effort_levels) ? [...new Set<string>(item.effort_levels.filter((level: unknown): level is string => typeof level === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(level)))] : [];
+      capabilities[item.id] = { effort_levels: levels, default_effort: typeof item.default_effort === 'string' && levels.includes(item.default_effort) ? item.default_effort : '' };
+    }
+    return { models: ids, source: 'saas_runtime', model_capabilities: capabilities };
   }
 
   return async function readCanvasRuntime(path: string, init?: RequestInit): Promise<any> {
@@ -70,7 +80,9 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
       } : ({
         name: item.type,
         supports_model_selection: item.supportsModelSelection === true || item.modelsCount > 0 || Boolean(companyId && (await modelCatalog(item.type, init?.signal, companyId)).models.length),
-        supports_effort_selection: false,
+        // Only a SaaS runtime can advertise effort here, and it does so per model: the levels
+        // arrive with the model catalog, so the picker treats them as a closed, model-scoped enum.
+        supports_effort_selection: item.modelCatalogSource === 'saas_runtime' && item.supportsEffortSelection === true,
         ...(item.supportsNodeTeams === true ? { supports_node_teams: true } : {}),
         ...(item.modelCatalogSource === 'saas_runtime' ? { model_catalog_source: 'saas_runtime', tools: Array.isArray(item.tools) ? item.tools : [] } : {}),
       }))) };

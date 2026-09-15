@@ -30,8 +30,8 @@ it('adapts backend runtimes to node/team capabilities and separate model catalog
     { name: 'pi', supports_model_selection: true, supports_effort_selection: false, supports_node_teams: true, model_catalog_source: 'saas_runtime', tools: [] },
     { name: 'openai-agents', supports_model_selection: true, supports_effort_selection: false, supports_node_teams: true, model_catalog_source: 'saas_runtime', tools: ['calculator', 'current_time'] },
   ] });
-  expect(await read('/api/agents/openai-agents/models')).toEqual({ source: 'saas_runtime', models: ['agents-model'] });
-  expect(await read('/api/agents/pi/models')).toEqual({ source: 'saas_runtime', models: ['pi-model', 'legacy-pi'] });
+  expect(await read('/api/agents/openai-agents/models')).toEqual({ source: 'saas_runtime', models: ['agents-model'], model_capabilities: { 'agents-model': { effort_levels: [], default_effort: '' } } });
+  expect(await read('/api/agents/pi/models')).toEqual({ source: 'saas_runtime', models: ['pi-model', 'legacy-pi'], model_capabilities: { 'pi-model': { effort_levels: [], default_effort: '' }, 'legacy-pi': { effort_levels: [], default_effort: '' } } });
   await expect(read('/api/agents/unknown/models')).rejects.toThrow('404');
   expect(fetch.mock.calls.every(([url]) => url === `/api/v1/tenants/${tenant.id}/runtime`)).toBe(true);
 });
@@ -85,4 +85,55 @@ it('shows independent runtime availability without requesting secrets or claimin
   expect(within(pi).getByText('Unavailable')).toBeVisible(); expect(within(pi).getByText('pi-model, legacy-pi')).toBeVisible();
   expect(within(agents).getByText('Configured')).toBeVisible(); expect(within(agents).getByText('agents-model')).toBeVisible();
   expect(screen.queryAllByRole('textbox')).toHaveLength(0); expect(screen.getByText(/an actual canvas run verifies model connectivity/)).toBeVisible();
+});
+
+const effortStatus: SaaSRuntimeStatus = { ...status,
+  runtimes: status.runtimes!.map(runtime => runtime.id === 'openai-agents' ? { ...runtime, supportsEffortSelection: true } : runtime),
+  models: [{ id: 'pi-model', runtime: 'pi' },
+    { id: 'agents-model', runtime: 'openai-agents', reasoningEfforts: ['low', 'high', 'high', 'Bad Level'], defaultReasoningEffort: 'low' },
+    { id: 'plain-model', runtime: 'openai-agents', reasoningEfforts: [], defaultReasoningEffort: '' }] };
+it('advertises reasoning effort per model as a closed enum and never for a runtime whose models lack levels', async () => {
+  setup(effortStatus); const read = createCanvasRuntimeReader();
+  expect(runtimeDefinitions(effortStatus).map(runtime => [runtime.id, runtime.supportsEffortSelection])).toEqual([['pi', false], ['openai-agents', true]]);
+  // A flag without any advertised level is not trusted: the picker would only offer a control the server refuses.
+  expect(runtimeDefinitions({ ...effortStatus, models: [{ id: 'agents-model', runtime: 'openai-agents' }] }).find(runtime => runtime.id === 'openai-agents')!.supportsEffortSelection).toBe(false);
+  const adapters = await (await canvasFetch('/paperclip-api/adapters')).json();
+  expect(adapters.find((item: any) => item.type === 'openai-agents').supportsEffortSelection).toBe(true);
+  expect(adapters.find((item: any) => item.type === 'pi').supportsEffortSelection).toBe(false);
+  expect(await read('/api/agents')).toEqual({ agents: [
+    expect.objectContaining({ name: 'pi', supports_effort_selection: false }),
+    expect.objectContaining({ name: 'openai-agents', supports_effort_selection: true }),
+  ] });
+  expect(await read('/api/agents/openai-agents/models')).toEqual({ source: 'saas_runtime', models: ['agents-model', 'plain-model'],
+    model_capabilities: { 'agents-model': { effort_levels: ['low', 'high'], default_effort: 'low' }, 'plain-model': { effort_levels: [], default_effort: '' } } });
+});
+it('offers only the chosen model\'s advertised effort levels and resets effort when the model changes', async () => {
+  setup(effortStatus); const read = createCanvasRuntimeReader(); const changed = vi.fn();
+  function Picker() {
+    const [value, setValue] = useState<RuntimeValue>({ backend: 'openai-agents', model: 'agents-model', effort: '' });
+    return <RuntimePicker lang="en" runtimes={['pi', 'openai-agents']} runtimeLabels={{ pi: 'Pi', 'openai-agents': 'OpenAI Agents JS' }} value={value} readJson={read} onChange={next => { changed(next); setValue(next); }} />;
+  }
+  render(<Picker />); await waitFor(() => expect(screen.getByLabelText('Effort')).not.toBeDisabled());
+  fireEvent.click(screen.getByLabelText('Effort'));
+  expect((await screen.findAllByRole('option')).map(option => option.textContent)).toEqual(['Inherit (runtime default) · low', 'low', 'high']);
+  fireEvent.click(screen.getByRole('option', { name: 'high' }));
+  expect(changed).toHaveBeenLastCalledWith({ backend: 'openai-agents', model: 'agents-model', effort: 'high' });
+  // A model without levels keeps the control but offers nothing, and drops the stale level.
+  await waitFor(() => expect(screen.getByLabelText('Model')).not.toBeDisabled()); fireEvent.click(screen.getByLabelText('Model'));
+  fireEvent.click(await screen.findByRole('option', { name: 'plain-model' }));
+  expect(changed).toHaveBeenLastCalledWith({ backend: 'openai-agents', model: 'plain-model', effort: '' });
+  expect(screen.getByLabelText('Effort')).toBeDisabled();
+});
+it('keeps a saved effort the runtime no longer advertises visible and clearable without offering it', async () => {
+  setup(status); const read = createCanvasRuntimeReader(); const changed = vi.fn();
+  function Picker() {
+    const [value, setValue] = useState<RuntimeValue>({ backend: 'openai-agents', model: 'agents-model', effort: 'high' });
+    return <RuntimePicker lang="en" runtimes={['pi', 'openai-agents']} runtimeLabels={{ pi: 'Pi', 'openai-agents': 'OpenAI Agents JS' }} value={value} readJson={read} onChange={next => { changed(next); setValue(next); }} />;
+  }
+  render(<Picker />); await waitFor(() => expect(screen.getByLabelText('Effort')).not.toBeDisabled());
+  fireEvent.click(screen.getByLabelText('Effort'));
+  expect(await screen.findByRole('option', { name: /high/ })).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(screen.getByRole('option', { name: 'Inherit (runtime default)' }));
+  expect(changed).toHaveBeenLastCalledWith({ backend: 'openai-agents', model: 'agents-model', effort: '' });
+  await waitFor(() => expect(screen.queryByLabelText('Effort')).toBeNull());
 });

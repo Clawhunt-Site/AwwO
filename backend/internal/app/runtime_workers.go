@@ -133,7 +133,7 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		if m.Runtime == "" && runtime == runtimePI {
 			m.Runtime = runtimePI
 		}
-		if m.Runtime != runtime || m.ID == "" || len(m.ID) > 200 || len(m.Provider) > 200 || seen[m.ID] {
+		if m.Runtime != runtime || m.ID == "" || len(m.ID) > 200 || len(m.Provider) > 200 || seen[m.ID] || !validEffortCatalog(m) {
 			return piHealth{}, errors.New("Runtime model catalog is invalid")
 		}
 		seen[m.ID], h.Models[i] = true, m
@@ -175,10 +175,13 @@ func (a *App) loadRuntime(ctx context.Context, entitlement modelEntitlement, cat
 // worker discovery or model fallback happens after any invocation is accepted.
 // The entitlement is a required argument rather than an ambient lookup so a new
 // admission path cannot compile without deciding which workspace it admits for.
-func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement, catalog runtimeCatalog, runtime, model, instructions string, team *nodeTeam) (executionSnapshot, error) {
+func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement, catalog runtimeCatalog, runtime, model, effort, instructions string, team *nodeTeam) (executionSnapshot, error) {
 	runtime = defaultRuntime(runtime)
 	if !validRuntime(runtime) {
 		return executionSnapshot{}, invalidSetup("Unsupported node runtime")
+	}
+	if !validEffortLevel(effort) {
+		return executionSnapshot{}, invalidSetup("Unsupported node effort")
 	}
 	if err := validateTeam(team); err != nil {
 		return executionSnapshot{}, invalidSetup(err.Error())
@@ -194,6 +197,11 @@ func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement,
 	if !ok {
 		return executionSnapshot{}, setupError{"model_unavailable", "Node model is unavailable for its runtime or this workspace"}
 	}
+	// An explicit effort is frozen only when the worker advertises that exact
+	// level for the selected model; nothing is substituted or silently dropped.
+	if !h.supportsEffort(model, effort) {
+		return executionSnapshot{}, setupError{"effort_unsupported", "Node selects a reasoning effort its model does not advertise"}
+	}
 	if team != nil {
 		for _, m := range team.Members {
 			if _, err = a.loadRuntime(ctx, entitlement, catalog, memberRuntime(team, m)); err != nil {
@@ -201,7 +209,7 @@ func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement,
 			}
 		}
 	}
-	resolved, err := resolveTeam(team, runtime, model, catalog)
+	resolved, err := resolveTeam(team, runtime, model, effort, catalog)
 	if err != nil {
 		return executionSnapshot{}, invalidSetup(err.Error())
 	}
@@ -211,10 +219,47 @@ func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement,
 			used[m.Runtime] = catalog[m.Runtime]
 		}
 	}
-	return executionSnapshot{Runtime: runtime, Instructions: instructions, Model: model, Budget: budget, Overhead: overhead, Team: resolved, Health: h, RuntimeHealth: used}, nil
+	return executionSnapshot{Runtime: runtime, Instructions: instructions, Model: model, Effort: effort, Budget: budget, Overhead: overhead, Team: resolved, Health: h, RuntimeHealth: used}, nil
 }
 
-func resolveTeam(t *nodeTeam, parentRuntime, parentModel string, catalog runtimeCatalog) (*nodeTeam, error) {
+// validEffortLevel accepts the empty string ("no explicit setting") and short
+// lowercase identifiers. The vocabulary itself belongs to the worker catalog;
+// this only bounds what may be persisted and forwarded.
+func validEffortLevel(effort string) bool {
+	if effort == "" {
+		return true
+	}
+	if len(effort) > 32 || effort[0] < 'a' || effort[0] > 'z' {
+		return false
+	}
+	for _, c := range effort[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// A worker may advertise at most a handful of distinct, well-formed levels, and
+// its display default must be one of them (or empty when it advertises none).
+func validEffortCatalog(m piModel) bool {
+	if len(m.ReasoningEfforts) > 8 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, level := range m.ReasoningEfforts {
+		if level == "" || !validEffortLevel(level) || seen[level] {
+			return false
+		}
+		seen[level] = true
+	}
+	if m.DefaultReasoningEffort == "" {
+		return true
+	}
+	return seen[m.DefaultReasoningEffort]
+}
+
+func resolveTeam(t *nodeTeam, parentRuntime, parentModel, parentEffort string, catalog runtimeCatalog) (*nodeTeam, error) {
 	if err := validateTeam(t); err != nil {
 		return nil, err
 	}
@@ -233,11 +278,20 @@ func resolveTeam(t *nodeTeam, parentRuntime, parentModel string, catalog runtime
 		if m.Model == "" {
 			m.Model = h.defaultModel()
 			if m.Runtime == defaultRuntime(parentRuntime) && parentModel != "" {
+				// Model and effort are parallel selectors: a member that inherits the node's
+				// model inherits the node's explicit effort with it, unless it names its own.
+				// A member that falls back to the runtime default model inherits no effort.
 				m.Model = parentModel
+				if m.Effort == "" {
+					m.Effort = parentEffort
+				}
 			}
 		}
 		if _, _, ok := h.modelLimits(m.Model); !ok {
 			return nil, errors.New("Member selects an unavailable model for its runtime")
+		}
+		if !h.supportsEffort(m.Model, m.Effort) {
+			return nil, errors.New("Member selects a reasoning effort its model does not advertise")
 		}
 		if _, ok := h.toolBudget(m.Tools); !ok {
 			return nil, errors.New("Member selects a tool not enabled by its runtime")

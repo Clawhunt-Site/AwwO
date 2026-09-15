@@ -30,17 +30,28 @@ flowchart LR
       "name": "OpenAI Agents",
       "configured": true,
       "available": true,
-      "supportsEffortSelection": false,
+      "supportsEffortSelection": true,
+      "effortInputMode": "select",
       "tools": ["calculator"]
     }
   ],
   "models": [
-    { "id": "model-id", "provider": "openai", "runtime": "openai-agents" }
+    { "id": "model-id", "provider": "openai", "runtime": "openai-agents", "reasoningEfforts": ["low", "medium", "high"], "defaultReasoningEffort": "medium" }
   ]
 }
 ```
 
 前端按 runtime 过滤模型，切换 runtime 时清空旧模型和工具，防止把 Pi 模型 ID 发给 OpenAI Agents worker。不可用的旧配置会保留显示并要求修正，不会静默回退。Agent 的 runtime 写入 `agents.runtime`；迁移 011 将历史 Agent 设为 `pi`。已初始化节点切换 runtime 会创建新的 Agent/Session，保留旧历史，不把不同 SDK 的会话混在一起。
+
+## 思考强度（reasoning effort）
+
+思考强度与模型是平行的 Agent 字段，并且按模型发布，而不是按 runtime 发布：
+
+- Worker 在 `/health` 的每个模型上发布 `reasoningEfforts` 与 `defaultReasoningEffort`。没有发布档位的模型不接受任何显式档位；Pi 目前不发布档位。
+- Go 在探测 worker 时校验档位格式、是否重复，以及默认档位是否属于档位集合；任一不满足即整份目录无效。运行时目录的 `supportsEffortSelection` 仅在该 runtime 至少一个模型发布了档位时为 true，`effortInputMode` 固定为 `select`，前端只提供所选模型自己的档位。
+- 节点初始化、团队成员解析和运行准入都按所选模型校验档位，不支持时返回 `400 invalid_node_setup`，不会静默丢弃。档位写入 `agents.effort`（迁移 016，默认空字符串），冻结进执行快照，并作为请求字段 `effort` 转发。只修改档位也会建立新的 Agent 与当前会话。团队成员留空模型而继承节点模型时，一并继承节点的思考强度；成员指定自己的模型时只使用成员自己的档位。
+- Worker 再次校验：请求档位不在所选模型档位中时返回 `400 EFFORT_NOT_SUPPORTED`；通过后写入 SDK `modelSettings.reasoning.effort`。未指定档位时请求不携带任何思考设置，由供应商使用自身默认；`defaultReasoningEffort` 只用于展示，永不回填。
+- OpenAI 兼容端点是否真正支持某个档位，需要按实际端点和模型验证后再配置。未配置档位时，行为与此前完全一致。
 
 ## 私有 Worker 契约
 
@@ -49,7 +60,7 @@ flowchart LR
 接口与 Pi worker 对齐：
 
 - `GET /health`：只返回 SDK 版本、配置状态、公开模型、限制和已启用工具；不探测真实模型。
-- `POST /internal/runs`：内部 bearer token 认证，接收固定的 run/tenant/session 身份、prompt、history、systemPrompt、runtime、model 和工具名称，返回 SSE。
+- `POST /internal/runs`：内部 bearer token 认证，接收固定的 run/tenant/session 身份、prompt、history、systemPrompt、runtime、model、可选 effort 和工具名称，返回 SSE。
 - `DELETE /internal/runs/{runId}`：精确取消一个成员调用。
 
 每次调用在独立 Node 子进程和临时目录中运行。子进程只通过私有 IPC 接收所选模型凭据及已验证输入；不继承 HOME、代理、NODE_OPTIONS、父进程凭据或用户配置。SDK tracing 和敏感模型日志关闭。进程边界不能替代容器或操作系统沙箱，公网部署仍使用只读文件系统、非 root 用户、capability drop、进程/内存上限及受控出网。
@@ -78,6 +89,7 @@ flowchart LR
 - Go：`AWWO_OPENAI_AGENTS_URL`、`AWWO_OPENAI_AGENTS_TOKEN`。
 - Worker 默认模型：`AWWO_OPENAI_AGENTS_PROVIDER=openai`、`MODEL`、`BASE_URL`、`API_KEY`、`PROTOCOL=chat_completions|responses`。
 - Worker 目录：`AWWO_OPENAI_AGENTS_MODELS_JSON`，密钥通过 `apiKeyEnv` 引用。
+- 思考强度：`AWWO_OPENAI_AGENTS_REASONING_EFFORTS` 为默认模型接受的档位，逗号分隔，取值是 none/minimal/low/medium/high/xhigh 的子集，留空表示不支持显式档位；`AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT` 仅用于展示，可以留空，填写时必须属于上述档位。额外模型在 `MODELS_JSON` 中用 `reasoningEfforts` / `defaultReasoningEffort` 各自声明，不继承默认模型。
 - 工具：`AWWO_OPENAI_AGENTS_TOOLS_JSON=[]`，显式启用时可填 `["calculator","current_time"]`。
 - 限制：`CONTEXT_WINDOW`、`MAX_TOKENS`、`TIMEOUT_MS`、`CANCEL_GRACE_MS`、`MAX_CONCURRENCY`、`MAX_OUTPUT_BYTES`，完整名称均有 `AWWO_OPENAI_AGENTS_` 前缀。
 

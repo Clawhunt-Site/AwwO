@@ -175,8 +175,8 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 404, "not_found", "Node binding does not belong to this workspace")
 				return
 			}
-			var model, instructions, runtime string
-			e = tx.QueryRow(r.Context(), "SELECT model,instructions,runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions, &runtime)
+			var model, instructions, runtime, effort string
+			e = tx.QueryRow(r.Context(), "SELECT model,instructions,runtime,effort FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions, &runtime, &effort)
 			if noRows(e) {
 				fail(w, 404, "not_found", "Node agent not found in workspace")
 				return
@@ -194,7 +194,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 				return
 			}
-			snap, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, instructions, team)
+			snap, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
 			if e != nil {
 				a.runtimeAdmissionError(w, e)
 				return
