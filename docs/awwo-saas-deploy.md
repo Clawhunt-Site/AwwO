@@ -49,6 +49,12 @@ Package `awwo-api`, `html/`, `SOURCE_SHA` and `SHA256SUMS` into one tarball, upl
 `s3://clawhunt-data-563688183799/deploy/awwo-saas/`, and fetch it on the host with a presigned URL
 (the host has `curl`, not the AWS CLI).
 
+When the commit changes nothing under `apps/web`, do not rebuild the bundle: `cp -a` the current
+release's `html/` into the new release on the host and prove it is unchanged with
+`grep '  html/' <old>/SHA256SUMS > /tmp/html.sums && sha256sum -c /tmp/html.sums` from the new
+directory. A rebuild would produce a bundle nobody reviewed, and the release still owns its own copy so
+both pointers can move together and old releases stay deletable. `f9b1155` shipped this way.
+
 ## Switch
 
 1. **Back up first.** `aws ec2 create-snapshot --volume-id <root volume>` for a rollback point, and
@@ -69,10 +75,11 @@ Package `awwo-api`, `html/`, `SOURCE_SHA` and `SHA256SUMS` into one tarball, upl
    without the `saas-` prefix, which is how a stale description survives a correct deploy. Then
    `systemctl daemon-reload`, `systemctl restart awwo-saas-api`. Migrations are embedded and applied
    by `Migrate()` before the API listens, so a listening API means they succeeded.
-5. Point `root` in `nginx-web.conf` at the new `html/`, `nginx -t`, then
-   `systemctl restart awwo-saas-web`. `nginx-preview.conf` is a separate preview vhost that tracks its
-   own release and was on `saas-f3be5f7` at the time of writing; do not move it as a side effect of
-   deploying the main site.
+5. Point `root` in `nginx-web.conf` at the new `html/`, test the config **as `awwo-saas`**, then
+   `systemctl restart awwo-saas-web` — read "The nginx switch is not the API switch" below first, because
+   the obvious way to do both of those took the site down on 2026-09-16. `nginx-preview.conf` is a
+   separate preview vhost that tracks its own release and was on `saas-f3be5f7` at the time of writing;
+   do not move it as a side effect of deploying the main site.
 
 ### Read the release the unit points at; never hardcode the one you expect
 
@@ -85,6 +92,40 @@ record it: it is the rollback target, and it is not necessarily the release you 
 
 Releases are retained, so rolling back is `sed` from the new release back to the recorded one,
 `daemon-reload`, and restart. Confirm afterwards with `systemctl show -p ExecStart --value`.
+
+### The nginx switch is not the API switch
+
+Applying step 4's recipe to `nginx-web.conf` took the web tier down for about a minute on 2026-09-16
+(unit failed 06:19:32 UTC, restored ~06:20:30; the API was healthy on the new release throughout, so
+users saw the tunnel's `502`). Two independent traps, neither of which exists on the API side:
+
+- **`grep -o 'saas-[0-9a-f]*'` does not return the release.** The config's first match is
+  `saas-staging` — `t` is not a hex digit, so the match is the bare prefix `saas-`, and a
+  `sed s|saas-|saas-<new>|g` built from it rewrites *every* path in the file: the bundle root becomes
+  `saas-<new><old>/html` and the pid path becomes `saas-<new>staging/run/...`. The API unit has no such
+  string, which is why step 4's pattern is safe there and not here. Anchor on the whole line and check
+  the blast radius:
+  ```bash
+  sed -i "s|root /srv/awwo/releases/saas-[0-9a-f]*/html;|root /srv/awwo/releases/saas-<new>/html;|" "$CONF"
+  diff "$BACKUP/nginx-web.conf" "$CONF"        # expect exactly the one root line
+  grep -c saas-staging "$CONF"                 # expect the same count as before (10)
+  ```
+- **Never run `nginx -t` as root on this host.** The unit is `User=awwo-saas`, and a root-run test
+  creates or truncates `/srv/awwo/saas-staging/run/nginx-web/nginx.pid` as `root:root`. From then on the
+  service user gets `open() ... failed (13: Permission denied)` on it, so `ExecStartPre` fails against a
+  config that is in fact valid, `Restart=on-failure` burns the restart limit, and `systemctl start`
+  reports `Start request repeated too quickly`. It reads like a broken config and is not one — which is
+  what made the first recovery attempt look like it had failed. Validate as the service user, and
+  recover by fixing the owner:
+  ```bash
+  su -s /bin/sh -c "/usr/sbin/nginx -t -c $CONF" awwo-saas
+  chown awwo-saas:awwo /srv/awwo/saas-staging/run/nginx-web/nginx.pid
+  systemctl reset-failed awwo-saas-web && systemctl start awwo-saas-web
+  ```
+
+Do the web switch with the same automatic rollback the API switch deserves: keep the pre-edit config in
+the backup directory, and on a failed config test or a non-200 from `http://127.0.0.1:5188/saas.html`,
+restore it and restart before reporting.
 
 ### Two ways a generated deploy script silently breaks
 
