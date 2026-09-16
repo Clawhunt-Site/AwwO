@@ -156,9 +156,18 @@ func graphFixture(t *testing.T, h *harness, c *http.Cookie, tid string) (string,
 	v := h.request(t, c, "POST", prefix+"/canvases", map[string]any{"name": "Graph", "document": doc}, 201)
 	return v["id"].(string), doc
 }
-func awaitGraph(t *testing.T, h *harness, c *http.Cookie, path, want string) map[string]any {
+
+// The deadline only backstops a graph that never settles: any unexpected terminal status fails
+// immediately, so a longer one cannot hide a broken graph. A caller whose run carries extra work —
+// an injected persistence failure costs a dispatch backoff on top of its model calls — passes its
+// own budget instead of reporting a loaded machine as a graph that never finished.
+func awaitGraph(t *testing.T, h *harness, c *http.Cookie, path, want string, budget ...time.Duration) map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(6 * time.Second)
+	limit := 6 * time.Second
+	if len(budget) > 0 {
+		limit = budget[0]
+	}
+	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
 		v := h.request(t, c, "GET", path, nil, 200)
 		if v["status"] == want {

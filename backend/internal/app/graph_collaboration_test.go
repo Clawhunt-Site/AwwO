@@ -393,9 +393,23 @@ func TestPostgresCollaborationSynthesisFileCommitsWithGraph(t *testing.T) {
 	canvas := "/tenants/" + tid + "/canvases/" + cid
 	h.request(t, c, "PUT", canvas, map[string]any{"name": "Graph", "version": 1, "document": doc}, 200)
 	ctx := context.Background()
+	// The first whole-graph completion is interrupted so the retry path runs, and its evidence is
+	// recorded durably instead of sampled: polling for the transient state races both the run
+	// reaching synthesis and the 500ms retry that ends it, and any row the raising transaction
+	// writes rolls back with it. Sequence advancement outlives that rollback, and the attempt that
+	// does commit leaves witness rows carrying its transaction id.
 	for _, sql := range []string{
 		"CREATE SEQUENCE collaboration_commit_attempt",
-		"CREATE FUNCTION fail_collaboration_commit_once() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.collaboration IS NOT NULL AND NEW.status='completed' AND nextval('collaboration_commit_attempt')=1 THEN RAISE EXCEPTION 'injected final commit failure'; END IF; RETURN NEW; END $$",
+		"CREATE SEQUENCE collaboration_artifact_already_published",
+		"CREATE TABLE collaboration_commit_witness(kind text, xact_id xid8)",
+		"CREATE FUNCTION witness_collaboration_artifact() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO collaboration_commit_witness VALUES('artifact',pg_current_xact_id()); RETURN NULL; END $$",
+		"CREATE TRIGGER collaboration_artifact_witness AFTER INSERT OR UPDATE ON artifacts FOR EACH ROW EXECUTE FUNCTION witness_collaboration_artifact()",
+		// Counting deliverables inside the failing transaction would also see its own uncommitted
+		// insert, so the sequence is advanced once per deliverable another transaction had already
+		// published: staying unused is the proof that nothing was durable before whole-graph success.
+		// The nested IF keeps that count and the attempt counter off unrelated graph_runs updates
+		// without relying on AND to short-circuit a side effect.
+		"CREATE FUNCTION fail_collaboration_commit_once() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.collaboration IS NOT NULL AND NEW.status='completed' THEN INSERT INTO collaboration_commit_witness VALUES('graph-completed',pg_current_xact_id()); PERFORM nextval('collaboration_artifact_already_published') FROM collaboration_commit_witness WHERE kind='artifact' AND xact_id<>pg_current_xact_id(); IF nextval('collaboration_commit_attempt')=1 THEN RAISE EXCEPTION 'injected final commit failure'; END IF; END IF; RETURN NEW; END $$",
 		"CREATE TRIGGER collaboration_commit_failure BEFORE UPDATE ON graph_runs FOR EACH ROW EXECUTE FUNCTION fail_collaboration_commit_once()",
 	} {
 		if _, e := h.db.Exec(ctx, sql); e != nil {
@@ -404,33 +418,29 @@ func TestPostgresCollaborationSynthesisFileCommitsWithGraph(t *testing.T) {
 	}
 	v := h.request(t, c, "POST", canvas+"/graph-runs", map[string]any{"operationId": "atomic-file-collaboration", "scope": []string{"a", "b"}, "collaboration": collaborationPolicy{Goal: "Synthesize a file and typed verdict", Rounds: 1, SynthesizerNodeID: "a"}}, 202)
 	path := canvas + "/graph-runs/" + v["id"].(string)
-	observedRollback := false
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		var called bool
-		var attempt int
-		if e := h.db.QueryRow(ctx, "SELECT is_called,last_value FROM collaboration_commit_attempt").Scan(&called, &attempt); e != nil {
-			t.Fatal(e)
-		}
-		if called && attempt == 1 {
-			var count int
-			if e := h.db.QueryRow(ctx, "SELECT count(*) FROM artifacts WHERE tenant_id=$1", tid).Scan(&count); e != nil {
-				t.Fatal(e)
-			}
-			if count != 0 {
-				t.Fatal("artifact published before whole-graph success", count)
-			}
-			observedRollback = true
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !observedRollback {
-		t.Fatal("did not observe the interrupted final transaction")
-	}
-	done := awaitGraph(t, h, c, path, "completed")
+	// Five model turns plus the dispatch backoff the interrupted commit costs, so this run needs
+	// more headroom than a graph that completes on its first attempt. Waiting for a durable terminal
+	// status cannot miss it the way sampling a transient one can, and an unexpected terminal status
+	// still fails at once, so this is sized well past a loaded machine rather than near it.
+	done := awaitGraph(t, h, c, path, "completed", 2*time.Minute)
 	if calls.Load() != 5 {
 		t.Fatal("persistence retry repeated model calls", calls.Load())
+	}
+	var attempts, artifactWrites, completions, xacts int
+	var publishedEarly bool
+	if e := h.db.QueryRow(ctx, "SELECT (SELECT last_value FROM collaboration_commit_attempt),(SELECT is_called FROM collaboration_artifact_already_published),count(*) FILTER (WHERE kind='artifact'),count(*) FILTER (WHERE kind='graph-completed'),count(DISTINCT xact_id) FROM collaboration_commit_witness").Scan(&attempts, &publishedEarly, &artifactWrites, &completions, &xacts); e != nil {
+		t.Fatal(e)
+	}
+	if attempts < 2 {
+		t.Fatal("the final transaction was never interrupted and retried", attempts)
+	}
+	if publishedEarly {
+		t.Fatal("artifact published before whole-graph success")
+	}
+	// Only a committed attempt leaves witnesses, so one deliverable write and one graph completion
+	// sharing one transaction id is the whole-graph atomicity this run has to prove.
+	if artifactWrites != 1 || completions != 1 || xacts != 1 {
+		t.Fatal("deliverable did not commit with the graph", artifactWrites, completions, xacts)
 	}
 	var count int
 	if e := h.db.QueryRow(ctx, "SELECT count(*) FROM artifacts WHERE tenant_id=$1", tid).Scan(&count); e != nil || count != 1 {
