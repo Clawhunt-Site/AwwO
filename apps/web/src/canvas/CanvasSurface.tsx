@@ -80,7 +80,7 @@ import { projectConversationTurns, updateConversationPresentation } from './conv
 import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserveThreadRuntime, rebindNodeThread, sessionStoreKey,
   updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
 import { arrangeNodePositions, presentationNodes } from './nodePresentation';
-import { fitBounds, fitOverview, focusWorld, type ViewportState } from './viewport';
+import { fitBounds, fitOverview, focusWorld, visibleBoxIds, type ViewportState } from './viewport';
 import { paperclipApiBase } from '../paperclipBridge';
 import { gatewayApiBase } from '../chatAutomations';
 import './canvas.css';
@@ -1254,6 +1254,53 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // ---- overlays -----------------------------------------------------------------------------
   const [inspectorId, setInspectorId] = useState<string | null>(null);
   const inspectorNode = inspectorId ? nodes.find((n) => n.id === inspectorId) ?? null : null;
+  // Viewport culling: tiles outside the visible world rect (plus margin) are not mounted.
+  // SessionTile's header contract assumes this — a culled-and-remounted tile must not lose
+  // state, and the sessions store exists exactly for that.
+  const visibleIds = useMemo(() => {
+    const ids = new Set(visibleBoxIds(renderNodes, view, size));
+    // A focused or inspected node is always mounted, even if the operator has panned it off
+    // screen — the inspector keeps describing a tile that is still "yours".
+    if (focusedId) ids.add(focusedId);
+    if (inspectorId) ids.add(inspectorId);
+    return ids;
+  }, [renderNodes, view, size, focusedId, inspectorId]);
+  // Stable tile callbacks: SessionTile is memoised, and an inline arrow recreated on every
+  // render would defeat it — every keystroke in one tile's composer would re-render the
+  // rest of the canvas.
+  const tileRenderTurnDetails = useCallback(
+    (node: CanvasNode, turn: { runId?: string }, latest: boolean) =>
+      turn.runId ? (
+        <TeamRunDetails key={turn.runId} tenantId={cloudScope!.tenant.id} runId={turn.runId} defaultOpen={latest}
+          runStatus={latest ? runs[node.id]?.state : undefined} />
+      ) : null,
+    [cloudScope, runs],
+  );
+  const tileOnSend = useCallback(
+    (node: CanvasNode, message: string, onAccepted?: () => void, displayText?: string) => { void startRun([node.id], message, onAccepted, displayText); },
+    [startRun],
+  );
+  const tileOnIssueId = useCallback(
+    (nodeId: string, issueId: string, threadId: string | undefined) =>
+      // Server-minted, not a user edit — never an undo step.
+      patchDoc(
+        (prev) => ({
+          ...prev,
+          nodes: prev.nodes.map((n) => (n.id === nodeId && n.kind === 'session'
+            ? updateThreadIssueId(n, threadId ?? activeThreadId(n), issueId) : n)),
+        }),
+        { silent: true },
+      ),
+    [patchDoc],
+  );
+  const tileOnConfigure = useCallback(
+    (id: string) => { if (!inspectorCloseLocked.current) { setInspectorId(id); focusNode(id); } },
+    [focusNode],
+  );
+  const tileDelete = useCallback(
+    (id: string) => deleteNodes([id]),
+    [deleteNodes],
+  );
   const [addMenu, setAddMenu] = useState<{ at: { x: number; y: number }; world: { x: number; y: number } } | null>(null);
   const [barMode, setBarMode] = useState<CommandBarMode | null>(null);
   const [minimapOpen, setMinimapOpen] = useState(true);
@@ -1564,13 +1611,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           preview={wiring.wireDrag} onDisconnect={readOnly || running || initializing ? undefined : disconnect} />
         <CollaborationFlow nodes={renderNodes} collaboration={journal.current?.collaboration} running={running} scale={view.scale} />
         {nodes.map((node) => (
+          visibleIds.has(node.id) && (
           <SessionTile
             key={node.id}
             node={node}
             readOnly={readOnly}
             initializeOnSend={canInitialize}
             freeConversation={Boolean(cloudScope)}
-            renderTurnDetails={cloudScope ? (turn, latest) => turn.runId ? <TeamRunDetails key={turn.runId} tenantId={cloudScope.tenant.id} runId={turn.runId} defaultOpen={latest} runStatus={latest ? runs[node.id]?.state : undefined} /> : null : undefined}
+            renderTurnDetails={cloudScope ? tileRenderTurnDetails : undefined}
             geometry={renderNodeById.get(node.id)}
             compact={node.kind === 'session' && focusedId !== node.id}
             scale={view.scale}
@@ -1578,19 +1626,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             selected={selection.includes(node.id)}
             run={runs[node.id] ?? null}
             gatewayBase={gatewayApiBase()}
-            onSend={(node, message, accepted, displayText) => { void startRun([node.id], message, accepted, displayText); }}
+            onSend={tileOnSend}
             conversationContext={node.kind === 'session' ? prepareNodeConversation(node, nodes, edges.filter(edge => edge.kind !== 'feedback')) : undefined}
-            onIssueId={(nodeId, issueId, threadId) =>
-              // Server-minted, not a user edit — never an undo step.
-              patchDoc(
-                (prev) => ({
-                  ...prev,
-                  nodes: prev.nodes.map((n) => (n.id === nodeId && n.kind === 'session'
-                    ? updateThreadIssueId(n, threadId ?? activeThreadId(n), issueId) : n)),
-                }),
-                { silent: true },
-              )
-            }
+            onIssueId={tileOnIssueId}
             onPreview={readOnly ? undefined : persistPreview}
             onDraftChange={readOnly ? undefined : persistDraft}
             onToggleDeliverables={readOnly ? undefined : toggleDeliverables}
@@ -1600,13 +1638,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onSelect={selectNode}
             onToggleFocus={toggleFocus}
             onFitNode={focusNode}
-            onConfigure={(id) => { if (!inspectorCloseLocked.current) { setInspectorId(id); focusNode(id); } }}
+            onConfigure={tileOnConfigure}
             configurationPanel={!canInitialize && node.kind === 'session' && focusedId === node.id && inspectorId === node.id ? renderInspector(node, true) : null}
             onUpdateNode={readOnly || running || initializing || bindingLocked ? undefined : saveNode}
             onRunNode={readOnly || running || initializing ? undefined : rerunNode}
-            onDelete={readOnly || running || initializing ? undefined : (id) => deleteNodes([id])}
+            onDelete={readOnly || running || initializing ? undefined : tileDelete}
             wiring={wiring}
           />
+          )
         ))}
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>

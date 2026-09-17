@@ -29,7 +29,7 @@
 //  - An unbound tile's composer is disabled with the reason stated, never a live-looking box.
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ArrowDownToLine, BookOpen, Bot, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
@@ -187,7 +187,7 @@ export interface SessionTileProps {
   initializeOnSend?: boolean;
   /** SaaS chat sends the current message; task execution uses the separate contract action. */
   freeConversation?: boolean;
-  renderTurnDetails?: (turn: Turn, latest: boolean) => ReactNode;
+  renderTurnDetails?: (node: CanvasNode, turn: Turn, latest: boolean) => ReactNode;
   node: CanvasNode;
   /** View geometry stays separate from persisted workspace dimensions. */
   geometry?: { x: number; y: number; w: number; h: number };
@@ -242,7 +242,13 @@ export interface SessionTileProps {
   onRunNode?: (nodeId: string) => void;
 }
 
-export function SessionTile({
+/**
+ * Memoised: the tile's props are all referentially stable across an unrelated node's update
+ * (the canvas keeps node objects immutable — a moved or edited node is a NEW object, untouched
+ * nodes keep their reference). Without this, every keystroke in one tile's composer would
+ * re-render every other tile on the canvas.
+ */
+export const SessionTile = memo(function SessionTile({
   node: sourceNode,
   initializeOnSend = false,
   geometry,
@@ -681,7 +687,7 @@ export function SessionTile({
                       {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
                     : <TileTranscript turns={session.turns} history={session.history} streaming={session.streaming}
-                      limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails} />}
+                      limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(conversationError)}
@@ -742,4 +748,4 @@ export function SessionTile({
       ) : null}
     </div>
   );
-}
+});

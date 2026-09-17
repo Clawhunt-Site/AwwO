@@ -173,6 +173,30 @@ export function worldTransform(view: ViewportState): string {
   return `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
 }
 
+/**
+ * Viewport culling: return the ids of the boxes whose AABB intersects the visible world rect
+ * (the viewport rect inverse-transformed to world space, padded by `margin` world units per
+ * side). Off-screen tiles can then be skipped by the renderer. Empty `size` (viewport not
+ * measured yet) means "unknown" and culls nothing.
+ */
+export function visibleBoxIds(
+  boxes: ReadonlyArray<{ id: string; x: number; y: number; w: number; h: number }>,
+  view: ViewportState,
+  size: { w: number; h: number },
+  margin = 200,
+): ReadonlySet<string> {
+  if (size.w <= 0 || size.h <= 0) return new Set(boxes.map((b) => b.id));
+  const minX = (0 - view.x) / view.scale - margin;
+  const minY = (0 - view.y) / view.scale - margin;
+  const maxX = (size.w - view.x) / view.scale + margin;
+  const maxY = (size.h - view.y) / view.scale + margin;
+  const out = new Set<string>();
+  for (const b of boxes) {
+    if (b.x + b.w >= minX && b.x <= maxX && b.y + b.h >= minY && b.y <= maxY) out.add(b.id);
+  }
+  return out;
+}
+
 /** Axis-aligned bounds of a set of positioned boxes (for fit-to-content). */
 export function boundsOfBoxes(
   boxes: ReadonlyArray<{ x: number; y: number; w: number; h: number }>,
