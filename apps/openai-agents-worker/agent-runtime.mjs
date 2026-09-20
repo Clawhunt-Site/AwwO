@@ -62,7 +62,9 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
   const agent = new sdk.Agent({ name: 'AwwO configured agent',
     instructions: request.systemPrompt ?? 'You are a helpful assistant. Follow the user task using only explicitly provided information and registered tools.',
     model, tools, handoffs: [], toolUseBehavior: 'stop_on_first_tool',
-    modelSettings: { preserveRawUsage: true, maxTokens: modelConfig.maxTokens, store: false, parallelToolCalls: false, retry: { maxRetries: 0 },
+    modelSettings: { preserveRawUsage: true, maxTokens: modelConfig.maxTokens, parallelToolCalls: false, retry: { maxRetries: 0 },
+      // Gemini's OpenAI-compatible endpoint rejects even store=false.
+      ...(endpoint.origin === 'https://generativelanguage.googleapis.com' ? {} : { store: false }),
       // Only an explicitly admitted level reaches the provider. Without one the
       // request carries no reasoning setting at all, so the provider default applies.
       ...(request.effort ? { reasoning: { effort: request.effort } } : {}) },

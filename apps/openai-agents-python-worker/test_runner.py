@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from agents import FunctionTool, set_trace_processors
+from openai import AsyncOpenAI
 
 from config import load_config
 from runner import RunRequest, _build_tools, stream_run
@@ -124,6 +125,19 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_text_round_trip_has_no_trace_or_span(self):
         events = await self.collect()
         self.assertEqual(events[-1]["text"], "Hello")
+        self.assertEqual(self.traces.events, [])
+
+    async def test_google_chat_wire_omits_unsupported_store(self):
+        profile = replace(self.config.models[0], base_url="https://generativelanguage.googleapis.com/v1beta/openai")
+        config = replace(self.config, models=(profile,))
+        # Exercise the actual SDK serialization, routing transport to our fixture.
+        def local_client(**kwargs):
+            return AsyncOpenAI(**{**kwargs, "base_url": self.config.base_url})
+        with patch("runner.AsyncOpenAI", side_effect=local_client):
+            events = await self.collect(self.request(tools=["calculator"]), config=config)
+        self.assertEqual(events[-1]["type"], "completed", events)
+        self.assertNotIn("store", self.calls[0])
+        self.assertFalse(self.calls[0]["parallel_tool_calls"])
         self.assertEqual(self.traces.events, [])
 
     async def test_setup_failures_are_terminal_wire_events(self):

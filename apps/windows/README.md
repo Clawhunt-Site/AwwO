@@ -14,3 +14,5 @@ npm run build:windows
 ```
 
 The NSIS installer is under `apps/windows/target/release/bundle/nsis` (or `CARGO_TARGET_DIR`). Installers are unsigned unless the release operator configures signing. Windows may display a publisher warning. WebView2 is installed if needed. Internet access and any access-gate authorization required by the chosen service are still required.
+
+Normal `v*` releases publish this client. The older native desktop workflow uses only `desktop-v*` tags or manual dispatch, so it cannot attach the legacy local installer to a hosted-client release.

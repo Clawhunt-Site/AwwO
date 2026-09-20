@@ -4,6 +4,25 @@ import { access } from 'node:fs/promises';
 import test from 'node:test';
 import { publicHealth } from './config.mjs';
 import { configuration, fixture, request, run } from './test-support.mjs';
+import { executeAgent } from './agent-runtime.mjs';
+
+test('Google chat wire omits unsupported store while keeping SDK execution', async t => {
+  const f = await fixture(t);
+  const profile = { ...configuration().models[0], baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' };
+  const events = [];
+  await executeAgent({ request: request({ tools: ['calculator'] }), modelConfig: profile, signal: new AbortController().signal,
+    emit: event => events.push(event), observer: {
+      fetch(input, init) {
+        assert.equal(String(input), `${profile.baseURL}/chat/completions`);
+        return fetch(`${f.baseURL}/chat/completions`, init);
+      },
+      snapshot: () => ({}),
+    } });
+  assert.equal(events.at(-1).type, 'completed');
+  assert.equal(f.calls.length, 1);
+  assert.ok(!Object.hasOwn(f.calls[0].body, 'store'));
+  assert.equal(f.calls[0].body.parallel_tool_calls, false);
+});
 
 test('official SDK chat stream preserves isolated instructions, history and single-call settings', { timeout: 15_000 }, async t => {
   const f = await fixture(t);

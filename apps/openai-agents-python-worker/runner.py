@@ -9,7 +9,7 @@ from typing import AsyncIterator
 from agents import Agent, FunctionTool, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, RunConfig, Runner
 from openai import AsyncOpenAI
 
-from config import Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
+from config import PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
 from errors import RuntimeError, classify_error
 from tools import TOOL_SCHEMAS, ToolInputError, execute_tool, tool_definition_bytes, validate_tool_names
 
@@ -127,7 +127,11 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
     else:
         input_messages = [{"role": "user", "content": request.prompt}]
 
-    settings = {"max_tokens": profile.max_tokens, "store": False, "parallel_tool_calls": False}
+    settings = {"max_tokens": profile.max_tokens, "parallel_tool_calls": False}
+    # Gemini rejects OpenAI's optional storage field, including store=false.
+    # Keep explicit no-storage requests for providers which accept that field.
+    if profile.base_url.rstrip("/") != PERSONAL_ENDPOINTS["google"]:
+        settings["store"] = False
     if effort:
         settings["reasoning"] = {"effort": effort}
 
