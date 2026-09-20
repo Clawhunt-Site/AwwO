@@ -25,6 +25,7 @@ export const tenantPath = (tenantId: string, suffix = '') => `/tenants/${encodeU
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
 export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
   const codes: Record<string, [string, string]> = {
+    account_password_as_key: ['这里需要模型服务商的 API Key，请勿填写 AwwO 登录密码。','Enter a provider API key here, not your AwwO login password.'],
     vault_unavailable: ['个人密钥服务尚未配置，请联系管理员。','Personal credential storage is not configured. Contact the administrator.'],
     provider_verification_failed: ['密钥验证失败，请检查 API Key、服务商额度和访问地区。','Key verification failed. Check your API key, provider access and region.'],
     invalid_connection: ['请选择正确的服务商、执行引擎并填写有效密钥。','Select a provider, supported engine and valid API key.'],

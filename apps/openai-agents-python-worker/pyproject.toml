@@ -1,0 +1,14 @@
+[project]
+name = "awwo-openai-agents-python-worker"
+version = "0.1.0"
+description = "AwwO agent execution worker using the openai-agents Python SDK"
+requires-python = ">=3.12"
+dependencies = [
+    "openai-agents==0.22.3",
+    "aiohttp>=3.9",
+    "tzdata; platform_system == 'Windows'",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

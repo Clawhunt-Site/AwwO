@@ -214,6 +214,17 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 	if b.Name == "" {
 		b.Name = p.Name
 	}
+	// Browsers can ignore autocomplete hints and insert the login password in
+	// a secret field. Never transmit that account password to a provider.
+	var passwordHash string
+	if e := a.db.QueryRow(r.Context(), "SELECT password_hash FROM users WHERE id=$1", currentUser(r).ID).Scan(&passwordHash); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if checkPassword(b.APIKey, passwordHash) {
+		fail(w, 400, "account_password_as_key", "Enter a provider API key, not your AwwO account password")
+		return
+	}
 	models, e := a.discoverConnectionModels(r.Context(), p, b.APIKey)
 	if e != nil {
 		fail(w, 422, "provider_verification_failed", "Could not verify the API key and read its model catalog. Check the key, access region and provider account.")
@@ -322,6 +333,16 @@ func (a *App) personalRuntime(ctx context.Context, runtime string) (piHealth, er
 	h.Model = h.Models[0].ID
 	h.Provider = h.Models[0].Provider
 	return h, nil
+}
+
+func (a *App) personalPlanner(ctx context.Context, entitlement modelEntitlement, catalog runtimeCatalog) (string, string, error) {
+	for _, runtime := range []string{runtimeOpenAIAgents, runtimePI} {
+		h, err := a.loadRuntime(ctx, entitlement, catalog, runtime)
+		if err == nil && h.defaultModel() != "" {
+			return runtime, h.defaultModel(), nil
+		}
+	}
+	return "", "", setupError{"model_unavailable", "Connect a personal engine before planning"}
 }
 
 // Resolve from the persisted run actor, including team child invocations. Neither

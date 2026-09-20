@@ -22,7 +22,7 @@ export function modelEffortCapability(model: SaaSRuntimeModel): { effort_levels:
   return { effort_levels: unique, default_effort: fallback };
 }
 export type SaaSRuntimeStatus = {
-  engine?: string; available: boolean; configured: boolean; reason?: string; plannerAvailable?: boolean;
+  engine?: string; available: boolean; configured: boolean; reason?: string; plannerAvailable?: boolean; plannerRuntime?: string;
   models: SaaSRuntimeModel[]; runtimes?: SaaSRuntimeDefinition[];
 };
 

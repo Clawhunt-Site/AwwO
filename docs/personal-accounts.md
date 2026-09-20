@@ -1,6 +1,10 @@
 # Personal accounts and model credentials
 
-The account-based product uses the Go API, PostgreSQL, SaaS web client, Pi worker and OpenAI Agents JS worker. Registration creates a personal account and workspace. Existing workspace memberships and history are retained.
+The account-based product uses the Go API, PostgreSQL, SaaS web client, Pi worker and OpenAI Agents worker. Registration creates a personal account and workspace. Existing workspace memberships and history are retained.
+
+The Windows shell in `apps/windows` shares the hosted service's account and database. It has no local command or filesystem bridge. Python workers also support the same private `userModel` admission contract; all workers selected by the API must advertise `userCredentials: true`.
+
+Canvas planning chooses an available engine from the requesting user's connections, preferring OpenAI Agents then Pi. It never stores a personal model selector on the shared internal planner Agent. Legacy Jev/TypeSafe does not support personal credentials: in personal mode both its catalogue and evaluation endpoints must route to the Go API, which rejects them. Remove any reverse-proxy route bypassing the API and pointing directly at an operator-key sidecar before enabling personal mode.
 
 ## User flow
 
@@ -14,11 +18,11 @@ To use ClawHunt's model service, open [LLM Gate](https://api.clawhunt.site/), pu
 
 | Provider | Supported engines | API |
 | --- | --- | --- |
-| LLM Gate / ClawHunt | Pi, OpenAI Agents JS | Chat Completions; GPT/Codex on Agents JS uses Responses |
-| OpenAI / Codex | OpenAI Agents JS | Responses |
+| LLM Gate / ClawHunt | Pi, OpenAI Agents | Chat Completions; GPT/Codex on Agents JS uses Responses |
+| OpenAI / Codex | OpenAI Agents | Responses |
 | Claude / Anthropic | Pi | Messages |
-| Grok / xAI | Pi, OpenAI Agents JS | Chat Completions |
-| Gemini / Google | Pi, OpenAI Agents JS | OpenAI-compatible Chat Completions |
+| Grok / xAI | Pi, OpenAI Agents | Chat Completions |
+| Gemini / Google | Pi, OpenAI Agents | OpenAI-compatible Chat Completions |
 
 The catalog is fetched with the supplied credential, not a hardcoded paid-model roster. Catalog access does **not** prove credit balance, inference permission or every model's protocol compatibility. A real run provides that evidence. Text-only execution uses a conservative 32,768-byte context envelope and 4,096-token output limit; long generated plans may need to be split. No unverified reasoning-effort options are advertised. Discovery retains up to 64 text-model IDs per connection, and an account may store eight connections. Remove and add a connection to refresh its catalog or rotate its key; select the replacement in existing nodes.
 

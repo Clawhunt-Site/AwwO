@@ -18,7 +18,7 @@ type Connections = {
   required: boolean;
   purchaseURL: string;
 };
-const engineName = (id: string) => (id === "pi" ? "Pi" : "OpenAI Agents JS");
+const engineName = (id: string) => (id === "pi" ? "Pi" : "OpenAI Agents");
 const home = () => {
   const query = new URLSearchParams(location.search);
   query.delete("account");
@@ -250,7 +250,8 @@ export function ConnectionSettings({
             API Key
             <input
               type="password"
-              autoComplete="off"
+              name="provider-api-key"
+              autoComplete="new-password"
               spellCheck={false}
               required
               minLength={8}

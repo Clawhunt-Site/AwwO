@@ -164,8 +164,18 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 	// configured/available stay service-level facts, but planning must not be
 	// offered when this workspace has no model to plan with: the planner Agent
 	// carries no explicit model, so an empty entitlement would fail at admission.
-	planner := pi.err == nil && entitlement.apply(pi.h).defaultModel() != ""
-	v := map[string]any{"engine": runtimePI, "configured": configured, "available": available, "plannerAvailable": planner, "models": models, "runtimes": runtimes, "modelConnectivityVerified": false, "limits": pi.h.Limits}
+	plannerRuntime := runtimePI
+	if a.cfg.UserCredentials {
+		for _, id := range []string{runtimeOpenAIAgents, runtimePI} {
+			if item := found[id]; item.err == nil && entitlement.apply(item.h).defaultModel() != "" {
+				plannerRuntime = id
+				break
+			}
+		}
+	}
+	selectedPlanner := found[plannerRuntime]
+	planner := selectedPlanner.err == nil && entitlement.apply(selectedPlanner.h).defaultModel() != ""
+	v := map[string]any{"engine": runtimePI, "configured": configured, "available": available, "plannerAvailable": planner, "plannerRuntime": plannerRuntime, "models": models, "runtimes": runtimes, "modelConnectivityVerified": false, "limits": pi.h.Limits}
 	if !available {
 		v["reason"] = "No configured runtime is available"
 	} else if len(models) == 0 {
@@ -307,7 +317,18 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 		return
 	}
-	snapshot, e := a.runtimeSnapshot(r.Context(), entitlement, runtimeCatalog{}, runtime, model, effort, instructions, team)
+	catalog := runtimeCatalog{}
+	if kind == "planner" && a.cfg.UserCredentials {
+		// A planner session is shared with its canvas, but its model credential is
+		// always the current actor's. Never write a personal selector into that Agent.
+		runtime, model, e = a.personalPlanner(r.Context(), entitlement, catalog)
+		if e != nil {
+			a.runtimeAdmissionError(w, e)
+			return
+		}
+		effort = ""
+	}
+	snapshot, e := a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
 	if e != nil {
 		a.runtimeAdmissionError(w, e)
 		return

@@ -1,0 +1,11 @@
+[package]
+name = "awwo_cloud"
+version = "0.7.1"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"

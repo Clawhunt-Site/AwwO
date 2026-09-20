@@ -66,6 +66,24 @@ func mockPersonalDiscovery(t *testing.T, h *harness) {
 		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	})
 }
+
+func TestPostgresPersonalConnectionNeverTransmitsAccountPassword(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	mockPersonalDiscovery(t, h)
+	owner, _, uid := h.register(t, "autofill@example.test")
+	password := "SyntheticAccountPassword123"
+	if _, err := h.db.Exec(t.Context(), "UPDATE users SET password_hash=$2 WHERE id=$1", uid, hashPassword(password)); err != nil {
+		t.Fatal(err)
+	}
+	h.a.client.Transport = personalTransport(func(r *http.Request) (*http.Response, error) {
+		t.Error("account password reached a provider")
+		return nil, nil
+	})
+	result := h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "llmgate", "runtime": "pi", "apiKey": password}, 400)
+	if result["error"].(map[string]any)["code"] != "account_password_as_key" {
+		t.Fatal("missing account password guard", result)
+	}
+}
 func addPersonalConnection(t *testing.T, h *harness, c *http.Cookie) string {
 	t.Helper()
 	v := h.request(t, c, "POST", "/auth/connections", map[string]any{"provider": "llmgate", "runtime": "pi", "apiKey": "synthetic-personal-secret", "name": "Work"}, 201)

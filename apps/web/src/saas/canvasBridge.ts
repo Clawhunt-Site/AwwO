@@ -121,8 +121,8 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
     if (path === '/canvas/planner') {
       const runtime: SaaSRuntimeStatus = await request('/runtime');
       const available = runtime.available === true && runtime.plannerAvailable === true;
-      return json({ available, provider: 'pi',
-        ...(!available ? { error: (runtime.reason ? canvasErrorMessage(runtime.reason) : '') || canvasText('Pi 规划服务尚未就绪。', 'The Pi planning service is not ready.') } : {}) });
+      return json({ available, provider: runtime.plannerRuntime || 'pi',
+        ...(!available ? { error: (runtime.reason ? canvasErrorMessage(runtime.reason) : '') || canvasText('请先连接你的执行引擎。', 'Connect your personal engine first.') } : {}) });
     }
     if (path === '/canvas/plan' && method === 'POST') {
       if (!saveCanvas) return json({ error: canvasText('画布保存尚未就绪', 'Canvas saving is not ready.') }, 409);

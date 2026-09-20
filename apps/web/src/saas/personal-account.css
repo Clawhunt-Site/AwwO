@@ -9,6 +9,9 @@
   flex-wrap: wrap;
   margin: 0 0 24px;
 }
+.saas-personal .saas-page-intro h1 {
+  max-width: none;
+}
 .saas-connection-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);

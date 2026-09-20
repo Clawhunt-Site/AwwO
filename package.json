@@ -1,6 +1,6 @@
 {
   "name": "awwo",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.4",
@@ -25,6 +25,8 @@
     "build:web": "npm run build --prefix apps/web",
     "build:gateway": "npm run build --prefix apps/gateway",
     "start:user": "node scripts/awwo-user-start.ts",
-    "test:user-models": "node --test apps/user-models.test.ts"
+    "test:user-models": "node --test apps/user-models.test.ts",
+    "build:windows": "node apps/windows/build.ts",
+    "test:windows": "node --test apps/windows/config.test.ts"
   }
 }

@@ -18,6 +18,7 @@ export function jevFailure(error: unknown, locale: UiLocale): Error {
   if (error instanceof DOMException && error.name === 'AbortError') return error;
   const code = error instanceof SaaSApiError ? error.code : '';
   const messages: Record<string, [string, string]> = {
+    typesafe_personal_required: ['个人凭证模式请使用已连接的执行引擎规划。Jev 暂不支持个人凭证。', 'Use your connected engine for planning. Jev does not yet support personal credentials.'],
     typesafe_disabled: ['此工作区尚未启用 Jev 编排。', 'Jev planning is not enabled for this workspace.'],
     typesafe_unconfigured: ['服务端尚未配置 Jev。', 'Jev is not configured on the server.'],
     typesafe_rate_limited: ['Jev 编排请求已达频率或并发上限，请稍后重试。', 'Jev planning reached its request or concurrency limit. Try again later.'],

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AwwO Cloud",
+  "version": "0.7.1",
+  "identifier": "store.clawhunt.awwo.cloud",
+  "build": { "frontendDist": "assets" },
+  "app": { "windows": [], "security": { "capabilities": [], "csp": "default-src 'none'" } },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["../desktop/src-tauri/icons/icon.ico", "../desktop/src-tauri/icons/icon.png"],
+    "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" }, "nsis": { "installMode": "currentUser" } }
+  }
+}

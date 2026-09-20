@@ -206,6 +206,15 @@ func (a *App) Handler() http.Handler {
 	// handler cannot apply that workspace's model entitlement, and a stale client
 	// asking for one must get a visible 404 rather than the whole catalogue.
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runtime", a.tenant(a.runtime, 1))
+	if a.cfg.UserCredentials {
+		// Hosted ingress must route both TypeSafe endpoints through this guard in
+		// personal mode. Its separate service still uses operator credentials.
+		disabledJev := func(w http.ResponseWriter, r *http.Request) {
+			fail(w, 403, "typesafe_personal_required", "Use your personal engine for planning; Jev does not support personal credentials yet")
+		}
+		m.HandleFunc("GET /api/v1/tenants/{tenantId}/typesafe", a.tenant(disabledJev, 1))
+		m.HandleFunc("POST /api/v1/tenants/{tenantId}/typesafe/evaluations", a.tenant(disabledJev, 2))
+	}
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/members", a.tenant(a.members, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/members", a.tenant(a.addMember, 3))
 	m.HandleFunc("PATCH /api/v1/tenants/{tenantId}/members/{id}", a.tenant(a.updateMember, 3))
