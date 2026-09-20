@@ -1,5 +1,7 @@
 # AwwO
 
+作者：[Boxpo](https://github.com/Boxpo)
+
 AwwO 是一个协作式 AI 画布。登录账号后，选择执行引擎并连接自己的模型服务，把 Bot、角色和任务连成可以运行的工作流。
 
 ## 使用线上版与 Windows 版

@@ -1,6 +1,10 @@
 {
   "name": "awwo",
   "version": "0.7.1",
+  "author": {
+    "name": "Boxpo",
+    "url": "https://github.com/Boxpo"
+  },
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.4",

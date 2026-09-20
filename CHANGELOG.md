@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Changed
+
+- Credit Boxpo as the AwwO author in the README and package metadata.
+
 ### Fixed
 
 - Preserve binary preview-signing keys on Windows, including random newline bytes; isolate preview tests using the Windows home directory variable.
