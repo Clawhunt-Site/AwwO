@@ -8720,7 +8720,9 @@ def create_app(state_path: str | Path | None = None) -> FastAPI:
             pass
         key_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = key_path.parent / f".preview-sign.key.{os.getpid()}.{secrets.token_hex(6)}.tmp"
-        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # Windows text-mode writes translate random LF bytes into CRLF, which
+        # corrupts the fixed-length signing key. Keep these bytes binary.
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
         try:
             os.write(fd, secrets.token_bytes(32))
         finally:

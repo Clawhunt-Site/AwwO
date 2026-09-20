@@ -57,6 +57,7 @@ def client(tmp_path, monkeypatch):
     # isolate the signing-key file under a temp HOME; configure a control token so
     # the TestClient (a non-loopback peer) authenticates via the header.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     app = create_app(state_path=tmp_path / "state.db")
     app.state.control_token = _TOKEN
     return TestClient(app)
@@ -75,7 +76,9 @@ def test_mint_rejects_non_http(client):
 def test_preview_roundtrip(client, http_server, monkeypatch):
     monkeypatch.setattr(wp, "_ip_is_public", lambda ip: True)  # allow loopback fetch target
     url = f"http://127.0.0.1:{http_server.server_address[1]}/"
-    ticket = _mint(client, url).json()["ticket"]
+    minted = _mint(client, url)
+    assert minted.status_code == 200, minted.text
+    ticket = minted.json()["ticket"]
     resp = client.get(f"/api/preview/{ticket}", headers=_HDR)
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -88,6 +91,18 @@ def test_preview_roundtrip(client, http_server, monkeypatch):
     assert f'<base href="{url}"' in body["page_html"]
     assert body["extracted_links"][0]["url"] == "https://e.com/x"
     assert resp.headers["cache-control"] == "no-store"
+
+
+def test_signing_key_preserves_binary_bytes(client, tmp_path, monkeypatch):
+    import secrets
+
+    key = (b"\n\r\x1a\x00" * 8)
+    monkeypatch.setattr(secrets, "token_bytes", lambda n: key if n == 32 else b"x" * n)
+    minted = _mint(client, "https://example.com/")
+    assert minted.status_code == 200, minted.text
+    assert (tmp_path / ".superclaw" / "preview-sign.key").read_bytes() == key
+    # The persisted bytes must remain valid on the next request too.
+    assert _mint(client, "https://example.com/").status_code == 200
 
 
 def test_get_rejects_tampered_ticket(client):

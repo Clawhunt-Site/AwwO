@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve binary preview-signing keys on Windows, including random newline bytes; isolate preview tests using the Windows home directory variable.
+
 ## [0.7.0] - 2026-09-20
 
 ### Added — personal accounts and execution credentials
