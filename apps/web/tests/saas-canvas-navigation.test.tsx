@@ -56,6 +56,7 @@ it.each(['owner', 'reader'])('keeps a return available while the %s canvas is lo
   const fetcher = server({ role, canvasRead: () => new Promise(done => { resolve = done; }) }); render(<SaaSApp />);
   await screen.findByText('正在加载云端画布…');
   expect(backLink()).toBeVisible(); expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
+  await waitFor(() => expect(resolve).toBeTypeOf('function'));
   await act(async () => resolve(response({ error: { message: 'Fixture unavailable' } }, 503)));
   expect(await screen.findByRole('alert')).toHaveTextContent('Fixture unavailable');
   expect(backLink()).toBeVisible();

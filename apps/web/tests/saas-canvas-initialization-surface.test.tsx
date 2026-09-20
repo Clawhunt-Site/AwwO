@@ -68,7 +68,7 @@ it('saves edited configuration synchronously, preserves the old thread and adopt
   await waitFor(() => expect(screen.queryByRole('dialog', { name: '节点配置 — Draft node' })).toBeNull());
   expect(received.nodes[0]).toMatchObject({ persona: 'Updated persona', binding: null, issueId: null });
   expect(getNodeThreads(received.nodes[0] as SessionNode).some(thread => thread.issueId === 'old-session' && thread.binding?.agentId === 'old-agent')).toBe(true);
-  expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({ binding: { agentId: 'new-agent' }, issueId: 'new-session', persona: 'Updated persona' });
+  await waitFor(() => expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({ binding: { agentId: 'new-agent' }, issueId: 'new-session', persona: 'Updated persona' }));
 });
 it('persists a node runtime change through initialization and preserves the prior Pi conversation', async () => {
   seed(true); let received!: CanvasDocument;
@@ -89,8 +89,8 @@ it('persists a node runtime change through initialization and preserves the prio
   fireEvent.click(screen.getByRole('button', { name: /保存配置|保存并准备运行/ }));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: '节点配置 — Draft node' })).toBeNull());
   expect(received.nodes[0]).toMatchObject({ runtime: 'openai-agents', model: 'agents-only', effort: '', binding: null, issueId: null });
+  await waitFor(() => expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({ runtime: 'openai-agents', model: 'agents-only', binding: { agentId: 'new-agent' }, issueId: 'new-session' }));
   const saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
-  expect(saved).toMatchObject({ runtime: 'openai-agents', model: 'agents-only', binding: { agentId: 'new-agent' }, issueId: 'new-session' });
   expect(getNodeThreads(saved)).toEqual(expect.arrayContaining([
     expect.objectContaining({ runtime: 'pi', model: 'profile-main', issueId: 'old-session', binding: expect.objectContaining({ agentId: 'old-agent' }) }),
     expect.objectContaining({ runtime: 'openai-agents', model: 'agents-only', issueId: 'new-session', binding: expect.objectContaining({ agentId: 'new-agent' }) }),

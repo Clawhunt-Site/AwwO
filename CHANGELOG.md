@@ -20,6 +20,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 ### Fixed
 
 - Gemini connections omit the unsupported OpenAI `store` field in both Agents workers; real Gemini chat, conversation history and calculator execution are verified.
+- Canvas regression checks wait for the actual request and canonical storage update, preventing timing-dependent false failures during release CI.
 - Prevent browser password autofill from being forwarded as a provider API key; reject the account password on the server before making any provider request.
 - Canvas planning uses the requesting user's available engine, including accounts with only an OpenAI Agents connection; personal selectors are never saved on the shared planner Agent.
 - Personal credential mode blocks the legacy Jev service from spending operator credentials. Normal canvas planning remains available through the user's engine.
