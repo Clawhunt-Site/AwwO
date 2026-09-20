@@ -90,7 +90,7 @@ def _parse_efforts(levels, fallback: str | None) -> tuple[tuple, str]:
         parsed = [part.strip() for part in levels.split(",") if part.strip()]
     else:
         parsed = list(levels)
-    if len(parsed) > len(EFFORT_LEVELS) or any(l not in EFFORT_LEVELS for l in parsed) or len(set(parsed)) != len(parsed):
+    if len(parsed) > len(EFFORT_LEVELS) or any(level not in EFFORT_LEVELS for level in parsed) or len(set(parsed)) != len(parsed):
         raise ConfigError("Invalid reasoning effort levels")
     default_effort = fallback or ""
     if default_effort and default_effort not in parsed:
