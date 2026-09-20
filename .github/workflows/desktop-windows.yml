@@ -12,6 +12,7 @@ on:
   workflow_dispatch:
   push:
     tags:
+      - "v*"
       - "desktop-v*"
 
 jobs:
