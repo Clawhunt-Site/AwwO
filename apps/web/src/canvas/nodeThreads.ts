@@ -26,6 +26,7 @@ function snapshot(node: SessionNode, prior?: NodeThread): NodeThread {
       ? prior.lastOutput : node.lastOutput ?? null,
     outputValues: Object.fromEntries((node.contract?.outputs || []).map(field => [field.id, field.value])),
     binding: node.binding,
+    agentRef: node.agentRef ?? null,
     runtime: node.runtime,
     model: node.model,
     effort: node.effort,
@@ -54,7 +55,8 @@ export function boundAgentConfigurationChanged(current: SessionNode, next: Sessi
     current.runtime !== next.runtime ||
     current.model !== next.model ||
     current.effort !== next.effort ||
-    current.persona !== next.persona
+    current.persona !== next.persona ||
+    current.agentRef?.agentId !== next.agentRef?.agentId
   );
 }
 
@@ -66,6 +68,7 @@ function project(node: SessionNode, threads: NodeThread[], target: NodeThread): 
     issueId: target.issueId,
     preview: target.preview,
     binding: target.binding === undefined ? node.binding : target.binding,
+    agentRef: target.agentRef ?? undefined,
     runtime: target.runtime ?? node.runtime,
     model: target.model ?? node.model,
     effort: target.effort ?? node.effort,
@@ -89,6 +92,7 @@ export function createNodeThread(node: SessionNode): SessionNode {
     draft: '',
     createdAt: Date.now(),
     binding: node.binding,
+    agentRef: node.agentRef ?? null,
     runtime: node.runtime, model: node.model, effort: node.effort, persona: node.persona,
     lastOutput: null,
     outputValues: {},
@@ -153,7 +157,7 @@ export function preserveThreadRuntime(target: SessionNode, live: SessionNode): S
       binding: fresh.binding === undefined ? thread.binding : fresh.binding,
       lastOutput: fresh.lastOutput ?? thread.lastOutput,
       outputValues: fresh.outputValues ?? thread.outputValues,
-      ...(newlyBound ? { runtime: fresh.runtime, model: fresh.model, effort: fresh.effort, persona: fresh.persona } : {}),
+      ...(newlyBound ? { runtime: fresh.runtime, model: fresh.model, effort: fresh.effort, persona: fresh.persona, agentRef: fresh.agentRef ?? null } : {}),
     };
   });
   // A conversation created since an old undo snapshot must stay reachable.
@@ -163,6 +167,6 @@ export function preserveThreadRuntime(target: SessionNode, live: SessionNode): S
   return { ...target, threads, issueId: active.issueId, preview: active.preview,
     binding: active.binding === undefined ? target.binding : active.binding,
     ...(newlyBound ? { runtime: active.runtime ?? target.runtime, model: active.model ?? target.model,
-      effort: active.effort ?? target.effort, persona: active.persona ?? target.persona } : {}),
+      effort: active.effort ?? target.effort, persona: active.persona ?? target.persona, agentRef: active.agentRef ?? undefined } : {}),
   };
 }

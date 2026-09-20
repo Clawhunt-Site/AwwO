@@ -17,7 +17,7 @@ function executionKey(node: CanvasNode): string {
     : null;
   return JSON.stringify([
     node.kind, node.title, node.agentKind, node.runtime, node.model, node.effort,
-    node.persona, binding, node.issueId, node.activeThreadId || 'default', contract, nodeTeamFingerprint(node.team),
+    node.persona, binding, node.issueId, node.activeThreadId || 'default', contract, nodeTeamFingerprint(node.team), node.agentRef ?? null,
   ]);
 }
 

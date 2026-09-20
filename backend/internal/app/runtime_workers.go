@@ -20,6 +20,16 @@ type runtimeCatalog map[string]piHealth
 func validRuntime(runtime string) bool { return runtime == runtimePI || runtime == runtimeOpenAIAgents }
 func defaultRuntime(runtime string) string {
 	if runtime == "" {
+		return runtimeOpenAIAgents
+	}
+	return runtime
+}
+
+// legacyRuntime resolves a persisted (pre-openai-agents-default) snapshot or
+// document whose runtime field is empty. Those were written when Pi was the
+// only engine, so an empty value means Pi — not the current creation default.
+func legacyRuntime(runtime string) string {
+	if runtime == "" {
 		return runtimePI
 	}
 	return runtime
@@ -117,6 +127,16 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		return h, errors.New("Runtime is unavailable")
 	}
 	defer resp.Body.Close()
+	if a.cfg.UserCredentials {
+		var capability struct {
+			Ready           bool `json:"ready"`
+			UserCredentials bool `json:"userCredentials"`
+		}
+		if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&capability) != nil || !capability.Ready || !capability.UserCredentials {
+			return piHealth{}, errors.New("Personal-credential worker is unavailable")
+		}
+		return a.personalRuntime(ctx, runtime)
+	}
 	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&h) != nil || !h.Ready || h.Model == "" {
 		return piHealth{}, errors.New("Runtime provider is not ready")
 	}
@@ -307,7 +327,7 @@ func (s executionSnapshot) memberHealth(runtime string) (piHealth, bool) {
 	}
 	// Persisted pre-runtime snapshots contain only Pi health. Never use that
 	// legacy budget/model catalog for a newly named worker.
-	return s.Health, runtime == runtimePI && defaultRuntime(s.Runtime) == runtimePI
+	return s.Health, runtime == runtimePI && legacyRuntime(s.Runtime) == runtimePI
 }
 
 func savedRuntimeMatches(raw []byte, nodeID, runtime string) bool {
@@ -319,7 +339,7 @@ func savedRuntimeMatches(raw []byte, nodeID, runtime string) bool {
 	}
 	for _, n := range doc.Nodes {
 		if n.ID == nodeID {
-			return defaultRuntime(n.Runtime) == runtime
+			return legacyRuntime(n.Runtime) == runtime
 		}
 	}
 	return true // Internal planner sessions have no document node.

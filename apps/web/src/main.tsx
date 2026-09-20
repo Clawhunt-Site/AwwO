@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client';
 // module-scoped CSS (e.g. settings/settings.css) wins equal-specificity ties.
 import './styles.css';
 import { App } from './App';
+// The shared workspace markup needs the same layout overrides as the hosted app.
+import './canvas/ios-theme.css';
 import { ErrorBoundary } from './ErrorBoundary';
 import { initUiZoom } from './zoom';
 import { recordStartupMark } from './startupTrace';
@@ -31,4 +33,3 @@ createRoot(document.getElementById('root')!).render(
   </React.StrictMode>,
 );
 recordStartupMark('react-render-called');
-

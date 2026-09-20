@@ -44,9 +44,9 @@ export function serviceEnvironments(env) {
   const telemetry = select(key => ['AWWO_METRICS_ENABLED','AWWO_OTEL_ENABLED','AWWO_REVISION','OTEL_EXPORTER_OTLP_ENDPOINT','OTEL_SERVICE_NAME','OTEL_RESOURCE_ATTRIBUTES','OTEL_TRACES_SAMPLER','OTEL_TRACES_SAMPLER_ARG'].includes(key) || key.startsWith('AWWO_TRACE_REF_'));
   // One dotenv drives three processes, each with its own loopback listener.
   // The general address is the API address; worker overrides are launcher-only.
-  const pi = { ...base, ...telemetry, OTEL_SERVICE_NAME: 'awwo-pi-worker', ...select(key => key.startsWith('AWWO_PI_')) };
+  const pi = { ...base, ...telemetry, AWWO_CREDENTIAL_MODE: env.AWWO_CREDENTIAL_MODE, OTEL_SERVICE_NAME: 'awwo-pi-worker', ...select(key => key.startsWith('AWWO_PI_')) };
   if (env.AWWO_LOCAL_PI_METRICS_LISTEN_ADDR) pi.AWWO_METRICS_LISTEN_ADDR = env.AWWO_LOCAL_PI_METRICS_LISTEN_ADDR;
-  const openAIAgents = { ...base, ...telemetry, OTEL_SERVICE_NAME: 'awwo-openai-agents-worker', ...select(key => key.startsWith('AWWO_OPENAI_AGENTS_')) };
+  const openAIAgents = { ...base, ...telemetry, AWWO_CREDENTIAL_MODE: env.AWWO_CREDENTIAL_MODE, OTEL_SERVICE_NAME: 'awwo-openai-agents-worker', ...select(key => key.startsWith('AWWO_OPENAI_AGENTS_')) };
   if (env.AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR) openAIAgents.AWWO_METRICS_LISTEN_ADDR = env.AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR;
   for (const key of piCredentials) if (Object.hasOwn(env, key)) pi[key] = env[key];
   for (const key of openAIAgentsCredentials) if (Object.hasOwn(env, key)) openAIAgents[key] = env[key];
@@ -68,6 +68,8 @@ export async function loadLocalEnv(environment = process.env) {
   for (const name of ['AWWO_LOCAL_DB_PASSWORD', 'AWWO_PI_TOKEN', 'AWWO_OPENAI_AGENTS_TOKEN', 'AWWO_BOOTSTRAP_ADMIN_PASSWORD']) {
     if (!environment[name] && !saved[name]) fresh[name] = randomBytes(32).toString('base64url');
   }
+  if (!environment.AWWO_CREDENTIAL_ENCRYPTION_KEY && !saved.AWWO_CREDENTIAL_ENCRYPTION_KEY) fresh.AWWO_CREDENTIAL_ENCRYPTION_KEY = randomBytes(32).toString('base64');
+  if (!environment.AWWO_CREDENTIAL_MODE && !saved.AWWO_CREDENTIAL_MODE) fresh.AWWO_CREDENTIAL_MODE = 'user';
   if (!environment.AWWO_BOOTSTRAP_ADMIN_EMAIL && !saved.AWWO_BOOTSTRAP_ADMIN_EMAIL) fresh.AWWO_BOOTSTRAP_ADMIN_EMAIL = 'admin@awwo.local';
   if (Object.keys(fresh).length) {
     const content = await exists(envFile) ? await readFile(envFile, 'utf8') : '# Local development only. Do not commit or share this file.\n';

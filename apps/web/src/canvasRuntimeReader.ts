@@ -1,5 +1,6 @@
 import { canvasFetch } from './saas/canvasBridge';
 import { paperclipApiBase } from './paperclipBridge';
+import { modelLabels } from './modelLabels';
 
 /** Adapt the live Node registry to RuntimePicker's existing inventory contract.
  * Registered adapters are not a claim that their CLI is logged in or executable.
@@ -34,7 +35,7 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
     return { models: ids, source: 'codex_app_server', model_capabilities: Object.fromEntries(capabilities) };
   }
 
-  async function modelCatalog(type: string, signal?: AbortSignal | null, selectedCompany?: string): Promise<{ models: string[]; source?: string; model_capabilities?: Record<string, { effort_levels: string[]; default_effort: string }> }> {
+  async function modelCatalog(type: string, signal?: AbortSignal | null, selectedCompany?: string): Promise<{ models: string[]; source?: string; model_labels?: Record<string, string>; model_capabilities?: Record<string, { effort_levels: string[]; default_effort: string }> }> {
     let companyId = selectedCompany;
     if (!companyId) {
       const companies = await get('/companies', signal);
@@ -57,7 +58,8 @@ export function createCanvasRuntimeReader(base = paperclipApiBase(), fetchImpl: 
       const levels: string[] = Array.isArray(item.effort_levels) ? [...new Set<string>(item.effort_levels.filter((level: unknown): level is string => typeof level === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(level)))] : [];
       capabilities[item.id] = { effort_levels: levels, default_effort: typeof item.default_effort === 'string' && levels.includes(item.default_effort) ? item.default_effort : '' };
     }
-    return { models: ids, source: 'saas_runtime', model_capabilities: capabilities };
+    const labels = modelLabels(Object.fromEntries(models.filter(item => item && typeof item === 'object' && ids.includes(item.id)).map(item => [item.id, item.label])));
+    return { models: ids, source: 'saas_runtime', model_capabilities: capabilities, ...(Object.keys(labels).length ? { model_labels: labels } : {}) };
   }
 
   return async function readCanvasRuntime(path: string, init?: RequestInit): Promise<any> {

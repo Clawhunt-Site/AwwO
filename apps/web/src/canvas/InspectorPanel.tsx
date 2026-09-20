@@ -26,6 +26,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { RuntimePicker, type RuntimeValue } from '../RuntimePicker';
 import { NodeTeamEditor } from './NodeTeamEditor';
+import { PersonaPicker } from './PersonaPicker';
 import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
@@ -303,7 +304,7 @@ export function InspectorPanel({
     let personaResult = result.personaResult;
     if (personaResult === undefined) {
       if (readOnlyRef.current) { holdBinding(result); return; }
-      if (result.node.persona.trim()) {
+      if (result.node.persona.trim() && !result.node.agentRef) {
         const ok = await syncPersona(apiBase, result.node.binding!.agentId, result.node.persona);
         personaResult = ok ? 'synced' : 'failed';
       } else personaResult = 'none';
@@ -326,7 +327,7 @@ export function InspectorPanel({
   };
 
   const bindAgent = async () => {
-    if (!sessionDraft || mutationLocked()) return;
+    if (!sessionDraft || sessionDraft.agentRef || mutationLocked()) return;
     if (sessionDraft.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     // Only ever POST to a company that is actually in the live list: a selection left over from a
     // company that has since disappeared must fall back to a real one, never be sent as-is.
@@ -408,6 +409,13 @@ export function InspectorPanel({
 
         {sessionDraft ? (
           <>
+            {sessionDraft.agentRef && <div className="canvas-inspector-hint" role="status">
+              <strong>{locale === 'en' ? 'Workspace Agent' : '工作区 Agent'}：{sessionDraft.binding?.agentName || sessionDraft.title}</strong>
+              <p>{locale === 'en' ? 'Uses this Agent’s saved configuration. Changes to this node do not modify the shared Agent.' : '使用该 Agent 已保存的配置。修改此节点不会更改共享 Agent。'}</p>
+              <button type="button" className="canvas-inspector-link" disabled={busy} onClick={() => {
+                if (!mutationLocked()) editDraft({ ...sessionDraft, agentRef: undefined });
+              }}>{locale === 'en' ? 'Use an independent custom Agent' : '解除引用，使用独立自定义 Agent'}</button>
+            </div>}
             <div className="canvas-inspector-label">{t('inspector.agentType')}</div>
             <div className="canvas-inspector-seg" role="radiogroup" aria-label={t('inspector.agentType')}>
               {AGENT_KINDS.map((kind) => (
@@ -417,17 +425,21 @@ export function InspectorPanel({
                   role="radio"
                   aria-checked={sessionDraft.agentKind === kind}
                   className={`canvas-inspector-seg-item${sessionDraft.agentKind === kind ? ' is-on' : ''}`}
-                  disabled={busy || Boolean(onInitialize && kind === 'image')}
+                  disabled={busy || Boolean(sessionDraft.agentRef) || Boolean(onInitialize && kind === 'image')}
                   onClick={() => editDraft({ ...sessionDraft, agentKind: kind })}
                 >
                   {t(kind === 'coding' ? 'node.coding' : kind === 'image' ? 'node.image' : 'node.llm')}
                 </button>
               ))}
             </div>
-            {onInitialize && <div className="canvas-inspector-hint">{t('inspector.piTaskTypes')}</div>}
+            {onInitialize && !sessionDraft.agentRef && <div className="canvas-inspector-hint">{t('inspector.piTaskTypes')}</div>}
 
             <div className="canvas-inspector-label">{t('inspector.runtime')}</div>
-            {readJson ? (
+            {sessionDraft.agentRef ? <dl className="canvas-inspector-hint">
+              <dt>Runtime</dt><dd><output aria-label="Runtime">{nodeTeamRuntimeLabel(sessionDraft.runtime || 'pi')}</output></dd>
+              <dt>{locale === 'en' ? 'Model' : '模型'}</dt><dd><output aria-label={locale === 'en' ? 'Model' : '模型'}>{sessionDraft.model || (locale === 'en' ? 'Resolved by the server' : '由服务端解析')}</output></dd>
+              <dt>{locale === 'en' ? 'Reasoning effort' : '推理强度'}</dt><dd><output aria-label={locale === 'en' ? 'Reasoning effort' : '推理强度'}>{sessionDraft.effort || (locale === 'en' ? 'Not set' : '未设置')}</output></dd>
+            </dl> : readJson ? (
               <div className="canvas-inspector-runtime">
                 <RuntimePicker
                   runtimes={runtimes}
@@ -438,7 +450,7 @@ export function InspectorPanel({
                   }
                   readJson={readJson}
                   lang={locale}
-                  disabled={busy}
+                  disabled={busy || Boolean(sessionDraft.agentRef)}
                 />
                 {runtimesError ? (
                   <div className="canvas-inspector-outcome canvas-inspector-outcome--err">
@@ -449,8 +461,10 @@ export function InspectorPanel({
             ) : (
               <div className="canvas-inspector-hint">{t('inspector.runtimeUnavailable')}</div>
             )}
-            {onInitialize && <div className="canvas-inspector-hint">{t('inspector.serviceDefaults')}</div>}
+            {onInitialize && !sessionDraft.agentRef && <div className="canvas-inspector-hint">{t('inspector.serviceDefaults')}</div>}
 
+            {!sessionDraft.agentRef && <PersonaPicker persona={sessionDraft.persona} disabled={busy}
+              onChange={persona => editDraft({ ...sessionDraft, persona })} />}
             <label className="canvas-inspector-label" htmlFor="cv-cfg-persona">
               {t('inspector.persona')}
             </label>
@@ -461,14 +475,14 @@ export function InspectorPanel({
               rows={5}
               placeholder={t(onInitialize ? 'inspector.initializePersonaPlaceholder' : 'inspector.personaPlaceholder')}
               value={sessionDraft.persona}
-              disabled={busy}
+              disabled={busy || Boolean(sessionDraft.agentRef)}
               onChange={(e) => editDraft({ ...sessionDraft, persona: e.target.value })}
             />
 
-            <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
+            {!sessionDraft.agentRef && <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
               runtimes={teamRuntimes} runtimeTools={teamTools}
-              disabled={busy} onValidityChange={setTeamCatalogValid}
-              onChange={team => editDraft({ ...sessionDraft, team })} />
+              disabled={busy || Boolean(sessionDraft.agentRef)} onValidityChange={setTeamCatalogValid}
+              onChange={team => editDraft({ ...sessionDraft, team })} />}
             {onInitialize ? <div className="canvas-inspector-initialization" role="status">
               <div className="canvas-inspector-label">{t('inspector.currentWorkspace', { workspace: liveCompanies[0]?.name || t('workspace.name') })}</div>
               <div className="canvas-inspector-hint">{t(initialization === 'pending' ? 'inspector.initializing' : initialization === 'done' ? 'inspector.initialized' : 'inspector.initializeOnSave')}</div>

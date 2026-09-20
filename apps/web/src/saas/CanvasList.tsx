@@ -19,13 +19,13 @@ export function CanvasList({ tenant, onOpen }: { tenant: Tenant; onOpen: (canvas
   return <>
     {readOnly && <p className="saas-runtime-note" role="status">{t('只读成员：可以浏览画布、会话和导出副本，不能编辑或运行。', 'Reader: browse canvases and conversations or export a copy. Editing and execution require member access.')}</p>}
     {!readOnly && <form className="saas-create" onSubmit={async event => {
-      event.preventDefault(); if (!name.trim() || busy) return; setBusy(true); setError(null);
+      event.preventDefault(); if (busy) return; setBusy(true); setError(null);
       try {
-        const canvas = await api<CanvasRecord>(path, { method: 'POST', body: JSON.stringify({ name: name.trim(), document: emptyDocument() }) });
+        const canvas = await api<CanvasRecord>(path, { method: 'POST', body: JSON.stringify({ name: name.trim() || t('未命名', 'Untitled'), document: emptyDocument() }) });
         if (mounted.current) onOpen(canvas.id);
       } catch (cause) { if (mounted.current) setError(cause); }
       finally { if (mounted.current) setBusy(false); }
-    }}><input aria-label={t('新画布名称', 'New canvas name')} placeholder={t('为新画布起个名字', 'Name your new canvas')} value={name} onChange={event => setName(event.target.value)} required maxLength={100} disabled={busy}/><button disabled={busy || !name.trim()} className="saas-primary"><Plus size={16}/>{t('新建画布', 'Create canvas')}</button></form>}
+    }}><input aria-label={t('新画布名称', 'New canvas name')} placeholder={t('为新画布起个名字', 'Name your new canvas')} value={name} onChange={event => setName(event.target.value)} maxLength={100} disabled={busy}/><button disabled={busy} className="saas-primary"><Plus size={16}/>{t('新建画布', 'Create canvas')}</button></form>}
     {(error || listing.error) && <p role="alert" className="saas-error">{saasErrorMessage(error || listing.error, locale)}</p>}
     <ListPager label={t('画布分页', 'Canvas pages')} page={listing.pageNumber} busy={listing.loading || busy} previous={listing.previous} next={listing.next} refresh={listing.refresh}/>
     {listing.loading ? <p role="status">{t('正在加载画布…', 'Loading canvases…')}</p> : listing.page && <div className="saas-canvas-list">{listing.page.items.map(canvas => <article key={canvas.id} className="saas-canvas-card">

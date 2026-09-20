@@ -72,6 +72,12 @@
 .awwo-planner-connection > button { margin-left: auto; padding: 2px 5px; background: transparent; color: var(--awwo-accent); border: 0; border-radius: 4px; font-size: 11px; }
 .awwo-planner-connection .is-ready { background: var(--awwo-accent); }
 .awwo-planner-connection > span { display: inline-block; width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--awwo-muted); }
+.awwo-orchestration-choice { display: grid; gap: 8px; font-size: 12px; color: var(--awwo-ink); }
+.awwo-orchestration-choice label { display: grid; gap: 7px; }
+.awwo-orchestration-choice label > span { font-weight: 600; }
+.awwo-orchestration-choice select { width: 100%; min-height: 34px; padding: 5px 8px; border: 1px solid var(--awwo-border); border-radius: 7px; background: var(--awwo-surface); color: var(--awwo-ink); }
+.awwo-orchestration-choice small { color: var(--awwo-muted); font-size: 11px; line-height: 1.55; }
+.awwo-orchestration-choice > button { justify-self: start; border: 0; padding: 5px 0; background: transparent; color: var(--awwo-accent); font-size: 12px; }
 .awwo-statusbar { min-height: 29px; display: flex; align-items: center; gap: 22px; padding: 5px 24px; border-top: 1px solid var(--awwo-border); background: #fbfcfa; color: #7a877e; font-size: 9px; }
 .awwo-statusbar > span { display: inline-flex; align-items: center; gap: 7px; }.awwo-status-divider { color: #c2c9c3; margin: 0 3px; }.awwo-local-tag { margin-left: auto; }
 .awwo-workspace .canvas-root { --page: #f6f7f4; --grid: #d5ded4; --text: #26362c; --muted: #68766c; --faint: #859088; --line: #dfe5dc; --soft: #f3f6f1; --strong: #245f4e; --strong-text: white; --blue: #3d7265; --teal: #3d7d64; --shadow: rgba(35,54,40,.08); --fs-body: 13px; --fs-title: 15px; --fs-meta: 12px; --fs-micro: 11px; }
@@ -174,7 +180,7 @@
   .awwo-workspace.is-nav-compact .awwo-brand { padding: 0 4px; }
   .awwo-workspace.is-nav-compact .awwo-brand > span, .awwo-workspace.is-nav-compact .awwo-workspace-name,
   .awwo-workspace.is-nav-compact .awwo-nav-active, .awwo-workspace.is-nav-compact .awwo-list-heading,
-  .awwo-workspace.is-nav-compact .awwo-search, .awwo-workspace.is-nav-compact .awwo-workspace-note,
+  .awwo-workspace.is-nav-compact .awwo-sidebar > .awwo-search, .awwo-workspace.is-nav-compact .awwo-workspace-note,
   .awwo-workspace.is-nav-compact .awwo-agent-row-copy, .awwo-workspace.is-nav-compact .awwo-agent-index,
   .awwo-workspace.is-nav-compact .awwo-list-empty { display: none; }
   .awwo-workspace.is-nav-compact .awwo-new-agent { font-size: 0 !important; gap: 0; padding: 10px; margin: 22px 0 16px; }
@@ -298,3 +304,29 @@
   .saas-canvas-shell .awwo-workspace .awwo-run-slot .canvas-run-ctl { max-width: 100%; }
   .saas-canvas-shell .canvas-root > .canvas-inspector { left: 12px; width: auto !important; }
 }
+
+/* Real workspace Agents share the library shell with editable role templates. */
+.awwo-library-sources { display: flex; gap: 8px; margin: 20px 0 4px; flex-shrink: 0; }
+.awwo-library-sources button { border: 1px solid var(--awwo-border); border-radius: 8px; padding: 9px 14px; color: var(--awwo-muted); background: transparent; }
+.awwo-library-sources button[aria-pressed='true'] { color: var(--awwo-ink); background: var(--awwo-accent-soft); border-color: var(--awwo-accent); }
+.awwo-workspace-agent-picker { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.awwo-workspace-agent-picker > p { font-size: 12px; line-height: 1.7; color: var(--awwo-muted); }
+.awwo-catalog-tools { display: flex; gap: 10px; align-items: center; margin: 16px 0; }
+.awwo-catalog-tools .awwo-search { flex: 1; margin: 0; }
+.awwo-catalog-tools button, .awwo-catalog-more, .awwo-catalog-error button { display: inline-flex; align-items: center; gap: 5px; padding: 8px 12px; border-radius: 8px; background: transparent; border: 1px solid var(--awwo-border); color: var(--awwo-ink); }
+.awwo-catalog-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.awwo-catalog-list > button { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px; border: 1px solid var(--awwo-border); border-radius: 10px; text-align: left; color: var(--awwo-ink); background: transparent; }
+.awwo-catalog-list > button[aria-pressed='true'] { border-color: var(--awwo-accent); background: var(--awwo-accent-soft); }
+.awwo-catalog-list strong { font-size: 14px; overflow-wrap: anywhere; }
+.awwo-catalog-list span, .awwo-catalog-list small { font-size: 11px; color: var(--awwo-muted); overflow-wrap: anywhere; }
+.awwo-catalog-list small { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.6; }
+.awwo-catalog-list em, .awwo-catalog-error { font-size: 12px; color: var(--awwo-muted); }
+.awwo-catalog-more { margin-top: 14px; }
+.awwo-catalog-selection { display: block; margin-top: 6px; overflow-wrap: anywhere; }
+.awwo-workspace-agent-picker button:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 600px) { .awwo-catalog-list { grid-template-columns: 1fr; } .awwo-workspace-agent-picker .awwo-template-library-footer { align-items: stretch; flex-direction: column; gap: 12px; } }
+.awwo-library-sources { flex-wrap: wrap; }
+.awwo-market-preview { margin-top: 16px; padding: 14px; border: 1px solid var(--awwo-border); border-radius: 10px; font-size: 12px; }
+.awwo-market-preview p { line-height: 1.7; color: var(--awwo-muted); }
+.awwo-market-preview summary { cursor: pointer; }
+.awwo-market-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 11px; line-height: 1.6; }

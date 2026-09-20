@@ -99,6 +99,28 @@ it('persists a node runtime change through initialization and preserves the prio
   expect(screen.getByLabelText('Runtime')).toHaveTextContent('OpenAI Agents JS');
   await waitFor(() => expect(screen.getByLabelText('模型')).toHaveTextContent('agents-only'));
 });
+it('persists detaching a shared Agent through the full inspector save path without reviving its reference', async () => {
+  seed(true);
+  const document = loadDocumentWithStatus().doc;
+  (document.nodes[0] as SessionNode).agentRef = { source: 'workspace', agentId: 'old-agent' };
+  canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(document));
+  let received!: CanvasDocument;
+  configureSaaSCanvasInitialize(async () => { received = loadDocumentWithStatus().doc; return canonical(received); });
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />); await openInspector();
+  fireEvent.click(screen.getByRole('button', { name: '解除引用，使用独立自定义 Agent' }));
+  fireEvent.click(screen.getByRole('button', { name: /保存配置|保存并准备运行/ }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '节点配置 — Draft node' })).toBeNull());
+  const detached = received.nodes[0] as SessionNode;
+  expect(detached.agentRef).toBeUndefined();
+  expect(detached.binding).toBeNull();
+  expect(detached.issueId).toBeNull();
+  expect(getNodeThreads(detached)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ issueId: 'old-session', agentRef: { source: 'workspace', agentId: 'old-agent' }, binding: expect.objectContaining({ agentId: 'old-agent' }) }),
+    expect.objectContaining({ issueId: null, agentRef: null, binding: null }),
+  ]));
+  expect((loadDocumentWithStatus().doc.nodes[0] as SessionNode).agentRef).toBeUndefined();
+  expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url).includes('/agents/') && init?.method === 'PUT')).toBe(false);
+});
 it('allows a SaaS draft composer while retaining its text until initialization and durable run acceptance', async () => {
   seed(); let reject!: (error: Error) => void;
   configureSaaSCanvasInitialize(() => new Promise((_resolve, failure) => { reject = failure; }));

@@ -33,7 +33,8 @@ services:
         required: false
     environment:
       <<: *backend-telemetry
-      APP_ENV: ${APP_ENV:-staging}
+      APP_ENV: ${APP_ENV:-production}
+      AWWO_CREDENTIAL_MODE: ${AWWO_CREDENTIAL_MODE:-user}
       OTEL_SERVICE_NAME: awwo-pi-worker
       AWWO_PI_HOST: 0.0.0.0
       AWWO_PI_PORT: 8097
@@ -58,7 +59,7 @@ services:
     # host.docker.internal entry, and 127.0.0.1 is the container's own loopback, which is also the
     # ollama provider default when AWWO_PI_BASE_URL is empty, so such a deployment silently
     # addresses nothing. This only writes /etc/hosts; the route is Pi's egress membership below,
-    # which api, web and database do not have. Pi alone is mapped because the OpenAI Agents worker
+    # which web and database do not have. The API also has egress for key verification and SMTP. Pi alone is mapped because the OpenAI Agents worker
     # rejects a non-HTTPS non-loopback host outside APP_ENV=development.
     extra_hosts:
       - host.docker.internal:host-gateway
@@ -82,7 +83,8 @@ services:
         required: false
     environment:
       <<: *backend-telemetry
-      APP_ENV: ${APP_ENV:-staging}
+      APP_ENV: ${APP_ENV:-production}
+      AWWO_CREDENTIAL_MODE: ${AWWO_CREDENTIAL_MODE:-user}
       OTEL_SERVICE_NAME: awwo-openai-agents-worker
       AWWO_OPENAI_AGENTS_HOST: 0.0.0.0
       AWWO_OPENAI_AGENTS_PORT: 8098
@@ -129,11 +131,18 @@ services:
       dockerfile: deploy/saas/api.Dockerfile
     environment:
       <<: *backend-telemetry
-      APP_ENV: ${APP_ENV:-staging}
+      APP_ENV: ${APP_ENV:-production}
+      AWWO_CREDENTIAL_MODE: ${AWWO_CREDENTIAL_MODE:-user}
       OTEL_SERVICE_NAME: awwo-api
       AWWO_METRICS_LISTEN_ADDR: ${AWWO_METRICS_LISTEN_ADDR:-127.0.0.1:9101}
       AWWO_MODEL_PRICING_JSON: ${AWWO_MODEL_PRICING_JSON:-}
       AWWO_USAGE_RETENTION_DAYS: ${AWWO_USAGE_RETENTION_DAYS:-180}
+      AWWO_CREDENTIAL_ENCRYPTION_KEY: ${AWWO_CREDENTIAL_ENCRYPTION_KEY:?Generate and retain a base64-encoded 32-byte key}
+      AWWO_SMTP_HOST: ${AWWO_SMTP_HOST:-}
+      AWWO_SMTP_PORT: ${AWWO_SMTP_PORT:-587}
+      AWWO_SMTP_USERNAME: ${AWWO_SMTP_USERNAME:-}
+      AWWO_SMTP_PASSWORD: ${AWWO_SMTP_PASSWORD:-}
+      AWWO_SMTP_FROM: ${AWWO_SMTP_FROM:-}
       AWWO_LISTEN_ADDR: 0.0.0.0:8087
       AWWO_PUBLIC_ORIGIN: ${AWWO_PUBLIC_ORIGIN:?Set the HTTPS public origin}
       AWWO_DATABASE_URL: ${AWWO_DATABASE_URL:?Set the dedicated PostgreSQL connection URL}
@@ -160,7 +169,7 @@ services:
     pids_limit: 64
     mem_limit: 512m
     restart: unless-stopped
-    networks: [private]
+    networks: [private, egress]
   web:
     build:
       context: ../..

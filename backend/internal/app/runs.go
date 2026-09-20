@@ -39,6 +39,7 @@ type runtimeTool struct {
 type piModel struct {
 	ID                   string `json:"id"`
 	Name                 string `json:"name"`
+	Label                string `json:"label,omitempty"`
 	Provider             string `json:"provider"`
 	ProviderModel        string `json:"providerModel,omitempty"`
 	Protocol             string `json:"protocol,omitempty"`
@@ -142,7 +143,11 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 				if len(m.ReasoningEfforts) > 0 {
 					efforts = append(efforts, m.ReasoningEfforts...)
 				}
-				models = append(models, map[string]any{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": id, "reasoningEfforts": efforts, "defaultReasoningEffort": m.DefaultReasoningEffort})
+				model := map[string]any{"id": m.ID, "name": m.Name, "provider": m.Provider, "runtime": id, "reasoningEfforts": efforts, "defaultReasoningEffort": m.DefaultReasoningEffort}
+				if m.Label != "" {
+					model["label"] = m.Label
+				}
+				models = append(models, model)
 				seen[m.ID] = true
 			}
 			// A legacy catalog may omit its own default. Offer it only when the
@@ -259,8 +264,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
 		return
 	}
-	var model, instructions, kind, runtime, effort string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort)
+	var model, instructions, kind, runtime, effort, agentID string
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -289,6 +294,15 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_team", e.Error())
 		return
 	}
+	if err := validateSavedWorkspaceAgent(document, nodeID, agentID); err != nil {
+		input := err.(setupError)
+		status := 400
+		if input.code == "node_setup_required" {
+			status = 409
+		}
+		fail(w, status, input.code, input.message)
+		return
+	}
 	if !savedRuntimeMatches(document, nodeID, runtime) {
 		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 		return
@@ -296,6 +310,10 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	snapshot, e := a.runtimeSnapshot(r.Context(), entitlement, runtimeCatalog{}, runtime, model, effort, instructions, team)
 	if e != nil {
 		a.runtimeAdmissionError(w, e)
+		return
+	}
+	if e = validateWorkspaceAgentSession(r.Context(), tx, tid, b.SessionID, nodeID, document, snapshot); e != nil {
+		a.workspaceAgentAdmissionError(w, e)
 		return
 	}
 	budget, overhead := snapshot.Budget, snapshot.Overhead
@@ -1053,6 +1071,12 @@ func (a *App) admitRuntime(ctx context.Context, runtime string, body []byte) (*h
 	endpoint, token, err := a.runtimeEndpoint(runtime)
 	if err != nil {
 		return nil, err
+	}
+	if a.cfg.UserCredentials {
+		body, err = a.personalAdmission(ctx, runtime, body)
+		if err != nil {
+			return nil, err
+		}
 	}
 	deadline := time.Now().Add(a.cfg.PIAdmissionWait)
 	delay := 50 * time.Millisecond

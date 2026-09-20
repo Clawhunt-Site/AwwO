@@ -45,6 +45,11 @@ interface CanvasNodeBase {
   title: string;
 }
 
+export interface WorkspaceAgentReference {
+  source: 'workspace';
+  agentId: string;
+}
+
 export interface SessionNode extends CanvasNodeBase {
   kind: 'session';
   agentKind: AgentKind;
@@ -56,6 +61,8 @@ export interface SessionNode extends CanvasNodeBase {
   persona: string;
   /** Optional collaboration plan; the primary binding remains the legacy conversation owner. */
   team?: NodeTeam;
+  /** Select an existing Agent in the current workspace. The server resolves its configuration. */
+  agentRef?: WorkspaceAgentReference;
   binding: AgentBinding | null;
   /** A bind attempt whose outcome was UNKNOWN (request sent, response lost). Persisted so the
    *  tile keeps warning across reloads — a blind retry could hire a duplicate agent.
@@ -97,6 +104,8 @@ export interface NodeThread {
   model?: string;
   effort?: string;
   persona?: string;
+  /** null explicitly marks a custom/legacy thread, rather than inheriting a later selection. */
+  agentRef?: WorkspaceAgentReference | null;
 }
 
 /**
@@ -274,6 +283,14 @@ function sanitizeOutput(raw: unknown): NodeOutput | null {
   };
 }
 
+function sanitizeAgentReference(raw: unknown): WorkspaceAgentReference | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  if (Object.keys(value).length !== 2 || value.source !== 'workspace' || typeof value.agentId !== 'string'
+    || !value.agentId.trim() || value.agentId !== value.agentId.trim() || value.agentId.length > 200) return undefined;
+  return { source: 'workspace', agentId: value.agentId };
+}
+
 function sanitizeThreads(raw: unknown): NodeThread[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const threads = new Map<string, NodeThread>();
@@ -297,6 +314,7 @@ function sanitizeThreads(raw: unknown): NodeThread[] | undefined {
       lastOutput: sanitizeOutput(r.lastOutput),
       ...(values ? { outputValues: values } : {}),
       ...(binding !== undefined ? { binding } : {}),
+      agentRef: sanitizeAgentReference(r.agentRef) ?? null,
       ...Object.fromEntries(['runtime', 'model', 'effort', 'persona'].filter(key => typeof r[key] === 'string').map(key => [key, r[key]])),
     });
   }
@@ -334,6 +352,11 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
   }
 
   if (r.kind === 'session') {
+    const agentRef = sanitizeAgentReference(r.agentRef);
+    if (r.agentRef != null && !agentRef) return null;
+    if (Array.isArray(r.threads) && r.threads.some(thread => thread && typeof thread === 'object'
+      && (thread as Record<string, unknown>).agentRef != null
+      && !sanitizeAgentReference((thread as Record<string, unknown>).agentRef))) return null;
     const contract = normalizeContract(r.contract);
     const team = r.team == null ? undefined : sanitizeNodeTeam(r.team);
     const threads = sanitizeThreads(r.threads);
@@ -371,6 +394,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       effort: str(r.effort),
       persona: str(r.persona),
       ...(team ? { team } : {}),
+      ...(agentRef ? { agentRef } : {}),
       binding,
       bindAttempt: r.bindAttempt === 'unknown' ? 'unknown' : null,
       issueId: typeof r.issueId === 'string' && r.issueId ? r.issueId : null,

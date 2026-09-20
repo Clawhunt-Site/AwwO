@@ -141,6 +141,22 @@ it('shows reader canvases without create, rename or delete controls', async () =
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
+it('creates with a default name when the input is left empty', async () => {
+  const writes: any[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_input: string, init: RequestInit = {}) => {
+    if (init.method === 'POST') { writes.push(JSON.parse(init.body as string)); return json({ ...record(0), name: '未命名' }, 201); }
+    return json({ items: [], nextCursor: null });
+  }));
+  const onOpen = vi.fn();
+  render(wrap(<CanvasList tenant={tenant} onOpen={onOpen}/>));
+  const button = await screen.findByRole('button', { name: '新建画布' });
+  expect(button).toBeEnabled();
+  fireEvent.click(button);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].name).toBe('未命名');
+  expect(onOpen).toHaveBeenCalledWith('canvas-0');
+});
+
 it('keeps a new canvas name when creation fails', async () => {
   vi.stubGlobal('fetch', vi.fn(async (_input: string, init: RequestInit = {}) => init.method === 'POST' ? json({ error: { message: 'network save failed' } }, 503) : json({ items: [], nextCursor: null })));
   render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()}/>));

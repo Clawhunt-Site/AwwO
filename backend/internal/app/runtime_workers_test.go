@@ -590,3 +590,36 @@ func TestPostgresOpenAIAgentCancellationUsesOnlyItsWorker(t *testing.T) {
 		t.Fatal("OA cancellation sent an unrelated Pi DELETE")
 	}
 }
+
+func TestPersistedRuntimeDoesNotFollowCreationDefault(t *testing.T) {
+	if defaultRuntime("") != runtimeOpenAIAgents {
+		t.Fatal("new nodes lost OpenAI default")
+	}
+	for _, raw := range []string{`{"model":"legacy"}`, `{"runtime":"pi","model":"legacy"}`, `{"runtime":"openai-agents","model":"new"}`} {
+		var snap executionSnapshot
+		if err := json.Unmarshal([]byte(raw), &snap); err != nil {
+			t.Fatal(err)
+		}
+		want := runtimePI
+		if snap.Model == "new" {
+			want = runtimeOpenAIAgents
+		}
+		if snap.Runtime != want || invocationMetadata(snap, nil).Runtime != want || snapshotRuntime(snap) != want {
+			t.Fatalf("runtime changed after decode: %+v", snap)
+		}
+	}
+}
+
+func TestPersistedTeamRuntimeInheritance(t *testing.T) {
+	var snap executionSnapshot
+	raw := `{"model":"legacy","team":{"members":[{"id":"old"},{"id":"new","runtime":"openai-agents"}]}}`
+	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap.Team.Runtime != runtimePI || snap.Team.Members[0].Runtime != runtimePI || snap.Team.Members[1].Runtime != runtimeOpenAIAgents {
+		t.Fatalf("invalid inheritance: %+v", snap.Team)
+	}
+	if invocationMetadata(snap, &snap.Team.Members[0]).Runtime != runtimePI || snapshotRuntime(snap) != "mixed" {
+		t.Fatal("ledger runtime differs from dispatch")
+	}
+}

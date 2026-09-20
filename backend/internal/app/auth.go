@@ -196,6 +196,15 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
+	var currentHash string
+	if e = tx.QueryRow(r.Context(), "SELECT password_hash FROM users WHERE id=$1 FOR SHARE", u.ID).Scan(&currentHash); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if currentHash != h {
+		fail(w, 401, "invalid_credentials", "Password changed; sign in again")
+		return
+	}
 	token, e := a.createLogin(r.Context(), tx, u.ID)
 	if e != nil {
 		a.dbError(w, e)
@@ -229,7 +238,7 @@ func (a *App) meResponse(w http.ResponseWriter, r *http.Request, u User, status 
 		a.dbError(w, e)
 		return
 	}
-	writeJSON(w, status, map[string]any{"user": u, "tenants": items})
+	writeJSON(w, status, map[string]any{"user": u, "tenants": items, "personalCredentialsRequired": a.cfg.UserCredentials})
 }
 func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

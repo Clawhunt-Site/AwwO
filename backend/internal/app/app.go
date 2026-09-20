@@ -37,6 +37,8 @@ type App struct {
 	leaseLost   atomic.Bool
 	authSlots   chan struct{}
 	reauthEvery time.Duration
+	sendReset   func(context.Context, string, string) error
+	mailSlots   chan struct{}
 	runEvents   runEventNotifier
 }
 type rateEntry struct {
@@ -53,6 +55,7 @@ func New(db *pgxpool.Pool, c Config) *App {
 		a.cfg.UsageRetentionDays = 180
 	}
 	a.pricing, _ = ParseModelPricing(c.ModelPricingJSON)
+	a.mailSlots = make(chan struct{}, 8)
 	a.obs = newObservability(a)
 	return a
 }
@@ -180,6 +183,17 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/login", a.authRate(a.login))
 	m.HandleFunc("POST /api/v1/auth/logout", a.auth(a.logout))
 	m.HandleFunc("PATCH /api/v1/auth/profile", a.auth(a.updateProfile))
+	m.HandleFunc("GET /api/v1/auth/connections", a.auth(a.listConnections))
+	m.HandleFunc("POST /api/v1/auth/connections", a.auth(a.authRate(a.createConnection)))
+	m.HandleFunc("DELETE /api/v1/auth/connections/{id}", a.auth(a.deleteConnection))
+	m.HandleFunc("POST /api/v1/auth/password", a.auth(a.authRate(a.changePassword)))
+	m.HandleFunc("GET /api/v1/auth/sessions", a.auth(a.listAuthSessions))
+	m.HandleFunc("DELETE /api/v1/auth/sessions/{id}", a.auth(a.revokeAuthSession))
+	m.HandleFunc("POST /api/v1/auth/forgot-password", a.authRate(a.forgotPassword))
+	m.HandleFunc("POST /api/v1/auth/reset-password", a.authRate(a.resetPassword))
+	m.HandleFunc("GET /api/v1/auth/options", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"passwordRecovery": a.cfg.SMTPHost != ""})
+	})
 	m.HandleFunc("GET /api/v1/appearance", a.auth(a.appearance))
 	m.HandleFunc("PUT /api/v1/appearance", a.auth(a.updateAppearance))
 	m.HandleFunc("GET /api/v1/appearance/export", a.auth(a.exportAppearance))

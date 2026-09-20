@@ -1,0 +1,107 @@
+.saas-personal {
+  max-width: none;
+  padding-inline: max(24px, calc((100vw - 1120px) / 2));
+}
+.saas-personal-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 24px;
+}
+.saas-connection-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.saas-personal .saas-card {
+  padding: 28px;
+  border-radius: 20px;
+}
+.saas-personal label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.saas-personal input,
+.saas-personal select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--saas-border);
+  border-radius: 12px;
+  background: var(--saas-input);
+  color: var(--saas-text);
+}
+.saas-personal small,
+.saas-personal p {
+  line-height: 1.65;
+}
+.saas-personal .saas-card p {
+  margin: 0;
+}
+.saas-personal-nav a {
+  color: var(--saas-accent);
+  text-underline-offset: 4px;
+}
+.saas-personal small {
+  display: block;
+  margin-bottom: 20px;
+}
+.saas-personal button {
+  min-height: 42px;
+}
+.saas-buy-link {
+  display: inline-flex;
+  padding: 12px 18px;
+  text-decoration: none;
+  border-radius: 14px;
+  align-self: flex-start;
+  background: var(--saas-accent);
+  color: var(--saas-accent-text);
+}
+.saas-gate-card {
+  border-top: 3px solid var(--saas-accent);
+}
+.saas-connection-list {
+  margin-top: 24px;
+}
+.saas-connection-list article,
+.saas-session {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--saas-border);
+}
+.saas-connection-list article > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.saas-connection-list ul {
+  max-height: 200px;
+  overflow: auto;
+}
+.saas-connection-list button {
+  flex-shrink: 0;
+}
+.saas-recovery {
+  max-width: 500px;
+  margin: auto;
+}
+@media (max-width: 720px) {
+  .saas-connection-grid {
+    grid-template-columns: 1fr;
+  }
+  .saas-personal .saas-card {
+    padding: 20px;
+  }
+  .saas-connection-list article {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

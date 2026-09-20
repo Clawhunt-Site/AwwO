@@ -20,13 +20,14 @@ type setupBinding struct {
 }
 
 type setupConfiguration struct {
-	Name      string    `json:"name"`
-	AgentKind string    `json:"agentKind"`
-	Runtime   string    `json:"runtime"`
-	Model     string    `json:"model"`
-	Effort    string    `json:"effort,omitempty"`
-	Persona   string    `json:"persona"`
-	Team      *nodeTeam `json:"team,omitempty"`
+	Name      string                   `json:"name"`
+	AgentKind string                   `json:"agentKind"`
+	Runtime   string                   `json:"runtime"`
+	Model     string                   `json:"model"`
+	Effort    string                   `json:"effort,omitempty"`
+	Persona   string                   `json:"persona"`
+	Team      *nodeTeam                `json:"team,omitempty"`
+	AgentRef  *workspaceAgentReference `json:"agentRef,omitempty"`
 }
 
 type setupError struct{ code, message string }
@@ -128,14 +129,31 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 		if !selected[i] {
 			continue
 		}
+		resolved, selectedAgent, err := resolveWorkspaceAgent(r.Context(), tx, tid, original)
+		if err != nil {
+			var input setupError
+			if errors.As(err, &input) {
+				status := 400
+				if input.code == "not_found" {
+					status = 404
+				}
+				fail(w, status, input.code, input.message)
+			} else {
+				a.dbError(w, err)
+			}
+			return
+		}
 		var selection struct{ Runtime, Model, Effort, Persona string }
-		if json.Unmarshal(original, &selection) != nil {
+		if json.Unmarshal(resolved, &selection) != nil {
 			fail(w, 400, "invalid_node_setup", "Invalid node configuration")
 			return
 		}
 		var identity struct{ ID string }
 		_ = json.Unmarshal(original, &identity)
-		team, err := savedNodeTeam(raw, identity.ID)
+		// Resolve team metadata against the authoritative Agent runtime as well;
+		// savedNodeTeam validates runtime before returning even a nil team.
+		resolvedDocument, _ := json.Marshal(map[string]any{"nodes": []json.RawMessage{resolved}})
+		team, err := savedNodeTeam(resolvedDocument, identity.ID)
 		if err != nil {
 			fail(w, 400, "invalid_node_setup", err.Error())
 			return
@@ -149,7 +167,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			a.runtimeAdmissionError(w, err)
 			return
 		}
-		updated, err := a.initializeNode(r.Context(), tx, tid, cid, original, catalog)
+		updated, err := a.initializeNode(r.Context(), tx, tid, cid, resolved, catalog, selectedAgent)
 		if err != nil {
 			var input setupError
 			if errors.As(err, &input) {
@@ -229,7 +247,7 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguratio
 		return setupConfiguration{}, invalidSetup("Node configuration contains invalid field types")
 	}
 	if n.Runtime == "" {
-		n.Runtime = "pi"
+		n.Runtime = defaultRuntime(n.Runtime)
 	}
 	if n.AgentKind == "" {
 		n.AgentKind = "llm"
@@ -274,13 +292,20 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguratio
 	return setupConfiguration{Name: name, AgentKind: n.AgentKind, Runtime: n.Runtime, Model: n.Model, Effort: n.Effort, Persona: n.Persona, Team: team}, nil
 }
 
-func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, raw json.RawMessage, catalog runtimeCatalog) (json.RawMessage, error) {
+func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, raw json.RawMessage, catalog runtimeCatalog, selected *setupBinding) (json.RawMessage, error) {
 	config, err := setupConfig(raw, catalog)
 	if err != nil {
 		return nil, err
 	}
 	var node map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &node)
+	config.AgentRef, err = parseWorkspaceAgentReference(node["agentRef"])
+	if err != nil {
+		return nil, err
+	}
+	if selected != nil {
+		config.Name = selected.AgentName
+	}
 	nid, sid := rawString(node["id"]), rawString(node["issueId"])
 	var old *setupBinding
 	if v := node["binding"]; len(v) > 0 && string(v) != "null" {
@@ -322,6 +347,9 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 	}
 	configRaw, _ := json.Marshal(config)
 	changed := old != nil && (oldConfig.Runtime != config.Runtime || oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Effort != config.Effort || oldConfig.Persona != config.Persona)
+	if selected != nil && old != nil && selected.AgentID != old.AgentID {
+		changed = true
+	}
 	if sid != "" {
 		if len(priorSnapshot) > 0 {
 			changed = changed || !equalJSON(priorSnapshot, configRaw)
@@ -330,13 +358,24 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		}
 	}
 	binding := old
-	if old == nil || changed {
+	if selected != nil {
+		binding = selected
+	} else if old == nil || changed {
 		binding = &setupBinding{CompanyID: tid, AgentID: randomID(), AgentName: config.Name}
 		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions,runtime,effort) VALUES($1,$2,$3,$4,$5,$6,$7)", binding.AgentID, tid, config.Name, config.Model, config.Persona, config.Runtime, config.Effort); err != nil {
 			return nil, err
 		}
 	}
 	if changed {
+		// A shared Agent may have been edited since this conversation was created.
+		// Preserve the old conversation's admitted definition, not today's row.
+		if len(priorSnapshot) > 0 {
+			var previous setupConfiguration
+			if json.Unmarshal(priorSnapshot, &previous) == nil {
+				oldConfig = previous
+				old.AgentName = previous.Name
+			}
+		}
 		// Save the old active thread using the actual old Agent configuration,
 		// not the just-edited persona/model on the node draft.
 		prior := snapshotSetupThread(node, threads[active], active, old, sid, oldConfig)
@@ -392,6 +431,10 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 	}
 	putJSON(node, "runtime", config.Runtime)
 	putJSON(node, "model", config.Model)
+	if selected != nil {
+		putJSON(node, "persona", config.Persona)
+		putJSON(node, "effort", config.Effort)
+	}
 	putJSON(node, "binding", binding)
 	putJSON(node, "bindAttempt", nil)
 	putJSON(node, "issueId", sid)
@@ -487,6 +530,10 @@ func configureSetupThread(thread map[string]json.RawMessage, binding *setupBindi
 	putJSON(thread, "model", config.Model)
 	putJSON(thread, "persona", config.Persona)
 	putJSON(thread, "effort", config.Effort)
+	// Leave old custom threads byte-stable unless they previously had a reference.
+	if config.AgentRef != nil || len(thread["agentRef"]) != 0 {
+		putJSON(thread, "agentRef", config.AgentRef)
+	}
 }
 
 func clearSetupOutputValues(node map[string]json.RawMessage) {

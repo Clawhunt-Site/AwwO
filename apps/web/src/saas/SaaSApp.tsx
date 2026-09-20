@@ -1,3 +1,4 @@
+import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LogOut, Plus, ArrowLeft, ShieldCheck, Save } from 'lucide-react';
 import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
@@ -22,17 +23,28 @@ import { CanvasList } from './CanvasList';
 import { AppearanceScope } from './SaaSAppearance';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
-const navigate = (tenant?: string, canvas?: string) => {
+const workspaceURL = (tenant?: string, canvas?: string) => {
   const query = new URLSearchParams();
   if (tenant) query.set('tenant', tenant);
   if (canvas) query.set('canvas', canvas);
-  window.location.assign('/' + (query.size ? '?' + query : ''));
+  return '/' + (query.size ? '?' + query : '');
 };
+const navigate = (tenant?: string, canvas?: string) => window.location.assign(workspaceURL(tenant, canvas));
+function CanvasBackLink({ tenantId }: { tenantId: string }) {
+  const { t } = useSaaSPreferences();
+  // A normal navigation preserves beforeunload protection for unsynced changes.
+  return <a className="saas-canvas-back" href={workspaceURL(tenantId)}><ArrowLeft size={14} aria-hidden="true" />{t('返回画布列表', 'Back to canvases')}</a>;
+}
+function CanvasPageHeader({ tenantId, controls }: { tenantId: string; controls: React.ReactNode }) {
+  return <header className="saas-canvas-page-header"><div className="saas-canvas-page-navigation"><a href="/" className="saas-logo">AwwO</a><CanvasBackLink tenantId={tenantId} /></div>{controls}</header>;
+}
 export function SaaSApp() { return <SaaSPreferencesProvider><AuthenticatedApp /></SaaSPreferencesProvider>; }
 function AuthenticatedApp() {
   const { locale, t } = useSaaSPreferences();
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('reset'));
+  useEffect(() => { if (resetToken) { const url = new URL(location.href); url.searchParams.delete('reset'); history.replaceState(null, '', url.pathname + url.search); } }, [resetToken]);
   const [failure, setFailure] = useState('');
   const onProfile = useCallback((name: string) => setIdentity(current => current ? { ...current, user: { ...current.user, name } } : current), []);
   useEffect(() => {
@@ -43,6 +55,7 @@ function AuthenticatedApp() {
     return () => { live = false; };
   }, []);
   const inviteToken = new URLSearchParams(window.location.search).get('invite');
+  if (resetToken) return <PasswordRecovery token={resetToken} onBack={() => location.assign('/')} />;
   if (loading) return <Notice text={t('正在验证会话…', 'Checking your session…')} />;
   if (failure) return <Notice text={saasErrorMessage(failure, locale)} retry />;
   if (!identity) return <Login invited={Boolean(inviteToken)} onAuthenticated={setIdentity} />;
@@ -50,7 +63,7 @@ function AuthenticatedApp() {
   const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
     : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
     : <Workspace identity={identity} onProfile={onProfile} />;
-  return <AppearanceScope key={identity.user.id} userId={identity.user.id}>{content}</AppearanceScope>;
+  return <AppearanceScope key={identity.user.id} userId={identity.user.id}><PersonalEngineGate identity={identity}>{content}</PersonalEngineGate></AppearanceScope>;
 }
 function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
   const { locale, t } = useSaaSPreferences();
@@ -59,8 +72,10 @@ function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
 function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Identity) => void; invited: boolean }) {
   const { locale, t } = useSaaSPreferences();
   const [register, setRegister] = useState(false);
+  const [forgot, setForgot] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  if (forgot) return <PasswordRecovery onBack={() => setForgot(false)} />;
   return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p></div>
     <form className="saas-card" onSubmit={async event => {
       event.preventDefault(); setBusy(true); setError(null);
@@ -73,6 +88,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       {register && <><label>{t('姓名', 'Name')}<input name="name" autoComplete="name" required maxLength={100} /></label><label>{t('工作区名称', 'Workspace name')}<input name="tenantName" required maxLength={100} /></label></>}
       <label>{t('邮箱', 'Email')}<input name="email" type="email" autoComplete="email" required /></label>
       <label>{t('密码', 'Password')}<input name="password" type="password" minLength={12} autoComplete={register ? 'new-password' : 'current-password'} required /></label>
+      {!register && <button type="button" className="saas-link" onClick={() => setForgot(true)}>{t('忘记密码？', 'Forgot password?')}</button>}
       {register && <small>{t('密码至少 12 位。', 'Use at least 12 characters.')}</small>}
       {error !== null && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
       <button className="saas-primary" disabled={busy}>{busy ? t('请稍候…', 'Please wait…') : register ? t('注册并创建工作区', 'Register and create workspace') : t('登录', 'Sign in')}</button>
@@ -105,6 +121,7 @@ function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity
     {creatingWorkspace && <CreateWorkspaceDialog onClose={() => setCreatingWorkspace(false)} onCreated={id => navigate(id)} />}
     {canvasId && tenant && <button title={t('返回画布列表', 'Back to canvases')} aria-label={t('返回画布列表', 'Back to canvases')} onClick={() => navigate(tenant.id)}><ArrowLeft size={16}/></button>}
     {identity.user.platformRole === 'admin' && <a href="/admin" title={t('平台管理', 'Platform administration')} aria-label={t('平台管理', 'Platform administration')}><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
+    <a href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a><a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
       workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi }} />
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => { try { await api('/auth/logout', { method: 'POST' }); window.location.reload(); } catch (error) { setError(message(error)); } }}><LogOut size={16}/></button>
@@ -150,8 +167,8 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
     }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => { controller.abort(); clearSaaSCanvas(); configureSaaSCanvasSave(null); };
   }, [identity.user.id, tenant.id, canvasId]);
-  if (!record) return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
-  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><span role="status">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span><button onClick={() => downloadDocument(record.document, record.name + '.json')}>{t('导出画布 JSON', 'Export canvas JSON')}</button></div>
+  if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
+  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><CanvasBackLink tenantId={tenant.id} /><span>{tenant.name} / {record.name}</span><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><span role="status">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span><button onClick={() => downloadDocument(record.document, record.name + '.json')}>{t('导出画布 JSON', 'Export canvas JSON')}</button></div>
     <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} onClose={() => setSettingsOpen(false)} />}
   </div>;
@@ -370,7 +387,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       setRecovery(null); setError(''); setSaveState('已同步');
     } catch (error) { setError(message(error)); }
   };
-  if (recovery) return <DraftRecovery controls={controls} record={record} drafts={recovery} error={error}
+  if (recovery) return <DraftRecovery tenantId={tenant.id} controls={controls} record={record} drafts={recovery} error={error}
     hasJournal={Boolean(scopedStorage.current && loadRunJournal(scopedStorage.current))} onUseCloud={useCloud}
     onRestore={saved => {
       if (!saved.draft || !current.current || saved.draft.baseVersion !== current.current.version) return;
@@ -388,12 +405,12 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       const remaining = readCanvasDrafts(storage);
       if (remaining.length) setRecovery(remaining); else useCloud();
     }} />;
-  if (!record) return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p>{error && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</section></main>;
+  if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><section className="saas-page-intro"><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p>{error && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</section></main>;
   const exportLocal = () => {
     const url = URL.createObjectURL(new Blob([scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}'], { type: 'application/json' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-canvas-recovery.json'; anchor.click(); URL.revokeObjectURL(url);
   };
-  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
+  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><CanvasBackLink tenantId={tenant.id} /><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
     {/* A workspace whose model entitlement resolves to nothing has an available
         service and no runnable model, so the server states that as a reason. Keying
@@ -404,8 +421,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   </div>;
 }
 
-function DraftRecovery({ controls, record, drafts, error, hasJournal, onRestore, onDiscard, onUseCloud }: {
-  controls: React.ReactNode; record: CanvasRecord | null; drafts: SavedCanvasDraft[]; error: string; hasJournal: boolean;
+function DraftRecovery({ tenantId, controls, record, drafts, error, hasJournal, onRestore, onDiscard, onUseCloud }: {
+  tenantId: string; controls: React.ReactNode; record: CanvasRecord | null; drafts: SavedCanvasDraft[]; error: string; hasJournal: boolean;
   onRestore: (saved: SavedCanvasDraft) => void; onDiscard: (saved: SavedCanvasDraft) => void; onUseCloud: () => void;
 }) {
   const { locale, t } = useSaaSPreferences();
@@ -413,7 +430,7 @@ function DraftRecovery({ controls, record, drafts, error, hasJournal, onRestore,
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const selected = drafts.find(saved => saved.key === selectedKey) || drafts[0];
   const canRestore = Boolean(record && selected?.draft && selected.draft.baseVersion === record.version);
-  return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{t('发现未同步的本机草稿', 'Unsynced local drafts found')}</h1><p role="status">{t('本机修改已保留。确认如何处理后才会打开编辑器；重新加载不会丢弃草稿。', 'Your local changes are preserved. Choose how to handle them before opening the editor. Reloading will not discard drafts.')}</p></section>
+  return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenantId} controls={controls} /><section className="saas-page-intro"><h1>{t('发现未同步的本机草稿', 'Unsynced local drafts found')}</h1><p role="status">{t('本机修改已保留。确认如何处理后才会打开编辑器；重新加载不会丢弃草稿。', 'Your local changes are preserved. Choose how to handle them before opening the editor. Reloading will not discard drafts.')}</p></section>
     {error && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
     <section className="saas-card saas-draft-recovery"><label>{t('选择本机草稿', 'Choose a local draft')}<select aria-label={t('选择本机草稿', 'Choose a local draft')} value={selected?.key || ''} onChange={event => { setSelectedKey(event.target.value); setConfirmDiscard(false); }}>{drafts.map((saved, index) => <option key={saved.key} value={saved.key}>{t('草稿', 'Draft')} {index + 1}{saved.draft ? ' · ' + new Date(saved.draft.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : t(' · 需要人工检查', ' · Manual inspection required')}</option>)}</select></label>
       {selected?.draft ? <><p>{t('草稿基于云端版本', 'Draft base version:')} {selected.draft.baseVersion}{t('；当前云端版本', '; current cloud version:')} {record?.version ?? t('读取中', 'loading')}。</p><p>{t('包含节点：', 'Nodes: ')}{selected.draft.document.nodes.map(node => node.title).join(', ') || t('空画布', 'Empty canvas')}</p>{record && !canRestore && <p className="saas-error">{t('云端版本已有变化。请导出草稿后核对，当前草稿不会自动覆盖较新的云端内容。', 'The cloud version has changed. Export and review your draft. It will not automatically overwrite newer cloud content.')}</p>}</> : <p className="saas-error">{t('草稿格式无法自动恢复。原始内容仍可导出，尚未删除。', 'This draft format cannot be restored automatically. Its original content is preserved and can be exported.')}</p>}

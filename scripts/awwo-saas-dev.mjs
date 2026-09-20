@@ -71,7 +71,7 @@ export async function runDevelopment({
       const web = launch(runtime.execPath, ['apps/web/node_modules/vite/bin/vite.js', '--config', 'apps/web/vite.saas.config.mjs', '--host', '127.0.0.1', '--port', env.VITE_AWWO_WEB_PORT, '--strictPort'], 'SaaS web', serviceEnv.web);
       await waitHttp(env.AWWO_PUBLIC_ORIGIN, web);
       if (await finishIfStopping()) return;
-      logger.log(`AwwO SaaS ready: ${env.AWWO_PUBLIC_ORIGIN}\nAdmin: ${env.AWWO_BOOTSTRAP_ADMIN_EMAIL}; password is in ${envFile}\nPi and OpenAI Agents provider credentials are configured in the same local file. No Agent run is started automatically.`);
+      logger.log(`AwwO SaaS ready: ${env.AWWO_PUBLIC_ORIGIN}\nAdmin: ${env.AWWO_BOOTSTRAP_ADMIN_EMAIL}; password is in ${envFile}\nSign in and connect your own API key in My engines. No Agent run is started automatically.`);
     }
   } catch (error) {
     if (!stopping) { logger.error(error.message); await stop(1); }

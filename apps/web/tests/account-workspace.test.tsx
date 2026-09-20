@@ -324,7 +324,7 @@ describe('AccountWorkspacePanel', () => {
       />,
     );
 
-    await screen.findByRole('button', { name: 'Create invite link' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create invite link' })).toBeEnabled());
     fireEvent.change(screen.getByRole('combobox', { name: 'Invite role' }), {
       target: { value: 'viewer' },
     });

@@ -7,6 +7,10 @@ import { createCanvasRuntimeReader } from '../src/canvasRuntimeReader';
 import { RuntimePicker, type RuntimeValue } from '../src/RuntimePicker';
 import { RuntimeSettings } from '../src/saas/RuntimeSettings';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import { NodeTeamEditor } from '../src/canvas/NodeTeamEditor';
+import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { createNodeTeam } from '../src/canvas/nodeTeam';
+import { LocaleProvider } from '../src/canvas/i18n';
 const tenant = { id: 'runtime-tenant', name: 'Runtime test', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const status: SaaSRuntimeStatus = { engine: 'pi', available: true, configured: true,
   runtimes: [
@@ -18,6 +22,27 @@ function setup(payload = status) {
   configureSaaSCanvas({ tenant, canvasId: 'runtime-canvas' });
   const fetch = vi.fn(async (_url: string, _init?: RequestInit) => Response.json(payload)); vi.stubGlobal('fetch', fetch); return fetch;
 }
+
+it('preserves connection labels through the bridge and selects credential IDs in node and team pickers', async () => {
+  const labels = { 'byok-work': 'gpt-5 · Work · openai / work01', 'byok-personal': 'gpt-5 · Personal · openai / pers02' };
+  setup({ ...status, models: Object.entries(labels).map(([id, label]) => ({ id, label, name:'gpt-5', runtime:'pi', provider:'openai' })) });
+  const read = createCanvasRuntimeReader();
+  expect((await read('/api/agents/pi/models')).model_labels).toEqual(labels);
+  const changed = vi.fn();
+  const view = render(<RuntimePicker lang="en" runtimes={['pi']} value={{backend:'pi',model:'byok-work',effort:''}} onChange={changed} readJson={read}/>);
+  await waitFor(()=>expect(screen.getByLabelText('Model')).toHaveTextContent(labels['byok-work']));
+  fireEvent.click(screen.getByLabelText('Model'));
+  fireEvent.click(await screen.findByRole('option',{name:labels['byok-personal']}));
+  expect(changed).toHaveBeenLastCalledWith({backend:'pi',model:'byok-personal',effort:''});
+  view.unmount();
+  const node: SessionNode = { ...createSessionNode('llm',{x:0,y:0}), runtime:'pi', model:'byok-work' };
+  node.team = createNodeTeam(node);
+  render(<LocaleProvider locale="en"><NodeTeamEditor node={node} available readJson={read} onChange={changed}/></LocaleProvider>);
+  const selects = await screen.findAllByLabelText('Model');
+  await waitFor(()=>expect(within(selects[0]).getByRole('option',{name:labels['byok-personal']})).toBeEnabled());
+  fireEvent.change(selects[0],{target:{value:'byok-personal'}});
+  expect(changed.mock.lastCall![0].members[0].model).toBe('byok-personal');
+});
 it('scopes mixed catalogs and legacy models without leaking models across runtimes', () => {
   expect(runtimeModels(status, 'pi').map(model => model.id)).toEqual(['pi-model', 'legacy-pi']);
   expect(runtimeModels(status, 'openai-agents').map(model => model.id)).toEqual(['agents-model']);

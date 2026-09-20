@@ -268,6 +268,20 @@ test('capacity and timeout knobs cannot drift between compose and the shipped te
   // occurrence that sits inside pi leaves no room for an anchor to grant it elsewhere.
   assert.equal((compose.match(/extra_hosts/g) ?? []).length, 1);
   assert.match(service('pi'), /extra_hosts:\n\s+- host\.docker\.internal:host-gateway\n/);
-  for (const name of ['api', 'web', 'database']) assert.match(service(name), /networks: \[private\]\n/);
+  // The API verifies personal credentials and sends recovery mail; web/database
+  // still have no egress and the API receives no Docker-host mapping.
+  assert.match(service('api'), /networks: \[private, egress\]\n/);
+  for (const name of ['web', 'database']) assert.match(service(name), /networks: \[private\]\n/);
   assert.match(compose, /^ {2}private:\n {4}internal: true$/m);
+});
+
+test('personal vault and mail credentials stay API-only while both workers share the mode', () => {
+  const env = serviceEnvironments({ PATH: '/usr/bin', AWWO_CREDENTIAL_MODE: 'user', AWWO_CREDENTIAL_ENCRYPTION_KEY: 'synthetic-vault-key', AWWO_SMTP_PASSWORD: 'synthetic-mail-password' });
+  for (const target of [env.pi, env.openAIAgents]) assert.equal(target.AWWO_CREDENTIAL_MODE, 'user');
+  for (const target of [env.web, env.build, env.pi, env.openAIAgents]) {
+    assert.equal(target.AWWO_CREDENTIAL_ENCRYPTION_KEY, undefined);
+    assert.equal(target.AWWO_SMTP_PASSWORD, undefined);
+  }
+  assert.equal(env.api.AWWO_CREDENTIAL_ENCRYPTION_KEY, 'synthetic-vault-key');
+  assert.equal(env.api.AWWO_SMTP_PASSWORD, 'synthetic-mail-password');
 });

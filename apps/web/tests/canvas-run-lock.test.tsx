@@ -23,6 +23,13 @@ import {
 import { getSnapshot, resetAllSessions, setStreaming } from '../src/canvas/sessions';
 import { loadRunJournal } from '../src/canvas/runJournal';
 
+// Wrap the memo component in a callable facade so callback-capture spies retain
+// the actual renderer without trying to spy on React's memo descriptor object.
+vi.mock('../src/canvas/SessionTile', async (importOriginal) => {
+ const original = await importOriginal<typeof import('../src/canvas/SessionTile')>();
+ return { ...original, SessionTile: (props: Tiles.SessionTileProps) => <original.SessionTile {...props} /> };
+});
+
 class SilentResizeObserver {
   observe() {}
   unobserve() {}

@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Dropdown, ComboInput } from './ui/Dropdown';
 import type { DropdownOption } from './ui/Dropdown';
+import { modelLabel, modelLabels } from './modelLabels';
 
 export type RuntimeValue = { backend: string; model: string; effort: string };
 
@@ -32,6 +33,7 @@ type ModelCatalog = {
   models: string[];
   source?: string;
   capabilities: Record<string, ModelCapability>;
+  labels?: Record<string, string>;
 };
 // `locked` (issue #452): the package exceeds the account's unlock ceiling — the
 // kernel (`is_tier_locked`, surfaced by GET /api/relay/packages) decides this; the
@@ -45,8 +47,8 @@ const COPY = {
   en: { runtime: 'Runtime', model: 'Model', effort: 'Effort', effortDefault: 'Inherit (runtime default)', modelDefault: 'Default model', inherit: 'Use lead', lockedBadge: 'Upgrade', pickRuntime: 'Select a runtime…', catalogUnavailable: 'The Codex model catalog is unavailable. Please retry.', catalogRetry: 'Retry model catalog', savedModel: 'Saved; not listed in the current catalog' },
 } as const;
 
-function toOptions(values: string[]): DropdownOption[] {
-  return values.map((v) => ({ value: v, label: v }));
+function toOptions(values: string[], labels?: Record<string, string>): DropdownOption[] {
+  return values.map((v) => ({ value: v, label: modelLabel(v, labels) }));
 }
 
 function stringValues(values: unknown): string[] {
@@ -122,6 +124,7 @@ export function RuntimePicker({
           models: stringValues(d?.models),
           source: typeof d?.source === 'string' ? d.source : undefined,
           capabilities: modelCapabilities(d?.model_capabilities),
+          labels: modelLabels(d?.model_labels),
         });
       })
       .catch(() => {
@@ -236,7 +239,7 @@ export function RuntimePicker({
           options={[
             ...(model && !modelCatalog.includes(model) ? [{ value: model, label: model, description: t.savedModel, disabled: true }] : []),
             { value: '', label: t.modelDefault },
-            ...toOptions(modelCatalog),
+            ...toOptions(modelCatalog, catalog?.backend === backend ? catalog.labels : undefined),
           ]}
           onChange={setModel}
           disabled={disabled || liveCatalogBlocked}

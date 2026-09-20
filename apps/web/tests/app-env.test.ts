@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeAppEnv, pickServiceUrl } from '../src/app-env';
 
 describe('normalizeAppEnv', () => {
-  it('defaults to staging when unset (there is no localhost development tier)', () => {
+  it('defaults to staging when unset', () => {
     expect(normalizeAppEnv(undefined)).toBe('staging');
     expect(normalizeAppEnv('')).toBe('staging');
     expect(normalizeAppEnv('   ')).toBe('staging');
@@ -14,12 +14,12 @@ describe('normalizeAppEnv', () => {
     expect(normalizeAppEnv('  Production ')).toBe('production');
   });
 
-  it('folds every legacy/non-production spelling to staging, matching the kernel', () => {
+  it('keeps development aliases separate from staging', () => {
     expect(normalizeAppEnv('prod')).toBe('production');
     expect(normalizeAppEnv('stage')).toBe('staging');
-    expect(normalizeAppEnv('development')).toBe('staging');
-    expect(normalizeAppEnv('dev')).toBe('staging');
-    expect(normalizeAppEnv('local')).toBe('staging');
+    expect(normalizeAppEnv('development')).toBe('development');
+    expect(normalizeAppEnv('dev')).toBe('development');
+    expect(normalizeAppEnv('local')).toBe('development');
     expect(normalizeAppEnv('test')).toBe('staging');
   });
 });

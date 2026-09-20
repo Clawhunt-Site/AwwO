@@ -65,8 +65,6 @@ jobs:
       # imports @mdxeditor/editor from server/ui, whose deps live in the server pnpm
       # workspace. Install them first or vite config load fails (MODULE_NOT_FOUND).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - run: pnpm -C server install --frozen-lockfile
       - run: npm ci --prefix apps/web
       - run: npm test --prefix apps/web
@@ -136,8 +134,6 @@ jobs:
       # imports @mdxeditor/editor from server/ui, whose deps live in the server pnpm
       # workspace. Install them first or vite config load fails (MODULE_NOT_FOUND).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - run: pnpm -C server install --frozen-lockfile
       - run: npm ci --prefix apps/web
       - run: npm test --prefix apps/web

@@ -1,0 +1,3 @@
+.canvas-persona-picker { display: grid; gap: 7px; min-width: 0; margin-top: 5px; }
+.canvas-persona-picker .canvas-inspector-hint { margin: 0; }
+.canvas-persona-picker select:focus-visible { outline: 2px solid var(--strong, #6c766c); outline-offset: 2px; }

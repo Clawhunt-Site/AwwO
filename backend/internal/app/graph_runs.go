@@ -171,6 +171,15 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if in[n.ID] && n.Kind == "session" {
+			if err := validateSavedWorkspaceAgent(raw, n.ID, n.Binding.AgentID); err != nil {
+				input := err.(setupError)
+				status := 400
+				if input.code == "node_setup_required" {
+					status = 409
+				}
+				fail(w, status, input.code, input.message)
+				return
+			}
 			if n.Binding.CompanyID != "" && n.Binding.CompanyID != tid {
 				fail(w, 404, "not_found", "Node binding does not belong to this workspace")
 				return
@@ -197,6 +206,10 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			snap, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
 			if e != nil {
 				a.runtimeAdmissionError(w, e)
+				return
+			}
+			if e = validateWorkspaceAgentSession(r.Context(), tx, tid, n.IssueID, n.ID, raw, snap); e != nil {
+				a.workspaceAgentAdmissionError(w, e)
 				return
 			}
 			// Freeze the output policy separately from persona instructions. Team members

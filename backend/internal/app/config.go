@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/base64"
 	"errors"
 	"net"
 	"net/netip"
@@ -12,6 +13,9 @@ import (
 )
 
 type Config struct {
+	UserCredentials                                                                       bool
+	CredentialKey                                                                         []byte
+	SMTPHost, SMTPPort, SMTPUsername, SMTPPassword, SMTPFrom                              string
 	MetricsEnabled, OTelEnabled                                                           bool
 	MetricsListenAddr, OTelEndpoint, OTelServiceName, OTelResourceAttributes, OTelSampler string
 	OTelSampleRatio                                                                       float64
@@ -30,6 +34,22 @@ type Config struct {
 
 func ConfigFromEnv() (Config, error) {
 	c := Config{Env: env("APP_ENV", "development"), DatabaseURL: os.Getenv("AWWO_DATABASE_URL"), ListenAddr: env("AWWO_LISTEN_ADDR", "127.0.0.1:8087"), PublicOrigin: env("AWWO_PUBLIC_ORIGIN", "http://127.0.0.1:5189"), PIURL: env("AWWO_PI_URL", "http://127.0.0.1:8097"), PIToken: os.Getenv("AWWO_PI_TOKEN"), AdminEmail: os.Getenv("AWWO_BOOTSTRAP_ADMIN_EMAIL"), AdminPassword: os.Getenv("AWWO_BOOTSTRAP_ADMIN_PASSWORD"), SessionTTL: 24 * time.Hour, RunTimeout: 180 * time.Second, MaxBodyBytes: 2 << 20, AuthRequestsPerMinute: 10}
+	c.UserCredentials = env("AWWO_CREDENTIAL_MODE", "operator") == "user"
+	if mode := env("AWWO_CREDENTIAL_MODE", "operator"); mode != "user" && mode != "operator" {
+		return c, errors.New("AWWO_CREDENTIAL_MODE must be user or operator")
+	}
+	if raw := os.Getenv("AWWO_CREDENTIAL_ENCRYPTION_KEY"); raw != "" {
+		var err error
+		c.CredentialKey, err = base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return c, errors.New("AWWO_CREDENTIAL_ENCRYPTION_KEY must be base64")
+		}
+	}
+	c.SMTPHost = os.Getenv("AWWO_SMTP_HOST")
+	c.SMTPPort = env("AWWO_SMTP_PORT", "587")
+	c.SMTPUsername = os.Getenv("AWWO_SMTP_USERNAME")
+	c.SMTPPassword = os.Getenv("AWWO_SMTP_PASSWORD")
+	c.SMTPFrom = os.Getenv("AWWO_SMTP_FROM")
 	c.PIAdmissionWait = 5 * time.Second
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = os.Getenv("AWWO_OPENAI_AGENTS_URL"), os.Getenv("AWWO_OPENAI_AGENTS_TOKEN")
 	for key, dst := range map[string]*time.Duration{"AWWO_SESSION_TTL": &c.SessionTTL, "AWWO_RUN_TIMEOUT": &c.RunTimeout, "AWWO_PI_SESSION_WAIT": &c.PIAdmissionWait} {
@@ -70,6 +90,12 @@ func env(k, d string) string {
 	return d
 }
 func (c Config) Validate() error {
+	if (c.UserCredentials || len(c.CredentialKey) > 0) && len(c.CredentialKey) != 32 {
+		return errors.New("AWWO_CREDENTIAL_ENCRYPTION_KEY must decode to 32 bytes")
+	}
+	if c.SMTPHost != "" && (!validEmail(c.SMTPFrom) || strings.ContainsAny(c.SMTPHost, " /\r\n") || (c.SMTPPort != "465" && c.SMTPPort != "587")) {
+		return errors.New("SMTP requires a valid host, sender and TLS port 465 or 587")
+	}
 	if c.Env != "development" && c.Env != "staging" && c.Env != "production" {
 		return errors.New("APP_ENV must be development, staging or production")
 	}

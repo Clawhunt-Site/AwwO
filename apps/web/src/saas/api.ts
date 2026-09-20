@@ -15,15 +15,22 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   return payload as T;
 }
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number };
-export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[] };
+export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
 /** API Agent runtime is persisted independently of a canvas draft. Legacy records default to Pi. */
-export type SaaSAgent = { id: string; tenantId: string; name: string; runtime?: 'pi' | 'openai-agents'; model: string; instructions?: string; status?: string };
+export type SaaSAgent = { id: string; tenantId: string; name: string; runtime?: 'pi' | 'openai-agents'; model: string; instructions?: string; status?: string;
+  effort?: string; role?: string; title?: string; adapterType?: 'pi' | 'openai-agents'; adapterConfig?: { model?: string; effort?: string } };
 export const tenantPath = (tenantId: string, suffix = '') => `/tenants/${encodeURIComponent(tenantId)}${suffix}`;
 
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
 export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
   const codes: Record<string, [string, string]> = {
+    vault_unavailable: ['个人密钥服务尚未配置，请联系管理员。','Personal credential storage is not configured. Contact the administrator.'],
+    provider_verification_failed: ['密钥验证失败，请检查 API Key、服务商额度和访问地区。','Key verification failed. Check your API key, provider access and region.'],
+    invalid_connection: ['请选择正确的服务商、执行引擎并填写有效密钥。','Select a provider, supported engine and valid API key.'],
+    connection_limit: ['最多保存 8 个个人连接。','Up to eight personal connections are allowed.'],
+    email_unavailable: ['邮件找回服务尚未配置，请联系管理员。','Password recovery email is not configured. Contact the administrator.'],
+    reset_invalid: ['重设链接已失效，请重新申请。','The reset link is invalid or expired. Request another.'],
     unauthenticated: ['请重新登录。', 'Please sign in again.'], forbidden: ['你没有执行此操作的权限。', 'You do not have permission for this action.'],
     invalid_credentials: ['邮箱或密码不正确。', 'The email or password is incorrect.'], invalid_input: ['输入无效，请检查后重试。', 'Check the entered values and try again.'],
     invalid_cursor: ['分页已失效，请刷新列表重新开始。', 'Pagination expired. Refresh the listing.'],

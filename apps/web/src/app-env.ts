@@ -4,15 +4,12 @@
 // The frontend MUST apply the same APP_ENV alias normalization as the backend:
 // otherwise a build whose VITE_APP_ENV is an alias (e.g. "prod") would leave the
 // frontend at a raw "prod" that isOnlineAppEnv does not recognize, splitting the
-// bundle's identity from the backend (adversarial review). There are only two
-// environments — staging (the test server) and production; every non-production
-// spelling, plus an unset value, folds to staging (the default), matching the
-// kernel. Side-effect-free + exported so it is unit testable.
+// bundle's identity from the backend. Unset still defaults to staging.
 
 const APP_ENV_ALIASES: Record<string, string> = {
-  development: 'staging',
-  dev: 'staging',
-  local: 'staging',
+  development: 'development',
+  dev: 'development',
+  local: 'development',
   test: 'staging',
   stage: 'staging',
   prod: 'production',

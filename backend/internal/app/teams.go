@@ -50,6 +50,29 @@ type executionSnapshot struct {
 	HistoryAvailable int                `json:"historyAvailable,omitempty"`
 }
 
+// Persisted snapshots predate the creation default: an absent runtime means Pi.
+// Normalize once at the decoding boundary so dispatch, cancellation and usage agree.
+func (s *executionSnapshot) UnmarshalJSON(data []byte) error {
+	type snapshotWire executionSnapshot
+	var decoded snapshotWire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	decoded.Runtime = legacyRuntime(decoded.Runtime)
+	if decoded.Team != nil {
+		if decoded.Team.Runtime == "" {
+			decoded.Team.Runtime = decoded.Runtime
+		}
+		for i := range decoded.Team.Members {
+			if decoded.Team.Members[i].Runtime == "" {
+				decoded.Team.Members[i].Runtime = decoded.Team.Runtime
+			}
+		}
+	}
+	*s = executionSnapshot(decoded)
+	return nil
+}
+
 func validateTeam(t *nodeTeam) error {
 	if t == nil {
 		return nil

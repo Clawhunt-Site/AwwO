@@ -6,6 +6,21 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-20
+
+### Added — personal accounts and execution credentials
+
+- Login onboarding requires a verified personal provider connection. Users choose LLM Gate, OpenAI/Codex, Claude, Grok or Gemini and a supported engine, then supply their own API key. LLM Gate links to credential and credit purchase on its own site.
+- Server-side AES-256-GCM vault, owner-scoped catalogs, and per-run worker configuration resolve credentials from the persisted run actor. Personal mode never falls back to shared operator credentials.
+- Password changes, individual login-session revocation, and optional SMTP password recovery with single-use, expiring links. Password change/reset revokes all login sessions.
+- One-command `npm run start:user` wrapper, production Compose defaults, additive migration 017, configuration and rollback guide in `docs/personal-accounts.md`.
+- Bring the released iOS-inspired canvas, left model palette, right Bot/persona library, canvas return navigation, and hosted Mac shell source into the public source baseline.
+- Add GitHub acceptance for PostgreSQL account regressions, worker isolation, SaaS web checks and production container builds; resolve the existing duplicate pnpm version configuration.
+
+### Verification scope
+
+Synthetic credentials/provider fixtures verify account isolation, background run admission, worker concurrency, secret handling and password/session behavior. Model catalog verification is not live paid-model inference or a hosted production rollout.
+
 ### Performance — reduce live-run latency and database amplification
 
 - **What changed:** Wake each live run's SSE subscribers immediately after its queued, running, delta or terminal event commits, while retaining cursor-based PostgreSQL replay and a forced 15-second authorization heartbeat as a durable fallback. Persist a single-Agent delta and its replay event in one atomic SQL statement, and send only the new team-turn fragment from Go to PostgreSQL instead of rebinding the full accumulated output on every fragment.

@@ -1,3 +1,4 @@
+import { bindUserModel } from '../user-models.ts';
 import { createWorkerObservability } from './observability.mjs';
 import { parentObservability } from './usage.mjs';
 import { createServer } from 'node:http';
@@ -66,8 +67,12 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
     }
     if (response.destroyed) return;
     if (shuttingDown) return json(response, 503, { error: { code: 'RUNTIME_UNAVAILABLE', message: 'The worker is stopping.' } });
+    let runConfig;
+    try { runConfig = bindUserModel(config, body, 'pi'); } catch {
+      return json(response, 400, { error: { code: 'PERSONAL_CREDENTIAL_REQUIRED', message: 'A verified personal model connection is required.' } });
+    }
     let modelConfig;
-    try { modelConfig = resolveModelConfig(config, body.model); } catch {
+    try { modelConfig = resolveModelConfig(runConfig, body.model); } catch {
       return json(response, 400, { error: { code: 'MODEL_NOT_FOUND', message: 'Select a model from the configured model catalog.' } });
     }
     if (!fitsContextBudget(body, modelConfig)) return json(response, 413, { error: {
@@ -109,7 +114,7 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
       if (!response.writableEnded) { entry.cancelRequested = true; entry.handle?.cancel(); }
     });
     try {
-      entry.handle = await startRun({ config, request: body, onEvent: emit, onExit: release });
+      entry.handle = await startRun({ config: runConfig, request: body, onEvent: emit, onExit: release });
       if (entry.cancelRequested || response.destroyed) entry.handle.cancel();
     } catch {
       release();

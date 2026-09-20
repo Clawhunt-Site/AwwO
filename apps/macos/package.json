@@ -1,0 +1,17 @@
+{
+  "name": "@awwo/macos",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.21.0" },
+  "scripts": {
+    "build": "node build.ts",
+    "test": "node --test production-config.test.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:bundle": "node verify-bundle.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}

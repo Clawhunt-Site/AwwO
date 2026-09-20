@@ -19,11 +19,14 @@ export interface AddNodeMenuProps {
   at: { x: number; y: number };
   onPick: (kind: AddNodeKind) => void;
   onClose: () => void;
+  onOpenAgentLibrary?: () => void;
+  /** Cloud hosts replace role-node shortcuts with the separate model/persona shelf. */
+  onOpenModelShelf?: () => void;
 }
 
-export function AddNodeMenu({ at, onPick, onClose }: AddNodeMenuProps) {
+export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenModelShelf }: AddNodeMenuProps) {
   const { locale, t } = useCanvasI18n();
-  const items = getAgentTemplates(locale);
+  const items = getAgentTemplates(locale).filter(item => !onOpenModelShelf || item.id === 'general');
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(at);
 
@@ -37,7 +40,7 @@ export function AddNodeMenu({ at, onPick, onClose }: AddNodeMenuProps) {
       x: Math.max(8, Math.min(at.x, bounds.width - menu.offsetWidth - 8)),
       y: Math.max(8, Math.min(at.y, bounds.height - menu.offsetHeight - 8)),
     });
-  }, [at.x, at.y]);
+  }, [at.x, at.y, locale, Boolean(onOpenModelShelf), Boolean(onOpenAgentLibrary)]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -66,6 +69,10 @@ export function AddNodeMenu({ at, onPick, onClose }: AddNodeMenuProps) {
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className="canvas-add-menu-title">{t('node.addAgent')}</div>
+      {onOpenModelShelf && <button type="button" role="menuitem" className="canvas-add-menu-item" onClick={event => {
+        event.stopPropagation(); onClose(); onOpenModelShelf();
+      }}>{locale === 'zh' ? '模型与人设…' : 'Models & personas…'}</button>}
+      {onOpenAgentLibrary && <button type="button" role="menuitem" className="canvas-add-menu-item" onClick={onOpenAgentLibrary}>{locale === 'zh' ? '选择工作区 Agent…' : 'Choose workspace Agent…'}</button>}
       {items.map((item) => (
         <button
           key={item.id}

@@ -93,6 +93,7 @@ export function loadConfig(env = process.env) {
   const apiKey = (env.AWWO_PI_API_KEY ?? '').trim();
   const token = env.AWWO_PI_TOKEN ?? '';
   const baseURL = (env.AWWO_PI_BASE_URL ?? '').trim() || DEFAULTS[provider] || '';
+  const userCredentials = env.AWWO_CREDENTIAL_MODE === 'user';
   const missing = [];
   if (token.length < 32) missing.push('AWWO_PI_TOKEN');
   if (!Object.hasOwn(DEFAULTS, provider)) missing.push('AWWO_PI_PROVIDER');
@@ -113,7 +114,8 @@ export function loadConfig(env = process.env) {
     maxConcurrency: integer(env.AWWO_PI_MAX_CONCURRENCY, 4, 1, 32, 'AWWO_PI_MAX_CONCURRENCY'),
     maxOutputBytes: integer(env.AWWO_PI_MAX_OUTPUT_BYTES, 1_048_576, 1024, 8_388_608, 'AWWO_PI_MAX_OUTPUT_BYTES'),
     contextWindow, maxTokens, models,
-    ready: missing.length === 0,
+    userCredentials,
+    ready: userCredentials ? token.length >= 32 && !/[\r\n]/.test(token) : missing.length === 0,
     missing: Object.freeze([...new Set(missing)]),
   });
 }
@@ -122,6 +124,7 @@ export function publicHealth(config, activeRuns = 0) {
   return {
     status: config.ready ? 'ready' : 'unconfigured',
     ready: config.ready,
+    userCredentials: config.userCredentials === true,
     configured: config.ready,
     provider: config.provider || null,
     model: config.model || null,
@@ -156,7 +159,7 @@ export function publicHealth(config, activeRuns = 0) {
 }
 
 export function validateRequest(value) {
-  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'model', 'runtime']);
+  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime']);
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error('Invalid request fields');
   }

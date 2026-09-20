@@ -1,3 +1,4 @@
+import { runtimeReadiness } from './settings/runtimeReadiness';
 import { memo, startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type AnchorHTMLAttributes } from 'react';
 import type {
   CSSProperties,
@@ -1242,6 +1243,7 @@ export type RuntimeConfigPayload = {
 };
 
 type AgentControlInfo = BackendInfo & {
+  readiness?: string;
   kind: string;
   configure: string;
   config_env?: string | null;
@@ -6061,11 +6063,11 @@ export function App() {
 	  useEffect(() => {
 	    if (!desktopMode || agentSetupDismissed || agentOnboardingPromptedRef.current || runtimeSetupDialogOpen) return;
 	    if (!runtimeConfigLoaded || !backendDefaultKnown) return;
-	    if (!agentSetupRequired) return;
+	    if (!agentSetupRequired || agentControl === null) return;
 	    agentOnboardingPromptedRef.current = true;
 	    setAgentSetupOpen(true);
 	  }, [
-	    agentInventory.length,
+	    agentControl,
 	    agentSetupDismissed,
 	    agentSetupRequired,
 	    backendDefaultKnown,
@@ -6832,13 +6834,7 @@ export function App() {
 	  const clawHuntLoginServerText = clawHuntLoginProbe
 	    ? `${clawHuntLoginProbe.reachable ? t('reachable') : t('unreachable')} (${clawHuntLoginProbe.status_code || t('no response')})`
 	    : t('probing');
-	  const selectedAgentReadinessText = selectedAgentAvailable
-	    ? t('Agent setup ready')
-	    : selectedBackend
-	      ? selectedAgentInfo?.reason ?? selectedInfo?.reason ?? t('Agent setup unavailable')
-	      : agentInventory.length
-	        ? t('Agent setup choose first')
-	        : t('Agent setup none found');
+	  const selectedAgentReadinessText = runtimeReadiness(selectedAgentInfo, locale).detail;
 	  // 聊天 runtime 选择器选项：可用（已配置）的排前面；未配置的置底并打「未配置」角标，
 	  // 仍可点击——选中后跳转运行时设置完成配置（见 selectComposerBackendOrConfigure）。
 	  const composerRuntimeOptions = useMemo(() => {
@@ -13568,7 +13564,7 @@ export function App() {
         statusPill={
           <>
             <span className={`status-pill ${selectedAgentAvailable ? 'good' : 'bad'}`}>
-              {selectedAgentAvailable ? 'ready' : 'missing'}
+              {runtimeReadiness(selectedAgentInfo, locale).label}
             </span>
             <button
               type="button"
@@ -13598,8 +13594,9 @@ export function App() {
 		                      <strong>{agent.name}</strong>
 		                      <small>{agent.kind ?? 'agent'}</small>
 		                    </span>
-		                    <span className={`status-pill ${agent.available ? 'good' : 'bad'}`}>{agent.available ? 'ready' : 'missing'}</span>
-		                    <small>{agent.executable ?? agent.reason ?? agent.configure ?? t('Agent setup unavailable')}</small>
+		                    <span className={`status-pill ${agent.available ? 'good' : 'bad'}`}>{runtimeReadiness(agent, locale).label}</span>
+		                    <small>{runtimeReadiness(agent, locale).detail}</small>
+                          {agent.executable ? <small>{agent.executable}</small> : null}
 		                  </button>
 		                ))
 		              ) : (

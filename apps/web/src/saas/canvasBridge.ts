@@ -116,7 +116,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       const selected = runtimeDefinitions(runtime).find(item => item.id === decodeURIComponent(modelCatalog[1]));
       if (!selected) return json({ error: canvasText('所选执行框架不在服务目录中。', 'The selected runtime is absent from the service catalog.') }, 404);
       // Models carry their own effort contract so the picker scopes levels to the chosen model.
-      return json({ source: 'saas_runtime', models: runtimeModels(runtime, selected.id).map(model => ({ id: model.id, ...modelEffortCapability(model) })) });
+      return json({ source: 'saas_runtime', models: runtimeModels(runtime, selected.id).map(model => ({ id: model.id, ...(model.label ? { label: model.label } : {}), ...modelEffortCapability(model) })) });
     }
     if (path === '/canvas/planner') {
       const runtime: SaaSRuntimeStatus = await request('/runtime');

@@ -16,7 +16,7 @@ func setupFixture(t *testing.T, h *harness, c *http.Cookie, tid string, count in
 	nodes := []any{}
 	for i := 0; i < count; i++ {
 		id := string(rune('a' + i))
-		nodes = append(nodes, map[string]any{"id": id, "kind": "session", "agentKind": "coding", "title": "Worker " + id, "runtime": "", "model": "", "persona": "PERSONA-" + id, "effort": "", "binding": nil, "issueId": nil, "preview": "", "threads": []any{}, "custom": map[string]any{"keep": true}})
+		nodes = append(nodes, map[string]any{"id": id, "kind": "session", "agentKind": "coding", "title": "Worker " + id, "runtime": "pi", "model": "", "persona": "PERSONA-" + id, "effort": "", "binding": nil, "issueId": nil, "preview": "", "threads": []any{}, "custom": map[string]any{"keep": true}})
 	}
 	doc := map[string]any{"nodes": nodes, "edges": []any{}, "viewport": map[string]any{"zoom": 1}}
 	v := h.request(t, c, "POST", "/tenants/"+tid+"/canvases", map[string]any{"name": "Initialize", "document": doc}, 201)

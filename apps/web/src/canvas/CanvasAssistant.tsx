@@ -24,6 +24,8 @@ export interface CanvasAssistantProps {
   onUndo?: () => void;
   canUndo?: boolean;
   runtimeControls?: ReactNode;
+  submitLabel?: string;
+  submitDisabled?: boolean;
   /** Last progress the host observed for the in-flight plan; absent until the run reports. */
   progress?: PlanProgress;
 }
@@ -38,16 +40,16 @@ const STAGE_LABEL: Record<PlanProgress['stage'], CanvasTextKey> = {
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
 export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
-  onClose, onUndo, canUndo = false, runtimeControls, progress }: CanvasAssistantProps) {
+  onClose, onUndo, canUndo = false, runtimeControls, progress, submitLabel, submitDisabled = false }: CanvasAssistantProps) {
   const { t } = useCanvasI18n();
   const examples = [t('assistant.exampleSaas'), t('assistant.exampleData'), t('assistant.exampleContent')];
   const welcome = mode === 'welcome';
-  const sendLabel = t(welcome ? 'assistant.generate' : 'assistant.modify');
+  const sendLabel = submitLabel || t(welcome ? 'assistant.generate' : 'assistant.modify');
   const errorId = useId();
   const composing = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
-  const canSend = !busy && Boolean(draft.trim());
+  const canSend = !busy && !submitDisabled && Boolean(draft.trim());
   const lastMessage = messages.at(-1);
   useEffect(() => {
     // Scroll only the conversation region, never the surrounding canvas or page.

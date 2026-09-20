@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionNode } from './canvasDoc';
+import { modelLabel, modelLabels } from '../modelLabels';
 import { useCanvasI18n } from './i18n';
 import { NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, createNodeTeam, createNodeTeamMember, nodeTeamTurnEstimate, validateNodeTeam, type NodeTeam, type NodeTeamEffortCatalogs, type NodeTeamMember, type NodeTeamMode, type NodeTeamRuntime, type NodeTeamTool, type NodeTeamModelCatalogs } from './nodeTeam';
 
@@ -76,7 +77,7 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
   disabledRef.current = disabled;
   const readRef = useRef(readJson);
   readRef.current = readJson;
-  const [catalogState, setCatalogState] = useState<{ key: string; models: NodeTeamModelCatalogs; efforts: NodeTeamEffortCatalogs; failed: string[] } | null>(null);
+  const [catalogState, setCatalogState] = useState<{ key: string; models: NodeTeamModelCatalogs; efforts: NodeTeamEffortCatalogs; labels: Partial<Record<NodeTeamRuntime, Record<string, string>>>; failed: string[] } | null>(null);
   const [retry, setRetry] = useState(0);
   const hasTeam = Boolean(team);
   const requestedRuntimes = team ? [...new Set([team.runtime, ...team.members.map(member => member.runtime || team.runtime)])].filter(runtime => NODE_TEAM_RUNTIMES.includes(runtime)).sort() : [];
@@ -100,12 +101,13 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
           const levels = capabilities[model]?.effort_levels;
           return Array.isArray(levels) && levels.length && levels.every(level => typeof level === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(level)) ? [[model, [...new Set<string>(levels)]]] : [];
         }));
-        return { runtime, models, efforts };
-      } catch { return { runtime, models: null, efforts: null }; }
+        return { runtime, models, efforts, labels: modelLabels(data?.model_labels) };
+      } catch { return { runtime, models: null, efforts: null, labels: null }; }
     })).then(results => {
       if (!stale) setCatalogState({ key: catalogKey,
         models: Object.fromEntries(results.filter(result => result.models !== null).map(result => [result.runtime, result.models])),
         efforts: Object.fromEntries(results.filter(result => result.efforts !== null).map(result => [result.runtime, result.efforts])),
+        labels: Object.fromEntries(results.filter(result => result.labels !== null).map(result => [result.runtime, result.labels])),
         failed: results.filter(result => result.models === null).map(result => result.runtime) });
     });
     return () => { stale = true; };
@@ -196,7 +198,7 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
             onChange={event => editMember(index, { model: event.target.value, effort: member.effort && (runtimeEfforts[event.target.value] ?? []).includes(member.effort) ? member.effort : '' })}>
             <option value="">{runtime === (node.runtime || 'pi') ? t.defaultModel : t.runtimeDefaultModel}</option>
             {member.model && !catalog?.includes(member.model) ? <option value={member.model} disabled>{t.unknownModel}{member.model}</option> : null}
-            {(catalog ?? []).map(model => <option key={model} value={model}>{model}</option>)}
+            {(catalog ?? []).map(model => <option key={model} value={model}>{modelLabel(model, catalogState?.key === catalogKey ? catalogState.labels[runtime] : undefined)}</option>)}
           </select></label>
           {effortLevels.length || member.effort ? <label>{t.effort}<select className="canvas-inspector-input" value={member.effort ?? ''} disabled={disabled || !available || !effortLevels.length}
             onChange={event => editMember(index, { effort: event.target.value })}>

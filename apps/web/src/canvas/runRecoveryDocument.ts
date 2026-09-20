@@ -324,6 +324,7 @@ function nodeInput(node: CanvasNode, inScope: boolean) {
     model: node.model,
     effort: node.effort,
     persona: node.persona,
+    ...(node.agentRef ? { agentRef: node.agentRef } : {}),
     ...(node.team ? { team: nodeTeamFingerprint(node.team) } : {}),
     binding: node.binding ? { companyId: node.binding.companyId, agentId: node.binding.agentId } : null,
     activeThreadId: activeThreadId(node),

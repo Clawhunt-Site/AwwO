@@ -187,7 +187,7 @@ func TestPostgresGraphOutputPolicyBudgetStopsBeforeInvocation(t *testing.T) {
 	h := newHarness(t, pi.URL)
 	c, tid, _ := h.register(t, "graph-policy-budget@example.test")
 	prefix := "/tenants/" + tid
-	aid := h.request(t, c, "POST", prefix+"/agents", map[string]string{"name": "Budget", "model": "test-model", "instructions": instructions}, 201)["id"].(string)
+	aid := h.request(t, c, "POST", prefix+"/agents", map[string]string{"name": "Budget", "adapterType": "pi", "model": "test-model", "instructions": instructions}, 201)["id"].(string)
 	n.Binding = &struct {
 		CompanyID string `json:"companyId"`
 		AgentID   string `json:"agentId"`

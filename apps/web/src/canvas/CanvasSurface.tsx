@@ -1,5 +1,8 @@
 import { canvasStorage, canvasStorageKey } from './canvasStorage';
 import { canvasFetch } from '../saas/canvasBridge';
+import { workspaceAgentCatalog } from '../saas/workspaceAgentCatalog';
+import { createMarketplaceRoleNode, type TeamMarketAgent } from './teamMarketAgents';
+import { createWorkspaceAgentNode, type WorkspaceAgent } from './workspaceAgents';
 import { saasErrorMessage } from '../saas/api';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
@@ -23,11 +26,15 @@ import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionR
 //   * a superseded run's trailing callbacks can never repaint the current run's badges;
 //   * the corrupt-document backup and the empty-first-run rule are inherited from canvasDoc.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type DragEvent } from 'react';
 import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2 } from 'lucide-react';
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant } from './CanvasAssistant';
+import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
+import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
+import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
+import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
 import { applyCanvasPlan, canvasPlanRevision } from './canvasPlan';
 import { loadPlanningConversation, savePlanningConversation, requestCanvasPlan, readPlannerStatus, type PlanProgress } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
@@ -168,11 +175,32 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   readOnlyRef.current = readOnly;
   const setupRequest = useRef<AbortController | null>(null);
   const [initializing, setInitializing] = useState(false);
+  const [agentLibraryRequest, setAgentLibraryRequest] = useState(0);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; setupRequest.current?.abort(); }; }, []);
   const cloudScope = currentSaaSCanvas();
+  const loadWorkspaceAgents = useMemo(() => storageMode === 'cloud' && cloudScope ? workspaceAgentCatalog(cloudScope.tenant.id) : undefined, [storageMode, cloudScope?.tenant.id]);
   const [storage] = useState(canvasStorage);
   const canInitialize = storageMode === 'cloud' && Boolean(cloudScope);
+  const [palette, setPalette] = useState<Awaited<ReturnType<typeof readModelPalette>> | null>(null);
+  const [paletteLoading, setPaletteLoading] = useState(false);
+  const [paletteError, setPaletteError] = useState('');
+  const [paletteRefresh, setPaletteRefresh] = useState(0);
+  const [palettePersona, setPalettePersona] = useState<AgentTemplateId | null>(null);
+  const [shelfCollapsed, setShelfCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900);
+  useEffect(() => {
+    setPalette(null); setPaletteError('');
+    if (!canInitialize || readOnly) return;
+    const controller = new AbortController();
+    const scope = cloudScope;
+    setPaletteLoading(true);
+    void readModelPalette(controller.signal, locale).then(value => {
+      if (!controller.signal.aborted && currentSaaSCanvas() === scope) setPalette(value);
+    }).catch(error => {
+      if (!controller.signal.aborted && currentSaaSCanvas() === scope) setPaletteError(saasErrorMessage(error, locale));
+    }).finally(() => { if (!controller.signal.aborted && currentSaaSCanvas() === scope) setPaletteLoading(false); });
+    return () => controller.abort();
+  }, [canInitialize, cloudScope, readOnly, locale, paletteRefresh]);
   const inspectorCloseLocked = useRef(false);
   const [bindingLocked, setBindingLocked] = useState(false);
   const onInspectorLockChange = useCallback((locked: boolean) => {
@@ -725,7 +753,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     };
     if (refuseUnsupportedGraph(docRef.current)) return;
     let runDocument = docRef.current;
-    try { if (currentSaaSCanvas()) runDocument = await prepareNodes(scope); }
+    try {
+      if (currentSaaSCanvas()) {
+        runDocument = await prepareNodes(scope);
+        // Keep the live document in sync with the prepared one: the recovery poll re-computes
+        // the input fingerprint from docRef.current, so a stale ref would fail the match and
+        // silently drop every recovered output.
+        docRef.current = runDocument;
+        setDoc(runDocument);
+      }
+    }
     catch (error) { if (mounted.current) setHandoffNote(saasErrorMessage(error, locale)); return; }
     if (!mounted.current || readOnlyRef.current) return;
     if (refuseUnsupportedGraph(runDocument)) return;
@@ -1202,7 +1239,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const rebound = bindingChanged ? rebindNodeThread(live, draft.binding)
         : configChanged ? rebindNodeThread(live, null) : { ...live, threads: getNodeThreads(live) };
       saveNode({ ...rebound, title: draft.title, agentKind: draft.agentKind, runtime: draft.runtime,
-        model: draft.model, effort: draft.effort, persona: draft.persona, team: draft.team,
+        model: draft.model, effort: draft.effort, persona: draft.persona, team: draft.team, agentRef: draft.agentRef,
         binding: configChanged ? null : draft.binding, bindAttempt: configChanged ? null : draft.bindAttempt,
         issueId: bindingChanged || configChanged ? null : live.issueId }, true);
       if (configChanged) setHandoffNote(surfaceNotice(t, 'config_forked'));
@@ -1391,6 +1428,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   );
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
+  const addWorkspaceAgent = useCallback((agent: WorkspaceAgent) => {
+    if (!canEditStructure()) return;
+    const v = viewRef.current;
+    const s = sizeRef.current;
+    const node = createWorkspaceAgentNode(agent, { x: (-v.x + s.w / 2) / (v.scale || 1) - 170, y: (-v.y + s.h / 2) / (v.scale || 1) - 130 }, locale);
+    patchDoc(previous => ({ ...previous, nodes: [...previous.nodes, node] }), { label: `add:${node.id}` });
+    setSelection([node.id]); focusNode(node.id); setInspectorId(node.id);
+  }, [canEditStructure, patchDoc, focusNode, locale]);
+  const addMarketAgent = useCallback((agent: TeamMarketAgent) => {
+    if (!canEditStructure()) return;
+    const v = viewRef.current;
+    const s = sizeRef.current;
+    const node = createMarketplaceRoleNode(agent, { x: (-v.x + s.w / 2) / (v.scale || 1) - 170, y: (-v.y + s.h / 2) / (v.scale || 1) - 130 }, locale);
+    patchDoc(previous => ({ ...previous, nodes: [...previous.nodes, node] }), { label: `add:${node.id}` });
+    setSelection([node.id]); focusNode(node.id); setInspectorId(node.id);
+  }, [canEditStructure, patchDoc, focusNode, locale]);
   const createTemplate = useCallback(() => {
     if (!canEditStructure()) return;
     const currentNodes = docRef.current.nodes;
@@ -1428,15 +1481,21 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   // The planning conversation is local UI history, separate from node execution Sessions.
   const [planning, setPlanning] = useState(() => readOnly ? { draft: '', messages: [] } as ReturnType<typeof loadPlanningConversation> : loadPlanningConversation());
-  const [assistantOpen, setAssistantOpen] = useState(true);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState('');
   // Progress observed for the in-flight plan only; cleared with every new request so a finished
   // run never leaves stale counts next to the next one.
   const [planningProgress, setPlanningProgress] = useState<PlanProgress | undefined>(undefined);
   const [plannerStatus, setPlannerStatus] = useState<{ available: boolean; provider: string; error?: string } | null>(null);
+  const [jevStatus, setJevStatus] = useState<Awaited<ReturnType<typeof readJevPlannerStatus>> | null>(null);
+  const [plannerProvider, setPlannerProvider] = useState<'pi' | 'jev'>(() => {
+    try { return canInitialize && canvasStorage().getItem('awwo.canvas.planner-provider.v1') === 'jev' ? 'jev' : 'pi'; }
+    catch { return 'pi'; }
+  });
   const [lastPlanRevision, setLastPlanRevision] = useState<string | null>(null);
   const [planningFitId, setPlanningFitId] = useState('');
+  const [modelFocusId, setModelFocusId] = useState<string | null>(null);
   const planningRequest = useRef<{ id: string; controller: AbortController; prompt: string } | null>(null);
   const planningSequence = useRef(0);
   // Measure after the welcome screen becomes a canvas with an assistant sidebar.
@@ -1446,6 +1505,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const box = viewportSize();
     if (box) setView(fitNodeOverview(docRef.current.nodes, box));
   }, [planningFitId, viewportSize]);
+  useLayoutEffect(() => {
+    if (!modelFocusId) return;
+    // Focus against the committed layout after the welcome/assistant panels change.
+    focusNode(modelFocusId);
+    setModelFocusId(null);
+  }, [modelFocusId, focusNode]);
   useEffect(() => { if (!readOnly) savePlanningConversation(planning); }, [planning, readOnly]);
   useEffect(() => {
     const controller = new AbortController();
@@ -1453,6 +1518,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     void readPlannerStatus(controller.signal, locale).then(status => { if (!controller.signal.aborted) setPlannerStatus(status); });
     return () => controller.abort();
   }, [locale, readOnly]);
+  useEffect(() => {
+    if (!canInitialize || readOnly) return;
+    const controller = new AbortController();
+    setJevStatus(null);
+    void readJevPlannerStatus(controller.signal, locale).then(value => {
+      if (!controller.signal.aborted) setJevStatus(value);
+    });
+    return () => controller.abort();
+  }, [canInitialize, cloudScope, locale, readOnly, paletteRefresh]);
   useEffect(() => () => { planningRequest.current?.controller.abort(); planningRequest.current = null; }, []);
   const appendPlanningMessage = (id: string, content: string, status?: 'applied' | 'error' | 'stale') => {
     setPlanning(previous => ({ ...previous, messages: [...previous.messages,
@@ -1476,18 +1550,21 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setPlanningProgress(undefined);
     setPlanning(previous => ({ draft: '', messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt }].slice(-60) }));
     try {
-      const plan = await planRequest(prompt, snapshot, planning.messages, controller.signal, locale, progress => {
+      const reportProgress = (progress: PlanProgress) => {
         // A superseded or cancelled request must not repaint the current one's progress.
         if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
         setPlanningProgress(progress);
-      });
+      };
+      const jev = plannerProvider === 'jev'
+        ? await requestJevPlan(prompt, snapshot, planning.messages, controller.signal, locale, reportProgress) : null;
+      const plan = jev?.plan ?? await planRequest(prompt, snapshot, planning.messages, controller.signal, locale, reportProgress);
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (canvasPlanRevision(docRef.current) !== revision || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale');
         setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
         return;
       }
-      const applied = applyCanvasPlan(docRef.current, plan, locale);
+      const applied = jev ? applyJevPlan(docRef.current, jev, locale) : applyCanvasPlan(docRef.current, plan, locale);
       if (plan.operations.length) {
         fitted.current = true;
         patchDoc(() => applied.doc, { label: `ai:${id}` });
@@ -1499,7 +1576,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setPlanningFitId(id);
       }
       appendPlanningMessage(`${id}-assistant`, applied.summary, plan.operations.length ? 'applied' : undefined);
-      setPlannerStatus(previous => ({ available: true, provider: previous?.provider || 'AI' }));
+      if (!jev) setPlannerStatus(previous => ({ available: true, provider: previous?.provider || 'AI' }));
     } catch (error) {
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       const message = planFailureMessage(t, error);
@@ -1527,6 +1604,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     && Boolean(lastCommit.current?.label.startsWith('ai:'));
   const assistantProps = {
     messages: planning.messages, draft: planning.draft, busy: planningBusy, error: planningError,
+    ...(plannerProvider === 'jev' ? { submitLabel: locale === 'zh' ? '新增工作流' : 'Add workflow', submitDisabled: !jevStatus?.available } : {}),
     progress: planningProgress,
     onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
     onSend: () => { void sendPlanningMessage(); }, onCancel: cancelPlanning,
@@ -1535,11 +1613,61 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       undo(); setLastPlanRevision(null);
       appendPlanningMessage(`undo-${Date.now()}`, surfaceNotice(t, 'plan_undone'));
     }, canUndo: canUndoPlan,
-    runtimeControls: <div className="awwo-planner-connection"><span className={plannerStatus?.available ? 'is-ready' : ''} />
-      {plannerConnectionMessage(t, plannerStatus)}
-      {plannerStatus && !plannerStatus.available ? <button type="button" title={plannerStatus.error} onClick={() => { void readPlannerStatus(undefined, locale).then(setPlannerStatus); }}>{t('surface.retryPlanner')}</button> : null}
+    runtimeControls: <div className="awwo-planner-connection"><span className={(plannerProvider === 'jev' ? jevStatus?.available : plannerStatus?.available) ? 'is-ready' : ''} />
+      {plannerProvider === 'jev' ? jevStatus?.error || (locale === 'zh' ? 'Jev · 选择人设与模型，新增工作流' : 'Jev · Select personas and models for a new workflow') : plannerConnectionMessage(t, plannerStatus)}
+      {plannerProvider === 'pi' && plannerStatus && !plannerStatus.available ? <button type="button" title={plannerStatus.error} onClick={() => { void readPlannerStatus(undefined, locale).then(setPlannerStatus); }}>{t('surface.retryPlanner')}</button> : null}
     </div>,
   };
+
+  const addPaletteModel = (model: ModelPaletteSelection, personaId: AgentTemplateId | null, world?: { x: number; y: number }) => {
+    if (!canEditStructure() || planningBusy || paletteLoading || paletteError || !cloudScope
+      || palette?.tenantId !== cloudScope.tenant.id || palette.canvasId !== cloudScope.canvasId) return;
+    const current = palette.models.find(item => item.key === model.key && item.available);
+    if (!current) return;
+    const v = viewRef.current;
+    const s = sizeRef.current;
+    const node = createModelNode(current, personaId, world ?? { x: (-v.x + s.w / 2) / (v.scale || 1) - 170, y: (-v.y + s.h / 2) / (v.scale || 1) - 130 }, locale);
+    // This explicit focus owns the initial viewport; a delayed ResizeObserver must
+    // not replace it with an overview fit for the smaller, collapsed card.
+    fitted.current = true;
+    patchDoc(previous => ({ ...previous, nodes: [...previous.nodes, node] }), { label: `add:${node.id}` });
+    setAssistantOpen(false);
+    if (window.innerWidth < 900) setShelfCollapsed(true);
+    setSelection([node.id]); setInspectorId(null); setModelFocusId(node.id);
+  };
+  const onModelDragStart = (event: DragEvent<HTMLButtonElement>, model: ModelPaletteSelection, personaId: AgentTemplateId | null) => {
+    if (!canEditStructure() || planningBusy || !cloudScope || paletteLoading || paletteError || !model.available) { event.preventDefault(); return; }
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(MODEL_DRAG_MIME, modelDragPayload(cloudScope.tenant.id, model, personaId));
+  };
+  const onModelDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!Array.from(event.dataTransfer?.types ?? []).includes(MODEL_DRAG_MIME)) return;
+    event.preventDefault();
+    if (!cloudScope || !canEditStructure() || planningBusy || !palette) return;
+    const chosen = resolveModelDrop(event.dataTransfer.getData(MODEL_DRAG_MIME), cloudScope.tenant.id, palette.models);
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!chosen || !rect) return;
+    const v = viewRef.current;
+    addPaletteModel(chosen.model, chosen.personaId, { x: (event.clientX - rect.left - v.x) / (v.scale || 1), y: (event.clientY - rect.top - v.y) / (v.scale || 1) });
+  };
+  const modelShelf = canInitialize && !readOnly ? <ModelPersonaShelf modelsOnly groups={palette?.groups ?? []}
+    loading={paletteLoading} error={paletteError} disabled={!canEdit || planningBusy || initializing || bindingLocked}
+    personaId={palettePersona} onPersonaChange={setPalettePersona} onAddModel={addPaletteModel} onModelDragStart={onModelDragStart}
+    onOpenWorkspaceAgents={() => setAgentLibraryRequest(value => value + 1)} onRetry={() => setPaletteRefresh(value => value + 1)}
+    collapsed={shelfCollapsed} onCollapsedChange={setShelfCollapsed}
+    orchestrationControls={<div className="awwo-orchestration-choice"><label>
+      <span>{locale === 'zh' ? '编排模型' : 'Orchestration model'}</span>
+      <select aria-label={locale === 'zh' ? '编排模型' : 'Orchestration model'} value={plannerProvider} disabled={planningBusy}
+        onChange={event => { const next = event.target.value === 'jev' ? 'jev' : 'pi'; setPlannerProvider(next); try { canvasStorage().setItem('awwo.canvas.planner-provider.v1', next); } catch { /* In-memory selection remains available. */ } }}>
+        <option value="jev" disabled={!jevStatus?.available}>{`Jev${jevStatus && !jevStatus.available ? (locale === 'zh' ? ' · 未就绪' : ' · Unavailable') : ''}`}</option>
+        <option value="pi">{locale === 'zh' ? '工作区默认模型' : 'Workspace default'}</option>
+      </select></label>
+      {plannerProvider === 'jev' ? <small>{jevStatus?.error || (locale === 'zh' ? '选择人设与执行模型，新增最多 3 个节点。' : 'Select personas and models for up to 3 new nodes.')}</small> : null}
+      {nodes.length > 0 && <button type="button" disabled={planningBusy} onClick={() => {
+        setAssistantOpen(true);
+        if (window.innerWidth < 900) setShelfCollapsed(true);
+      }}>{locale === 'zh' ? '开始编排' : 'Start planning'}</button>}
+    </div>} /> : undefined;
 
   const renderInspector = (node: CanvasNode, inline = false) => (
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
@@ -1559,7 +1687,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   return (
     <AgentWorkspace readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
-      onFocusNode={focusNode} onAddAgent={addAgent} onCreateTemplate={createTemplate}
+      modelShelf={modelShelf}
+      personaControls={modelShelf ? <ModelPersonaControls personaId={palettePersona} onPersonaChange={setPalettePersona}
+        disabled={!canEdit || planningBusy || initializing || bindingLocked} /> : undefined}
+      onModelDrop={onModelDrop} onModelDragOver={event => {
+        if (Array.from(event.dataTransfer?.types ?? []).includes(MODEL_DRAG_MIME) && canEditStructure() && !planningBusy) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }
+      }}
+      onFocusNode={focusNode} onAddAgent={addAgent} loadWorkspaceAgents={loadWorkspaceAgents} agentLibraryRequest={agentLibraryRequest} onAddWorkspaceAgent={addWorkspaceAgent} onAddMarketAgent={loadWorkspaceAgents ? addMarketAgent : undefined} onCreateTemplate={createTemplate}
       onSearch={() => setBarMode('search')}
       assistant={!readOnly && nodes.length && assistantOpen ? <CanvasAssistant mode="panel" {...assistantProps} onClose={() => setAssistantOpen(false)} /> : undefined}
       welcome={readOnly ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} />}
@@ -1650,7 +1784,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
 
-      {!running && <SelectionCollaboration key={selection.join(':')} nodes={nodes.filter(node => selection.includes(node.id))}
+      {!running && <SelectionCollaboration key={`selection:${JSON.stringify(selection)}`} nodes={nodes.filter(node => selection.includes(node.id))}
         disabled={readOnly || initializing || bindingLocked} available={Boolean(cloudScope)}
         onStart={(ids, policy) => { void startRun(ids, undefined, undefined, undefined, policy); }} />}
       {running && journal.current?.collaboration && <CollaborationStatus nodes={nodes} collaboration={journal.current.collaboration} />}
@@ -1697,6 +1831,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
       {!readOnly && addMenu ? (
         <AddNodeMenu
+          onOpenModelShelf={modelShelf ? () => setShelfCollapsed(false) : undefined}
+          onOpenAgentLibrary={loadWorkspaceAgents ? () => { setAddMenu(null); setAgentLibraryRequest(value => value + 1); } : undefined}
           at={addMenu.at}
           onPick={(kind) => {
             addNode(kind, addMenu.world);
