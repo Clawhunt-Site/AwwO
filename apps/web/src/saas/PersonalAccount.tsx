@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, saasErrorMessage, type Identity } from "./api";
 import { PreferenceControls, useSaaSPreferences } from "./preferences";
 import "./personal-account.css";
+import { GuideLauncher, MainSiteLink } from "./SaaSOnboarding";
 import { SecretInput } from "./SecretInput";
 
 type Provider = { id: string; name: string; runtimes: string[] };
@@ -55,7 +56,7 @@ function AccountLayout({
         <a href="/" className="saas-logo">
           AwwO
         </a>
-        <PreferenceControls />
+        <div className="saas-account-header-actions"><PreferenceControls /><GuideLauncher /><MainSiteLink /></div>
       </header>
       <section className="saas-page-intro">
         <h1>{title}</h1>
@@ -218,6 +219,7 @@ export function ConnectionSettings({
       <div className="saas-connection-grid">
         <form
           ref={providerForm}
+          data-onboarding="engine-setup"
           className="saas-card"
           onSubmit={async (e) => {
             e.preventDefault();
@@ -304,7 +306,7 @@ export function ConnectionSettings({
               placeholder={t("例如：我的工作账号", "For example: Work account")}
             />
           </label>
-          <SecretInput key={providerID} label="API Key" name="provider-api-key"
+          <SecretInput key={providerID} label="API Key" name="provider-api-key" data-onboarding="provider-key"
             autoComplete="new-password" spellCheck={false} required minLength={8} maxLength={4096}
             value={key} disabled={busy} onChange={(e) => setKey(e.target.value)}
             aria-describedby="provider-key-help" />
@@ -323,7 +325,7 @@ export function ConnectionSettings({
             </p>
           )}
           {notice && <p role="status">{notice}</p>}
-          <button className="saas-primary" disabled={busy || !provider || !key}>
+          <button data-onboarding="provider-verify" className="saas-primary" disabled={busy || !provider || !key}>
             {busy
               ? t("正在验证…", "Verifying…")
               : t("验证并保存", "Verify and save")}
@@ -339,6 +341,7 @@ export function ConnectionSettings({
             )}
           </p>
           <a
+            data-onboarding="gate-purchase"
             className="saas-primary saas-buy-link"
             href={catalog.purchaseURL}
             target="_blank"

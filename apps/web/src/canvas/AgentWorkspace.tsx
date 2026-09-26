@@ -182,12 +182,12 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
 
   const botSidebar = botRailCollapsed ? (
     // Collapsed rail: identity, the expand control and the add-Bot affordance only.
-    <aside ref={botSidebarRef} className="awwo-sidebar awwo-bot-sidebar is-collapsed" aria-label={locale === 'zh' ? 'Bot 清单' : 'Bot list'}>
+    <aside data-onboarding="bots" ref={botSidebarRef} className="awwo-sidebar awwo-bot-sidebar is-collapsed" aria-label={locale === 'zh' ? 'Bot 清单' : 'Bot list'}>
       {botHeader}
       <button className="awwo-new-agent" aria-label={addBotLabel} title={addBotLabel} disabled={readOnly || running} onClick={() => { setSidebarOpen(false); setLibraryOpen(true); }}><Plus size={17} /></button>
     </aside>
   ) : (
-<aside ref={botSidebarRef} className={`awwo-sidebar${modelShelf ? ' awwo-bot-sidebar' : ''}`} aria-label={modelShelf ? (locale === 'zh' ? 'Bot 清单' : 'Bot list') : t('workspace.navigation')}>
+<aside data-onboarding="bots" ref={botSidebarRef} className={`awwo-sidebar${modelShelf ? ' awwo-bot-sidebar' : ''}`} aria-label={modelShelf ? (locale === 'zh' ? 'Bot 清单' : 'Bot list') : t('workspace.navigation')}>
       {modelShelf ? botHeader : <>
       <div className="awwo-brand"><button className="awwo-brand-mark" aria-label={t(navExpanded ? 'workspace.collapseNavigation' : 'workspace.expandNavigation')} title={t('workspace.navigationTitle')} onClick={() => setNavExpanded(!navExpanded)}><GitBranch size={23} /></button><span>AwwO</span><span className="awwo-brand-caption">{t('workspace.caption')}</span></div>
       <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{workspaceName || t('workspace.name')}</strong><small>{workspaceCaption || t('workspace.local')}</small></div></div>
@@ -226,7 +226,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
 
   return <div className={`awwo-workspace${sidebarOpen ? ' is-sidebar-open' : ''}${modelLibraryOpen ? ' is-model-library-open' : ''}${modelShelf ? ' has-model-library' : navExpanded ? '' : ' is-nav-compact'}`}>
     {(sidebarOpen || modelLibraryOpen) && <button className="awwo-sidebar-scrim" aria-label={t('workspace.closeNavigation')} onClick={() => { setSidebarOpen(false); setModelLibraryOpen(false); }} />}
-    {modelShelf && <aside ref={modelSidebarRef} className="awwo-model-sidebar" aria-label={locale === 'zh' ? '模型库' : 'Model library'} onPointerDown={() => setSidebarOpen(false)}>
+    {modelShelf && <aside data-onboarding="models" ref={modelSidebarRef} className="awwo-model-sidebar" aria-label={locale === 'zh' ? '模型库' : 'Model library'} onPointerDown={() => setSidebarOpen(false)}>
       <div className="awwo-brand"><span className="awwo-brand-mark" aria-hidden="true"><GitBranch size={23} /></span><span>AwwO</span><button type="button" className="awwo-icon-button awwo-mobile-menu" aria-label={locale === 'zh' ? '关闭模型库' : 'Close model library'} onClick={() => setModelLibraryOpen(false)}><X size={18} /></button></div>
       <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{workspaceName || t('workspace.name')}</strong><small>{locale === 'zh' ? '模型与编排' : 'Models & orchestration'}</small></div></div>
       {modelShelf}
@@ -235,15 +235,15 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     {!modelShelf && botSidebar}
     <main className="awwo-main" inert={mobile && (modelLibraryOpen || sidebarOpen)}>
       <header className="awwo-header">
-        {modelShelf && <button ref={modelOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={locale === 'zh' ? '打开模型库' : 'Open model library'} aria-expanded={modelLibraryOpen} onClick={revealModelRail}><Cpu size={19} /></button>}
-        <button ref={botOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={t('workspace.openNavigation')} aria-expanded={sidebarOpen} onClick={() => { setSidebarOpen(true); setModelLibraryOpen(false); }}><Menu size={19} /></button>
+        {modelShelf && <button data-onboarding="models-toggle" ref={modelOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={locale === 'zh' ? '打开模型库' : 'Open model library'} aria-expanded={modelLibraryOpen} onClick={revealModelRail}><Cpu size={19} /></button>}
+        <button data-onboarding="bots-toggle" ref={botOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={t('workspace.openNavigation')} aria-expanded={sidebarOpen} onClick={() => { setSidebarOpen(true); setModelLibraryOpen(false); }}><Menu size={19} /></button>
         <div className="awwo-page-title"><div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{workspaceName || t('workspace.name')}</span></div></div>
         <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{accountControl}</div>
       </header>
       <div className="awwo-canvas-bar">{onToggleAssistant && nodes.length > 0 ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}<div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div><span className="awwo-canvas-meta">{t('workspace.agentCount', { count: nodes.length })}<span>·</span>{t('workspace.connectionCount', { count: edges.length })}</span><div className="awwo-run-slot">{toolbar}</div></div>
       <section className="awwo-stage" aria-label={t('workspace.stage')}>
         {assistant ? <aside className="awwo-planner-sidebar" aria-label={t('workspace.planning')}>{assistant}</aside> : null}
-        <div className="awwo-stage-canvas" onDragOver={onModelDragOver} onDrop={onModelDrop}>{children}
+        <div data-onboarding="canvas-stage" className="awwo-stage-canvas" onDragOver={onModelDragOver} onDrop={onModelDrop}>{children}
         {!nodes.length && <div className={`awwo-empty${welcome ? ' has-assistant' : ''}`}>
           {welcome || <>
           <div className="awwo-empty-kicker"><span />{t('workspace.emptyKicker')}</div>

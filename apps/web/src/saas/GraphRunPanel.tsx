@@ -51,7 +51,7 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
     window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape);
   }, [open]);
   return <div className="saas-graph-control">
-    <button onClick={() => setOpen(!open)} aria-expanded={open}>{active ? '● ' : ''}{t('后台运行与协作记录', 'Background runs & collaboration')}</button>
+    <button data-onboarding="run-history" onClick={() => setOpen(!open)} aria-expanded={open}>{active ? '● ' : ''}{t('后台运行与协作记录', 'Background runs & collaboration')}</button>
     {open && <section className="saas-graph-panel" role="dialog" aria-label={t('后台运行与协作记录', 'Background runs & collaboration')}>
       <header><h2>{t('后台运行与协作记录', 'Background runs & collaboration')}</h2><button aria-label={t('关闭运行记录', 'Close run history')} onClick={() => setOpen(false)}>×</button></header>
       <p>{t('任务提交后由后台继续调度。离开或关闭页面不会停止任务。', 'Accepted tasks keep running in the background when you leave or close this page.')}</p>

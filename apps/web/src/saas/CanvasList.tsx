@@ -18,7 +18,7 @@ export function CanvasList({ tenant, onOpen }: { tenant: Tenant; onOpen: (canvas
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   return <>
     {readOnly && <p className="saas-runtime-note" role="status">{t('只读成员：可以浏览画布、会话和导出副本，不能编辑或运行。', 'Reader: browse canvases and conversations or export a copy. Editing and execution require member access.')}</p>}
-    {!readOnly && <form className="saas-create" onSubmit={async event => {
+    {!readOnly && <form data-onboarding="canvas-create" className="saas-create" onSubmit={async event => {
       event.preventDefault(); if (busy) return; setBusy(true); setError(null);
       try {
         const canvas = await api<CanvasRecord>(path, { method: 'POST', body: JSON.stringify({ name: name.trim() || t('未命名', 'Untitled'), document: emptyDocument() }) });
@@ -28,7 +28,7 @@ export function CanvasList({ tenant, onOpen }: { tenant: Tenant; onOpen: (canvas
     }}><input aria-label={t('新画布名称', 'New canvas name')} placeholder={t('为新画布起个名字', 'Name your new canvas')} value={name} onChange={event => setName(event.target.value)} maxLength={100} disabled={busy}/><button disabled={busy} className="saas-primary"><Plus size={16}/>{busy ? t('正在创建…', 'Creating…') : t('新建画布', 'Create canvas')}</button></form>}
     {(error || listing.error) && <p role="alert" className="saas-error">{saasErrorMessage(error || listing.error, locale)}</p>}
     {(listing.loading || listing.pageNumber > 1 || Boolean(listing.page?.items.length) || listing.error) ? <ListPager label={t('画布分页', 'Canvas pages')} page={listing.pageNumber} busy={listing.loading || busy} previous={listing.previous} next={listing.next} refresh={listing.refresh}/> : <button type="button" onClick={listing.refresh}>{t('刷新列表', 'Refresh list')}</button>}
-    {listing.loading ? <p role="status">{t('正在加载画布…', 'Loading canvases…')}</p> : listing.page && <div className="saas-canvas-list">{listing.page.items.map(canvas => <article key={canvas.id} className="saas-canvas-card">
+    {listing.loading ? <p role="status">{t('正在加载画布…', 'Loading canvases…')}</p> : listing.page && <div data-onboarding="canvas-list" className="saas-canvas-list">{listing.page.items.map(canvas => <article key={canvas.id} className="saas-canvas-card">
       <button className="saas-canvas-open" onClick={() => onOpen(canvas.id)}><span>↗</span><h2>{canvas.name}</h2><p>{new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</p></button>
       {!readOnly && <div className="saas-canvas-actions"><button aria-label={t(`改名：${canvas.name}`, `Rename ${canvas.name}`)} onClick={() => setEditing({ canvas, action: 'rename' })}>{t('改名', 'Rename')}</button><button aria-label={t(`删除：${canvas.name}`, `Delete ${canvas.name}`)} onClick={() => setEditing({ canvas, action: 'delete' })}>{t('删除', 'Delete')}</button></div>}
     </article>)}{listing.page.items.length === 0 && <section className="saas-empty-guide">

@@ -1,0 +1,9 @@
+.saas-guide-launch,.saas-main-site { display:inline-flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; }
+.saas-main-site { color:var(--saas-muted); font-size:12px; text-decoration:none; }
+.saas-main-site:hover { color:var(--saas-accent); }
+.saas-account-header-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+.saas-guide-launch:focus-visible,.saas-main-site:focus-visible { outline:2px solid var(--saas-accent); outline-offset:4px; }
+@media(max-width:760px) {
+  .saas-account-actions .saas-guide-launch>span { display:none; }
+  .saas-account-header-actions { gap:8px; }
+}

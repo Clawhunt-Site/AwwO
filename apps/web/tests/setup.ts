@@ -1,6 +1,12 @@
 import '@testing-library/jest-dom/vitest';
 import { beforeEach } from 'vitest';
 
+// Native dialogs are exercised in browser acceptance; jsdom needs the open state API.
+if (typeof HTMLDialogElement !== 'undefined') {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
+}
+
 // jsdom does not implement Web Locks. Model exclusive ifAvailable ownership, including release,
 // so all canvas interaction tests exercise the same asynchronous entry gate as a real browser.
 const heldLocks = new Map<string, Promise<void>>();

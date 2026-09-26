@@ -148,6 +148,7 @@ export function RunControls({
 
   return (
     <div
+      data-onboarding="run-controls"
       className="canvas-run-ctl"
       role="group"
       aria-label={t('run.controls')}
