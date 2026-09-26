@@ -35,7 +35,9 @@ it('adds one node per explicit workspace selection under StrictMode, with distin
   await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
   const first = loadDocumentWithStatus().doc.nodes[0];
   expect(first).toMatchObject({ agentRef: { source: 'workspace', agentId: agent.id }, binding: null, issueId: null });
-  fireEvent.click(screen.getByRole('button', { name: '关闭配置' }));
+  // The new node opens focused without an auto-opened inspector; configuration stays a tile action.
+  expect(screen.queryByRole('dialog', { name: /节点配置/ })).toBeNull();
+  expect(screen.getByTestId(`canvas-tile-${first.id}`).dataset.lod).toBe('focus');
   await addWorkspaceAgent();
   await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
   const nodes = loadDocumentWithStatus().doc.nodes;
@@ -54,5 +56,6 @@ it('adds a market role once under StrictMode without shared Agent identity or du
   await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
   expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({ title: 'Content Lead · Content Machine', binding: null, issueId: null });
   expect(loadDocumentWithStatus().doc.nodes[0]).not.toHaveProperty('agentRef');
+  expect(screen.queryByRole('dialog', { name: /节点配置/ })).toBeNull();
   expect(errors.mock.calls.filter(call => String(call[0]).includes('same key'))).toEqual([]);
 });

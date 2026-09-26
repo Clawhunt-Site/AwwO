@@ -1,5 +1,6 @@
 import { loadObservabilityConfig } from './observability.mjs';
 const DEFAULTS = Object.freeze({
+  llmgate: 'https://api.clawhunt.site/v1',
   openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com',
   ollama: 'http://127.0.0.1:11434/v1',
@@ -86,9 +87,11 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
 }
 
 export function loadConfig(env = process.env) {
+  if (!['', 'false', 'true', undefined].includes(env.AWWO_LLMGATE_ONLY)) throw new Error('AWWO_LLMGATE_ONLY must be true or false');
+  const llmgateOnly = env.AWWO_LLMGATE_ONLY === 'true';
   const environment = env.APP_ENV ?? 'development';
   if (!['development', 'staging', 'production'].includes(environment)) throw new Error('APP_ENV must be development, staging, or production');
-  const provider = (env.AWWO_PI_PROVIDER ?? '').trim();
+  const provider = (env.AWWO_PI_PROVIDER ?? (llmgateOnly ? 'llmgate' : '')).trim();
   const model = (env.AWWO_PI_MODEL ?? '').trim();
   const apiKey = (env.AWWO_PI_API_KEY ?? '').trim();
   const token = env.AWWO_PI_TOKEN ?? '';
@@ -104,6 +107,10 @@ export function loadConfig(env = process.env) {
   const maxTokens = integer(env.AWWO_PI_MAX_TOKENS, 4096, 128, 32_768, 'AWWO_PI_MAX_TOKENS');
   if (maxTokens + 256 >= contextWindow) missing.push('AWWO_PI_MAX_TOKENS');
   const models = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens }), missing);
+  // Provider labels may name the protocol adapter; only the URL chooses the destination.
+  if (llmgateOnly && models.some(profile => profile.baseURL !== DEFAULTS.llmgate)) {
+    throw new Error('AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile');
+  }
   return Object.freeze({
     observability: loadObservabilityConfig(env, 'pi', environment),
     host: env.AWWO_PI_HOST ?? '127.0.0.1',
@@ -115,6 +122,7 @@ export function loadConfig(env = process.env) {
     maxOutputBytes: integer(env.AWWO_PI_MAX_OUTPUT_BYTES, 1_048_576, 1024, 8_388_608, 'AWWO_PI_MAX_OUTPUT_BYTES'),
     contextWindow, maxTokens, models,
     userCredentials,
+    llmgateOnly,
     ready: userCredentials ? token.length >= 32 && !/[\r\n]/.test(token) : missing.length === 0,
     missing: Object.freeze([...new Set(missing)]),
   });
@@ -125,6 +133,7 @@ export function publicHealth(config, activeRuns = 0) {
     status: config.ready ? 'ready' : 'unconfigured',
     ready: config.ready,
     userCredentials: config.userCredentials === true,
+    ...(config.llmgateOnly === true ? { llmgateOnly: true } : {}),
     configured: config.ready,
     provider: config.provider || null,
     model: config.model || null,

@@ -9,6 +9,13 @@ type UserModel = {
   maxTokens: number;
   reasoningEfforts: string[];
   defaultReasoningEffort: string;
+  /**
+   * Present only when the API froze a delivery contract for this run and the
+   * connection's provider honours a json_schema response format. It is the
+   * capability the openai-agents worker's contract authorization reads, so it
+   * must be literally true and it exists on no other runtime.
+   */
+  structuredOutput?: true;
 };
 const endpoints: Record<string, string> = {
   llmgate: "https://api.clawhunt.site/v1",
@@ -28,12 +35,14 @@ const fields = new Set([
   "maxTokens",
   "reasoningEfforts",
   "defaultReasoningEffort",
+  "structuredOutput",
 ]);
 
 /** Internal authenticated admission only. Never mutate a shared worker config. */
 export function bindUserModel<
   T extends {
     userCredentials?: boolean;
+    llmgateOnly?: boolean;
     models: readonly unknown[];
     ready: boolean;
   },
@@ -48,6 +57,7 @@ export function bindUserModel<
     !m ||
     typeof m !== "object" ||
     Array.isArray(m) ||
+    (config.llmgateOnly === true && m.provider !== "llmgate") ||
     Object.keys(m).some((k) => !fields.has(k)) ||
     typeof m.id !== "string" ||
     !/^byok_[A-Za-z0-9_-]{33}_[0-9a-f]{16}$/.test(m.id) ||
@@ -63,6 +73,8 @@ export function bindUserModel<
     !Array.isArray(m.reasoningEfforts) ||
     m.reasoningEfforts.length !== 0 ||
     m.defaultReasoningEffort !== "" ||
+    (m.structuredOutput !== undefined &&
+      (m.structuredOutput !== true || runtime !== "openai-agents")) ||
     (m.provider === "anthropic"
       ? runtime !== "pi" || m.protocol !== "anthropic_messages"
       : !["chat_completions", "responses"].includes(m.protocol) ||
@@ -71,6 +83,8 @@ export function bindUserModel<
     throw new Error("Invalid personal model configuration");
   delete request.userModel;
   // Provider attribution remains explicit; no process-global environment update.
+  // structuredOutput passes through as sent (absent or true), so a bound model
+  // without it keeps the exact shape it had before the field existed.
   return {
     ...config,
     models: [

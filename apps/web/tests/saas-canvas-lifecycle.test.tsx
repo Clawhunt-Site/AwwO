@@ -255,3 +255,33 @@ it.each([
   if (note) expect(await screen.findByText(new RegExp(note.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeVisible();
   else expect(screen.queryByText(/Pi execution is not ready/)).toBeNull();
 });
+
+it('links a personal-mode canvas runtime warning to engine settings without claiming a missing key', async () => {
+  localStorage.setItem('superclaw_locale', 'en');
+  const cloud = { ...record(0), document: emptyDocument() };
+  const identity = { user: { id: 'user-a', name: 'Alice', email: 'alice@example.test', platformRole: 'user' },
+    tenants: [tenant], personalCredentialsRequired: true };
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('/auth/me')) return json(identity);
+    if (url.endsWith('/auth/connections')) return json({ items: [{ id: 'saved-engine', name: 'Work', provider: 'llmgate', runtime: 'openai-agents', models: ['test-model'], hasKey: true }],
+      providers: [{ id: 'llmgate', name: 'LLM Gate · ClawHunt', runtimes: ['openai-agents', 'pi'] }], required: true, purchaseURL: 'https://api.clawhunt.site/' });
+    if (url.endsWith('/appearance')) return json(appearanceFixture);
+    if (url.endsWith('/runtime')) return json({ available: false, configured: true, plannerAvailable: false,
+      models: [], reason: 'No configured runtime is available', runtimes: [
+        { id: 'pi', name: 'Pi', available: false, configured: true, supportsEffortSelection: false, tools: [], reason: 'Runtime is unavailable' },
+        { id: 'openai-agents', name: 'OpenAI Agents', available: false, configured: true, supportsEffortSelection: false, tools: [], reason: 'Runtime is unavailable' },
+      ] });
+    if (url.endsWith('/graph-runs')) return json({ items: [] });
+    return json(cloud);
+  }));
+  window.history.replaceState({}, '', `/?tenant=${tenant.id}&canvas=${cloud.id}`);
+  const view = render(<SaaSApp />);
+  await waitFor(() => expect(view.container.querySelector('.saas-runtime-note')).not.toBeNull());
+  const note = view.container.querySelector('.saas-runtime-note');
+  expect(note).not.toBeNull();
+  expect(note).toHaveTextContent('Execution is not ready');
+  expect(note).not.toHaveTextContent('Pi execution');
+  expect(note).not.toHaveTextContent('Add an API key');
+  expect(within(note as HTMLElement).getByRole('link', { name: 'My engines' })).toHaveAttribute('href', `/?tenant=${tenant.id}&canvas=${cloud.id}&account=engines`);
+});

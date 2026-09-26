@@ -1,0 +1,455 @@
+{
+  "accepted": [
+    {
+      "body": {
+        "createdAt": "<timestamp>",
+        "error": "",
+        "id": "<run:manual-pi-run>",
+        "operationId": "manual-pi-run",
+        "output": "",
+        "outputAvailable": false,
+        "sessionId": "<session:pi-node>",
+        "status": "queued",
+        "tenantId": "<tenant:manual-owner>",
+        "terminal": false,
+        "updatedAt": "<timestamp>"
+      },
+      "status": 202
+    },
+    {
+      "body": {
+        "createdAt": "<timestamp>",
+        "error": "",
+        "id": "<run:manual-oa-run-one>",
+        "operationId": "manual-oa-run-one",
+        "output": "",
+        "outputAvailable": false,
+        "sessionId": "<session:oa-node>",
+        "status": "queued",
+        "tenantId": "<tenant:manual-owner>",
+        "terminal": false,
+        "updatedAt": "<timestamp>"
+      },
+      "status": 202
+    },
+    {
+      "body": {
+        "createdAt": "<timestamp>",
+        "error": "",
+        "id": "<run:manual-oa-run-two>",
+        "operationId": "manual-oa-run-two",
+        "output": "",
+        "outputAvailable": false,
+        "sessionId": "<session:oa-node>",
+        "status": "queued",
+        "tenantId": "<tenant:manual-owner>",
+        "terminal": false,
+        "updatedAt": "<timestamp>"
+      },
+      "status": 202
+    },
+    {
+      "body": {
+        "createdAt": "<timestamp>",
+        "error": "",
+        "id": "<run:manual-oa-effort-run>",
+        "operationId": "manual-oa-effort-run",
+        "output": "",
+        "outputAvailable": false,
+        "sessionId": "<session:oa-effort-node>",
+        "status": "queued",
+        "tenantId": "<tenant:manual-owner>",
+        "terminal": false,
+        "updatedAt": "<timestamp>"
+      },
+      "status": 202
+    }
+  ],
+  "completedRuns": [
+    {
+      "body": {
+        "createdAt": "<timestamp>",
+        "error": "",
+        "id": "<run:manual-pi-run>",
+        "operationId": "manual-pi-run",
+        "output": "pi reply 1 from test-model",
+        "outputAvailable": true,
+        "sessionId": "<session:pi-node>",
+        "status": "completed",
+        "tenantId": "<tenant:manual-owner>",
+        "terminal": true,
+        "updatedAt": "<timestamp>"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "createdAt": "<timestamp>",
+        "error": "",
+        "id": "<run:manual-oa-run-one>",
+        "operationId": "manual-oa-run-one",
+        "output": "openai-agents reply 2 from oa-default",
+        "outputAvailable": true,
+        "sessionId": "<session:oa-node>",
+        "status": "completed",
+        "tenantId": "<tenant:manual-owner>",
+        "terminal": true,
+        "updatedAt": "<timestamp>"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "createdAt": "<timestamp>",
+        "error": "",
+        "id": "<run:manual-oa-run-two>",
+        "operationId": "manual-oa-run-two",
+        "output": "openai-agents reply 3 from oa-default",
+        "outputAvailable": true,
+        "sessionId": "<session:oa-node>",
+        "status": "completed",
+        "tenantId": "<tenant:manual-owner>",
+        "terminal": true,
+        "updatedAt": "<timestamp>"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "createdAt": "<timestamp>",
+        "error": "",
+        "id": "<run:manual-oa-effort-run>",
+        "operationId": "manual-oa-effort-run",
+        "output": "openai-agents reply 4 from oa-default",
+        "outputAvailable": true,
+        "sessionId": "<session:oa-effort-node>",
+        "status": "completed",
+        "tenantId": "<tenant:manual-owner>",
+        "terminal": true,
+        "updatedAt": "<timestamp>"
+      },
+      "status": 200
+    }
+  ],
+  "modelInvocations": [
+    {
+      "admission_ms": "<measured-ms>",
+      "admission_status": "accepted",
+      "admitted_at": "<timestamp>",
+      "agent_id": "<agent:Manual OA effort>",
+      "cache_write_tokens": null,
+      "cached_input_tokens": 20,
+      "completed_at": "<timestamp>",
+      "completed_xid_present": true,
+      "computed_total_tokens": 150,
+      "cost_status": "unavailable",
+      "created_at": "<timestamp>",
+      "created_xid_present": true,
+      "currency": "USD",
+      "estimated_cost_microusd": null,
+      "failure_class": "none",
+      "id": "<run:manual-oa-effort-run>",
+      "input_tokens": 120,
+      "model_id": "oa-default",
+      "observability_version": 1,
+      "output_tokens": 30,
+      "price_snapshot": {
+        "catalogKey": "openai-agents:oa-default",
+        "currency": "USD",
+        "version": ""
+      },
+      "pricing_version": "",
+      "protocol": "",
+      "provider": "",
+      "provider_model": "",
+      "provider_ms": 20,
+      "provider_total_tokens": 150,
+      "provider_ttft_ms": 7,
+      "queue_ms": "<measured-ms>",
+      "reasoning_tokens": 5,
+      "request_id": "<request-id>",
+      "run_id": "<run:manual-oa-effort-run>",
+      "runtime": "openai-agents",
+      "setup_ms": 4,
+      "status": "completed",
+      "tenant_id": "<tenant:manual-owner>",
+      "trace_id": "",
+      "turn_id": null,
+      "updated_at": "<timestamp>",
+      "usage_reason": "none",
+      "usage_source": "provider_raw",
+      "usage_status": "reported",
+      "worker_first_delta_ms": 8,
+      "worker_total_ms": 30
+    },
+    {
+      "admission_ms": "<measured-ms>",
+      "admission_status": "accepted",
+      "admitted_at": "<timestamp>",
+      "agent_id": "<agent:Manual OA>",
+      "cache_write_tokens": null,
+      "cached_input_tokens": 20,
+      "completed_at": "<timestamp>",
+      "completed_xid_present": true,
+      "computed_total_tokens": 150,
+      "cost_status": "unavailable",
+      "created_at": "<timestamp>",
+      "created_xid_present": true,
+      "currency": "USD",
+      "estimated_cost_microusd": null,
+      "failure_class": "none",
+      "id": "<run:manual-oa-run-one>",
+      "input_tokens": 120,
+      "model_id": "oa-default",
+      "observability_version": 1,
+      "output_tokens": 30,
+      "price_snapshot": {
+        "catalogKey": "openai-agents:oa-default",
+        "currency": "USD",
+        "version": ""
+      },
+      "pricing_version": "",
+      "protocol": "",
+      "provider": "",
+      "provider_model": "",
+      "provider_ms": 20,
+      "provider_total_tokens": 150,
+      "provider_ttft_ms": 7,
+      "queue_ms": "<measured-ms>",
+      "reasoning_tokens": 5,
+      "request_id": "<request-id>",
+      "run_id": "<run:manual-oa-run-one>",
+      "runtime": "openai-agents",
+      "setup_ms": 4,
+      "status": "completed",
+      "tenant_id": "<tenant:manual-owner>",
+      "trace_id": "",
+      "turn_id": null,
+      "updated_at": "<timestamp>",
+      "usage_reason": "none",
+      "usage_source": "provider_raw",
+      "usage_status": "reported",
+      "worker_first_delta_ms": 8,
+      "worker_total_ms": 30
+    },
+    {
+      "admission_ms": "<measured-ms>",
+      "admission_status": "accepted",
+      "admitted_at": "<timestamp>",
+      "agent_id": "<agent:Manual OA>",
+      "cache_write_tokens": null,
+      "cached_input_tokens": 20,
+      "completed_at": "<timestamp>",
+      "completed_xid_present": true,
+      "computed_total_tokens": 150,
+      "cost_status": "unavailable",
+      "created_at": "<timestamp>",
+      "created_xid_present": true,
+      "currency": "USD",
+      "estimated_cost_microusd": null,
+      "failure_class": "none",
+      "id": "<run:manual-oa-run-two>",
+      "input_tokens": 120,
+      "model_id": "oa-default",
+      "observability_version": 1,
+      "output_tokens": 30,
+      "price_snapshot": {
+        "catalogKey": "openai-agents:oa-default",
+        "currency": "USD",
+        "version": ""
+      },
+      "pricing_version": "",
+      "protocol": "",
+      "provider": "",
+      "provider_model": "",
+      "provider_ms": 20,
+      "provider_total_tokens": 150,
+      "provider_ttft_ms": 7,
+      "queue_ms": "<measured-ms>",
+      "reasoning_tokens": 5,
+      "request_id": "<request-id>",
+      "run_id": "<run:manual-oa-run-two>",
+      "runtime": "openai-agents",
+      "setup_ms": 4,
+      "status": "completed",
+      "tenant_id": "<tenant:manual-owner>",
+      "trace_id": "",
+      "turn_id": null,
+      "updated_at": "<timestamp>",
+      "usage_reason": "none",
+      "usage_source": "provider_raw",
+      "usage_status": "reported",
+      "worker_first_delta_ms": 8,
+      "worker_total_ms": 30
+    },
+    {
+      "admission_ms": "<measured-ms>",
+      "admission_status": "accepted",
+      "admitted_at": "<timestamp>",
+      "agent_id": "<agent:Manual Pi>",
+      "cache_write_tokens": null,
+      "cached_input_tokens": null,
+      "completed_at": "<timestamp>",
+      "completed_xid_present": true,
+      "computed_total_tokens": null,
+      "cost_status": "unavailable",
+      "created_at": "<timestamp>",
+      "created_xid_present": true,
+      "currency": "USD",
+      "estimated_cost_microusd": null,
+      "failure_class": "none",
+      "id": "<run:manual-pi-run>",
+      "input_tokens": null,
+      "model_id": "test-model",
+      "observability_version": 0,
+      "output_tokens": null,
+      "price_snapshot": {
+        "catalogKey": "pi:test-model",
+        "currency": "USD",
+        "version": ""
+      },
+      "pricing_version": "",
+      "protocol": "",
+      "provider": "",
+      "provider_model": "",
+      "provider_ms": null,
+      "provider_total_tokens": null,
+      "provider_ttft_ms": null,
+      "queue_ms": "<measured-ms>",
+      "reasoning_tokens": null,
+      "request_id": "<request-id>",
+      "run_id": "<run:manual-pi-run>",
+      "runtime": "pi",
+      "setup_ms": null,
+      "status": "completed",
+      "tenant_id": "<tenant:manual-owner>",
+      "trace_id": "",
+      "turn_id": null,
+      "updated_at": "<timestamp>",
+      "usage_reason": "legacy_worker",
+      "usage_source": "none",
+      "usage_status": "unavailable",
+      "worker_first_delta_ms": null,
+      "worker_total_ms": null
+    }
+  ],
+  "runTurns": [],
+  "runs": [
+    {
+      "actor_id": "<user:manual-owner>",
+      "error": "",
+      "id": "<run:manual-oa-effort-run>",
+      "operation_id": "manual-oa-effort-run",
+      "output": "openai-agents reply 4 from oa-default",
+      "prompt": "MANUAL-OA-EFFORT-QUESTION",
+      "session_id": "<session:oa-effort-node>",
+      "status": "completed"
+    },
+    {
+      "actor_id": "<user:manual-owner>",
+      "error": "",
+      "id": "<run:manual-oa-run-one>",
+      "operation_id": "manual-oa-run-one",
+      "output": "openai-agents reply 2 from oa-default",
+      "prompt": "MANUAL-OA-QUESTION-ONE",
+      "session_id": "<session:oa-node>",
+      "status": "completed"
+    },
+    {
+      "actor_id": "<user:manual-owner>",
+      "error": "",
+      "id": "<run:manual-oa-run-two>",
+      "operation_id": "manual-oa-run-two",
+      "output": "openai-agents reply 3 from oa-default",
+      "prompt": "MANUAL-OA-QUESTION-TWO",
+      "session_id": "<session:oa-node>",
+      "status": "completed"
+    },
+    {
+      "actor_id": "<user:manual-owner>",
+      "error": "",
+      "id": "<run:manual-pi-run>",
+      "operation_id": "manual-pi-run",
+      "output": "pi reply 1 from test-model",
+      "prompt": "MANUAL-PI-QUESTION",
+      "session_id": "<session:pi-node>",
+      "status": "completed"
+    }
+  ],
+  "workerRequests": [
+    {
+      "body": {
+        "messages": [],
+        "model": "test-model",
+        "prompt": "MANUAL-PI-QUESTION",
+        "runId": "<run:manual-pi-run>",
+        "runtime": "pi",
+        "sessionId": "<session:pi-node>",
+        "systemPrompt": "MANUAL-PI-PERSONA",
+        "tenantId": "<tenant:manual-owner>"
+      },
+      "contentType": "application/json",
+      "method": "POST",
+      "path": "/internal/runs",
+      "runtime": "pi"
+    },
+    {
+      "body": {
+        "messages": [],
+        "model": "oa-default",
+        "prompt": "MANUAL-OA-QUESTION-ONE",
+        "runId": "<run:manual-oa-run-one>",
+        "runtime": "openai-agents",
+        "sessionId": "<session:oa-node>",
+        "systemPrompt": "MANUAL-OA-PERSONA",
+        "tenantId": "<tenant:manual-owner>"
+      },
+      "contentType": "application/json",
+      "method": "POST",
+      "path": "/internal/runs",
+      "runtime": "openai-agents"
+    },
+    {
+      "body": {
+        "messages": [
+          {
+            "content": "MANUAL-OA-QUESTION-ONE",
+            "role": "user"
+          },
+          {
+            "content": "openai-agents reply 2 from oa-default",
+            "role": "assistant"
+          }
+        ],
+        "model": "oa-default",
+        "prompt": "MANUAL-OA-QUESTION-TWO",
+        "runId": "<run:manual-oa-run-two>",
+        "runtime": "openai-agents",
+        "sessionId": "<session:oa-node>",
+        "systemPrompt": "MANUAL-OA-PERSONA",
+        "tenantId": "<tenant:manual-owner>"
+      },
+      "contentType": "application/json",
+      "method": "POST",
+      "path": "/internal/runs",
+      "runtime": "openai-agents"
+    },
+    {
+      "body": {
+        "effort": "low",
+        "messages": [],
+        "model": "oa-default",
+        "prompt": "MANUAL-OA-EFFORT-QUESTION",
+        "runId": "<run:manual-oa-effort-run>",
+        "runtime": "openai-agents",
+        "sessionId": "<session:oa-effort-node>",
+        "systemPrompt": "MANUAL-OA-EFFORT-PERSONA",
+        "tenantId": "<tenant:manual-owner>"
+      },
+      "contentType": "application/json",
+      "method": "POST",
+      "path": "/internal/runs",
+      "runtime": "openai-agents"
+    }
+  ]
+}

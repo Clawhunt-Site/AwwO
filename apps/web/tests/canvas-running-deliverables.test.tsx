@@ -43,6 +43,7 @@ describe('read-only delivery disclosure during execution', () => {
     const delivery = screen.getByRole('region', { name: '交付物', exact: true });
     expect(within(delivery).getByRole('heading', { name: '已验收的页面', exact: true })).toBeInTheDocument();
     expect(within(delivery).getByText('历史交付 · 未传递给下游')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表', exact: true }));
     expect(screen.getByRole('button', { name: '打开 Session 1', exact: true })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: '打开 Session 2', exact: true })).toBeDisabled();
     expect(screen.getByRole('button', { name: '新建 Session', exact: true })).toBeDisabled();

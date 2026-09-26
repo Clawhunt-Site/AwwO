@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import {
   PersonalEngineGate,
@@ -57,6 +58,22 @@ const gate = () =>
       </PersonalEngineGate>
     </SaaSPreferencesProvider>,
   );
+
+it("does not request personal credentials in platform LLM Gate mode", () => {
+  history.replaceState(null, "", "/?account=engines");
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  render(
+    <SaaSPreferencesProvider>
+      <PersonalEngineGate identity={{ ...identity, personalCredentialsRequired: false }}>
+        <p>Canvas content</p>
+      </PersonalEngineGate>
+    </SaaSPreferencesProvider>,
+  );
+  expect(screen.getByText(/AwwO provides models through LLM Gate/)).toBeVisible();
+  expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+  expect(fetch).not.toHaveBeenCalled();
+});
 
 it("requires a saved personal connection, selects a supported engine and links to LLM Gate", async () => {
   const fetch = vi.fn().mockResolvedValue(response(catalog));
@@ -119,6 +136,63 @@ it("opens the workspace only after verification and server readback, without sto
   expect(JSON.stringify({ ...sessionStorage })).not.toContain(
     "synthetic-user-secret",
   );
+});
+
+it("keeps onboarding closed for legacy or empty connections under the Gate-only catalog while allowing removal", async () => {
+  const gateCatalog = {
+    ...catalog,
+    providers: [providers[0]],
+    items: [
+      {
+        id: "legacy-connection",
+        name: "Old Claude",
+        provider: "anthropic",
+        runtime: "pi",
+        models: ["legacy-model"],
+        hasKey: true,
+      },
+      {
+        id: "empty-gate-connection",
+        name: "Empty Gate",
+        provider: "llmgate",
+        runtime: "pi",
+        models: [],
+        hasKey: true,
+      },
+    ],
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response(gateCatalog))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(
+      response({
+        ...gateCatalog,
+        items: gateCatalog.items.slice(1),
+      }),
+    );
+  vi.stubGlobal("fetch", fetch);
+  gate();
+  await screen.findByText("Connect your first engine");
+  expect(screen.queryByText("Canvas content")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Open workspace" })).not.toBeInTheDocument();
+  expect(screen.getAllByText(/Unavailable for new tasks/)).toHaveLength(2);
+  expect(screen.getAllByRole("option", { name: /LLM Gate/ })).toHaveLength(1);
+  fireEvent.click(
+    within(screen.getByText("Old Claude").closest("article")!).getByRole("button", {
+      name: "Remove connection",
+    }),
+  );
+  expect(screen.getByRole("dialog")).toHaveTextContent("Old Claude");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  fireEvent.submit(screen.getByRole("dialog").querySelector("form")!);
+  await waitFor(() => expect(screen.queryByText("Old Claude")).not.toBeInTheDocument());
+  expect(fetch.mock.calls[1][0]).toBe(
+    "/api/v1/auth/connections/legacy-connection",
+  );
+  expect(fetch.mock.calls[1][1].method).toBe("DELETE");
+  expect(screen.queryByText("Canvas content")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Open workspace" })).not.toBeInTheDocument();
 });
 
 it("verification failure keeps onboarding closed and clears the password field", async () => {

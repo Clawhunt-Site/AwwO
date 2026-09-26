@@ -139,6 +139,10 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// Collected here and counted after commit: a graph that is rejected or rolled
+	// back decided nothing, and a metric emitted inside the transaction would claim
+	// an envelope that no run will ever use.
+	contractOutcomes := []string{}
 	for i, n := range d.Nodes {
 		if !needed[n.ID] {
 			continue
@@ -215,6 +219,20 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			// Freeze the output policy separately from persona instructions. Team members
 			// retain their own personas without overriding this server-owned format.
 			snap.OutputPolicy = graphOutputPolicy(n)
+			// Freeze a structured contract only when the deployment has switched contracts
+			// on, and only for a plain single-agent node whose own model advertises the
+			// capability. A team turn is excluded because its members deliver into the
+			// node's envelope through their own turns, and a runtime or model that never
+			// advertised it keeps the textual policy alone. The decision is frozen with the
+			// rest of the snapshot, so a capability or switch that changes later cannot
+			// change what this run was admitted to do.
+			if a.cfg.StructuredContracts && team == nil && snap.Runtime == runtimeOpenAIAgents && snap.Health.supportsStructuredOutput(snap.Model) {
+				contract, outcome := graphOutputContract(n)
+				snap.OutputContract = contract
+				if outcome != "none" {
+					contractOutcomes = append(contractOutcomes, outcome)
+				}
+			}
 			sid = n.IssueID
 			if sid != "" {
 				var exists bool
@@ -259,7 +277,10 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					a.dbError(w, err)
 					return
 				}
-				history = boundedHistoryWithLimits(history, len(graphSystemPrompt(snap.Instructions, snap.OutputPolicy)), snap.Budget, snap.Overhead)
+				// The response-format envelope occupies context too, so history is trimmed
+				// against the instructions this run will actually send plus that reserve.
+				// Both terms are unchanged when no contract is frozen.
+				history = boundedHistoryWithLimits(history, len(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)))+outputContractReserve(snap), snap.Budget, snap.Overhead)
 				snap.History = &history
 			}
 		}
@@ -291,6 +312,9 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	for _, outcome := range contractOutcomes {
+		a.observeGraphOutputContract(outcome)
 	}
 	a.dispatchGraph(tid, id, r.Context())
 	writeJSON(w, 202, v)
@@ -608,13 +632,22 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		// turn snapshot; proposal and synthesis retain the frozen contract.
 		if turn.Phase == "review" {
 			snap.OutputPolicy = "Server-owned collaboration review policy: Return Markdown critique only. This turn is discussion, not a node deliverable; do not follow the original output schema. Preserve the configured persona and review responsibilities."
+			// The structured envelope goes with the deliverable, so a critique must not be
+			// forced into it. Telling the model to write Markdown while the provider still
+			// enforced a JSON schema would fail every review turn.
+			snap.OutputContract = nil
 		}
 		if e = appendCollaborationHistory(ctx, tx, tid, gid, nid, &snap); e != nil {
 			return e
 		}
 	}
-	instructions := graphSystemPrompt(snap.Instructions, snap.OutputPolicy)
-	if len(prompt) > 128000 || (snap.Team == nil && (len(prompt)+len(instructions)+snap.Overhead > snap.Budget || len(utf16.Encode([]rune(instructions))) > 32768)) {
+	if snap.OutputContract != nil {
+		// The node prompt repeats the textual policy, and so does a proposal or synthesis
+		// seed, so the allowance is withdrawn here as well, before the prompt is hashed and stored.
+		prompt = withdrawPromptAllowance(prompt)
+	}
+	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
+	if len(prompt) > 128000 || (snap.Team == nil && (len(prompt)+len(instructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(instructions))) > 32768)) {
 		return errors.New("context_limit")
 	}
 	var busy bool

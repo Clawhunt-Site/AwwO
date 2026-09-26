@@ -1,6 +1,7 @@
 import { createProviderObserver } from './usage.mjs';
 import { parseToolArguments, registeredTools } from './tools.mjs';
 import { RuntimeError } from './errors.mjs';
+import { deliveryGuardrail, deliveryOutputType, deliveryViolation, parseDeliveryText } from './delivery-contract.mjs';
 
 // The SDK runs the agent and registered functions; Go owns cross-agent planning,
 // tenancy, durable history, retries/admission and model-call accounting.
@@ -12,6 +13,9 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
   sdk.setSensitiveDataLoggingEnabled(false);
   let calls = 0, completed = false, finishReason, streamed = '', generatedBytes = 0;
   const names = request.tools ?? [];
+  // A server-derived delivery contract; admission already refused it together with tools.
+  const contract = request.outputContract;
+  let deliveredText;
   const endpoint = new URL(`${modelConfig.baseURL.replace(/\/$/, '')}/${modelConfig.protocol === 'responses' ? 'responses' : 'chat/completions'}`);
   const client = new OpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL, maxRetries: 0,
     fetch: (input, init) => {
@@ -52,6 +56,15 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
           if (output.some(item => !['message', 'function_call', 'reasoning'].includes(item.type))) throw new RuntimeError('MODEL_PROTOCOL_ERROR');
           if (output.some(item => item.status === 'incomplete')) throw new RuntimeError('MODEL_OUTPUT_LIMIT');
           if (output.some(item => item.content?.some(part => part.type === 'refusal'))) throw new RuntimeError('MODEL_REFUSAL');
+          if (contract) {
+            // Checked before this event reaches the SDK, so an empty or reasoning-only reply
+            // fails here while the one admitted provider call is still the only call.
+            const messages = output.filter(item => item.type === 'message');
+            if (messages.length !== 1 || !Array.isArray(messages[0].content)
+              || messages[0].content.some(part => part.type !== 'output_text' || typeof part.text !== 'string')) throw new RuntimeError('OUTPUT_CONTRACT_INVALID');
+            deliveredText = messages[0].content.map(part => part.text).join('');
+            parseDeliveryText(deliveredText);
+          }
           completed = true;
         }
         yield event;
@@ -62,6 +75,8 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
   const agent = new sdk.Agent({ name: 'AwwO configured agent',
     instructions: request.systemPrompt ?? 'You are a helpful assistant. Follow the user task using only explicitly provided information and registered tools.',
     model, tools, handoffs: [], toolUseBehavior: 'stop_on_first_tool',
+    // No error handlers and no blocked-output message: a tripwire is a terminal failure.
+    ...(contract ? { outputType: deliveryOutputType(contract), outputGuardrails: [deliveryGuardrail(contract)] } : {}),
     modelSettings: { preserveRawUsage: true, maxTokens: modelConfig.maxTokens, parallelToolCalls: false, retry: { maxRetries: 0 },
       // Gemini's OpenAI-compatible endpoint rejects even store=false.
       ...(endpoint.origin === 'https://generativelanguage.googleapis.com' ? {} : { store: false }),
@@ -87,8 +102,19 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
     throw error;
   }
   if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
-  if (!completed || calls !== 1 || result.interruptions.length !== 0 || typeof result.finalOutput !== 'string' || !result.finalOutput.trim()) throw new RuntimeError('MODEL_PROTOCOL_ERROR');
-  const text = result.finalOutput;
+  if (!completed || calls !== 1 || result.interruptions.length !== 0) throw new RuntimeError('MODEL_PROTOCOL_ERROR');
+  let text;
+  if (contract) {
+    const value = result.finalOutput;
+    if (value === null || typeof value !== 'object' || Array.isArray(value) || typeof deliveredText !== 'string') throw new RuntimeError('MODEL_PROTOCOL_ERROR');
+    // The guardrail has passed. Re-check the exact delivered bytes as well, so success
+    // never rests on SDK guardrail wiring alone; Go still validates every value.
+    if (deliveryViolation(contract, parseDeliveryText(deliveredText)) !== null) throw new RuntimeError('OUTPUT_CONTRACT_INVALID');
+    text = deliveredText;
+  } else {
+    if (typeof result.finalOutput !== 'string' || !result.finalOutput.trim()) throw new RuntimeError('MODEL_PROTOCOL_ERROR');
+    text = result.finalOutput;
+  }
   if (!text.startsWith(streamed)) throw new RuntimeError('MODEL_PROTOCOL_ERROR');
   // With tools enabled, buffer provisional model text: a tool result is the final
   // answer and must not be confused with a preceding model preamble.

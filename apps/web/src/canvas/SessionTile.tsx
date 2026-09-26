@@ -298,7 +298,9 @@ export const SessionTile = memo(function SessionTile({
   const template = node.kind === 'session' ? getAgentTemplateForNode(node, locale) : undefined;
   const [deliverablesOpen, setDeliverablesOpen] = useState(node.kind === 'session' && Boolean(node.deliverablesOpen));
   useEffect(() => { setDeliverablesOpen(node.kind === 'session' && Boolean(node.deliverablesOpen)); }, [node.kind, node.kind === 'session' && node.deliverablesOpen]);
-  const [sessionsOpen, setSessionsOpen] = useState(true);
+  // The Session list starts collapsed so an opened node leads with its conversation; the chat
+  // heading keeps the expand control and the list keeps its collapse control.
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
   const composerDraft = localDrafts[storeKey] ?? currentThread?.draft ?? '';

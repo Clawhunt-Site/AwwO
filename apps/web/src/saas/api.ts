@@ -47,6 +47,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     context_limit: ['输入超出模型上下文限制，请缩短输入或减少历史内容。', 'The input exceeds the model context limit. Shorten it or reduce the history.'],
     rate_limited: ['请求过于频繁，请稍后重试。', 'Too many requests. Please try again later.'],
     quota_exceeded: ['工作区运行额度不足，请联系管理员。', 'The workspace run quota has been reached. Contact an administrator.'],
+    personal_engine_required: ['请先到「我的引擎」添加并验证你自己的 API Key。', 'Add and verify your API key in My engines before running.'],
     model_unavailable: ['所选模型不可用，请重新选择服务端提供的模型。', 'The selected model is unavailable. Choose a model offered by the server.'],
     // Distinct from model_unavailable: the model exists but is not open to this
     // workspace, so the fix is an administrator grant rather than another model.
@@ -69,6 +70,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     '草稿状态刚被另一个页面更新，请重新连接后核对。': ['草稿状态刚被另一个页面更新，请重新连接后核对。', 'Another page just changed this draft. Reconnect and check its state.'],
     '画布未同步，请先解决保存错误再运行。': ['画布未同步，请先解决保存错误再运行。', 'The canvas is not synced. Resolve the save error before running.'],
     'No model is available to this workspace': ['本工作区当前没有可用模型，请联系管理员开放模型。', 'No model is available to this workspace. Ask an administrator to grant one.'],
+    'No configured runtime is available': ['当前没有可用的执行引擎。', 'No execution engine is currently available.'],
   };
   if (known[raw]) return known[raw][locale === 'zh' ? 0 : 1];
   if (locale === 'en') {

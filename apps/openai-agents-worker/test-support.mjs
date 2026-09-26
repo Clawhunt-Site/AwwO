@@ -34,6 +34,15 @@ export async function fixture(t, { mode = 'text', text = 'Hello from Agents', ca
         event('response.output_item.done', { output_index: 0, item });
         event('response.completed', { response }); res.end(); return;
       }
+      if (mode === 'empty' || mode === 'reasoning') {
+        // A completed response with no message: nothing at all, or out-of-band reasoning only.
+        const output = mode === 'reasoning' ? [{ type: 'reasoning', id: 'rs_fixture', summary: [{ type: 'summary_text', text: 'Private reasoning only.' }] }] : [];
+        const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'fixture-model', output, usage: responseUsage };
+        const event = (type, payload) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`);
+        event('response.created', { response: { ...response, status: 'in_progress', output: [] } });
+        for (const [index, item] of output.entries()) { event('response.output_item.added', { output_index: index, item }); event('response.output_item.done', { output_index: index, item }); }
+        event('response.completed', { response }); res.end(); return;
+      }
       const message = { type: 'message', id: 'msg_fixture', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] };
       const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'fixture-model', output: [message], usage: responseUsage };
       const event = (type, payload) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`);
@@ -46,7 +55,10 @@ export async function fixture(t, { mode = 'text', text = 'Hello from Agents', ca
       event('response.output_item.done', { output_index: 0, item: message });
       event('response.completed', { response }); res.end(); return;
     }
-    send({ role: 'assistant', content: mode === 'tool' || mode === 'double-tool' ? 'Provisional preamble.' : text });
+    // 'empty' streams no content at all; 'reasoning' streams only out-of-band reasoning.
+    if (mode === 'empty') send({ role: 'assistant' });
+    else if (mode === 'reasoning') send({ role: 'assistant', reasoning: 'Private reasoning only.' });
+    else send({ role: 'assistant', content: mode === 'tool' || mode === 'double-tool' ? 'Provisional preamble.' : text });
     if (mode === 'stall') return;
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     if (mode === 'tool' || mode === 'double-tool') {

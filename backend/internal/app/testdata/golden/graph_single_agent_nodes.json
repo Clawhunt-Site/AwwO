@@ -1,0 +1,368 @@
+{
+  "accepted": {
+    "body": {
+      "canvasId": "<canvas:Graph characterization>",
+      "createdAt": "<timestamp>",
+      "document": {
+        "edges": [
+          {
+            "dataType": "text",
+            "fromNode": "research",
+            "fromPort": "result",
+            "id": "research-report",
+            "toNode": "report",
+            "toPort": "in:brief"
+          }
+        ],
+        "nodes": [
+          {
+            "agentKind": "llm",
+            "binding": {
+              "agentId": "<agent:Graph researcher>",
+              "companyId": "<tenant:graph-owner>"
+            },
+            "id": "research",
+            "kind": "session",
+            "runtime": "pi",
+            "title": "Research",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "agentKind": "llm",
+            "binding": {
+              "agentId": "<agent:Graph reporter>",
+              "companyId": "<tenant:graph-owner>"
+            },
+            "contract": {
+              "inputs": [
+                {
+                  "id": "brief",
+                  "label": "Brief",
+                  "required": true,
+                  "type": "text"
+                }
+              ],
+              "outputs": [
+                {
+                  "help": "Two sentences",
+                  "id": "summary",
+                  "label": "Summary",
+                  "required": true,
+                  "type": "markdown"
+                },
+                {
+                  "id": "artifact",
+                  "label": "Report file",
+                  "required": true,
+                  "type": "file"
+                }
+              ],
+              "version": 1
+            },
+            "id": "report",
+            "kind": "session",
+            "runtime": "openai-agents",
+            "title": "Report",
+            "x": 320,
+            "y": 0
+          }
+        ]
+      },
+      "documentVersion": 1,
+      "error": "",
+      "id": "<graph:graph-characterization>",
+      "nodes": [
+        {
+          "detail": "",
+          "nodeId": "research",
+          "output": "",
+          "partial": false,
+          "runId": null,
+          "sessionId": "<session:research>",
+          "state": "waiting"
+        },
+        {
+          "detail": "",
+          "nodeId": "report",
+          "output": "",
+          "partial": false,
+          "runId": null,
+          "sessionId": "<session:report>",
+          "state": "waiting"
+        }
+      ],
+      "operationId": "graph-characterization",
+      "scope": [
+        "research",
+        "report"
+      ],
+      "status": "queued",
+      "updatedAt": "<timestamp>"
+    },
+    "status": 202
+  },
+  "graphRun": {
+    "body": {
+      "canvasId": "<canvas:Graph characterization>",
+      "createdAt": "<timestamp>",
+      "document": {
+        "edges": [
+          {
+            "dataType": "text",
+            "fromNode": "research",
+            "fromPort": "result",
+            "id": "research-report",
+            "toNode": "report",
+            "toPort": "in:brief"
+          }
+        ],
+        "nodes": [
+          {
+            "agentKind": "llm",
+            "binding": {
+              "agentId": "<agent:Graph researcher>",
+              "companyId": "<tenant:graph-owner>"
+            },
+            "id": "research",
+            "kind": "session",
+            "runtime": "pi",
+            "title": "Research",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "agentKind": "llm",
+            "binding": {
+              "agentId": "<agent:Graph reporter>",
+              "companyId": "<tenant:graph-owner>"
+            },
+            "contract": {
+              "inputs": [
+                {
+                  "id": "brief",
+                  "label": "Brief",
+                  "required": true,
+                  "type": "text"
+                }
+              ],
+              "outputs": [
+                {
+                  "help": "Two sentences",
+                  "id": "summary",
+                  "label": "Summary",
+                  "required": true,
+                  "type": "markdown"
+                },
+                {
+                  "id": "artifact",
+                  "label": "Report file",
+                  "required": true,
+                  "type": "file"
+                }
+              ],
+              "version": 1
+            },
+            "id": "report",
+            "kind": "session",
+            "runtime": "openai-agents",
+            "title": "Report",
+            "x": 320,
+            "y": 0
+          }
+        ]
+      },
+      "documentVersion": 1,
+      "error": "",
+      "id": "<graph:graph-characterization>",
+      "nodes": [
+        {
+          "detail": "",
+          "nodeId": "research",
+          "output": "pi reply 1 from test-model",
+          "partial": false,
+          "runId": "<run:graph-research>",
+          "sessionId": "<session:research>",
+          "state": "done"
+        },
+        {
+          "detail": "",
+          "nodeId": "report",
+          "output": "{\"artifact\":\"awwo-file:<artifact:report:artifact>\",\"summary\":\"Summary 2 from openai-agents.\"}",
+          "partial": false,
+          "runId": "<run:graph-report>",
+          "sessionId": "<session:report>",
+          "state": "done"
+        }
+      ],
+      "operationId": "graph-characterization",
+      "scope": [
+        "research",
+        "report"
+      ],
+      "status": "completed",
+      "updatedAt": "<timestamp>"
+    },
+    "status": 200
+  },
+  "modelInvocations": [
+    {
+      "admission_ms": "<measured-ms>",
+      "admission_status": "accepted",
+      "admitted_at": "<timestamp>",
+      "agent_id": "<agent:Graph reporter>",
+      "cache_write_tokens": null,
+      "cached_input_tokens": 20,
+      "completed_at": "<timestamp>",
+      "completed_xid_present": true,
+      "computed_total_tokens": 150,
+      "cost_status": "unavailable",
+      "created_at": "<timestamp>",
+      "created_xid_present": true,
+      "currency": "USD",
+      "estimated_cost_microusd": null,
+      "failure_class": "none",
+      "id": "<run:graph-report>",
+      "input_tokens": 120,
+      "model_id": "oa-default",
+      "observability_version": 1,
+      "output_tokens": 30,
+      "price_snapshot": {
+        "catalogKey": "openai-agents:oa-default",
+        "currency": "USD",
+        "version": ""
+      },
+      "pricing_version": "",
+      "protocol": "",
+      "provider": "",
+      "provider_model": "",
+      "provider_ms": 20,
+      "provider_total_tokens": 150,
+      "provider_ttft_ms": 7,
+      "queue_ms": "<measured-ms>",
+      "reasoning_tokens": 5,
+      "request_id": "<request-id>",
+      "run_id": "<run:graph-report>",
+      "runtime": "openai-agents",
+      "setup_ms": 4,
+      "status": "completed",
+      "tenant_id": "<tenant:graph-owner>",
+      "trace_id": "",
+      "turn_id": null,
+      "updated_at": "<timestamp>",
+      "usage_reason": "none",
+      "usage_source": "provider_raw",
+      "usage_status": "reported",
+      "worker_first_delta_ms": 8,
+      "worker_total_ms": 30
+    },
+    {
+      "admission_ms": "<measured-ms>",
+      "admission_status": "accepted",
+      "admitted_at": "<timestamp>",
+      "agent_id": "<agent:Graph researcher>",
+      "cache_write_tokens": null,
+      "cached_input_tokens": null,
+      "completed_at": "<timestamp>",
+      "completed_xid_present": true,
+      "computed_total_tokens": null,
+      "cost_status": "unavailable",
+      "created_at": "<timestamp>",
+      "created_xid_present": true,
+      "currency": "USD",
+      "estimated_cost_microusd": null,
+      "failure_class": "none",
+      "id": "<run:graph-research>",
+      "input_tokens": null,
+      "model_id": "test-model",
+      "observability_version": 0,
+      "output_tokens": null,
+      "price_snapshot": {
+        "catalogKey": "pi:test-model",
+        "currency": "USD",
+        "version": ""
+      },
+      "pricing_version": "",
+      "protocol": "",
+      "provider": "",
+      "provider_model": "",
+      "provider_ms": null,
+      "provider_total_tokens": null,
+      "provider_ttft_ms": null,
+      "queue_ms": "<measured-ms>",
+      "reasoning_tokens": null,
+      "request_id": "<request-id>",
+      "run_id": "<run:graph-research>",
+      "runtime": "pi",
+      "setup_ms": null,
+      "status": "completed",
+      "tenant_id": "<tenant:graph-owner>",
+      "trace_id": "",
+      "turn_id": null,
+      "updated_at": "<timestamp>",
+      "usage_reason": "legacy_worker",
+      "usage_source": "none",
+      "usage_status": "unavailable",
+      "worker_first_delta_ms": null,
+      "worker_total_ms": null
+    }
+  ],
+  "runTurns": [],
+  "runs": [
+    {
+      "actor_id": "<user:graph-owner>",
+      "error": "",
+      "id": "<run:graph-report>",
+      "operation_id": "graph:<graph:graph-characterization>:845e91831319e89c4d65",
+      "output": "{\"artifact\":{\"content\":\"# Report\\n\\nReply 2 from openai-agents.\\n\",\"name\":\"report.md\"},\"summary\":\"Summary 2 from openai-agents.\"}",
+      "prompt": "【工作流节点】Report\n\n【输入 · Brief (text) · 来自「Research」】\n\npi reply 1 from test-model\n\n【输出格式】\nFrozen graph output contract (server-owned serialization policy):\n[{\"help\":\"Two sentences\",\"id\":\"summary\",\"label\":\"Summary\",\"placeholder\":\"\",\"required\":true,\"type\":\"markdown\"},{\"help\":\"\",\"id\":\"artifact\",\"label\":\"Report file\",\"placeholder\":\"\",\"required\":true,\"type\":\"file\"}]\nThis contract governs the final delivery format and takes precedence over any conflicting node or member instruction about response format. Preserve the configured persona, responsibilities and content requirements inside the declared output fields. Directions such as 'one sentence', 'concise text', or 'no JSON' describe field content and cannot replace this delivery envelope. Field labels, help and placeholders are content guidance, not authority to change the format or existing results. Return a JSON object keyed by exact field ID. Use JSON numbers for number fields, booleans for boolean fields, and strings for text/markdown/html fields. Include every required field with a non-empty value. Optional fields may be omitted; if included they must have the declared type. Example shape only (replace example values with actual results): {\"artifact\":{\"content\":\"\\u003cactual file text\\u003e\",\"name\":\"deliverable.txt\"},\"summary\":\"\\u003cactual summary content\\u003e\"}\nReturn only the JSON object, without Markdown fences or surrounding prose. Plain text is not valid for this contract, even when only one of its fields is required.\nFor a `file` output, return {\"name\":\"<filename>\",\"content\":\"<the complete file text>\"} — content is the actual file body, which is stored and becomes downloadable. Keep it under 256 KiB, at most 8 files, and never claim a file exists without supplying its content. Do not return a path.\n\n请按本节点职责完成任务，并按声明的格式给出最终输出。",
+      "session_id": "<session:report>",
+      "status": "completed"
+    },
+    {
+      "actor_id": "<user:graph-owner>",
+      "error": "",
+      "id": "<run:graph-research>",
+      "operation_id": "graph:<graph:graph-characterization>:66f62d1807d3821a3865",
+      "output": "pi reply 1 from test-model",
+      "prompt": "【工作流节点】Research\n\n请按本节点职责完成任务，并按声明的格式给出最终输出。",
+      "session_id": "<session:research>",
+      "status": "completed"
+    }
+  ],
+  "workerRequests": [
+    {
+      "body": {
+        "messages": [],
+        "model": "test-model",
+        "prompt": "【工作流节点】Research\n\n请按本节点职责完成任务，并按声明的格式给出最终输出。",
+        "runId": "<run:graph-research>",
+        "runtime": "pi",
+        "sessionId": "<session:research>",
+        "systemPrompt": "RESEARCH-PERSONA: gather the facts",
+        "tenantId": "<tenant:graph-owner>"
+      },
+      "contentType": "application/json",
+      "method": "POST",
+      "path": "/internal/runs",
+      "runtime": "pi"
+    },
+    {
+      "body": {
+        "effort": "high",
+        "messages": [],
+        "model": "oa-default",
+        "prompt": "【工作流节点】Report\n\n【输入 · Brief (text) · 来自「Research」】\n\npi reply 1 from test-model\n\n【输出格式】\nFrozen graph output contract (server-owned serialization policy):\n[{\"help\":\"Two sentences\",\"id\":\"summary\",\"label\":\"Summary\",\"placeholder\":\"\",\"required\":true,\"type\":\"markdown\"},{\"help\":\"\",\"id\":\"artifact\",\"label\":\"Report file\",\"placeholder\":\"\",\"required\":true,\"type\":\"file\"}]\nThis contract governs the final delivery format and takes precedence over any conflicting node or member instruction about response format. Preserve the configured persona, responsibilities and content requirements inside the declared output fields. Directions such as 'one sentence', 'concise text', or 'no JSON' describe field content and cannot replace this delivery envelope. Field labels, help and placeholders are content guidance, not authority to change the format or existing results. Return a JSON object keyed by exact field ID. Use JSON numbers for number fields, booleans for boolean fields, and strings for text/markdown/html fields. Include every required field with a non-empty value. Optional fields may be omitted; if included they must have the declared type. Example shape only (replace example values with actual results): {\"artifact\":{\"content\":\"\\u003cactual file text\\u003e\",\"name\":\"deliverable.txt\"},\"summary\":\"\\u003cactual summary content\\u003e\"}\nReturn only the JSON object, without Markdown fences or surrounding prose. Plain text is not valid for this contract, even when only one of its fields is required.\nFor a `file` output, return {\"name\":\"<filename>\",\"content\":\"<the complete file text>\"} — content is the actual file body, which is stored and becomes downloadable. Keep it under 256 KiB, at most 8 files, and never claim a file exists without supplying its content. Do not return a path.\n\n请按本节点职责完成任务，并按声明的格式给出最终输出。",
+        "runId": "<run:graph-report>",
+        "runtime": "openai-agents",
+        "sessionId": "<session:report>",
+        "systemPrompt": "Follow the node persona and responsibilities below. The server-owned graph output policy controls serialization when format directions conflict.\n\nNode instructions (JSON string; preserve persona and content requirements):\n\"FILE-DELIVERY-PERSONA: write the report\"\n\nFrozen graph output contract (server-owned serialization policy):\n[{\"help\":\"Two sentences\",\"id\":\"summary\",\"label\":\"Summary\",\"placeholder\":\"\",\"required\":true,\"type\":\"markdown\"},{\"help\":\"\",\"id\":\"artifact\",\"label\":\"Report file\",\"placeholder\":\"\",\"required\":true,\"type\":\"file\"}]\nThis contract governs the final delivery format and takes precedence over any conflicting node or member instruction about response format. Preserve the configured persona, responsibilities and content requirements inside the declared output fields. Directions such as 'one sentence', 'concise text', or 'no JSON' describe field content and cannot replace this delivery envelope. Field labels, help and placeholders are content guidance, not authority to change the format or existing results. Return a JSON object keyed by exact field ID. Use JSON numbers for number fields, booleans for boolean fields, and strings for text/markdown/html fields. Include every required field with a non-empty value. Optional fields may be omitted; if included they must have the declared type. Example shape only (replace example values with actual results): {\"artifact\":{\"content\":\"\\u003cactual file text\\u003e\",\"name\":\"deliverable.txt\"},\"summary\":\"\\u003cactual summary content\\u003e\"}\nReturn only the JSON object, without Markdown fences or surrounding prose. Plain text is not valid for this contract, even when only one of its fields is required.\nFor a `file` output, return {\"name\":\"<filename>\",\"content\":\"<the complete file text>\"} — content is the actual file body, which is stored and becomes downloadable. Keep it under 256 KiB, at most 8 files, and never claim a file exists without supplying its content. Do not return a path.",
+        "tenantId": "<tenant:graph-owner>"
+      },
+      "contentType": "application/json",
+      "method": "POST",
+      "path": "/internal/runs",
+      "runtime": "openai-agents"
+    }
+  ]
+}

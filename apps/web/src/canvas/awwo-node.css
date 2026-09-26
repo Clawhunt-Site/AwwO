@@ -163,11 +163,12 @@
 .canvas-root .awwo-node-empty strong { font-size: 17px; font-weight: 550; letter-spacing: -.3px; }
 .canvas-root .awwo-node .canvas-composer { padding: 8px 12px 12px; }
 .canvas-root .awwo-node .canvas-composer-row { display: block; }
-.canvas-root .awwo-node .canvas-composer-input { min-height: 80px; padding: 10px 12px 33px; border-radius: 12px; background: var(--awwo-soft); font-size: 12px; resize: none; }
+.canvas-root .awwo-node .canvas-composer-input { min-height: 80px; padding: 10px 12px 28px; border-radius: 12px; background: var(--awwo-soft); font-size: 12px; resize: none; }
 .canvas-root .awwo-node .canvas-composer-send { position: absolute; right: 7px; bottom: 7px; padding: 5px; min-height: 26px; width: 26px; height: 26px; border-radius: 50%; background: var(--awwo-ink); color: var(--awwo-card); }
 .canvas-root .awwo-node .canvas-composer-send span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .canvas-root .awwo-node .canvas-composer-blocked, .canvas-root .awwo-node .canvas-composer-notice { font-size: 10px; line-height: 1.4; }
-.canvas-root .awwo-node-delivery-drawer { width: 400px; flex: 0 0 400px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--awwo-line); background: var(--awwo-card); }
+/* Width mirrors DELIVERY_DRAWER_WIDTH in nodePresentation.ts. */
+.canvas-root .awwo-node-delivery-drawer { width: 320px; flex: 0 0 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--awwo-line); background: var(--awwo-card); }
 .canvas-root .awwo-node-delivery-drawer > header { min-height: 37px; padding: 5px 10px; border-bottom: 1px solid var(--awwo-line); display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
 .canvas-root .awwo-node-delivery-drawer > header > span { display: flex; align-items: center; gap: 6px; }
 .canvas-root .awwo-deliverables { padding: 12px; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; font-size: 12px; }

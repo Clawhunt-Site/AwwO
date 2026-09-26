@@ -60,6 +60,8 @@ apps/desktop/backend/.node-cache/
 /.vscode
 /CCimages
 /.local/
+/apps/desktop/src-tauri/tauri.*.local.json
+/release/windows/
 /.grok/
 /.gemini/
 /apps/web/dist-saas/

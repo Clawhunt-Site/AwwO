@@ -40,6 +40,7 @@ type executionSnapshot struct {
 	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`
 	Instructions     string             `json:"instructions"`
 	OutputPolicy     string             `json:"outputPolicy,omitempty"`
+	OutputContract   *outputContract    `json:"outputContract,omitempty"`
 	Model            string             `json:"model"`
 	Effort           string             `json:"effort,omitempty"`
 	Budget           int                `json:"budget"`
@@ -71,6 +72,60 @@ func (s *executionSnapshot) UnmarshalJSON(data []byte) error {
 	}
 	*s = executionSnapshot(decoded)
 	return nil
+}
+
+// effectiveOutputPolicy returns the instructions a request actually carries. When a
+// structured contract is frozen the provider itself enforces the envelope, so the
+// extra sentence is derived here at send time and never written into the snapshot:
+// a deployment where no model advertises the capability must keep producing
+// byte-identical requests, which the request goldens pin.
+func effectiveOutputPolicy(snap executionSnapshot) string {
+	if snap.OutputContract == nil || snap.OutputPolicy == "" {
+		return snap.OutputPolicy
+	}
+	return withdrawPlainTextAllowance(snap.OutputPolicy) + "\nThe provider enforces this contract as a JSON schema for this delivery: return only the JSON object, with every required field present and each value of its declared type."
+}
+
+// withdrawPlainTextAllowance replaces the single-text-field allowance with the JSON-only
+// sentence. It is applied only where a contract is frozen, so a run without one is
+// byte-identical. The frozen policy is server text whose user-supplied parts are JSON
+// encoded, so it can be rewritten whole.
+func withdrawPlainTextAllowance(policy string) string {
+	return strings.ReplaceAll(policy, plainTextAllowance, jsonOnlyPolicy)
+}
+
+// withdrawPromptAllowance applies the same rewrite to a node prompt, but only inside its
+// server-owned policy block after the last output-format marker. Input values, help text
+// and a collaboration goal come before that block and reach the model exactly as given,
+// even when they quote the allowance sentence.
+func withdrawPromptAllowance(prompt string) string {
+	i := strings.LastIndex(prompt, outputFormatMarker)
+	if i < 0 {
+		return prompt
+	}
+	return prompt[:i] + withdrawPlainTextAllowance(prompt[i:])
+}
+
+// outputContractReserve is the context budget the response-format envelope needs.
+// It is zero unless a contract is frozen, so history trimming and the admission
+// bounds are unchanged for every run that carries none.
+func outputContractReserve(snap executionSnapshot) int {
+	if snap.OutputContract == nil {
+		return 0
+	}
+	return schemaReserveBytes
+}
+
+// structuredContractConsistent rejects a snapshot whose frozen contract contradicts
+// the rest of it. A snapshot is durable and replayed after a restart, so a row that
+// was hand-edited, or written before a model lost the capability, must fail closed
+// rather than send a contract to a team, runtime or model that cannot honour it.
+func structuredContractConsistent(snap executionSnapshot) bool {
+	if snap.OutputContract == nil {
+		return true
+	}
+	return snap.Team == nil && snap.Runtime == runtimeOpenAIAgents &&
+		snap.Health.supportsStructuredOutput(snap.Model) && validOutputContract(snap.OutputContract)
 }
 
 func validateTeam(t *nodeTeam) error {
@@ -563,8 +618,8 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			continue
 		}
 		var ev struct {
-			Type, Delta, Text string
-			Observability     json.RawMessage `json:"observability"`
+			Type, Delta, Text, Code string
+			Observability           json.RawMessage `json:"observability"`
 		}
 		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev) != nil {
 			code = "invalid_runtime_event"
@@ -614,7 +669,9 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			status = "cancelled"
 			return "", context.Canceled
 		case "failed":
-			code = "runtime_failed"
+			// Members deliver through their own turn and never carry a contract, so a
+			// contract refusal reported here stays the generic runtime failure.
+			code = runtimeFailureCode(ev.Code, false)
 			return "", errors.New(code)
 		default:
 			code = "invalid_runtime_event"

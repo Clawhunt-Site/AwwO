@@ -133,6 +133,7 @@ describe('durable manual draft acceptance', () => {
     openComposer();
     const accept = deferOwnership();
     fireEvent.click(screen.getByTestId('composer-send'));
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表', exact: true }));
     fireEvent.click(screen.getByRole('button', { name: '打开 Session 2', exact: true }));
     accept();
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('画布已在其他标签页更新'));

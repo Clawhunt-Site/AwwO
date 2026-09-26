@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -111,6 +112,11 @@ func (a *App) runtimeEndpoint(runtime string) (string, string, error) {
 
 func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error) {
 	var h piHealth
+	if a.cfg.UserCredentials {
+		if err := a.requirePersonalConnection(ctx, runtime); err != nil {
+			return h, err
+		}
+	}
 	endpoint, token, err := a.runtimeEndpoint(runtime)
 	if err != nil {
 		return h, err
@@ -127,18 +133,41 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		return h, errors.New("Runtime is unavailable")
 	}
 	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
+	if err != nil || len(body) > 65536 {
+		return piHealth{}, errors.New("Runtime provider is not ready")
+	}
 	if a.cfg.UserCredentials {
 		var capability struct {
-			Ready           bool `json:"ready"`
-			UserCredentials bool `json:"userCredentials"`
+			Ready                bool            `json:"ready"`
+			UserCredentials      bool            `json:"userCredentials"`
+			LLMGateOnly          bool            `json:"llmgateOnly"`
+			UserStructuredOutput json.RawMessage `json:"userStructuredOutput"`
 		}
-		if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&capability) != nil || !capability.Ready || !capability.UserCredentials {
+		if resp.StatusCode != 200 || json.Unmarshal(body, &capability) != nil || !capability.Ready || !capability.UserCredentials || (a.cfg.LLMGateOnly && !capability.LLMGateOnly) {
 			return piHealth{}, errors.New("Personal-credential worker is unavailable")
 		}
-		return a.personalRuntime(ctx, runtime)
+		// Whether the worker can bind a user model carrying structuredOutput is the worker's
+		// own claim: the JS worker makes it, the Python worker and older builds do not. Only
+		// a literal true counts; anything else is a dropped capability, never an outage.
+		raw := bytes.TrimSpace(capability.UserStructuredOutput)
+		structured := bytes.Equal(raw, []byte("true"))
+		if len(raw) > 0 && !structured && !bytes.Equal(raw, []byte("false")) && !bytes.Equal(raw, []byte("null")) {
+			a.recordCapabilityCleared(runtime, "user-credentials", "malformed")
+		}
+		return a.personalRuntime(ctx, runtime, structured)
 	}
-	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&h) != nil || !h.Ready || h.Model == "" {
+	if resp.StatusCode != 200 || json.Unmarshal(body, &h) != nil || !h.Ready || h.Model == "" {
 		return piHealth{}, errors.New("Runtime provider is not ready")
+	}
+	if a.cfg.LLMGateOnly {
+		var policy struct {
+			LLMGateOnly     bool            `json:"llmgateOnly"`
+			UserCredentials json.RawMessage `json:"userCredentials"`
+		}
+		if json.Unmarshal(body, &policy) != nil || !policy.LLMGateOnly || !bytes.Equal(bytes.TrimSpace(policy.UserCredentials), []byte("false")) {
+			return piHealth{}, errors.New("Runtime provider is not ready")
+		}
 	}
 	if len(h.Models) > 128 {
 		return piHealth{}, errors.New("Runtime model catalog exceeds limit")
@@ -147,6 +176,8 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	// echoed this field could otherwise narrow or widen what a workspace may run.
 	h.Allowed = nil
 	seen, hasDefault := map[string]bool{}, false
+	type clearing struct{ model, reason string }
+	cleared := []clearing{}
 	for i, m := range h.Models {
 		// Legacy Pi catalogs did not publish runtime. Other workers must declare
 		// it, so a miswired URL cannot silently route a request to a different SDK.
@@ -155,6 +186,18 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		}
 		if m.Runtime != runtime || m.ID == "" || len(m.ID) > 200 || len(m.Provider) > 200 || seen[m.ID] || !validEffortCatalog(m) {
 			return piHealth{}, errors.New("Runtime model catalog is invalid")
+		}
+		// Structured delivery output exists only on the openai-agents worker. Another
+		// runtime advertising it, or a value that is not a boolean, gets the claim
+		// cleared rather than failing the whole catalog: a text outage is a worse
+		// outcome than a dropped capability. The reason is recorded only once the whole
+		// catalog is accepted, so a rejected catalog reports no clearing that never applied.
+		if m.structuredOutputMalformed {
+			cleared = append(cleared, clearing{m.ID, "malformed"})
+		}
+		if runtime != runtimeOpenAIAgents && m.StructuredOutput {
+			m.StructuredOutput = false
+			cleared = append(cleared, clearing{m.ID, "wrong_runtime"})
 		}
 		seen[m.ID], h.Models[i] = true, m
 		hasDefault = hasDefault || m.ID == h.Model
@@ -171,6 +214,9 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	}
 	if _, ok := h.toolBudget(toolNames); !ok {
 		return piHealth{}, errors.New("Runtime tool budgets are invalid")
+	}
+	for _, c := range cleared {
+		a.recordCapabilityCleared(runtime, c.model, c.reason)
 	}
 	a.registerTelemetryModels(runtime, h.Models)
 	return h, nil
@@ -349,7 +395,7 @@ func (a *App) runtimeAdmissionError(w http.ResponseWriter, err error) {
 	var input setupError
 	if errors.As(err, &input) {
 		status := 400
-		if input.code == "model_unavailable" {
+		if input.code == "model_unavailable" || input.code == "personal_engine_required" {
 			status = 409
 		}
 		fail(w, status, input.code, input.message)

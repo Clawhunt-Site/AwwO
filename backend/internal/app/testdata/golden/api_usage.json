@@ -1,0 +1,590 @@
+{
+  "runInvocationsOwner": {
+    "body": {
+      "freshness": {
+        "asOf": "<timestamp>",
+        "retainedFrom": "<timestamp>",
+        "source": "ledger"
+      },
+      "items": [
+        {
+          "admissionStatus": "accepted",
+          "admittedAt": "<timestamp>",
+          "agentId": "author",
+          "completedAt": "<timestamp>",
+          "costStatus": "unavailable",
+          "createdAt": "<timestamp>",
+          "currency": "USD",
+          "estimatedCostMicrousd": null,
+          "failureClass": "none",
+          "id": "<turn:team-run-one:01>",
+          "modelId": "test-model",
+          "priceSnapshot": {
+            "catalogKey": "pi:test-model",
+            "currency": "USD",
+            "version": ""
+          },
+          "pricingVersion": "",
+          "protocol": "",
+          "provider": "",
+          "providerModel": "",
+          "runId": "<run:team-run-one>",
+          "runtime": "pi",
+          "status": "completed",
+          "timingMs": {
+            "admission": "<measured-ms>",
+            "provider": null,
+            "providerTtft": null,
+            "queue": null,
+            "setup": null,
+            "workerFirstDelta": null,
+            "workerTotal": null
+          },
+          "turnId": "<turn:team-run-one:01>",
+          "usage": {
+            "cacheWriteTokens": null,
+            "cachedInputTokens": null,
+            "computedTotalTokens": null,
+            "inputTokens": null,
+            "outputTokens": null,
+            "providerTotalTokens": null,
+            "reasoningTokens": null
+          },
+          "usageReason": "legacy_worker",
+          "usageSource": "none",
+          "usageStatus": "unavailable"
+        },
+        {
+          "admissionStatus": "accepted",
+          "admittedAt": "<timestamp>",
+          "agentId": "critic",
+          "completedAt": "<timestamp>",
+          "costStatus": "unavailable",
+          "createdAt": "<timestamp>",
+          "currency": "USD",
+          "estimatedCostMicrousd": null,
+          "failureClass": "none",
+          "id": "<turn:team-run-one:02>",
+          "modelId": "oa-default",
+          "priceSnapshot": {
+            "catalogKey": "openai-agents:oa-default",
+            "currency": "USD",
+            "version": ""
+          },
+          "pricingVersion": "",
+          "protocol": "",
+          "provider": "",
+          "providerModel": "",
+          "runId": "<run:team-run-one>",
+          "runtime": "openai-agents",
+          "status": "completed",
+          "timingMs": {
+            "admission": "<measured-ms>",
+            "provider": 20,
+            "providerTtft": 7,
+            "queue": null,
+            "setup": 4,
+            "workerFirstDelta": 8,
+            "workerTotal": 30
+          },
+          "turnId": "<turn:team-run-one:02>",
+          "usage": {
+            "cacheWriteTokens": null,
+            "cachedInputTokens": "20",
+            "computedTotalTokens": "150",
+            "inputTokens": "120",
+            "outputTokens": "30",
+            "providerTotalTokens": "150",
+            "reasoningTokens": "5"
+          },
+          "usageReason": "none",
+          "usageSource": "provider_raw",
+          "usageStatus": "reported"
+        },
+        {
+          "admissionStatus": "accepted",
+          "admittedAt": "<timestamp>",
+          "agentId": "judge",
+          "completedAt": "<timestamp>",
+          "costStatus": "unavailable",
+          "createdAt": "<timestamp>",
+          "currency": "USD",
+          "estimatedCostMicrousd": null,
+          "failureClass": "none",
+          "id": "<turn:team-run-one:03>",
+          "modelId": "oa-default",
+          "priceSnapshot": {
+            "catalogKey": "openai-agents:oa-default",
+            "currency": "USD",
+            "version": ""
+          },
+          "pricingVersion": "",
+          "protocol": "",
+          "provider": "",
+          "providerModel": "",
+          "runId": "<run:team-run-one>",
+          "runtime": "openai-agents",
+          "status": "completed",
+          "timingMs": {
+            "admission": "<measured-ms>",
+            "provider": 20,
+            "providerTtft": 7,
+            "queue": null,
+            "setup": 4,
+            "workerFirstDelta": 8,
+            "workerTotal": 30
+          },
+          "turnId": "<turn:team-run-one:03>",
+          "usage": {
+            "cacheWriteTokens": null,
+            "cachedInputTokens": "20",
+            "computedTotalTokens": "150",
+            "inputTokens": "120",
+            "outputTokens": "30",
+            "providerTotalTokens": "150",
+            "reasoningTokens": "5"
+          },
+          "usageReason": "none",
+          "usageSource": "provider_raw",
+          "usageStatus": "reported"
+        }
+      ],
+      "page": {
+        "nextCursor": null
+      }
+    },
+    "status": 200
+  },
+  "runInvocationsReader": {
+    "body": {
+      "freshness": {
+        "asOf": "<timestamp>",
+        "retainedFrom": "<timestamp>",
+        "source": "ledger"
+      },
+      "items": [
+        {
+          "admissionStatus": "accepted",
+          "admittedAt": "<timestamp>",
+          "agentId": "author",
+          "completedAt": "<timestamp>",
+          "createdAt": "<timestamp>",
+          "failureClass": "none",
+          "id": "<turn:team-run-one:01>",
+          "modelId": "test-model",
+          "protocol": "",
+          "provider": "",
+          "providerModel": "",
+          "runId": "<run:team-run-one>",
+          "runtime": "pi",
+          "status": "completed",
+          "timingMs": {
+            "admission": "<measured-ms>",
+            "provider": null,
+            "providerTtft": null,
+            "queue": null,
+            "setup": null,
+            "workerFirstDelta": null,
+            "workerTotal": null
+          },
+          "turnId": "<turn:team-run-one:01>",
+          "usage": {
+            "cacheWriteTokens": null,
+            "cachedInputTokens": null,
+            "computedTotalTokens": null,
+            "inputTokens": null,
+            "outputTokens": null,
+            "providerTotalTokens": null,
+            "reasoningTokens": null
+          },
+          "usageReason": "legacy_worker",
+          "usageSource": "none",
+          "usageStatus": "unavailable"
+        },
+        {
+          "admissionStatus": "accepted",
+          "admittedAt": "<timestamp>",
+          "agentId": "critic",
+          "completedAt": "<timestamp>",
+          "createdAt": "<timestamp>",
+          "failureClass": "none",
+          "id": "<turn:team-run-one:02>",
+          "modelId": "oa-default",
+          "protocol": "",
+          "provider": "",
+          "providerModel": "",
+          "runId": "<run:team-run-one>",
+          "runtime": "openai-agents",
+          "status": "completed",
+          "timingMs": {
+            "admission": "<measured-ms>",
+            "provider": 20,
+            "providerTtft": 7,
+            "queue": null,
+            "setup": 4,
+            "workerFirstDelta": 8,
+            "workerTotal": 30
+          },
+          "turnId": "<turn:team-run-one:02>",
+          "usage": {
+            "cacheWriteTokens": null,
+            "cachedInputTokens": "20",
+            "computedTotalTokens": "150",
+            "inputTokens": "120",
+            "outputTokens": "30",
+            "providerTotalTokens": "150",
+            "reasoningTokens": "5"
+          },
+          "usageReason": "none",
+          "usageSource": "provider_raw",
+          "usageStatus": "reported"
+        },
+        {
+          "admissionStatus": "accepted",
+          "admittedAt": "<timestamp>",
+          "agentId": "judge",
+          "completedAt": "<timestamp>",
+          "createdAt": "<timestamp>",
+          "failureClass": "none",
+          "id": "<turn:team-run-one:03>",
+          "modelId": "oa-default",
+          "protocol": "",
+          "provider": "",
+          "providerModel": "",
+          "runId": "<run:team-run-one>",
+          "runtime": "openai-agents",
+          "status": "completed",
+          "timingMs": {
+            "admission": "<measured-ms>",
+            "provider": 20,
+            "providerTtft": 7,
+            "queue": null,
+            "setup": 4,
+            "workerFirstDelta": 8,
+            "workerTotal": 30
+          },
+          "turnId": "<turn:team-run-one:03>",
+          "usage": {
+            "cacheWriteTokens": null,
+            "cachedInputTokens": "20",
+            "computedTotalTokens": "150",
+            "inputTokens": "120",
+            "outputTokens": "30",
+            "providerTotalTokens": "150",
+            "reasoningTokens": "5"
+          },
+          "usageReason": "none",
+          "usageSource": "provider_raw",
+          "usageStatus": "reported"
+        }
+      ],
+      "page": {
+        "nextCursor": null
+      }
+    },
+    "status": 200
+  },
+  "usageByAgent": {
+    "body": {
+      "freshness": {
+        "asOf": "<timestamp>",
+        "completeForRequestedRange": true,
+        "retainedFrom": "<timestamp>",
+        "source": "ledger",
+        "stale": false
+      },
+      "items": [
+        {
+          "costSamples": {
+            "estimated": "0",
+            "notIncurred": "0",
+            "reconciled": "0",
+            "unavailable": "2",
+            "unknown": "0"
+          },
+          "currency": "USD",
+          "group": {
+            "type": "agent",
+            "value": "author"
+          },
+          "invocations": {
+            "cancelled": "0",
+            "completed": "2",
+            "failed": "0",
+            "interrupted": "0"
+          },
+          "knownEstimatedCostMicrousd": null,
+          "pricingVersion": "",
+          "tokens": {
+            "cacheWrite": null,
+            "cachedInput": null,
+            "input": null,
+            "output": null,
+            "reasoning": null
+          },
+          "usageSamples": {
+            "invalid": "0",
+            "partial": "0",
+            "reported": "0",
+            "unavailable": "2",
+            "unknown": "0"
+          }
+        },
+        {
+          "costSamples": {
+            "estimated": "0",
+            "notIncurred": "0",
+            "reconciled": "0",
+            "unavailable": "2",
+            "unknown": "0"
+          },
+          "currency": "USD",
+          "group": {
+            "type": "agent",
+            "value": "critic"
+          },
+          "invocations": {
+            "cancelled": "0",
+            "completed": "2",
+            "failed": "0",
+            "interrupted": "0"
+          },
+          "knownEstimatedCostMicrousd": null,
+          "pricingVersion": "",
+          "tokens": {
+            "cacheWrite": null,
+            "cachedInput": "40",
+            "input": "240",
+            "output": "60",
+            "reasoning": "10"
+          },
+          "usageSamples": {
+            "invalid": "0",
+            "partial": "0",
+            "reported": "2",
+            "unavailable": "0",
+            "unknown": "0"
+          }
+        },
+        {
+          "costSamples": {
+            "estimated": "0",
+            "notIncurred": "0",
+            "reconciled": "0",
+            "unavailable": "2",
+            "unknown": "0"
+          },
+          "currency": "USD",
+          "group": {
+            "type": "agent",
+            "value": "judge"
+          },
+          "invocations": {
+            "cancelled": "0",
+            "completed": "2",
+            "failed": "0",
+            "interrupted": "0"
+          },
+          "knownEstimatedCostMicrousd": null,
+          "pricingVersion": "",
+          "tokens": {
+            "cacheWrite": null,
+            "cachedInput": "40",
+            "input": "240",
+            "output": "60",
+            "reasoning": "10"
+          },
+          "usageSamples": {
+            "invalid": "0",
+            "partial": "0",
+            "reported": "2",
+            "unavailable": "0",
+            "unknown": "0"
+          }
+        }
+      ],
+      "page": {
+        "nextCursor": null
+      }
+    },
+    "status": 200
+  },
+  "usageByModel": {
+    "body": {
+      "freshness": {
+        "asOf": "<timestamp>",
+        "completeForRequestedRange": true,
+        "retainedFrom": "<timestamp>",
+        "source": "ledger",
+        "stale": false
+      },
+      "items": [
+        {
+          "costSamples": {
+            "estimated": "0",
+            "notIncurred": "0",
+            "reconciled": "0",
+            "unavailable": "4",
+            "unknown": "0"
+          },
+          "currency": "USD",
+          "group": {
+            "type": "model",
+            "value": "openai-agents:oa-default"
+          },
+          "invocations": {
+            "cancelled": "0",
+            "completed": "4",
+            "failed": "0",
+            "interrupted": "0"
+          },
+          "knownEstimatedCostMicrousd": null,
+          "pricingVersion": "",
+          "tokens": {
+            "cacheWrite": null,
+            "cachedInput": "80",
+            "input": "480",
+            "output": "120",
+            "reasoning": "20"
+          },
+          "usageSamples": {
+            "invalid": "0",
+            "partial": "0",
+            "reported": "4",
+            "unavailable": "0",
+            "unknown": "0"
+          }
+        },
+        {
+          "costSamples": {
+            "estimated": "0",
+            "notIncurred": "0",
+            "reconciled": "0",
+            "unavailable": "2",
+            "unknown": "0"
+          },
+          "currency": "USD",
+          "group": {
+            "type": "model",
+            "value": "pi:test-model"
+          },
+          "invocations": {
+            "cancelled": "0",
+            "completed": "2",
+            "failed": "0",
+            "interrupted": "0"
+          },
+          "knownEstimatedCostMicrousd": null,
+          "pricingVersion": "",
+          "tokens": {
+            "cacheWrite": null,
+            "cachedInput": null,
+            "input": null,
+            "output": null,
+            "reasoning": null
+          },
+          "usageSamples": {
+            "invalid": "0",
+            "partial": "0",
+            "reported": "0",
+            "unavailable": "2",
+            "unknown": "0"
+          }
+        }
+      ],
+      "page": {
+        "nextCursor": null
+      }
+    },
+    "status": 200
+  },
+  "usageByRuntime": {
+    "body": {
+      "freshness": {
+        "asOf": "<timestamp>",
+        "completeForRequestedRange": true,
+        "retainedFrom": "<timestamp>",
+        "source": "ledger",
+        "stale": false
+      },
+      "items": [
+        {
+          "costSamples": {
+            "estimated": "0",
+            "notIncurred": "0",
+            "reconciled": "0",
+            "unavailable": "4",
+            "unknown": "0"
+          },
+          "currency": "USD",
+          "group": {
+            "type": "runtime",
+            "value": "openai-agents"
+          },
+          "invocations": {
+            "cancelled": "0",
+            "completed": "4",
+            "failed": "0",
+            "interrupted": "0"
+          },
+          "knownEstimatedCostMicrousd": null,
+          "pricingVersion": "",
+          "tokens": {
+            "cacheWrite": null,
+            "cachedInput": "80",
+            "input": "480",
+            "output": "120",
+            "reasoning": "20"
+          },
+          "usageSamples": {
+            "invalid": "0",
+            "partial": "0",
+            "reported": "4",
+            "unavailable": "0",
+            "unknown": "0"
+          }
+        },
+        {
+          "costSamples": {
+            "estimated": "0",
+            "notIncurred": "0",
+            "reconciled": "0",
+            "unavailable": "2",
+            "unknown": "0"
+          },
+          "currency": "USD",
+          "group": {
+            "type": "runtime",
+            "value": "pi"
+          },
+          "invocations": {
+            "cancelled": "0",
+            "completed": "2",
+            "failed": "0",
+            "interrupted": "0"
+          },
+          "knownEstimatedCostMicrousd": null,
+          "pricingVersion": "",
+          "tokens": {
+            "cacheWrite": null,
+            "cachedInput": null,
+            "input": null,
+            "output": null,
+            "reasoning": null
+          },
+          "usageSamples": {
+            "invalid": "0",
+            "partial": "0",
+            "reported": "0",
+            "unavailable": "2",
+            "unknown": "0"
+          }
+        }
+      ],
+      "page": {
+        "nextCursor": null
+      }
+    },
+    "status": 200
+  }
+}

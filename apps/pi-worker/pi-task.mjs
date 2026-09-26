@@ -111,7 +111,13 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     // streamFunction hook keeps this application-only context free of local paths,
     // while retaining Pi's authenticated model stream and agent lifecycle.
     const piStream = activeSession.agent.streamFunction;
-    activeSession.agent.streamFunction = (selectedModel, context, options) => piStream(selectedModel, { ...context, systemPrompt }, { ...options, maxRetries: 0, fetch: observer.fetch });
+    // Pi's provider adapter retries only transport errors and HTTP 408/409/429/5xx
+    // before a response stream begins. One bounded Gate retry covers cold egress
+    // failures without replaying an answer already streamed to the caller.
+    activeSession.agent.streamFunction = (selectedModel, context, options) => piStream(selectedModel, { ...context, systemPrompt }, {
+      ...options, maxRetries: modelConfig.provider === 'llmgate' ? 1 : 0,
+      maxRetryDelayMs: 2_000, fetch: observer.fetch,
+    });
     if (activeSession.agent.state.tools.length !== 0) throw new Error('Unexpected tools enabled');
     if (cancelled) { await cancel(); return await terminal({ type: 'cancelled' }); }
     let text = '';

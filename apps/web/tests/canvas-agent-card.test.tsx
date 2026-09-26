@@ -32,6 +32,7 @@ describe('AwwO conversational cards', () => {
   it('keeps the conversation and its unsent message visible while inspecting inputs and deliverables', () => {
     render(<SessionTile node={node({ binding: { companyId: 'c', agentId: 'a', agentName: '前端' } })} scale={1} focused={false} onSend={vi.fn()} />);
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '请先检查现有接口' } });
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
     expect(screen.getByRole('navigation', { name: 'Session 管理' })).toBeTruthy();
     expect(screen.queryByRole('tablist')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));

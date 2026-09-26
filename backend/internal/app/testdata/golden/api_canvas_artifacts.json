@@ -1,0 +1,18 @@
+{
+  "body": {
+    "items": [
+      {
+        "createdAt": "<timestamp>",
+        "fieldId": "artifact",
+        "id": "<artifact:report:artifact>",
+        "name": "report.md",
+        "nodeId": "report",
+        "runId": "<run:graph-report>",
+        "sha256": "35110adb82dff021d9870b8fca1b4a2fef7e1e926dd57d590ad18f965eec31e1",
+        "size": 38
+      }
+    ],
+    "truncated": false
+  },
+  "status": 200
+}

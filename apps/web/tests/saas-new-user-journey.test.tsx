@@ -44,13 +44,13 @@ it('takes an empty Bot library back to model selection without creating a phanto
   render(<AgentWorkspace nodes={[]} edges={[]} selectedIds={[]} runs={{}} running={false}
     onFocusNode={vi.fn()} onSearch={vi.fn()} onAddAgent={add} onCreateTemplate={vi.fn()}
     modelShelf={<p>模型选择入口</p>} loadWorkspaceAgents={async () => ({ items: [] })} onAddWorkspaceAgent={add}><div /></AgentWorkspace>);
-  const addBot = screen.getByRole('button', { name: '添加 Bot', exact: true });
-  addBot.focus();
-  fireEvent.click(addBot);
+  const trigger = screen.getByRole('button', { name: '添加 Bot', exact: true });
+  trigger.focus();
+  fireEvent.click(trigger);
   fireEvent.click(await screen.findByRole('button', { name: '去选择模型' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(document.querySelector('.awwo-workspace')).toHaveClass('is-model-library-open');
-  expect(addBot).toHaveFocus();
+  expect(trigger).toHaveFocus();
   expect(add).not.toHaveBeenCalled();
 });
 it('opens the correct mobile drawer from the empty-canvas guidance', () => {
@@ -84,7 +84,7 @@ it('expands an initially collapsed model rail before opening its mobile drawer',
     return <AgentWorkspace nodes={[]} edges={[]} selectedIds={[]} runs={{}} running={false}
       onFocusNode={vi.fn()} onSearch={vi.fn()} onAddAgent={vi.fn()} onCreateTemplate={vi.fn()}
       modelShelf={<div hidden={collapsed}><button type="button">测试模型</button></div>}
-      onExpandModelRail={() => setCollapsed(false)}><div /></AgentWorkspace>;
+      modelRailCollapsed={collapsed} onExpandModelRail={() => setCollapsed(false)}><div /></AgentWorkspace>;
   }
   render(<MobileCanvas />);
   expect(screen.queryByRole('button', { name: '测试模型' })).toBeNull();

@@ -40,6 +40,11 @@ type App struct {
 	sendReset   func(context.Context, string, string) error
 	mailSlots   chan struct{}
 	runEvents   runEventNotifier
+	// capabilityNotes remembers which cleared worker capabilities were already logged,
+	// bounded by capabilityNoteLimit; capabilityNotesCapped marks the one-time notice.
+	capabilityNotes       sync.Map
+	capabilityNoteCount   atomic.Int64
+	capabilityNotesCapped atomic.Bool
 }
 type rateEntry struct {
 	start time.Time

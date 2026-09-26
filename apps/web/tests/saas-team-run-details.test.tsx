@@ -65,6 +65,17 @@ describe('durable team run details', () => {
     expect(fetcher).toHaveBeenCalledTimes(4); await flushTimers(10000); expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
+  it('explains named run and member failures in the reader\'s language and keeps unknown ones verbatim', async () => {
+    const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url === path
+      ? { ...record('failed'), error: 'provider_auth_failed' }
+      : { items: [turn({ status: 'failed', error: 'model_refused' }), turn({ id: 'turn-b', ordinal: 2, status: 'failed', error: 'provider_diagnostic_42' })] }));
+    vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true }));
+    expect(await screen.findByText('The model provider rejected the configured credentials. Check the API key of this model connection.')).toBeInTheDocument();
+    expect(screen.getByText('The model declined this request. Adjust the task and try again.')).toBeInTheDocument();
+    expect(screen.getByText('provider_diagnostic_42')).toBeInTheDocument();
+    expect(screen.queryByText('model_refused')).toBeNull();
+  });
+
   it.each(['run', 'tenant'])('clears previous records immediately on %s switch and rejects a late old response', async change => {
     let delayed = false; let resolveOld!: (value: Response) => void; let oldSignal: AbortSignal | undefined;
     const fetcher = vi.fn(async (url: string, init: RequestInit = {}) => {

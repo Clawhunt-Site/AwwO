@@ -16,6 +16,8 @@ function Harness() {
 it('keeps Session management and chat inside the node, with deliverables collapsed initially', () => {
   render(<Harness />);
   const tile = screen.getByTestId('canvas-tile-workbench');
+  expect(within(tile).queryByRole('navigation', { name: 'Session 管理' })).toBeNull();
+  fireEvent.click(within(tile).getByRole('button', { name: '展开 Session 列表' }));
   expect(within(tile).getByRole('navigation', { name: 'Session 管理' })).toBeTruthy();
   expect(within(tile).getByTestId('composer-input')).toBeTruthy();
   expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
@@ -28,6 +30,7 @@ it('keeps Session management and chat inside the node, with deliverables collaps
 it('creates and switches real local Sessions while retaining each unsent draft', () => {
   render(<Harness />);
   fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '第一段草稿' } });
+  fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
   fireEvent.click(screen.getByRole('button', { name: '新建 Session' }));
   expect(screen.getByTestId('composer-input')).toHaveValue('');
   fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '第二段草稿' } });

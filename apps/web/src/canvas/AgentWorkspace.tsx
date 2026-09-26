@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type DragEventHandler } from 'react';
-import { ArrowRight, Bot, ChevronRight, Code2, Cpu, Database, FolderOpen, GitBranch, Layers3, Menu, MessageSquare, Plus, Search, Settings2, TerminalSquare, X } from 'lucide-react';
+import { ArrowRight, Bot, ChevronRight, Code2, Cpu, Database, FolderOpen, GitBranch, Layers3, Menu, MessageSquare, PanelRightClose, PanelRightOpen, Plus, Search, Settings2, TerminalSquare, X } from 'lucide-react';
+import { RAIL_BOT_KEY, isDesktopStage, readRailCollapsed, writeRailCollapsed } from './railState';
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
 import type { RunNodeStatus } from './runGraph';
 import { AGENT_TEMPLATE_VERSION, getAgentTemplateForNode, getAgentTemplates, type AgentTemplateId } from './agentTemplates';
@@ -35,17 +36,21 @@ export interface AgentWorkspaceProps {
   accountControl?: ReactNode;
   assistant?: ReactNode;
   modelShelf?: ReactNode;
-  onExpandModelRail?: () => void;
   personaControls?: ReactNode;
   onModelDragOver?: DragEventHandler<HTMLDivElement>;
   onModelDrop?: DragEventHandler<HTMLDivElement>;
   welcome?: ReactNode;
   assistantOpen?: boolean;
   onToggleAssistant?: () => void;
+  /** Fired after a side rail collapses or expands, so the host can refit the stage. */
+  onRailsChange?: () => void;
+  /** Whether the host's model rail is collapsed right now, and how to expand it. */
+  modelRailCollapsed?: boolean;
+  onExpandModelRail?: () => void;
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, modelShelf, onExpandModelRail, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -59,13 +64,23 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 900);
   const [navExpanded, setNavExpanded] = useState(false);
   const [botSource, setBotSource] = useState<'canvas' | 'workspace' | 'market'>('canvas');
+  // The desktop Bot rail starts collapsed so the stage gets the width; the choice is remembered
+  // per browser. The mobile drawer is a different surface and always shows the full list.
+  const [botCollapsed, setBotCollapsed] = useState(() => readRailCollapsed(RAIL_BOT_KEY, isDesktopStage()));
+  const botRailCollapsed = Boolean(modelShelf) && !mobile && botCollapsed;
+  const toggleBotRail = () => {
+    const next = !botCollapsed;
+    setBotCollapsed(next);
+    writeRailCollapsed(RAIL_BOT_KEY, next);
+    onRailsChange?.();
+  };
   useEffect(() => { setModelLibraryOpen(false); }, [nodes.length]);
   const libraryRef = useRef<HTMLElement>(null);
-  const skipLibraryReturnFocus = useRef(false);
   const modelSidebarRef = useRef<HTMLElement>(null);
   const botSidebarRef = useRef<HTMLElement>(null);
   const modelOpenButtonRef = useRef<HTMLButtonElement>(null);
   const botOpenButtonRef = useRef<HTMLButtonElement>(null);
+  const skipLibraryReturnFocus = useRef(false);
   useEffect(() => {
     const resize = () => {
       const next = window.innerWidth <= 900; setMobile(next);
@@ -92,8 +107,8 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     document.addEventListener('keydown', trap);
     return () => {
       document.removeEventListener('keydown', trap);
-      // Drawer content or the library dialog may have been removed by the transition. Return
-      // focus to the stable header opener once the main area is interactive again.
+      // A drawer may remove the previously focused control. Restore focus to a stable header
+      // opener once the main area becomes interactive again.
       const opener = modelLibraryOpen ? modelOpenButtonRef.current : botOpenButtonRef.current;
       if (window.innerWidth <= 900 && opener?.isConnected && !opener.closest('[inert]')) opener.focus();
       else if (previous?.isConnected && !previous.closest('[inert]') && previous.getClientRects().length > 0) previous.focus();
@@ -123,31 +138,57 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     document.addEventListener('keydown', trap);
     return () => {
       document.removeEventListener('keydown', trap);
-      if (!skipLibraryReturnFocus.current && previous?.isConnected) previous.focus();
-      skipLibraryReturnFocus.current = false;
+      if (skipLibraryReturnFocus.current) { skipLibraryReturnFocus.current = false; return; }
+      if (previous?.isConnected) previous.focus();
     };
   }, [libraryOpen]);
   const visible = nodes.filter(n => n.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const connected = nodes.filter(n => n.kind === 'session' && n.binding).length;
   const pick = (id: AgentTemplateId) => { if (readOnly) return; onAddAgent(id); setLibraryOpen(false); setSidebarOpen(false); };
 
-  const revealModelLibrary = () => { onExpandModelRail?.(); setSidebarOpen(false); setModelLibraryOpen(true); };
-  const revealBotList = () => { setModelLibraryOpen(false); setSidebarOpen(true); };
-  const railLink = (label: string, open: () => void) => mobile
+  // The empty-canvas hint points at the two rails. A rail that is collapsed (desktop) or hidden in a
+  // drawer (narrow stage) is not where the hint says, so its name becomes the control that reveals it.
+  const revealModelRail = () => {
+    if (modelRailCollapsed) onExpandModelRail?.();
+    setModelLibraryOpen(true); setSidebarOpen(false);
+  };
+  const openModelRail = mobile ? revealModelRail : modelRailCollapsed && onExpandModelRail ? onExpandModelRail : null;
+  const openBotRail = mobile ? () => { setSidebarOpen(true); setModelLibraryOpen(false); } : botRailCollapsed ? toggleBotRail : null;
+  const railLink = (label: string, open: (() => void) | null) => open
     ? <button type="button" className="awwo-rail-link" onClick={open}>{label}</button>
-    : label;
+    : <>{label}</>;
   const emptyRailHint = locale === 'zh'
-    ? <>先在右侧{railLink('Bot 清单', revealBotList)}选择人设（可选），再从左侧{railLink('模型栏', revealModelLibrary)}添加模型；也可以直接选用已有 Bot。</>
-    : <>Optionally choose a persona in the {railLink('Bot list', revealBotList)} on the right, then add a model from the {railLink('model rail', revealModelLibrary)} on the left. You can also use an existing Bot.</>;
+    ? <>先在右侧{railLink('Bot 清单', openBotRail)}选择人设（可选），再从左侧{railLink('模型栏', openModelRail)}添加模型；也可以直接选用已有 Bot。</>
+    : <>Optionally choose a persona in the {railLink('Bot list', openBotRail)} on the right, then add a model from the {railLink('model rail', openModelRail)} on the left. You can also use an existing Bot.</>;
+
+  const botRailToggle = modelShelf ? <button type="button" className="awwo-icon-button awwo-rail-toggle" aria-expanded={!botRailCollapsed}
+    aria-label={t(botRailCollapsed ? 'workspace.expandBots' : 'workspace.collapseBots')} title={t(botRailCollapsed ? 'workspace.expandBots' : 'workspace.collapseBots')}
+    onClick={toggleBotRail}>{botRailCollapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}</button> : null;
+
+  // One header for both rail states: the toggle keeps its child slot, so collapsing or expanding
+  // updates the very button that was pressed instead of replacing it, and keyboard focus stays on it.
+  const botHeader = <header className="awwo-bot-header">
+    {!botRailCollapsed && <div><span className="awwo-eyebrow">YOUR TEAM</span><h2><Bot size={20} />{locale === 'zh' ? 'Bot 清单' : 'Bots'}</h2></div>}
+    {botRailToggle}
+    {!botRailCollapsed && <button type="button" className="awwo-icon-button awwo-mobile-menu" aria-label={t('workspace.closeNavigation')} onClick={() => setSidebarOpen(false)}><X size={18} /></button>}
+  </header>;
+
   const startNewBot = modelShelf ? () => {
-    if (libraryOpen && mobile) skipLibraryReturnFocus.current = true;
+    if (mobile && libraryOpen) skipLibraryReturnFocus.current = true;
     setLibraryOpen(false);
-    revealModelLibrary();
+    revealModelRail();
   } : undefined;
   const addBotLabel = modelShelf ? (locale === 'zh' ? '添加 Bot' : 'Add Bot') : t('workspace.addAgent');
-  const botSidebar = (
+
+  const botSidebar = botRailCollapsed ? (
+    // Collapsed rail: identity, the expand control and the add-Bot affordance only.
+    <aside ref={botSidebarRef} className="awwo-sidebar awwo-bot-sidebar is-collapsed" aria-label={locale === 'zh' ? 'Bot 清单' : 'Bot list'}>
+      {botHeader}
+      <button className="awwo-new-agent" aria-label={addBotLabel} title={addBotLabel} disabled={readOnly || running} onClick={() => { setSidebarOpen(false); setLibraryOpen(true); }}><Plus size={17} /></button>
+    </aside>
+  ) : (
 <aside ref={botSidebarRef} className={`awwo-sidebar${modelShelf ? ' awwo-bot-sidebar' : ''}`} aria-label={modelShelf ? (locale === 'zh' ? 'Bot 清单' : 'Bot list') : t('workspace.navigation')}>
-      {modelShelf ? <header className="awwo-bot-header"><div><span className="awwo-eyebrow">YOUR TEAM</span><h2><Bot size={20} />{locale === 'zh' ? 'Bot 清单' : 'Bots'}</h2></div><button type="button" className="awwo-icon-button awwo-mobile-menu" aria-label={t('workspace.closeNavigation')} onClick={() => setSidebarOpen(false)}><X size={18} /></button></header> : <>
+      {modelShelf ? botHeader : <>
       <div className="awwo-brand"><button className="awwo-brand-mark" aria-label={t(navExpanded ? 'workspace.collapseNavigation' : 'workspace.expandNavigation')} title={t('workspace.navigationTitle')} onClick={() => setNavExpanded(!navExpanded)}><GitBranch size={23} /></button><span>AwwO</span><span className="awwo-brand-caption">{t('workspace.caption')}</span></div>
       <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{workspaceName || t('workspace.name')}</strong><small>{workspaceCaption || t('workspace.local')}</small></div></div>
       </>}
@@ -194,8 +235,8 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     {!modelShelf && botSidebar}
     <main className="awwo-main" inert={mobile && (modelLibraryOpen || sidebarOpen)}>
       <header className="awwo-header">
-        {modelShelf && <button ref={modelOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={locale === 'zh' ? '打开模型库' : 'Open model library'} aria-expanded={modelLibraryOpen} onClick={revealModelLibrary}><Cpu size={19} /></button>}
-        <button ref={botOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={t('workspace.openNavigation')} aria-expanded={sidebarOpen} onClick={revealBotList}><Menu size={19} /></button>
+        {modelShelf && <button ref={modelOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={locale === 'zh' ? '打开模型库' : 'Open model library'} aria-expanded={modelLibraryOpen} onClick={revealModelRail}><Cpu size={19} /></button>}
+        <button ref={botOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={t('workspace.openNavigation')} aria-expanded={sidebarOpen} onClick={() => { setSidebarOpen(true); setModelLibraryOpen(false); }}><Menu size={19} /></button>
         <div className="awwo-page-title"><div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{workspaceName || t('workspace.name')}</span></div></div>
         <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{accountControl}</div>
       </header>

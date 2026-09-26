@@ -1,8 +1,10 @@
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
 
 export const COMPACT_SESSION_SIZE = { w: 260, h: 128 } as const;
-export const FOCUSED_SESSION_MIN_SIZE = { w: 560, h: 420 } as const;
-export const DELIVERY_DRAWER_WIDTH = 400;
+// Slim focused geometry: a focused node plus its delivery drawer has to fit a laptop stage with
+// both side rails open. The drawer width is mirrored by .awwo-node-delivery-drawer in awwo-node.css.
+export const FOCUSED_SESSION_MIN_SIZE = { w: 520, h: 380 } as const;
+export const DELIVERY_DRAWER_WIDTH = 320;
 
 /**
  * Geometry for the current canvas view only. Persisted workspace sizes and session contents

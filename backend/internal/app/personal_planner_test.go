@@ -58,7 +58,31 @@ func TestPostgresPersonalOpenAIPlannerUsesActorCredential(t *testing.T) {
 	if catalog["plannerAvailable"] != false {
 		t.Fatal("revoked planner remained available")
 	}
-	h.request(t, owner, "POST", "/tenants/"+tid+"/canvases/"+cid+"/plan", map[string]any{"prompt": "prepare a plan", "context": "", "operationId": "personal-revoked-plan"}, 409)
+	rejected := h.request(t, owner, "POST", "/tenants/"+tid+"/canvases/"+cid+"/plan", map[string]any{"prompt": "prepare a plan", "context": "", "operationId": "personal-revoked-plan"}, 409)
+	if rejected["error"].(map[string]any)["code"] != "personal_engine_required" {
+		t.Fatal("revoked personal engine did not identify the missing connection", rejected)
+	}
+}
+
+func TestPostgresPersonalPlannerPreservesWorkerOutageWhenAnotherRuntimeHasNoKey(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "userCredentials": true})
+			return
+		}
+		t.Errorf("unexpected worker call %s", r.URL.Path)
+	}))
+	defer worker.Close()
+	h := newHarness(t, worker.URL)
+	mockPersonalDiscovery(t, h)
+	h.a.cfg.OpenAIAgentsURL, h.a.cfg.OpenAIAgentsToken = "http://127.0.0.1:1", h.cfg.PIToken
+	owner, tid, _ := h.register(t, "planner-worker-down@example.test")
+	h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "llmgate", "runtime": runtimeOpenAIAgents, "apiKey": "synthetic-personal-secret"}, 201)
+	cid, _ := setupFixture(t, h, owner, tid, 1)
+	rejected := h.request(t, owner, "POST", "/tenants/"+tid+"/canvases/"+cid+"/plan", map[string]any{"prompt": "prepare a plan", "context": "", "operationId": "personal-worker-down"}, 503)
+	if rejected["error"].(map[string]any)["code"] != "runtime_unavailable" {
+		t.Fatal("worker outage was mistaken for a missing personal engine", rejected)
+	}
 }
 
 func TestPostgresPersonalJevCannotUseOperatorCredentials(t *testing.T) {

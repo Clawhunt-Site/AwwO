@@ -1,0 +1,39 @@
+{
+  "accept": [
+    "summary",
+    "field-abc123-1",
+    "a",
+    "A_b-9",
+    "-",
+    "_",
+    "hasOwnProperty",
+    "toString",
+    "Constructor",
+    "__PROTO__",
+    "Prototype_",
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-",
+    "-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_"
+  ],
+  "reject": [
+    "",
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-a",
+    "a\"b",
+    "a\\b",
+    "\u5b57\u6bb5",
+    "caf\u00e9",
+    "a b",
+    "a.b",
+    "a:b",
+    "a/b",
+    "\u0001",
+    "a\tb",
+    "abc\n",
+    "\u007f",
+    "a\u0085",
+    "a\u200bb",
+    "__proto__",
+    "prototype",
+    "constructor"
+  ],
+  "schemaReserveBytes": 8192
+}

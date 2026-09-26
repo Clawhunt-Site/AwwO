@@ -1,0 +1,246 @@
+{
+  "bothRuntimes": {
+    "body": {
+      "available": true,
+      "configured": true,
+      "engine": "pi",
+      "limits": null,
+      "modelConnectivityVerified": false,
+      "models": [
+        {
+          "defaultReasoningEffort": "",
+          "id": "test-model",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "pi"
+        },
+        {
+          "defaultReasoningEffort": "",
+          "id": "pi-only",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "pi"
+        },
+        {
+          "defaultReasoningEffort": "",
+          "id": "shared",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "pi"
+        },
+        {
+          "defaultReasoningEffort": "low",
+          "id": "oa-default",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [
+            "low",
+            "high"
+          ],
+          "runtime": "openai-agents"
+        },
+        {
+          "defaultReasoningEffort": "",
+          "id": "oa-only",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "openai-agents"
+        },
+        {
+          "defaultReasoningEffort": "",
+          "id": "shared",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "openai-agents"
+        }
+      ],
+      "plannerAvailable": true,
+      "plannerRuntime": "pi",
+      "runtimes": [
+        {
+          "available": true,
+          "configured": true,
+          "defaultModel": "test-model",
+          "effortInputMode": "select",
+          "id": "pi",
+          "name": "Pi",
+          "supportsEffortSelection": false,
+          "tools": []
+        },
+        {
+          "available": true,
+          "configured": true,
+          "defaultModel": "oa-default",
+          "effortInputMode": "select",
+          "id": "openai-agents",
+          "name": "OpenAI Agents",
+          "supportsEffortSelection": true,
+          "tools": [
+            "calculator",
+            "current_time"
+          ]
+        }
+      ]
+    },
+    "status": 200
+  },
+  "emptyAllowlist": {
+    "body": {
+      "available": true,
+      "configured": true,
+      "engine": "pi",
+      "limits": null,
+      "modelConnectivityVerified": false,
+      "models": [],
+      "plannerAvailable": false,
+      "plannerRuntime": "pi",
+      "reason": "No model is available to this workspace",
+      "runtimes": [
+        {
+          "available": true,
+          "configured": true,
+          "defaultModel": "",
+          "effortInputMode": "select",
+          "id": "pi",
+          "name": "Pi",
+          "supportsEffortSelection": false,
+          "tools": []
+        },
+        {
+          "available": true,
+          "configured": true,
+          "defaultModel": "",
+          "effortInputMode": "select",
+          "id": "openai-agents",
+          "name": "OpenAI Agents",
+          "supportsEffortSelection": false,
+          "tools": [
+            "calculator",
+            "current_time"
+          ]
+        }
+      ]
+    },
+    "status": 200
+  },
+  "piOnly": {
+    "body": {
+      "available": true,
+      "configured": true,
+      "engine": "pi",
+      "limits": null,
+      "modelConnectivityVerified": false,
+      "models": [
+        {
+          "defaultReasoningEffort": "",
+          "id": "test-model",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "pi"
+        },
+        {
+          "defaultReasoningEffort": "",
+          "id": "pi-only",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "pi"
+        },
+        {
+          "defaultReasoningEffort": "",
+          "id": "shared",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "pi"
+        }
+      ],
+      "plannerAvailable": true,
+      "plannerRuntime": "pi",
+      "runtimes": [
+        {
+          "available": true,
+          "configured": true,
+          "defaultModel": "test-model",
+          "effortInputMode": "select",
+          "id": "pi",
+          "name": "Pi",
+          "supportsEffortSelection": false,
+          "tools": []
+        },
+        {
+          "available": false,
+          "configured": false,
+          "effortInputMode": "select",
+          "id": "openai-agents",
+          "name": "OpenAI Agents",
+          "reason": "Runtime is not configured",
+          "supportsEffortSelection": false,
+          "tools": []
+        }
+      ]
+    },
+    "status": 200
+  },
+  "restrictedAllowlist": {
+    "body": {
+      "available": true,
+      "configured": true,
+      "engine": "pi",
+      "limits": null,
+      "modelConnectivityVerified": false,
+      "models": [
+        {
+          "defaultReasoningEffort": "",
+          "id": "test-model",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "pi"
+        },
+        {
+          "defaultReasoningEffort": "",
+          "id": "oa-only",
+          "name": "",
+          "provider": "",
+          "reasoningEfforts": [],
+          "runtime": "openai-agents"
+        }
+      ],
+      "plannerAvailable": true,
+      "plannerRuntime": "pi",
+      "runtimes": [
+        {
+          "available": true,
+          "configured": true,
+          "defaultModel": "test-model",
+          "effortInputMode": "select",
+          "id": "pi",
+          "name": "Pi",
+          "supportsEffortSelection": false,
+          "tools": []
+        },
+        {
+          "available": true,
+          "configured": true,
+          "defaultModel": "oa-only",
+          "effortInputMode": "select",
+          "id": "openai-agents",
+          "name": "OpenAI Agents",
+          "supportsEffortSelection": false,
+          "tools": [
+            "calculator",
+            "current_time"
+          ]
+        }
+      ]
+    },
+    "status": 200
+  }
+}

@@ -5,6 +5,7 @@ import test from 'node:test';
 import { createOpenAIAgentsServer } from './server.mjs';
 import { startIsolatedRun } from './runner.mjs';
 import { configuration, fixture, request } from './test-support.mjs';
+import { deliverySchemaBytes } from './delivery-contract.mjs';
 
 async function serve(t, config, options) {
   const app = createOpenAIAgentsServer(config, options);
@@ -99,4 +100,51 @@ test('terminal IPC does not release a slot until forced process teardown and dir
   const seen = []; let released = false;
   const handle = await startIsolatedRun({ config:configuration(),request:request(),onExit(){released=true;},onEvent(event){if(event.type==='completed') assert.equal(released,true);seen.push(event);} },{taskURL:new URL('./terminal-exit-fixture.mjs',import.meta.url)});
   await handle.done; assert.equal(seen.at(-1).type,'completed'); assert.throws(()=>process.kill(handle.pid,0),/ESRCH/); await assert.rejects(access(handle.directory));
+});
+
+const CONTRACT = Object.freeze({ version: 1, fields: [{ id: 'summary', type: 'text', required: true }, { id: 'score', type: 'number', required: false }] });
+
+test('structured delivery admission refuses before launching: unflagged profile, tools, closed grammar and envelope bytes', { timeout: 5000 }, async t => {
+  let unexpected = 0;
+  const off = await serve(t, configuration(), { startRun: () => { unexpected++; throw new Error('Unexpected launch'); } });
+  const refused = await off.send(request({ outputContract: CONTRACT }));
+  assert.equal(refused.status, 400);
+  assert.deepEqual(await refused.json(), { error: { code: 'OUTPUT_CONTRACT_NOT_SUPPORTED', message: 'Select a model whose profile enables structured delivery output, or send no output contract.' } });
+  assert.equal(unexpected, 0); assert.equal((await off.health()).activeRuns, 0);
+
+  const launched = [];
+  const config = configuration({ AWWO_OPENAI_AGENTS_STRUCTURED_OUTPUT: 'true', AWWO_OPENAI_AGENTS_CONTEXT_WINDOW: '4096', AWWO_OPENAI_AGENTS_MAX_TOKENS: '128',
+    AWWO_OPENAI_AGENTS_TOOLS_JSON: '["calculator"]', SECOND_KEY: 'k',
+    AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([{ id: 'plain', provider: 'openai', model: 'plain-model', apiKeyEnv: 'SECOND_KEY' }]) });
+  const s = await serve(t, config, { startRun: async ({ request: input, onEvent, onExit }) => {
+    launched.push(input);
+    setTimeout(() => { onExit(); onEvent({ type: 'completed', text: '{"summary":"ok"}' }); }, 0);
+    return { done: Promise.resolve(), cancel() {} };
+  } });
+  let sequence = 0;
+  const send = (input, overrides) => { sequence++; return s.send({ ...input, runId: `run-${sequence}`, sessionId: `session-${sequence}` }, overrides); };
+  const budget = config.contextWindow - config.maxTokens - 256 - 32;
+  const schemaBytes = deliverySchemaBytes(CONTRACT);
+  const rawPrototype = JSON.stringify(request({ runId: 'run-raw', sessionId: 'session-raw' })).replace(/}$/, ',"outputContract":{"version":1,"fields":[{"id":"summary","type":"text","required":true}],"__proto__":{"polluted":true}}}');
+  for (const [input, status, code, overrides] of [
+    [request({ model: 'plain', outputContract: CONTRACT }), 400, 'OUTPUT_CONTRACT_NOT_SUPPORTED'],
+    [request({ outputContract: CONTRACT, tools: ['calculator'] }), 400, 'INVALID_INPUT'],
+    [request({ model: 'plain', outputContract: CONTRACT, tools: ['calculator'] }), 400, 'INVALID_INPUT'],
+    [request({ outputContract: { version: 1, fields: [{ id: '__proto__', type: 'text', required: true }] } }), 400, 'INVALID_INPUT'],
+    [request({ outputContract: { version: 1, fields: [{ id: 'constructor', type: 'text', required: true }] } }), 400, 'INVALID_INPUT'],
+    [request({ outputContract: { type: 'object', properties: { summary: { type: 'string' } } } }), 400, 'INVALID_INPUT'],
+    [request({ outputContract: null }), 400, 'INVALID_INPUT'],
+    [request(), 400, 'INVALID_INPUT', { body: rawPrototype }],
+    [request({ prompt: 'x'.repeat(budget - schemaBytes + 1), outputContract: CONTRACT }), 413, 'CONTEXT_LIMIT'],
+  ]) {
+    const res = await send(input, overrides);
+    assert.equal(res.status, status, code); assert.equal((await res.json()).error.code, code);
+  }
+  assert.equal(launched.length, 0); assert.equal((await s.health()).activeRuns, 0);
+  // The same prompt fits without a contract, and the contract fits at exactly its envelope budget.
+  for (const input of [request({ prompt: 'x'.repeat(budget - schemaBytes), outputContract: CONTRACT }), request({ prompt: 'x'.repeat(budget - schemaBytes + 1) }), request({ outputContract: CONTRACT, tools: [] })]) {
+    const res = await send(input);
+    assert.equal(res.status, 200); assert.equal((await events(res)).at(-1).type, 'completed');
+  }
+  assert.deepEqual(launched.map(item => item.outputContract), [CONTRACT, undefined, CONTRACT]);
 });

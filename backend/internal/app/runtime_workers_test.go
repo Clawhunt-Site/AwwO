@@ -123,6 +123,11 @@ type runtimeCall struct {
 	// EffortPresent records whether the request carried an effort key at all, so
 	// "no level" cannot be confused with an explicit empty string.
 	EffortPresent bool `json:"-"`
+	// OutputContract and ContractPresent separate "no contract key" from a key
+	// carrying null or an empty object, so a path that must send nothing can be
+	// distinguished from one that sends an empty envelope.
+	OutputContract  *outputContract `json:"outputContract"`
+	ContractPresent bool            `json:"-"`
 }
 
 func runtimeProvider(t *testing.T, runtime string, handle func(http.ResponseWriter, *http.Request, runtimeCall)) *httptest.Server {
@@ -167,6 +172,12 @@ func runtimeProvider(t *testing.T, runtime string, handle func(http.ResponseWrit
 			return
 		}
 		_, call.EffortPresent = keys["effort"]
+		_, call.ContractPresent = keys["outputContract"]
+		if call.ContractPresent {
+			// This worker's catalog advertises no structured-output model, so a contract
+			// here would mean the gate leaked rather than that a workspace enabled it.
+			t.Error("request carried an output contract to a worker without the capability")
+		}
 		if runtime == runtimePI && call.EffortPresent {
 			t.Error("Pi request included an effort field")
 		}

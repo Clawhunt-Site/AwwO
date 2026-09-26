@@ -232,7 +232,7 @@ button.saas-primary:hover:not(:disabled), .saas-primary-link:hover { background:
 .awwo-status-dot.is-running { background: var(--agent-running); }
 .awwo-status-dot.is-failed, .awwo-status-dot.is-blocked { background: var(--saas-danger); }
 .awwo-list-empty { color: var(--saas-muted); font-size: 12px; padding: 18px 10px; }
-.awwo-workspace-note, .awwo-sidebar-footer > button, :root[data-theme='dark'] .awwo-workspace-note, :root[data-theme='dark'] .awwo-sidebar-footer > button { color: var(--saas-muted); font-size: 11px; }
+.awwo-workspace-note, .awwo-sidebar-footer > button, :root[data-theme='dark'] .awwo-workspace-note, :root[data-theme='dark'] .awwo-sidebar-footer > button { color: var(--saas-muted); }
 .awwo-statusbar, :root[data-theme='dark'] .awwo-statusbar { background: var(--saas-card); color: var(--saas-muted); min-height: 30px; font-size: 10px; padding-inline: 18px; }
 .awwo-status-divider { color: var(--saas-border); }
 .awwo-view-tools { border-radius: 13px; padding: 5px; background: var(--saas-card); box-shadow: var(--ios-shadow); }
@@ -320,6 +320,14 @@ button.saas-primary:hover:not(:disabled), .saas-primary-link:hover { background:
   padding: 0 14px 14px;
   overflow: hidden;
 }
+/* Collapsed Bot rail: the mirror of the collapsed model sidebar (70px), keeping the add-Bot control. */
+.awwo-sidebar.awwo-bot-sidebar.is-collapsed { flex: 0 0 70px; width: 70px; padding-inline: 8px; }
+.awwo-sidebar.awwo-bot-sidebar.is-collapsed > header { justify-content: center; margin-inline: -8px; padding-inline: 8px; }
+.awwo-sidebar.awwo-bot-sidebar.is-collapsed .awwo-new-agent { width: 44px; margin: 16px auto; padding: 9px 0; }
+.awwo-rail-toggle { flex-shrink: 0; }
+/* A rail named in the empty-canvas hint while it is collapsed: the name itself reveals it. */
+.awwo-rail-link { border: 0; background: none; padding: 0; margin: 0 2px; font: inherit; color: var(--saas-accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.awwo-workspace .awwo-rail-link:focus-visible { outline: 2px solid var(--saas-accent); outline-offset: 2px; border-radius: 3px; }
 .awwo-bot-sidebar > header, .awwo-bot-sidebar > .awwo-bot-heading {
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
   min-height: 58px; flex-shrink: 0; border-bottom: 1px solid var(--saas-border); margin-inline: -14px; padding: 12px 18px;
@@ -457,6 +465,9 @@ button.saas-primary:hover:not(:disabled), .saas-primary-link:hover { background:
   .awwo-workspace.has-model-library .awwo-model-menu,
   .awwo-workspace.has-model-library .awwo-mobile-menu,
   .awwo-workspace.has-model-library .awwo-bot-close { display: inline-flex; }
+  /* Mobile rails are drawers with their own close control; the desktop collapse toggles are not one. */
+  .awwo-workspace.has-model-library .awwo-rail-toggle,
+  .awwo-workspace.has-model-library .model-persona-shelf-toggle { display: none; }
   .awwo-model-sidebar:has(.model-persona-shelf.is-collapsed) { flex-basis: 70px; width: 70px; }
 }
 @media (max-width: 760px) {

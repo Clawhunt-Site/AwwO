@@ -1,10 +1,11 @@
 """Personal model admission: no shared-key fallback or cross-request mutation."""
 import copy
+import json
 import unittest
 from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 
-from config import bind_user_model, load_config, public_health
+from config import ConfigError, bind_user_model, load_config, public_health
 from server import create_app
 
 
@@ -50,6 +51,52 @@ class PersonalCredentialsTests(unittest.TestCase):
         config = load_config({"AWWO_OPENAI_AGENTS_TOKEN": "t" * 32})
         with self.assertRaises(ValueError):
             bind_user_model(config, self.body)
+
+    def test_gate_only_rejects_direct_provider_even_with_valid_endpoint(self):
+        env = {"AWWO_CREDENTIAL_MODE": "user", "AWWO_LLMGATE_ONLY": "true", "AWWO_OPENAI_AGENTS_TOKEN": "t" * 32}
+        config = load_config(env)
+        self.assertTrue(config.ready)
+        self.assertEqual(config.provider, "llmgate")
+        self.assertTrue(public_health(config)["llmgateOnly"])
+        bind_user_model(config, self.body)
+        legacy_alias = load_config({**env, "AWWO_OPENAI_AGENTS_PROVIDER": "openai",
+                                    "AWWO_OPENAI_AGENTS_BASE_URL": "https://api.clawhunt.site/v1"})
+        self.assertEqual(legacy_alias.base_url, "https://api.clawhunt.site/v1")
+        direct = copy.deepcopy(self.body)
+        direct["userModel"].update(provider="openai", baseURL="https://api.openai.com/v1")
+        with self.assertRaises(ValueError):
+            bind_user_model(config, direct)
+        for override in ({"AWWO_OPENAI_AGENTS_PROVIDER": "openai"}, {"AWWO_OPENAI_AGENTS_BASE_URL": "https://api.openai.com/v1"}, {"AWWO_LLMGATE_ONLY": "yes"}):
+            with self.subTest(override=override), self.assertRaises(ConfigError):
+                load_config({**env, **override})
+        direct_profile = [{"id": "direct", "provider": "openai", "model": "test-model",
+                           "baseURL": "https://api.openai.com/v1", "apiKeyEnv": "SYNTHETIC_KEY"}]
+        with self.assertRaises(ConfigError):
+            load_config({**env, "SYNTHETIC_KEY": "synthetic-key",
+                         "AWWO_OPENAI_AGENTS_MODELS_JSON": json.dumps(direct_profile)})
+
+    def test_gate_only_operator_requires_gate_endpoint_for_all_profiles(self):
+        env = {"AWWO_CREDENTIAL_MODE": "operator", "AWWO_LLMGATE_ONLY": "true",
+               "AWWO_OPENAI_AGENTS_TOKEN": "t" * 32, "AWWO_OPENAI_AGENTS_MODEL": "gate-model",
+               "AWWO_OPENAI_AGENTS_API_KEY": "synthetic-operator-key"}
+        config = load_config(env)
+        self.assertTrue(config.ready)
+        self.assertFalse(config.user_credentials)
+        self.assertEqual(config.models[0].base_url, "https://api.clawhunt.site/v1")
+        self.assertTrue(public_health(config)["llmgateOnly"])
+        alias = load_config({**env, "AWWO_OPENAI_AGENTS_PROVIDER": "openai",
+                             "AWWO_OPENAI_AGENTS_BASE_URL": "https://api.clawhunt.site/v1"})
+        self.assertTrue(alias.ready)
+        self.assertEqual(alias.models[0].base_url, "https://api.clawhunt.site/v1")
+        for override in ({"AWWO_OPENAI_AGENTS_BASE_URL": "https://api.openai.com/v1"},
+                         {"AWWO_OPENAI_AGENTS_PROVIDER": "openai"}):
+            with self.subTest(override=override), self.assertRaises(ConfigError):
+                load_config({**env, **override})
+        direct = [{"id": "direct", "provider": "openai", "model": "direct-model",
+                   "baseURL": "https://api.openai.com/v1", "apiKeyEnv": "SYNTHETIC_KEY"}]
+        with self.assertRaises(ConfigError):
+            load_config({**env, "SYNTHETIC_KEY": "synthetic-key",
+                         "AWWO_OPENAI_AGENTS_MODELS_JSON": json.dumps(direct)})
 
 
 class PersonalHTTPTests(unittest.IsolatedAsyncioTestCase):

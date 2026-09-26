@@ -1,0 +1,136 @@
+{
+  "allowlist": {
+    "body": {
+      "allowedModels": [
+        "oa-default",
+        "test-model"
+      ],
+      "createdAt": "<timestamp>",
+      "id": "<tenant:admin-target>",
+      "maxConcurrentRuns": 3,
+      "maxRunsPerDay": 250,
+      "name": "Workspace",
+      "status": "active"
+    },
+    "status": 200
+  },
+  "allowlistCleared": {
+    "body": {
+      "allowedModels": null,
+      "createdAt": "<timestamp>",
+      "id": "<tenant:admin-target>",
+      "maxConcurrentRuns": 3,
+      "maxRunsPerDay": 250,
+      "name": "Workspace",
+      "status": "active"
+    },
+    "status": 200
+  },
+  "emptyPatch": {
+    "body": {
+      "error": {
+        "code": "invalid_input",
+        "details": {},
+        "message": "Invalid tenant status or quota",
+        "requestId": "<request-id>"
+      }
+    },
+    "status": 400
+  },
+  "invalidAllowlist": {
+    "body": {
+      "error": {
+        "code": "invalid_input",
+        "details": {},
+        "message": "allowedModels entries must be worker model ids without whitespace or commas",
+        "requestId": "<request-id>"
+      }
+    },
+    "status": 400
+  },
+  "invalidQuota": {
+    "body": {
+      "error": {
+        "code": "invalid_input",
+        "details": {},
+        "message": "Invalid tenant status or quota",
+        "requestId": "<request-id>"
+      }
+    },
+    "status": 400
+  },
+  "listing": {
+    "body": {
+      "items": [
+        {
+          "allowedModels": null,
+          "createdAt": "<timestamp>",
+          "id": "<tenant:platform-admin>",
+          "maxConcurrentRuns": 2,
+          "maxRunsPerDay": 100,
+          "name": "Workspace",
+          "status": "active"
+        },
+        {
+          "allowedModels": null,
+          "createdAt": "<timestamp>",
+          "id": "<tenant:admin-target>",
+          "maxConcurrentRuns": 3,
+          "maxRunsPerDay": 250,
+          "name": "Workspace",
+          "status": "active"
+        }
+      ],
+      "nextCursor": null,
+      "snapshot": "<timestamp>"
+    },
+    "status": 200
+  },
+  "missingWorkspace": {
+    "body": {
+      "error": {
+        "code": "not_found",
+        "details": {},
+        "message": "Workspace not found",
+        "requestId": "<request-id>"
+      }
+    },
+    "status": 404
+  },
+  "quota": {
+    "body": {
+      "allowedModels": null,
+      "createdAt": "<timestamp>",
+      "id": "<tenant:admin-target>",
+      "maxConcurrentRuns": 3,
+      "maxRunsPerDay": 250,
+      "name": "Workspace",
+      "status": "active"
+    },
+    "status": 200
+  },
+  "reactivated": {
+    "body": {
+      "allowedModels": null,
+      "createdAt": "<timestamp>",
+      "id": "<tenant:admin-target>",
+      "maxConcurrentRuns": 3,
+      "maxRunsPerDay": 250,
+      "name": "Workspace",
+      "status": "active"
+    },
+    "status": 200
+  },
+  "suspended": {
+    "body": {
+      "allowedModels": null,
+      "createdAt": "<timestamp>",
+      "id": "<tenant:admin-target>",
+      "maxConcurrentRuns": 3,
+      "maxRunsPerDay": 250,
+      "name": "Workspace",
+      "status": "suspended"
+    },
+    "status": 200
+  }
+}

@@ -43,7 +43,12 @@ describe('progressive node disclosure', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开 甲', exact: true }));
     expect(screen.getAllByTestId('composer-input')).toHaveLength(1);
     expect(within(screen.getByTestId('canvas-tile-a')).getByTestId('composer-input')).toHaveValue('甲的未发送草稿');
+    // The Session list starts collapsed inside the opened node and appears on request.
+    expect(screen.queryAllByRole('navigation', { name: 'Session 管理' })).toHaveLength(0);
+    fireEvent.click(within(screen.getByTestId('canvas-tile-a')).getByRole('button', { name: '展开 Session 列表', exact: true }));
     expect(screen.getAllByRole('navigation', { name: 'Session 管理' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '收起 Session 列表', exact: true }));
+    expect(screen.queryAllByRole('navigation', { name: 'Session 管理' })).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: '打开 乙', exact: true }));
     expect(screen.getAllByTestId('composer-input')).toHaveLength(1);

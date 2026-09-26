@@ -12,7 +12,7 @@ from tools import tool_metadata
 MODEL_SELECTOR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$")
 EFFORT_LEVELS = ["low", "medium", "high"]
 PROTOCOLS = {"chat_completions", "responses"}
-DEFAULT_BASE_URLS = {"openai": "https://api.openai.com/v1"}
+DEFAULT_BASE_URLS = {"openai": "https://api.openai.com/v1", "llmgate": "https://api.clawhunt.site/v1"}
 
 
 class ConfigError(ValueError):
@@ -68,6 +68,7 @@ class Config:
     ready: bool
     missing: tuple
     user_credentials: bool = False
+    llmgate_only: bool = False
 
 
 def _integer(env: dict, key: str, fallback: int, minimum: int, maximum: int) -> int:
@@ -156,11 +157,15 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
 
 def load_config(env: dict | None = None) -> Config:
     env = env if env is not None else dict(os.environ)
+    gate_only_value = env.get("AWWO_LLMGATE_ONLY", "")
+    if gate_only_value not in ("", "false", "true"):
+        raise ConfigError("AWWO_LLMGATE_ONLY must be true or false")
+    llmgate_only = gate_only_value == "true"
     mode = env.get("AWWO_CREDENTIAL_MODE", "operator")
     if mode not in ("user", "operator"):
         raise ConfigError("AWWO_CREDENTIAL_MODE must be user or operator")
     personal = mode == "user"
-    provider = (env.get("AWWO_OPENAI_AGENTS_PROVIDER") or "openai").strip()
+    provider = (env.get("AWWO_OPENAI_AGENTS_PROVIDER") or ("llmgate" if llmgate_only else "openai")).strip()
     protocol = env.get("AWWO_OPENAI_AGENTS_PROTOCOL") or "chat_completions"
     environment = env.get("APP_ENV") or "development"
     if environment not in ("development", "staging", "production"):
@@ -204,6 +209,10 @@ def load_config(env: dict | None = None) -> Config:
         reasoning_efforts=efforts, default_reasoning_effort=default_effort,
     )
     models = tuple(_load_profiles(env.get("AWWO_OPENAI_AGENTS_MODELS_JSON"), env, default_profile, missing))
+    # Legacy "openai" profiles can be protocol adapters for the Gate endpoint.
+    # Personal mode replaces every profile before a request can reach the SDK.
+    if llmgate_only and any(p.base_url != DEFAULT_BASE_URLS["llmgate"] for p in models):
+        raise ConfigError("AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile")
 
     return Config(
         host=env.get("AWWO_OPENAI_AGENTS_HOST") or "127.0.0.1",
@@ -220,6 +229,7 @@ def load_config(env: dict | None = None) -> Config:
         ready=(len(token) >= 32 and not re.search(r"[\r\n]", token)) if personal else not missing,
         missing=tuple(x for x in dict.fromkeys(missing) if not personal or x == "AWWO_OPENAI_AGENTS_TOKEN"),
         user_credentials=personal,
+        llmgate_only=llmgate_only,
     )
 
 
@@ -229,6 +239,7 @@ def public_health(config: Config, active_runs: int = 0) -> dict:
         "ready": config.ready,
         "configured": config.ready,
         "userCredentials": config.user_credentials,
+        **({"llmgateOnly": True} if config.llmgate_only else {}),
         "provider": config.provider or None,
         "model": config.model or None,
         "runtime": "openai-agents",
@@ -287,6 +298,7 @@ def bind_user_model(config: Config, body: dict) -> tuple[Config, dict]:
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}", model["model"])
             or not isinstance(model["provider"], str)
             or model["provider"] not in PERSONAL_ENDPOINTS
+            or (config.llmgate_only and model["provider"] != "llmgate")
             or model["baseURL"] != PERSONAL_ENDPOINTS[model["provider"]]
             or not isinstance(model["apiKey"], str)
             or not re.fullmatch(r"[\x21-\x7e]{8,4096}", model["apiKey"])

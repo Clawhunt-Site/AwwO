@@ -1,0 +1,325 @@
+{
+  "acceptedExecution": {
+    "modelInvocations": [
+      {
+        "admission_ms": "<measured-ms>",
+        "admission_status": "accepted",
+        "admitted_at": "<timestamp>",
+        "agent_id": "<agent:Image graph agent>",
+        "cache_write_tokens": null,
+        "cached_input_tokens": null,
+        "completed_at": "<timestamp>",
+        "completed_xid_present": true,
+        "computed_total_tokens": null,
+        "cost_status": "unavailable",
+        "created_at": "<timestamp>",
+        "created_xid_present": true,
+        "currency": "USD",
+        "estimated_cost_microusd": null,
+        "failure_class": "none",
+        "id": "<run:graph-image-graph>",
+        "input_tokens": null,
+        "model_id": "test-model",
+        "observability_version": 0,
+        "output_tokens": null,
+        "price_snapshot": {
+          "catalogKey": "pi:test-model",
+          "currency": "USD",
+          "version": ""
+        },
+        "pricing_version": "",
+        "protocol": "",
+        "provider": "",
+        "provider_model": "",
+        "provider_ms": null,
+        "provider_total_tokens": null,
+        "provider_ttft_ms": null,
+        "queue_ms": "<measured-ms>",
+        "reasoning_tokens": null,
+        "request_id": "<request-id>",
+        "run_id": "<run:graph-image-graph>",
+        "runtime": "pi",
+        "setup_ms": null,
+        "status": "completed",
+        "tenant_id": "<tenant:errors-owner>",
+        "trace_id": "",
+        "turn_id": null,
+        "updated_at": "<timestamp>",
+        "usage_reason": "legacy_worker",
+        "usage_source": "none",
+        "usage_status": "unavailable",
+        "worker_first_delta_ms": null,
+        "worker_total_ms": null
+      },
+      {
+        "admission_ms": "<measured-ms>",
+        "admission_status": "accepted",
+        "admitted_at": "<timestamp>",
+        "agent_id": "<agent:Image manual agent>",
+        "cache_write_tokens": null,
+        "cached_input_tokens": null,
+        "completed_at": "<timestamp>",
+        "completed_xid_present": true,
+        "computed_total_tokens": null,
+        "cost_status": "unavailable",
+        "created_at": "<timestamp>",
+        "created_xid_present": true,
+        "currency": "USD",
+        "estimated_cost_microusd": null,
+        "failure_class": "none",
+        "id": "<run:image-manual-run>",
+        "input_tokens": null,
+        "model_id": "test-model",
+        "observability_version": 0,
+        "output_tokens": null,
+        "price_snapshot": {
+          "catalogKey": "pi:test-model",
+          "currency": "USD",
+          "version": ""
+        },
+        "pricing_version": "",
+        "protocol": "",
+        "provider": "",
+        "provider_model": "",
+        "provider_ms": null,
+        "provider_total_tokens": null,
+        "provider_ttft_ms": null,
+        "queue_ms": "<measured-ms>",
+        "reasoning_tokens": null,
+        "request_id": "<request-id>",
+        "run_id": "<run:image-manual-run>",
+        "runtime": "pi",
+        "setup_ms": null,
+        "status": "completed",
+        "tenant_id": "<tenant:errors-owner>",
+        "trace_id": "",
+        "turn_id": null,
+        "updated_at": "<timestamp>",
+        "usage_reason": "legacy_worker",
+        "usage_source": "none",
+        "usage_status": "unavailable",
+        "worker_first_delta_ms": null,
+        "worker_total_ms": null
+      }
+    ],
+    "runTurns": [],
+    "runs": [
+      {
+        "actor_id": "<user:errors-owner>",
+        "error": "",
+        "id": "<run:graph-image-graph>",
+        "operation_id": "graph:<graph:image-graph-run>:a00ded471f74c1e3cbe7",
+        "output": "pi reply 2 from test-model",
+        "prompt": "【工作流节点】image-graph\n\n请按本节点职责完成任务，并按声明的格式给出最终输出。",
+        "session_id": "<session:image-graph>",
+        "status": "completed"
+      },
+      {
+        "actor_id": "<user:errors-owner>",
+        "error": "",
+        "id": "<run:image-manual-run>",
+        "operation_id": "image-manual-run",
+        "output": "pi reply 1 from test-model",
+        "prompt": "IMAGE-MANUAL-PROMPT: a red kite",
+        "session_id": "<session:image-manual>",
+        "status": "completed"
+      }
+    ],
+    "workerRequests": [
+      {
+        "body": {
+          "messages": [],
+          "model": "test-model",
+          "prompt": "IMAGE-MANUAL-PROMPT: a red kite",
+          "runId": "<run:image-manual-run>",
+          "runtime": "pi",
+          "sessionId": "<session:image-manual>",
+          "systemPrompt": "PERSONA-Image manual agent",
+          "tenantId": "<tenant:errors-owner>"
+        },
+        "contentType": "application/json",
+        "method": "POST",
+        "path": "/internal/runs",
+        "runtime": "pi"
+      },
+      {
+        "body": {
+          "messages": [],
+          "model": "test-model",
+          "prompt": "【工作流节点】image-graph\n\n请按本节点职责完成任务，并按声明的格式给出最终输出。",
+          "runId": "<run:graph-image-graph>",
+          "runtime": "pi",
+          "sessionId": "<session:image-graph>",
+          "systemPrompt": "PERSONA-Image graph agent",
+          "tenantId": "<tenant:errors-owner>"
+        },
+        "contentType": "application/json",
+        "method": "POST",
+        "path": "/internal/runs",
+        "runtime": "pi"
+      }
+    ]
+  },
+  "imageNodeCreateGraphRun": {
+    "body": {
+      "canvasId": "<canvas:Image graph>",
+      "createdAt": "<timestamp>",
+      "document": {
+        "edges": [],
+        "nodes": [
+          {
+            "agentKind": "image",
+            "binding": {
+              "agentId": "<agent:Image graph agent>",
+              "companyId": "<tenant:errors-owner>"
+            },
+            "id": "image-graph",
+            "kind": "session",
+            "runtime": "pi",
+            "title": "image-graph"
+          }
+        ]
+      },
+      "documentVersion": 1,
+      "error": "",
+      "id": "<graph:image-graph-run>",
+      "nodes": [
+        {
+          "detail": "",
+          "nodeId": "image-graph",
+          "output": "",
+          "partial": false,
+          "runId": null,
+          "sessionId": "<session:image-graph>",
+          "state": "waiting"
+        }
+      ],
+      "operationId": "image-graph-run",
+      "scope": [
+        "image-graph"
+      ],
+      "status": "queued",
+      "updatedAt": "<timestamp>"
+    },
+    "status": 202
+  },
+  "imageNodeCreateGraphRunSettled": {
+    "body": {
+      "canvasId": "<canvas:Image graph>",
+      "createdAt": "<timestamp>",
+      "document": {
+        "edges": [],
+        "nodes": [
+          {
+            "agentKind": "image",
+            "binding": {
+              "agentId": "<agent:Image graph agent>",
+              "companyId": "<tenant:errors-owner>"
+            },
+            "id": "image-graph",
+            "kind": "session",
+            "runtime": "pi",
+            "title": "image-graph"
+          }
+        ]
+      },
+      "documentVersion": 1,
+      "error": "",
+      "id": "<graph:image-graph-run>",
+      "nodes": [
+        {
+          "detail": "",
+          "nodeId": "image-graph",
+          "output": "pi reply 2 from test-model",
+          "partial": false,
+          "runId": "<run:graph-image-graph>",
+          "sessionId": "<session:image-graph>",
+          "state": "done"
+        }
+      ],
+      "operationId": "image-graph-run",
+      "scope": [
+        "image-graph"
+      ],
+      "status": "completed",
+      "updatedAt": "<timestamp>"
+    },
+    "status": 200
+  },
+  "imageNodeCreateRun": {
+    "body": {
+      "createdAt": "<timestamp>",
+      "error": "",
+      "id": "<run:image-manual-run>",
+      "operationId": "image-manual-run",
+      "output": "",
+      "outputAvailable": false,
+      "sessionId": "<session:image-manual>",
+      "status": "queued",
+      "tenantId": "<tenant:errors-owner>",
+      "terminal": false,
+      "updatedAt": "<timestamp>"
+    },
+    "status": 202
+  },
+  "imageNodeCreateRunSettled": {
+    "body": {
+      "createdAt": "<timestamp>",
+      "error": "",
+      "id": "<run:image-manual-run>",
+      "operationId": "image-manual-run",
+      "output": "pi reply 1 from test-model",
+      "outputAvailable": true,
+      "sessionId": "<session:image-manual>",
+      "status": "completed",
+      "tenantId": "<tenant:errors-owner>",
+      "terminal": true,
+      "updatedAt": "<timestamp>"
+    },
+    "status": 200
+  },
+  "imageNodeInitialize": {
+    "body": {
+      "error": {
+        "code": "invalid_node_setup",
+        "details": {},
+        "message": "Only supported runtime text/coding nodes with a well-formed effort setting are supported",
+        "requestId": "<request-id>"
+      }
+    },
+    "status": 400
+  },
+  "unadvertisedEffortCreateGraphRun": {
+    "body": {
+      "error": {
+        "code": "effort_unsupported",
+        "details": {},
+        "message": "Node selects a reasoning effort its model does not advertise",
+        "requestId": "<request-id>"
+      }
+    },
+    "status": 400
+  },
+  "unadvertisedEffortCreateRun": {
+    "body": {
+      "error": {
+        "code": "effort_unsupported",
+        "details": {},
+        "message": "Node selects a reasoning effort its model does not advertise",
+        "requestId": "<request-id>"
+      }
+    },
+    "status": 400
+  },
+  "unadvertisedEffortInitialize": {
+    "body": {
+      "error": {
+        "code": "invalid_node_setup",
+        "details": {},
+        "message": "Node selects a reasoning effort its model does not advertise",
+        "requestId": "<request-id>"
+      }
+    },
+    "status": 400
+  }
+}

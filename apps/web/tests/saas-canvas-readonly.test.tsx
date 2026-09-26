@@ -56,6 +56,7 @@ describe('original canvas reader mode', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开 方案顾问', exact: true }));
     const tile = within(screen.getByTestId('canvas-tile-agent'));
     expect(await tile.findByText('本次服务端回复')).toBeTruthy();
+    fireEvent.click(tile.getByRole('button', { name: '展开 Session 列表' }));
     expect(tile.getByRole('button', { name: '新建 Session' })).toBeDisabled();
     fireEvent.click(tile.getByRole('button', { name: '打开 历史 Session' }));
     expect(await tile.findByText('从服务端读取的历史回复')).toBeTruthy();

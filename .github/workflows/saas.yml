@@ -43,6 +43,9 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install application dependencies
         run: |
           npm ci --prefix apps/web
@@ -61,6 +64,10 @@ jobs:
           npm run test:saas:pi
           npm run test:saas:openai-agents
           npm run test:saas:scripts
+      - name: Python worker regressions
+        run: |
+          python -m pip install -e ./apps/openai-agents-python-worker
+          python -m unittest discover -s apps/openai-agents-python-worker -p 'test_*.py'
       - name: Web regressions and production build
         run: |
           npm run test:saas --prefix apps/web

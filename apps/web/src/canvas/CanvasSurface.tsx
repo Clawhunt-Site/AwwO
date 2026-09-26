@@ -88,7 +88,8 @@ import { projectConversationTurns, updateConversationPresentation } from './conv
 import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserveThreadRuntime, rebindNodeThread, sessionStoreKey,
   updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
 import { arrangeNodePositions, presentationNodes } from './nodePresentation';
-import { fitBounds, fitOverview, focusWorld, visibleBoxIds, type ViewportState } from './viewport';
+import { boundsWithinViewport, fitBounds, fitOverview, focusWorld, visibleBoxIds, type ViewportState } from './viewport';
+import { RAIL_MODEL_KEY, isDesktopStage, readRailCollapsed, useDesktopStage, writeRailCollapsed } from './railState';
 import { paperclipApiBase } from '../paperclipBridge';
 import { gatewayApiBase } from '../chatAutomations';
 import './canvas.css';
@@ -97,6 +98,22 @@ import './canvas.css';
 const COALESCE_MS = 900;
 /** Cap on remembered steps. Documents are small, but an unbounded stack is a leak. */
 const HISTORY_LIMIT = 60;
+/** Stage padding reserved around a focused node (room for the composer and the delivery drawer). */
+const FOCUS_FIT_PADDING = { x: 28, top: 24, bottom: 82 } as const;
+/** Stage changes (window resize, rail toggles) settle for this long before the overview refits. */
+const REFIT_DEBOUNCE_MS = 150;
+/** A camera within this many pixels of the one the app fitted, at the same scale, is still the app's.
+ * A click or tap on the background wobbles a few pixels (the viewport's own tap slop is 3px for a mouse
+ * and 10px for touch) and a wheel tick at a clamped scale returns the same camera: neither is the
+ * operator taking the camera. */
+const CAMERA_SLOP_PX = 10;
+
+function isFittedCamera(view: ViewportState, fitted: ViewportState | null): boolean {
+  return fitted !== null
+    && Math.abs(view.scale - fitted.scale) <= 1e-9 * Math.max(1, fitted.scale)
+    && Math.abs(view.x - fitted.x) <= CAMERA_SLOP_PX
+    && Math.abs(view.y - fitted.y) <= CAMERA_SLOP_PX;
+}
 
 /** Compact summaries remain readable at overview scale without the full-workbench fit floor. */
 function fitNodeOverview(nodes: ReadonlyArray<CanvasNode>, size: { w: number; h: number }): ViewportState {
@@ -123,6 +140,8 @@ export interface CanvasSurfaceProps {
   planRequest?: typeof requestCanvasPlan;
   accountControl?: ReactNode;
   onOpenSettings?: () => void;
+  /** Hosted accounts either supply their own model credential or use a platform-managed one. */
+  personalCredentialsRequired?: boolean;
   /** Host inventory reader (App.readJson) for the inspector's contract-driven RuntimePicker.
    *  Absent → runtime selection is hidden, fail-closed. */
   runtimeReadJson?: (path: string, init?: RequestInit & { headers?: Record<string, string> }) => Promise<any>;
@@ -169,7 +188,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, personalCredentialsRequired = false, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   const readOnlyRef = useRef(readOnly);
@@ -188,7 +207,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [paletteError, setPaletteError] = useState('');
   const [paletteRefresh, setPaletteRefresh] = useState(0);
   const [palettePersona, setPalettePersona] = useState<AgentTemplateId | null>(null);
-  const [shelfCollapsed, setShelfCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900);
+  // The model rail starts collapsed on a desktop stage (the canvas gets the width) and remembers
+  // the operator's choice per browser. Below the desktop width the rail is a drawer that always
+  // opens on the full shelf, whatever was stored, exactly like the Bot drawer.
+  const [shelfCollapsed, setShelfCollapsedState] = useState(() => readRailCollapsed(RAIL_MODEL_KEY, isDesktopStage()));
+  const desktopStage = useDesktopStage();
+  const modelRailCollapsed = shelfCollapsed && desktopStage;
+  const setShelfCollapsed = useCallback((collapsed: boolean) => {
+    setShelfCollapsedState(collapsed);
+    writeRailCollapsed(RAIL_MODEL_KEY, collapsed);
+  }, []);
+  // Bumped by the workspace when a rail toggles; the refit effect below listens to it.
+  const [railsVersion, setRailsVersion] = useState(0);
+  const onRailsChange = useCallback(() => setRailsVersion(value => value + 1), []);
   useEffect(() => {
     setPalette(null); setPaletteError('');
     if (!canInitialize || readOnly) return;
@@ -344,6 +375,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [view, setView] = useState<ViewportState>(() => doc.view ?? { x: 0, y: 0, scale: 1 });
   const viewRef = useRef(view);
   viewRef.current = view;
+  // The camera the app itself last fitted to the overview. While the live view is still that camera
+  // (within tap slop, same scale) the operator has not taken it, so a stage change may refit it; a real
+  // pan, a zoom, a focus or a waypoint moves it further and the camera is the operator's from then on.
+  const lastAutoView = useRef<ViewportState | null>(null);
+  const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: { w: number; h: number }) => {
+    const next = fitNodeOverview(fitNodes, box);
+    lastAutoView.current = next;
+    setView(next);
+  }, []);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const sizeRef = useRef(size);
   sizeRef.current = size;
@@ -385,17 +425,52 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (!nodes.length || !box || inspectorCloseLocked.current) return;
     setInspectorId(null);
     setFocusedId(null);
-    setView(fitNodeOverview(nodes, box));
-  }, [nodes, viewportSize]);
+    autoFit(nodes, box);
+  }, [nodes, viewportSize, autoFit]);
 
-  // A valid saved view owns the initial position. Only an unpositioned graph auto-fits once
-  // its first real size is known; explicit Fit and newly generated plans still fit on request.
-  const fitted = useRef(doc.view !== null);
+  // The saved view owns the initial position only while it still shows the whole graph on THIS
+  // stage; a view persisted on a wider screen (or none at all) fits once the first real size is
+  // known. Explicit Fit and newly generated plans still fit on request.
+  const savedView = useRef(doc.view);
+  const fitted = useRef(false);
   useEffect(() => {
-    if (fitted.current || size.w === 0 || nodes.length === 0) return;
+    if (fitted.current || size.w === 0) return;
+    const saved = savedView.current;
+    // An empty graph has nothing to fit; a saved view keeps owning the camera, an unpositioned
+    // canvas waits for its first node.
+    if (nodes.length === 0) { if (saved) fitted.current = true; return; }
     fitted.current = true;
-    setView(fitNodeOverview(nodes, viewportSize() || size));
-  }, [size, nodes, doc.view, viewportSize]);
+    const box = viewportSize() || size;
+    // A kept saved view already shows the whole graph, so it counts as fitted: a later stage change
+    // may refit it, exactly as it would the overview computed below.
+    if (saved && boundsWithinViewport(boundsOfNodes(presentationNodes(nodes, null)), saved, box)) { lastAutoView.current = viewRef.current; return; }
+    autoFit(nodes, box);
+  }, [size, nodes, viewportSize, autoFit]);
+
+  // Refit the overview when the stage itself changes shape — a window resize, a rail collapsing
+  // or expanding, the planning assistant opening — so the whole graph stays on screen at the real
+  // stage size. Only a camera the app fitted is refitted: never while a node is focused and never
+  // once the operator has zoomed, panned or recalled a view (that camera is theirs until Fit All),
+  // never on the first measurement (the open logic above owns that), never for a repeated
+  // identical measurement, and debounced so a live window drag is not fought frame by frame.
+  const focusedRef = useRef<string | null>(null);
+  focusedRef.current = focusedId;
+  const stageSignature = useRef<string | null>(null);
+  useEffect(() => {
+    if (size.w === 0 || size.h === 0) return;
+    const signature = `${size.w}x${size.h}:${railsVersion}:${modelRailCollapsed ? 1 : 0}`;
+    const previous = stageSignature.current;
+    stageSignature.current = signature;
+    if (previous === null || previous === signature) return;
+    const timer = setTimeout(() => {
+      if (focusedRef.current !== null || inspectorCloseLocked.current || !isFittedCamera(viewRef.current, lastAutoView.current)) return;
+      const current = docRef.current.nodes;
+      const box = viewportSize();
+      if (!current.length || !box) return;
+      autoFit(current, box);
+    }, REFIT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [size, railsVersion, modelRailCollapsed, viewportSize, autoFit]);
 
   const focusNode = useCallback(
     (nodeId: string) => {
@@ -410,8 +485,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setFocusedId(nodeId);
       setSelection([nodeId]);
       if (!box) return;
+      // Cap the focus scale so the whole node — delivery drawer included — fits the stage inside
+      // the focus padding; fitBounds' readable floor otherwise lets a wide node overflow it.
+      const pad = FOCUS_FIT_PADDING;
+      const availW = Math.max(120, box.w - pad.x * 2);
+      const availH = Math.max(120, box.h - pad.top - pad.bottom);
+      const maxScale = Math.min(1.25, availW / Math.max(1, node.w), availH / Math.max(1, node.h));
       setView(fitBounds({ minX: node.x, minY: node.y, maxX: node.x + node.w, maxY: node.y + node.h }, box,
-        { minScale: 0.2, maxScale: 1.25 }, { x: 28, top: 24, bottom: 82 }));
+        { minScale: 0.2, maxScale }, pad));
     },
     [focusedId, viewportSize],
   );
@@ -423,8 +504,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setInspectorId(null);
     setFocusedId(null);
     const box = viewportSize();
-    if (box) setView(fitNodeOverview(arranged, box));
-  }, [canEditStructure, patchDoc, viewportSize]);
+    if (box) autoFit(arranged, box);
+  }, [canEditStructure, patchDoc, viewportSize, autoFit]);
 
   const unfocus = useCallback(() => {
     if (inspectorCloseLocked.current) return;
@@ -1435,7 +1516,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const s = sizeRef.current;
     const node = createWorkspaceAgentNode(agent, { x: (-v.x + s.w / 2) / (v.scale || 1) - 170, y: (-v.y + s.h / 2) / (v.scale || 1) - 130 }, locale);
     patchDoc(previous => ({ ...previous, nodes: [...previous.nodes, node] }), { label: `add:${node.id}` });
-    setSelection([node.id]); focusNode(node.id); setInspectorId(node.id);
+    // The node opens focused, not configured: the inspector stays reachable from the tile menu.
+    setSelection([node.id]); focusNode(node.id);
   }, [canEditStructure, patchDoc, focusNode, locale]);
   const addMarketAgent = useCallback((agent: TeamMarketAgent) => {
     if (!canEditStructure()) return;
@@ -1443,7 +1525,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const s = sizeRef.current;
     const node = createMarketplaceRoleNode(agent, { x: (-v.x + s.w / 2) / (v.scale || 1) - 170, y: (-v.y + s.h / 2) / (v.scale || 1) - 130 }, locale);
     patchDoc(previous => ({ ...previous, nodes: [...previous.nodes, node] }), { label: `add:${node.id}` });
-    setSelection([node.id]); focusNode(node.id); setInspectorId(node.id);
+    setSelection([node.id]); focusNode(node.id);
   }, [canEditStructure, patchDoc, focusNode, locale]);
   const createTemplate = useCallback(() => {
     if (!canEditStructure()) return;
@@ -1455,8 +1537,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setFocusedId(null);
     fitted.current = true;
     const box = viewportSize();
-    if (box) setView(fitNodeOverview([...currentNodes, ...template.nodes], box));
-  }, [canEditStructure, patchDoc, viewportSize, locale]);
+    if (box) autoFit([...currentNodes, ...template.nodes], box);
+  }, [canEditStructure, patchDoc, viewportSize, locale, autoFit]);
 
   const zoomBy = (factor: number) => {
     const box = viewportSize();
@@ -1504,8 +1586,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   useLayoutEffect(() => {
     if (!planningFitId) return;
     const box = viewportSize();
-    if (box) setView(fitNodeOverview(docRef.current.nodes, box));
-  }, [planningFitId, viewportSize]);
+    if (box) autoFit(docRef.current.nodes, box);
+  }, [planningFitId, viewportSize, autoFit]);
   useLayoutEffect(() => {
     if (!modelFocusId) return;
     // Focus against the committed layout after the welcome/assistant panels change.
@@ -1633,7 +1715,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     fitted.current = true;
     patchDoc(previous => ({ ...previous, nodes: [...previous.nodes, node] }), { label: `add:${node.id}` });
     setAssistantOpen(false);
-    if (window.innerWidth < 900) setShelfCollapsed(true);
     setSelection([node.id]); setInspectorId(null); setModelFocusId(node.id);
   };
   const onModelDragStart = (event: DragEvent<HTMLButtonElement>, model: ModelPaletteSelection, personaId: AgentTemplateId | null) => {
@@ -1651,11 +1732,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const v = viewRef.current;
     addPaletteModel(chosen.model, chosen.personaId, { x: (event.clientX - rect.left - v.x) / (v.scale || 1), y: (event.clientY - rect.top - v.y) / (v.scale || 1) });
   };
-  const modelShelf = canInitialize && !readOnly ? <ModelPersonaShelf modelsOnly configureModelsHref={accountURL('engines')} groups={palette?.groups ?? []}
+  const modelShelf = canInitialize && !readOnly ? <ModelPersonaShelf modelsOnly
+    configureModelsHref={personalCredentialsRequired ? accountURL('engines') : undefined}
+    operatorManaged={!personalCredentialsRequired} groups={palette?.groups ?? []}
     loading={paletteLoading} error={paletteError} disabled={!canEdit || planningBusy || initializing || bindingLocked}
     personaId={palettePersona} onPersonaChange={setPalettePersona} onAddModel={addPaletteModel} onModelDragStart={onModelDragStart}
     onOpenWorkspaceAgents={() => setAgentLibraryRequest(value => value + 1)} onRetry={() => setPaletteRefresh(value => value + 1)}
-    collapsed={shelfCollapsed} onCollapsedChange={setShelfCollapsed}
+    collapsed={modelRailCollapsed} onCollapsedChange={setShelfCollapsed}
     orchestrationControls={<div className="awwo-orchestration-choice"><label>
       <span>{locale === 'zh' ? '编排模型' : 'Orchestration model'}</span>
       <select aria-label={locale === 'zh' ? '编排模型' : 'Orchestration model'} value={plannerProvider} disabled={planningBusy}
@@ -1664,10 +1747,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <option value="pi">{locale === 'zh' ? '工作区默认模型' : 'Workspace default'}</option>
       </select></label>
       {plannerProvider === 'jev' ? <small>{jevStatus?.error || (locale === 'zh' ? '选择人设与执行模型，新增最多 3 个节点。' : 'Select personas and models for up to 3 new nodes.')}</small> : null}
-      {nodes.length > 0 && <button type="button" disabled={planningBusy} onClick={() => {
-        setAssistantOpen(true);
-        if (window.innerWidth < 900) setShelfCollapsed(true);
-      }}>{locale === 'zh' ? '开始编排' : 'Start planning'}</button>}
+      {nodes.length > 0 && <button type="button" disabled={planningBusy} onClick={() => setAssistantOpen(true)}>{locale === 'zh' ? '开始编排' : 'Start planning'}</button>}
     </div>} /> : undefined;
 
   const renderInspector = (node: CanvasNode, inline = false) => (
@@ -1689,7 +1769,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   return (
     <AgentWorkspace readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
       modelShelf={modelShelf}
-      onExpandModelRail={modelShelf ? () => setShelfCollapsed(false) : undefined}
       personaControls={modelShelf ? <ModelPersonaControls personaId={palettePersona} onPersonaChange={setPalettePersona}
         disabled={!canEdit || planningBusy || initializing || bindingLocked} /> : undefined}
       onModelDrop={onModelDrop} onModelDragOver={event => {
@@ -1701,6 +1780,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       welcome={readOnly ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} />}
       assistantOpen={assistantOpen}
       onToggleAssistant={readOnly ? undefined : () => setAssistantOpen(value => !value)}
+      onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked || initializing}>{accountControl}</div>}
       toolbar={<>{!cloudScope && <GraphSettings doc={doc} selectedNodeId={selection[0]} selectedEdgeId={selectedEdgeId}
@@ -1793,7 +1873,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
       {initializing && <div className="awwo-handoff-note" role="status">{locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…'}</div>}
       {!initializing && handoffNote && <div className="awwo-handoff-note" role="alert"><span>{handoffNote}</span><button type="button" aria-label={locale === 'zh' ? '关闭提示' : 'Dismiss notice'} onClick={() => setHandoffNote('')}>×</button></div>}
-      <div className="awwo-view-tools" role="toolbar" aria-label={viewText.toolbar}>
+      {/* Same guard as the minimap: the view tools never paint over the opaque welcome overlay of a
+          fresh canvas. An empty canvas that still has something to undo or redo keeps them, or a
+          deleted last node or an undone plan could only come back through a keyboard shortcut. */}
+      {(nodes.length > 0 || history.undo > 0 || history.redo > 0) && <div className="awwo-view-tools" role="toolbar" aria-label={viewText.toolbar}>
         <button type="button" aria-label={locale === 'zh' ? '框选组件' : 'Select components'} title={locale === 'zh' ? '框选组件（也可按住 Shift 拖动）' : 'Select components (or Shift + drag)'} aria-pressed={selectionTool}
           onClick={() => setSelectionTool(value => !value)}><MousePointer2 size={16} /></button>
         <span className="awwo-tool-separator" />
@@ -1808,7 +1891,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <button aria-label={viewText.undo} title={viewText.undo} disabled={readOnly || running || initializing || !history.undo} onClick={undo}><Undo2 size={16} /></button>
         <button aria-label={viewText.redo} title={viewText.redo} disabled={readOnly || running || initializing || !history.redo} onClick={redo}><Redo2 size={16} /></button>
         {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={viewText.runSelection} disabled={readOnly || running} onClick={runFromSelection}><Play size={15} /></button></>}
-      </div>
+      </div>}
 
       {minimapOpen && nodes.length > 0 ? (
         <Minimap

@@ -24,6 +24,34 @@ const openPanel = () => fireEvent.click(screen.getByRole('button', { name: /Back
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'en'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
 
+// A node that failed its delivery contract must say so in the reader's language, while a
+// detail the panel does not know still shows verbatim rather than being swallowed.
+it('labels a delivery-contract failure in both locales and leaves an unmapped detail raw', async () => {
+  for (const [locale, detail, expected] of [
+    ['en', 'output_contract_invalid', 'Output did not match the delivery format'],
+    ['zh', 'output_contract_invalid', '输出不符合交付格式'],
+    ['en', 'provider_auth_failed', 'The provider rejected the credentials'],
+    ['zh', 'provider_auth_failed', '模型服务拒绝了凭据'],
+    ['zh', 'model_refused', '模型拒绝了请求'],
+    ['en', 'provider_rate_limited', 'The provider is rate limited'],
+    ['zh', 'provider_unavailable', '模型服务暂不可用'],
+    ['en', 'provider_diagnostic_42', 'provider_diagnostic_42'],
+  ] as const) {
+    localStorage.setItem('superclaw_locale', locale);
+    const fetcher = vi.fn(async (url: string) => {
+      if (url === base) return json({ items: [graph({ status: 'failed', nodes: [{ nodeId: 'a', state: 'failed', runId: 'run-a', output: '', detail }] })] });
+      if (runRecord(url)) return json({ id: 'run-a', tenantId: 'tenant-a', status: 'failed' });
+      if (url === '/api/v1/tenants/tenant-a/runs/run-a/turns') return json({ items: [] });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher); renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: locale === 'zh' ? /后台运行/ : /Background runs & collaboration/ }));
+    const panel = within(await screen.findByRole('dialog'));
+    await panel.findByText(expected);
+    cleanup(); vi.unstubAllGlobals();
+  }
+});
+
 it('renders actual member rounds, per-agent models, review text and final node output', async () => {
   const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => {
     if (url === base) return json({ items: [graph()] });

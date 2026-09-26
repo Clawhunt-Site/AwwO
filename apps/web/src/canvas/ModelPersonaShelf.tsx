@@ -21,6 +21,7 @@ export interface ModelPersonaShelfProps {
   orchestrationControls?: ReactNode;
   modelsOnly?: boolean;
   configureModelsHref?: string;
+  operatorManaged?: boolean;
 }
 
 /** Persona selection lives with Bots; the selected value is shared with the model shelf. */
@@ -49,23 +50,25 @@ export function ModelPersonaControls({ personaId, onPersonaChange, disabled = fa
 /** Catalog presentation only. The host revalidates availability before creating a node. */
 export function ModelPersonaShelf({ groups, loading, error, disabled = false, personaId, onPersonaChange,
   onAddModel, onModelDragStart, onOpenWorkspaceAgents, onRetry, collapsed, onCollapsedChange,
-  orchestrationControls, modelsOnly = false, configureModelsHref }: ModelPersonaShelfProps) {
+  orchestrationControls, modelsOnly = false, configureModelsHref, operatorManaged = false }: ModelPersonaShelfProps) {
   const { locale } = useCanvasI18n();
   const en = locale === 'en';
   const id = useId();
   const blocked = disabled || loading || Boolean(error);
-  const isCollapsed = !modelsOnly && collapsed;
+  // The host owns the collapsed state for both shelf flavours: a models-only rail collapses to
+  // its 70px sidebar strip exactly like the full shelf does.
+  const isCollapsed = collapsed;
   const title = modelsOnly ? (en ? 'Models' : '模型') : (en ? 'Models & personas' : '模型与人设');
   const unavailable = en ? 'Unavailable' : '不可用';
   return <aside className={`model-persona-shelf${isCollapsed ? ' is-collapsed' : ''}`} aria-label={modelsOnly ? (en ? 'Execution and orchestration models' : '执行与编排模型') : title}
     onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
     <header className="model-persona-shelf-head">
       {!isCollapsed && <h2>{title}</h2>}
-      {!modelsOnly && <button type="button" className="model-persona-shelf-toggle" aria-expanded={!collapsed} aria-controls={`${id}-body`}
+      <button type="button" className="model-persona-shelf-toggle" aria-expanded={!collapsed} aria-controls={`${id}-body`}
         aria-label={modelsOnly ? (collapsed ? (en ? 'Expand models' : '展开模型') : (en ? 'Collapse models' : '收起模型')) : collapsed ? (en ? 'Expand models and personas' : '展开模型与人设') : (en ? 'Collapse models and personas' : '收起模型与人设')}
         onClick={() => onCollapsedChange(!collapsed)}>
         <span aria-hidden="true">{collapsed ? '‹' : '›'}</span>
-      </button>}
+      </button>
     </header>
     <div id={`${id}-body`} className="model-persona-shelf-body" hidden={isCollapsed}>
       {orchestrationControls && <div className="model-persona-shelf-orchestration">{orchestrationControls}</div>}
@@ -111,6 +114,10 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
       {configureModelsHref && <div className="model-persona-shelf-setup">
         {!loading && !error && !groups.some(group => group.available && group.models.some(model => model.available)) && <p>{en ? 'No models are available. Check your connections or ask the workspace admin.' : '当前没有可用模型。请检查个人连接或联系工作区管理员。'}</p>}
         <a href={configureModelsHref}>{en ? 'Manage my model connections' : '配置我的模型连接'} ↗</a>
+      </div>}
+      {operatorManaged && !loading && !error && !groups.some(group => group.available && group.models.some(model => model.available)) && <div className="model-persona-shelf-setup">
+        <p>{en ? 'No models are available. Ask your workspace admin to check model access and service status.' : '当前没有可用模型。请联系工作区管理员检查模型权限和服务状态。'}</p>
+        {onRetry && <button type="button" onClick={onRetry}>{en ? 'Check again' : '重新检查'}</button>}
       </div>}
       {!modelsOnly && <ModelPersonaControls personaId={personaId} onPersonaChange={onPersonaChange} disabled={disabled} />}
       {!modelsOnly && <button type="button" className="model-persona-shelf-workspace" disabled={disabled}

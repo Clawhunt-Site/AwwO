@@ -21,3 +21,14 @@ it('refreshes the real inventory without exposing secret inputs or claiming infe
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
   expect(onClose).toHaveBeenCalledOnce();
 });
+
+it('explains the platform LLM Gate model without asking for a personal key', async () => {
+  localStorage.setItem('superclaw_locale', 'en');
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ available: true, configured: true, models: [{ id: 'qwen3.8-27b-p6' }] })));
+  vi.stubGlobal('fetch', fetch);
+  render(<SaaSPreferencesProvider><RuntimeSettings tenantId="tenant-a" personalCredentialsRequired={false} onClose={() => {}}/></SaaSPreferencesProvider>);
+  expect(await screen.findByText(/AwwO provides models through LLM Gate/)).toBeVisible();
+  expect(screen.queryByRole('link', { name: 'Manage my engines' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Manage your API keys/)).not.toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledOnce();
+});

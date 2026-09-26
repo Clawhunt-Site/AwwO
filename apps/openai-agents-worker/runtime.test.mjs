@@ -5,6 +5,9 @@ import test from 'node:test';
 import { publicHealth } from './config.mjs';
 import { configuration, fixture, request, run } from './test-support.mjs';
 import { executeAgent } from './agent-runtime.mjs';
+import { deliveryOutputType, deliverySchemaBytes } from './delivery-contract.mjs';
+import { classifyError } from './errors.mjs';
+import { createProviderObserver } from './usage.mjs';
 
 test('Google chat wire omits unsupported store while keeping SDK execution', async t => {
   const f = await fixture(t);
@@ -165,4 +168,99 @@ for (const protocol of ['chat_completions', 'responses']) test(`${protocol} forw
   await assert.rejects(run(config, request({ runId: 'run-3', sessionId: 'session-3', effort: 'medium' })), /not supported/);
   await assert.rejects(run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: protocol }), request({ runId: 'run-4', sessionId: 'session-4', effort: 'low' })), /not supported/);
   assert.equal(f.calls.length, 2);
+});
+
+const DELIVERY = Object.freeze({ version: 1, fields: [
+  { id: 'summary', type: 'markdown', required: true },
+  { id: 'hasOwnProperty', type: 'number', required: true },
+  { id: 'report', type: 'file', required: true },
+] });
+const OPTIONAL_DELIVERY = Object.freeze({ version: 1, fields: [{ id: 'notes', type: 'text', required: false }] });
+const DELIVERED = '{ "summary": "## Done",\n  "hasOwnProperty": 2.50, "report": {"name": "report.txt", "content": "Body"} }';
+const structured = (f, protocol, overrides = {}) => configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: protocol, AWWO_OPENAI_AGENTS_STRUCTURED_OUTPUT: 'true', ...overrides });
+const sentFormat = (protocol, body) => protocol === 'responses' ? body.text?.format : body.response_format;
+const schemaOf = format => format.json_schema ?? format;
+function expectedFormat(protocol, contract) {
+  const { name, strict, schema } = deliveryOutputType(contract);
+  return protocol === 'responses' ? { type: 'json_schema', name, strict, schema } : { type: 'json_schema', json_schema: { name, strict, schema } };
+}
+
+for (const protocol of ['chat_completions', 'responses']) test(`${protocol} structured delivery sends the server-derived schema and completes with the exact delivered bytes`, { timeout: 15_000 }, async t => {
+  const f = await fixture(t, { text: DELIVERED });
+  const task = await run(structured(f, protocol), request({ outputContract: DELIVERY }));
+  assert.deepEqual(businessEvent(await task.result), { type: 'completed', text: DELIVERED });
+  assert.equal(task.events.filter(e => e.type === 'text_delta').map(e => e.delta).join(''), DELIVERED);
+  assert.equal(f.calls.length, 1);
+  const format = sentFormat(protocol, f.calls[0].body);
+  assert.deepEqual(format, expectedFormat(protocol, DELIVERY));
+  assert.equal(schemaOf(format).strict, true);
+  assert.deepEqual(Object.keys(schemaOf(format).schema.properties), ['summary', 'hasOwnProperty', 'report']);
+  assert.ok(!f.calls[0].body.tools?.length);
+  await assert.rejects(access(task.directory));
+
+  const g = await fixture(t, { text: '{"notes":"kept"}' });
+  const partial = await run(structured(g, protocol), request({ runId: 'run-2', sessionId: 'session-2', outputContract: OPTIONAL_DELIVERY }));
+  assert.deepEqual(businessEvent(await partial.result), { type: 'completed', text: '{"notes":"kept"}' });
+  assert.deepEqual(sentFormat(protocol, g.calls[0].body), expectedFormat(protocol, OPTIONAL_DELIVERY));
+  assert.equal(schemaOf(sentFormat(protocol, g.calls[0].body)).strict, false);
+});
+
+for (const protocol of ['chat_completions', 'responses']) for (const [name, options, contract] of [
+  ['plain text', { text: 'PRIVATE-DELIVERY plain answer' }, DELIVERY],
+  ['fenced JSON', { text: '```json\n{"summary":"PRIVATE-DELIVERY","hasOwnProperty":1,"report":{"name":"r.txt","content":"c"}}\n```' }, DELIVERY],
+  ['an optional-field {} reply', { text: '{}' }, OPTIONAL_DELIVERY],
+  ['an EMPTY reply', { mode: 'empty' }, DELIVERY],
+  ['a REASONING-ONLY reply', { mode: 'reasoning' }, DELIVERY],
+  ['a wrong-typed field', { text: '{"summary":"PRIVATE-DELIVERY","hasOwnProperty":"2","report":{"name":"r.txt","content":"c"}}' }, DELIVERY],
+  ['a file returned as a path', { text: '{"summary":"PRIVATE-DELIVERY","hasOwnProperty":2,"report":"/srv/report.txt"}' }, DELIVERY],
+]) test(`${protocol} structured delivery fails ${name} as OUTPUT_CONTRACT_INVALID after exactly one model call`, { timeout: 15_000 }, async t => {
+  const f = await fixture(t, options);
+  const task = await run(structured(f, protocol), request({ outputContract: contract }));
+  const end = await task.result;
+  assert.deepEqual(businessEvent(end), { type: 'failed', code: 'OUTPUT_CONTRACT_INVALID', message: 'The model output did not match the required delivery contract.' });
+  assert.equal(f.calls.length, 1);
+  assert.ok(!task.events.some(e => e.type === 'completed'));
+  assert.ok(!JSON.stringify(end).includes('PRIVATE-DELIVERY'));
+  await assert.rejects(access(task.directory));
+});
+
+for (const protocol of ['chat_completions', 'responses']) test(`${protocol} a request without a contract sends no response format, even on a structured profile`, { timeout: 15_000 }, async t => {
+  const f = await fixture(t, { text: 'Plain answer' });
+  const task = await run(structured(f, protocol), request());
+  assert.deepEqual(businessEvent(await task.result), { type: 'completed', text: 'Plain answer' });
+  assert.equal(f.calls.length, 1);
+  assert.ok(!('response_format' in f.calls[0].body));
+  assert.ok(!('text' in f.calls[0].body));
+});
+
+test('the runner re-checks structured admission before any child process or provider call', { timeout: 15_000 }, async t => {
+  const f = await fixture(t);
+  await assert.rejects(run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL }), request({ outputContract: DELIVERY })), /not supported/);
+  await assert.rejects(run(structured(f, 'chat_completions', { AWWO_OPENAI_AGENTS_TOOLS_JSON: '["calculator"]' }), request({ outputContract: DELIVERY, tools: ['calculator'] })), /cannot be combined/);
+  const small = structured(f, 'chat_completions', { AWWO_OPENAI_AGENTS_CONTEXT_WINDOW: '4096', AWWO_OPENAI_AGENTS_MAX_TOKENS: '128' });
+  const budget = small.contextWindow - small.maxTokens - 256 - 32;
+  await assert.rejects(run(small, request({ prompt: 'x'.repeat(budget - deliverySchemaBytes(DELIVERY) + 1), outputContract: DELIVERY })), /Invalid runtime admission/);
+  assert.equal(f.calls.length, 0);
+});
+
+// Pins the SDK coupling structured delivery relies on: the guardrail's tripwire surfaces as
+// the named OutputGuardrailTripwireTriggered error, with nothing delivered in its message.
+for (const protocol of ['chat_completions', 'responses']) test(`${protocol} a structural violation is the SDK output guardrail tripwire and carries no delivered content`, { timeout: 15_000 }, async t => {
+  for (const [text, contract, violation] of [
+    ['{}', OPTIONAL_DELIVERY, 'empty_delivery'],
+    ['{"summary":"PRIVATE-DELIVERY","hasOwnProperty":"2","report":{"name":"r.txt","content":"PRIVATE-DELIVERY"}}', DELIVERY, 'wrong_type'],
+    ['{"summary":"PRIVATE-DELIVERY","hasOwnProperty":2,"report":{"name":"r.txt","content":"c"},"extra":"PRIVATE-DELIVERY"}', DELIVERY, 'unknown_field'],
+  ]) {
+    const f = await fixture(t, { text });
+    const error = await executeAgent({
+      request: { prompt: 'Deliver the result.', messages: [], outputContract: contract },
+      modelConfig: { protocol, baseURL: f.baseURL, apiKey: 'fixture-key', model: 'fixture-model', maxTokens: 64 },
+      signal: new AbortController().signal, emit: async () => {}, observer: createProviderObserver(protocol),
+    }).then(() => undefined, caught => caught);
+    assert.equal(error?.name, 'OutputGuardrailTripwireTriggered', violation);
+    assert.equal(error.result?.output?.outputInfo?.violation, violation);
+    assert.equal(classifyError(error).code, 'OUTPUT_CONTRACT_INVALID');
+    assert.ok(!String(error.message).includes('PRIVATE-DELIVERY'));
+    assert.equal(f.calls.length, 1);
+  }
 });

@@ -37,6 +37,15 @@ function canonical(document: CanvasDocument, runtime = 'pi', model = 'profile-ma
     runtime, model, binding: { companyId: tenant.id, agentId: 'new-agent', agentName: node.title }, issueId: 'new-session',
   }) });
 }
+it('routes empty hosted model catalogues according to who owns the credential', async () => {
+  const view = render(<CanvasSurface storageMode="cloud" personalCredentialsRequired runtimeReadJson={reader} />);
+  fireEvent.click(screen.getByRole('button', { name: '展开模型' }));
+  expect(await screen.findByRole('link', { name: '配置我的模型连接 ↗' })).toHaveAttribute('href', expect.stringContaining('account=engines'));
+  view.rerender(<CanvasSurface storageMode="cloud" personalCredentialsRequired={false} runtimeReadJson={reader} />);
+  await screen.findByText('当前没有可用模型。请联系工作区管理员检查模型权限和服务状态。');
+  expect(screen.queryByRole('link', { name: '配置我的模型连接 ↗' })).toBeNull();
+  expect(screen.getByRole('button', { name: '重新检查' })).toBeEnabled();
+});
 it('shows the model controls when a 390px canvas first opens its model drawer', () => {
   vi.stubGlobal('innerWidth', 390);
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);

@@ -10,6 +10,7 @@ const MESSAGES = Object.freeze({
   TOOL_DENIED: 'The model requested an unregistered or disabled tool.',
   TOOL_INPUT_INVALID: 'The registered tool received invalid input.',
   MODEL_CALL_LIMIT: 'The single model call limit was reached.',
+  OUTPUT_CONTRACT_INVALID: 'The model output did not match the required delivery contract.',
   DEADLINE_EXCEEDED: 'The model request timed out.',
   OUTPUT_LIMIT: 'The model output exceeded the configured limit.',
   WORKER_ERROR: 'The model worker could not start.',
@@ -25,6 +26,8 @@ export function classifyError(error) {
   if (error?.name === 'ToolInputError' || error?.cause?.name === 'ToolInputError') return failureEvent('TOOL_INPUT_INVALID');
   if (error?.name === 'MaxTurnsExceededError') return failureEvent('MODEL_CALL_LIMIT');
   if (error?.name === 'ModelRefusalError') return failureEvent('MODEL_REFUSAL');
+  // The delivery guardrail is local and pure; its tripwire is never retried or repaired.
+  if (error?.name === 'OutputGuardrailTripwireTriggered') return failureEvent('OUTPUT_CONTRACT_INVALID');
   if (error?.name === 'ModelBehaviorError') return failureEvent('MODEL_PROTOCOL_ERROR');
   if (error?.name === 'ToolCallError') return failureEvent('TOOL_INPUT_INVALID');
   if ([401,403].includes(error?.status)) return failureEvent('MODEL_AUTHENTICATION');

@@ -313,8 +313,107 @@ func hasFileOutput(n graphNode) bool {
 	return false
 }
 
+// plainTextAllowance and jsonOnlyPolicy close the textual output policy. They are
+// named so that a frozen structured contract can withdraw the allowance at send
+// time: the provider then enforces a JSON schema, so telling the model that plain
+// text is also acceptable would make an answer that follows the prompt fail delivery.
+const (
+	plainTextAllowance = "\nThis contract declares exactly one text/markdown/html output; its complete value may alternatively be returned as plain text."
+	jsonOnlyPolicy     = "\nReturn only the JSON object, without Markdown fences or surrounding prose. Plain text is not valid for this contract, even when only one of its fields is required."
+	// outputFormatMarker opens the server-owned policy block of a node prompt. Every raw
+	// input, help text and goal precedes the last one, and whatever follows it is fixed
+	// text or JSON-escaped data, so a rewrite after it cannot touch user content.
+	outputFormatMarker = "【输出格式】\n"
+)
+
 func allowsPlainTextOutput(fields []graphField) bool {
 	return len(fields) == 1 && (fields[0].Type == "text" || fields[0].Type == "markdown" || fields[0].Type == "html")
+}
+
+// Structured delivery output. The worker receives a contract of field ids, types
+// and requiredness only — never labels, help text, placeholders or saved values —
+// so a canvas cannot smuggle schema text or prompt content through this channel.
+// The limits mirror the worker's CONTRACT_LIMITS and the id vectors both sides
+// must agree on live in testdata/output_contract_v1_vectors.json.
+const (
+	outputContractVersion   = 1
+	outputContractMaxFields = 32
+	outputContractMaxFiles  = 8
+	outputContractIDBytes   = 64
+	// schemaReserveBytes is the context budget reserved for the response-format
+	// envelope. The largest envelope this grammar allows is 6,063 bytes, so the
+	// reserve covers it with room to spare; the worker pins the same number.
+	schemaReserveBytes = 8192
+)
+
+// Ids that plain-object handling in the worker can silently drop or confuse.
+var outputContractReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "constructor": true}
+
+// The closed type vocabulary, identical to the worker's FIELD_TYPES.
+var outputContractTypes = map[string]bool{"text": true, "markdown": true, "html": true, "number": true, "boolean": true, "file": true}
+
+type outputContractField struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
+}
+
+type outputContract struct {
+	Version int                   `json:"version"`
+	Fields  []outputContractField `json:"fields"`
+}
+
+// structuredFieldID mirrors the worker's FIELD_ID exactly: ASCII only, so JSON
+// serialization never expands a byte of an id. Length is counted in bytes for the
+// same reason, and the comparison against reserved ids is case-sensitive because
+// only those exact spellings are hazardous.
+func structuredFieldID(id string) bool {
+	if len(id) == 0 || len(id) > outputContractIDBytes || outputContractReservedIDs[id] {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func validOutputContract(c *outputContract) bool {
+	if c == nil || c.Version != outputContractVersion || len(c.Fields) == 0 || len(c.Fields) > outputContractMaxFields {
+		return false
+	}
+	ids, files := map[string]bool{}, 0
+	for _, f := range c.Fields {
+		if !structuredFieldID(f.ID) || ids[f.ID] || !outputContractTypes[f.Type] {
+			return false
+		}
+		ids[f.ID] = true
+		if f.Type == "file" {
+			files++
+		}
+	}
+	return files <= outputContractMaxFiles
+}
+
+// graphOutputContract derives the machine contract from the same frozen output
+// fields graphOutputFiles validates, so the requested shape can never disagree
+// with the shape Go accepts. Deriving is deliberate: nothing authors a schema.
+// A contract this grammar cannot express falls back to the textual policy alone
+// rather than sending a narrowed schema that would silently drop a field.
+func graphOutputContract(n graphNode) (*outputContract, string) {
+	if n.Contract == nil || len(n.Contract.Outputs) == 0 {
+		return nil, "none"
+	}
+	c := &outputContract{Version: outputContractVersion, Fields: make([]outputContractField, 0, len(n.Contract.Outputs))}
+	for _, f := range n.Contract.Outputs {
+		c.Fields = append(c.Fields, outputContractField{ID: f.ID, Type: f.Type, Required: f.Required})
+	}
+	if !validOutputContract(c) {
+		return nil, "fallback_bounds"
+	}
+	return c, "frozen"
 }
 
 // Generate format instructions from the same frozen fields used by validation.
@@ -351,9 +450,9 @@ func graphOutputPolicy(n graphNode) string {
 		"Include every required field with a non-empty value. Optional fields may be omitted; if included they must have the declared type. " +
 		"Example shape only (replace example values with actual results): " + string(shape)
 	if allowsPlainTextOutput(n.Contract.Outputs) {
-		policy += "\nThis contract declares exactly one text/markdown/html output; its complete value may alternatively be returned as plain text."
+		policy += plainTextAllowance
 	} else {
-		policy += "\nReturn only the JSON object, without Markdown fences or surrounding prose. Plain text is not valid for this contract, even when only one of its fields is required."
+		policy += jsonOnlyPolicy
 	}
 	for _, f := range n.Contract.Outputs {
 		if f.Type == "html" {
@@ -539,7 +638,7 @@ func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (strin
 			parts = append(parts, fmt.Sprintf("【输入 · %s (%s) · %s】\n%s\n%s", f.Label, f.Type, from, f.Help, value))
 		}
 		if policy := graphOutputPolicy(n); policy != "" {
-			parts = append(parts, "【输出格式】\n"+policy)
+			parts = append(parts, outputFormatMarker+policy)
 		}
 	}
 	parts = append(parts, "请按本节点职责完成任务，并按声明的格式给出最终输出。")

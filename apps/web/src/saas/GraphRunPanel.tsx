@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, saasErrorMessage } from './api';
+import { runErrorText } from './canvasErrors';
 import { graphPath, graphIsActive, validGraphCollaboration, type GraphRunSnapshot, type GraphCollaborationPhase } from './graphRuns';
 import { TeamRunDetails } from './TeamRunDetails';
 import { useSaaSPreferences } from './preferences';
@@ -25,7 +26,10 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
   const nodeTitle = (id: string) => current?.document?.nodes.find(item => item.id === id)?.title || id;
   const status = (value: string) => ({ queued: t('排队中', 'Queued'), waiting: t('等待上游', 'Waiting'), running: t('运行中', 'Running'),
     completed: t('完成', 'Completed'), done: t('完成', 'Completed'), failed: t('失败', 'Failed'), cancelled: t('已停止', 'Cancelled'),
-    interrupted: t('已中断', 'Interrupted'), blocked: t('上游阻断', 'Blocked'), cached: t('沿用已有结果', 'Cached'), 'Graph cancelled': t('已停止', 'Cancelled') }[value] || value);
+    interrupted: t('已中断', 'Interrupted'), blocked: t('上游阻断', 'Blocked'), cached: t('沿用已有结果', 'Cached'), 'Graph cancelled': t('已停止', 'Cancelled'),
+    output_contract_invalid: t('输出不符合交付格式', 'Output did not match the delivery format'),
+    model_refused: t('模型拒绝了请求', 'The model declined the request'), provider_auth_failed: t('模型服务拒绝了凭据', 'The provider rejected the credentials'),
+    provider_rate_limited: t('模型服务限流', 'The provider is rate limited'), provider_unavailable: t('模型服务暂不可用', 'The provider is unavailable') }[value] || value);
   useEffect(() => {
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -78,7 +82,7 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
                 : <p>{t('此步骤尚未派发模型调用。', 'No model call has been dispatched for this step.')}</p>}
               {turn.output && <><p>{turn.phase === 'review' ? t('评议记录，不作为正式交付物', 'Review evidence; not a published deliverable')
                 : turn.phase === 'synthesis' && current.status === 'completed' ? t('汇总结果', 'Synthesis result') : t('候选结果', 'Candidate result')}</p><pre>{turn.output}</pre></>}
-              {turn.error && <p>{turn.error}</p>}
+              {turn.error && <p>{runErrorText(turn.error, locale) ?? turn.error}</p>}
             </details>
           </li>)}</ol>
         </section>}

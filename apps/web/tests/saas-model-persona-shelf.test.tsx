@@ -120,3 +120,14 @@ it('offers model configuration without enabling unavailable models', () => {
   expect(screen.getByRole('link', { name: '配置我的模型连接 ↗' })).toHaveAttribute('href', '/?tenant=t&canvas=c&account=engines');
   expect(screen.queryByRole('button', { name: /添加/ })).toBeNull();
 });
+
+it('sends operator-managed users to a catalogue retry and their workspace admin, never to personal key setup', () => {
+  const p = props({ groups: groups.slice(0, 4), modelsOnly: true, operatorManaged: true });
+  const view = render(<ModelPersonaShelf {...p} />);
+  expect(screen.getByText('当前没有可用模型。请联系工作区管理员检查模型权限和服务状态。')).toBeVisible();
+  expect(screen.queryByRole('link', { name: /模型连接/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
+  expect(p.onRetry).toHaveBeenCalledOnce();
+  view.rerender(<ModelPersonaShelf {...p} groups={groups} />);
+  expect(screen.queryByRole('button', { name: '重新检查' })).toBeNull();
+});

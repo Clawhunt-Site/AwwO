@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -65,6 +67,110 @@ func mockPersonalDiscovery(t *testing.T, h *harness) {
 		}
 		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	})
+}
+
+func TestPostgresLLMGateOnlyHidesAndRejectsDirectProviders(t *testing.T) {
+	var gateClaim atomic.Bool
+	gateClaim.Store(true)
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Errorf("unexpected worker call %s", r.URL.Path)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ready": true, "userCredentials": true, "llmgateOnly": gateClaim.Load()})
+	}))
+	defer worker.Close()
+	h := newHarness(t, worker.URL)
+	mockPersonalDiscovery(t, h)
+	h.a.cfg.LLMGateOnly = true
+	owner, _, uid := h.register(t, "gate-only@example.test")
+	list := h.request(t, owner, "GET", "/auth/connections", nil, 200)
+	providers := list["providers"].([]any)
+	if len(providers) != 1 || providers[0].(map[string]any)["id"] != "llmgate" {
+		t.Fatal("direct providers remained selectable", providers)
+	}
+	h.request(t, owner, "POST", "/auth/connections", map[string]any{
+		"provider": "openai", "runtime": runtimeOpenAIAgents,
+		"name": "Direct", "apiKey": "synthetic-personal-secret",
+	}, 400)
+	id := addPersonalConnection(t, h, owner)
+	if _, err := h.db.Exec(context.Background(), "UPDATE user_connections SET provider='openai' WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	list = h.request(t, owner, "GET", "/auth/connections", nil, 200)
+	if len(list["items"].([]any)) != 1 {
+		t.Fatal("legacy direct connection cannot be listed for deletion")
+	}
+	ctx := context.WithValue(context.Background(), userKey{}, User{ID: uid})
+	var missing setupError
+	if _, err := h.a.probeRuntime(ctx, runtimePI); !errors.As(err, &missing) || missing.code != "personal_engine_required" {
+		t.Fatal("legacy direct connection satisfied Gate-only admission", err)
+	}
+	if _, err := h.db.Exec(context.Background(), "UPDATE user_connections SET provider='llmgate' WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	if catalog, err := h.a.probeRuntime(ctx, runtimePI); err != nil || len(catalog.Models) == 0 || catalog.Models[0].Provider != "llmgate" {
+		t.Fatal("Gate connection was not admitted", catalog, err)
+	}
+	gateClaim.Store(false)
+	if _, err := h.a.probeRuntime(ctx, runtimePI); err == nil || !strings.Contains(err.Error(), "worker is unavailable") {
+		t.Fatal("API accepted a worker without the Gate-only policy", err)
+	}
+}
+
+func TestPostgresNodeSetupWithoutPersonalConnectionNamesMissingEngine(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "userCredentials": true})
+			return
+		}
+		t.Errorf("unexpected worker call %s", r.URL.Path)
+	}))
+	defer worker.Close()
+	h := newHarness(t, worker.URL)
+	mockPersonalDiscovery(t, h)
+	owner, tid, _ := h.register(t, "missing-engine@example.test")
+	cid, _ := setupFixture(t, h, owner, tid, 1)
+	rejected := h.request(t, owner, "POST", "/tenants/"+tid+"/canvases/"+cid+"/initialize", map[string]any{"documentVersion": 1}, 409)
+	if rejected["error"].(map[string]any)["code"] != "personal_engine_required" {
+		t.Fatal("node setup did not identify the missing personal connection", rejected)
+	}
+}
+
+func TestPostgresEmptySavedPersonalCatalogIsModelUnavailable(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "userCredentials": true})
+			return
+		}
+		t.Errorf("unexpected worker call %s", r.URL.Path)
+	}))
+	defer worker.Close()
+	h := newHarness(t, worker.URL)
+	mockPersonalDiscovery(t, h)
+	owner, _, uid := h.register(t, "empty-catalog@example.test")
+	id := addPersonalConnection(t, h, owner)
+	if _, err := h.db.Exec(t.Context(), "UPDATE user_connections SET models='[]'::jsonb WHERE id=$1 AND user_id=$2", id, uid); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(t.Context(), userKey{}, User{ID: uid})
+	_, err := h.a.probeRuntime(ctx, runtimePI)
+	input, ok := err.(setupError)
+	if !ok || input.code != "model_unavailable" {
+		t.Fatal("an existing connection with no models was mistaken for no connection", err)
+	}
+}
+
+func TestPostgresMissingPersonalConnectionPrecedesWorkerOutage(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	mockPersonalDiscovery(t, h)
+	_, _, uid := h.register(t, "missing-engine-worker-down@example.test")
+	ctx := context.WithValue(t.Context(), userKey{}, User{ID: uid})
+	_, err := h.a.probeRuntime(ctx, runtimePI)
+	input, ok := err.(setupError)
+	if !ok || input.code != "personal_engine_required" {
+		t.Fatal("worker outage hid the missing personal connection", err)
+	}
 }
 
 func TestPostgresPersonalConnectionNeverTransmitsAccountPassword(t *testing.T) {
@@ -210,6 +316,18 @@ func TestPostgresPersonalCredentialsIsolationAndDispatch(t *testing.T) {
 	h.request(t, owner, "DELETE", "/auth/connections/"+id, nil, 204)
 	if _, err = h.a.personalAdmission(context.Background(), runtimePI, raw); err == nil {
 		t.Fatal("removed key admitted")
+	}
+	rejected := h.request(t, owner, "POST", "/tenants/"+tid+"/runs", map[string]any{"sessionId": teamSID, "prompt": "hello again", "operationId": "personal-stale-model"}, 409)
+	if rejected["error"].(map[string]any)["code"] != "model_unavailable" {
+		t.Fatal("stale selector was not kept distinct from missing personal connections", rejected)
+	}
+	staleCanvas, staleDoc := setupFixture(t, h, owner, tid, 1)
+	staleDoc["nodes"].([]any)[0].(map[string]any)["model"] = selector
+	stalePath := "/tenants/" + tid + "/canvases/" + staleCanvas
+	h.request(t, owner, "PUT", stalePath, map[string]any{"version": 1, "name": "Stale", "document": staleDoc}, 200)
+	initialization := h.request(t, owner, "POST", stalePath+"/initialize", map[string]any{"documentVersion": 2}, 409)
+	if initialization["error"].(map[string]any)["code"] != "model_unavailable" {
+		t.Fatal("stale node selector was hidden as invalid setup", initialization)
 	}
 }
 

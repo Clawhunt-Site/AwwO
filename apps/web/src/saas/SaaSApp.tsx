@@ -122,7 +122,7 @@ function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity
     {creatingWorkspace && <CreateWorkspaceDialog onClose={() => setCreatingWorkspace(false)} onCreated={id => navigate(id)} />}
     {canvasId && tenant && <button title={t('返回画布列表', 'Back to canvases')} aria-label={t('返回画布列表', 'Back to canvases')} onClick={() => navigate(tenant.id)}><ArrowLeft size={16}/></button>}
     {identity.user.platformRole === 'admin' && <a href="/admin" title={t('平台管理', 'Platform administration')} aria-label={t('平台管理', 'Platform administration')}><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
-    <a href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a><a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
+    {identity.personalCredentialsRequired && <a href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}<a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
       workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi }} />
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => { try { await api('/auth/logout', { method: 'POST' }); window.location.reload(); } catch (error) { setError(message(error)); } }}><LogOut size={16}/></button>
@@ -171,7 +171,7 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
   return <div className="saas-canvas-shell"><div className="saas-cloud-status"><CanvasBackLink tenantId={tenant.id} /><span>{tenant.name} / {record.name}</span><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><span role="status">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span><button onClick={() => downloadDocument(record.document, record.name + '.json')}>{t('导出画布 JSON', 'Export canvas JSON')}</button></div>
     <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)} />
-    {settingsOpen && <RuntimeSettings tenantId={tenant.id} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
 
@@ -416,9 +416,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     {/* A workspace whose model entitlement resolves to nothing has an available
         service and no runnable model, so the server states that as a reason. Keying
         the note on the reason keeps the canvas from looking ready to execute. */}
-    {runtime && (!runtime.available || Boolean(runtime.reason)) && <div className="saas-runtime-note" role="status">{t('Pi 执行尚未就绪：', 'Pi execution is not ready: ')}{runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('请由服务管理员配置模型。', 'Ask the service administrator to configure a model.')}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
-    <CanvasSurface storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)} />
-    {settingsOpen && <RuntimeSettings tenantId={tenant.id} onClose={() => setSettingsOpen(false)} />}
+    {runtime && (!runtime.available || Boolean(runtime.reason)) && <div className="saas-runtime-note" role="status">{t('执行尚未就绪：', 'Execution is not ready: ')}{runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('请检查执行引擎配置。', 'Check the execution engine configuration.')}{' '}{identity.personalCredentialsRequired && <a href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
+    <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)} />
+    {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
 

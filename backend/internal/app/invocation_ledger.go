@@ -223,7 +223,7 @@ func invocationFailure(status, code string) string {
 	switch code {
 	case "run_timeout", "team_timeout":
 		return "timeout"
-	case "runtime_failed":
+	case "runtime_failed", "model_refused", "provider_auth_failed", "provider_rate_limited", "provider_unavailable":
 		return "provider"
 	case "invalid_runtime_event", "inconsistent_runtime_output", "output_limit", "invalid_canvas_plan", "reasoning_only_output":
 		return "protocol"

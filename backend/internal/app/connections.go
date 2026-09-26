@@ -45,6 +45,21 @@ func providerByID(id string) (connectionProvider, bool) {
 	}
 	return connectionProvider{}, false
 }
+func (a *App) personalProviderAllowed(id string) bool {
+	return !a.cfg.LLMGateOnly || id == "llmgate"
+}
+func (a *App) personalProviders() []connectionProvider {
+	if !a.cfg.LLMGateOnly {
+		return connectionProviders
+	}
+	providers := make([]connectionProvider, 0, 1)
+	for _, provider := range connectionProviders {
+		if provider.ID == "llmgate" {
+			providers = append(providers, provider)
+		}
+	}
+	return providers
+}
 func connectionSupports(p connectionProvider, runtime string) bool {
 	for _, r := range p.Runtimes {
 		if r == runtime {
@@ -65,6 +80,17 @@ func connectionProtocol(provider, runtime, model string) string {
 		return "responses"
 	}
 	return "chat_completions"
+}
+
+// providerStructuredOutput reports whether a personal connection's provider honours a
+// json_schema response format on the given protocol, which is what lets a run on that
+// connection carry a frozen delivery contract. It is keyed by provider, never by model
+// name, because the provider's own endpoint is what enforces the schema. This cut trusts
+// only OpenAI's own endpoints on both of its protocols; the gateways and the other
+// vendors' OpenAI-compatible surfaces have not been proven on a strict schema, so they
+// stay text-only and fail closed. The API switch still decides whether anything is frozen.
+func providerStructuredOutput(provider, protocol string) bool {
+	return provider == "openai" && (protocol == "responses" || protocol == "chat_completions")
 }
 func validAPIKey(key string) bool {
 	if len(key) < 8 || len(key) > 4096 {
@@ -189,7 +215,7 @@ func (a *App) listConnections(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "providers": connectionProviders, "required": a.cfg.UserCredentials, "purchaseURL": "https://api.clawhunt.site/"})
+	writeJSON(w, 200, map[string]any{"items": items, "providers": a.personalProviders(), "required": a.cfg.UserCredentials, "purchaseURL": "https://api.clawhunt.site/"})
 }
 func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 	if len(a.cfg.CredentialKey) != 32 {
@@ -207,7 +233,7 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	p, ok := providerByID(b.Provider)
 	b.Name = strings.TrimSpace(b.Name)
-	if !ok || !connectionSupports(p, b.Runtime) || !validAPIKey(b.APIKey) || len(b.Name) > 80 {
+	if !ok || !a.personalProviderAllowed(b.Provider) || !connectionSupports(p, b.Runtime) || !validAPIKey(b.APIKey) || len(b.Name) > 80 {
 		fail(w, 400, "invalid_connection", "Choose a provider, supported engine and valid API key")
 		return
 	}
@@ -248,7 +274,7 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var count int
-	if e = tx.QueryRow(r.Context(), "SELECT count(*) FROM user_connections WHERE user_id=$1", uid).Scan(&count); e != nil {
+	if e = tx.QueryRow(r.Context(), "SELECT count(*) FROM user_connections WHERE user_id=$1 AND (NOT $2::boolean OR provider='llmgate')", uid, a.cfg.LLMGateOnly).Scan(&count); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -298,18 +324,41 @@ func (a *App) deleteConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
-func (a *App) personalRuntime(ctx context.Context, runtime string) (piHealth, error) {
+
+// A missing connection is an actionable account setup state even when the worker is down.
+// Check only the caller's runtime; another engine's key cannot satisfy this one.
+func (a *App) requirePersonalConnection(ctx context.Context, runtime string) error {
+	u, ok := ctx.Value(userKey{}).(User)
+	if !ok {
+		return errors.New("personal credentials required")
+	}
+	var found bool
+	if err := a.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM user_connections WHERE user_id=$1 AND runtime=$2 AND (NOT $3::boolean OR provider='llmgate'))", u.ID, runtime, a.cfg.LLMGateOnly).Scan(&found); err != nil {
+		return err
+	}
+	if !found {
+		return setupError{"personal_engine_required", "Add your own API key in Personal engines"}
+	}
+	return nil
+}
+
+// personalRuntime builds the caller's catalogue from their own connections. workerStructured
+// is the admitted worker's user-mode claim that it can bind a user model carrying
+// structuredOutput.
+func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructured bool) (piHealth, error) {
 	u, ok := ctx.Value(userKey{}).(User)
 	if !ok {
 		return piHealth{}, errors.New("personal credentials required")
 	}
-	rows, e := a.db.Query(ctx, "SELECT id,provider,name,models FROM user_connections WHERE user_id=$1 AND runtime=$2 ORDER BY created_at", u.ID, runtime)
+	rows, e := a.db.Query(ctx, "SELECT id,provider,name,models FROM user_connections WHERE user_id=$1 AND runtime=$2 AND (NOT $3::boolean OR provider='llmgate') ORDER BY created_at", u.ID, runtime, a.cfg.LLMGateOnly)
 	if e != nil {
 		return piHealth{}, e
 	}
 	defer rows.Close()
 	h := piHealth{Ready: true, Status: "ready", Limits: map[string]any{"maxContextTextBytes": float64(28416), "messageOverheadBytes": float64(32)}, Models: []piModel{}}
+	connections := 0
 	for rows.Next() {
+		connections++
 		var id, provider, name string
 		var raw []byte
 		if e = rows.Scan(&id, &provider, &name, &raw); e != nil {
@@ -321,14 +370,24 @@ func (a *App) personalRuntime(ctx context.Context, runtime string) (piHealth, er
 		}
 		for _, model := range models {
 			label := model + " · " + name + " · " + provider + " / " + id[max(0, len(id)-6):]
-			h.Models = append(h.Models, piModel{ID: connectionModelID(id, model), Name: model, Label: label, Provider: provider, ProviderModel: model, Protocol: connectionProtocol(provider, runtime, model), Runtime: runtime, MaxContextTextBytes: 28416, MessageOverheadBytes: 32})
+			protocol := connectionProtocol(provider, runtime, model)
+			// The capability needs all three: the deployment switch, the worker's own claim and
+			// a provider that enforces the schema. It is omitted when false and the runtime
+			// catalogue never projects it, so with the switch off (or a worker that makes no
+			// claim) the catalogue, and every snapshot frozen from it, serializes exactly as
+			// before and nothing can be frozen for a worker that would refuse it.
+			structured := a.cfg.StructuredContracts && workerStructured && runtime == runtimeOpenAIAgents && providerStructuredOutput(provider, protocol)
+			h.Models = append(h.Models, piModel{ID: connectionModelID(id, model), Name: model, Label: label, Provider: provider, ProviderModel: model, Protocol: protocol, Runtime: runtime, MaxContextTextBytes: 28416, MessageOverheadBytes: 32, StructuredOutput: structured})
 		}
 	}
 	if e = rows.Err(); e != nil {
 		return piHealth{}, e
 	}
+	if connections == 0 {
+		return piHealth{}, setupError{"personal_engine_required", "Add your own API key in Personal engines"}
+	}
 	if len(h.Models) == 0 {
-		return piHealth{}, errors.New("Add your own API key in Personal engines")
+		return piHealth{}, setupError{"model_unavailable", "Personal engine has no usable models"}
 	}
 	h.Model = h.Models[0].ID
 	h.Provider = h.Models[0].Provider
@@ -336,11 +395,25 @@ func (a *App) personalRuntime(ctx context.Context, runtime string) (piHealth, er
 }
 
 func (a *App) personalPlanner(ctx context.Context, entitlement modelEntitlement, catalog runtimeCatalog) (string, string, error) {
+	missing := 0
+	var unavailable error
 	for _, runtime := range []string{runtimeOpenAIAgents, runtimePI} {
 		h, err := a.loadRuntime(ctx, entitlement, catalog, runtime)
 		if err == nil && h.defaultModel() != "" {
 			return runtime, h.defaultModel(), nil
 		}
+		var input setupError
+		if errors.As(err, &input) && input.code == "personal_engine_required" {
+			missing++
+		} else if err != nil && unavailable == nil && !errors.As(err, &input) {
+			unavailable = err
+		}
+	}
+	if missing == 2 {
+		return "", "", setupError{"personal_engine_required", "Add your own API key in Personal engines"}
+	}
+	if unavailable != nil {
+		return "", "", unavailable
 	}
 	return "", "", setupError{"model_unavailable", "Connect a personal engine before planning"}
 }
@@ -394,14 +467,25 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 		}
 	}
 	p, ok := providerByID(provider)
-	if model == "" || !ok || !connectionSupports(p, runtime) {
+	if model == "" || !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) {
 		return nil, errors.New("model unavailable")
 	}
 	key, e := a.openCredential(uid, match[1], sealed)
 	if e != nil {
 		return nil, e
 	}
-	request["userModel"], e = json.Marshal(map[string]any{"id": selector, "provider": provider, "model": model, "baseURL": p.BaseURL, "apiKey": key, "protocol": connectionProtocol(provider, runtime, model), "contextWindow": 32768, "maxTokens": 4096, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""})
+	protocol := connectionProtocol(provider, runtime, model)
+	userModel := map[string]any{"id": selector, "provider": provider, "model": model, "baseURL": p.BaseURL, "apiKey": key, "protocol": protocol, "contextWindow": 32768, "maxTokens": 4096, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""}
+	// The worker only honours a contract from a model that declares the capability.
+	// It is declared solely when this request already carries a frozen contract, which
+	// Go sends only after the switch, the runtime and this provider's capability all
+	// agreed at admission, so every plain run still sends exactly the ten fields it
+	// sent before. A contract on a provider without the capability is left undeclared
+	// and the worker refuses it rather than running it as text.
+	if _, frozen := request["outputContract"]; frozen && runtime == runtimeOpenAIAgents && providerStructuredOutput(provider, protocol) {
+		userModel["structuredOutput"] = true
+	}
+	request["userModel"], e = json.Marshal(userModel)
 	if e != nil {
 		return nil, e
 	}

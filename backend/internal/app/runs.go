@@ -52,6 +52,34 @@ type piModel struct {
 	// default is display metadata only: it is never back-filled into a request.
 	ReasoningEfforts       []string `json:"reasoningEfforts,omitempty"`
 	DefaultReasoningEffort string   `json:"defaultReasoningEffort,omitempty"`
+	// StructuredOutput reports that this model's own endpoint honours a json_schema
+	// response format on its protocol. It is a property of the model, never of the
+	// runtime, and it is omitted when false so a catalog without the capability
+	// serializes exactly as it did before.
+	StructuredOutput bool `json:"structuredOutput,omitempty"`
+	// structuredOutputMalformed remembers a worker value that was neither a boolean
+	// nor null, so the probe can record why the capability was cleared.
+	structuredOutputMalformed bool
+}
+
+// UnmarshalJSON decodes a catalog model. Only a literal true sets StructuredOutput.
+// Any other value leaves it false instead of failing the decode, so one malformed
+// capability field cannot take down the runtime's whole catalog and every text run
+// on it. Encoding is unchanged, which keeps catalogs and snapshots byte-identical.
+func (m *piModel) UnmarshalJSON(b []byte) error {
+	type plain piModel
+	var v struct {
+		plain
+		StructuredOutput json.RawMessage `json:"structuredOutput"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*m = piModel(v.plain)
+	raw := bytes.TrimSpace(v.StructuredOutput)
+	m.StructuredOutput = bytes.Equal(raw, []byte("true"))
+	m.structuredOutputMalformed = len(raw) > 0 && !m.StructuredOutput && !bytes.Equal(raw, []byte("false")) && !bytes.Equal(raw, []byte("null"))
+	return nil
 }
 
 // supportsEffort reports whether model accepts the exact effort level. An empty
@@ -78,6 +106,18 @@ func (h piHealth) supportsEffortSelection() bool {
 	for _, m := range h.Models {
 		if len(m.ReasoningEfforts) > 0 {
 			return true
+		}
+	}
+	return false
+}
+
+// supportsStructuredOutput requires an exact model id match. A model missing from
+// the catalog never inherits the capability: an unknown id means the contract must
+// be withheld, not sent to a model that would ignore the schema and deliver prose.
+func (h piHealth) supportsStructuredOutput(model string) bool {
+	for _, m := range h.Models {
+		if m.ID == model {
+			return m.StructuredOutput
 		}
 	}
 	return false
@@ -452,6 +492,15 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.finish(tid, id, "failed", "", "snapshot_invalid")
 		return
 	}
+	// A snapshot is durable and replayed after a restart, and a row can be edited by
+	// hand, so an inconsistent contract must fail the run before any quota is reserved.
+	// This runs ahead of the team branch on purpose: "a team snapshot never carries a
+	// contract" is half of the invariant, and checking only the single-agent path below
+	// would leave that half unenforced for exactly the snapshot it is meant to catch.
+	if !structuredContractConsistent(snapshot) {
+		a.finish(tid, id, "failed", "", "snapshot_invalid")
+		return
+	}
 	if snapshot.Team != nil {
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
 		return
@@ -476,11 +525,16 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	if kind == "planner" {
 		history = []json.RawMessage{}
 	} else {
-		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions), budget, overhead)
+		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions)+outputContractReserve(snapshot), budget, overhead)
 	}
 	request := map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": defaultRuntime(snapshot.Runtime)}
 	if snapshot.Effort != "" {
 		request["effort"] = snapshot.Effort
+	}
+	// Sent only when it was frozen at admission. The worker derives the schema from
+	// this contract alone, so the request still carries no schema text.
+	if snapshot.OutputContract != nil {
+		request["outputContract"] = snapshot.OutputContract
 	}
 	body, e := json.Marshal(request)
 	if e != nil {
@@ -615,7 +669,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			finish("completed", output.String(), "")
 			return
 		case "failed":
-			finish("failed", output.String(), "runtime_failed")
+			finish("failed", output.String(), runtimeFailureCode(ev.Code, snapshot.OutputContract != nil))
 			return
 		case "cancelled":
 			finish("cancelled", output.String(), "")
@@ -630,6 +684,39 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	} else {
 		finish("failed", output.String(), "runtime_stream_ended")
 	}
+}
+
+// runtimeFailureCode turns a worker's failed-event code into the run's error code. The
+// named codes are the ones a workspace can act on differently: a refused or exhausted
+// provider, a declined request, a response that hit the output cap or the deadline.
+// Every other code, including an unknown or absent one, stays the generic runtime
+// failure rather than inventing a cause the worker never reported. Single runs, graph
+// nodes and collaboration turns all read the run's error, and team member turns apply
+// this same table, so one worker code means one thing everywhere.
+//
+// OUTPUT_CONTRACT_INVALID is named separately only when this run actually carried a
+// contract: a worker reporting it otherwise is not describing this run, and inventing
+// that cause would tell the workspace to fix an envelope it never had.
+func runtimeFailureCode(workerCode string, contract bool) string {
+	switch workerCode {
+	case "OUTPUT_CONTRACT_INVALID":
+		if contract {
+			return "output_contract_invalid"
+		}
+	case "MODEL_OUTPUT_LIMIT":
+		return "output_limit"
+	case "MODEL_REFUSAL":
+		return "model_refused"
+	case "MODEL_AUTHENTICATION":
+		return "provider_auth_failed"
+	case "MODEL_RATE_LIMIT":
+		return "provider_rate_limited"
+	case "MODEL_UNAVAILABLE":
+		return "provider_unavailable"
+	case "DEADLINE_EXCEEDED":
+		return "run_timeout"
+	}
+	return "runtime_failed"
 }
 
 // runContextOutcome reports how a run ended when its own context is what stopped it. Once the

@@ -18,6 +18,9 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
+// capabilityNoteLimit caps the distinct (runtime, model, reason) clearings logged once each.
+const capabilityNoteLimit = 512
+
 var httpBuckets = []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30}
 var admissionBuckets = []float64{.01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30}
 var modelBuckets = []float64{.1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60, 120, 180, 300, 600}
@@ -74,6 +77,8 @@ func newObservability(a *App) *observability {
 	hist("db_query_duration_seconds", dbBuckets, "operation", "outcome")
 	counter("graph_runs_total", "outcome")
 	counter("graph_nodes_total", "state")
+	counter("graph_output_contracts_total", "outcome")
+	counter("runtime_capabilities_cleared_total", "runtime", "capability", "reason")
 	gauge("graph_runs_active", "state")
 	gauge("graph_nodes_active", "state")
 	hist("graph_node_duration_seconds", modelBuckets, "runtime", "outcome")
@@ -302,6 +307,48 @@ func (a *App) observeGraph(outcome string) {
 func (a *App) observeGraphNodeState(state string) {
 	if a.telemetryOn() {
 		a.obs.counters["graph_nodes_total"].WithLabelValues(enum(state, "waiting", "running", "done", "failed", "blocked", "cancelled", "cached")).Inc()
+	}
+}
+
+// observeGraphOutputContract records how a capable node's delivery envelope was
+// decided. It is only ever called for a node whose model advertises the capability,
+// so no series exists until a workspace actually configures one, and a fallback is
+// visible rather than silent: a canvas whose field ids the grammar cannot express
+// keeps working on the textual policy alone, and this is how that shows up.
+func (a *App) observeGraphOutputContract(outcome string) {
+	if a.telemetryOn() {
+		a.obs.counters["graph_output_contracts_total"].WithLabelValues(enum(outcome, "frozen", "fallback_bounds")).Inc()
+	}
+}
+
+// recordCapabilityCleared records a model capability the control plane dropped from an
+// accepted worker catalog instead of failing it. The reason is logged once per runtime,
+// model and reason whether or not metrics are enabled, because a probe repeats on every
+// uncached admission; with metrics enabled every clearing is also counted. Nothing is
+// recorded until a worker advertises a capability it cannot have.
+func (a *App) recordCapabilityCleared(runtime, model, reason string) {
+	reason = enum(reason, "malformed", "wrong_runtime")
+	// The key carries a worker-supplied model id and a probe repeats on every uncached
+	// admission, so the once-only set is bounded like the telemetry model set: two
+	// runtimes of at most 128 models and two reasons fit, and anything beyond that is
+	// announced once instead of growing memory and the log for the life of the process.
+	key := runtime + "\x00" + model + "\x00" + reason
+	if _, seen := a.capabilityNotes.Load(key); !seen {
+		if a.capabilityNoteCount.Add(1) <= capabilityNoteLimit {
+			if _, dup := a.capabilityNotes.LoadOrStore(key, true); dup {
+				a.capabilityNoteCount.Add(-1)
+			} else {
+				a.log.Warn("runtime capability cleared", "runtime", metricRuntime(runtime, false), "model", model, "capability", "structured_output", "reason", reason)
+			}
+		} else {
+			a.capabilityNoteCount.Add(-1)
+			if a.capabilityNotesCapped.CompareAndSwap(false, true) {
+				a.log.Warn("further runtime capability clearings are counted but no longer logged", "limit", capabilityNoteLimit)
+			}
+		}
+	}
+	if a.telemetryOn() {
+		a.obs.counters["runtime_capabilities_cleared_total"].WithLabelValues(metricRuntime(runtime, false), "structured_output", reason).Inc()
 	}
 }
 func (a *App) observeGraphNode(runtime, outcome string, d time.Duration) {

@@ -1,6 +1,7 @@
 import { loadObservabilityConfig } from './observability.mjs';
 import { toolMetadata, toolDefinitionBytes, validateToolNames } from './tools.mjs';
-const DEFAULTS = Object.freeze({ openai: 'https://api.openai.com/v1' });
+import { deliverySchemaBytes, validateOutputContract } from './delivery-contract.mjs';
+const DEFAULTS = Object.freeze({ openai: 'https://api.openai.com/v1', llmgate: 'https://api.clawhunt.site/v1' });
 const PROTOCOLS = new Set(['chat_completions', 'responses']);
 
 export const INPUT_LIMITS = Object.freeze({
@@ -22,7 +23,7 @@ function integer(value, fallback, minimum, maximum, name) {
   return parsed;
 }
 
-const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'protocol', 'reasoningEfforts', 'defaultReasoningEffort']);
+const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'protocol', 'reasoningEfforts', 'defaultReasoningEffort', 'structuredOutput', 'name']);
 const MODEL_SELECTOR = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$/;
 // The reasoning-effort vocabulary the provider protocols accept. A profile
 // advertises a subset; a request may only name a level its profile advertises,
@@ -45,6 +46,22 @@ export function parseEfforts(levels, fallback) {
     throw new Error('Invalid default reasoning effort');
   }
   return { reasoningEfforts: Object.freeze([...list]), defaultReasoningEffort: defaultEffort };
+}
+
+// Optional display name for the model picker. It never selects a model and is never
+// sent to a provider; without it the catalog name stays the provider model ID.
+export function validProfileName(name) {
+  if (typeof name !== 'string' || !name.isWellFormed() || /[\p{Cc}\p{Cf}]/u.test(name)) return false;
+  const characters = [...name].length;
+  return characters >= 1 && characters <= 80;
+}
+
+// The default profile's structured delivery capability. Unset, empty and 'false' mean
+// off and 'true' means on; any other value stops startup instead of guessing.
+export function parseStructuredOutput(value) {
+  if (value === undefined || value === '' || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new Error('AWWO_OPENAI_AGENTS_STRUCTURED_OUTPUT must be true or false');
 }
 
 function validBaseURL(baseURL) {
@@ -99,7 +116,11 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
       // Efforts are never inherited from the default profile: they describe one
       // provider model, and a profile that says nothing supports no explicit level.
       const efforts = parseEfforts(value.reasoningEfforts, value.defaultReasoningEffort);
-      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, baseURL, apiKey, contextWindow, maxTokens, protocol: value.protocol ?? defaultProfile.protocol, ...efforts }));
+      problem = `profile ${index + 1} has an invalid structuredOutput flag or display name`;
+      if ((value.structuredOutput !== undefined && typeof value.structuredOutput !== 'boolean') || (value.name !== undefined && !validProfileName(value.name))) throw new Error();
+      // structuredOutput is never inherited either: it asserts that this profile's own
+      // endpoint and model honour a JSON schema response format on its protocol.
+      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, name: value.name ?? value.model, baseURL, apiKey, contextWindow, maxTokens, protocol: value.protocol ?? defaultProfile.protocol, ...efforts, structuredOutput: value.structuredOutput === true }));
       ids.add(value.id);
     }
     return Object.freeze(profiles);
@@ -107,7 +128,9 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
 }
 
 export function loadConfig(env = process.env) {
-  const provider = (env.AWWO_OPENAI_AGENTS_PROVIDER ?? 'openai').trim();
+  if (!['', 'false', 'true', undefined].includes(env.AWWO_LLMGATE_ONLY)) throw new Error('AWWO_LLMGATE_ONLY must be true or false');
+  const llmgateOnly = env.AWWO_LLMGATE_ONLY === 'true';
+  const provider = (env.AWWO_OPENAI_AGENTS_PROVIDER ?? (llmgateOnly ? 'llmgate' : 'openai')).trim();
   const protocol = env.AWWO_OPENAI_AGENTS_PROTOCOL ?? 'chat_completions';
   const environment = env.APP_ENV ?? 'development';
   if (!['development', 'staging', 'production'].includes(environment)) throw new Error('APP_ENV must be development, staging, or production');
@@ -132,7 +155,13 @@ export function loadConfig(env = process.env) {
   let efforts;
   try { efforts = parseEfforts(env.AWWO_OPENAI_AGENTS_REASONING_EFFORTS, env.AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT); }
   catch { throw new Error(`AWWO_OPENAI_AGENTS_REASONING_EFFORTS must list distinct levels from ${EFFORT_LEVELS.join(', ')} and AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT, when set, must be one of them`); }
-  const models = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, apiKey, baseURL, contextWindow, maxTokens, protocol, ...efforts }), missing);
+  const structuredOutput = parseStructuredOutput(env.AWWO_OPENAI_AGENTS_STRUCTURED_OUTPUT);
+  const models = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, name: model, apiKey, baseURL, contextWindow, maxTokens, protocol, ...efforts, structuredOutput }), missing);
+  // Older worker configs use "openai" as the protocol adapter for LLM Gate.
+  // The URL is the network destination; personal mode replaces these profiles per request.
+  if (llmgateOnly && models.some(profile => profile.baseURL !== DEFAULTS.llmgate)) {
+    throw new Error('AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile');
+  }
   for (const profile of models) {
     if (environment !== 'development' && validBaseURL(profile.baseURL)) {
       const u = new URL(profile.baseURL);
@@ -151,6 +180,7 @@ export function loadConfig(env = process.env) {
     maxOutputBytes: integer(env.AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES, 1_048_576, 1024, 8_388_608, 'AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES'),
     contextWindow, maxTokens, models,
     userCredentials,
+    llmgateOnly,
     ready: userCredentials ? token.length >= 32 && !/[\r\n]/.test(token) : missing.length === 0,
     missing: Object.freeze([...new Set(missing)]),
   });
@@ -161,6 +191,11 @@ export function publicHealth(config, activeRuns = 0) {
     status: config.ready ? 'ready' : 'unconfigured',
     ready: config.ready,
     userCredentials: config.userCredentials === true,
+    ...(config.llmgateOnly === true ? { llmgateOnly: true } : {}),
+    // In user-credential mode this worker binds a per-request user model that may carry
+    // structuredOutput (see ../user-models.ts), so it declares that it can. Present only
+    // in that mode, so an operator-mode health body is byte-identical.
+    ...(config.userCredentials === true ? { userStructuredOutput: true } : {}),
     configured: config.ready,
     provider: config.provider || null,
     model: config.model || null,
@@ -173,7 +208,7 @@ export function publicHealth(config, activeRuns = 0) {
     tools: config.enabledTools.map(toolMetadata),
     models: config.models.filter((profile) => profile.id && profile.provider).map((profile) => ({
       id: profile.id,
-      name: profile.model,
+      name: profile.name,
       providerModel: profile.model,
       provider: profile.provider,
       runtime: 'openai-agents',
@@ -184,6 +219,8 @@ export function publicHealth(config, activeRuns = 0) {
       messageOverheadBytes: 32,
       reasoningEfforts: [...profile.reasoningEfforts],
       defaultReasoningEffort: profile.defaultReasoningEffort,
+      // Present only when enabled, so a catalog without the capability is byte-identical.
+      ...(profile.structuredOutput ? { structuredOutput: true } : {}),
     })),
     activeRuns,
     version: '0.1.0',
@@ -204,7 +241,7 @@ export function publicHealth(config, activeRuns = 0) {
 }
 
 export function validateRequest(value) {
-  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime', 'tools', 'effort']);
+  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime', 'tools', 'effort', 'outputContract']);
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error('Invalid request fields');
   }
@@ -212,6 +249,11 @@ export function validateRequest(value) {
   if (value.effort !== undefined && (typeof value.effort !== 'string' || !EFFORT_LEVELS.includes(value.effort))) throw new Error('Invalid effort selector');
   if (value.runtime !== undefined && value.runtime !== 'openai-agents') throw new Error('Invalid runtime selector');
   validateToolNames(value.tools ?? []);
+  if (value.outputContract !== undefined) {
+    validateOutputContract(value.outputContract);
+    // A selected tool's result would be the final output and bypass the contract.
+    if ((value.tools ?? []).length > 0) throw new Error('An output contract cannot be combined with tools');
+  }
   for (const field of ['runId', 'tenantId', 'sessionId']) {
     if (typeof value[field] !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value[field])) {
       throw new Error(`Invalid ${field}`);
@@ -242,12 +284,14 @@ export function resolveModelConfig(config, selector) {
 
 // Text admission uses a conservative byte budget, not a provider-tokenizer claim.
 // Reserve output capacity and framing, and never silently truncate instructions,
-// planner context, or conversation history to make a request fit.
+// planner context, or conversation history to make a request fit. A structured
+// delivery contract adds its response-format envelope bytes to the same budget.
 export function fitsContextBudget(request, config) {
   const textBytes = Buffer.byteLength(request.prompt)
     + Buffer.byteLength(request.systemPrompt ?? '')
     + request.messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0);
-  return textBytes + toolDefinitionBytes(request.tools ?? []) + 32 * (request.messages.length + 1) <= config.contextWindow - config.maxTokens - 256;
+  const schemaBytes = request.outputContract === undefined ? 0 : deliverySchemaBytes(request.outputContract);
+  return textBytes + toolDefinitionBytes(request.tools ?? []) + schemaBytes + 32 * (request.messages.length + 1) <= config.contextWindow - config.maxTokens - 256;
 }
 
 export function authorizeTools(config, request) {
@@ -263,4 +307,12 @@ export function authorizeEffort(modelConfig, request) {
   if (request.effort === undefined) return '';
   if (!modelConfig.reasoningEfforts.includes(request.effort)) throw new Error('Effort is not supported by the selected model');
   return request.effort;
+}
+
+// A contract is only honoured by a profile that advertises structured delivery output.
+// Nothing is downgraded: without the capability the request is refused, never run as text.
+export function authorizeOutputContract(modelConfig, request) {
+  if (request.outputContract === undefined) return undefined;
+  if (modelConfig.structuredOutput !== true) throw new Error('Structured output is not supported by the selected model');
+  return request.outputContract;
 }

@@ -161,6 +161,10 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 		if _, err = a.runtimeSnapshot(r.Context(), entitlement, catalog, selection.Runtime, selection.Model, selection.Effort, selection.Persona, team); err != nil {
 			var input setupError
 			if errors.As(err, &input) {
+				if input.code == "personal_engine_required" || (a.cfg.UserCredentials && input.code == "model_unavailable") {
+					fail(w, 409, input.code, input.message)
+					return
+				}
 				fail(w, 400, "invalid_node_setup", input.message)
 				return
 			}

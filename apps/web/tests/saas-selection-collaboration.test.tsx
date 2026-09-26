@@ -171,6 +171,17 @@ describe('durable collaboration details', () => {
     expect(fetcher.mock.calls.every(([, init]) => !init.method)).toBe(true);
   });
 
+  it('explains a failed turn\'s named failure in the reader\'s language', async () => {
+    const failed = collaboration();
+    failed.turns = failed.turns.map(turn => turn.ordinal === 3 ? { ...turn, status: 'failed', error: 'provider_rate_limited' } : turn);
+    vi.stubGlobal('fetch', vi.fn(async () => json({ items: [snapshot({ collaboration: failed })] })));
+    render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly /></SaaSPreferencesProvider>);
+    fireEvent.click(screen.getByRole('button', { name: /Background runs & collaboration/ }));
+    const region = within(await screen.findByRole('region', { name: 'Selected-node collaboration' }));
+    expect(region.getByText('The model provider is rate limited. Please try again later.')).toBeVisible();
+    expect(region.queryByText('provider_rate_limited')).toBeNull();
+  });
+
   it('labels completed synthesis without claiming another review of the final result', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ items: [completed()] })));
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" /></SaaSPreferencesProvider>);

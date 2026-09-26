@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { createFormNode, type CanvasEdge, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
-import { arrangeNodePositions, presentationNodes } from '../src/canvas/nodePresentation';
+import { DELIVERY_DRAWER_WIDTH, FOCUSED_SESSION_MIN_SIZE, arrangeNodePositions, presentationNodes } from '../src/canvas/nodePresentation';
 import { canConnect, edgeBezierPath, portAnchorWorld, portsFor } from '../src/canvas/ports';
 
 function session(): SessionNode {
@@ -25,7 +25,13 @@ it('compacts session geometry without mutating persisted workspace dimensions or
   expect((compact as SessionNode).contract).toBe(node.contract);
   expect((compact as SessionNode).threads).toBe(node.threads);
   expect(compact.lastOutput).toBe(node.lastOutput);
-  expect(presentationNodes(nodes, node.id)[0]).toMatchObject({ w: 960, h: node.h });
+  // The saved 940px width already exceeds the slim focused minimum plus its drawer (520 + 320).
+  expect(presentationNodes(nodes, node.id)[0]).toMatchObject({ w: 940, h: node.h });
+});
+
+it('uses the slim focused geometry that fits a laptop stage with both rails open', () => {
+  expect(FOCUSED_SESSION_MIN_SIZE).toEqual({ w: 520, h: 380 });
+  expect(DELIVERY_DRAWER_WIDTH).toBe(320);
 });
 
 it('expands only the focused session and preserves form node geometry and identity', () => {
@@ -33,15 +39,15 @@ it('expands only the focused session and preserves form node geometry and identi
   const other = { ...session(), id: 'other' };
   const form = createFormNode({ x: 500, y: 100 });
   const rendered = presentationNodes([first, other, form], first.id);
-  expect(rendered[0]).toMatchObject({ w: 560, h: 420, x: first.x, y: first.y });
+  expect(rendered[0]).toMatchObject({ w: 520, h: 380, x: first.x, y: first.y });
   expect(rendered[1]).toMatchObject({ w: 260, h: 128 });
   expect(rendered[2]).toBe(form);
   expect(first).toMatchObject({ w: 300, h: 200 });
 });
 
 it('reserves drawer space only as a focused minimum without adding it again to saved expanded width', () => {
-  const small = { ...session(), w: 560, h: 420 };
-  expect(presentationNodes([small], small.id)[0]).toMatchObject({ w: 960, h: 420 });
+  const small = { ...session(), w: 520, h: 380 };
+  expect(presentationNodes([small], small.id)[0]).toMatchObject({ w: 840, h: 380 });
   const large = { ...small, w: 1040, h: 720 };
   expect(presentationNodes([large], large.id)[0]).toMatchObject({ w: 1040, h: 720 });
   expect(presentationNodes([large], null)[0]).toMatchObject({ w: 260, h: 128 });

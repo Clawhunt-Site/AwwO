@@ -19,6 +19,14 @@ type Connections = {
   required: boolean;
   purchaseURL: string;
 };
+const connectionUsable = (connection: Connection, catalog: Connections) =>
+  connection.hasKey &&
+  connection.models.length > 0 &&
+  catalog.providers.some(
+    (provider) =>
+      provider.id === connection.provider &&
+      provider.runtimes.includes(connection.runtime),
+  );
 const engineName = (id: string) => (id === "pi" ? "Pi" : "OpenAI Agents");
 const home = () => {
   const query = new URLSearchParams(location.search);
@@ -69,7 +77,7 @@ export function PersonalEngineGate({
   const { t, locale } = useSaaSPreferences();
   const section = new URLSearchParams(location.search).get("account");
   const needed =
-    identity.personalCredentialsRequired === true || section === "engines";
+    identity.personalCredentialsRequired === true;
   const [catalog, setCatalog] = useState<Connections | null>(null);
   const [error, setError] = useState<unknown>(null);
   useEffect(() => {
@@ -84,7 +92,8 @@ export function PersonalEngineGate({
       });
     return () => controller.abort();
   }, [identity.user.id, needed]);
-  if (section === "security") return <AccountSecurity />;
+  if (section === "security") return <AccountSecurity personalCredentialsRequired={needed} />;
+  if (section === "engines" && !needed) return <AccountLayout title={t("模型服务", "Model service")} intro={t("AwwO 已通过 LLM Gate 提供模型，无需填写个人 API Key。", "AwwO provides models through LLM Gate. No personal API key is needed.")}><a href={home()}>{t("返回工作区", "Back to workspace")}</a></AccountLayout>;
   if (!needed) return <>{children}</>;
   if (error)
     return (
@@ -107,12 +116,15 @@ export function PersonalEngineGate({
         <p role="status">{t("请稍候…", "Please wait…")}</p>
       </AccountLayout>
     );
-  if (catalog.items.length && section !== "engines") return <>{children}</>;
+  const hasUsableConnection = catalog.items.some((item) =>
+    connectionUsable(item, catalog),
+  );
+  if (hasUsableConnection && section !== "engines") return <>{children}</>;
   return (
     <ConnectionSettings
       catalog={catalog}
       onChange={setCatalog}
-      onboarding={identity.personalCredentialsRequired === true && catalog.items.length === 0}
+      onboarding={!hasUsableConnection}
     />
   );
 }
@@ -327,6 +339,14 @@ export function ConnectionSettings({
             <article key={c.id}>
               <div>
                 <strong>{c.name}</strong>
+                {!connectionUsable(c, catalog) && (
+                  <p>
+                    {t(
+                      "当前无法用于新任务。请添加可用的模型服务连接。",
+                      "Unavailable for new tasks. Add an allowed model provider connection.",
+                    )}
+                  </p>
+                )}
                 <p>
                   {engineName(c.runtime)} · {c.models.length}{" "}
                   {t("个模型", "models")} · API Key {t("已保存", "saved")}
@@ -357,9 +377,11 @@ export function ConnectionSettings({
               "Removing a connection prevents new calls. To rotate a key, add a replacement and remove the old connection. Calls already in progress may finish.",
             )}
           </p>
-          <a className="saas-primary saas-buy-link" href={home()}>
-            {t("进入工作区", "Open workspace")}
-          </a>
+          {!onboarding && (
+            <a className="saas-primary saas-buy-link" href={home()}>
+              {t("进入工作区", "Open workspace")}
+            </a>
+          )}
         </section>
       )}
     </AccountLayout>
@@ -407,7 +429,7 @@ type AuthSession = {
   expiresAt: string;
   current: boolean;
 };
-export function AccountSecurity() {
+export function AccountSecurity({ personalCredentialsRequired = true }: { personalCredentialsRequired?: boolean } = {}) {
   const { t, locale } = useSaaSPreferences();
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [error, setError] = useState<unknown>(null);
@@ -428,7 +450,7 @@ export function AccountSecurity() {
       )}
     >
       <nav className="saas-personal-nav">
-        <a href={accountURL("engines")}>{t("我的执行引擎", "My engines")}</a>
+        {personalCredentialsRequired && <a href={accountURL("engines")}>{t("我的执行引擎", "My engines")}</a>}
         <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
       </nav>
       {error !== null && (

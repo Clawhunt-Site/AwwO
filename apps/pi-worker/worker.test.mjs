@@ -14,6 +14,41 @@ const REQUEST = { runId: 'run_1', tenantId: 'tenant_1', sessionId: 'session_1', 
 const ENV = { AWWO_PI_TOKEN: TOKEN, AWWO_PI_PROVIDER: 'openai', AWWO_PI_MODEL: 'test-model', AWWO_PI_API_KEY: 'provider-test-key' };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+test('Gate-only Pi personal configuration advertises its policy', () => {
+  const env = { AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'true', AWWO_PI_TOKEN: TOKEN };
+  const config = loadConfig(env);
+  assert.equal(config.ready, true);
+  assert.equal(config.provider, 'llmgate');
+  assert.equal(publicHealth(config).llmgateOnly, true);
+  const legacyAlias = loadConfig({ ...env, AWWO_PI_PROVIDER: 'openai', AWWO_PI_BASE_URL: 'https://api.clawhunt.site/v1' });
+  assert.equal(legacyAlias.models[0].baseURL, 'https://api.clawhunt.site/v1');
+  assert.throws(() => loadConfig({ ...env, AWWO_PI_PROVIDER: 'openai' }), /LLMGATE_ONLY/);
+  assert.throws(() => loadConfig({ ...env, AWWO_PI_BASE_URL: 'https://api.openai.com/v1' }), /LLMGATE_ONLY/);
+  const directProfile = [{ id: 'direct', provider: 'openai', model: 'test-model', baseURL: 'https://api.openai.com/v1', apiKeyEnv: 'SYNTHETIC_KEY' }];
+  assert.throws(() => loadConfig({ ...env, SYNTHETIC_KEY: 'synthetic-key', AWWO_PI_MODELS_JSON: JSON.stringify(directProfile) }), /LLMGATE_ONLY/);
+  assert.throws(() => loadConfig({ ...env, AWWO_LLMGATE_ONLY: 'yes' }), /LLMGATE_ONLY/);
+});
+
+test('Gate-only Pi operator mode requires the Gate endpoint for every profile', () => {
+  const env = { AWWO_CREDENTIAL_MODE: 'operator', AWWO_LLMGATE_ONLY: 'true',
+    AWWO_PI_TOKEN: TOKEN, AWWO_PI_MODEL: 'gate-model', AWWO_PI_API_KEY: 'synthetic-operator-key' };
+  const config = loadConfig(env);
+  assert.equal(config.ready, true);
+  assert.equal(config.userCredentials, false);
+  assert.equal(config.models[0].baseURL, 'https://api.clawhunt.site/v1');
+  assert.equal(publicHealth(config).llmgateOnly, true);
+  const alias = loadConfig({ ...env, AWWO_PI_PROVIDER: 'openai',
+    AWWO_PI_BASE_URL: 'https://api.clawhunt.site/v1' });
+  assert.equal(alias.ready, true);
+  assert.equal(alias.models[0].baseURL, 'https://api.clawhunt.site/v1');
+  assert.throws(() => loadConfig({ ...env, AWWO_PI_BASE_URL: 'https://api.openai.com/v1' }), /LLMGATE_ONLY/);
+  assert.throws(() => loadConfig({ ...env, AWWO_PI_PROVIDER: 'openai' }), /LLMGATE_ONLY/);
+  const direct = [{ id: 'direct', provider: 'openai', model: 'direct-model',
+    baseURL: 'https://api.openai.com/v1', apiKeyEnv: 'SYNTHETIC_KEY' }];
+  assert.throws(() => loadConfig({ ...env, SYNTHETIC_KEY: 'synthetic-key',
+    AWWO_PI_MODELS_JSON: JSON.stringify(direct) }), /LLMGATE_ONLY/);
+});
+
 async function listen(server) {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -40,6 +75,11 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
     if (mode === 'error') {
       res.writeHead(401, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: { type: 'authentication_error', message: 'private-provider-key-and-internal-path' } }));
+      return;
+    }
+    if (mode === 'transient' && requests.length === 1) {
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { type: 'temporarily_unavailable', message: 'try again' } }));
       return;
     }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -232,6 +272,17 @@ test('concurrent catalog profiles reach separate real Pi providers with independ
   assert.equal((await (await fetch(`${url}/health`)).json()).activeRuns, 0);
   assert.equal(config.model, ENV.AWWO_PI_MODEL);
   assert.equal(config.apiKey, ENV.AWWO_PI_API_KEY);
+});
+
+test('Gate Pi retries a pre-stream 503 once and completes without duplicate output', { timeout: 20000 }, async t => {
+  const fixture = await provider(t, { mode: 'transient' });
+  const config = configuration(fixture.baseURL, { AWWO_PI_PROVIDER: 'llmgate' });
+  const { handle, events } = await run(t, config);
+  await handle.done;
+  assert.equal(fixture.requests.length, 2);
+  assert.deepEqual(events.filter(event => event.type === 'completed').map(businessEvent), [{ type: 'completed', text: 'Hello from Pi' }]);
+  assert.equal(events.filter(event => event.type === 'failed').length, 0);
+  await assert.rejects(access(handle.directory));
 });
 
 test('selected profile context limits apply before starting Pi and do not silently use default capacity', { timeout: 20000 }, async (t) => {

@@ -13,7 +13,11 @@ import (
 )
 
 type Config struct {
-	UserCredentials                                                                       bool
+	UserCredentials bool
+	// LLMGateOnly confines both personal and operator model execution to the
+	// ClawHunt LLM Gate. Workers enforce their own profile URLs and advertise
+	// the same policy before the API admits a run.
+	LLMGateOnly                                                                           bool
 	CredentialKey                                                                         []byte
 	SMTPHost, SMTPPort, SMTPUsername, SMTPPassword, SMTPFrom                              string
 	MetricsEnabled, OTelEnabled                                                           bool
@@ -30,6 +34,11 @@ type Config struct {
 	MaxBodyBytes                                                                          int64
 	AuthRequestsPerMinute                                                                 int
 	TrustedProxyCIDRs                                                                     []netip.Prefix
+	// StructuredContracts is the deployment switch for freezing structured delivery
+	// contracts into new graph snapshots. A worker capability alone freezes nothing.
+	// Turning it off stops new freezes without touching any workspace entitlement, so
+	// snapshots already frozen still dispatch and drain.
+	StructuredContracts bool
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -37,6 +46,13 @@ func ConfigFromEnv() (Config, error) {
 	c.UserCredentials = env("AWWO_CREDENTIAL_MODE", "operator") == "user"
 	if mode := env("AWWO_CREDENTIAL_MODE", "operator"); mode != "user" && mode != "operator" {
 		return c, errors.New("AWWO_CREDENTIAL_MODE must be user or operator")
+	}
+	switch os.Getenv("AWWO_LLMGATE_ONLY") {
+	case "", "false":
+	case "true":
+		c.LLMGateOnly = true
+	default:
+		return c, errors.New("AWWO_LLMGATE_ONLY must be true or false")
 	}
 	if raw := os.Getenv("AWWO_CREDENTIAL_ENCRYPTION_KEY"); raw != "" {
 		var err error
@@ -60,6 +76,15 @@ func ConfigFromEnv() (Config, error) {
 			}
 			*dst = v
 		}
+	}
+	// Unset, empty and "false" mean off; any value other than "true" stops startup
+	// instead of guessing which way an operator meant it.
+	switch s := os.Getenv("AWWO_STRUCTURED_DELIVERY_CONTRACTS"); s {
+	case "", "false":
+	case "true":
+		c.StructuredContracts = true
+	default:
+		return c, errors.New("AWWO_STRUCTURED_DELIVERY_CONTRACTS must be true or false")
 	}
 	if s := os.Getenv("AWWO_AUTH_REQUESTS_PER_MINUTE"); s != "" {
 		v, e := strconv.Atoi(s)

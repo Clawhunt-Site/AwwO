@@ -8,6 +8,11 @@ import { resetAllSessions } from '../src/canvas/sessions';
 import { MODEL_DRAG_MIME } from '../src/canvas/canvasModelDrop';
 import * as jev from '../src/canvas/jevPlanning';
 import { presentationNodes } from '../src/canvas/nodePresentation';
+import { RAIL_MODEL_KEY } from '../src/canvas/railState';
+
+// Both desktop rails start collapsed; the catalog and the persona presets are behind their toggles.
+const expandModels = () => fireEvent.click(screen.getByRole('button', { name: '展开模型' }));
+const expandBots = () => fireEvent.click(screen.getByRole('button', { name: '展开 Bot 清单' }));
 
 const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
 const status = { configured: true, available: true, plannerAvailable: true,
@@ -29,10 +34,30 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); clearSaaSCanvas(); resetAllSessions(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+it('starts with the model rail collapsed on a desktop stage and remembers expansion per browser', async () => {
+  const view = render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
+  const shelf = () => screen.getByRole('complementary', { name: '执行与编排模型' });
+  expect(shelf()).toHaveClass('is-collapsed');
+  expect(screen.queryByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: '编排模型' })).toBeNull();
+  expandModels();
+  expect(shelf()).not.toHaveClass('is-collapsed');
+  expect(await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
+  expect(localStorage.getItem(RAIL_MODEL_KEY)).toBe('0');
+  view.unmount();
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
+  expect(shelf()).not.toHaveClass('is-collapsed');
+  fireEvent.click(screen.getByRole('button', { name: '收起模型' }));
+  expect(shelf()).toHaveClass('is-collapsed');
+  expect(localStorage.getItem(RAIL_MODEL_KEY)).toBe('1');
+});
+
 it('adds a selected persona on a real catalog model with generic inputs, and undoes it as one action', async () => {
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
+  expandBots();
   fireEvent.click(screen.getByText('人设预设'));
   fireEvent.click(screen.getByRole('radio', { name: '前端开发' }));
+  expandModels();
   fireEvent.click(await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' }));
   await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
   const node = loadDocumentWithStatus().doc.nodes[0];
@@ -51,6 +76,7 @@ it('drops only same-workspace model identities and uses viewport coordinates', a
     observe() {} unobserve() {} disconnect() {}
   });
   const { container } = render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
+  expandModels();
   await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' });
   const stage = container.querySelector('.awwo-stage-canvas')!;
   const root = container.querySelector('.canvas-root')!;
@@ -73,6 +99,7 @@ it('selects Jev independently of execution models and cancellation cannot apply 
   const apply = vi.spyOn(jev, 'applyJevPlan');
   const piRequest = vi.fn();
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} planRequest={piRequest} />);
+  expandModels();
   await waitFor(() => expect((screen.getByRole('option', { name: 'Jev', exact: true }) as HTMLOptionElement).disabled).toBe(false));
   fireEvent.change(screen.getByRole('combobox', { name: '编排模型' }), { target: { value: 'jev' } });
   fireEvent.change(screen.getByRole('textbox', { name: '画布需求' }), { target: { value: '整理产品需求' } });
@@ -105,6 +132,7 @@ it('keeps a dragged model visible after undoing a plan back to the welcome scree
     { type: 'add_node', ref: 'one', templateId: 'general', title: 'Fixture task', inputValues: { brief: 'Fixture' } },
   ] });
   const { container } = render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} planRequest={planRequest} />);
+  expandModels();
   await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' });
   fireEvent.change(screen.getByRole('textbox', { name: '画布需求' }), { target: { value: 'Fixture request' } });
   fireEvent.click(screen.getByRole('button', { name: '生成画布', exact: true }));

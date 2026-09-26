@@ -163,6 +163,20 @@ export function fitBounds(
   return { scale, x: pad.x + availW / 2 - cx * scale, y: pad.top + availH / 2 - cy * scale };
 }
 
+/**
+ * Whether the whole world-space bounds is on screen at `view` in a viewport of `size`
+ * (edges inclusive). Used to decide if a saved viewport still shows the graph on THIS stage —
+ * a view persisted on a wide monitor can leave half the graph off a laptop screen.
+ */
+export function boundsWithinViewport(bounds: Bounds, view: ViewportState, size: Size): boolean {
+  if (size.w <= 0 || size.h <= 0 || !(view.scale > 0)) return false;
+  const left = bounds.minX * view.scale + view.x;
+  const top = bounds.minY * view.scale + view.y;
+  const right = bounds.maxX * view.scale + view.x;
+  const bottom = bounds.maxY * view.scale + view.y;
+  return left >= 0 && top >= 0 && right <= size.w && bottom <= size.h;
+}
+
 /** Center a world point in a viewport of the given size, keeping the current scale. */
 export function focusWorld(view: ViewportState, wx: number, wy: number, size: Size): ViewportState {
   return { ...view, x: (size.w || 1) / 2 - wx * view.scale, y: (size.h || 1) / 2 - wy * view.scale };

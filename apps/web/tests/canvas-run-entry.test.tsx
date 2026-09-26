@@ -167,6 +167,7 @@ describe('manual run acceptance persists composer drafts', () => {
     expect(screen.getByTestId('composer-input')).toHaveValue('');
     expect(screen.getByTestId('composer-send')).toBeDisabled();
     expect(screen.getByText('Recovered reply')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表', exact: true }));
     fireEvent.click(screen.getByRole('button', { name: '打开 Session 1', exact: true }));
     expect(screen.getByTestId('composer-input')).toHaveValue('Keep the first Session draft');
     expect(execute).toHaveBeenCalledOnce();
