@@ -11,7 +11,7 @@
 // An UNBOUND tile cannot send at all. It is disabled with the reason stated — never a live-looking
 // box whose message would silently go nowhere.
 
-import { useState, type KeyboardEvent } from 'react';
+import { useId, useState, type KeyboardEvent } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 
@@ -30,6 +30,8 @@ export interface TileComposerProps {
   /** Hard block (e.g. the tile is not bound to a real agent). `blockedReason` says why. */
   blocked?: boolean;
   blockedReason?: string;
+  /** A temporary execution prerequisite disables sending while leaving the draft editable. */
+  sendUnavailableReason?: string;
   /** An optional card-owned draft survives switching its input/output tabs. */
   draft?: string;
   onDraftChange?: (value: string) => void;
@@ -39,16 +41,18 @@ export interface TileComposerProps {
   notice?: string;
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, draft, onDraftChange, onSend, deferClear = false, notice }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice }: TileComposerProps) {
   const { t } = useCanvasI18n();
+  const reasonId = useId();
   const [localInput, setLocalInput] = useState('');
   const input = draft ?? localInput;
   const setInput = (value: string) => { setLocalInput(value); onDraftChange?.(value); };
   const disabled = blocked || streaming;
+  const sendReason = !blocked ? sendUnavailableReason?.trim() || undefined : undefined;
 
   const send = () => {
     const message = input.trim();
-    if (!message || disabled) return;
+    if (!message || disabled || sendReason) return;
     if (deferClear) onSend(message, () => setInput(''));
     else { setInput(''); onSend(message); }
   };
@@ -67,6 +71,8 @@ export function TileComposer({ streaming, blocked = false, blockedReason, draft,
         <div className="canvas-composer-blocked" data-testid="composer-blocked">
           {blockedReason || t('composer.unbound')}
         </div>
+      ) : sendReason ? (
+        <div className="canvas-composer-notice" id={reasonId} role="status">{sendReason}</div>
       ) : (
         <div className="canvas-composer-notice">{notice ?? t('composer.notice')}</div>
       )}
@@ -86,7 +92,10 @@ export function TileComposer({ streaming, blocked = false, blockedReason, draft,
           type="button"
           className="canvas-composer-send"
           data-testid="composer-send"
-          disabled={disabled || !input.trim()}
+          disabled={disabled || Boolean(sendReason) || !input.trim()}
+          title={sendReason}
+          aria-label={sendReason ? `${t('composer.send')}：${sendReason}` : undefined}
+          aria-describedby={sendReason ? reasonId : undefined}
           onClick={send}
         >
           {streaming ? <Loader2 size={16} aria-hidden="true" /> : <ArrowUp size={16} aria-hidden="true" />}

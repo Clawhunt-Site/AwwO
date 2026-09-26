@@ -118,7 +118,7 @@ function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity
   const accountApi = useMemo(() => createSaaSAccountApi(onProfile), [identity.user.id, onProfile]);
   return <div className="saas-account-actions"><PreferenceControls />
     {identity.tenants.length > 0 && <select aria-label={t('切换工作区', 'Switch workspace')} value={tenant?.id || ''} onChange={event => navigate(event.target.value)}>{!tenant && <option value="" disabled>{t('选择工作区', 'Choose a workspace')}</option>}{identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? t('（已暂停）', ' (suspended)') : ''}</option>)}</select>}
-    <button title={t('新建工作区', 'Create workspace')} aria-label={t('新建工作区', 'Create workspace')} onClick={() => setCreatingWorkspace(true)}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
+    <button className="saas-create-workspace-trigger" title={t('新建工作区', 'Create workspace')} aria-label={t('新建工作区', 'Create workspace')} onClick={() => setCreatingWorkspace(true)}><Plus size={16}/><span>{t('新建工作区', 'Create workspace')}</span></button>
     {creatingWorkspace && <CreateWorkspaceDialog onClose={() => setCreatingWorkspace(false)} onCreated={id => navigate(id)} />}
     {canvasId && tenant && <button title={t('返回画布列表', 'Back to canvases')} aria-label={t('返回画布列表', 'Back to canvases')} onClick={() => navigate(tenant.id)}><ArrowLeft size={16}/></button>}
     {identity.user.platformRole === 'admin' && <a href="/admin" title={t('平台管理', 'Platform administration')} aria-label={t('平台管理', 'Platform administration')}><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
@@ -180,7 +180,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
   const [saveState, setSaveState] = useState('正在加载…');
-  const [runtime, setRuntime] = useState<{ configured: boolean; available: boolean; reason?: string } | null>(null);
+  const [runtime, setRuntime] = useState<{ configured: boolean; available: boolean; reason?: string; models?: unknown[] } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [recovery, setRecovery] = useState<SavedCanvasDraft[] | null>(null);
   const current = useRef<CanvasRecord | null>(null);
@@ -198,7 +198,11 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const storage = canvasStorage(); scopedStorage.current = storage;
     try { const saved = readCanvasDrafts(storage); if (saved.length) setRecovery(saved); }
     catch (error) { setError(`无法读取本机草稿：${message(error)}`); return () => controller.abort(); }
-    Promise.all([api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }), api<any>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal })])
+    // Canvas data stays available when the separate runtime-status request fails.
+    // Its failure still disables execution until a later reload confirms readiness.
+    Promise.all([api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }),
+      api<{ configured: boolean; available: boolean; reason?: string; models?: unknown[] }>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal })
+        .catch(() => ({ configured: false, available: false, reason: 'Runtime status unavailable' }))])
       .then(async ([value, health]) => {
         if (controller.signal.aborted) return;
         configureSaaSCanvas({ tenant, canvasId });
@@ -411,13 +415,19 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const url = URL.createObjectURL(new Blob([scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}'], { type: 'application/json' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-canvas-recovery.json'; anchor.click(); URL.revokeObjectURL(url);
   };
+  const executionUnavailableReason = runtime === null
+    ? t('正在检查执行引擎…', 'Checking the execution engine…')
+    : runtime.available && !runtime.reason && Array.isArray(runtime.models) && runtime.models.length > 0
+      ? undefined
+      : runtime.reason
+        ? saasErrorMessage(runtime.reason, locale)
+        : t('当前没有可用的执行引擎。', 'No execution engine is currently available.');
   return <div className="saas-canvas-shell"><div className="saas-cloud-status"><CanvasBackLink tenantId={tenant.id} /><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
-    {/* A workspace whose model entitlement resolves to nothing has an available
-        service and no runnable model, so the server states that as a reason. Keying
-        the note on the reason keeps the canvas from looking ready to execute. */}
-    {runtime && (!runtime.available || Boolean(runtime.reason)) && <div className="saas-runtime-note" role="status">{t('执行尚未就绪：', 'Execution is not ready: ')}{runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('请检查执行引擎配置。', 'Check the execution engine configuration.')}{' '}{identity.personalCredentialsRequired && <a href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
-    <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)} />
+    {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status">{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
+    <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true}
+      executionUnavailableReason={executionUnavailableReason}
+      workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }

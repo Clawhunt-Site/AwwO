@@ -12,13 +12,16 @@ const identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test',
 const cloudDocument = { ...emptyDocument(), updatedAt: 1, nodes: [{ ...createSessionNode('llm', { x: 0, y: 0 }), id: 'node-a', title: 'Navigation fixture' }] };
 const cloud = { id: 'canvas-a', tenantId: tenant.id, name: 'Team canvas', document: cloudDocument, version: 7, createdAt: '', updatedAt: '' };
 const response = (value: unknown, status = 200) => Response.json(value, { status });
-type Options = { role?: string; canvasRead?: () => Promise<Response>; write?: (init: RequestInit) => Promise<Response>; initialize?: () => Promise<Response> };
-function server({ role = 'owner', canvasRead, write, initialize }: Options = {}) {
+type Options = { role?: string; personal?: boolean; canvasRead?: () => Promise<Response>; runtimeRead?: () => Promise<Response>; write?: (init: RequestInit) => Promise<Response>; initialize?: () => Promise<Response> };
+function server({ role = 'owner', personal = false, canvasRead, runtimeRead, write, initialize }: Options = {}) {
   const fetcher = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = String(input);
-    if (url.endsWith('/auth/me')) return response({ ...identity, tenants: [{ ...tenant, role }] });
+    if (url.endsWith('/auth/me')) return response({ ...identity, tenants: [{ ...tenant, role }], personalCredentialsRequired: personal });
+    if (url.endsWith('/auth/connections')) return response({ items: [], providers: [{ id: 'llmgate', name: 'LLM Gate', runtimes: ['pi', 'openai-agents'] }], required: true, purchaseURL: 'https://api.clawhunt.site/' });
     if (url.endsWith('/appearance')) return response(appearanceFixture);
-    if (url.endsWith('/runtime')) return response({ configured: true, available: true, model: 'fixture-model', models: [{ id: 'fixture-model' }] });
+    if (url.endsWith('/runtime')) return runtimeRead ? runtimeRead() : response(personal
+      ? { configured: true, available: false, plannerAvailable: false, reason: 'No configured runtime is available', models: [] }
+      : { configured: true, available: true, model: 'fixture-model', models: [{ id: 'fixture-model' }] });
     if (url.endsWith('/initialize')) return initialize ? initialize() : response({ error: { message: 'Fixture initialization rejected' } }, 503);
     if (url.endsWith('/canvases/canvas-a')) {
       if (init.method === 'PUT') return write ? write(init) : response({ ...cloud, document: JSON.parse(String(init.body)).document, version: 8 });
@@ -49,6 +52,40 @@ it.each(['owner', 'reader'])('offers a direct current-workspace return for a loa
   expect(backLink()).toBeVisible(); expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
   expect(backLink().closest('[inert]')).toBeNull();
   expect(fetcher.mock.calls.some(([, init]) => init?.method && init.method !== 'GET')).toBe(false);
+});
+
+it('lets a signed-in owner without a personal key inspect, export and edit an existing canvas while execution remains unavailable', async () => {
+  const fetcher = server({ personal: true }); render(<SaaSApp />); await ready();
+  expect(await screen.findByText('尚未连接执行引擎')).toBeVisible();
+  expect(screen.getByRole('link', { name: '连接执行引擎' })).toHaveAttribute('href', '/?tenant=tenant-a&canvas=canvas-a&account=engines');
+  expect(screen.getByText('Navigation fixture')).toBeVisible();
+  expect(screen.getByRole('button', { name: '导出画布 JSON' })).toBeEnabled();
+  expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
+  expect(screen.getByText(/画布仍可编辑/)).toBeVisible();
+  expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
+  act(() => saveDocument({ ...cloudDocument, updatedAt: 2 }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith('/canvases/canvas-a') && init?.method === 'PUT')).toBe(true));
+  expect(fetcher.mock.calls.some(([url, init]) => String(url).includes('/graph-runs') && init?.method === 'POST')).toBe(false);
+});
+
+it('keeps the old canvas editable and execution closed when the runtime-status request fails', async () => {
+  const fetcher = server({ personal: true, runtimeRead: () => Promise.reject(new TypeError('offline')) });
+  render(<SaaSApp />); await ready();
+  expect(screen.getByText('Navigation fixture')).toBeVisible();
+  expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
+  expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /运行图/ })).toHaveAttribute('title', '暂时无法确认执行引擎状态。画布仍可编辑，请稍后刷新后再运行。');
+  act(() => saveDocument({ ...cloudDocument, updatedAt: 2 }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith('/canvases/canvas-a') && init?.method === 'PUT')).toBe(true));
+  expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith('/initialize') && init?.method === 'POST')).toBe(false);
+});
+
+it('does not offer execution when runtime health claims ready without a model catalog', async () => {
+  const fetcher = server({ personal: true, runtimeRead: async () => response({ configured: true, available: true }) });
+  render(<SaaSApp />); await ready();
+  expect(screen.getByText('Navigation fixture')).toBeVisible();
+  expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
+  expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith('/initialize') && init?.method === 'POST')).toBe(false);
 });
 
 it.each(['owner', 'reader'])('keeps a return available while the %s canvas is loading or fails', async role => {

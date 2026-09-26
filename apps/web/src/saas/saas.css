@@ -103,6 +103,7 @@ button.saas-link { border:0; background:transparent; color:var(--saas-accent); }
 :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog { background:var(--saas-card); border-color:var(--saas-border); }
 :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog-header { background:var(--saas-card); border-color:var(--saas-border); }
 @media(max-width:760px) { .saas-dashboard>header { height:auto; min-height:84px; flex-wrap:wrap; padding:16px 0; }.saas-account-actions { flex-wrap:wrap; }.saas-cloud-status { flex-wrap:wrap; padding:7px 10px; gap:8px; }.account-invite-row { flex-wrap:wrap; } }
+@media(max-width:360px) { .saas-canvas-shell .saas-create-workspace-trigger span { display:none; } }
 
 @media(max-width:760px) {
   .saas-canvas-shell .awwo-header { flex-shrink:0; flex-wrap:wrap; gap:8px; padding:8px 12px; }

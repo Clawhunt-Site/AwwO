@@ -215,6 +215,8 @@ export interface SessionTileProps {
   interactionLocked?: boolean;
   /** Viewing history does not grant edit, send, or publication permission. */
   readOnly?: boolean;
+  /** Cloud execution prerequisite: preserve the editable draft, but prevent sending. */
+  sendUnavailableReason?: string;
   onFitNode?: (nodeId: string) => void;
   onToggleDeliverables?: (nodeId: string, open: boolean) => void;
   /** Override the send path (tests / a host that owns the transport). */
@@ -265,6 +267,7 @@ export const SessionTile = memo(function SessionTile({
   configurationPanel,
   interactionLocked = false,
   readOnly: viewOnly = false,
+  sendUnavailableReason,
   onToggleDeliverables,
   onSend,
   conversationContext,
@@ -458,7 +461,7 @@ export const SessionTile = memo(function SessionTile({
   const conversationError = freeConversation ? undefined : preparedConversation.error;
   const send = useCallback(
     (text: string, onAccepted?: () => void) => {
-      if (viewOnlyRef.current || node.kind !== 'session' || interactionLocked) return;
+      if (viewOnlyRef.current || node.kind !== 'session' || interactionLocked || sendUnavailableReason?.trim()) return;
       if (conversationError) {
         // The composer normally blocks before clearing. Retain the user's text if readiness
         // changes at the send boundary or a host invokes the callback directly.
@@ -482,7 +485,7 @@ export const SessionTile = memo(function SessionTile({
       });
       onAccepted?.();
     },
-    [node, nodeId, onSend, gatewayBase, onIssueId, preparedConversation, conversationError, freeConversation, currentThread?.id, interactionLocked, t],
+    [node, nodeId, onSend, gatewayBase, onIssueId, preparedConversation, conversationError, freeConversation, currentThread?.id, interactionLocked, sendUnavailableReason, t],
   );
 
   const { kindClass, label } = glyphOf(node, locale);
@@ -692,6 +695,7 @@ export const SessionTile = memo(function SessionTile({
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
+                    sendUnavailableReason={sendUnavailableReason}
                     blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(conversationError)}
                     blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : conversationError || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>

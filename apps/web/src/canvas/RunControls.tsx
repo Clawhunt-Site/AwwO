@@ -14,7 +14,7 @@
 //    with the count it actually completed. "被阻断" is never folded into "失败": a node that never
 //    ran because its upstream failed did not itself fail.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { CanvasEdge, CanvasNode, ReviewGraphPolicy } from './canvasDoc';
 import { preflightReviewGraphIssue } from './reviewGraph';
@@ -39,6 +39,8 @@ export interface RunControlsProps {
   stopped?: boolean;
   /** SaaS prepares missing node resources before performing its authoritative preflight. */
   initializeOnRun?: boolean;
+  /** Host execution readiness; editing remains available while a run is unavailable. */
+  runUnavailableReason?: string;
   /** Open a node's configuration from the preflight details. */
   onConfigureNode?: (nodeId: string) => void;
   /** Called after local preflight, or directly when initializeOnRun is enabled. */
@@ -87,6 +89,7 @@ export function RunControls({
   summary = null,
   stopped = false,
   initializeOnRun = false,
+  runUnavailableReason,
   onConfigureNode,
   onStart,
   onStop,
@@ -95,6 +98,7 @@ export function RunControls({
   style,
 }: RunControlsProps) {
   const { locale, t } = useCanvasI18n();
+  const unavailableDescriptionId = useId();
   // "The operator asked and was refused" — a flag, not the refusal TEXT. The text is re-derived
   // from the CURRENT graph on every render, so a refusal can never outlive the problem it named:
   // bind the missing agent and the message goes away by itself (and if the graph acquires a
@@ -126,7 +130,7 @@ export function RunControls({
   }, [running, issueKey]);
 
   const start = () => {
-    if (readOnly) return;
+    if (readOnly || runUnavailableReason) return;
     setDismissedSummary(null); setDismissedProblem(null); setExpandedProblem(null);
     const found = initializeOnRun ? null : preflight();
     if (found) {
@@ -160,12 +164,15 @@ export function RunControls({
           type="button"
           className="canvas-run-btn"
           onClick={start}
-          disabled={readOnly || nodes.length === 0}
-          title={readOnly ? t('common.readOnly') : nodes.length === 0 ? t('run.emptyTitle') : undefined}
+          disabled={readOnly || Boolean(runUnavailableReason) || nodes.length === 0}
+          title={readOnly ? t('common.readOnly') : runUnavailableReason || (nodes.length === 0 ? t('run.emptyTitle') : undefined)}
+          aria-describedby={!readOnly && runUnavailableReason ? unavailableDescriptionId : undefined}
         >
           ▶ {t(execution ? 'graph.runReview' : 'run.runGraph')}
         </button>
       )}
+
+      {!running && runUnavailableReason && <span id={unavailableDescriptionId} hidden>{runUnavailableReason}</span>}
 
       {running ? (
         <span className="canvas-run-note" role="status">

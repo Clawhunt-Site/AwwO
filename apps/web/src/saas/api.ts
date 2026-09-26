@@ -71,6 +71,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     '画布未同步，请先解决保存错误再运行。': ['画布未同步，请先解决保存错误再运行。', 'The canvas is not synced. Resolve the save error before running.'],
     'No model is available to this workspace': ['本工作区当前没有可用模型，请联系管理员开放模型。', 'No model is available to this workspace. Ask an administrator to grant one.'],
     'No configured runtime is available': ['当前没有可用的执行引擎。', 'No execution engine is currently available.'],
+    'Runtime status unavailable': ['暂时无法确认执行引擎状态。画布仍可编辑，请稍后刷新后再运行。', 'Could not check the execution engine. You can still edit this canvas; refresh before running.'],
   };
   if (known[raw]) return known[raw][locale === 'zh' ? 0 : 1];
   if (locale === 'en') {

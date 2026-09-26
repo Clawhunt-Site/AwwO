@@ -93,4 +93,28 @@ describe('SessionTile composer', () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0][1]).toBe('写个登录页');
   });
+
+  it('keeps a cloud draft editable when execution is unavailable and sends it after reconnection', () => {
+    const onSend = vi.fn();
+    const bound = node({ binding: { companyId: 'c1', agentId: 'a1', agentName: '前端' } });
+    const reason = '请先连接个人执行引擎';
+    const view = render(<SessionTile node={bound} scale={1} focused onSend={onSend} sendUnavailableReason={reason} />);
+    const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
+    const button = screen.getByTestId('composer-send');
+
+    expect(input).not.toBeDisabled();
+    fireEvent.change(input, { target: { value: '继续旧画布中的任务' } });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', reason);
+    expect(button).toHaveAttribute('aria-describedby', screen.getByRole('status').id);
+    expect(screen.getByRole('status')).toHaveTextContent(reason);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue('继续旧画布中的任务');
+
+    view.rerender(<SessionTile node={bound} scale={1} focused onSend={onSend} />);
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(onSend).toHaveBeenCalledWith(bound, '继续旧画布中的任务', expect.any(Function), '继续旧画布中的任务');
+  });
 });

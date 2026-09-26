@@ -66,6 +66,27 @@ describe('online Review controls combined with SaaS controls', () => {
     expect(props.onStop).not.toHaveBeenCalled();
   });
 
+  it('explains unavailable execution while retaining the stop control for an existing run', () => {
+    const { props } = fixture();
+    const reason = 'Connect your execution engine to run this canvas.';
+    const view = render(<RunControls {...props} initializeOnRun runUnavailableReason={reason} />);
+    const run = screen.getByRole('button', { name: '▶ 开始互审' });
+    expect(run).toBeDisabled();
+    expect(run).toHaveAttribute('title', reason);
+    expect(document.getElementById(run.getAttribute('aria-describedby')!)).toHaveTextContent(reason);
+    expect(screen.queryByRole('status')).toBeNull();
+    fireEvent.click(run);
+    expect(props.onStart).not.toHaveBeenCalled();
+
+    view.rerender(<RunControls {...props} initializeOnRun />);
+    fireEvent.click(screen.getByRole('button', { name: '▶ 开始互审' }));
+    expect(props.onStart).toHaveBeenCalledOnce();
+
+    view.rerender(<RunControls {...props} initializeOnRun runUnavailableReason={reason} running />);
+    fireEvent.click(screen.getByRole('button', { name: '■ 停止' }));
+    expect(props.onStop).toHaveBeenCalledOnce();
+  });
+
   it.each(['approved', 'exhausted', 'cancelled'] as const)('localizes and dismisses an honest %s Review outcome', outcome => {
     const { props } = fixture();
     const expected = { approved: 'Approved after 2 round(s)', exhausted: 'review has not passed', cancelled: 'Review stopped after 2 round(s)' };

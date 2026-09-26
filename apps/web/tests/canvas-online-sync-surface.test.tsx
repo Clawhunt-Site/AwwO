@@ -50,6 +50,14 @@ it('retains native review settings for readers while disabling mutations', async
   expect(loadDocumentWithStatus().doc.execution).toBeUndefined();
 });
 
+it('ignores a hosted execution reason in a local canvas', () => {
+  clearSaaSCanvas();
+  canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(graph()));
+  render(<CanvasSurface storageMode="local" executionUnavailableReason="Hosted engine unavailable" />);
+  expect(screen.getByRole('button', { name: /运行图/ })).toBeEnabled();
+  expect(screen.queryByText('Hosted engine unavailable')).toBeNull();
+});
+
 it('checks the canonical initialization response before recording or submitting a cloud graph', async () => {
   const doc = graph(); canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
   const initialize = vi.fn(async () => ({ ...doc, execution: { mode: 'review' as const, maxRounds: 3, reviewerNodeId: 'reviewer', verdictFieldId: 'approved' } }));

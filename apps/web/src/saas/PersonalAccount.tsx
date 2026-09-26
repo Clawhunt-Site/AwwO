@@ -66,7 +66,7 @@ function AccountLayout({
   );
 }
 
-/** Identity-gated; neither a browser storage flag nor an admin's provider key completes onboarding. */
+/** A personal key is required for execution, but never for viewing an existing workspace. */
 export function PersonalEngineGate({
   identity,
   children,
@@ -80,9 +80,12 @@ export function PersonalEngineGate({
     identity.personalCredentialsRequired === true;
   const [catalog, setCatalog] = useState<Connections | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     if (!needed) return;
     const controller = new AbortController();
+    setCatalog(null);
+    setError(null);
     api<Connections>("/auth/connections", { signal: controller.signal })
       .then((value) => {
         if (!controller.signal.aborted) setCatalog(value);
@@ -91,10 +94,37 @@ export function PersonalEngineGate({
         if (!controller.signal.aborted) setError(cause);
       });
     return () => controller.abort();
-  }, [identity.user.id, needed]);
+  }, [identity.user.id, needed, revision]);
   if (section === "security") return <AccountSecurity personalCredentialsRequired={needed} />;
   if (section === "engines" && !needed) return <AccountLayout title={t("模型服务", "Model service")} intro={t("AwwO 已通过 LLM Gate 提供模型，无需填写个人 API Key。", "AwwO provides models through LLM Gate. No personal API key is needed.")}><a href={home()}>{t("返回工作区", "Back to workspace")}</a></AccountLayout>;
   if (!needed) return <>{children}</>;
+  const hasUsableConnection = catalog?.items.some((item) =>
+    connectionUsable(item, catalog),
+  ) ?? false;
+  if (section !== "engines") {
+    const needsEngine = Boolean(catalog && !hasUsableConnection);
+    const canvasPage = new URLSearchParams(location.search).has("canvas");
+    const content = <>
+      {(Boolean(error) || needsEngine) && (
+        <div className="saas-runtime-note saas-personal-notice" role={error ? "alert" : "status"}>
+          <strong>{error
+            ? t("无法检查执行引擎连接", "Could not check engine connections")
+            : t("尚未连接执行引擎", "No execution engine connected")}</strong>
+          <span>{error
+            ? t("工作区和历史仍可使用。", "Your workspaces and history remain available.") + " " + saasErrorMessage(error, locale)
+            : canvasPage
+              ? t("画布仍可编辑；运行前请连接 API Key。", "You can still edit this canvas. Connect an API key before running it.")
+              : t("现有工作区、画布和历史仍可浏览及编辑；运行任务前请连接自己的 API Key。", "You can still browse and edit your workspaces, canvases and history. Connect your own API key before running tasks.")}</span>
+          <a href={accountURL("engines")}>{t("连接执行引擎", "Connect an engine")}</a>
+          {Boolean(error) && <button type="button" onClick={() => setRevision(value => value + 1)}>{t("重新检查", "Retry check")}</button>}
+        </div>
+      )}
+      {children}
+    </>;
+    return canvasPage
+      ? <div className={`saas-personal-gated-canvas${needsEngine ? " saas-personal-gated-canvas--needs-engine" : ""}`}>{content}</div>
+      : content;
+  }
   if (error)
     return (
       <AccountLayout
@@ -105,6 +135,7 @@ export function PersonalEngineGate({
         <button onClick={() => location.reload()}>
           {t("重新连接", "Retry")}
         </button>
+        <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
       </AccountLayout>
     );
   if (!catalog)
@@ -116,10 +147,6 @@ export function PersonalEngineGate({
         <p role="status">{t("请稍候…", "Please wait…")}</p>
       </AccountLayout>
     );
-  const hasUsableConnection = catalog.items.some((item) =>
-    connectionUsable(item, catalog),
-  );
-  if (hasUsableConnection && section !== "engines") return <>{children}</>;
   return (
     <ConnectionSettings
       catalog={catalog}
@@ -186,9 +213,7 @@ export function ConnectionSettings({
         >
           {t("退出登录", "Sign out")}
         </button>
-        {!onboarding && (
-          <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
-        )}
+        <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
       </nav>
       <div className="saas-connection-grid">
         <form

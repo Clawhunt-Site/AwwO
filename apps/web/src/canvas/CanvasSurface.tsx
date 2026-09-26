@@ -142,6 +142,8 @@ export interface CanvasSurfaceProps {
   onOpenSettings?: () => void;
   /** Hosted accounts either supply their own model credential or use a platform-managed one. */
   personalCredentialsRequired?: boolean;
+  /** A host-provided reason execution is unavailable. Cloud canvases remain editable. */
+  executionUnavailableReason?: string;
   /** Host inventory reader (App.readJson) for the inspector's contract-driven RuntimePicker.
    *  Absent → runtime selection is hidden, fail-closed. */
   runtimeReadJson?: (path: string, init?: RequestInit & { headers?: Record<string, string> }) => Promise<any>;
@@ -188,7 +190,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, personalCredentialsRequired = false, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   const readOnlyRef = useRef(readOnly);
@@ -202,6 +204,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const loadWorkspaceAgents = useMemo(() => storageMode === 'cloud' && cloudScope ? workspaceAgentCatalog(cloudScope.tenant.id) : undefined, [storageMode, cloudScope?.tenant.id]);
   const [storage] = useState(canvasStorage);
   const canInitialize = storageMode === 'cloud' && Boolean(cloudScope);
+  const runUnavailableReason = storageMode === 'cloud' ? executionUnavailableReason?.trim() || '' : '';
   const [palette, setPalette] = useState<Awaited<ReturnType<typeof readModelPalette>> | null>(null);
   const [paletteLoading, setPaletteLoading] = useState(false);
   const [paletteError, setPaletteError] = useState('');
@@ -745,6 +748,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     * output instead of re-running. Omitted = the whole canvas, which is what 运行图 still does.
     */
   const prepareNodes = useCallback(async (scope?: readonly string[]): Promise<CanvasDocument> => {
+    // This is the shared cloud initialization path (graph, node, conversation and inspector).
+    // Missing user credentials must never reach POST /initialize, even via a hidden shortcut.
+    if (runUnavailableReason) throw new Error(runUnavailableReason);
     if (!currentSaaSCanvas()) return docRef.current;
     const sessionScope = scope?.filter(id => docRef.current.nodes.some(node => node.id === id && node.kind === 'session'));
     if (sessionScope?.length === 0) return docRef.current;
@@ -763,10 +769,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (setupRequest.current === controller) setupRequest.current = null;
       if (mounted.current) setInitializing(false);
     }
-  }, [locale, t, saveLocalDocument]);
+  }, [locale, t, saveLocalDocument, runUnavailableReason]);
 
   const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
     if (readOnlyRef.current) return Promise.resolve();
+    if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
     const collaborationRevision = collaboration ? canvasPlanRevision(docRef.current) : undefined;
     // Ownership can arrive after another edit. A manual send belongs to the exact Session
     // and draft that initiated it, never whichever Session happens to be selected later.
@@ -1065,7 +1072,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setRunSummary(finalSummary);
     }
     }, () => setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere')));
-  }, [patchDoc, saveLocalDocument, updateJournal, prepareNodes, locale, t]);
+  }, [patchDoc, saveLocalDocument, updateJournal, prepareNodes, locale, t, runUnavailableReason]);
 
   const stopRun = useCallback(() => {
     if (readOnlyRef.current) return;
@@ -1487,7 +1494,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }) : ({
       addSession: (kind) => addAtViewCenter(kind),
       canEdit,
-      run: () => void startRun(),
+      run: runUnavailableReason ? undefined : () => void startRun(),
       stop: stopRun,
       fitAll,
       toggleTimeline: () => setTimelineOpen((o) => !o),
@@ -1496,8 +1503,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       saveWaypoint: () => saveWaypoint(1),
       recallWaypoint: () => recallWaypoint(1),
       deleteSelection: () => deleteNodes(selection),
-      runSelection: runFromSelection,
-      rerunNode: () => {
+      runSelection: runUnavailableReason ? undefined : runFromSelection,
+      rerunNode: runUnavailableReason ? undefined : () => {
         const only = selectionRef.current[0];
         if (only) rerunNode(only);
       },
@@ -1506,7 +1513,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       canUndo: canEdit && history.undo > 0,
       canRedo: canEdit && history.redo > 0,
     }),
-    [readOnly, addAtViewCenter, canEdit, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo],
+    [readOnly, addAtViewCenter, canEdit, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo, runUnavailableReason],
   );
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
@@ -1615,8 +1622,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setPlanning(previous => ({ ...previous, messages: [...previous.messages,
       { id, role: 'assistant' as const, content, ...(status ? { status } : {}) }].slice(-60) }));
   };
+  // The planner is a model call too. In a hosted personal account it needs the same ready
+  // execution engine as graph runs; an explicit unavailable planner status also blocks Pi.
+  // A pending status check is not a permanent lock: the host's runtime readiness gate still
+  // applies while its credential check is in flight.
+  const planningUnavailableReason = runUnavailableReason || (plannerProvider === 'jev' && !jevStatus?.available
+    ? jevStatus?.error || (locale === 'zh' ? '编排模型暂不可用，请重试。' : 'The orchestration model is unavailable. Please retry.')
+    : canInitialize && plannerProvider === 'pi' && plannerStatus?.available === false
+      ? plannerStatus.error || (locale === 'zh' ? '画布助手暂不可用，请重试。' : 'The canvas assistant is unavailable. Please retry.')
+      : '');
   const sendPlanningMessage = async () => {
     if (readOnlyRef.current) return;
+    // Keep the draft untouched and refuse before allocating a request or calling either planner.
+    if (planningUnavailableReason) { setPlanningError(planningUnavailableReason); return; }
     const prompt = planning.draft.trim();
     if (!prompt || planningRequest.current) return;
     if (journal.current || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
@@ -1687,7 +1705,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     && Boolean(lastCommit.current?.label.startsWith('ai:'));
   const assistantProps = {
     messages: planning.messages, draft: planning.draft, busy: planningBusy, error: planningError,
-    ...(plannerProvider === 'jev' ? { submitLabel: locale === 'zh' ? '新增工作流' : 'Add workflow', submitDisabled: !jevStatus?.available } : {}),
+    ...(plannerProvider === 'jev' ? { submitLabel: locale === 'zh' ? '新增工作流' : 'Add workflow' } : {}),
+    submitDisabled: Boolean(planningUnavailableReason),
     progress: planningProgress,
     onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
     onSend: () => { void sendPlanningMessage(); }, onCancel: cancelPlanning,
@@ -1752,7 +1771,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const renderInspector = (node: CanvasNode, inline = false) => (
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
-      readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize ? initializeInspector : undefined} readOnly={readOnly || running} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
+      readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || running} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
       onCreateCompany={!readOnly && onCreateCompany ? () => {
         if (inspectorCloseLocked.current) return;
@@ -1791,7 +1810,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           patchDoc(() => result.doc, { label: 'review-partner' });
           setSelection([result.reviewerId]); setFocusedId(null);
         }} />}
-      <RunControls initializeOnRun={canInitialize} onConfigureNode={(id) => { focusNode(id); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
+      <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
@@ -1832,6 +1851,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             key={node.id}
             node={node}
             readOnly={readOnly}
+            sendUnavailableReason={runUnavailableReason || undefined}
             initializeOnSend={canInitialize}
             freeConversation={Boolean(cloudScope)}
             renderTurnDetails={cloudScope ? tileRenderTurnDetails : undefined}
@@ -1857,7 +1877,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onConfigure={tileOnConfigure}
             configurationPanel={!canInitialize && node.kind === 'session' && focusedId === node.id && inspectorId === node.id ? renderInspector(node, true) : null}
             onUpdateNode={readOnly || running || initializing || bindingLocked ? undefined : saveNode}
-            onRunNode={readOnly || running || initializing ? undefined : rerunNode}
+            onRunNode={readOnly || running || initializing || runUnavailableReason ? undefined : rerunNode}
             onDelete={readOnly || running || initializing ? undefined : tileDelete}
             wiring={wiring}
           />
@@ -1867,7 +1887,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       </CanvasViewport>
 
       {!running && <SelectionCollaboration key={`selection:${JSON.stringify(selection)}`} nodes={nodes.filter(node => selection.includes(node.id))}
-        disabled={readOnly || initializing || bindingLocked} available={Boolean(cloudScope)}
+        disabled={readOnly || initializing || bindingLocked || Boolean(runUnavailableReason)} available={Boolean(cloudScope)}
         onStart={(ids, policy) => { void startRun(ids, undefined, undefined, undefined, policy); }} />}
       {running && journal.current?.collaboration && <CollaborationStatus nodes={nodes} collaboration={journal.current.collaboration} />}
 
@@ -1890,7 +1910,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.undo} title={viewText.undo} disabled={readOnly || running || initializing || !history.undo} onClick={undo}><Undo2 size={16} /></button>
         <button aria-label={viewText.redo} title={viewText.redo} disabled={readOnly || running || initializing || !history.redo} onClick={redo}><Redo2 size={16} /></button>
-        {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={viewText.runSelection} disabled={readOnly || running} onClick={runFromSelection}><Play size={15} /></button></>}
+        {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={runUnavailableReason || viewText.runSelection} disabled={readOnly || running || Boolean(runUnavailableReason)} onClick={runFromSelection}><Play size={15} /></button></>}
       </div>}
 
       {minimapOpen && nodes.length > 0 ? (

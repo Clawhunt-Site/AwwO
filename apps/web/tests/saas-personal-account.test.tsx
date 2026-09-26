@@ -75,12 +75,46 @@ it("does not request personal credentials in platform LLM Gate mode", () => {
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it("requires a saved personal connection, selects a supported engine and links to LLM Gate", async () => {
+it("keeps existing workspace access visible without a personal connection", async () => {
+  const fetch = vi.fn().mockResolvedValue(response(catalog));
+  vi.stubGlobal("fetch", fetch);
+  gate();
+  expect(screen.getByText("Canvas content")).toBeVisible();
+  expect(await screen.findByText("No execution engine connected")).toBeVisible();
+  expect(screen.getByText(/browse and edit your workspaces, canvases and history/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Connect an engine" })).toHaveAttribute("href", "/?account=engines");
+  expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+});
+
+it("keeps workspace access when the connection list fails and allows a retry", async () => {
+  const fetch = vi.fn().mockRejectedValueOnce(new TypeError("offline"))
+    .mockResolvedValueOnce(response(catalog));
+  vi.stubGlobal("fetch", fetch);
+  gate();
+  expect(screen.getByText("Canvas content")).toBeVisible();
+  expect(await screen.findByText("Could not check engine connections")).toBeVisible();
+  expect(screen.getByRole("link", { name: "Connect an engine" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Retry check" }));
+  expect(await screen.findByText("No execution engine connected")).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+it("returns to the same canvas when engine settings cannot load", async () => {
+  history.replaceState(null, "", "/?tenant=t&canvas=c&account=engines");
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+  gate();
+  expect(await screen.findByRole("alert")).toBeVisible();
+  expect(screen.getByRole("link", { name: "Back to workspace" })).toHaveAttribute("href", "/?tenant=t&canvas=c");
+});
+
+it("selects a supported engine and links to LLM Gate from personal settings", async () => {
+  history.replaceState(null, "", "/?account=engines");
   const fetch = vi.fn().mockResolvedValue(response(catalog));
   vi.stubGlobal("fetch", fetch);
   gate();
   await screen.findByText("Connect your first engine");
   expect(screen.queryByText("Canvas content")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Back to workspace" })).toHaveAttribute("href", "/");
   expect(screen.getByRole("link", { name: /Open LLM Gate/ })).toHaveAttribute(
     "href",
     "https://api.clawhunt.site/",
@@ -95,7 +129,8 @@ it("requires a saved personal connection, selects a supported engine and links t
   ).not.toBeInTheDocument();
 });
 
-it("opens the workspace only after verification and server readback, without storing the key", async () => {
+it("shows a completed connection only after verification and server readback, without storing the key", async () => {
+  history.replaceState(null, "", "/?account=engines");
   const fetch = vi
     .fn()
     .mockResolvedValueOnce(response(catalog))
@@ -122,7 +157,7 @@ it("opens the workspace only after verification and server readback, without sto
     target: { value: "synthetic-user-secret" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Verify and save" }));
-  await screen.findByText("Canvas content");
+  expect(await screen.findByRole("link", { name: "Open workspace" })).toHaveAttribute("href", "/");
   expect(fetch.mock.calls[1][0]).toBe("/api/v1/auth/connections");
   expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
     provider: "llmgate",
@@ -138,7 +173,8 @@ it("opens the workspace only after verification and server readback, without sto
   );
 });
 
-it("keeps onboarding closed for legacy or empty connections under the Gate-only catalog while allowing removal", async () => {
+it("keeps legacy connections unavailable under the Gate-only catalog while allowing removal", async () => {
+  history.replaceState(null, "", "/?account=engines");
   const gateCatalog = {
     ...catalog,
     providers: [providers[0]],
@@ -196,6 +232,7 @@ it("keeps onboarding closed for legacy or empty connections under the Gate-only 
 });
 
 it("verification failure keeps onboarding closed and clears the password field", async () => {
+  history.replaceState(null, "", "/?account=engines");
   const fetch = vi
     .fn()
     .mockResolvedValueOnce(response(catalog))
@@ -247,6 +284,7 @@ it("retries the capability check and sends recovery only after it is available",
 });
 
 it("reveals only the entered key and resets visibility and stale errors on provider change", async () => {
+  history.replaceState(null, "", "/?account=engines");
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response(catalog)).mockResolvedValueOnce(response({ error: { code: 'provider_verification_failed' } }, 422)));
   gate(); await screen.findByLabelText('API Key');
   fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'synthetic-user-secret' } });

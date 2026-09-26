@@ -115,6 +115,28 @@ it('selects Jev independently of execution models and cancellation cannot apply 
   expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0);
 });
 
+it('keeps the hosted planner draft editable while engine access is unavailable, then enables submit after recovery', async () => {
+  const planRequest = vi.fn().mockResolvedValue({ version: 1, summary: 'Ready', operations: [] });
+  const reason = '请先连接你的执行引擎。';
+  const view = render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader}
+    executionUnavailableReason={reason} planRequest={planRequest} />);
+  const prompt = screen.getByRole('textbox', { name: '画布需求' });
+  fireEvent.change(prompt, { target: { value: '给旧画布增加一名研究员' } });
+  const submit = screen.getByRole('button', { name: '生成画布', exact: true });
+  expect(prompt).toBeEnabled();
+  expect(submit).toBeDisabled();
+  fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+  fireEvent.submit(prompt.closest('form')!);
+  expect(prompt).toHaveValue('给旧画布增加一名研究员');
+  expect(planRequest).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+
+  view.rerender(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} planRequest={planRequest} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: '生成画布', exact: true })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '生成画布', exact: true }));
+  await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+});
+
 it('does not expose writable model/persona controls in a reader canvas', () => {
   render(<CanvasSurface readOnly storageMode="cloud" runtimeReadJson={runtimeReader} />);
   expect(screen.queryByRole('complementary', { name: '模型与人设' })).toBeNull();

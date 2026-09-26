@@ -160,6 +160,36 @@ it('keeps explicit node execution behind task validation and retains the unsent 
   expect(screen.getByTestId('composer-input')).toHaveValue('An unsent follow-up');
 });
 
+it('keeps a cloud canvas editable but blocks manual conversation before initialization when the engine is unavailable', async () => {
+  const original = seed();
+  const reason = 'Connect your execution engine before running this canvas.';
+  render(<SaaSPreferencesProvider><CanvasSurface storageMode="cloud" runtimeReadJson={reader}
+    executionUnavailableReason={reason} /></SaaSPreferencesProvider>);
+  const run = screen.getByRole('button', { name: '▶ Run graph' });
+  expect(run).toBeDisabled();
+  expect(run).toHaveAttribute('title', reason);
+  expect(document.getElementById(run.getAttribute('aria-describedby')!)).toHaveTextContent(reason);
+  openChat();
+  expect(screen.queryByRole('button', { name: 'Execute node task' })).toBeNull();
+  const input = screen.getByTestId('composer-input');
+  expect(input).toBeEnabled();
+  fireEvent.change(input, { target: { value: 'Keep this draft until the engine is connected.' } });
+  expect(input).toHaveValue('Keep this draft until the engine is connected.');
+  const sendButton = screen.getByTestId('composer-send');
+  expect(sendButton).toBeDisabled();
+  expect(sendButton).toHaveAttribute('title', reason);
+  fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+  expect(input).toHaveValue('Keep this draft until the engine is connected.');
+  expect(initialize).not.toHaveBeenCalled();
+  expect(writes()).toEqual([]);
+  expect(loadRunJournal()).toBeNull();
+  await waitFor(() => expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({
+    id: original.nodes[0].id, title: original.nodes[0].title,
+    lastOutput: original.nodes[0].lastOutput,
+    threads: [{ draft: 'Keep this draft until the engine is connected.' }],
+  }));
+});
+
 it('preserves published outputs and downstream deliverables after successful natural-language chat and reload', async () => {
   const original = seed('Create a structured report', true);
   let view = renderCanvas(); openChat(); send('Can you explain the previous answer?'); await finished();

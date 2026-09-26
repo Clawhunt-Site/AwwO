@@ -60,6 +60,23 @@ async function openInspector() {
   fireEvent.click(screen.getByRole('button', { name: '配置', exact: true }));
   await waitFor(() => expect(screen.getByRole('button', { name: /保存配置|保存并准备运行/ })).not.toBeDisabled());
 }
+it('saves cloud node configuration without initializing when execution is unavailable', async () => {
+  seed(true);
+  const initialize = vi.fn();
+  configureSaaSCanvasInitialize(initialize);
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader}
+    executionUnavailableReason="请先连接执行引擎。" />);
+  expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '打开 Draft node', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '配置', exact: true }));
+  const inspector = screen.getByRole('dialog', { name: '节点配置 — Draft node' });
+  fireEvent.change(screen.getByLabelText(/系统提示词|人格/), { target: { value: 'Saved without running' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
+  await waitFor(() => expect(inspector).not.toBeInTheDocument());
+  expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({ persona: 'Saved without running' });
+  expect(initialize).not.toHaveBeenCalled();
+  expect(loadRunJournal()).toBeNull();
+});
 it('initializes a draft before graph journaling and executes the returned Agent/session identity', async () => {
   seed(); const initialize = vi.fn(async () => { expect(loadRunJournal()).toBeNull(); return canonical(loadDocumentWithStatus().doc); });
   configureSaaSCanvasInitialize(initialize); render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);

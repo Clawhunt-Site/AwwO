@@ -2,6 +2,32 @@
   max-width: none;
   padding-inline: max(24px, calc((100vw - 1120px) / 2));
 }
+.saas-personal-notice {
+  flex-wrap: wrap;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.saas-personal-gated-canvas {
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--saas-bg);
+}
+.saas-personal-gated-canvas > .saas-runtime-note {
+  flex-shrink: 0;
+}
+.saas-personal-gated-canvas > .saas-canvas-shell,
+.saas-personal-gated-canvas > .saas-dashboard {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+.saas-personal-gated-canvas--needs-engine > .saas-canvas-shell > .saas-runtime-note {
+  display: none;
+}
+.saas-runtime-note a {
+  white-space: nowrap;
+}
 .saas-personal-nav {
   display: flex;
   align-items: center;
