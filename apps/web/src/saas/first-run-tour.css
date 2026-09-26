@@ -5,15 +5,16 @@
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
 }
 .first-run-tour::backdrop { background: transparent; }
-.first-run-tour-scrim { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.first-run-tour-scrim { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .first-run-tour-shade { fill: #0713259c; }
 .first-run-tour-highlight { fill: none; stroke: #ffffffd9; stroke-width: 2; }
 .first-run-tour-card {
-  position: absolute; box-sizing: border-box; display: flex; flex-direction: column;
+  position: absolute; z-index: 1; box-sizing: border-box; display: flex; flex-direction: column;
   width: min(390px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: hidden;
   left: 50%; top: 50%; border: 1px solid var(--saas-border, #e1e7ee); border-radius: 24px;
   background: var(--saas-card, #fff); box-shadow: 0 24px 90px #08152545, 0 2px 8px #08152514;
-  animation: first-run-tour-in 180ms ease-out; text-align: left;
+  /* Keep the modal card on a static layer above the SVG in macOS WKWebView. */
+  text-align: left;
 }
 .first-run-tour :is(button, a) { -webkit-tap-highlight-color: transparent; }
 .first-run-tour button { font: inherit; cursor: pointer; }
@@ -46,7 +47,6 @@
 .first-run-tour-skip { padding: 8px 4px; color: var(--saas-muted, #687889); background: transparent; }
 .first-run-tour-back { width: 40px; color: var(--saas-text, #182838); background: var(--saas-soft, #f1f5f9); }
 .first-run-tour-next { padding: 10px 15px; color: var(--saas-accent-text, #fff); background: var(--saas-accent, #356ee8); }
-@keyframes first-run-tour-in { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 360px) {
   .first-run-tour-content { padding: 14px 19px 18px; }
   .first-run-tour-content h2 { font-size: 23px; }
@@ -56,4 +56,3 @@
   .first-run-tour-buttons { gap: 5px; }
   .first-run-tour-buttons button { font-size: 12px; }
 }
-@media (prefers-reduced-motion: reduce) { .first-run-tour-card { animation: none; } }
