@@ -1,3 +1,4 @@
+import { SecretInput } from './SecretInput';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LogOut, Plus, ArrowLeft, ShieldCheck, Save } from 'lucide-react';
@@ -78,7 +79,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   if (forgot) return <PasswordRecovery onBack={() => setForgot(false)} />;
   return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p></div>
     <form className="saas-card" onSubmit={async event => {
-      event.preventDefault(); setBusy(true); setError(null);
+      event.preventDefault(); if (busy) return; setBusy(true); setError(null);
       const values = Object.fromEntries(new FormData(event.currentTarget));
       try { onAuthenticated(await api<Identity>(register ? '/auth/register' : '/auth/login', { method: 'POST', body: JSON.stringify(values) })); }
       catch (error) { setError(error); } finally { setBusy(false); }
@@ -87,9 +88,9 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       {invited && <p role="status">{t('请先登录或注册。邀请会保留，登录后由你确认加入；注册时也会建立你自己的工作区。', 'Sign in or register first. Your invitation is preserved for confirmation after sign-in. Registration also creates your own workspace.')}</p>}
       {register && <><label>{t('姓名', 'Name')}<input name="name" autoComplete="name" required maxLength={100} /></label><label>{t('工作区名称', 'Workspace name')}<input name="tenantName" required maxLength={100} /></label></>}
       <label>{t('邮箱', 'Email')}<input name="email" type="email" autoComplete="email" required /></label>
-      <label>{t('密码', 'Password')}<input name="password" type="password" minLength={12} autoComplete={register ? 'new-password' : 'current-password'} required /></label>
-      {!register && <button type="button" className="saas-link" onClick={() => setForgot(true)}>{t('忘记密码？', 'Forgot password?')}</button>}
-      {register && <small>{t('密码至少 12 位。', 'Use at least 12 characters.')}</small>}
+      <SecretInput key={register ? "register" : "login"} label={t('密码', 'Password')} name="password" minLength={register ? 12 : undefined} maxLength={1024} autoComplete={register ? 'new-password' : 'current-password'} disabled={busy} required />
+      {!register && <button type="button" className="saas-link" disabled={busy} onClick={() => setForgot(true)}>{t('忘记密码？', 'Forgot password?')}</button>}
+      {register && <small>{t('密码至少 12 位。注册后进入工作区，按提示选择模型服务，再创建第一张画布。工作区名称稍后可以修改。', 'Use at least 12 characters. After registering, enter your workspace, choose a model service as prompted, and create your first canvas. You can rename your workspace later.')}</small>}
       {error !== null && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
       <button className="saas-primary" disabled={busy}>{busy ? t('请稍候…', 'Please wait…') : register ? t('注册并创建工作区', 'Register and create workspace') : t('登录', 'Sign in')}</button>
       <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>

@@ -1,4 +1,5 @@
 import { canvasStorage, canvasStorageKey } from './canvasStorage';
+import { accountURL } from '../saas/PersonalAccount';
 import { canvasFetch } from '../saas/canvasBridge';
 import { workspaceAgentCatalog } from '../saas/workspaceAgentCatalog';
 import { createMarketplaceRoleNode, type TeamMarketAgent } from './teamMarketAgents';
@@ -1650,7 +1651,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const v = viewRef.current;
     addPaletteModel(chosen.model, chosen.personaId, { x: (event.clientX - rect.left - v.x) / (v.scale || 1), y: (event.clientY - rect.top - v.y) / (v.scale || 1) });
   };
-  const modelShelf = canInitialize && !readOnly ? <ModelPersonaShelf modelsOnly groups={palette?.groups ?? []}
+  const modelShelf = canInitialize && !readOnly ? <ModelPersonaShelf modelsOnly configureModelsHref={accountURL('engines')} groups={palette?.groups ?? []}
     loading={paletteLoading} error={paletteError} disabled={!canEdit || planningBusy || initializing || bindingLocked}
     personaId={palettePersona} onPersonaChange={setPalettePersona} onAddModel={addPaletteModel} onModelDragStart={onModelDragStart}
     onOpenWorkspaceAgents={() => setAgentLibraryRequest(value => value + 1)} onRetry={() => setPaletteRefresh(value => value + 1)}
@@ -1688,6 +1689,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   return (
     <AgentWorkspace readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
       modelShelf={modelShelf}
+      onExpandModelRail={modelShelf ? () => setShelfCollapsed(false) : undefined}
       personaControls={modelShelf ? <ModelPersonaControls personaId={palettePersona} onPersonaChange={setPalettePersona}
         disabled={!canEdit || planningBusy || initializing || bindingLocked} /> : undefined}
       onModelDrop={onModelDrop} onModelDragOver={event => {

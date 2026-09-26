@@ -4,8 +4,8 @@ import { useCanvasI18n } from './i18n';
 import { SaaSApiError, saasErrorMessage } from '../saas/api';
 import type { WorkspaceAgent, WorkspaceAgentLoader } from './workspaceAgents';
 
-export function WorkspaceAgentPicker({ loadPage, onSelect, disabled, compact = false }: {
-  loadPage: WorkspaceAgentLoader; onSelect: (agent: WorkspaceAgent) => void; disabled: boolean; compact?: boolean;
+export function WorkspaceAgentPicker({ loadPage, onSelect, disabled, compact = false, onStartNew }: {
+  loadPage: WorkspaceAgentLoader; onSelect: (agent: WorkspaceAgent) => void; disabled: boolean; compact?: boolean; onStartNew?: () => void;
 }) {
   const { locale } = useCanvasI18n();
   const text = (zh: string, en: string) => locale === 'zh' ? zh : en;
@@ -58,7 +58,8 @@ export function WorkspaceAgentPicker({ loadPage, onSelect, disabled, compact = f
       {visible.map(item => <button type="button" key={item.id} aria-pressed={selected === item.id} aria-label={text(`选择 ${item.name}`, `Select ${item.name}`)} onClick={() => setSelected(item.id)}><strong>{item.name}</strong><span className="awwo-catalog-id">ID · {item.id.slice(-8)}</span><span>{item.model || text('未配置模型', 'No model configured')} · {item.runtime}</span><small>{item.instructions || text('未设置角色说明', 'No role instructions')}</small>{!canUse(item) && <em>{text('当前不可运行', 'Currently unavailable')}</em>}</button>)}
     </div>
     {busy && <p role="status">{text('正在读取 Agent 目录…', 'Loading Agent catalogue…')}</p>}
-    {!busy && !error && !visible.length && <p role="status">{items.length ? text('已加载的 Agent 中没有匹配项。', 'No matches among the loaded Agents.') : text('此工作区尚无 Agent。可以先从角色模板创建。', 'This workspace has no Agents yet. Start with a role template.')}</p>}
+    {!busy && !error && !visible.length && <p role="status">{items.length ? text('已加载的 Agent 中没有匹配项。', 'No matches among the loaded Agents.') : onStartNew ? text('此工作区还没有 Bot。先选择模型，创建第一位协作者。', 'This workspace has no Bots yet. Choose a model to create your first collaborator.') : text('此工作区尚无 Agent。可以先从角色模板创建。', 'This workspace has no Agents yet. Start with a role template.')}</p>}
+    {!busy && !error && items.length === 0 && onStartNew && <button type="button" className="awwo-primary" disabled={disabled} onClick={onStartNew}>{text('去选择模型', 'Choose a model')}</button>}
     {cursor && <button className="awwo-catalog-more" type="button" disabled={busy} onClick={() => void load(cursor)}>{text('加载更多 Agent', 'Load more Agents')}</button>}
     <footer className="awwo-template-library-footer"><span>{text(`已加载 ${items.length} 个 Agent${cursor ? '，还有更多' : ''}`, `${items.length} Agents loaded${cursor ? ', more available' : ''}`)}{agent && <span className="awwo-catalog-selection">{text('已选择：', 'Selected: ')}{agent.name}</span>}</span><button className="awwo-primary" type="button" disabled={disabled || busy || !agent || !canUse(agent)} onClick={() => { if (!disabled && !busy && agent && canUse(agent)) onSelect(agent); }}><Plus size={16} />{text('添加所选 Agent', 'Add selected Agent')}</button></footer>
   </div>;

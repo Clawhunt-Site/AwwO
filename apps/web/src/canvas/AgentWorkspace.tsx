@@ -35,6 +35,7 @@ export interface AgentWorkspaceProps {
   accountControl?: ReactNode;
   assistant?: ReactNode;
   modelShelf?: ReactNode;
+  onExpandModelRail?: () => void;
   personaControls?: ReactNode;
   onModelDragOver?: DragEventHandler<HTMLDivElement>;
   onModelDrop?: DragEventHandler<HTMLDivElement>;
@@ -44,7 +45,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, modelShelf, onExpandModelRail, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -60,8 +61,11 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
   const [botSource, setBotSource] = useState<'canvas' | 'workspace' | 'market'>('canvas');
   useEffect(() => { setModelLibraryOpen(false); }, [nodes.length]);
   const libraryRef = useRef<HTMLElement>(null);
+  const skipLibraryReturnFocus = useRef(false);
   const modelSidebarRef = useRef<HTMLElement>(null);
   const botSidebarRef = useRef<HTMLElement>(null);
+  const modelOpenButtonRef = useRef<HTMLButtonElement>(null);
+  const botOpenButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const resize = () => {
       const next = window.innerWidth <= 900; setMobile(next);
@@ -86,7 +90,14 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
       }
     };
     document.addEventListener('keydown', trap);
-    return () => { document.removeEventListener('keydown', trap); if (previous?.isConnected) previous.focus(); };
+    return () => {
+      document.removeEventListener('keydown', trap);
+      // Drawer content or the library dialog may have been removed by the transition. Return
+      // focus to the stable header opener once the main area is interactive again.
+      const opener = modelLibraryOpen ? modelOpenButtonRef.current : botOpenButtonRef.current;
+      if (window.innerWidth <= 900 && opener?.isConnected && !opener.closest('[inert]')) opener.focus();
+      else if (previous?.isConnected && !previous.closest('[inert]') && previous.getClientRects().length > 0) previous.focus();
+    };
   }, [mobile, modelLibraryOpen, sidebarOpen]);
   useEffect(() => {
     if (!sidebarOpen && !modelLibraryOpen) return;
@@ -110,12 +121,30 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     };
     document.addEventListener('keydown', trap);
-    return () => { document.removeEventListener('keydown', trap); previous?.focus(); };
+    return () => {
+      document.removeEventListener('keydown', trap);
+      if (!skipLibraryReturnFocus.current && previous?.isConnected) previous.focus();
+      skipLibraryReturnFocus.current = false;
+    };
   }, [libraryOpen]);
   const visible = nodes.filter(n => n.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const connected = nodes.filter(n => n.kind === 'session' && n.binding).length;
   const pick = (id: AgentTemplateId) => { if (readOnly) return; onAddAgent(id); setLibraryOpen(false); setSidebarOpen(false); };
 
+  const revealModelLibrary = () => { onExpandModelRail?.(); setSidebarOpen(false); setModelLibraryOpen(true); };
+  const revealBotList = () => { setModelLibraryOpen(false); setSidebarOpen(true); };
+  const railLink = (label: string, open: () => void) => mobile
+    ? <button type="button" className="awwo-rail-link" onClick={open}>{label}</button>
+    : label;
+  const emptyRailHint = locale === 'zh'
+    ? <>先在右侧{railLink('Bot 清单', revealBotList)}选择人设（可选），再从左侧{railLink('模型栏', revealModelLibrary)}添加模型；也可以直接选用已有 Bot。</>
+    : <>Optionally choose a persona in the {railLink('Bot list', revealBotList)} on the right, then add a model from the {railLink('model rail', revealModelLibrary)} on the left. You can also use an existing Bot.</>;
+  const startNewBot = modelShelf ? () => {
+    if (libraryOpen && mobile) skipLibraryReturnFocus.current = true;
+    setLibraryOpen(false);
+    revealModelLibrary();
+  } : undefined;
+  const addBotLabel = modelShelf ? (locale === 'zh' ? '添加 Bot' : 'Add Bot') : t('workspace.addAgent');
   const botSidebar = (
 <aside ref={botSidebarRef} className={`awwo-sidebar${modelShelf ? ' awwo-bot-sidebar' : ''}`} aria-label={modelShelf ? (locale === 'zh' ? 'Bot 清单' : 'Bot list') : t('workspace.navigation')}>
       {modelShelf ? <header className="awwo-bot-header"><div><span className="awwo-eyebrow">YOUR TEAM</span><h2><Bot size={20} />{locale === 'zh' ? 'Bot 清单' : 'Bots'}</h2></div><button type="button" className="awwo-icon-button awwo-mobile-menu" aria-label={t('workspace.closeNavigation')} onClick={() => setSidebarOpen(false)}><X size={18} /></button></header> : <>
@@ -123,7 +152,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
       <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{workspaceName || t('workspace.name')}</strong><small>{workspaceCaption || t('workspace.local')}</small></div></div>
       </>}
       {!modelShelf && <div className="awwo-nav-active" aria-current="page"><Layers3 size={17} /><span>{t('workspace.canvas')}</span><span className="awwo-nav-badge">{nodes.length}</span></div>}
-      <button className="awwo-new-agent" aria-label={t('workspace.addAgent')} title={t('workspace.addAgent')} disabled={readOnly || running} onClick={() => { setSidebarOpen(false); setLibraryOpen(true); }}><Plus size={17} />{modelShelf ? (locale === 'zh' ? '添加 Bot' : 'Add Bot') : t('workspace.addAgent')}</button>
+      <button className="awwo-new-agent" aria-label={addBotLabel} title={addBotLabel} disabled={readOnly || running} onClick={() => { setSidebarOpen(false); setLibraryOpen(true); }}><Plus size={17} />{addBotLabel}</button>
       {modelShelf && <div className="awwo-bot-tabs" role="group" aria-label={locale === 'zh' ? 'Bot 来源' : 'Bot source'}>
         <button type="button" aria-pressed={botSource === 'canvas'} onClick={() => setBotSource('canvas')}>{locale === 'zh' ? '画布中' : 'Canvas'}<span>{nodes.length}</span></button>
         {loadWorkspaceAgents && onAddWorkspaceAgent && <button type="button" aria-pressed={botSource === 'workspace'} onClick={() => setBotSource('workspace')}>{locale === 'zh' ? '工作区' : 'Workspace'}</button>}
@@ -146,7 +175,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
         {!visible.length && <p className="awwo-list-empty">{query ? t('workspace.noAgentMatch') : t('workspace.firstAgent')}</p>}
       </div>
       </>}
-      {modelShelf && botSource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent && <WorkspaceAgentPicker compact loadPage={loadWorkspaceAgents} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setBotSource('canvas'); setSidebarOpen(false); }} />}
+      {modelShelf && botSource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent && <WorkspaceAgentPicker onStartNew={startNewBot} compact loadPage={loadWorkspaceAgents} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setBotSource('canvas'); setSidebarOpen(false); }} />}
       {modelShelf && botSource === 'market' && onAddMarketAgent && <TeamMarketAgentPicker compact disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddMarketAgent(agent); setBotSource('canvas'); setSidebarOpen(false); }} />}
       {personaControls && <details className="awwo-bot-personas"><summary>{locale === 'zh' ? '人设预设' : 'Persona presets'}</summary>{personaControls}</details>}
       </div>
@@ -165,8 +194,8 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     {!modelShelf && botSidebar}
     <main className="awwo-main" inert={mobile && (modelLibraryOpen || sidebarOpen)}>
       <header className="awwo-header">
-        {modelShelf && <button className="awwo-mobile-menu awwo-icon-button" aria-label={locale === 'zh' ? '打开模型库' : 'Open model library'} aria-expanded={modelLibraryOpen} onClick={() => { setModelLibraryOpen(true); setSidebarOpen(false); }}><Cpu size={19} /></button>}
-        <button className="awwo-mobile-menu awwo-icon-button" aria-label={t('workspace.openNavigation')} aria-expanded={sidebarOpen} onClick={() => { setSidebarOpen(true); setModelLibraryOpen(false); }}><Menu size={19} /></button>
+        {modelShelf && <button ref={modelOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={locale === 'zh' ? '打开模型库' : 'Open model library'} aria-expanded={modelLibraryOpen} onClick={revealModelLibrary}><Cpu size={19} /></button>}
+        <button ref={botOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={t('workspace.openNavigation')} aria-expanded={sidebarOpen} onClick={revealBotList}><Menu size={19} /></button>
         <div className="awwo-page-title"><div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{workspaceName || t('workspace.name')}</span></div></div>
         <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{accountControl}</div>
       </header>
@@ -187,7 +216,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
             <div className="awwo-example-node"><span><Code2 size={19} /></span><strong>{t('workspace.exampleFrontend')}</strong><small>{t('workspace.exampleFrontendDetail')}</small></div>
           </div>
           </>}
-          {modelShelf ? <p className="awwo-empty-note">{locale === 'zh' ? '从左侧拖入模型，在右侧选择 Bot 或人设。' : 'Drag a model from the left, or choose a Bot from the right.'}</p> : <>
+          {modelShelf ? <p className="awwo-empty-note">{emptyRailHint}</p> : <>
           <div className="awwo-empty-actions"><button className="awwo-primary" onClick={() => { if (!readOnly) onCreateTemplate(); }} disabled={readOnly || running}><GitBranch size={17} />{t('workspace.createProductCanvas')}<ArrowRight size={16} /></button><button className="awwo-secondary" onClick={() => pick('general')} disabled={readOnly || running}><Plus size={16} />{t('workspace.startBlank')}</button></div>
           <span className="awwo-empty-note">{welcome ? t('workspace.templateHint') : t('workspace.draftHint')}</span></>}
         </div>}
@@ -197,14 +226,14 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     </main>
     {modelShelf && botSidebar}
     {libraryOpen && <div className="awwo-library-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) setLibraryOpen(false); }} onKeyDown={e => { if (e.key === 'Escape') setLibraryOpen(false); }}>
-      <section ref={libraryRef} className="awwo-agent-library" role="dialog" aria-modal="true" aria-label={t('workspace.addAgent')}>
+      <section ref={libraryRef} className="awwo-agent-library" role="dialog" aria-modal="true" aria-label={addBotLabel}>
         <header><div><span className="awwo-eyebrow">AGENT LIBRARY</span><h2>{t('workspace.chooseCollaborator')}</h2></div><button className="awwo-icon-button" aria-label={t('workspace.closeAddAgent')} onClick={() => setLibraryOpen(false)}><X size={19} /></button></header>
         {loadWorkspaceAgents && onAddWorkspaceAgent && <div className="awwo-library-sources" role="group" aria-label={locale === 'zh' ? 'Agent 来源' : 'Agent source'}>
           <button type="button" aria-pressed={librarySource === 'workspace'} onClick={() => setLibrarySource('workspace')}>{locale === 'zh' ? '工作区 Agent' : 'Workspace Agents'}</button>
           {onAddMarketAgent && <button type="button" aria-pressed={librarySource === 'market'} onClick={() => setLibrarySource('market')}>{locale === 'zh' ? '团队市场角色' : 'Team market roles'}</button>}
           {!modelShelf && <button type="button" aria-pressed={librarySource === 'templates'} onClick={() => setLibrarySource('templates')}>{locale === 'zh' ? '角色模板' : 'Role templates'}</button>}
         </div>}
-        {librarySource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent ? <WorkspaceAgentPicker loadPage={loadWorkspaceAgents} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setLibraryOpen(false); setSidebarOpen(false); }} /> : librarySource === 'market' && onAddMarketAgent ? <TeamMarketAgentPicker disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddMarketAgent(agent); setLibraryOpen(false); setSidebarOpen(false); }} /> : <>
+        {librarySource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent ? <WorkspaceAgentPicker onStartNew={startNewBot} loadPage={loadWorkspaceAgents} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setLibraryOpen(false); setSidebarOpen(false); }} /> : librarySource === 'market' && onAddMarketAgent ? <TeamMarketAgentPicker disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddMarketAgent(agent); setLibraryOpen(false); setSidebarOpen(false); }} /> : <>
         <p>{t('workspace.libraryBody')}</p>
         <div className="awwo-template-browser">
           <nav className="awwo-template-list" aria-label={t('workspace.templateList')}>{templates.map(item => <button key={item.id} type="button" aria-label={t('workspace.previewTemplate', { title: item.title })} aria-pressed={selectedTemplate === item.id} data-template={item.id} onClick={() => setSelectedTemplate(item.id)}>

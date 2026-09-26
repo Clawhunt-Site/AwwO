@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, saasErrorMessage, type Identity } from "./api";
 import { PreferenceControls, useSaaSPreferences } from "./preferences";
 import "./personal-account.css";
+import { SecretInput } from "./SecretInput";
 
 type Provider = { id: string; name: string; runtimes: string[] };
 type Connection = {
@@ -111,7 +112,7 @@ export function PersonalEngineGate({
     <ConnectionSettings
       catalog={catalog}
       onChange={setCatalog}
-      onboarding={catalog.items.length === 0}
+      onboarding={identity.personalCredentialsRequired === true && catalog.items.length === 0}
     />
   );
 }
@@ -134,6 +135,16 @@ export function ConnectionSettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState("");
+  const [removing, setRemoving] = useState<Connection | null>(null);
+  const providerForm = useRef<HTMLFormElement>(null);
+  const removalTrigger = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (removing) return;
+    const trigger = removalTrigger.current;
+    if (!trigger) return;
+    (trigger.isConnected ? trigger : providerForm.current?.querySelector('select'))?.focus();
+    removalTrigger.current = null;
+  }, [removing]);
   const refresh = async () =>
     onChange(await api<Connections>("/auth/connections"));
   return (
@@ -148,12 +159,17 @@ export function ConnectionSettings({
         "Choose a provider and add your API key. Each task uses the credentials of the person who starts it.",
       )}
     >
+      {onboarding && <ol className="saas-onboarding-steps" aria-label={t('开始使用', 'Getting started')}>
+        <li>{t('1 · 账号已创建', '1 · Account created')}</li>
+        <li aria-current="step">{t('2 · 连接模型服务', '2 · Connect a provider')}</li>
+        <li>{t('3 · 创建画布', '3 · Create a canvas')}</li>
+      </ol>}
       <nav className="saas-personal-nav">
         <a href={accountURL("security")}>{t("账号安全", "Account security")}</a>
         <button
           onClick={async () => {
-            await api("/auth/logout", { method: "POST" });
-            location.reload();
+            try { await api("/auth/logout", { method: "POST" }); location.reload(); }
+            catch (cause) { setError(cause); }
           }}
         >
           {t("退出登录", "Sign out")}
@@ -164,6 +180,7 @@ export function ConnectionSettings({
       </nav>
       <div className="saas-connection-grid">
         <form
+          ref={providerForm}
           className="saas-card"
           onSubmit={async (e) => {
             e.preventDefault();
@@ -208,6 +225,7 @@ export function ConnectionSettings({
               disabled={busy}
               onChange={(e) => {
                 setProviderID(e.target.value);
+                setError(null); setNotice("");
                 setRuntime(
                   catalog.providers.find((p) => p.id === e.target.value)
                     ?.runtimes[0] || "",
@@ -236,6 +254,9 @@ export function ConnectionSettings({
               ))}
             </select>
           </label>
+          <p className="saas-field-hint">{runtime === 'pi'
+            ? t('Pi：通过所选服务商运行 Agent，支持多种模型。', 'Pi runs Agents through your selected provider and supports multiple models.')
+            : t('OpenAI Agents：通过兼容接口运行 Agent，也可使用 LLM Gate 的模型。不确定时保留默认选择即可。', 'OpenAI Agents runs Agents through a compatible API, including LLM Gate models. Keep the default if you are unsure.')}</p>
           <label>
             {t("连接名称（可选）", "Connection name (optional)")}
             <input
@@ -246,21 +267,13 @@ export function ConnectionSettings({
               placeholder={t("例如：我的工作账号", "For example: Work account")}
             />
           </label>
-          <label>
-            API Key
-            <input
-              type="password"
-              name="provider-api-key"
-              autoComplete="new-password"
-              spellCheck={false}
-              required
-              minLength={8}
-              maxLength={4096}
-              value={key}
-              disabled={busy}
-              onChange={(e) => setKey(e.target.value)}
-            />
-          </label>
+          <SecretInput key={providerID} label="API Key" name="provider-api-key"
+            autoComplete="new-password" spellCheck={false} required minLength={8} maxLength={4096}
+            value={key} disabled={busy} onChange={(e) => setKey(e.target.value)}
+            aria-describedby="provider-key-help" />
+          <p id="provider-key-help" className="saas-field-hint">{t(
+            `请填写 ${provider?.name || ''} 的 API Key，不是 AwwO 登录密码。`,
+            `Use an API key from ${provider?.name || 'your provider'}, not your AwwO password.`)}</p>
           <small>
             {t(
               "密钥加密保存在服务端，不写入画布或浏览器存储。验证会读取服务商的模型目录。",
@@ -304,6 +317,9 @@ export function ConnectionSettings({
           </p>
         </aside>
       </div>
+      {removing && <RemoveConnectionDialog connection={removing} onClose={() => setRemoving(null)}
+        onDeleted={() => onChange({ ...catalog, items: catalog.items.filter(item => item.id !== removing.id) })}
+        onRemoved={async () => { await refresh(); setRemoving(null); }} />}
       {catalog.items.length > 0 && (
         <section className="saas-card saas-connection-list">
           <h2>{t("已连接的服务", "Connected providers")}</h2>
@@ -329,20 +345,7 @@ export function ConnectionSettings({
               </div>
               <button
                 disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  setError(null);
-                  try {
-                    await api("/auth/connections/" + encodeURIComponent(c.id), {
-                      method: "DELETE",
-                    });
-                    await refresh();
-                  } catch (cause) {
-                    setError(cause);
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
+                onClick={event => { removalTrigger.current = event.currentTarget; setRemoving(c); }}
               >
                 {t("移除连接", "Remove connection")}
               </button>
@@ -361,6 +364,41 @@ export function ConnectionSettings({
       )}
     </AccountLayout>
   );
+}
+
+function RemoveConnectionDialog({ connection, onClose, onDeleted, onRemoved }: {
+  connection: Connection; onClose: () => void; onDeleted: () => void; onRemoved: () => Promise<void>;
+}) {
+  const { t, locale } = useSaaSPreferences();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [removed, setRemoved] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => { const element = dialog.current; element?.showModal(); return () => element?.close(); }, []);
+  return <dialog ref={dialog} className="saas-native-dialog" aria-labelledby="remove-connection-title"
+    onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    <form className="saas-card" onSubmit={async event => {
+      event.preventDefault(); if (busy) return; setBusy(true); setError(null);
+      try {
+        if (!removed) {
+          await api('/auth/connections/' + encodeURIComponent(connection.id), { method: 'DELETE' });
+          setRemoved(true);
+          onDeleted();
+        }
+        await onRemoved();
+      } catch (cause) { setError(cause); } finally { setBusy(false); }
+    }}>
+      <h2 id="remove-connection-title">{t('移除模型连接？', 'Remove model connection?')}</h2>
+      <p>{t(`将移除“${connection.name}”。后续任务无法再使用此连接；已开始的调用可能继续完成。重新使用需要再次填写 API Key。`,
+        `Remove “${connection.name}”? New tasks cannot use this connection. Calls in progress may finish. Reconnecting requires the API key again.`)}</p>
+      {removed && <p role="status">{t('连接已移除，正在更新列表。若刷新失败，请重试刷新。', 'Connection removed. Refresh the list if it could not be updated.')}</p>}
+      {error !== null && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
+      <div className="saas-draft-actions">
+        <button type="button" autoFocus disabled={busy} onClick={onClose}>{removed ? t('关闭', 'Close') : t('取消', 'Cancel')}</button>
+        <button className="saas-danger-button" disabled={busy}>{busy ? t('请稍候…', 'Please wait…') : removed ? t('刷新列表', 'Refresh list') : t('确认移除', 'Remove connection')}</button>
+      </div>
+    </form>
+  </dialog>;
 }
 
 type AuthSession = {
@@ -523,6 +561,16 @@ export function PasswordRecovery({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState(false);
+  const [recovery, setRecovery] = useState<'loading' | 'available' | 'unavailable' | 'error'>(token ? 'available' : 'loading');
+  const [optionsRevision, setOptionsRevision] = useState(0);
+  useEffect(() => {
+    if (token) return;
+    const controller = new AbortController(); setRecovery('loading');
+    api<{ passwordRecovery: boolean }>('/auth/options', { signal: controller.signal })
+      .then(options => { if (!controller.signal.aborted) setRecovery(options.passwordRecovery ? 'available' : 'unavailable'); })
+      .catch(() => { if (!controller.signal.aborted) setRecovery('error'); });
+    return () => controller.abort();
+  }, [token, optionsRevision]);
   return (
     <AccountLayout
       title={
@@ -534,7 +582,7 @@ export function PasswordRecovery({
         token
           ? t("设置新的登录密码。", "Set a new sign-in password.")
           : t(
-              "输入注册邮箱，我们会发送限时重设链接。",
+              "使用注册邮箱找回密码。邮件服务可用时会发送限时重设链接。",
               "Enter your email to request a time-limited reset link.",
             )
       }
@@ -543,6 +591,7 @@ export function PasswordRecovery({
         className="saas-card saas-recovery"
         onSubmit={async (e) => {
           e.preventDefault();
+          if (busy || recovery !== 'available') return;
           setBusy(true);
           setError(null);
           const form = e.currentTarget;
@@ -568,6 +617,11 @@ export function PasswordRecovery({
           }
         }}
       >
+        {!token && recovery !== 'available' && <p role={recovery === 'error' ? 'alert' : 'status'}>{
+          recovery === 'loading' ? t('正在检查邮件服务…', 'Checking email recovery…') : recovery === 'unavailable'
+            ? t('邮件找回服务尚未配置，请联系管理员。当前无法发送重设邮件。', 'Email recovery is not configured. Contact your administrator; reset emails cannot be sent yet.')
+            : t('无法检查邮件服务，请重试。', 'Could not check email recovery. Try again.')}</p>}
+        {recovery === 'error' && <button type="button" onClick={() => setOptionsRevision(value => value + 1)}>{t('重试', 'Retry')}</button>}
         {!done &&
           (token ? (
             <label>
@@ -579,7 +633,7 @@ export function PasswordRecovery({
                 minLength={12}
                 maxLength={1024}
                 required
-                disabled={busy}
+                disabled={busy || recovery !== 'available'}
               />
             </label>
           ) : (
@@ -590,7 +644,7 @@ export function PasswordRecovery({
                 name="email"
                 autoComplete="email"
                 required
-                disabled={busy}
+                disabled={busy || recovery !== 'available'}
               />
             </label>
           ))}
@@ -612,7 +666,7 @@ export function PasswordRecovery({
                 )}
           </p>
         ) : (
-          <button className="saas-primary" disabled={busy}>
+          <button className="saas-primary" disabled={busy || recovery !== 'available'}>
             {busy
               ? t("请稍候…", "Please wait…")
               : token

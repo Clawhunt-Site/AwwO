@@ -37,6 +37,15 @@ function canonical(document: CanvasDocument, runtime = 'pi', model = 'profile-ma
     runtime, model, binding: { companyId: tenant.id, agentId: 'new-agent', agentName: node.title }, issueId: 'new-session',
   }) });
 }
+it('shows the model controls when a 390px canvas first opens its model drawer', () => {
+  vi.stubGlobal('innerWidth', 390);
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+  fireEvent.click(screen.getByRole('button', { name: '打开模型库' }));
+  const modelBody = document.querySelector('.awwo-model-sidebar .model-persona-shelf-body');
+  expect(modelBody).not.toBeNull();
+  expect(modelBody).not.toHaveAttribute('hidden');
+  expect(screen.getByRole('heading', { name: '执行模型' })).toBeVisible();
+});
 async function openInspector() {
   fireEvent.click(screen.getByRole('button', { name: '打开 Draft node', exact: true }));
   fireEvent.click(screen.getByRole('button', { name: '配置', exact: true }));

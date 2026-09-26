@@ -20,6 +20,7 @@ export interface ModelPersonaShelfProps {
   onCollapsedChange: (collapsed: boolean) => void;
   orchestrationControls?: ReactNode;
   modelsOnly?: boolean;
+  configureModelsHref?: string;
 }
 
 /** Persona selection lives with Bots; the selected value is shared with the model shelf. */
@@ -48,7 +49,7 @@ export function ModelPersonaControls({ personaId, onPersonaChange, disabled = fa
 /** Catalog presentation only. The host revalidates availability before creating a node. */
 export function ModelPersonaShelf({ groups, loading, error, disabled = false, personaId, onPersonaChange,
   onAddModel, onModelDragStart, onOpenWorkspaceAgents, onRetry, collapsed, onCollapsedChange,
-  orchestrationControls, modelsOnly = false }: ModelPersonaShelfProps) {
+  orchestrationControls, modelsOnly = false, configureModelsHref }: ModelPersonaShelfProps) {
   const { locale } = useCanvasI18n();
   const en = locale === 'en';
   const id = useId();
@@ -107,6 +108,10 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
           {en ? 'No model catalog is available.' : '暂无模型目录。'}
         </p>}
       </section>
+      {configureModelsHref && <div className="model-persona-shelf-setup">
+        {!loading && !error && !groups.some(group => group.available && group.models.some(model => model.available)) && <p>{en ? 'No models are available. Check your connections or ask the workspace admin.' : '当前没有可用模型。请检查个人连接或联系工作区管理员。'}</p>}
+        <a href={configureModelsHref}>{en ? 'Manage my model connections' : '配置我的模型连接'} ↗</a>
+      </div>}
       {!modelsOnly && <ModelPersonaControls personaId={personaId} onPersonaChange={onPersonaChange} disabled={disabled} />}
       {!modelsOnly && <button type="button" className="model-persona-shelf-workspace" disabled={disabled}
         onClick={() => { if (!disabled) onOpenWorkspaceAgents(); }}>

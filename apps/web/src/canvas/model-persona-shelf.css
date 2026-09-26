@@ -68,3 +68,7 @@
   .model-persona-shelf.is-collapsed { bottom: auto; width: 42px; }
   .model-persona-shelf.is-collapsed .model-persona-shelf-head { border-bottom: 0; }
 }
+
+.model-persona-shelf-setup { padding-top: 16px; border-top: 1px solid var(--saas-border); font-size: 12px; line-height: 1.6; }
+.model-persona-shelf-setup p { color: var(--saas-muted); }
+.model-persona-shelf-setup a { display: inline-flex; align-items: center; min-height: 44px; color: var(--saas-accent); text-underline-offset: 4px; }

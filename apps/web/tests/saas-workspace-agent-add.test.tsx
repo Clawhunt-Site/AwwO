@@ -23,7 +23,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); clearSaaSCanvas(); resetAllSessions(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 async function addWorkspaceAgent() {
-  fireEvent.click(screen.getByRole('button', { name: '添加 Agent', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '添加 Bot', exact: true }));
   fireEvent.click(await screen.findByRole('button', { name: '选择 QA Analyst' }));
   fireEvent.click(screen.getByRole('button', { name: '添加所选 Agent' }));
 }
@@ -47,7 +47,7 @@ it('adds one node per explicit workspace selection under StrictMode, with distin
 it('adds a market role once under StrictMode without shared Agent identity or duplicate keys', async () => {
   const errors = vi.spyOn(console, 'error');
   render(<StrictMode><CanvasSurface storageMode="cloud" runtimeReadJson={reader} /></StrictMode>);
-  fireEvent.click(screen.getByRole('button', { name: '添加 Agent', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '添加 Bot', exact: true }));
   fireEvent.click(screen.getByRole('button', { name: '团队市场角色' }));
   fireEvent.click(screen.getByRole('button', { name: '选择 Content Lead · Content Machine' }));
   fireEvent.click(screen.getByRole('button', { name: '添加所选角色' }));

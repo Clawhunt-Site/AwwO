@@ -25,13 +25,16 @@ export function CanvasList({ tenant, onOpen }: { tenant: Tenant; onOpen: (canvas
         if (mounted.current) onOpen(canvas.id);
       } catch (cause) { if (mounted.current) setError(cause); }
       finally { if (mounted.current) setBusy(false); }
-    }}><input aria-label={t('新画布名称', 'New canvas name')} placeholder={t('为新画布起个名字', 'Name your new canvas')} value={name} onChange={event => setName(event.target.value)} maxLength={100} disabled={busy}/><button disabled={busy} className="saas-primary"><Plus size={16}/>{t('新建画布', 'Create canvas')}</button></form>}
+    }}><input aria-label={t('新画布名称', 'New canvas name')} placeholder={t('为新画布起个名字', 'Name your new canvas')} value={name} onChange={event => setName(event.target.value)} maxLength={100} disabled={busy}/><button disabled={busy} className="saas-primary"><Plus size={16}/>{busy ? t('正在创建…', 'Creating…') : t('新建画布', 'Create canvas')}</button></form>}
     {(error || listing.error) && <p role="alert" className="saas-error">{saasErrorMessage(error || listing.error, locale)}</p>}
-    <ListPager label={t('画布分页', 'Canvas pages')} page={listing.pageNumber} busy={listing.loading || busy} previous={listing.previous} next={listing.next} refresh={listing.refresh}/>
+    {(listing.loading || listing.pageNumber > 1 || Boolean(listing.page?.items.length) || listing.error) ? <ListPager label={t('画布分页', 'Canvas pages')} page={listing.pageNumber} busy={listing.loading || busy} previous={listing.previous} next={listing.next} refresh={listing.refresh}/> : <button type="button" onClick={listing.refresh}>{t('刷新列表', 'Refresh list')}</button>}
     {listing.loading ? <p role="status">{t('正在加载画布…', 'Loading canvases…')}</p> : listing.page && <div className="saas-canvas-list">{listing.page.items.map(canvas => <article key={canvas.id} className="saas-canvas-card">
       <button className="saas-canvas-open" onClick={() => onOpen(canvas.id)}><span>↗</span><h2>{canvas.name}</h2><p>{new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</p></button>
       {!readOnly && <div className="saas-canvas-actions"><button aria-label={t(`改名：${canvas.name}`, `Rename ${canvas.name}`)} onClick={() => setEditing({ canvas, action: 'rename' })}>{t('改名', 'Rename')}</button><button aria-label={t(`删除：${canvas.name}`, `Delete ${canvas.name}`)} onClick={() => setEditing({ canvas, action: 'delete' })}>{t('删除', 'Delete')}</button></div>}
-    </article>)}{listing.page.items.length === 0 && <p>{t('当前页没有画布。', 'No canvases on this page.')}</p>}</div>}
+    </article>)}{listing.page.items.length === 0 && <section className="saas-empty-guide">
+      <h2>{listing.pageNumber === 1 ? t('从第一张画布开始', 'Start with your first canvas') : t('当前页没有画布', 'No canvases on this page')}</h2>
+      <p>{readOnly ? t('请工作区成员创建画布后，刷新列表查看。', 'Ask a workspace member to create a canvas, then refresh this list.') : listing.pageNumber > 1 ? t('返回上一页，或新建一张画布。', 'Go to the previous page or create a canvas.') : t('在上方输入任务名称并新建画布。进入后，先选人设，再从左侧添加模型；右侧 Bot 清单会显示你的协作者。', 'Name your task above and create a canvas. Choose a persona, then add a model from the left. Your collaborators appear in the Bot list on the right.')}</p>
+    </section>}</div>}
     {editing && !readOnly && <CanvasAction key={`${tenant.id}:${editing.canvas.id}:${editing.action}`} tenantId={tenant.id} {...editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); listing.refresh(); }}/>}
   </>;
 }

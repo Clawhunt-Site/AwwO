@@ -113,3 +113,10 @@ it('keeps same-model personal connections visibly distinct and selects the inten
   expect(onAddModel.mock.calls[0][0]).toMatchObject({ model: 'personal-b', label: entries[1].label });
   expect(screen.getByRole('button', { name: 'Add gpt-5 · Work · openai / conn-a · Agents' })).toBeEnabled();
 });
+
+it('offers model configuration without enabling unavailable models', () => {
+  render(<ModelPersonaShelf {...props({ groups: groups.slice(0, 4), modelsOnly: true, configureModelsHref: '/?tenant=t&canvas=c&account=engines' })} />);
+  expect(screen.getByText('当前没有可用模型。请检查个人连接或联系工作区管理员。')).toBeVisible();
+  expect(screen.getByRole('link', { name: '配置我的模型连接 ↗' })).toHaveAttribute('href', '/?tenant=t&canvas=c&account=engines');
+  expect(screen.queryByRole('button', { name: /添加/ })).toBeNull();
+});
