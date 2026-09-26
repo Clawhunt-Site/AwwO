@@ -237,12 +237,16 @@ def test_diagnostic_loss_counter_resets_after_flush(tmp_path: Path) -> None:
 # -- queue-full drop counts as loss (no block on diagnostics) --------------
 
 
-def test_diagnostic_drop_on_full_queue_is_counted(tmp_path: Path) -> None:
+def test_diagnostic_drop_on_full_queue_is_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / "telemetry.db"
     # Tiny queue + a daemon stalled inside the first write so nothing drains.
     import threading
 
+    monkeypatch.setattr(ds, "_DIAG_QUEUE_MAXSIZE", 8)
     release = threading.Event()
+    writer_stalled = threading.Event()
 
     def stalling_connect(p: Path) -> sqlite3.Connection:
         real = ds._default_connect(p)
@@ -250,7 +254,8 @@ def test_diagnostic_drop_on_full_queue_is_counted(tmp_path: Path) -> None:
         class _Stall:
             def execute(self, sql: str, *args):
                 if "INTO receipts" in sql:
-                    release.wait(timeout=5.0)
+                    writer_stalled.set()
+                    release.wait()
                 return real.execute(sql, *args)
 
             def __enter__(self):
@@ -268,13 +273,15 @@ def test_diagnostic_drop_on_full_queue_is_counted(tmp_path: Path) -> None:
         path, connect=stalling_connect, install_signal_handlers=False, critical_timeout=2.0
     )
     try:
-        # Flood diagnostics; the daemon is stuck on its first INSERT, so the bounded
-        # diagnostic queue fills and excess diagnostics are dropped + counted (never block).
+        store.record("noise", {"i": -1}, critical=False)
+        assert writer_stalled.wait(timeout=5.0)
+        # The daemon is now inside its first INSERT, so it cannot drain the queue
+        # or flush the loss counter while the flood is being recorded.
         for i in range(ds._DIAG_QUEUE_MAXSIZE + 200):
             store.record("noise", {"i": i}, critical=False)
         with store._loss_lock:
-            assert store._loss_count > 0
-            assert "queue_full" in store._loss_reasons
+            assert store._loss_count == 200
+            assert store._loss_reasons == {"queue_full": 200}
     finally:
         release.set()
         store.close()

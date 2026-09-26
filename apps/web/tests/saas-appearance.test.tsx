@@ -19,9 +19,9 @@ it('persists a preset through the API, projects both themes and reloads the save
   await waitFor(() => expect(screen.getByRole('radio', { name: 'Emerald' })).toHaveAttribute('aria-checked', 'true'));
   expect(server.active_preset).toBe('emerald');
   const emerald = catalog.presets.find(p => p.id === 'emerald')!;
-  expect(document.documentElement.style.getPropertyValue('--accent')).toBe(emerald.overrides.dark.accent);
+  await waitFor(() => expect(document.documentElement.style.getPropertyValue('--accent')).toBe(emerald.overrides.dark.accent));
   fireEvent.click(screen.getByRole('button', { name: 'Close' })); fireEvent.click(screen.getByRole('button', { name: 'Use light theme' }));
-  expect(document.documentElement.style.getPropertyValue('--accent')).toBe(emerald.overrides.light.accent);
+  await waitFor(() => expect(document.documentElement.style.getPropertyValue('--accent')).toBe(emerald.overrides.light.accent));
   view.unmount(); expect(document.documentElement.style.getPropertyValue('--accent')).toBe('');
   render(wrap()); await waitFor(() => expect(document.documentElement.style.getPropertyValue('--accent')).toBe(emerald.overrides.light.accent));
 });
