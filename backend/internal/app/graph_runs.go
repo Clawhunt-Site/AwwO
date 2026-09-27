@@ -90,6 +90,10 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "version_conflict", "Canvas changed before graph admission")
 		return
 	}
+	if err := validateCanvasTaskFrames(raw); err != nil {
+		fail(w, 400, "invalid_task_frame", err.Error())
+		return
+	}
 	var active bool
 	if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND status IN ('queued','running'))", tid, cid).Scan(&active); e != nil {
 		a.dbError(w, e)
@@ -219,6 +223,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			// Freeze the output policy separately from persona instructions. Team members
 			// retain their own personas without overriding this server-owned format.
 			snap.OutputPolicy = graphOutputPolicy(n)
+			snap.TaskFrame, e = savedNodeTaskFrame(raw, n.ID)
+			if e != nil {
+				fail(w, 400, "invalid_task_frame", e.Error())
+				return
+			}
 			// Freeze a structured contract only when the deployment has switched contracts
 			// on, and only for a plain single-agent node whose own model advertises the
 			// capability. A team turn is excluded because its members deliver into the
@@ -280,7 +289,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				// The response-format envelope occupies context too, so history is trimmed
 				// against the instructions this run will actually send plus that reserve.
 				// Both terms are unchanged when no contract is frozen.
-				history = boundedHistoryWithLimits(history, len(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)))+outputContractReserve(snap), snap.Budget, snap.Overhead)
+				history = boundedHistoryWithLimits(history, len(taskFrameSystemPrompt(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)), snap.TaskFrame))+outputContractReserve(snap), snap.Budget, snap.Overhead)
 				snap.History = &history
 			}
 		}
@@ -647,7 +656,8 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		prompt = withdrawPromptAllowance(prompt)
 	}
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
-	if len(prompt) > 128000 || (snap.Team == nil && (len(prompt)+len(instructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(instructions))) > 32768)) {
+	framedInstructions := taskFrameSystemPrompt(instructions, snap.TaskFrame)
+	if len(prompt) > 128000 || (snap.Team == nil && (len(prompt)+len(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		return errors.New("context_limit")
 	}
 	var busy bool

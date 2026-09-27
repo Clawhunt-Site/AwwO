@@ -377,8 +377,14 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.workspaceAgentAdmissionError(w, e)
 		return
 	}
+	snapshot.TaskFrame, e = savedNodeTaskFrame(document, nodeID)
+	if e != nil {
+		fail(w, 400, "invalid_task_frame", e.Error())
+		return
+	}
 	budget, overhead := snapshot.Budget, snapshot.Overhead
-	if team == nil && len(b.Prompt)+len(instructions)+overhead > budget {
+	framedInstructions := taskFrameSystemPrompt(instructions, snapshot.TaskFrame)
+	if team == nil && (len(b.Prompt)+len(framedInstructions)+overhead > budget || (snapshot.TaskFrame != nil && len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		fail(w, 413, "context_limit", "Prompt and instructions exceed the selected runtime context budget")
 		return
 	}
@@ -503,6 +509,11 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	if snapshot.Team != nil {
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
+		return
+	}
+	instructions = taskFrameSystemPrompt(instructions, snapshot.TaskFrame)
+	if snapshot.TaskFrame != nil && (len(prompt)+len(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
+		a.finish(tid, id, "failed", "", "context_limit")
 		return
 	}
 	facts := invocationMetadata(snapshot, nil)

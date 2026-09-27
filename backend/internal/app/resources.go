@@ -195,6 +195,10 @@ func (a *App) createCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_input", "Name and JSON document object required")
 		return
 	}
+	if err := validateCanvasTaskFrames(b.Document); err != nil {
+		fail(w, 400, "invalid_task_frame", err.Error())
+		return
+	}
 	a.mutateObject(w, r, "canvas.created", randomID(), 201, func(tx pgx.Tx, id string) (json.RawMessage, error) {
 		return oneJSON(r.Context(), tx, "INSERT INTO canvases(id,tenant_id,name,document) VALUES($1,$2,$3,$4) RETURNING "+canvasJSON, id, r.PathValue("tenantId"), b.Name, b.Document)
 	})
@@ -212,6 +216,10 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_input", "Name, document and current version required")
 		return
 	}
+	if err := validateCanvasTaskFrames(b.Document); err != nil {
+		fail(w, 400, "invalid_task_frame", err.Error())
+		return
+	}
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
 		a.dbError(w, e)
@@ -220,10 +228,11 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
 	var version int64
+	var savedDocument json.RawMessage
 	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
 		return
 	}
-	e = tx.QueryRow(r.Context(), "SELECT version FROM canvases WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, id).Scan(&version)
+	e = tx.QueryRow(r.Context(), "SELECT version,document FROM canvases WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, id).Scan(&version, &savedDocument)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Canvas not found")
 		return
@@ -234,6 +243,11 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	if version != b.Version {
 		fail(w, 409, "version_conflict", "Canvas changed; reload before saving")
+		return
+	}
+	b.Document = preserveCanvasTaskFrames(savedDocument, b.Document)
+	if err := validateCanvasTaskFrames(b.Document); err != nil {
+		fail(w, 400, "invalid_task_frame", err.Error())
 		return
 	}
 	v, e := oneJSON(r.Context(), tx, "UPDATE canvases SET name=$3,document=$4,version=version+1,updated_at=now() WHERE tenant_id=$1 AND id=$2 RETURNING "+canvasJSON, tid, id, b.Name, b.Document)

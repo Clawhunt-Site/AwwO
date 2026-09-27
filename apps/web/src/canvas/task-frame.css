@@ -1,0 +1,8 @@
+.canvas-task-frame { margin-block: 16px; padding-block: 12px; border-block: 1px solid var(--line); }
+.canvas-task-frame h3 { margin: 0 0 8px; font-size: 13px; }
+.canvas-task-frame fieldset { margin: 12px 0 0; padding: 0; border: 0; min-width: 0; }
+.canvas-task-frame legend { margin-bottom: 7px; font-size: 12px; font-weight: 600; }
+.canvas-task-frame-entry { margin-block: 8px; }
+.canvas-task-frame-entry label { display: grid; gap: 5px; font-size: 12px; }
+.canvas-task-frame-entry textarea { box-sizing: border-box; width: 100%; resize: vertical; }
+.canvas-task-frame-error { color: var(--err); font-size: 12px; line-height: 1.6; }

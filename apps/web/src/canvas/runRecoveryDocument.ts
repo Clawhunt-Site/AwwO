@@ -1,5 +1,6 @@
 import { canvasStorage } from './canvasStorage';
 import { nodeTeamFingerprint } from './nodeTeam';
+import { taskFrameFingerprint } from './taskFrame';
 import type { CanvasDocument, CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
 import type { CanvasRunJournal } from './runJournal';
@@ -326,6 +327,7 @@ function nodeInput(node: CanvasNode, inScope: boolean) {
     persona: node.persona,
     ...(node.agentRef ? { agentRef: node.agentRef } : {}),
     ...(node.team ? { team: nodeTeamFingerprint(node.team) } : {}),
+    ...(node.taskFrame !== undefined ? { taskFrame: taskFrameFingerprint(node.taskFrame) } : {}),
     binding: node.binding ? { companyId: node.binding.companyId, agentId: node.binding.agentId } : null,
     activeThreadId: activeThreadId(node),
     contract: node.contract ? {

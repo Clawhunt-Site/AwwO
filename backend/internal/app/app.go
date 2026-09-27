@@ -251,6 +251,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}", a.tenant(a.getRun, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/runs/{id}/cancel", a.tenant(a.cancelRun, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/events", a.tenant(a.events, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/evidence", a.tenant(a.getRunEvidence, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/archive", a.tenant(a.downloadRunArchive, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/turns", a.tenant(a.runTurns, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs", a.tenant(a.createGraphRun, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs", a.tenant(a.listGraphRuns, 1))

@@ -57,6 +57,24 @@ function invalidatedOnlyDependents() {
 }
 
 describe('CanvasSurface team configuration persistence', () => {
+  it('persists manual task requirements through the real inspector and invalidates only affected outputs', async () => {
+    const initial = seed(); const page = render(<CanvasSurface runtimeReadJson={runtimeReadJson} />);
+    await openInspector();
+    fireEvent.click(screen.getByRole('button', { name: '添加约束' }));
+    fireEvent.change(screen.getByLabelText('约束 1'), { target: { value: '  Use the supplied sources only.  ' } });
+    fireEvent.click(screen.getByRole('button', { name: '添加验收标准' }));
+    fireEvent.change(screen.getByLabelText('验收标准 1'), { target: { value: 'Human checks each citation.' } });
+    await save();
+    expect(stored().taskFrame).toEqual({ version: 1, source: 'manual', constraints: ['  Use the supplied sources only.  '], acceptanceCriteria: ['Human checks each citation.'] });
+    unchangedSession(initial); invalidatedOnlyDependents();
+    page.unmount(); render(<CanvasSurface runtimeReadJson={runtimeReadJson} />); await openInspector();
+    expect(screen.getByLabelText('约束 1')).toHaveValue('  Use the supplied sources only.  ');
+    fireEvent.click(screen.getByRole('button', { name: '移除约束 1' }));
+    fireEvent.click(screen.getByRole('button', { name: '移除验收标准 1' }));
+    await save();
+    expect(stored().taskFrame).toEqual({ version: 1, source: 'manual', constraints: [], acceptanceCriteria: [] });
+  });
+
   it('saves enabling a team through the real inspector and restores it after remount', async () => {
     const initial = seed(); const page = render(<CanvasSurface runtimeReadJson={runtimeReadJson} />);
     await openInspector(); fireEvent.click(screen.getByRole('checkbox', { name: '启用多 Agent 协作' }));

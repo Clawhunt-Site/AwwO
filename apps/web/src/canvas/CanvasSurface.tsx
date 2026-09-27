@@ -1303,7 +1303,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(n => n.id === next.id
         ? { ...next, x: n.x, y: n.y, w: n.w, h: n.h }
         : n) }), { label: `config:${next.id}` });
-      if (current?.kind === 'session' && next.kind === 'session' && JSON.stringify(current.team) !== JSON.stringify(next.team)) {
+      if (current?.kind === 'session' && next.kind === 'session' && (JSON.stringify(current.team) !== JSON.stringify(next.team)
+        || JSON.stringify(current.taskFrame) !== JSON.stringify(next.taskFrame))) {
         const affected = new Set(downstreamClosure([next.id]));
         setRuns(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !affected.has(id))));
         setRunSummary(null);
@@ -1329,6 +1330,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         : configChanged ? rebindNodeThread(live, null) : { ...live, threads: getNodeThreads(live) };
       saveNode({ ...rebound, title: draft.title, agentKind: draft.agentKind, runtime: draft.runtime,
         model: draft.model, effort: draft.effort, persona: draft.persona, team: draft.team, agentRef: draft.agentRef,
+        ...(Object.hasOwn(draft, 'taskFrame') ? { taskFrame: draft.taskFrame } : {}),
         binding: configChanged ? null : draft.binding, bindAttempt: configChanged ? null : draft.bindAttempt,
         issueId: bindingChanged || configChanged ? null : live.issueId }, true);
       if (configChanged) setHandoffNote(surfaceNotice(t, 'config_forked'));
