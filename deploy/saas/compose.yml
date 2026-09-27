@@ -153,6 +153,7 @@ services:
       # deployment's nginx proxy_read_timeout (660s in ./nginx.conf) so the model layer is what
       # gives up first. Raising it past nginx buys nothing: nginx cuts the response either way.
       AWWO_RUN_TIMEOUT: ${AWWO_RUN_TIMEOUT:-600s}
+      AWWO_RUN_ARCHIVE_MAX_BYTES: ${AWWO_RUN_ARCHIVE_MAX_BYTES:-16777216}
       AWWO_PI_TOKEN: ${AWWO_PI_TOKEN:?Set a dedicated internal token}
       AWWO_OPENAI_AGENTS_URL: http://openai-agents:8098
       AWWO_OPENAI_AGENTS_TOKEN: ${AWWO_OPENAI_AGENTS_TOKEN:?Set a dedicated OpenAI Agents internal token}

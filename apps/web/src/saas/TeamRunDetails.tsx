@@ -3,6 +3,7 @@ import { api, SaaSApiError, saasErrorMessage, tenantPath } from './api';
 import type { TeamRunRecord, TeamTurn } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
 import { runErrorText } from './canvasErrors';
+import { RunEvidence } from './RunEvidence';
 import './team-run-details.css';
 
 export interface TeamRunDetailsProps {
@@ -111,6 +112,7 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
       {record && !turns.length && error === null && !loading && <p>{isActive(record.status)
         ? t('暂未收到成员协作记录；运行结束前会继续查询。', 'No member records yet. Observation continues while the run is active.')
         : t('本次运行没有成员协作记录。', 'This run has no member collaboration records.')}</p>}
+      {record && <RunEvidence tenantId={tenantId} runId={runId} runStatus={record.status} />}
       {turns.map(turn => <MemberTurn key={turn.id} turn={turn} />)}
     </div>}
   </section>;

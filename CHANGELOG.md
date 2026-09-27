@@ -6,8 +6,18 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-27
+
+### Added
+
+- Human-authored task constraints and acceptance criteria on canvas nodes. Saved requirements are frozen into single, team, graph and collaboration executions and included in context admission budgets; older clients preserve them when saving.
+- Read-only run evidence shows stored outputs, artifacts and checks against frozen delivery formats. Model claims and completed runs never count as human acceptance.
+- Download a sanitized NDJSON projection of retained run events, including snapshot cursor, record count and SHA-256. Credentials split across text events are redacted; oversized downloads fail explicitly instead of returning a partial archive.
+
 ### Changed
 
+- Windows Cloud uses explicit app, Access and identity-provider origins, preserves authentication popup state, and adds reconnect and browser actions. The hosted feature update is shared by Windows and Mac cloud clients.
+- Adapt useful task-frame and event-journal patterns from Mu to AwwO's existing canvas CAS, Go execution snapshots and PostgreSQL event storage; no second orchestration runtime or database is introduced.
 - Credit Boxpo as the AwwO author in the README and package metadata.
 
 ### Fixed

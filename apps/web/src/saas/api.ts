@@ -25,6 +25,9 @@ export const tenantPath = (tenantId: string, suffix = '') => `/tenants/${encodeU
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
 export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
   const codes: Record<string, [string, string]> = {
+    invalid_task_frame: ['任务要求无效或版本不受支持；输入已保留。请检查条数与长度后重试。', 'Task requirements are invalid or unsupported. Your input is preserved. Check the entry counts and lengths before retrying.'],
+    invalid_run_evidence: ['证据响应无效，请重试读取。', 'Invalid evidence response. Retry reading it.'],
+    invalid_run_archive: ['下载记录响应无效，请重试。', 'Invalid archive response. Retry the download.'],
     account_password_as_key: ['这里需要模型服务商的 API Key，请勿填写 AwwO 登录密码。','Enter a provider API key here, not your AwwO login password.'],
     vault_unavailable: ['个人密钥服务尚未配置，请联系管理员。','Personal credential storage is not configured. Contact the administrator.'],
     provider_verification_failed: ['密钥验证失败，请检查 API Key、服务商额度和访问地区。','Key verification failed. Check your API key, provider access and region.'],

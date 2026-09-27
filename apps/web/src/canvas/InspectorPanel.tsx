@@ -27,6 +27,8 @@ import type { CSSProperties } from 'react';
 import { RuntimePicker, type RuntimeValue } from '../RuntimePicker';
 import { NodeTeamEditor } from './NodeTeamEditor';
 import { PersonaPicker } from './PersonaPicker';
+import { TaskFrameEditor } from './TaskFrameEditor';
+import { cleanTaskFrame, isTaskFrame, taskFrameError } from './taskFrame';
 import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
@@ -225,6 +227,7 @@ export function InspectorPanel({
   }, [node.id]);
   const sessionDraft = draft.kind === 'session' ? draft : null;
   const formDraft = draft.kind === 'form' ? draft : null;
+  const taskFrameInvalid = sessionDraft ? taskFrameError(sessionDraft.taskFrame) !== null : false;
   const boundCompany = useMemo(
     () => (sessionDraft?.binding ? liveCompanies.find((c) => c.id === sessionDraft.binding?.companyId) : undefined),
     [sessionDraft?.binding, liveCompanies],
@@ -248,7 +251,9 @@ export function InspectorPanel({
   };
 
   const save = async () => {
-    if (mutationLocked()) return;
+    if (mutationLocked() || taskFrameInvalid) return;
+    const preparedDraft = draft.kind === 'session' && isTaskFrame(draft.taskFrame)
+      ? { ...draft, taskFrame: cleanTaskFrame(draft.taskFrame) } : draft;
     if (onInitialize && sessionDraft?.agentKind === 'image') return;
     if (sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     if (onInitialize && sessionDraft) {
@@ -259,7 +264,7 @@ export function InspectorPanel({
       setInitialization('pending'); setInitializationError('');
       closeLockCallbackRef.current?.(true);
       try {
-        await onInitialize(sessionDraft);
+        await onInitialize(preparedDraft as SessionNode);
         if (initializeRequest.current !== request || currentNodeId.current !== nodeId) return;
         initializeRequest.current = null;
         setInitialization('done');
@@ -274,7 +279,7 @@ export function InspectorPanel({
       }
       return;
     }
-    onSave(draft);
+    onSave(preparedDraft);
     onClose();
   };
   const close = () => {
@@ -327,7 +332,7 @@ export function InspectorPanel({
   };
 
   const bindAgent = async () => {
-    if (!sessionDraft || sessionDraft.agentRef || mutationLocked()) return;
+    if (!sessionDraft || sessionDraft.agentRef || mutationLocked() || taskFrameInvalid) return;
     if (sessionDraft.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     // Only ever POST to a company that is actually in the live list: a selection left over from a
     // company that has since disappeared must fall back to a real one, never be sent as-is.
@@ -479,6 +484,9 @@ export function InspectorPanel({
               onChange={(e) => editDraft({ ...sessionDraft, persona: e.target.value })}
             />
 
+            <TaskFrameEditor value={sessionDraft.taskFrame} disabled={busy}
+              onChange={taskFrame => editDraft({ ...sessionDraft, taskFrame })} />
+
             {!sessionDraft.agentRef && <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
               runtimes={teamRuntimes} runtimeTools={teamTools}
               disabled={busy || Boolean(sessionDraft.agentRef)} onValidityChange={setTeamCatalogValid}
@@ -595,7 +603,7 @@ export function InspectorPanel({
       </div>
 
       <footer className="canvas-inspector-foot">
-        <button type="button" className="canvas-inspector-save" disabled={busy || Boolean(onInitialize && sessionDraft?.agentKind === 'image') || Boolean(sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length))} onClick={() => void save()}>
+        <button type="button" className="canvas-inspector-save" disabled={busy || taskFrameInvalid || Boolean(onInitialize && sessionDraft?.agentKind === 'image') || Boolean(sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length))} onClick={() => void save()}>
           {t(onInitialize && sessionDraft ? initialization === 'pending' ? 'inspector.initializing' : initialization === 'done' ? 'common.close' : 'inspector.saveAndInitialize' : 'common.save')}
         </button>
         <button type="button" className="canvas-inspector-cancel" disabled={closeLocked} onClick={close}>

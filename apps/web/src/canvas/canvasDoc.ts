@@ -86,6 +86,8 @@ export interface SessionNode extends CanvasNodeBase {
   lastOutput?: NodeOutput | null;
   /** Absent on legacy sessions, which retain their context/result ports. */
   contract?: NodeContract;
+  /** Preserve unknown versions unchanged; editors must validate before interpreting. */
+  taskFrame?: unknown;
 }
 
 /** Conversation metadata and drafts persist locally; transcripts are restored from the server. */
@@ -409,6 +411,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
         ? { activeThreadId: r.activeThreadId } : {}),
       lastOutput: sanitizeOutput(r.lastOutput),
       ...(contract ? { contract } : {}),
+      ...(Object.hasOwn(r, 'taskFrame') ? { taskFrame: r.taskFrame } : {}),
     };
   }
 

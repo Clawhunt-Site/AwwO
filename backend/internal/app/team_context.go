@@ -104,6 +104,7 @@ func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput,
 				"This review envelope takes precedence over persona format directions and the graph contract's outer-envelope instruction."
 		}
 	}
+	system = taskFrameSystemPrompt(system, snap.TaskFrame)
 	upstream := input.Upstream
 	if m.Context == "task" && !input.Required {
 		upstream = nil

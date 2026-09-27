@@ -32,6 +32,7 @@ type Config struct {
 	SessionTTL, RunTimeout                                                                time.Duration
 	PIAdmissionWait                                                                       time.Duration
 	MaxBodyBytes                                                                          int64
+	RunArchiveMaxBytes                                                                    int64
 	AuthRequestsPerMinute                                                                 int
 	TrustedProxyCIDRs                                                                     []netip.Prefix
 	// StructuredContracts is the deployment switch for freezing structured delivery
@@ -44,6 +45,14 @@ type Config struct {
 func ConfigFromEnv() (Config, error) {
 	c := Config{Env: env("APP_ENV", "development"), DatabaseURL: os.Getenv("AWWO_DATABASE_URL"), ListenAddr: env("AWWO_LISTEN_ADDR", "127.0.0.1:8087"), PublicOrigin: env("AWWO_PUBLIC_ORIGIN", "http://127.0.0.1:5189"), PIURL: env("AWWO_PI_URL", "http://127.0.0.1:8097"), PIToken: os.Getenv("AWWO_PI_TOKEN"), AdminEmail: os.Getenv("AWWO_BOOTSTRAP_ADMIN_EMAIL"), AdminPassword: os.Getenv("AWWO_BOOTSTRAP_ADMIN_PASSWORD"), SessionTTL: 24 * time.Hour, RunTimeout: 180 * time.Second, MaxBodyBytes: 2 << 20, AuthRequestsPerMinute: 10}
 	c.UserCredentials = env("AWWO_CREDENTIAL_MODE", "operator") == "user"
+	c.RunArchiveMaxBytes = defaultRunArchiveMaxBytes
+	if raw := os.Getenv("AWWO_RUN_ARCHIVE_MAX_BYTES"); raw != "" {
+		limit, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || limit < 1<<20 || limit > 256<<20 {
+			return c, errors.New("AWWO_RUN_ARCHIVE_MAX_BYTES must be between 1048576 and 268435456")
+		}
+		c.RunArchiveMaxBytes = limit
+	}
 	if mode := env("AWWO_CREDENTIAL_MODE", "operator"); mode != "user" && mode != "operator" {
 		return c, errors.New("AWWO_CREDENTIAL_MODE must be user or operator")
 	}

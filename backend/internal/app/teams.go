@@ -41,6 +41,7 @@ type executionSnapshot struct {
 	Instructions     string             `json:"instructions"`
 	OutputPolicy     string             `json:"outputPolicy,omitempty"`
 	OutputContract   *outputContract    `json:"outputContract,omitempty"`
+	TaskFrame        *taskFrame         `json:"taskFrame,omitempty"`
 	Model            string             `json:"model"`
 	Effort           string             `json:"effort,omitempty"`
 	Budget           int                `json:"budget"`

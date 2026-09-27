@@ -1,0 +1,11 @@
+.saas-run-evidence { margin-block: 12px; border-top: 1px solid var(--saas-border, var(--line)); padding-top: 10px; font-size: 12px; }
+.saas-run-evidence button { border: 1px solid var(--saas-border, var(--line)); border-radius: 6px; padding: 6px 9px; color: inherit; background: transparent; font: inherit; cursor: pointer; }
+.saas-run-evidence button:disabled { opacity: .5; cursor: default; }
+.saas-run-evidence button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.saas-evidence-toggle { font-weight: 600 !important; }
+.saas-evidence-body { margin-top: 8px; line-height: 1.6; overflow-wrap: anywhere; }
+.saas-evidence-body dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+.saas-evidence-body dd { margin: 0; }
+.saas-evidence-body pre { white-space: pre-wrap; max-height: 240px; overflow: auto; font: inherit; }
+.saas-evidence-body li { white-space: pre-wrap; }
+.saas-evidence-body [role="alert"] { color: var(--saas-danger, var(--err)); }

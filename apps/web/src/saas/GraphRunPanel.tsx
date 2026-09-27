@@ -3,6 +3,7 @@ import { api, saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
 import { graphPath, graphIsActive, validGraphCollaboration, type GraphRunSnapshot, type GraphCollaborationPhase } from './graphRuns';
 import { TeamRunDetails } from './TeamRunDetails';
+import { RunEvidence } from './RunEvidence';
 import { useSaaSPreferences } from './preferences';
 import './graph-runs.css';
 
@@ -83,6 +84,7 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
               {turn.output && <><p>{turn.phase === 'review' ? t('评议记录，不作为正式交付物', 'Review evidence; not a published deliverable')
                 : turn.phase === 'synthesis' && current.status === 'completed' ? t('汇总结果', 'Synthesis result') : t('候选结果', 'Candidate result')}</p><pre>{turn.output}</pre></>}
               {turn.error && <p>{runErrorText(turn.error, locale) ?? turn.error}</p>}
+              {turn.runId && <RunEvidence tenantId={tenantId} runId={turn.runId} runStatus={turn.status} />}
             </details>
           </li>)}</ol>
         </section>}

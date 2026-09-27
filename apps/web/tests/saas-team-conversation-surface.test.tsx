@@ -217,7 +217,7 @@ it('associates identical live replies and restored replies with their own durabl
   for (const [index, reply] of replies.entries()) {
     const slot = reply.nextElementSibling as HTMLElement;
     expect(slot).toHaveClass('saas-team-run-details');
-    const toggle = within(slot).getByRole('button');
+    const toggle = within(slot).getByRole('button', { name: /Team collaboration|Run process/ });
     if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
     await within(slot).findByText(`Member evidence for ${runs[index].id}`);
     expect(within(slot).queryByText(`Member evidence for ${runs[1 - index].id}`)).toBeNull();
