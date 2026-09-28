@@ -34,10 +34,11 @@ it.each(['failed', 'cancelled', 'interrupted'])('shows %s partial evidence witho
 });
 
 it('downloads an authenticated NDJSON response only after an explicit click', async () => {
+  const archive = '{"record":"redacted"}\n';
   const fetcher = vi.fn(async (url: string) => url.endsWith('/archive')
-    ? new Response('{"record":"redacted"}\n', { headers: { 'Content-Type': 'application/x-ndjson', 'Content-Disposition': 'attachment; filename="run-redacted.ndjson"' } }) : json(evidence()));
+    ? new Response(archive, { headers: { 'Content-Type': 'application/x-ndjson', 'Content-Disposition': 'attachment; filename="run-redacted.ndjson"' } }) : json(evidence()));
   vi.stubGlobal('fetch', fetcher);
-  const objectURL = vi.fn(() => 'blob:archive'); const revoke = vi.fn();
+  const objectURL = vi.fn<(blob: Blob) => string>(() => 'blob:archive'); const revoke = vi.fn();
   vi.stubGlobal('URL', class extends URL { static createObjectURL = objectURL; static revokeObjectURL = revoke; });
   let savedName = ''; const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { savedName = this.download; });
   render(view()); fireEvent.click(screen.getByRole('button', { name: '证据摘要' }));
@@ -45,7 +46,13 @@ it('downloads an authenticated NDJSON response only after an explicit click', as
   fireEvent.click(screen.getByRole('button', { name: '下载脱敏记录' }));
   await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
   expect(savedName).toBe('run-redacted.ndjson');
-  expect(objectURL).toHaveBeenCalledWith(expect.any(Blob));
+  // Node's Response.blob() and jsdom's Blob belong to different realms.
+  // Validate the downloaded payload rather than its constructor identity.
+  expect(objectURL).toHaveBeenCalledTimes(1);
+  const [downloaded] = objectURL.mock.calls[0]!;
+  expect(downloaded.type).toBe('application/x-ndjson');
+  expect(downloaded.size).toBe(new TextEncoder().encode(archive).byteLength);
+  await expect(downloaded.text()).resolves.toBe(archive);
   expect(fetcher).toHaveBeenLastCalledWith(`${path}/archive`, expect.objectContaining({ credentials: 'include' }));
 });
 
