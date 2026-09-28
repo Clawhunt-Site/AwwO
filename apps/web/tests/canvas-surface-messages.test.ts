@@ -60,6 +60,10 @@ describe('canvas surface messages', () => {
     expect(recoveryDetailMessage(en, 'timed_out')).toBe('Timed out');
     expect(recoveryDetailMessage(zh, 'failed')).toBe('失败');
     expect(recoveryDetailMessage(zh, 'cancelled')).toBe('已取消');
+    expect(recoveryDetailMessage(zh, 'Upstream did not complete')).toBe('上游节点未完成');
+    expect(recoveryDetailMessage(en, 'Upstream did not complete')).toBe('Upstream node did not complete');
+    expect(recoveryDetailMessage(zh, 'Missing cached upstream output')).toBe('缺少可沿用的上游产出');
+    expect(recoveryDetailMessage(zh, 'Cached upstream output holds no deliverable')).toBe('上游旧产出没有可用交付物');
     expect(recoveryDetailMessage(en, 'native status: paused')).toBe('native status: paused');
     expect(recoveryDetailMessage(en, undefined)).toBeUndefined();
   });

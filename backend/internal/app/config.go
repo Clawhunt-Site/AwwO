@@ -13,7 +13,13 @@ import (
 )
 
 type Config struct {
-	UserCredentials bool
+	TypeSafeAPIKey, TypeSafeModel                       string
+	TypeSafeEnabledTenantIDs                            []string
+	TypeSafeTimeout                                     time.Duration
+	TypeSafeSponsoredPlanning                           bool
+	TypeSafeMaxEvaluationsPerDay                        int
+	ClawHuntURL, ClawHuntClientID, ClawHuntClientSecret string
+	UserCredentials                                     bool
 	// LLMGateOnly confines both personal and operator model execution to the
 	// ClawHunt LLM Gate. Workers enforce their own profile URLs and advertise
 	// the same policy before the API admits a run.
@@ -44,6 +50,9 @@ type Config struct {
 
 func ConfigFromEnv() (Config, error) {
 	c := Config{Env: env("APP_ENV", "development"), DatabaseURL: os.Getenv("AWWO_DATABASE_URL"), ListenAddr: env("AWWO_LISTEN_ADDR", "127.0.0.1:8087"), PublicOrigin: env("AWWO_PUBLIC_ORIGIN", "http://127.0.0.1:5189"), PIURL: env("AWWO_PI_URL", "http://127.0.0.1:8097"), PIToken: os.Getenv("AWWO_PI_TOKEN"), AdminEmail: os.Getenv("AWWO_BOOTSTRAP_ADMIN_EMAIL"), AdminPassword: os.Getenv("AWWO_BOOTSTRAP_ADMIN_PASSWORD"), SessionTTL: 24 * time.Hour, RunTimeout: 180 * time.Second, MaxBodyBytes: 2 << 20, AuthRequestsPerMinute: 10}
+	if err := c.typeSafeFromEnv(); err != nil {
+		return c, err
+	}
 	c.UserCredentials = env("AWWO_CREDENTIAL_MODE", "operator") == "user"
 	c.RunArchiveMaxBytes = defaultRunArchiveMaxBytes
 	if raw := os.Getenv("AWWO_RUN_ARCHIVE_MAX_BYTES"); raw != "" {
@@ -53,6 +62,9 @@ func ConfigFromEnv() (Config, error) {
 		}
 		c.RunArchiveMaxBytes = limit
 	}
+	c.ClawHuntURL = os.Getenv("AWWO_CLAWHUNT_URL")
+	c.ClawHuntClientID = os.Getenv("AWWO_CLAWHUNT_CLIENT_ID")
+	c.ClawHuntClientSecret = os.Getenv("AWWO_CLAWHUNT_CLIENT_SECRET")
 	if mode := env("AWWO_CREDENTIAL_MODE", "operator"); mode != "user" && mode != "operator" {
 		return c, errors.New("AWWO_CREDENTIAL_MODE must be user or operator")
 	}
@@ -124,6 +136,12 @@ func env(k, d string) string {
 	return d
 }
 func (c Config) Validate() error {
+	if err := validateTypeSafeConfig(c); err != nil {
+		return err
+	}
+	if err := c.validateClawHunt(); err != nil {
+		return err
+	}
 	if (c.UserCredentials || len(c.CredentialKey) > 0) && len(c.CredentialKey) != 32 {
 		return errors.New("AWWO_CREDENTIAL_ENCRYPTION_KEY must decode to 32 bytes")
 	}

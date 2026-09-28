@@ -15,12 +15,17 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   return payload as T;
 }
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number };
-export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean };
+export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
 /** API Agent runtime is persisted independently of a canvas draft. Legacy records default to Pi. */
 export type SaaSAgent = { id: string; tenantId: string; name: string; runtime?: 'pi' | 'openai-agents'; model: string; instructions?: string; status?: string;
   effort?: string; role?: string; title?: string; adapterType?: 'pi' | 'openai-agents'; adapterConfig?: { model?: string; effort?: string } };
 export const tenantPath = (tenantId: string, suffix = '') => `/tenants/${encodeURIComponent(tenantId)}${suffix}`;
+
+export const runtimeUnavailableMessages: [string, string] = [
+  '执行引擎尚未就绪。请检查模型连接及本次运行节点的执行引擎和模型配置；若仍无法运行，请联系管理员。',
+  'The execution engine is not ready. Check the model connection and the engine and model settings of nodes in this run. If it remains unavailable, contact an administrator.',
+];
 
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
 export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
@@ -37,6 +42,10 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     reset_invalid: ['重设链接已失效，请重新申请。','The reset link is invalid or expired. Request another.'],
     unauthenticated: ['请重新登录。', 'Please sign in again.'], forbidden: ['你没有执行此操作的权限。', 'You do not have permission for this action.'],
     invalid_credentials: ['邮箱或密码不正确。', 'The email or password is incorrect.'], invalid_input: ['输入无效，请检查后重试。', 'Check the entered values and try again.'],
+    sso_expired: ['账号关联请求已过期，请重新使用 ClawHunt 账号继续。', 'The account-linking request expired. Continue with ClawHunt again.'],
+    sso_link_failed: ['原 AwwO 密码验证失败；本次关联请求已用尽，请从 ClawHunt 重新开始。', 'The original AwwO password could not be verified. This linking request has been used; start again from ClawHunt.'],
+    clawhunt_invite_required: ['请创建邀请链接，对方使用 ClawHunt 账号确认后加入工作区。', 'Create an invitation link so the recipient can join with their ClawHunt account.'],
+    sso_unavailable: ['暂时无法确认 ClawHunt 账号，请稍后重试。', 'Could not verify your ClawHunt account right now. Try again later.'],
     invalid_cursor: ['分页已失效，请刷新列表重新开始。', 'Pagination expired. Refresh the listing.'],
     invalid_pagination: ['分页参数无效，请刷新列表重新开始。', 'The pagination parameters are invalid. Refresh the listing.'],
     email_exists: ['此邮箱已注册，请登录。', 'This email is already registered. Please sign in.'],
@@ -52,6 +61,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     quota_exceeded: ['工作区运行额度不足，请联系管理员。', 'The workspace run quota has been reached. Contact an administrator.'],
     personal_engine_required: ['请先到「我的引擎」添加并验证你自己的 API Key。', 'Add and verify your API key in My engines before running.'],
     model_unavailable: ['所选模型不可用，请重新选择服务端提供的模型。', 'The selected model is unavailable. Choose a model offered by the server.'],
+    runtime_unavailable: runtimeUnavailableMessages,
     // Distinct from model_unavailable: the model exists but is not open to this
     // workspace, so the fix is an administrator grant rather than another model.
     model_not_allowed: ['此模型未向本工作区开放，请选择本工作区可用的模型或联系管理员。', 'This model is not available to this workspace. Choose one offered to it or contact an administrator.'],
@@ -74,6 +84,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     '画布未同步，请先解决保存错误再运行。': ['画布未同步，请先解决保存错误再运行。', 'The canvas is not synced. Resolve the save error before running.'],
     'No model is available to this workspace': ['本工作区当前没有可用模型，请联系管理员开放模型。', 'No model is available to this workspace. Ask an administrator to grant one.'],
     'No configured runtime is available': ['当前没有可用的执行引擎。', 'No execution engine is currently available.'],
+    'Runtime is not configured': runtimeUnavailableMessages,
     'Runtime status unavailable': ['暂时无法确认执行引擎状态。画布仍可编辑，请稍后刷新后再运行。', 'Could not check the execution engine. You can still edit this canvas; refresh before running.'],
   };
   if (known[raw]) return known[raw][locale === 'zh' ? 0 : 1];

@@ -75,7 +75,8 @@ export function summaryNote(summary: RunSummary, stopped: boolean, locale: UiLoc
   const values = { done: summary.done, total: summary.total, failed: summary.failed, blocked: summary.blocked, reused };
   if (stopped) return canvasText(locale, 'run.stoppedSummary', values);
   if (summary.ok) return canvasText(locale, 'run.completedSummary', values);
-  return `${canvasText(locale, 'run.failedSummary', values).replace(/\.$/, '')}${cancelled}.`;
+  const punctuation = locale === 'zh' ? '。' : '.';
+  return `${canvasText(locale, 'run.failedSummary', values).replace(/[。.]+$/u, '')}${cancelled}${punctuation}`;
 }
 
 export function RunControls({

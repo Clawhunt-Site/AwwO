@@ -23,6 +23,7 @@ import { RuntimeSettings } from './RuntimeSettings';
 import { CanvasList } from './CanvasList';
 import { AppearanceScope } from './SaaSAppearance';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink } from './SaaSOnboarding';
+import { clearSSOReturnURL, clawHuntAccountURL, clawHuntStartURL, clawHuntWaitlistURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
 const workspaceURL = (tenant?: string, canvas?: string) => {
@@ -43,29 +44,128 @@ function CanvasPageHeader({ tenantId, controls }: { tenantId: string; controls: 
 export function SaaSApp() { return <SaaSPreferencesProvider><AuthenticatedApp /></SaaSPreferencesProvider>; }
 function AuthenticatedApp() {
   const { locale, t } = useSaaSPreferences();
+  const [ssoReturn, setSSOReturn] = useState<SSOReturn | null>(() => readSSOReturn(location.search));
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [loading, setLoading] = useState(true);
   const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('reset'));
   useEffect(() => { if (resetToken) { const url = new URL(location.href); url.searchParams.delete('reset'); history.replaceState(null, '', url.pathname + url.search); } }, [resetToken]);
+  useEffect(() => { if (ssoReturn) clearSSOReturnURL(); }, [ssoReturn]);
   const [failure, setFailure] = useState('');
+  const sessionRequestGeneration = useRef(0);
+  const onAuthenticated = useCallback((value: Identity) => {
+    // A completed login/link supersedes the initial session lookup, even if
+    // that older request later returns another account or a service error.
+    sessionRequestGeneration.current += 1;
+    setIdentity(value);
+    setFailure('');
+    setLoading(false);
+    setSSOReturn(null);
+  }, []);
   const onProfile = useCallback((name: string) => setIdentity(current => current ? { ...current, user: { ...current.user, name } } : current), []);
   useEffect(() => {
     let live = true;
-    api<Identity>('/auth/me').then(value => { if (live) setIdentity(value); })
-      .catch(error => { if (live && !(error instanceof SaaSApiError && error.status === 401)) setFailure(message(error)); })
-      .finally(() => { if (live) setLoading(false); });
-    return () => { live = false; };
+    const generation = ++sessionRequestGeneration.current;
+    const controller = new AbortController();
+    const current = () => live && generation === sessionRequestGeneration.current;
+    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) setIdentity(value); })
+      .catch(error => { if (current() && !(error instanceof SaaSApiError && error.status === 401)) setFailure(message(error)); })
+      .finally(() => { if (current()) setLoading(false); });
+    return () => { live = false; controller.abort(); };
   }, []);
   const inviteToken = new URLSearchParams(window.location.search).get('invite');
+  if (ssoReturn?.kind === 'error') return <SSOFailure reason={ssoReturn.reason} signedIn={Boolean(identity)} />;
+  if (ssoReturn?.kind === 'link') return <LinkExistingAccount onAuthenticated={onAuthenticated} />;
   if (resetToken) return <PasswordRecovery token={resetToken} onBack={() => location.assign('/')} />;
   if (loading) return <Notice text={t('正在验证会话…', 'Checking your session…')} />;
   if (failure) return <Notice text={saasErrorMessage(failure, locale)} retry />;
-  if (!identity) return <Login invited={Boolean(inviteToken)} onAuthenticated={setIdentity} />;
+  if (!identity) return <Login invited={Boolean(inviteToken)} onAuthenticated={onAuthenticated} />;
   const controls = <WorkspaceControls identity={identity} onProfile={onProfile} />;
   const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
     : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
     : <Workspace identity={identity} onProfile={onProfile} />;
   return <AppearanceScope key={identity.user.id} userId={identity.user.id}><SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity}>{content}</PersonalEngineGate></SaaSOnboarding></AppearanceScope>;
+}
+function useAuthOptions() {
+  const [options, setOptions] = useState<AuthOptions | null>(null);
+  const [error, setError] = useState(false);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setOptions(null); setError(false);
+    api<AuthOptions>('/auth/options', { signal: controller.signal })
+      .then(value => { if (!controller.signal.aborted) setOptions(value); })
+      .catch(() => { if (!controller.signal.aborted) setError(true); });
+    return () => controller.abort();
+  }, [revision]);
+  return { options, optionsError: error, retryOptions: () => setRevision(value => value + 1) };
+}
+const ssoFailureCopy: Record<SSOFailureReason, [string, string]> = {
+  waitlisted: ['你的 ClawHunt 账号仍在 AwwO 轮候名单中。请返回主站查看申请状态。', 'Your ClawHunt account is still on the AwwO waitlist. Return to the main site to check your application.'],
+  expired: ['登录请求已过期。请重新使用 ClawHunt 账号继续。', 'The sign-in request expired. Continue with ClawHunt again.'],
+  unavailable: ['暂时无法完成统一登录。请稍后重试。', 'Unified sign-in is temporarily unavailable. Please try again.'],
+  conflict: ['此账号关联存在冲突，尚未访问任何 AwwO 工作区。请联系管理员处理。', 'This account has a linking conflict. No AwwO workspace was opened. Contact an administrator.'],
+  invalid_identity: ['无法验证 ClawHunt 账号身份。请返回主站确认账号状态后重试。', 'We could not verify your ClawHunt identity. Check your account on the main site and try again.'],
+};
+function SSOFailure({ reason, signedIn = false }: { reason: SSOFailureReason; signedIn?: boolean }) {
+  const { t, locale } = useSaaSPreferences();
+  const { options } = useAuthOptions();
+  const waitlistURL = clawHuntWaitlistURL(options?.clawhuntSiteURL);
+  return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('账号连接未完成', 'Account connection not completed')}</h1></div>
+    <section className="saas-card"><h2>{t('请检查登录状态', 'Check your sign-in')}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
+      {reason === 'waitlisted' && waitlistURL && <a className="saas-primary saas-sso-action" href={waitlistURL}>{t('查看 AwwO 轮候', 'View the AwwO waitlist')}</a>}
+      {reason !== 'waitlisted' && <a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('重新使用 ClawHunt 账号继续', 'Continue with ClawHunt again')}</a>}
+      <a href="/">{signedIn ? t('返回工作区', 'Back to workspace') : t('返回登录', 'Back to sign in')}</a>
+    </section></main>;
+}
+function LinkExistingAccount({ onAuthenticated }: { onAuthenticated: (identity: Identity) => void }) {
+  const { t, locale } = useSaaSPreferences();
+  const [pending, setPending] = useState<{ email: string; expiresAt: string } | null>(null);
+  const [loadError, setLoadError] = useState<'expired' | 'unavailable' | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const [linkConsumed, setLinkConsumed] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    api<{ email: string; expiresAt: string }>('/auth/clawhunt/pending', { signal: controller.signal })
+      .then(value => {
+        if (controller.signal.aborted) return;
+        if (typeof value.email !== 'string' || !value.email || typeof value.expiresAt !== 'string') { setLoadError('unavailable'); return; }
+        setPending(value);
+      })
+      .catch(cause => { if (!controller.signal.aborted) setLoadError(cause instanceof SaaSApiError && (cause.code === 'sso_expired' || [400, 404, 410].includes(cause.status)) ? 'expired' : 'unavailable'); });
+    return () => controller.abort();
+  }, []);
+  if (loadError) return <SSOFailure reason={loadError} />;
+  return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('保留你原来的工作区', 'Keep your existing workspace')}</h1><p>{t('已确认 ClawHunt 账号。关联前，请证明这个旧 AwwO 账号也属于你。', 'Your ClawHunt account is confirmed. Before linking, prove that the existing AwwO account is yours too.')}</p></div>
+    <form className="saas-card" onSubmit={async event => {
+      event.preventDefault(); if (busy || !pending) return;
+      setBusy(true); setError(null);
+      const form = event.currentTarget;
+      const password = String(new FormData(form).get('password') || '');
+      try {
+        const result = await api<Identity & { redirectURL?: string }>('/auth/clawhunt/link', { method: 'POST', body: JSON.stringify({ password }) });
+        const redirect = trustedAwwORedirectURL(result.redirectURL);
+        if (redirect) history.replaceState(history.state, '', redirect);
+        onAuthenticated(result);
+      }
+      catch (cause) {
+        if (cause instanceof SaaSApiError && cause.code === 'sso_expired') setLoadError('expired');
+        else {
+          setError(cause);
+          if (cause instanceof SaaSApiError && cause.code === 'sso_link_failed') setLinkConsumed(true);
+        }
+        form.reset();
+      }
+      finally { setBusy(false); }
+    }}><span className="saas-eyebrow">{t('关联已有账号', 'LINK EXISTING ACCOUNT')}</span><h2>{t('验证原 AwwO 密码', 'Verify your original AwwO password')}</h2>
+      {pending ? <><p>{t('原 AwwO 账号：', 'Existing AwwO account: ')}<strong>{pending.email}</strong></p>
+        {linkConsumed ? <>{error !== null && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}<a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('从 ClawHunt 重新开始', 'Start again from ClawHunt')}</a></> : <>
+        <SecretInput label={t('原 AwwO 密码', 'Original AwwO password')} name="password" autoComplete="current-password" disabled={busy} required />
+        {error !== null && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
+        <button className="saas-primary" disabled={busy}>{busy ? t('正在验证…', 'Verifying…') : t('验证并保留工作区', 'Verify and keep workspace')}</button>
+        <small>{t('验证后会沿用原工作区、画布、历史和个人模型连接。不会根据邮箱自动合并账号。忘记原密码时请联系管理员恢复。', 'Verification preserves your existing workspace, canvases, history and personal model connections. Accounts are never merged based on email alone. Contact an administrator if you lost the original password.')}</small></>}</>
+        : <p role="status">{t('正在检查关联请求…', 'Checking the linking request…')}</p>}
+    </form></main>;
 }
 function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
   const { locale, t } = useSaaSPreferences();
@@ -73,13 +173,17 @@ function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
 }
 function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Identity) => void; invited: boolean }) {
   const { locale, t } = useSaaSPreferences();
+  const { options, optionsError, retryOptions } = useAuthOptions();
   const [register, setRegister] = useState(false);
   const [forgot, setForgot] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  if (forgot) return <PasswordRecovery onBack={() => setForgot(false)} />;
+  if (forgot && options?.localAuth === true) return <PasswordRecovery onBack={() => setForgot(false)} />;
   return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p></div>
-    <form className="saas-card" onSubmit={async event => {
+    {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
+    : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
+    : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a></section>}
+    {options.localAuth === true && <form className="saas-card" onSubmit={async event => {
       event.preventDefault(); if (busy) return; setBusy(true); setError(null);
       const values = Object.fromEntries(new FormData(event.currentTarget));
       try { onAuthenticated(await api<Identity>(register ? '/auth/register' : '/auth/login', { method: 'POST', body: JSON.stringify(values) })); }
@@ -95,7 +199,9 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       {error !== null && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
       <button className="saas-primary" disabled={busy}>{busy ? t('请稍候…', 'Please wait…') : register ? t('注册并创建工作区', 'Register and create workspace') : t('登录', 'Sign in')}</button>
       <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
-    </form></main>;
+    </form>}
+    {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
+    </div>}</main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
   const { t } = useSaaSPreferences();
@@ -125,8 +231,18 @@ function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity
     {identity.user.platformRole === 'admin' && <a href="/admin" title={t('平台管理', 'Platform administration')} aria-label={t('平台管理', 'Platform administration')}><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     {identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}<a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
-      workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi }} />
-    <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => { try { await api('/auth/logout', { method: 'POST' }); window.location.reload(); } catch (error) { setError(message(error)); } }}><LogOut size={16}/></button>
+      workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi,
+        ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined } } : {}) }} />
+    <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => {
+      try {
+        const result = await api<null | { logoutURL: string }>('/auth/logout', { method: 'POST' });
+        if (identity.authentication === 'clawhunt') {
+          const logoutURL = trustedClawHuntLogoutURL(result?.logoutURL, identity.clawhuntSiteURL);
+          if (!logoutURL) { setError(t('AwwO 已退出，但无法确认 ClawHunt 主站退出。请到主站检查登录状态。', 'You signed out of AwwO, but we could not confirm ClawHunt sign-out. Check your main-site session.')); return; }
+          location.assign(logoutURL);
+        } else location.reload();
+      } catch { setError(t('退出失败，请重试。', 'Sign-out failed. Please try again.')); }
+    }}><LogOut size={16}/></button>
     {error && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
   </div>;
 }
@@ -272,29 +388,46 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       if (failed.current || disposed) throw new Error('画布未同步，请先解决保存错误再运行。');
       if (!current.current || !pending.current) return current.current?.version;
       saving.current = true;
-      while (pending.current && !failed.current && !disposed) {
-        const sent: CanvasDraft = draft.current || persistCanvasDraft(storage, writerId, current.current!.version, pending.current);
-        const document: CanvasDocument = sent.document; pending.current = null;
-        setSaveState('正在保存…');
-        try {
-          const saved: CanvasRecord = await api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { method: 'PUT', body: JSON.stringify({ name: current.current!.name, document, version: current.current!.version }) });
-          rememberCanvasBaseline(storage, saved.version, saved.document);
-          acknowledgeCanvasDraft(storage, sent, saved.version);
-          if (restoredSource.current) { removeCanvasDraft(storage, restoredSource.current); restoredSource.current = null; }
-          if (draft.current?.revision === sent.revision) draft.current = null;
-          else if (draft.current) draft.current = { ...draft.current, baseVersion: saved.version };
-          current.current = saved;
-          storage.setItem('awwo.cloud.version', String(Math.max(saved.version, Number(storage.getItem('awwo.cloud.version')) || 0)));
-          if (!disposed) setSaveState(pending.current ? '等待同步…' : '已同步');
-        } catch (error) {
-          failed.current = true; pending.current ||= document;
-          if (!disposed) {
-            setSaveState('未同步');
-            setError(error instanceof SaaSApiError && error.status === 409 ? '画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。' : `保存失败：${message(error)}。未同步草稿保留在本机，重新加载后可恢复或导出。`);
+      try {
+        while (pending.current && !failed.current && !disposed) {
+          // An editor may re-publish the same snapshot while its previous PUT is in flight.
+          // Once that PUT is acknowledged, the newer draft has no unsent change; do not
+          // advance the cloud version again or discard a genuinely different pending edit.
+          if (!restoredSource.current && canonicalCanvasDocumentJSON(pending.current) === canonicalCanvasDocumentJSON(current.current!.document)) {
+            try {
+              const redundant = draft.current;
+              if (redundant) acknowledgeCanvasDraft(storage, redundant, current.current!.version);
+              pending.current = null;
+              draft.current = null;
+              if (!disposed) setSaveState('已同步');
+            } catch (error) {
+              failed.current = true;
+              if (!disposed) { setSaveState('未同步'); setError(`本机草稿保存失败：${message(error)}。请立即导出本地副本。`); }
+            }
+            break;
+          }
+          const sent: CanvasDraft = draft.current || persistCanvasDraft(storage, writerId, current.current!.version, pending.current);
+          const document: CanvasDocument = sent.document; pending.current = null;
+          setSaveState('正在保存…');
+          try {
+            const saved: CanvasRecord = await api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { method: 'PUT', body: JSON.stringify({ name: current.current!.name, document, version: current.current!.version }) });
+            rememberCanvasBaseline(storage, saved.version, saved.document);
+            acknowledgeCanvasDraft(storage, sent, saved.version);
+            if (restoredSource.current) { removeCanvasDraft(storage, restoredSource.current); restoredSource.current = null; }
+            if (draft.current?.revision === sent.revision) draft.current = null;
+            else if (draft.current) draft.current = { ...draft.current, baseVersion: saved.version };
+            current.current = saved;
+            storage.setItem('awwo.cloud.version', String(Math.max(saved.version, Number(storage.getItem('awwo.cloud.version')) || 0)));
+            if (!disposed) setSaveState(pending.current ? '等待同步…' : '已同步');
+          } catch (error) {
+            failed.current = true; pending.current ||= document;
+            if (!disposed) {
+              setSaveState('未同步');
+              setError(error instanceof SaaSApiError && error.status === 409 ? '画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。' : `保存失败：${message(error)}。未同步草稿保留在本机，重新加载后可恢复或导出。`);
+            }
           }
         }
-      }
-      saving.current = false;
+      } finally { saving.current = false; }
       if (failed.current) throw new Error('画布未同步，请先解决保存错误再运行。');
     };
     const observe = (event: Event) => {

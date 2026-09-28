@@ -13,7 +13,7 @@ afterEach(() => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); v
 
 it('shows login on a missing server session without reading legacy identity tokens', async () => {
   localStorage.setItem('clawhunt_token', 'not-a-saas-session');
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ error: { code: 'unauthenticated', message: 'Login required' } }, 401)));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/options') ? response({ clawhuntSSO: false, localAuth: true, passwordRecovery: false }) : response({ error: { code: 'unauthenticated', message: 'Login required' } }, 401)));
   render(<SaaSApp />);
   expect(await screen.findByRole('heading', { name: '欢迎回来' })).toBeVisible();
   expect(screen.getByLabelText('密码')).toHaveAttribute('type', 'password');

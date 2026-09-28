@@ -111,6 +111,29 @@ describe('durable cloud graph identity and recovery', () => {
     expect(fetcher.mock.calls[0]![1].method).toBeUndefined();
   });
 
+  it('shows only server-confirmed cached ancestors in a live scoped run without expanding the execution scope', () => {
+    const original = pending();
+    delete original.nodes.upstream; // A newly submitted scoped run journals only executable nodes.
+    const observed = mergeGraphSnapshot(original, snapshot({ status: 'completed', nodes: [
+      { nodeId: 'a', state: 'done', runId: 'run-a', output: 'New A' },
+      { nodeId: 'b', state: 'done', runId: 'run-b', output: 'New B' },
+      { nodeId: 'upstream', state: 'cached', output: 'Published source', detail: 'cached predecessor' },
+    ] }));
+    expect(observed.nodes.upstream).toMatchObject({ state: 'cached', output: 'Published source', runId: null, threadId: 'thread-upstream' });
+    expect(observed.scope).toEqual(['b', 'a']);
+    expect(journalSummary(observed)).toMatchObject({ ok: true, done: 2, total: 2, cached: 1 });
+    const storage = memoryStorage();
+    expect(saveRunJournal(observed, storage)).toBe(true);
+    expect(loadRunJournal(storage)?.nodes.upstream).toMatchObject({ state: 'cached', output: 'Published source', runId: null });
+
+    const withoutProof = mergeGraphSnapshot(original, snapshot({ document: undefined, nodes: [
+      { nodeId: 'a', state: 'running' }, { nodeId: 'b', state: 'waiting' },
+      { nodeId: 'upstream', state: 'cached', output: 'Published source' },
+    ] }));
+    expect(withoutProof.nodes.upstream).toBeUndefined();
+    expect(journalSummary(withoutProof)).toMatchObject({ total: 2, cached: 0 });
+  });
+
   it.each(['offline', 'unauthenticated', 'foreign-canvas', 'foreign-operation'])('preserves the recovery lock and evidence on %s', async scenario => {
     const original = graphRecoveryJournal(snapshot(), tenant.id, document());
     vi.stubGlobal('fetch', vi.fn(async () => {

@@ -84,6 +84,36 @@ it('uses two real Choice batches, preserves existing nodes and assigns exact run
   expect(fake.requests.every(request => Object.keys(request).sort().join() === 'questions,state')).toBe(true);
 });
 
+it.each(['zh', 'en'] as const)('keeps the original goal while giving each new role a bounded execution task (%s)', async locale => {
+  const goal = locale === 'zh'
+    ? '新增三角色工作流：整理三个卖点、制作页面、检查页面。这里只新增节点，稍后由我点击运行。不得发布；如果我明确取消则停止。'
+    : 'Add three roles: write three benefits, create a page, and review the page. Only create nodes here; I will click Run later. Do not publish; stop if I explicitly cancel.';
+  const fake = mock({ first: { role_1: 'template_5', role_2: 'template_1', role_3: 'template_6' }, second: { order: 'order_0' } });
+  const doc = emptyDocument();
+  const result = await requestJevPlan(goal, doc, [], signal(), locale);
+  const created = applyJevPlan(doc, result, locale).doc.nodes as SessionNode[];
+  expect(created).toHaveLength(3);
+  expect(fake.requests).toHaveLength(2);
+  const tasks = created.map(node => node.contract!.inputs.find(field => field.id === 'task'));
+  expect(tasks.every(task => task?.required === true && task.type === 'markdown')).toBe(true);
+  expect(new Set(tasks.map(task => task!.value)).size).toBe(3);
+  created.forEach((node, index) => {
+    expect(node.contract!.inputs.find(field => field.id === 'brief')?.value).toBe(goal);
+    expect(tasks[index]!.value).toContain(node.title);
+    expect(tasks[index]!.value).toContain(`${index + 1}/3`);
+    expect(tasks[index]!.value).toContain(locale === 'zh' ? '仅生成本角色的文本交付' : 'Produce only this role’s text deliverable');
+    expect(tasks[index]!.value).toContain(locale === 'zh' ? '不授予外部操作权限' : 'does not authorize external actions');
+    expect(tasks[index]!.value).toContain(locale === 'zh' ? '明确取消、停止或只要规划内容的要求仍须遵守' : 'Explicit cancellation, stop instructions, or requests for planning content only still apply');
+    if (index > 0) {
+      expect(tasks[index]!.value).toContain(created[index - 1].title);
+      expect(node.contract!.inputs.find(field => field.id === 'context')?.required).toBe(true);
+    }
+  });
+  expect(created[0].contract!.inputs.some(field => field.id === 'context')).toBe(false);
+  expect(created.every(node => node.contract!.outputs.length === 1 && node.contract!.outputs[0].id === 'result')).toBe(true);
+  expect(result.modelAssignments).toHaveLength(3);
+});
+
 it.each(['unsupported', 'clarify', 'omit'])('does not apply an unsupported or missing-role decision (%s), or spend a second call', async decision => {
   const fake = mock({ first: decision === 'omit' ? { role_1: 'omit' } : { intent: decision } });
   const doc = emptyDocument();
@@ -109,7 +139,9 @@ it('uses the sole real candidate without asking a one-option Choice and creates 
   const result = await requestJevPlan('安排独立角色', doc, [], signal());
   expect(Object.keys(fake.requests[1].questions).sort()).toEqual(['compatibility', 'order', 'topology']);
   expect(result.modelAssignments.every(model => model.runtime === 'pi' && model.model === 'shared-model')).toBe(true);
-  expect(applyJevPlan(doc, result).doc.edges).toEqual([]);
+  const applied = applyJevPlan(doc, result);
+  expect(applied.doc.edges).toEqual([]);
+  expect(applied.doc.nodes.every(node => node.kind === 'session' && node.contract!.inputs.find(field => field.id === 'task')?.value.includes('独立完成，不假设其他节点已有结果'))).toBe(true);
 });
 
 it('supports one role and one model with only the required compatibility judgment in the second batch', async () => {

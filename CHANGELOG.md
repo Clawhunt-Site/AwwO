@@ -6,6 +6,25 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-28
+
+### Added
+
+- Optional ClawHunt identity handoff with PKCE, approved-user checks, explicit proof before linking existing accounts, and session revocation. Existing workspaces, histories and personal connections retain their original user IDs. Configure and verify both services before enabling unified login.
+- Jev planning inside the main API with an explicit workspace sponsorship switch, exact workspace allowlist, durable daily budget and live authorization checks. Personal model execution continues to use the user's credentials; sponsorship defaults to disabled.
+
+### Fixed
+
+- Preserve queued canvas edits while avoiding redundant saves. Keep task requirements and run evidence alongside role-specific Jev instructions.
+- Verify LLM Gate credentials through an authenticated endpoint, filter transcription-only models from text execution, and accept plain text for single text deliveries.
+- Improve model search and names, Bot labels, timeline placement, translated failure messages and full-screen artifact previews.
+- Pass optional identity settings only to the API in Compose and allow the exact ClawHunt sign-in routes in the Mac client.
+
+### Changed
+
+- Consolidate verified product work on `main` as the only named branch. Preserve detached worktrees, private history and immutable release tags. Source publication and running-service deployment remain separate.
+- Prepare Mac source version 0.9.0, build 7. The existing 0.8.1 build 6 release remains unchanged; this entry does not announce a new binary release.
+
 ## [0.8.1] - 2026-09-28
 
 ### Changed

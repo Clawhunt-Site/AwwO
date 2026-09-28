@@ -312,6 +312,22 @@ describe('canvasDoc: sanitize', () => {
 describe('canvasDoc: persistence', () => {
   beforeEach(() => localStorage.clear());
 
+  it('does not broadcast a second cache write for an identical saved document', () => {
+    const document = { ...emptyDocument(), updatedAt: 123 };
+    const writes: Event[] = [];
+    const observe = (event: Event) => writes.push(event);
+    window.addEventListener('awwo:canvas-cache-write', observe);
+    try {
+      expect(saveDocument(document)).toBe(true);
+      expect(saveDocument(document)).toBe(true);
+      expect(writes).toHaveLength(1);
+      expect(saveDocument({ ...document, updatedAt: 124 })).toBe(true);
+      expect(writes).toHaveLength(2);
+    } finally {
+      window.removeEventListener('awwo:canvas-cache-write', observe);
+    }
+  });
+
   it('first run with neither key is an EMPTY canvas (nothing seeded)', () => {
     const { doc, status } = loadDocumentWithStatus();
     expect(status).toBe('empty');

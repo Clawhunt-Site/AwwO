@@ -1,6 +1,6 @@
 # AwwO repository
 
-The operator requested a new Forgejo repository on 2026-09-05 to carry forward all current AwwO work. The repository is `ClawHunt-Store/AwwO`, private like its source project. On 2026-09-06 the operator requested that local and remote branches be reduced to `main` and `online`. `main` is the default source baseline; `online` is the reviewed release reference. The first version was `v0.2.0`; production deployment is separate.
+The canonical public product repository is [Clawhunt-Site/AwwO](https://github.com/Clawhunt-Site/AwwO). On 2026-09-28 the operator requested that `main` be the only named branch locally and on both remotes. GitHub `main` carries the latest verified public product source. The private Forgejo repository, `ClawHunt-Store/AwwO`, retains its operational history and any private-only legacy implementation without exporting those records to GitHub. The first version was `v0.2.0`; source publication, native package releases and production deployment are separate operations.
 
 ## Import provenance
 
@@ -15,11 +15,11 @@ The operator requested a new Forgejo repository on 2026-09-05 to carry forward a
 
 ## Iteration workflow
 
-Use `main` as the default source baseline and maintain only `main` and `online` as named branches. Do not recreate `dev` or named worker branches. Preserve isolated work directories and use an exact-SHA detached worktree where unfinished work must stay isolated. Review a specific commit/diff, validate affected tests/builds, and keep commits focused before the authorized integration/release step.
+Use GitHub `main` as the source baseline and retain only `main` as a named branch. Do not recreate `online`, `staging`, `dev` or named worker branches. Develop in an exact-SHA detached worktree, review the final diff, and validate affected tests/builds. Integrate verified work by an explicitly authorized fast-forward push to `main`; never force-push shared history. Check the remote URL before pushing: existing clones may still name Forgejo `origin`.
 
-The inherited SuperClaw instructions mention branches and hosts belonging to the original repository. The operator's 2026-09-06 two-branch decision supersedes those topology rules for AwwO only. Approval, secret separation, independent review and relevant verification remain in force. Initializing `online` from an existing release commit is not a production deployment. Historical acceptance documents retain their original branch names as provenance.
+This single-branch decision supersedes the 2026-09-06 two-branch policy and all inherited SuperClaw branch/promotion rules for AwwO only. Authorization, secret separation, independent review and relevant verification remain required. Test and production environments stay isolated even though they can deploy different reviewed commits from the same branch. Historical acceptance documents retain their original branch names as provenance.
 
-The 2026-09-06 cleanup preserves in-progress server acceptance changes in their existing worktree. Neither branch creation nor deletion publishes those uncommitted changes. Consult the dated cleanup record for remote readback, metadata repairs and any remaining operational blocker.
+Preserve existing detached worktrees, recordings and uncommitted files. They are working directories, not extra branches. Delete a redundant remote branch only after its completed changes have been integrated or equivalently preserved. Keep release tags and downloads immutable, including `macos-v0.8.1-build6`; advancing `main` does not rebuild or deploy an existing artifact.
 
 ## Verification records
 

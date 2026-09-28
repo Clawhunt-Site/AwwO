@@ -318,6 +318,26 @@ it("confirms removal, allows cancellation, and retries readback without repeatin
   expect(changed).toHaveBeenCalledWith(catalog);
 });
 
+it('clears a connection success notice after that connection is removed', async () => {
+  const connection = { id: 'synthetic', name: 'Temporary test', provider: 'llmgate', runtime: 'openai-agents', models: ['test-model'], hasKey: true };
+  const fetch = vi.fn().mockResolvedValueOnce(response({ id: 'synthetic' }))
+    .mockResolvedValueOnce(response({ ...catalog, items: [connection] }))
+    .mockResolvedValueOnce(response({}))
+    .mockResolvedValueOnce(response(catalog));
+  vi.stubGlobal('fetch', fetch);
+  function Host() { const [data, setData] = useState(catalog); return <ConnectionSettings catalog={data} onChange={setData} onboarding={false} />; }
+  render(<SaaSPreferencesProvider><Host /></SaaSPreferencesProvider>);
+  fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'synthetic-key-only' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Verify and save' }));
+  expect(await screen.findByText('Credentials encrypted and model catalog verified.')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Remove connection' }));
+  fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(screen.queryByText('Credentials encrypted and model catalog verified.')).toBeNull();
+  expect(screen.queryByText('Temporary test')).toBeNull();
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
+});
+
 it("checks password confirmation before sending and never requests another account session", async () => {
   const fetch = vi.fn().mockResolvedValue(response({ items: [] }));
   vi.stubGlobal("fetch", fetch);

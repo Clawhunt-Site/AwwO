@@ -23,6 +23,7 @@ it.each([
 ])('renders $code from the real $mode form and re-translates without resubmitting', async ({ mode, status, code, message, zh, en }) => {
   const fetch = vi.fn(async (url: string) => {
     if (url === '/api/v1/auth/me') return response({ error: { code: 'unauthenticated', message: 'Login required' } }, 401);
+    if (url === '/api/v1/auth/options') return response({ clawhuntSSO: false, localAuth: true, passwordRecovery: false });
     if (url === `/api/v1/auth/${mode}`) return response({ error: { code, message } }, status);
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -39,11 +40,11 @@ it.each([
   fireEvent.click(screen.getByRole('button', { name: mode === 'register' ? '注册并创建工作区' : '登录' }));
 
   expect(await screen.findByRole('alert')).toHaveTextContent(zh);
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(3);
   expect(fetch).toHaveBeenLastCalledWith(`/api/v1/auth/${mode}`, expect.objectContaining({ method: 'POST', credentials: 'include' }));
   fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));
   expect(screen.getByRole('alert')).toHaveTextContent(en);
   fireEvent.click(screen.getByRole('button', { name: 'Switch to Chinese' }));
   expect(screen.getByRole('alert')).toHaveTextContent(zh);
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(3);
 });

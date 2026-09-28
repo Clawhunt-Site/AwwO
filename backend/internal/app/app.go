@@ -25,6 +25,7 @@ type App struct {
 	cfg         Config
 	log         *slog.Logger
 	client      *http.Client
+	typesafe    *typeSafeService
 	dummyHash   string
 	cursorKey   []byte
 	mu          sync.Mutex
@@ -60,6 +61,8 @@ func New(db *pgxpool.Pool, c Config) *App {
 		a.cfg.UsageRetentionDays = 180
 	}
 	a.pricing, _ = ParseModelPricing(c.ModelPricingJSON)
+	a.typesafe = newTypeSafeService(a.persistTypeSafeAudit)
+	a.typesafe.authorize = a.verifyTypeSafeAccess
 	a.mailSlots = make(chan struct{}, 8)
 	a.obs = newObservability(a)
 	return a
@@ -167,6 +170,9 @@ func (a *App) Close() {
 	}
 	a.mu.Unlock()
 	a.tasks.Wait()
+	if a.typesafe != nil {
+		a.typesafe.client.CloseIdleConnections()
+	}
 	if a.lease != nil {
 		_, _ = a.lease.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtextextended(current_database() || ':' || current_schema(),84321002))")
 		a.lease.Release()
@@ -186,7 +192,9 @@ func (a *App) Handler() http.Handler {
 	})
 	m.HandleFunc("POST /api/v1/auth/register", a.authRate(a.register))
 	m.HandleFunc("POST /api/v1/auth/login", a.authRate(a.login))
-	m.HandleFunc("POST /api/v1/auth/logout", a.auth(a.logout))
+	// Logout must also clear expired/revoked sessions; ordinary auth rejects
+	// those before the provider's idempotent revoke path can run.
+	m.HandleFunc("POST /api/v1/auth/logout", a.authRate(a.logout))
 	m.HandleFunc("PATCH /api/v1/auth/profile", a.auth(a.updateProfile))
 	m.HandleFunc("GET /api/v1/auth/connections", a.auth(a.listConnections))
 	m.HandleFunc("POST /api/v1/auth/connections", a.auth(a.authRate(a.createConnection)))
@@ -196,8 +204,12 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/v1/auth/sessions/{id}", a.auth(a.revokeAuthSession))
 	m.HandleFunc("POST /api/v1/auth/forgot-password", a.authRate(a.forgotPassword))
 	m.HandleFunc("POST /api/v1/auth/reset-password", a.authRate(a.resetPassword))
+	m.HandleFunc("GET /api/v1/auth/clawhunt/start", a.authRate(a.clawHuntStart))
+	m.HandleFunc("GET /api/v1/auth/clawhunt/callback", a.authRate(a.clawHuntCallback))
+	m.HandleFunc("GET /api/v1/auth/clawhunt/pending", a.authRate(a.clawHuntPending))
+	m.HandleFunc("POST /api/v1/auth/clawhunt/link", a.authRate(a.clawHuntLink))
 	m.HandleFunc("GET /api/v1/auth/options", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"passwordRecovery": a.cfg.SMTPHost != ""})
+		writeJSON(w, 200, map[string]any{"passwordRecovery": !a.clawHuntEnabled() && a.cfg.SMTPHost != "", "clawhuntSSO": a.clawHuntEnabled(), "localAuth": !a.clawHuntEnabled(), "clawhuntSiteURL": a.cfg.ClawHuntURL})
 	})
 	m.HandleFunc("GET /api/v1/appearance", a.auth(a.appearance))
 	m.HandleFunc("PUT /api/v1/appearance", a.auth(a.updateAppearance))
@@ -211,7 +223,7 @@ func (a *App) Handler() http.Handler {
 	// handler cannot apply that workspace's model entitlement, and a stale client
 	// asking for one must get a visible 404 rather than the whole catalogue.
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runtime", a.tenant(a.runtime, 1))
-	if a.cfg.UserCredentials {
+	if a.cfg.UserCredentials && !a.cfg.TypeSafeSponsoredPlanning {
 		// Hosted ingress must route both TypeSafe endpoints through this guard in
 		// personal mode. Its separate service still uses operator credentials.
 		disabledJev := func(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +231,12 @@ func (a *App) Handler() http.Handler {
 		}
 		m.HandleFunc("GET /api/v1/tenants/{tenantId}/typesafe", a.tenant(disabledJev, 1))
 		m.HandleFunc("POST /api/v1/tenants/{tenantId}/typesafe/evaluations", a.tenant(disabledJev, 2))
+	} else {
+		// A personal execution account may use a separately sponsored planner only
+		// with explicit server opt-in and an exact workspace allowlist. No engine
+		// credential or execution entitlement is changed by this exception.
+		m.HandleFunc("GET /api/v1/tenants/{tenantId}/typesafe", a.tenant(a.typeSafeStatus, 1))
+		m.HandleFunc("POST /api/v1/tenants/{tenantId}/typesafe/evaluations", a.tenant(a.typeSafeEvaluate, 2))
 	}
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/members", a.tenant(a.members, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/members", a.tenant(a.addMember, 3))

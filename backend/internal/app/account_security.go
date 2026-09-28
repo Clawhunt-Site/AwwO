@@ -35,6 +35,9 @@ func (a *App) revokeAuthSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
+	if !a.localAuthentication(w) {
+		return
+	}
 	var b struct {
 		Current string `json:"currentPassword"`
 		Next    string `json:"newPassword"`
@@ -86,6 +89,9 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (a *App) forgotPassword(w http.ResponseWriter, r *http.Request) {
+	if !a.localAuthentication(w) {
+		return
+	}
 	var b struct {
 		Email string `json:"email"`
 	}
@@ -172,6 +178,9 @@ func (a *App) forgotPassword(w http.ResponseWriter, r *http.Request) {
 	accepted()
 }
 func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
+	if !a.localAuthentication(w) {
+		return
+	}
 	var b struct {
 		Token    string `json:"token"`
 		Password string `json:"password"`

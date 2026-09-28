@@ -57,6 +57,13 @@ func (a *App) members(w http.ResponseWriter, r *http.Request) {
 	a.tenantList(w, r, "members")
 }
 func (a *App) addMember(w http.ResponseWriter, r *http.Request) {
+	// The identity provider may authorize accounts with unverified email
+	// metadata. Matching that address cannot prove who should receive a
+	// workspace role; a one-time invitation binds the claim to the actor.
+	if a.clawHuntEnabled() {
+		fail(w, 403, "clawhunt_invite_required", "Use a workspace invitation link to add members")
+		return
+	}
 	var b struct {
 		Email string `json:"email"`
 		Role  string `json:"role"`

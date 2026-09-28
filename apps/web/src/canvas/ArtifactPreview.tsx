@@ -9,14 +9,14 @@ import './artifactPreview.css';
 // Kept together so the same preview can be used in both the native and cloud workbench.
 const messages = {
   zh: {
-    preview: '预览', source: '源码', html: 'HTML 预览', markdown: 'Markdown 源码',
+    preview: '预览', source: '源码', html: 'HTML 预览', markdown: 'Markdown 源码', plain: '文件源码',
     loading: '正在读取交付物…', unavailable: '暂时无法预览，请重试或下载文件。',
     unsupported: '此文件格式暂不支持预览，可以下载查看。',
     tooLarge: '文件超过 2 MiB 预览上限，请下载查看。', retry: '重试预览',
     static: '静态预览 · 脚本和外部资源已停用', expand: '放大预览', close: '关闭预览',
   },
   en: {
-    preview: 'Preview', source: 'Source', html: 'HTML preview', markdown: 'Markdown source',
+    preview: 'Preview', source: 'Source', html: 'HTML preview', markdown: 'Markdown source', plain: 'File source',
     loading: 'Loading deliverable…', unavailable: 'Preview unavailable. Retry or download the file.',
     unsupported: 'Preview is not available for this file format. Download it to view.',
     tooLarge: 'This file exceeds the 2 MiB preview limit. Download it to view.', retry: 'Retry preview',
@@ -24,7 +24,10 @@ const messages = {
   },
 };
 
-type PreviewType = 'html' | 'markdown';
+type PreviewType = 'html' | 'markdown' | 'text';
+// An extension only selects a renderer. The stream still has to be bounded,
+// valid UTF-8 and free of binary control bytes; source is never executed.
+const TEXT_SOURCE_EXTENSION = /\.(?:txt|text|[cm]?tsx?|[cm]?jsx?|jsonc?|css|scss|less|py|go|rs|java|c|h|cpp|hpp|swift|sh|sql|ya?ml|toml|xml|svg|csv|tsv)$/i;
 type MarkdownRenderer = (source: string) => ReactNode;
 type DownloadProps = { downloadUrl?: string; canDownload?: boolean; onStoredDownload?: (event: MouseEvent<HTMLAnchorElement>) => void };
 
@@ -99,20 +102,23 @@ export function ArtifactPreview({ source, type, title, renderMarkdown, downloadU
   const tooLarge = new TextEncoder().encode(documentSource).byteLength > MAX_ARTIFACT_PREVIEW_BYTES;
   const html = useMemo(() => type === 'html' && !tooLarge ? htmlPreviewDocument(documentSource) : '', [documentSource, type, tooLarge]);
   const download = () => {
+    // Plain source previews are stored artifacts and use their original download
+    // endpoint; never re-export them as a different HTML/Markdown file type.
+    if (type === 'text') return;
     try { downloadTextDeliverable(source, title, type); setDownloadError(false); }
     catch { setDownloadError(true); }
   };
   return <div className="awwo-artifact-preview">
     <div className="awwo-artifact-toolbar" role="group" aria-label={title}>
-      <button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}><Eye size={13} aria-hidden="true" />{text.preview}</button>
-      <button type="button" aria-pressed={mode === 'source'} onClick={() => setMode('source')}><Code2 size={13} aria-hidden="true" />{text.source}</button>
+      {type !== 'text' && <button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}><Eye size={13} aria-hidden="true" />{text.preview}</button>}
+      <button type="button" aria-pressed={type === 'text' || mode === 'source'} onClick={() => setMode('source')}><Code2 size={13} aria-hidden="true" />{text.source}</button>
       {allowExpand && !tooLarge && <button type="button" aria-label={text.expand} title={text.expand} onClick={() => setExpanded(true)}><Maximize2 size={13} aria-hidden="true" /><span>{text.expand}</span></button>}
       {canDownload && (downloadUrl
         ? <a className="awwo-artifact-download" href={downloadUrl} download rel="noreferrer" onClick={onStoredDownload}><Download size={13} aria-hidden="true" />{t('deliverable.downloadFile')}</a>
-        : <button className="awwo-artifact-download" type="button" onClick={download}><Download size={13} aria-hidden="true" />{t('deliverable.downloadFormat', { format: type === 'html' ? 'html' : 'md' })}</button>)}
+        : type !== 'text' && <button className="awwo-artifact-download" type="button" onClick={download}><Download size={13} aria-hidden="true" />{t('deliverable.downloadFormat', { format: type === 'html' ? 'html' : 'md' })}</button>)}
     </div>
     {tooLarge ? <p className="awwo-artifact-status" role="status">{text.tooLarge}</p>
-      : mode === 'source' ? <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : text.markdown}><code>{documentSource}</code></pre>
+      : type === 'text' || mode === 'source' ? <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code>{documentSource}</code></pre>
         : type === 'html' ? <>
           <iframe className="awwo-artifact-frame" title={`${title} · ${text.html}`} sandbox="" referrerPolicy="no-referrer" srcDoc={html} />
           <p className="awwo-artifact-note">{text.static}</p>
@@ -142,7 +148,7 @@ export function artifactFilename(disposition: string): string | null {
 export async function readArtifactPreview(response: Response, signal: AbortSignal): Promise<StoredContent | 'unsupported'> {
   const name = artifactFilename(response.headers.get('Content-Disposition') || '');
   if (!name) { await response.body?.cancel(); throw new Error('preview_unavailable'); }
-  const type = /\.html?$/i.test(name) ? 'html' : /\.(?:md|markdown)$/i.test(name) ? 'markdown' : null;
+  const type = /\.html?$/i.test(name) ? 'html' : /\.(?:md|markdown)$/i.test(name) ? 'markdown' : TEXT_SOURCE_EXTENSION.test(name) ? 'text' : null;
   if (!type) { await response.body?.cancel(); return 'unsupported'; }
   const length = response.headers.get('Content-Length');
   if (length && (!/^\d+$/.test(length) || Number(length) > MAX_ARTIFACT_PREVIEW_BYTES)) {
@@ -166,7 +172,7 @@ export async function readArtifactPreview(response: Response, signal: AbortSigna
       source += decoder.decode(chunk.value, { stream: true });
     }
     source += decoder.decode();
-    if (source.includes('\u0000')) throw new Error('preview_unavailable');
+    if (source.includes('\u0000') || (type === 'text' && /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(source))) throw new Error('preview_unavailable');
     return { type, source, name };
   } catch (error) {
     await reader.cancel().catch(() => undefined);
@@ -224,7 +230,7 @@ export function StoredArtifactPreview({ reference, title, identity, renderMarkdo
     if (currentSaaSCanvas() !== scope || storedArtifactUrl(reference) !== url) event.preventDefault();
   };
   if (current?.content) return <ArtifactPreview key={`${identity}:${url}`} source={current.content.source} type={current.content.type}
-    title={title} renderMarkdown={renderMarkdown} downloadUrl={url} onStoredDownload={onStoredDownload} />;
+    title={current.content.type === 'text' ? current.content.name : title} renderMarkdown={renderMarkdown} downloadUrl={url} onStoredDownload={onStoredDownload} />;
   return <div className="awwo-artifact-preview">
     <div className="awwo-artifact-toolbar"><File size={15} aria-hidden="true" />
       <a className="awwo-artifact-download" href={url} download rel="noreferrer" onClick={onStoredDownload}><Download size={13} aria-hidden="true" />{t('deliverable.downloadFile')}</a>

@@ -4,6 +4,7 @@ import { PreferenceControls, useSaaSPreferences } from "./preferences";
 import "./personal-account.css";
 import { GuideLauncher, MainSiteLink } from "./SaaSOnboarding";
 import { SecretInput } from "./SecretInput";
+import { clawHuntAccountURL, type AuthOptions } from './clawhuntAuth';
 
 type Provider = { id: string; name: string; runtimes: string[] };
 type Connection = {
@@ -96,7 +97,7 @@ export function PersonalEngineGate({
       });
     return () => controller.abort();
   }, [identity.user.id, needed, revision]);
-  if (section === "security") return <AccountSecurity personalCredentialsRequired={needed} />;
+  if (section === "security") return <AccountSecurity personalCredentialsRequired={needed} identity={identity} />;
   if (section === "engines" && !needed) return <AccountLayout title={t("模型服务", "Model service")} intro={t("AwwO 已通过 LLM Gate 提供模型，无需填写个人 API Key。", "AwwO provides models through LLM Gate. No personal API key is needed.")}><a href={home()}>{t("返回工作区", "Back to workspace")}</a></AccountLayout>;
   if (!needed) return <>{children}</>;
   const hasUsableConnection = catalog?.items.some((item) =>
@@ -358,7 +359,7 @@ export function ConnectionSettings({
         </aside>
       </div>
       {removing && <RemoveConnectionDialog connection={removing} onClose={() => setRemoving(null)}
-        onDeleted={() => onChange({ ...catalog, items: catalog.items.filter(item => item.id !== removing.id) })}
+        onDeleted={() => { setNotice(''); onChange({ ...catalog, items: catalog.items.filter(item => item.id !== removing.id) }); }}
         onRemoved={async () => { await refresh(); setRemoving(null); }} />}
       {catalog.items.length > 0 && (
         <section className="saas-card saas-connection-list">
@@ -457,8 +458,10 @@ type AuthSession = {
   expiresAt: string;
   current: boolean;
 };
-export function AccountSecurity({ personalCredentialsRequired = true }: { personalCredentialsRequired?: boolean } = {}) {
+export function AccountSecurity({ personalCredentialsRequired = true, identity }: { personalCredentialsRequired?: boolean; identity?: Identity } = {}) {
   const { t, locale } = useSaaSPreferences();
+  const unified = identity?.authentication === 'clawhunt';
+  const accountLink = clawHuntAccountURL(identity?.clawhuntSiteURL);
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -472,10 +475,9 @@ export function AccountSecurity({ personalCredentialsRequired = true }: { person
   return (
     <AccountLayout
       title={t("账号安全", "Account security")}
-      intro={t(
-        "管理密码和已登录的会话。",
-        "Manage your password and signed-in sessions.",
-      )}
+      intro={unified
+        ? t('你的 AwwO 账号已关联 ClawHunt。账号资料与密码由主站管理；这里可以管理 AwwO 登录会话。', 'Your AwwO account is linked to ClawHunt. Manage your profile and password on the main site, and your AwwO sessions here.')
+        : t('管理密码和已登录的会话。', 'Manage your password and signed-in sessions.')}
     >
       <nav className="saas-personal-nav">
         {personalCredentialsRequired && <a href={accountURL("engines")}>{t("我的执行引擎", "My engines")}</a>}
@@ -487,7 +489,7 @@ export function AccountSecurity({ personalCredentialsRequired = true }: { person
         </p>
       )}
       <div className="saas-connection-grid">
-        <form
+        {unified ? <section className="saas-card"><h2>{t('已关联 ClawHunt 账号', 'ClawHunt account linked')}</h2><p>{t('统一账号的资料与密码请在 ClawHunt 主站修改。', 'Change your unified account profile and password on the ClawHunt main site.')}</p>{accountLink && <a className="saas-buy-link" href={accountLink} target="_blank" rel="noopener noreferrer">{t('管理 ClawHunt 账号', 'Manage ClawHunt account')}</a>}</section> : <form
           className="saas-card"
           onSubmit={async (e) => {
             e.preventDefault();
@@ -562,7 +564,7 @@ export function AccountSecurity({ personalCredentialsRequired = true }: { person
           <button className="saas-primary" disabled={busy}>
             {t("修改并重新登录", "Change and sign in again")}
           </button>
-        </form>
+        </form>}
         <section className="saas-card">
           <h2>{t("已登录会话", "Signed-in sessions")}</h2>
           {sessions.map((s) => (
@@ -611,16 +613,26 @@ export function PasswordRecovery({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState(false);
-  const [recovery, setRecovery] = useState<'loading' | 'available' | 'unavailable' | 'error'>(token ? 'available' : 'loading');
+  const [recovery, setRecovery] = useState<'loading' | 'available' | 'unavailable' | 'external' | 'error'>('loading');
+  const [accountLink, setAccountLink] = useState<string | null>(null);
   const [optionsRevision, setOptionsRevision] = useState(0);
   useEffect(() => {
-    if (token) return;
     const controller = new AbortController(); setRecovery('loading');
-    api<{ passwordRecovery: boolean }>('/auth/options', { signal: controller.signal })
-      .then(options => { if (!controller.signal.aborted) setRecovery(options.passwordRecovery ? 'available' : 'unavailable'); })
+    api<AuthOptions>('/auth/options', { signal: controller.signal })
+      .then(options => {
+        if (controller.signal.aborted) return;
+        if (options.localAuth === false) {
+          setAccountLink(clawHuntAccountURL(options.clawhuntSiteURL));
+          setRecovery('external');
+        } else setRecovery(token || options.passwordRecovery ? 'available' : 'unavailable');
+      })
       .catch(() => { if (!controller.signal.aborted) setRecovery('error'); });
     return () => controller.abort();
   }, [token, optionsRevision]);
+  if (recovery === 'external') return <AccountLayout
+    title={t('到 ClawHunt 管理账号', 'Manage your account on ClawHunt')}
+    intro={t('统一账号的密码和找回操作由 ClawHunt 主站负责。', 'ClawHunt manages passwords and recovery for unified accounts.')}
+  ><section className="saas-card saas-recovery">{accountLink && <a className="saas-buy-link" href={accountLink} target="_blank" rel="noopener noreferrer">{t('打开 ClawHunt 账号管理', 'Open ClawHunt account settings')}</a>}<button type="button" onClick={onBack}>{t('返回登录', 'Back to sign in')}</button></section></AccountLayout>;
   return (
     <AccountLayout
       title={

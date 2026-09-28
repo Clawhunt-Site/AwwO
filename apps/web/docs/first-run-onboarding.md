@@ -8,17 +8,19 @@ Presentation progress is saved per account and scene on the current browser/devi
 
 ## Main-site navigation
 
-Set `VITE_CLAWHUNT_SITE_URL` at **build time** to enable the main-site header link and final workspace guide step. Empty or invalid configuration hides both. Only HTTPS URLs without credentials, query parameters, or fragments are accepted. Links carry no account information and use `noopener noreferrer`.
+Set `VITE_CLAWHUNT_SITE_URL` at **build time** to enable the main-site header link and final workspace guide step. Empty or invalid configuration hides both. Deployed builds accept only HTTPS. An explicit Vite development run also accepts HTTP on the literal loopback hosts `127.0.0.1`, `localhost`, and `[::1]`; other HTTP hosts are rejected. Credentials, query parameters, and fragments are always rejected. Links carry no account information and use `noopener noreferrer`.
 
 | Environment | Configuration |
 | --- | --- |
-| Development | Empty, or an explicit development HTTPS site |
+| Development | Empty, a development HTTPS site, or `http://127.0.0.1:8795` when the isolated ClawHunt main site is running locally |
 | Staging | Empty until a separate staging main-site URL is provisioned |
 | Production | Verified main-site URL: `https://clawhunt.store` |
 
 For Docker Compose, set this name in the deployment environment; `web.build.args` passes it to Vite. For a direct web-only release build, export the same value to the build command and record it in the release manifest. Changing the API's environment without rebuilding the web assets does not change the link.
 
-The matching ClawHunt `/awwo` entry is configured by that project's `AWWO_WORKSPACE_URL`. These are ordinary navigation links, not SSO. Existing ClawHunt login, Cloudflare Access, and AwwO account sessions remain separate. No token is forwarded and no same-email accounts are merged. The Mac app opens main-site destinations in the system browser.
+For a fully local navigation check, run the isolated main site at `http://127.0.0.1:8795` and start AwwO's Vite development server at `http://127.0.0.1:5193` with `VITE_CLAWHUNT_SITE_URL=http://127.0.0.1:8795`. The main-site header link and final guide step should both open that local origin. A production-mode build still rejects this HTTP setting, even if a development mode name is supplied.
+
+The matching ClawHunt `/awwo` entry is configured by that project's `AWWO_WORKSPACE_URL`. These links provide navigation without forwarding tokens or merging same-email accounts. Unified authentication is configured separately using the [ClawHunt identity protocol](../../../docs/clawhunt-identity.md). Without that configuration, account sessions remain separate. The Mac app opens ordinary main-site destinations in the system browser; the exact authentication/account routes used for unified login remain inside its WebKit window.
 
 ## Acceptance
 

@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowRight, Bot, Check, Cpu, ExternalLink, Layers3, Sparkles, X } from 'lucide-react';
-import { safeMainSiteURL } from './mainSite';
+import { mainSiteEnvironment, safeMainSiteURL } from './mainSite';
 import './first-run-tour.css';
 
 export type FirstRunScene = 'workspace' | 'canvas' | 'engines';
@@ -69,7 +69,7 @@ export function FirstRunTour({ open, scene, locale, mainSiteURL, readOnly = fals
   const closeCallback = useRef(onClose); closeCallback.current = onClose;
   const [layout, setLayout] = useState<Layout>(() => ({ spotlight: null, card: {}, ...viewport() }));
   const id = useId();
-  const siteURL = safeMainSiteURL(mainSiteURL);
+  const siteURL = safeMainSiteURL(mainSiteURL, mainSiteEnvironment());
   const steps = stepsFor(scene, readOnly, personalEngines).filter(step => !step.siteLink || Boolean(siteURL));
   const index = Math.min(requestedIndex, steps.length - 1);
   const step = steps[index];

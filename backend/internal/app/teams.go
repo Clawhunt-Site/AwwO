@@ -92,7 +92,10 @@ func effectiveOutputPolicy(snap executionSnapshot) string {
 // byte-identical. The frozen policy is server text whose user-supplied parts are JSON
 // encoded, so it can be rewritten whole.
 func withdrawPlainTextAllowance(policy string) string {
-	return strings.ReplaceAll(policy, plainTextAllowance, jsonOnlyPolicy)
+	// The original allowance is present in older persisted snapshots. Newer
+	// snapshots add exact-text guidance separately; both are incompatible with a
+	// provider-enforced JSON schema and must be withdrawn together.
+	return strings.ReplaceAll(strings.ReplaceAll(policy, plainTextAllowance, jsonOnlyPolicy), exactPlainTextGuidance, "")
 }
 
 // withdrawPromptAllowance applies the same rewrite to a node prompt, but only inside its

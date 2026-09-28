@@ -87,6 +87,7 @@
   border-color: var(--account-accent);
   color: #ffffff;
   background: var(--account-accent);
+  text-decoration: none;
 }
 
 .account-secondary-button {

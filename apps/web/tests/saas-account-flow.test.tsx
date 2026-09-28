@@ -91,6 +91,7 @@ it('preserves an invitation through login and joins only after explicit confirma
     if (url.endsWith('/appearance')) return response(appearanceFixture);
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return authenticated ? response(owner) : response({ error: { code: 'unauthenticated' } }, 401);
+    if (url.endsWith('/auth/options')) return response({ clawhuntSSO: false, localAuth: true, passwordRecovery: false });
     if (url.endsWith('/auth/login')) { authenticated = true; return response(owner); }
     if (url.endsWith('/accept')) return response({ tenantId: 'invited-team', role: 'member' });
     return response({ tenantId: 'invited-team', tenantName: 'Invited Team', role: 'member', status: 'active', expiresAt: '2099-01-01T00:00:00Z' });
@@ -122,6 +123,7 @@ it('keeps an invitation across registration and does not consume it when creatin
     if (url.endsWith('/appearance')) return response(appearanceFixture);
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response({ error: { code: 'unauthenticated' } }, 401);
+    if (url.endsWith('/auth/options')) return response({ clawhuntSSO: false, localAuth: true, passwordRecovery: false });
     if (url.endsWith('/auth/register')) return response(owner, 201);
     return response({ tenantId: 'invited-team', tenantName: 'Registration Team', role: 'reader', status: 'active', expiresAt: '2099-01-01T00:00:00Z' });
   }));
@@ -172,7 +174,7 @@ it('translates the original account panel when changing the SaaS language', asyn
 });
 
 it('reuses the existing language/theme keys and keeps the choice on a fresh mount', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ error: { code: 'unauthenticated' } }, 401)));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/options') ? response({ clawhuntSSO: false, localAuth: true, passwordRecovery: false }) : response({ error: { code: 'unauthenticated' } }, 401)));
   const first = render(<SaaSApp />); expect(await screen.findByRole('heading', { name: '欢迎回来' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));
   expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeVisible();

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FirstRunTour, type FirstRunTourProps } from '../src/saas/FirstRunTour';
+import * as mainSite from '../src/saas/mainSite';
 
 const showModal = vi.fn(function (this: HTMLDialogElement) { this.setAttribute('open', ''); });
 const close = vi.fn(function (this: HTMLDialogElement) { this.removeAttribute('open'); });
@@ -15,7 +16,7 @@ beforeEach(() => {
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
   showModal.mockClear(); close.mockClear();
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('FirstRunTour', () => {
   it('uses a native modal and restores focus after dismissal', () => {
@@ -157,6 +158,14 @@ describe('FirstRunTour', () => {
     next();
     fireEvent.click(screen.getByRole('button', { name: '知道了' }));
     expect(onClose).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it('keeps the loopback main-site step after revalidation in local development', () => {
+    vi.spyOn(mainSite, 'mainSiteEnvironment').mockReturnValue('development');
+    render(<FirstRunTour {...base} mainSiteURL="http://127.0.0.1:8795" />);
+    next(); next(); next();
+    expect(screen.getByRole('heading', { name: '与 ClawHunt 主站相连' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '打开 ClawHunt 主站' })).toHaveAttribute('href', 'http://127.0.0.1:8795/');
   });
 
   it.each([undefined, '', 'javascript:alert(1)', 'http://main.example.test', 'https://user:password@main.example.test', 'https://main.example.test/?token=private', 'https://main.example.test/#return'])('omits the main-site step for an absent or unsafe URL: %s', mainSiteURL => {

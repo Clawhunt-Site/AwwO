@@ -394,6 +394,9 @@ func mockPersonalProviders(t *testing.T, h *harness, key string) {
 			body, credential = `{"data":[{"id":"gpt-test"}]}`, r.Header.Get("Authorization")
 		case "api.clawhunt.site":
 			body, credential = `{"data":[{"id":"gpt-test"},{"id":"test-chat-model"}]}`, r.Header.Get("Authorization")
+			if r.URL.Path == "/v1/user/balance" {
+				body = `{"is_active":true,"balance":0}`
+			}
 		case "generativelanguage.googleapis.com":
 			body, credential = `{"models":[{"name":"models/gemini-test","supportedGenerationMethods":["generateContent"]}]}`, "Bearer "+r.Header.Get("x-goog-api-key")
 		default:

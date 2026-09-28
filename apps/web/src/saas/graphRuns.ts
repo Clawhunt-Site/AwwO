@@ -3,7 +3,7 @@ import { currentSaaSCanvas, flushSaaSCanvas } from './canvasBridge';
 import type { CanvasDocument } from '../canvas/canvasDoc';
 import { runInputFingerprint } from '../canvas/runRecoveryDocument';
 import { activeThreadId } from '../canvas/nodeThreads';
-import type { CanvasRunJournal } from '../canvas/runJournal';
+import type { CanvasRunJournal, CanvasRunJournalNode } from '../canvas/runJournal';
 import type { RunNodeState } from '../canvas/runGraph';
 
 export interface GraphNodeResult {
@@ -191,9 +191,24 @@ export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRun
       }
     }
   }
-  const nodes = Object.fromEntries(Object.entries(journal.nodes).map(([id, node]) => [id, { ...node }]));
+  const nodes: Record<string, CanvasRunJournalNode> = Object.fromEntries(Object.entries(journal.nodes).map(([id, node]) => [id, { ...node }]));
   for (const result of snapshot.nodes) {
-    const previous = nodes[result.nodeId];
+    let previous = nodes[result.nodeId];
+    // The pending journal contains executable nodes only. The server can also confirm that
+    // out-of-scope ancestors supplied a published output; show those as cached in the live
+    // timeline without adding them to the executable scope or claiming they ran again.
+    if (!previous && result.state === 'cached' && !journal.scope.includes(result.nodeId)
+      && !snapshot.scope.includes(result.nodeId) && typeof result.output === 'string'
+      && result.output.trim() && result.partial !== true) {
+      const source = snapshot.document?.nodes.find(node => node.id === result.nodeId);
+      if (source && (source.kind === 'form' || source.binding?.companyId === journal.serverGraph.tenantId)) {
+        previous = { nodeId: result.nodeId,
+          threadId: source.kind === 'session' ? activeThreadId(source) : 'form',
+          companyId: journal.serverGraph.tenantId,
+          agentId: source.kind === 'session' ? source.binding?.agentId ?? null : null,
+          issueId: null, runId: null, state: 'cached' };
+      }
+    }
     if (!previous) continue;
     if (collaboration && previous.issueId && result.sessionId && previous.issueId !== result.sessionId) throw new Error('Collaboration node Session changed');
     nodes[result.nodeId] = { ...previous, state: result.state,

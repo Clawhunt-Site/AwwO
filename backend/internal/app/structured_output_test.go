@@ -161,7 +161,7 @@ func TestEffectiveOutputPolicyAndReserveAreDerivedNotFrozen(t *testing.T) {
 		t.Fatal("the single-text-field policy lost its plain-text allowance", policy)
 	}
 	derived := effectiveOutputPolicy(structured)
-	if strings.Contains(derived, plainTextAllowance) || !strings.HasPrefix(derived, strings.ReplaceAll(policy, plainTextAllowance, jsonOnlyPolicy)) {
+	if strings.Contains(derived, plainTextAllowance) || strings.Contains(derived, exactPlainTextGuidance) || !strings.HasPrefix(derived, withdrawPlainTextAllowance(policy)) {
 		t.Fatal("the structured policy must withdraw the allowance and extend the rest", derived)
 	}
 	if outputContractReserve(structured) != schemaReserveBytes {

@@ -11,6 +11,9 @@ import (
 )
 
 func (a *App) updateProfile(w http.ResponseWriter, r *http.Request) {
+	if !a.localAuthentication(w) {
+		return
+	}
 	var b struct {
 		Name string `json:"name"`
 	}

@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { evaluateJev, readJevStatus, type JevRequest, type JevStatus } from '../src/saas/jev';
+import { evaluateJev, jevFailure, readJevStatus, type JevRequest, type JevStatus } from '../src/saas/jev';
+import { SaaSApiError } from '../src/saas/api';
 
 const status: JevStatus = { provider: 'typesafe', model: 'jev-latest', configured: true, enabled: true, canEvaluate: true,
   questionTypes: ['choice'], limits: { maxQuestions: 16, maxRequestBytes: 65536 } };
@@ -13,6 +14,16 @@ const response = () => ({ model: 'jev-1.13.0', answers: {
 }, usage: { input_tokens: 200, output_tokens: 10 } });
 afterEach(() => vi.unstubAllGlobals());
 const evaluate = () => evaluateJev('tenant', request, status, new AbortController().signal, 'en');
+
+it('explains workspace Jev admission errors in both languages without exposing server diagnostics', () => {
+  const daily = new SaaSApiError(429, 'typesafe_daily_limit', 'INTERNAL_LIMIT_DIAGNOSTIC');
+  expect(jevFailure(daily, 'zh').message).toBe('此工作区今日 Jev 编排额度已用完，请等待额度恢复或联系管理员。');
+  expect(jevFailure(daily, 'en').message).toContain('allowance for today');
+  const personal = new SaaSApiError(403, 'typesafe_personal_required', 'INTERNAL_MODE_DIAGNOSTIC');
+  expect(jevFailure(personal, 'zh').message).toContain('可使用你已连接的执行引擎规划');
+  expect(jevFailure(personal, 'en').message).toContain('an execution engine you have connected');
+  expect(jevFailure(personal, 'en').message).not.toContain('INTERNAL_MODE_DIAGNOSTIC');
+});
 
 it('accepts official batched Choice responses, forward metadata, aliases and nullable/missing token counters', async () => {
   const raw = { ...response(), usage: { input_tokens: null }, provider_metadata: { request: 'safe' } };

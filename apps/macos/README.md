@@ -1,10 +1,14 @@
 # AwwO for Mac
 
-Version **0.8.1, build 6** is the Apple Silicon desktop client for the hosted
+Source version **0.9.0, build 7** is the Apple Silicon desktop client for the hosted
 AwwO service. It requires macOS 14 or later and an internet connection. The
 Swift/AppKit/WebKit shell uses the hosted account, workspaces and history;
 the website and server deploy separately. No local database, Node runtime,
 worker, model runtime or provider API key is bundled.
+
+The latest published download remains **0.8.1, build 6** until a separate native
+release is built and verified. The 0.9.0 source adds the exact ClawHunt identity
+handoff routes; a Git push does not update installed binaries.
 
 The bundle identifier remains `store.clawhunt.awwo.local` and the app remains
 `AwwO Local.app` with the display name **AwwO**. Existing WebKit session data
@@ -50,7 +54,7 @@ APP_ENV=production VITE_APP_ENV=production \
 
 The script reads `latest.json`, requires its revision and app metadata to match
 `HEAD`, rejects builds with modified inputs, and runs `verify-bundle.ts`.
-It refuses to overwrite `.local/releases/macos-0.8.1-build6-<sha7>/`.
+It refuses to overwrite `.local/releases/macos-0.9.0-build7-<sha7>/`.
 The output contains stable release names for the DMG, ZIP, `INSTALL.txt`,
 `SHA256SUMS`, a Fold brand kit ZIP (MIT license, SVG/PNG, vector source and
 ICNS), and `release.json` with verification evidence. The DMG includes the app,

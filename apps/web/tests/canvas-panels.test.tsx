@@ -11,7 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { InspectorPanel } from '../src/canvas/InspectorPanel';
-import { RunControls } from '../src/canvas/RunControls';
+import { RunControls, summaryNote } from '../src/canvas/RunControls';
 import { RunTimeline, type RunView } from '../src/canvas/RunTimeline';
 import { CommandBar } from '../src/canvas/CommandBar';
 import { createFormNode, createSessionNode, type FormNode, type SessionNode } from '../src/canvas/canvasDoc';
@@ -227,6 +227,12 @@ describe('InspectorPanel', () => {
 });
 
 describe('RunControls', () => {
+  it('keeps a single locale-appropriate final mark when cancelled nodes are counted', () => {
+    const summary = { ok: false, done: 0, failed: 1, blocked: 2, cancelled: 1, cached: 0, total: 3 };
+    expect(summaryNote(summary, false, 'zh')).toBe('运行结束：成功 0 · 失败 1 · 被阻断 2（共 3） · 已取消 1。');
+    expect(summaryNote(summary, false, 'en')).toBe('Run ended: 0 succeeded · 1 failed · 2 blocked (3 total) · 1 cancelled.');
+  });
+
   it('reports a preflight problem NAMING the unbound node and does not start the run', () => {
     const onStart = vi.fn();
     render(
@@ -297,11 +303,22 @@ describe('RunControls', () => {
         onStop={vi.fn()}
       />,
     );
-    expect(screen.getByText(/成功 1 · 失败 1 · 被阻断 1（共 3）/)).toBeTruthy();
+    expect(screen.getByText('运行结束：成功 1 · 失败 1 · 被阻断 1（共 3）。')).toBeTruthy();
   });
 });
 
 describe('RunTimeline', () => {
+  it('stays inside the canvas viewport and localizes a server-blocked node', () => {
+    const blocked = sessionNode({ id: 'blocked', title: '交付验收' });
+    render(<RunTimeline nodes={[blocked]}
+      runs={{ blocked: { state: 'blocked', detail: 'Upstream did not complete' } }}
+      runStartedAt={1_000} now={2_000} onClose={vi.fn()} />);
+    const timeline = screen.getByRole('region', { name: '执行时间线' });
+    expect(timeline).toHaveStyle({ position: 'absolute', left: '16px', right: '16px' });
+    const badge = within(screen.getByTestId('runline-blocked')).getByText('上游节点未完成');
+    expect(badge.getAttribute('title')).toBe('上游节点未完成');
+  });
+
   it("shows a blocked row's REASON and computes elapsed from the recorded stamps", () => {
     const a = sessionNode({ id: 'a', title: '实现', runtime: 'claude_local', model: 'opus' });
     const b = sessionNode({ id: 'b', title: '审阅' });
@@ -347,6 +364,20 @@ describe('RunTimeline', () => {
     );
     const badge = within(screen.getByTestId('runline-recovered')).getByText('页面中断前尚未下发。');
     expect(badge.getAttribute('title')).toBe('页面中断前尚未下发。');
+  });
+
+  it('uses the current catalogue label for cloud selectors and keeps missing historical models identifiable', () => {
+    const known = sessionNode({ id: 'known', title: 'Known', runtime: 'pi', model: 'byok_scope_known_12345678' });
+    const missing = sessionNode({ id: 'missing', title: 'Missing', runtime: 'pi', model: 'byok_scope_missing_87654321' });
+    render(<RunTimeline nodes={[known, missing]} runs={{ known: { state: 'done' }, missing: { state: 'done' } }}
+      modelCatalogue={[{ key: 'known', runtime: 'pi', model: known.model, label: 'qwen3.8 · Team connection', providerGroup: 'clawhunt', available: true }]}
+      runStartedAt={1_000} now={2_000} onClose={vi.fn()} />);
+    const knownRow = within(screen.getByTestId('runline-known'));
+    expect(knownRow.getByText('pi · qwen3.8 · Team connection')).toBeVisible();
+    expect(knownRow.queryByText(/byok_scope_known/)).toBeNull();
+    const missingRow = within(screen.getByTestId('runline-missing'));
+    expect(missingRow.getByText('pi · 当前目录未包含该模型 · 87654321')).toBeVisible();
+    expect(missingRow.queryByText(/byok_scope_missing/)).toBeNull();
   });
 });
 

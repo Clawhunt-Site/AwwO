@@ -12,7 +12,7 @@ export interface CanvasAccountControlProps {
   onLogin: () => void;
   onLogout: () => void;
   onOpenWorkspaceAuth: () => void;
-  workspace?: { displayName: string; selectedCompanyId: string | null; onCompanyChange: (id: string) => void; api: AccountApi };
+  workspace?: { displayName: string; selectedCompanyId: string | null; onCompanyChange: (id: string) => void; api: AccountApi; externalProfile?: { url?: string } };
 }
 
 /** Native modal semantics keep keyboard focus inside account management. */
@@ -54,7 +54,7 @@ export function CanvasAccountControl({ locale, identity, onLogin, onLogout, onOp
       <div className="awwo-account-dialog-body">
         <AccountWorkspacePanel key={workspace?.selectedCompanyId || 'default'} locale={locale} clawHuntIdentity={workspace ? null : identity}
           selectedCompanyId={workspace ? workspace.selectedCompanyId : companyId} onCompanyChange={workspace?.onCompanyChange || setCompanyId}
-          api={workspace?.api} workspaceOnly={Boolean(workspace)}
+          api={workspace?.api} workspaceOnly={Boolean(workspace)} externalProfile={workspace?.externalProfile}
           onClawHuntLogin={() => { close(); onLogin(); }} onClawHuntLogout={onLogout}
           onOpenWorkspaceAuth={() => { close(); onOpenWorkspaceAuth(); }} />
       </div>

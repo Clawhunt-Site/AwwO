@@ -26,6 +26,35 @@ describe('model and persona shelf', () => {
     expect(screen.getByRole('radio', { name: '无预设' })).toBeChecked();
   });
 
+  it('filters a long model catalogue by brand, model, or connection without changing selection identity', () => {
+    const onAddModel = vi.fn();
+    const qwen = { ...model, label: 'qwen3.8-p6 · Work connection · llmgate / alias-7' };
+    const claude = { ...model, key: 'pi:claude', model: 'claude-5', label: 'claude-5 · Personal connection', providerGroup: 'claude' as const };
+    const list = groups.map(group => group.id === 'clawhunt' ? { ...group, models: [qwen] }
+      : group.id === 'claude' ? { ...group, models: [claude], available: true } : group);
+    render(<ModelPersonaShelf {...props({ groups: list, onAddModel })} />);
+    const search = screen.getByRole('searchbox', { name: '查找模型' });
+    fireEvent.change(search, { target: { value: 'alias-7' } });
+    expect(screen.getByRole('status')).toHaveTextContent('找到 1 个模型');
+    expect(screen.getByRole('button', { name: /添加 qwen3.8-p6 · Work connection · llmgate \/ alias-7/ })).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'claude' })).toBeNull();
+    expect(screen.getByText('qwen3.8-p6')).toBeVisible();
+    expect(screen.getByText('Work connection · llmgate / alias-7')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /添加 qwen3.8-p6/ }));
+    expect(onAddModel).toHaveBeenCalledWith(qwen, null);
+    fireEvent.change(search, { target: { value: 'Claude' } });
+    expect(screen.getByRole('button', { name: /添加 claude-5/ })).toBeVisible();
+    fireEvent.change(search, { target: { value: 'unlisted-model' } });
+    expect(screen.getByText('没有匹配的模型。试试品牌、模型名或连接名称。')).toBeVisible();
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(search).toHaveValue('');
+    expect(screen.getByRole('button', { name: /添加 qwen3.8-p6/ })).toBeVisible();
+    fireEvent.change(search, { target: { value: 'alias-7' } });
+    fireEvent.click(screen.getByRole('button', { name: '清除模型搜索' }));
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue('');
+  });
+
   it('passes identical model and independent persona for click and drag; preserves the workspace entry', () => {
     const p = props({ personaId: 'frontend' });
     render(<ModelPersonaShelf {...p} />);

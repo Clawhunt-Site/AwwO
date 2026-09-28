@@ -105,6 +105,9 @@ func (a *App) createLogin(ctx context.Context, tx pgx.Tx, userID string) (string
 	return token, e
 }
 func (a *App) register(w http.ResponseWriter, r *http.Request) {
+	if !a.localAuthentication(w) {
+		return
+	}
 	var b struct {
 		Email      string `json:"email"`
 		Password   string `json:"password"`
@@ -163,6 +166,9 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) {
 	a.meResponse(w, r, u, 201)
 }
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
+	if !a.localAuthentication(w) {
+		return
+	}
 	var b struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -223,13 +229,35 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 	c, e := r.Cookie("awwo_session")
+	logoutURL := ""
 	if e == nil {
+		var sealed []byte
+		var uid string
+		if e = a.db.QueryRow(r.Context(), "SELECT user_id,sso_grant FROM auth_sessions WHERE token_hash=$1", tokenHash(c.Value)).Scan(&uid, &sealed); e != nil && !noRows(e) {
+			a.dbError(w, e)
+			return
+		}
+		if len(sealed) > 0 && a.clawHuntEnabled() {
+			grant, err := a.openCredential(uid, "clawhunt-session:"+tokenHash(c.Value), sealed)
+			var out struct {
+				LogoutURL string `json:"logout_url"`
+			}
+			if err != nil || a.clawHuntRequest(r.Context(), "revoke", map[string]string{"grant_token": grant}, &out) != nil || !a.validClawHuntLogoutURL(out.LogoutURL) {
+				fail(w, 503, "sso_unavailable", "ClawHunt sign out is unavailable; retry")
+				return
+			}
+			logoutURL = out.LogoutURL
+		}
 		if _, e = a.db.Exec(r.Context(), "DELETE FROM auth_sessions WHERE token_hash=$1", tokenHash(c.Value)); e != nil {
 			a.dbError(w, e)
 			return
 		}
 	}
 	a.sessionCookie(w, "", -1)
+	if logoutURL != "" {
+		writeJSON(w, 200, map[string]string{"logoutURL": logoutURL})
+		return
+	}
 	w.WriteHeader(204)
 }
 func (a *App) meResponse(w http.ResponseWriter, r *http.Request, u User, status int) {
@@ -238,7 +266,15 @@ func (a *App) meResponse(w http.ResponseWriter, r *http.Request, u User, status 
 		a.dbError(w, e)
 		return
 	}
-	writeJSON(w, status, map[string]any{"user": u, "tenants": items, "personalCredentialsRequired": a.cfg.UserCredentials})
+	method := "local"
+	if linked, _ := r.Context().Value(clawHuntSessionKey{}).(bool); linked {
+		method = "clawhunt"
+	}
+	out := map[string]any{"user": u, "tenants": items, "personalCredentialsRequired": a.cfg.UserCredentials, "authentication": method, "clawhuntSiteURL": a.cfg.ClawHuntURL}
+	if redirect, ok := r.Context().Value(clawHuntReturnKey{}).(string); ok {
+		out["redirectURL"] = redirect
+	}
+	writeJSON(w, status, out)
 }
 func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +284,9 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		var u User
-		e = a.db.QueryRow(r.Context(), "SELECT u.id,u.email,u.name,u.platform_role FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()", tokenHash(c.Value)).Scan(&u.ID, &u.Email, &u.Name, &u.PlatformRole)
+		var issuer, subject string
+		var grant []byte
+		e = a.db.QueryRow(r.Context(), "SELECT u.id,u.email,u.name,u.platform_role,COALESCE(s.sso_issuer,''),COALESCE(s.sso_subject,''),s.sso_grant FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()", tokenHash(c.Value)).Scan(&u.ID, &u.Email, &u.Name, &u.PlatformRole, &issuer, &subject, &grant)
 		if noRows(e) {
 			fail(w, 401, "unauthorized", "Session expired")
 			return
@@ -257,7 +295,24 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 			a.dbError(w, e)
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), userKey{}, u)))
+		profile, valid, err := a.validateClawHuntSessionIdentity(r.Context(), tokenHash(c.Value), u.ID, issuer, subject, grant)
+		if err != nil {
+			fail(w, 503, "sso_unavailable", "ClawHunt session verification is unavailable")
+			return
+		}
+		if !valid {
+			a.sessionCookie(w, "", -1)
+			fail(w, 401, "unauthorized", "Continue with ClawHunt again")
+			return
+		}
+		if len(grant) > 0 {
+			// Provider fields are current display metadata. The persisted user ID,
+			// memberships and credential ownership remain the stable local account.
+			u.Name, u.Email = profile.Name, profile.Email
+		}
+		ctx := context.WithValue(r.Context(), userKey{}, u)
+		ctx = context.WithValue(ctx, clawHuntSessionKey{}, len(grant) > 0)
+		next(w, r.WithContext(ctx))
 	}
 }
 func (a *App) tenant(next http.HandlerFunc, minRole int) http.HandlerFunc {

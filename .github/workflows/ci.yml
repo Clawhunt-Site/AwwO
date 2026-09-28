@@ -3,7 +3,7 @@ name: ci
 # Trigger scope is deliberately narrow to conserve Actions minutes (the org is on
 # the Free 2,000-min/month pool, shared across all private repos):
 #   - pull_request covers every branch that has an open PR.
-#   - push fires on main/staging only (post-merge acceptance). It no longer fires
+#   - push fires on main only (integration acceptance). It no longer fires
 #     on codex/** because those branches are already covered by pull_request —
 #     keeping both double-ran the matrix on every push.
 # Minutes are reclaimed by the concurrency block below, NOT by skipping any change.
@@ -17,15 +17,14 @@ on:
   # *.md/docs change would let a test-breaking edit merge unverified, so every
   # change runs the matrix. Minutes are reclaimed by concurrency + trigger scope.
   pull_request:
-  # `staging` is included proactively per AGENTS.md (optional online-acceptance
-  # branch); it costs nothing until that branch exists.
+  # AwwO uses main as its only named branch (operator decision 2026-09-28).
   push:
-    branches: [main, staging]
+    branches: [main]
 
 concurrency:
   # Group PR runs by PR number so a newer commit cancels the PR's superseded
   # in-flight run — the biggest saver under rapid, agent-driven pushes. A push to
-  # main/staging has no pull_request.number, so it falls back to the unique
+  # main has no pull_request.number, so it falls back to the unique
   # run_id: each acceptance run lands in its own group and is therefore NEVER
   # cancelled or queue-skipped. Post-merge acceptance CI must always complete for
   # every commit — with no branch protection it is the only green-integration signal.

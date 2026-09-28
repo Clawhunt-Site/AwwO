@@ -10,7 +10,9 @@ const tenant = { id: 'ux', name: 'UX', role: 'owner', status: 'active' } as Tena
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); history.replaceState(null, '', '/'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 it('does not block existing shorter login passwords and resets visibility when registering', async () => {
-  const fetch = vi.fn().mockResolvedValue(Response.json({ error: { code: 'unauthenticated' } }, { status: 401 }));
+  const fetch = vi.fn(async (url: string) => url === '/api/v1/auth/options'
+    ? Response.json({ clawhuntSSO: false, localAuth: true, passwordRecovery: false })
+    : Response.json({ error: { code: 'unauthenticated' } }, { status: 401 }));
   vi.stubGlobal('fetch', fetch); render(<SaaSApp />);
   const password = await screen.findByLabelText('密码');
   expect(password).not.toHaveAttribute('minlength');

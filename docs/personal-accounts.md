@@ -4,7 +4,7 @@ The account-based product uses the Go API, PostgreSQL, SaaS web client, Pi worke
 
 The Windows shell in `apps/windows` shares the hosted service's account and database. It has no local command or filesystem bridge. Python workers also support the same private `userModel` admission contract; all workers selected by the API must advertise `userCredentials: true`.
 
-Canvas planning chooses an available engine from the requesting user's connections, preferring OpenAI Agents then Pi. It never stores a personal model selector on the shared internal planner Agent. Legacy Jev/TypeSafe does not support personal credentials: in personal mode both its catalogue and evaluation endpoints must route to the Go API, which rejects them. Remove any reverse-proxy route bypassing the API and pointing directly at an operator-key sidecar before enabling personal mode.
+Canvas planning chooses an available engine from the requesting user's connections, preferring OpenAI Agents then Pi. It never stores a personal model selector on the shared internal planner Agent. Jev/TypeSafe does not support personal credentials: in personal mode both its catalogue and evaluation endpoints must route to the Go API, which rejects them by default. An explicit, default-off workspace sponsorship switch plus an exact tenant allowlist can enable typed Jev planning under the API's permission, audit and daily-budget checks; node execution still uses the user's own credentials (see [Jev sponsored planning](awwo-jev-sponsored-planning-20260927.md)). Remove any reverse-proxy route bypassing the API and pointing directly at an operator-key sidecar before enabling personal mode.
 
 ## User flow
 

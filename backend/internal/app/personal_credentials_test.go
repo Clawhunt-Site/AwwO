@@ -57,10 +57,13 @@ func mockPersonalDiscovery(t *testing.T, h *harness) {
 		if r.URL.Host != "api.clawhunt.site" {
 			return http.DefaultTransport.RoundTrip(r)
 		}
-		if r.URL.Path != "/v1/models" {
+		if r.URL.Path != "/v1/models" && r.URL.Path != "/v1/user/balance" {
 			t.Errorf("unexpected provider path %s", r.URL.Path)
 		}
 		status, body := 200, `{"data":[{"id":"test-chat-model"},{"id":"text-embedding-small"}]}`
+		if r.URL.Path == "/v1/user/balance" {
+			body = `{"is_active":true,"balance":0,"currency":"USD"}`
+		}
 		if r.Header.Get("Authorization") != "Bearer synthetic-personal-secret" {
 			status = 401
 			body = `{"error":"synthetic-personal-secret"}`
@@ -278,6 +281,17 @@ func TestPostgresPersonalCredentialsIsolationAndDispatch(t *testing.T) {
 	if _, err = h.a.personalAdmission(context.Background(), runtimePI, raw); err != nil {
 		t.Fatal("background admission depends on HTTP session", err)
 	}
+	// A catalog saved before modality filtering must not let a stale canvas
+	// dispatch an ASR-only model through the text worker.
+	if _, err = h.db.Exec(t.Context(), "UPDATE user_connections SET models=$2::jsonb WHERE id=$1", id, `["test-chat-model","qwen3-asr-flash"]`); err != nil {
+		t.Fatal(err)
+	}
+	request["model"] = connectionModelID(id, "qwen3-asr-flash")
+	incompatible, _ := json.Marshal(request)
+	if _, err = h.a.personalAdmission(t.Context(), runtimePI, incompatible); err == nil {
+		t.Fatal("ASR-only model admitted to the text worker from a legacy catalog")
+	}
+	request["model"] = selector
 	request["sessionId"] = "other-session"
 	invalid, _ := json.Marshal(request)
 	if _, err = h.a.personalAdmission(context.Background(), runtimePI, invalid); err == nil {

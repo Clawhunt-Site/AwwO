@@ -15,6 +15,7 @@
 
 import type { CSSProperties } from 'react';
 import type { CanvasNode } from './canvasDoc';
+import type { ModelPaletteSelection } from './modelPalette';
 import type { RunNodeStatus } from './runGraph';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
 import { recoveryDetailMessage } from './surfaceMessages';
@@ -53,12 +54,16 @@ const KIND_COLOR: Record<string, string> = {
 };
 
 const DRAWER_STYLE: CSSProperties = {
-  position: 'fixed',
+  // Canvas chrome is rendered inside the positioned canvas root. Anchoring to the browser
+  // viewport puts the drawer under the left model rail, where the canvas clips its title/rows.
+  position: 'absolute',
   left: 16,
   right: 16,
-  bottom: 16,
+  // The same canvas root places the view toolbar at bottom:20px. Keep its controls clickable
+  // while the timeline is open instead of covering them with this higher-z-index drawer.
+  bottom: 76,
   zIndex: 35,
-  maxHeight: '38vh',
+  maxHeight: 'min(38vh, calc(100% - 96px))',
   overflow: 'auto',
 };
 
@@ -73,6 +78,7 @@ export function RunTimeline({
   runStartedAt,
   now,
   onClose,
+  modelCatalogue,
   style,
 }: {
   nodes: ReadonlyArray<CanvasNode>;
@@ -82,9 +88,11 @@ export function RunTimeline({
   /** The surface's clock. Ticks only while a run is in flight. */
   now: number;
   onClose: () => void;
+  /** A scope-checked catalogue lets cloud model selectors render as their public labels. */
+  modelCatalogue?: readonly ModelPaletteSelection[];
   style?: CSSProperties;
 }) {
-  const { t } = useCanvasI18n();
+  const { t, locale } = useCanvasI18n();
   const origin = runStartedAt ?? now;
   // A 1s floor keeps the very first frames from dividing by ~0 and drawing a full-width bar for
   // a node that has run for 4ms.
@@ -120,11 +128,17 @@ export function RunTimeline({
           const barLeft = started ? ((started - origin) / span) * 100 : 0;
           const barWidth = started ? (((ended ?? now) - started) / span) * 100 : 0;
           const elapsed = started != null ? fmtElapsed((ended ?? now) - started) : '—';
+          const modelLabel = node.kind === 'session' && node.model
+            ? modelCatalogue?.find(model => model.runtime === node.runtime && model.model === node.model)?.label
+              || (/^byok_[a-zA-Z0-9_-]+$/.test(node.model)
+                ? `${locale === 'zh' ? '当前目录未包含该模型' : 'Model not in current catalogue'} · ${node.model.slice(-8)}`
+                : node.model)
+            : '';
           const runtime =
             node.kind === 'form'
               ? t('timeline.form')
               : node.runtime
-                ? `${node.runtime}${node.model ? ` · ${node.model}` : ''}`
+                ? `${node.runtime}${modelLabel ? ` · ${modelLabel}` : ''}`
                 : t('timeline.runtimeUnset');
           return (
             <div key={node.id} className="canvas-runline-row" data-testid={`runline-${node.id}`}>

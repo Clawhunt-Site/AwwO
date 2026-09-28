@@ -54,6 +54,34 @@ describe('real Agent library', () => {
     fireEvent.click(await screen.findByRole('button', { name: '选择 paused' }));
     expect(screen.getByRole('button', { name: '添加所选 Agent' })).toBeDisabled();
   });
+
+  it('shows the current catalogue label for an opaque model selector and keeps its exact Agent identity', async () => {
+    const opaque = 'byok_scope_connection_12345678';
+    const selectedAgent = { ...agent('assigned', 'Research Bot'), model: opaque };
+    const select = vi.fn();
+    render(<WorkspaceAgentPicker loadPage={async () => ({ items: [selectedAgent] })} onSelect={select} disabled={false}
+      catalogue={[{ key: 'pi:model', runtime: 'pi', model: opaque, label: 'qwen3.8 · Team connection', providerGroup: 'clawhunt', available: true }]} />);
+    const card = await screen.findByRole('button', { name: '选择 Research Bot' });
+    expect(card).toHaveTextContent('qwen3.8 · Team connection · pi');
+    expect(card).not.toHaveTextContent(opaque);
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索已加载的 Agent' }), { target: { value: 'qwen3.8' } });
+    expect(screen.getByRole('button', { name: '选择 Research Bot' })).toBeVisible();
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索已加载的 Agent' }), { target: { value: 'nonexistent model' } });
+    expect(screen.queryByRole('button', { name: '选择 Research Bot' })).toBeNull();
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索已加载的 Agent' }), { target: { value: 'qwen3.8' } });
+    fireEvent.click(screen.getByRole('button', { name: '选择 Research Bot' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加所选 Agent' }));
+    expect(select).toHaveBeenCalledExactlyOnceWith(selectedAgent);
+  });
+
+  it('does not claim an unknown opaque model is ready or print its selector in the catalogue', async () => {
+    const opaque = 'byok_scope_connection_87654321';
+    render(<WorkspaceAgentPicker loadPage={async () => ({ items: [{ ...agent('unknown'), model: opaque }] })} onSelect={vi.fn()} disabled={false} catalogue={[]} />);
+    const card = await screen.findByRole('button', { name: '选择 unknown' });
+    expect(card).toHaveTextContent('模型未在当前目录 · pi');
+    expect(card).not.toHaveTextContent(opaque);
+    expect(card.querySelector('span[title]')?.getAttribute('title')).toBe('pi · 87654321');
+  });
 });
 
 

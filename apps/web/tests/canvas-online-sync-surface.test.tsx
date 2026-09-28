@@ -68,6 +68,29 @@ it('checks the canonical initialization response before recording or submitting 
   expect(vi.mocked(fetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
 });
 
+it('shows a localized runtime rejection without admitting or repeating the graph', async () => {
+  localStorage.setItem('superclaw_locale', 'zh');
+  const node = { ...createSessionNode('llm', { x: 50, y: 50 }), id: 'author', title: 'Author', runtime: 'pi', model: 'fixture-model',
+    binding: { companyId: tenant.id, agentId: 'agent-author', agentName: 'Author' } };
+  const doc = { ...emptyDocument(), nodes: [node] };
+  canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
+  const initialize = vi.fn(async () => doc); configureSaaSCanvasInitialize(initialize);
+  const fetcher = vi.fn(async (input: string, init: RequestInit = {}) => {
+    if (String(input).endsWith('/graph-runs') && init.method === 'POST') return new Response(JSON.stringify({ error: { code: 'runtime_unavailable', message: 'Runtime is not configured' } }), { status: 503 });
+    return new Response(JSON.stringify({ items: [], models: [] }));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<CanvasSurface storageMode="cloud" />);
+  fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+  const notice = await screen.findByRole('alert');
+  expect(notice).toHaveTextContent('执行引擎尚未就绪');
+  expect(notice).toHaveTextContent('模型连接');
+  expect(notice).toHaveTextContent('节点');
+  expect(initialize).toHaveBeenCalledOnce();
+  expect(fetcher.mock.calls.filter(([url, init]) => String(url).endsWith('/graph-runs') && init?.method === 'POST')).toHaveLength(1);
+  expect(loadRunJournal()).toBeNull();
+});
+
 it('offers HTML output contracts in SaaS and preserves the existing source', () => {
   const text = { id: 'body', label: 'Body', type: 'text' as const, value: 'saved', required: false };
   const onChange = vi.fn(); const view = render(<ContractFields fields={[text]} onChange={onChange} label="Output" />);

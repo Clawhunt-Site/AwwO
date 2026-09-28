@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { canvasErrorMessage } from '../src/saas/canvasErrors';
-import { SaaSApiError } from '../src/saas/api';
+import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { canvasFetch, configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from '../src/saas/canvasBridge';
 import { fetchConversationIndex } from '../src/canvasAgentChat';
 const tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
@@ -12,6 +12,23 @@ it('tells a user with no personal engine to add a key while preserving real mode
   document.documentElement.lang = 'en';
   expect(canvasErrorMessage(new SaaSApiError(409, 'personal_engine_required', 'Add your own API key in Personal engines'))).toContain('My engines');
   expect(canvasErrorMessage(new SaaSApiError(409, 'model_unavailable', 'Node model is unavailable'))).toContain('Choose a model');
+});
+it('explains unready execution in both languages without changing the backend status or code', () => {
+  const failure = new SaaSApiError(503, 'runtime_unavailable', 'Runtime is not configured');
+  expect(failure.status).toBe(503);
+  expect(failure.code).toBe('runtime_unavailable');
+  document.documentElement.lang = 'zh-CN';
+  for (const text of [saasErrorMessage(failure, 'zh'), saasErrorMessage('Runtime is not configured', 'zh'), canvasErrorMessage(failure)]) {
+    expect(text).toContain('模型连接');
+    expect(text).toContain('节点');
+    expect(text).not.toContain('Runtime is not configured');
+  }
+  document.documentElement.lang = 'en';
+  for (const text of [saasErrorMessage(failure, 'en'), saasErrorMessage('Runtime is not configured', 'en'), canvasErrorMessage(failure)]) {
+    expect(text).toContain('model connection');
+    expect(text).toContain('nodes in this run');
+  }
+  expect(saasErrorMessage(new SaaSApiError(503, 'unknown_provider', 'Provider diagnostic'), 'zh')).toBe('Provider diagnostic');
 });
 it('translates HTTP and recovered error codes using the current locale while preserving unknown details', () => {
   document.documentElement.lang = 'en'; expect(canvasErrorMessage('quota_exceeded')).toContain('quota');

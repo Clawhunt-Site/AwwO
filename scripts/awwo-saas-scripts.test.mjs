@@ -275,6 +275,27 @@ test('capacity and timeout knobs cannot drift between compose and the shipped te
   assert.match(compose, /^ {2}private:\n {4}internal: true$/m);
 });
 
+test('identity and Jev settings reach only the API in Compose and local services', async () => {
+  const compose = await readFile(new URL('../deploy/saas/compose.yml', import.meta.url), 'utf8');
+  const deployment = parseEnv(await readFile(new URL('../deploy/saas/.env.example', import.meta.url), 'utf8'));
+  const service = name => compose.split(/^ {2}(?=\S)/m).find(block => block.startsWith(`${name}:`)) ?? '';
+  const settings = {
+    AWWO_CLAWHUNT_URL: '', AWWO_CLAWHUNT_CLIENT_ID: '', AWWO_CLAWHUNT_CLIENT_SECRET: '',
+    AWWO_TYPESAFE_SPONSORED_PLANNING: 'false', AWWO_TYPESAFE_API_KEY: '',
+    AWWO_TYPESAFE_MODEL: 'jev-1.13.0', AWWO_TYPESAFE_ENABLED_TENANT_IDS: '',
+    AWWO_TYPESAFE_TIMEOUT: '10s', AWWO_TYPESAFE_MAX_EVALUATIONS_PER_DAY: '20',
+  };
+  const synthetic = Object.fromEntries(Object.keys(settings).map(key => [key, `synthetic-${key}`]));
+  const local = serviceEnvironments(synthetic);
+  for (const [key, fallback] of Object.entries(settings)) {
+    assert.equal(deployment[key], fallback, `${key} must retain a safe deployment default`);
+    assert.ok(service('api').includes(`${key}: \${${key}:-${fallback}}`), `${key} must reach the API`);
+    assert.equal(local.api[key], synthetic[key]);
+    for (const name of ['pi', 'openai-agents', 'web', 'database']) assert.ok(!service(name).includes(key), `${key} leaked to ${name}`);
+    for (const target of [local.pi, local.openAIAgents, local.web, local.build]) assert.equal(target[key], undefined);
+  }
+});
+
 test('personal vault and mail credentials stay API-only while both workers share the mode', () => {
   const env = serviceEnvironments({ PATH: '/usr/bin', AWWO_CREDENTIAL_MODE: 'user', AWWO_CREDENTIAL_ENCRYPTION_KEY: 'synthetic-vault-key', AWWO_SMTP_PASSWORD: 'synthetic-mail-password' });
   for (const target of [env.pi, env.openAIAgents]) assert.equal(target.AWWO_CREDENTIAL_MODE, 'user');

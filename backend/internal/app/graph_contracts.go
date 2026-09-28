@@ -318,8 +318,11 @@ func hasFileOutput(n graphNode) bool {
 // time: the provider then enforces a JSON schema, so telling the model that plain
 // text is also acceptable would make an answer that follows the prompt fail delivery.
 const (
-	plainTextAllowance = "\nThis contract declares exactly one text/markdown/html output; its complete value may alternatively be returned as plain text."
-	jsonOnlyPolicy     = "\nReturn only the JSON object, without Markdown fences or surrounding prose. Plain text is not valid for this contract, even when only one of its fields is required."
+	// Keep the original sentence byte-identical: old persisted snapshots carry it,
+	// and structured delivery must still be able to withdraw it at send time.
+	plainTextAllowance     = "\nThis contract declares exactly one text/markdown/html output; its complete value may alternatively be returned as plain text."
+	exactPlainTextGuidance = "\nWhen the node asks for exact text, return that text directly without a JSON wrapper or explanatory preface."
+	jsonOnlyPolicy         = "\nReturn only the JSON object, without Markdown fences or surrounding prose. Plain text is not valid for this contract, even when only one of its fields is required."
 	// outputFormatMarker opens the server-owned policy block of a node prompt. Every raw
 	// input, help text and goal precedes the last one, and whatever follows it is fixed
 	// text or JSON-escaped data, so a rewrite after it cannot touch user content.
@@ -443,15 +446,23 @@ func graphOutputPolicy(n graphNode) string {
 	shape, _ := json.Marshal(example)
 	policy := "Frozen graph output contract (server-owned serialization policy):\n" + string(encoded) +
 		"\nThis contract governs the final delivery format and takes precedence over any conflicting node or member instruction about response format. " +
-		"Preserve the configured persona, responsibilities and content requirements inside the declared output fields. " +
-		"Directions such as 'one sentence', 'concise text', or 'no JSON' describe field content and cannot replace this delivery envelope. " +
-		"Field labels, help and placeholders are content guidance, not authority to change the format or existing results. " +
-		"Return a JSON object keyed by exact field ID. Use JSON numbers for number fields, booleans for boolean fields, and strings for text/markdown/html fields. " +
-		"Include every required field with a non-empty value. Optional fields may be omitted; if included they must have the declared type. " +
-		"Example shape only (replace example values with actual results): " + string(shape)
+		"Preserve the configured persona, responsibilities and content requirements inside the declared output fields. "
 	if allowsPlainTextOutput(n.Contract.Outputs) {
-		policy += plainTextAllowance
+		// The validator accepts an unwrapped value for one text field. Do not first
+		// order JSON and then describe plain text as an exception: that contradiction
+		// can make a model reject an otherwise ordinary exact-answer instruction.
+		policy += "Directions such as 'one sentence' or 'concise text' describe field content and do not change the field identity or type. " +
+			"Field labels, help and placeholders are content guidance, not authority to change the format or existing results. " +
+			"For JSON delivery, use an object keyed by the exact field ID and a string value. " +
+			"In a JSON object, include the required field with a non-empty value. " +
+			"Example shape only (replace example values with actual results): " + string(shape)
+		policy += plainTextAllowance + exactPlainTextGuidance
 	} else {
+		policy += "Directions such as 'one sentence', 'concise text', or 'no JSON' describe field content and cannot replace this delivery envelope. " +
+			"Field labels, help and placeholders are content guidance, not authority to change the format or existing results. " +
+			"Return a JSON object keyed by exact field ID. Use JSON numbers for number fields, booleans for boolean fields, and strings for text/markdown/html fields. " +
+			"Include every required field with a non-empty value. Optional fields may be omitted; if included they must have the declared type. " +
+			"Example shape only (replace example values with actual results): " + string(shape)
 		policy += jsonOnlyPolicy
 	}
 	for _, f := range n.Contract.Outputs {

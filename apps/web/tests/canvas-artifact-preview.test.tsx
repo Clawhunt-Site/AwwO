@@ -212,6 +212,37 @@ describe('stored byte preview', () => {
     expect(screen.queryByTitle('网页 · HTML 预览')).toBeNull();
   });
 
+  it.each(['tickets.ts', 'Component.TSX', 'app.js', 'module.mjs', 'settings.json', 'styles.css', 'notes.txt'])('reads bounded UTF-8 source from %s as plain text', async name => {
+    const source = 'export const value = "<script>window.untrusted = true</script>";\n// 中文';
+    await expect(readArtifactPreview(response(source, name), new AbortController().signal))
+      .resolves.toEqual({ name, source, type: 'text' });
+  });
+
+  it('opens a stored TypeScript deliverable as exact inert source, with download and expanded preview', async () => {
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    const source = 'export const view = <img src="/api/v1/private" onerror="steal()" />;\n<script>steal()</script>';
+    const renderMarkdown = vi.fn(markdown);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(source, 'tickets.ts')));
+    render(<StoredArtifactPreview reference={reference} identity="typescript" title="源码交付物" renderMarkdown={renderMarkdown} />);
+    expect((await screen.findByLabelText('文件源码')).textContent).toBe(source);
+    expect(screen.queryByRole('button', { name: '预览', exact: true })).toBeNull();
+    expect(screen.getByRole('button', { name: '源码', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('link', { name: '下载文件' })).toHaveAttribute('href', artifactUrl);
+    expect(document.querySelector('.awwo-artifact-preview iframe, .awwo-artifact-preview img, .awwo-artifact-preview script')).toBeNull();
+    expect(renderMarkdown).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '放大预览' }));
+    const dialog = screen.getByRole('dialog', { name: 'tickets.ts' });
+    expect(within(dialog).getByLabelText('文件源码').textContent).toBe(source);
+    expect(within(dialog).getByRole('link', { name: '下载文件' })).toHaveAttribute('href', artifactUrl);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it.each([new Uint8Array([0xff, 0xfe]), new TextEncoder().encode('valid\0binary'), new TextEncoder().encode('valid\u0007binary')])('refuses binary bytes with a source-code extension', async bytes => {
+    const reply = new Response(bytes, { headers: { 'Content-Disposition': 'attachment; filename=payload.ts' } });
+    await expect(readArtifactPreview(reply, new AbortController().signal)).rejects.toThrow();
+  });
+
   it('does not read or claim to preview unsupported binary file formats', async () => {
     configureSaaSCanvas({ tenant, canvasId: 'canvas' });
     const cancel = vi.fn();

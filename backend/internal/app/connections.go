@@ -36,6 +36,27 @@ var connectionProviders = []connectionProvider{
 }
 var providerModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}$`)
 var connectionSelectorPattern = regexp.MustCompile(`^byok_([A-Za-z0-9_-]{33})_([0-9a-f]{16})$`)
+var transcriptionModelPattern = regexp.MustCompile(`(^|[-_./:])(asr|transcribe|transcription)($|[-_./:])`)
+
+// The canvas dispatches text conversations, not transcription or media jobs.
+// Apply this to saved catalogs too, so old connections cannot retain incompatible
+// choices. Audio-capable chat models remain eligible; only dedicated endpoints
+// are excluded. Provider discovery does not prove that every eligible model works.
+func personalTextModel(id string) bool {
+	if !providerModelPattern.MatchString(id) {
+		return false
+	}
+	lower := strings.ToLower(id)
+	if transcriptionModelPattern.MatchString(lower) {
+		return false
+	}
+	for _, family := range []string{"embedding", "whisper", "tts", "dall-e", "image", "realtime"} {
+		if strings.Contains(lower, family) {
+			return false
+		}
+	}
+	return true
+}
 
 func providerByID(id string) (connectionProvider, bool) {
 	for _, p := range connectionProviders {
@@ -139,6 +160,14 @@ func (a *App) openCredential(user, id string, sealed []byte) (string, error) {
 func (a *App) discoverConnectionModels(ctx context.Context, p connectionProvider, key string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	if p.ID == "llmgate" {
+		// Gate's model catalogue is public and returns 200 for an invalid key.
+		// Authenticate against its documented, read-only account endpoint first.
+		// This does not perform inference or expose account balance to the caller.
+		if err := a.verifyGateCredential(ctx, key); err != nil {
+			return nil, err
+		}
+	}
 	req, e := http.NewRequestWithContext(ctx, "GET", p.ModelsURL, nil)
 	if e != nil {
 		return nil, errors.New("provider unavailable")
@@ -179,17 +208,12 @@ func (a *App) discoverConnectionModels(ctx context.Context, p connectionProvider
 	seen := map[string]bool{}
 	models := []string{}
 	add := func(id string) {
-		if providerModelPattern.MatchString(id) && !seen[id] {
+		if personalTextModel(id) && !seen[id] {
 			seen[id] = true
 			models = append(models, id)
 		}
 	}
 	for _, m := range catalog.Data {
-		// The canvas is text-only. Do not advertise image/audio/embedding endpoints.
-		lower := strings.ToLower(m.ID)
-		if strings.Contains(lower, "embedding") || strings.Contains(lower, "whisper") || strings.Contains(lower, "tts") || strings.Contains(lower, "dall-e") || strings.Contains(lower, "image") || strings.Contains(lower, "realtime") {
-			continue
-		}
 		add(m.ID)
 	}
 	for _, m := range catalog.Models {
@@ -209,11 +233,55 @@ func (a *App) discoverConnectionModels(ctx context.Context, p connectionProvider
 	}
 	return models, nil
 }
+
+func (a *App) verifyGateCredential(ctx context.Context, key string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.clawhunt.site/v1/user/balance", nil)
+	if err != nil {
+		return errors.New("provider unavailable")
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Accept", "application/json")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return errors.New("provider unavailable")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errors.New("provider rejected credentials")
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
+	var account struct {
+		Active bool `json:"is_active"`
+	}
+	if err != nil || len(raw) > 65536 || json.Unmarshal(raw, &account) != nil || !account.Active {
+		return errors.New("provider credential is not active")
+	}
+	return nil
+}
+
 func (a *App) listConnections(w http.ResponseWriter, r *http.Request) {
 	items, e := rowsJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',id,'provider',provider,'runtime',runtime,'name',name,'models',models,'createdAt',created_at,'hasKey',true) FROM user_connections WHERE user_id=$1 ORDER BY created_at`, currentUser(r).ID)
 	if e != nil {
 		a.dbError(w, e)
 		return
+	}
+	// Keep the account view consistent with execution discovery without rewriting
+	// saved connections or their history when the compatibility filter changes.
+	for i, raw := range items {
+		var item map[string]json.RawMessage
+		var models []string
+		if json.Unmarshal(raw, &item) != nil || json.Unmarshal(item["models"], &models) != nil {
+			a.dbError(w, errors.New("invalid personal catalog"))
+			return
+		}
+		eligible := make([]string, 0, len(models))
+		for _, model := range models {
+			if personalTextModel(model) {
+				eligible = append(eligible, model)
+			}
+		}
+		item["models"], _ = json.Marshal(eligible)
+		items[i], _ = json.Marshal(item)
 	}
 	writeJSON(w, 200, map[string]any{"items": items, "providers": a.personalProviders(), "required": a.cfg.UserCredentials, "purchaseURL": "https://api.clawhunt.site/"})
 }
@@ -369,6 +437,9 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 			return piHealth{}, errors.New("invalid personal catalog")
 		}
 		for _, model := range models {
+			if !personalTextModel(model) {
+				continue
+			}
 			label := model + " · " + name + " · " + provider + " / " + id[max(0, len(id)-6):]
 			protocol := connectionProtocol(provider, runtime, model)
 			// The capability needs all three: the deployment switch, the worker's own claim and
@@ -467,7 +538,7 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 		}
 	}
 	p, ok := providerByID(provider)
-	if model == "" || !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) {
+	if !personalTextModel(model) || !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) {
 		return nil, errors.New("model unavailable")
 	}
 	key, e := a.openCredential(uid, match[1], sealed)

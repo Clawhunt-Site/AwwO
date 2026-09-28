@@ -61,6 +61,9 @@ const RECOVERY_DETAIL_KEYS = {
   failed: 'session.failed',
   cancelled: 'session.cancelled',
   'Graph cancelled': 'session.cancelled',
+  'Upstream did not complete': 'surface.upstreamIncomplete',
+  'Missing cached upstream output': 'surface.cachedOutputMissing',
+  'Cached upstream output holds no deliverable': 'surface.cachedOutputEmpty',
   timed_out: 'session.timedOut',
 } as const satisfies Record<string, CanvasTextKey>;
 

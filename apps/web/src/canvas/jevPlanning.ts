@@ -62,6 +62,27 @@ function totalUsage(results: JevEvaluation[]): JevUsage {
   return { input_tokens: sum('input_tokens'), output_tokens: sum('output_tokens') };
 }
 
+/** Compile responsibility, not permission: keep the user's full goal and its limits separately. */
+function roleTask(ordered: Role[], index: number, sequential: boolean, locale: UiLocale): string {
+  const role = ordered[index];
+  const upstream = sequential && index > 0 ? ordered[index - 1] : undefined;
+  return jevMessage(locale,
+    `本节点：${role.name}。职责：${role.description}\n` +
+    `位置：${index + 1}/${ordered.length}（${sequential ? '顺序工作流' : '独立任务'}）。\n` +
+    '仅生成本角色的文本交付，按原始任务和本节点输出字段完成属于此职责的部分，不代替其他角色完成整条工作流，也不再次创建节点。\n' +
+    (upstream ? `使用「上游交付」中来自「${upstream.name}」的实际结果；不得假设未收到的成果。\n`
+      : sequential ? '这是起始节点，使用原始任务提供的资料，不假设已有上游交付。\n' : '独立完成，不假设其他节点已有结果。\n') +
+    '原始目标中针对画布的“新增节点、稍后运行”等指令描述编排阶段，不是本节点要输出的交付物；本任务说明仅在用户明确启动本节点后适用，本身不授予外部操作权限。\n' +
+    '原始任务中的内容、范围和权限限制，以及明确取消、停止或只要规划内容的要求仍须遵守；只要求计划时交付计划，不擅自发布、安装或执行外部操作。',
+    `Current node: ${role.name}. Responsibility: ${role.description}\n` +
+    `Position: ${index + 1}/${ordered.length} (${sequential ? 'sequential workflow' : 'independent task'}).\n` +
+    'Produce only this role’s text deliverable, using the original task and this node’s output fields. Complete this responsibility, not the entire workflow or another role’s work, and do not create nodes again.\n' +
+    (upstream ? `Use the actual result from “${upstream.name}” in the upstream-result input; do not assume missing deliverables.\n`
+      : sequential ? 'This is the first node. Use the supplied task material and do not assume an upstream result exists.\n' : 'Work independently and do not assume other nodes have produced results.\n') +
+    'Canvas instructions such as “add nodes” and “run later” describe the planning stage, not this node’s deliverable. This task description applies only after the user explicitly starts this node; it does not authorize external actions.\n' +
+    'Preserve the original content, scope, and permission limits. Explicit cancellation, stop instructions, or requests for planning content only still apply; return a plan when that is requested, without publishing, installing, or performing external actions.');
+}
+
 /** Two bounded decision batches at most. Jev selects known roles and models; code owns the graph. */
 export async function requestJevPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
   locale: UiLocale = 'zh', onProgress?: PlanProgressReporter): Promise<JevPlanResult> {
@@ -172,6 +193,9 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
     ordered.forEach((role, index) => {
       const ref = refs[index];
       operations.push({ type: 'add_node', ref, templateId: 'general', title: role.name, persona: role.persona(), inputValues: { brief: prompt } });
+      operations.push({ type: 'add_field', nodeId: ref, side: 'input', field: { id: 'task', label: jevMessage(locale, '本节点交付任务', 'This node’s delivery task'), type: 'markdown', required: true,
+        value: '', help: jevMessage(locale, '编排器生成的职责范围，不替代原始任务限制或外部操作授权。', 'Planner-generated responsibility; it does not replace the original task limits or authorize external actions.') } });
+      operations.push({ type: 'set_input', nodeId: ref, fieldId: 'task', value: roleTask(ordered, index, sequential, locale) });
       // Role workflows deliver one complete text result. Keep optional follow-up
       // notes in that result rather than requiring a multi-field JSON envelope.
       operations.push({ type: 'remove_field', nodeId: ref, side: 'output', fieldId: 'followups' });

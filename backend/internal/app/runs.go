@@ -1046,6 +1046,16 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 		}
 		e := a.db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM memberships m JOIN auth_sessions s ON s.user_id=m.user_id WHERE m.tenant_id=$1 AND m.user_id=$2 AND s.token_hash=$3 AND s.expires_at>now())", tid, currentUser(r).ID, tokenHash(c.Value)).Scan(&valid)
 		nextAuth = time.Now().Add(a.reauthEvery)
+		if e != nil || !valid {
+			return false
+		}
+		var issuer, subject string
+		var grant []byte
+		e = a.db.QueryRow(r.Context(), "SELECT COALESCE(sso_issuer,''),COALESCE(sso_subject,''),sso_grant FROM auth_sessions WHERE token_hash=$1", tokenHash(c.Value)).Scan(&issuer, &subject, &grant)
+		if e != nil {
+			return false
+		}
+		valid, e = a.validateClawHuntSession(r.Context(), tokenHash(c.Value), currentUser(r).ID, issuer, subject, grant)
 		return e == nil && valid
 	}
 	for {

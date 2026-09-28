@@ -36,6 +36,8 @@ export interface AccountWorkspacePanelProps {
   api?: AccountApi;
   /** SaaS uses its own cookie identity and never exposes an external-account login. */
   workspaceOnly?: boolean;
+  /** When SaaS SSO owns profile changes, show current values without a local save action. */
+  externalProfile?: { url?: string };
 }
 
 type Copy = ReturnType<typeof accountCopy>;
@@ -287,6 +289,7 @@ export function AccountWorkspacePanel({
   onOpenTeam,
   api = accountApi,
   workspaceOnly = false,
+  externalProfile,
 }: AccountWorkspacePanelProps) {
   const text = accountCopy(locale);
   const [bootstrap, setBootstrap] = useState<BootstrapState | null>(null);
@@ -592,15 +595,15 @@ export function AccountWorkspacePanel({
           <div className="account-profile-grid">
             <label>
               <span>{text.displayName}</span>
-              <input aria-label={text.displayName} value={profileName} maxLength={120} onChange={(event) => setProfileName(event.target.value)} />
+              <input aria-label={text.displayName} value={profileName} maxLength={120} readOnly={Boolean(externalProfile)} aria-readonly={Boolean(externalProfile)} onChange={(event) => setProfileName(event.target.value)} />
             </label>
             <label>
               <span>{text.email}</span>
               <input value={bootstrap.profile.email ?? ''} readOnly aria-readonly="true" />
             </label>
-            <button type="button" className="account-primary-button" disabled={profileBusy || !profileName.trim()} onClick={() => void saveProfile()}>
-              {text.saveProfile}
-            </button>
+            {externalProfile ? externalProfile.url ? <a className="account-primary-button" href={externalProfile.url} target="_blank" rel="noopener noreferrer">{locale === 'zh' ? '到 ClawHunt 管理资料' : 'Manage profile on ClawHunt'}<ExternalLink size={14} aria-hidden="true" /></a>
+              : <span className="account-inline-note">{locale === 'zh' ? '资料由 ClawHunt 主站管理。' : 'Your profile is managed on ClawHunt.'}</span>
+              : <button type="button" className="account-primary-button" disabled={profileBusy || !profileName.trim()} onClick={() => void saveProfile()}>{text.saveProfile}</button>}
           </div>
           {profileNotice ? <div className="account-inline-note" role="status">{profileNotice}</div> : null}
         </section>
@@ -700,7 +703,7 @@ export function AccountWorkspacePanel({
 
           {(team.members?.nextCursor !== undefined || memberPages.length > 1) && <AccountListPager locale={locale} label={locale === 'zh' ? '成员分页' : 'Member pages'} page={memberPages.length} busy={team.loading || memberBusyId !== null || inviteBusy} previous={memberPages.length > 1 ? () => changePage('members', memberPages.slice(0, -1)) : undefined} next={team.members?.nextCursor ? () => changePage('members', [...memberPages, team.members!.nextCursor!]) : undefined} refresh={() => { changePage('members', [null]); setTeamVersion(value => value + 1); }}/>}
 
-          {api.addMember && team.members?.access.canManageMembers && <form className="account-member-add" onSubmit={event => {
+          {api.addMember && !externalProfile && team.members?.access.canManageMembers && <form className="account-member-add" onSubmit={event => {
             event.preventDefault(); if (activeCompanyId) void memberAction(() => api.addMember!(activeCompanyId, { email: newMemberEmail, role: inviteRole }));
           }}><p>{locale === 'zh' ? '可直接添加已注册邮箱；新用户可使用下方邀请链接。' : 'Add a registered email directly, or invite a new user with a link below.'}</p><label><span>{text.email}</span><input type="email" aria-label={locale === 'zh' ? '成员邮箱' : 'Member email'} required value={newMemberEmail} onChange={event => setNewMemberEmail(event.target.value)} /></label>
             <label><span>{text.role}</span><select aria-label={locale === 'zh' ? '新成员角色' : 'New member role'} value={inviteRole} onChange={event => setInviteRole(event.target.value as HumanCompanyRole)}>{assignableRoles.map(role => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}</select></label>
@@ -709,6 +712,7 @@ export function AccountWorkspacePanel({
 
           <div className="account-invite-panel">
             <div className="account-invite-heading"><UserPlus size={18} aria-hidden="true" /><strong>{text.invite}</strong></div>
+            {externalProfile && team.canInvite && <p>{locale === 'zh' ? '请创建邀请链接并分享给指定成员，对方使用 ClawHunt 账号确认后加入。' : 'Create an invitation link and share it with the intended member. They join after confirming with their ClawHunt account.'}</p>}
             <label>
               <span>{text.inviteRole}</span>
               <select aria-label={text.inviteRole} value={inviteRole} onChange={(event) => setInviteRole(event.target.value as HumanCompanyRole)} disabled={!team.canInvite || inviteBusy}>

@@ -1,10 +1,10 @@
 # AGENTS.md instructions
 
-## AwwO branch policy — operator decision 2026-09-06
+## AwwO branch policy — operator decision 2026-09-28
 
-For the independent `ClawHunt-Store/AwwO` repository, the operator explicitly requested only `main` and `online` locally and remotely. This supersedes inherited branch-topology requirements below: do not recreate `dev`, `dev/roadmap`, `dev/server-refactor`, `codex/*`, or `feat/*` branches here. `main` is the default source baseline; `online` is the reviewed release reference. A reference named `online` does not prove deployment or production acceptance.
+For AwwO, the operator explicitly requested `main` as the only named branch locally and on both GitHub (`Clawhunt-Site/AwwO`) and Forgejo (`ClawHunt-Store/AwwO`). This supersedes all inherited branch-topology and promotion requirements below, including the earlier two-branch policy. Do not recreate `online`, `staging`, `dev`, `dev/roadmap`, `dev/server-refactor`, `codex/*`, or `feat/*` branches. GitHub `main` is the canonical public product source; retain private operational history only in Forgejo. Tags identify released artifacts; branch names do not prove deployment.
 
-Preserve isolated work directories and uncommitted work. Detached worktrees may retain in-progress changes while only the two named branches exist. Keep exact-SHA review, relevant tests, environment separation and explicit remote/deployment authorization. Do not infer permission to publish unfinished acceptance changes from branch cleanup. See `docs/awwo-repository.md` and the dated cleanup record for actual ref state. These rules do not alter the separate legacy SuperClaw repository.
+Develop and review in isolated detached worktrees, preserve uncommitted work, and integrate verified commits into `main` by an explicitly authorized fast-forward push. Never force-push a shared branch. Keep exact-diff review, relevant tests, environment separation and explicit deployment authorization; a source push is not deployment. Do not publish unfinished work merely to remove a branch. See `docs/awwo-repository.md` for current usage. These rules do not alter the separate legacy SuperClaw repository.
 
 > **⚡ 本分支（`dev/server-refactor`）请直接以下方「本分支工作模式（宪法 §十一）」节为准——它对本分支优先于一切工作流条款，包括紧接其下的这段 Goal Go / `dev/roadmap` 默认 main 流程。** 正常 main 推进流程的完整版备份在 `main-md/`。
 

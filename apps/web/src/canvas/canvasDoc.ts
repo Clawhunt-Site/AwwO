@@ -673,7 +673,10 @@ export function loadDocument(): CanvasDocument {
 
 export function saveDocument(doc: CanvasDocument): boolean {
   try {
-    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
+    const storage = canvasStorage();
+    const serialized = JSON.stringify(doc);
+    // A redundant write also broadcasts a cache-change event to the cloud autosaver.
+    if (storage.getItem(CANVAS_STORAGE_KEY) !== serialized) storage.setItem(CANVAS_STORAGE_KEY, serialized);
     return true;
   } catch {
     return false;

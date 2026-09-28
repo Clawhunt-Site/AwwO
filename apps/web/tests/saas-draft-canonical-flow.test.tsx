@@ -59,6 +59,103 @@ it('hydrates an equal legacy cache and ignores cache-write events that only reor
   expect(puts).toBe(0);
 });
 
+it('does not re-submit a document echoed by the canvas while its first save is in flight', async () => {
+  const original = documentWithThreads(); const changed = { ...original, updatedAt: original.updatedAt + 1 };
+  let cloud = record(original); let puts = 0;
+  let acknowledgeFirst!: (value: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/auth/me')) return response(identity);
+    if (url.endsWith('/runtime')) return response({ available: false, models: [] });
+    if (url.endsWith('/graph-runs')) return response({ items: [] });
+    if (init.method === 'PUT') {
+      const body = JSON.parse(init.body as string);
+      puts++;
+      cloud = record(body.document, body.version + 1);
+      if (puts === 1) return new Promise<Response>(resolve => { acknowledgeFirst = resolve; });
+    }
+    return response(cloud);
+  }));
+  render(<SaaSApp />); const flush = await writerReady();
+  act(() => { saveDocument(reordered(changed)); });
+  const firstSave = flush();
+  await waitFor(() => expect(puts).toBe(1));
+  act(() => { saveDocument(changed); });
+  await act(async () => { acknowledgeFirst(response(cloud)); await firstSave; });
+  expect(puts).toBe(1);
+  expect(readCanvasDrafts(canvasStorage())).toHaveLength(0);
+});
+
+it('keeps the echoed draft and releases the save queue if local acknowledgement fails', async () => {
+  const original = documentWithThreads(); const changed = { ...original, updatedAt: original.updatedAt + 1 };
+  let cloud = record(original); let puts = 0;
+  let acknowledgeFirst!: (value: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/auth/me')) return response(identity);
+    if (url.endsWith('/runtime')) return response({ available: false, models: [] });
+    if (url.endsWith('/graph-runs')) return response({ items: [] });
+    if (init.method === 'PUT') {
+      const body = JSON.parse(init.body as string);
+      puts++; cloud = record(body.document, body.version + 1);
+      if (puts === 1) return new Promise<Response>(resolve => { acknowledgeFirst = resolve; });
+    }
+    return response(cloud);
+  }));
+  render(<SaaSApp />); const flush = await writerReady();
+  act(() => { saveDocument(reordered(changed)); });
+  const firstSave = flush();
+  await waitFor(() => expect(puts).toBe(1));
+  act(() => { saveDocument(changed); });
+  const remove = localStorage.removeItem.bind(localStorage);
+  vi.spyOn(localStorage, 'removeItem').mockImplementation((key: string) => {
+    if (key.includes('awwo.cloud.draft.v1:')) throw new Error('simulated local acknowledgement failure');
+    return remove(key);
+  });
+  expect(() => localStorage.removeItem('awwo.cloud.draft.v1:probe')).toThrow('simulated local acknowledgement failure');
+  await act(async () => {
+    acknowledgeFirst(response(cloud));
+    await expect(firstSave).rejects.toThrow('画布未同步');
+  });
+  expect(await screen.findByRole('alert')).toHaveTextContent('本机草稿保存失败');
+  expect(readCanvasDrafts(canvasStorage())).toHaveLength(1);
+  expect(puts).toBe(1);
+  const secondSave = await Promise.race([
+    flush().then(() => 'unexpected success', () => 'blocked'),
+    new Promise<string>(resolve => setTimeout(() => resolve('queue stuck'), 150)),
+  ]);
+  expect(secondSave).toBe('blocked');
+});
+
+it('keeps a distinct edit made during the first save and sends it with the acknowledged version', async () => {
+  const original = documentWithThreads();
+  const first = { ...original, updatedAt: original.updatedAt + 1 };
+  const second = { ...first, nodes: first.nodes.map(node => ({ ...node, title: 'Real second edit' })) };
+  let cloud = record(original); const writes: Array<{ document: CanvasDocument; version: number }> = [];
+  let acknowledgeFirst!: (value: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/auth/me')) return response(identity);
+    if (url.endsWith('/runtime')) return response({ available: false, models: [] });
+    if (url.endsWith('/graph-runs')) return response({ items: [] });
+    if (init.method === 'PUT') {
+      const body = JSON.parse(init.body as string) as { document: CanvasDocument; version: number };
+      writes.push(body); cloud = record(body.document, body.version + 1);
+      if (writes.length === 1) return new Promise<Response>(resolve => { acknowledgeFirst = resolve; });
+    }
+    return response(cloud);
+  }));
+  render(<SaaSApp />); const flush = await writerReady();
+  act(() => { saveDocument(first); });
+  const firstSave = flush();
+  await waitFor(() => expect(writes).toHaveLength(1));
+  act(() => { saveDocument(second); });
+  await act(async () => { acknowledgeFirst(response(record(first, 8))); await firstSave; });
+  expect(writes.map(write => write.version)).toEqual([7, 8]);
+  expect(writes[1].document.nodes[0].title).toBe('Real second edit');
+  expect(readCanvasDrafts(canvasStorage())).toHaveLength(0);
+});
+
 it('restores a same-version draft once and stays synced after a reordered server acknowledgement and refresh', async () => {
   const local = documentWithThreads(); let cloud = record(reordered(local)); let puts = 0;
   persistCanvasDraft(canvasStorage(), 'old-phantom', 7, local);

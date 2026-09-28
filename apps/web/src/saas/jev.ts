@@ -18,10 +18,11 @@ export function jevFailure(error: unknown, locale: UiLocale): Error {
   if (error instanceof DOMException && error.name === 'AbortError') return error;
   const code = error instanceof SaaSApiError ? error.code : '';
   const messages: Record<string, [string, string]> = {
-    typesafe_personal_required: ['个人凭证模式请使用已连接的执行引擎规划。Jev 暂不支持个人凭证。', 'Use your connected engine for planning. Jev does not yet support personal credentials.'],
+    typesafe_personal_required: ['此工作区尚未启用 Jev；可使用你已连接的执行引擎规划。', 'Jev is not enabled for this workspace. You can plan with an execution engine you have connected.'],
     typesafe_disabled: ['此工作区尚未启用 Jev 编排。', 'Jev planning is not enabled for this workspace.'],
     typesafe_unconfigured: ['服务端尚未配置 Jev。', 'Jev is not configured on the server.'],
     typesafe_rate_limited: ['Jev 编排请求已达频率或并发上限，请稍后重试。', 'Jev planning reached its request or concurrency limit. Try again later.'],
+    typesafe_daily_limit: ['此工作区今日 Jev 编排额度已用完，请等待额度恢复或联系管理员。', 'This workspace has used its Jev planning allowance for today. Wait for the allowance to reset or contact an administrator.'],
     typesafe_timeout: ['Jev 判断超时，本次未修改画布；服务方可能已收到请求。', 'Jev timed out. The canvas was not changed; the provider may have received the request.'],
     typesafe_access_revoked: ['Jev 编排权限已撤销，本次未修改画布。', 'Jev planning permission was revoked. The canvas was not changed.'],
     typesafe_provider_rate_limited: ['Jev 服务暂时限流，请稍后重试。', 'The Jev service is temporarily rate limited.'],

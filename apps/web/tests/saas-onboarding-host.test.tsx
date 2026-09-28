@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SaaSOnboarding, GuideLauncher, onboardingScene, onboardingStorageKey } from '../src/saas/SaaSOnboarding';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
-import { safeMainSiteURL } from '../src/saas/mainSite';
+import { mainSiteEnvironment, safeMainSiteURL } from '../src/saas/mainSite';
 import type { Identity } from '../src/saas/api';
 import type { FirstRunTourProps } from '../src/saas/FirstRunTour';
 
@@ -17,7 +17,7 @@ const identity = (): Identity => ({ user: { id: `guide-user-${++sequence}`, name
   tenants: [{ id: 'team', name: 'Team', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 20 }] });
 const content = (user: Identity, ready = true) => <SaaSPreferencesProvider><SaaSOnboarding identity={user}><GuideLauncher />{ready && <div data-onboarding="canvas-list" />}</SaaSOnboarding></SaaSPreferencesProvider>;
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'en'); history.replaceState(null, '', '/?tenant=team'); });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); history.replaceState(null, '', '/'); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); history.replaceState(null, '', '/'); });
 
 it('waits for the real page, dismisses once per account and can always replay', async () => {
   const user = identity(); const view = render(content(user, false));
@@ -83,7 +83,29 @@ it('excludes auth/security/admin/unknown and suspended workspaces', () => {
   user.personalCredentialsRequired = false; expect(onboardingScene(user, '?account=engines', '/')).toBeNull();
 });
 
-it('accepts only configured HTTPS navigation without secrets or open redirects', () => {
+it('accepts HTTPS navigation without secrets or open redirects in every environment', () => {
   expect(safeMainSiteURL('https://main.example.test/awwo')).toBe('https://main.example.test/awwo');
-  for (const value of ['', undefined, 'javascript:alert(1)', '//main.example.test', 'http://main.example.test', 'https://key@main.example.test', 'https://main.example.test/?token=secret', 'https://main.example.test/#token']) expect(safeMainSiteURL(value)).toBeUndefined();
+  expect(safeMainSiteURL('https://main.example.test/awwo', 'development')).toBe('https://main.example.test/awwo');
+  for (const value of ['', undefined, 'javascript:alert(1)', '//main.example.test', 'http://main.example.test', 'https://key@main.example.test', 'https://@main.example.test', 'https://main.example.test/?token=secret', 'https://main.example.test/#token', 'https://main.example.test/?', 'https://main.example.test/#']) expect(safeMainSiteURL(value)).toBeUndefined();
+});
+
+it('permits only literal loopback HTTP sites in explicit development', () => {
+  for (const value of ['http://127.0.0.1:8795', 'http://localhost:8795/awwo', 'http://[::1]:8795']) {
+    expect(safeMainSiteURL(value, 'development')).toBe(new URL(value).href);
+    expect(safeMainSiteURL(value)).toBeUndefined();
+    expect(safeMainSiteURL(value, 'production')).toBeUndefined();
+  }
+  for (const value of [
+    'http://main.example.test', 'http://127.1:8795', 'http://2130706433:8795',
+    'http://0x7f000001:8795', 'http://127.0.0.1.evil.test:8795', 'http://localhost.evil.test:8795',
+    'http://localhost.:8795', 'http://user@localhost:8795', 'http://@localhost:8795',
+    'http://localhost:8795/?token=secret', 'http://localhost:8795/#token',
+    'http://localhost:8795/?', 'http://localhost:8795/#',
+  ]) expect(safeMainSiteURL(value, 'development')).toBeUndefined();
+});
+
+it('does not enable local HTTP in a production build even with development mode', () => {
+  expect(mainSiteEnvironment({ DEV: true, MODE: 'development' })).toBe('development');
+  expect(mainSiteEnvironment({ DEV: false, MODE: 'development' })).toBe('production');
+  expect(mainSiteEnvironment({ DEV: true, MODE: 'test' })).toBe('production');
 });

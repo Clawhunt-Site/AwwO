@@ -10,6 +10,7 @@ export { AgentGlyph } from './AgentTemplateDetails';
 import './awwo-workspace.css';
 import { TeamMarketAgentPicker } from './TeamMarketAgentPicker';
 import type { TeamMarketAgent } from './teamMarketAgents';
+import type { ModelPaletteSelection } from './modelPalette';
 import { WorkspaceAgentPicker } from './WorkspaceAgentPicker';
 import type { WorkspaceAgent, WorkspaceAgentLoader } from './workspaceAgents';
 
@@ -26,6 +27,7 @@ export interface AgentWorkspaceProps {
   onFocusNode: (id: string) => void;
   onAddAgent: (id: AgentTemplateId) => void;
   loadWorkspaceAgents?: WorkspaceAgentLoader;
+  modelCatalogue?: readonly ModelPaletteSelection[];
   agentLibraryRequest?: number;
   onAddWorkspaceAgent?: (agent: WorkspaceAgent) => void;
   onAddMarketAgent?: (agent: TeamMarketAgent) => void;
@@ -50,7 +52,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -216,7 +218,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
         {!visible.length && <p className="awwo-list-empty">{query ? t('workspace.noAgentMatch') : t('workspace.firstAgent')}</p>}
       </div>
       </>}
-      {modelShelf && botSource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent && <WorkspaceAgentPicker onStartNew={startNewBot} compact loadPage={loadWorkspaceAgents} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setBotSource('canvas'); setSidebarOpen(false); }} />}
+      {modelShelf && botSource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent && <WorkspaceAgentPicker onStartNew={startNewBot} compact loadPage={loadWorkspaceAgents} catalogue={modelCatalogue} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setBotSource('canvas'); setSidebarOpen(false); }} />}
       {modelShelf && botSource === 'market' && onAddMarketAgent && <TeamMarketAgentPicker compact disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddMarketAgent(agent); setBotSource('canvas'); setSidebarOpen(false); }} />}
       {personaControls && <details className="awwo-bot-personas"><summary>{locale === 'zh' ? '人设预设' : 'Persona presets'}</summary>{personaControls}</details>}
       </div>
@@ -274,7 +276,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
           {onAddMarketAgent && <button type="button" aria-pressed={librarySource === 'market'} onClick={() => setLibrarySource('market')}>{locale === 'zh' ? '团队市场角色' : 'Team market roles'}</button>}
           {!modelShelf && <button type="button" aria-pressed={librarySource === 'templates'} onClick={() => setLibrarySource('templates')}>{locale === 'zh' ? '角色模板' : 'Role templates'}</button>}
         </div>}
-        {librarySource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent ? <WorkspaceAgentPicker onStartNew={startNewBot} loadPage={loadWorkspaceAgents} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setLibraryOpen(false); setSidebarOpen(false); }} /> : librarySource === 'market' && onAddMarketAgent ? <TeamMarketAgentPicker disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddMarketAgent(agent); setLibraryOpen(false); setSidebarOpen(false); }} /> : <>
+        {librarySource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent ? <WorkspaceAgentPicker onStartNew={startNewBot} loadPage={loadWorkspaceAgents} catalogue={modelCatalogue} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setLibraryOpen(false); setSidebarOpen(false); }} /> : librarySource === 'market' && onAddMarketAgent ? <TeamMarketAgentPicker disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddMarketAgent(agent); setLibraryOpen(false); setSidebarOpen(false); }} /> : <>
         <p>{t('workspace.libraryBody')}</p>
         <div className="awwo-template-browser">
           <nav className="awwo-template-list" aria-label={t('workspace.templateList')}>{templates.map(item => <button key={item.id} type="button" aria-label={t('workspace.previewTemplate', { title: item.title })} aria-pressed={selectedTemplate === item.id} data-template={item.id} onClick={() => setSelectedTemplate(item.id)}>

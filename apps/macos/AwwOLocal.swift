@@ -184,6 +184,10 @@ private enum NavigationPolicy {
         return url
     }()
     static let accessHost = "lively-grass-61f6.cloudflareaccess.com"
+    static let mainSiteHost = "clawhunt.store"
+    private static let mainSiteAuthPaths: Set<String> = [
+        "/api/awwo/sso/authorize", "/api/awwo/sso/logout", "/login", "/register", "/account"
+    ]
 
     static func port(_ url: URL) -> Int? {
         url.port ?? (url.scheme?.lowercased() == "https" ? 443 : url.scheme?.lowercased() == "http" ? 80 : nil)
@@ -204,6 +208,18 @@ private enum NavigationPolicy {
         let path = url.path
         return (path == "/cdn-cgi/access" || path.hasPrefix("/cdn-cgi/access/"))
             && !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == "." || $0 == ".." })
+    }
+    static func isClawHuntSSOURL(_ url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https", url.host?.lowercased() == mainSiteHost,
+            port(url) == 443, url.user == nil, url.password == nil,
+            let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath else { return false }
+        // These are the only main-site documents needed for account handoff.
+        // Compare the encoded path so dot segments or encoded slashes cannot
+        // normalize into an allowlisted route.
+        return mainSiteAuthPaths.contains(path)
+    }
+    static func isCloudNavigationURL(_ url: URL?) -> Bool {
+        sameOrigin(url, cloudURL, allowBlob: true) || isAuthenticationURL(url) || isClawHuntSSOURL(url)
     }
     static func frameMatches(protocol scheme: String, host: String, port framePort: Int, origin: URL?) -> Bool {
         guard let origin, !host.isEmpty, ["http", "https"].contains(scheme.lowercased()) else { return false }
@@ -726,7 +742,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func isAllowedNavigation(_ url: URL?) -> Bool {
-        isApplicationURL(url) || (mode == .cloud && NavigationPolicy.isAuthenticationURL(url))
+        mode == .cloud ? NavigationPolicy.isCloudNavigationURL(url) : isApplicationURL(url)
     }
 
     private func isEmbeddedPreview(_ url: URL?) -> Bool {
@@ -789,7 +805,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard webView === self.webView, !switching, !terminating,
-            (isApplicationFrame(navigationAction.sourceFrame) || (mode == .cloud && NavigationPolicy.isAuthenticationURL(navigationAction.sourceFrame.request.url))),
+            (isApplicationFrame(navigationAction.sourceFrame) || (mode == .cloud &&
+                (NavigationPolicy.isAuthenticationURL(navigationAction.sourceFrame.request.url) || NavigationPolicy.isClawHuntSSOURL(navigationAction.sourceFrame.request.url)))),
             let url = navigationAction.request.url else { return nil }
         if isAllowedNavigation(url) {
             pageLoad.prepareForNavigation()
@@ -835,7 +852,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         statusView.isHidden = true
         webView.isHidden = false
         if mode == .cloud {
-            window.title = NavigationPolicy.isAuthenticationURL(webView.url) ? "AwwO · 登录" : "AwwO"
+            window.title = (NavigationPolicy.isAuthenticationURL(webView.url) || NavigationPolicy.isClawHuntSSOURL(webView.url)) ? "AwwO · 登录" : "AwwO"
         }
     }
 
@@ -1282,6 +1299,30 @@ private func testNavigationPolicy() throws {
         ("http://\(NavigationPolicy.accessHost)/cdn-cgi/access/login", false),
         (access + ":444/cdn-cgi/access/login", false)
     ] { try check(NavigationPolicy.isAuthenticationURL(URL(string: value)), accepted, value) }
+    for (value, accepted) in [
+        ("https://clawhunt.store/api/awwo/sso/authorize?client_id=test&state=test", true),
+        ("https://clawhunt.store/api/awwo/sso/logout?ticket=test", true),
+        ("https://clawhunt.store/login?redirect=%2Fapi%2Fawwo%2Fsso%2Fauthorize", true),
+        ("https://clawhunt.store/register", true),
+        ("https://clawhunt.store/account#profile", true),
+        ("https://clawhunt.store/awwo", false),
+        ("https://clawhunt.store/api/awwo/sso/token", false),
+        ("https://clawhunt.store/api/awwo/sso/logout-evil?ticket=test", false),
+        ("https://clawhunt.store/api/awwo/sso/%2e%2e/logout", false),
+        ("https://clawhunt.store/%61ccount", false),
+        ("https://clawhunt.store//account", false),
+        ("https://clawhunt.store.evil.example/login", false),
+        ("https://clawhunt.store@evil.example/login", false),
+        ("https://user@clawhunt.store/login", false),
+        ("http://clawhunt.store/login", false),
+        ("https://clawhunt.store:444/login", false),
+        ("https://www.clawhunt.store/login", false),
+        ("blob:https://clawhunt.store/login", false),
+        ("file:///login", false)
+    ] {
+        try check(NavigationPolicy.isClawHuntSSOURL(URL(string: value)), accepted, value)
+        try check(NavigationPolicy.isCloudNavigationURL(URL(string: value)), accepted, "cloud \(value)")
+    }
     for (value, accepted) in [
         ("about:srcdoc", true), ("about:blank", true), ("about:srcdoc#section", true),
         ("about:blank?origin=local", false), ("about://example/blank", false), ("https://example.org/", false)

@@ -3,6 +3,12 @@
 body { margin: 0; }
 .saas-login,.saas-notice,.saas-dashboard,.saas-canvas-shell { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--saas-text); background: var(--saas-bg); }
 .saas-login { min-height:100dvh; display:grid; grid-template-columns:1fr minmax(330px,440px); align-items:center; gap:10%; padding:8%; box-sizing:border-box; }
+.saas-auth-choices { min-width:0; display:grid; gap:16px; }
+.saas-sso-choice { border-color:var(--saas-accent); }
+.saas-sso-action { display:inline-flex; min-height:44px; box-sizing:border-box; align-items:center; justify-content:center; padding:11px 18px; border-radius:8px; background:var(--saas-accent); color:var(--saas-accent-text); font-size:14px; font-weight:700; text-align:center; text-decoration:none; }
+.saas-sso-action:hover { filter:brightness(1.08); }
+.saas-sso-action:focus-visible { outline:2px solid var(--saas-accent); outline-offset:3px; }
+.saas-sso-layout .saas-card strong { overflow-wrap:anywhere; }
 .saas-login-brand>span,.saas-logo { font-size:28px; font-weight:760; letter-spacing:-1px; text-decoration:none; color:inherit; }
 .saas-login h1 { max-width:600px; font-size:clamp(30px,4vw,52px); letter-spacing:-1.5px; line-height:1.25; }
 .saas-login p,.saas-page-intro p { color:var(--saas-muted); line-height:1.8; }
@@ -28,7 +34,9 @@ button.saas-link { border:0; background:transparent; color:var(--saas-accent); }
 .saas-canvas-card>span { display:block; font-size:27px; color:var(--saas-muted); }
 .saas-canvas-card h2 { font-size:18px; margin:20px 0 10px; }
 .saas-canvas-card p { color:var(--saas-muted); font-size:12px; }
-.saas-account-actions { display:flex; gap:10px; align-items:center; font-size:12px; }
+.saas-account-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; font-size:12px; }
+.saas-account-actions>button,.saas-account-actions>a,.saas-account-actions>select,.saas-account-actions>.saas-preferences { flex-shrink:0; white-space:nowrap; }
+.saas-account-actions>.saas-preferences>button,.saas-create-workspace-trigger>span { white-space:nowrap; }
 .saas-account-actions select { max-width:170px; padding:6px; border:1px solid var(--saas-border); background:var(--saas-card); color:var(--saas-accent); border-radius:6px; }
 .saas-account-actions>button,.saas-account-actions>a,.saas-account-actions>.saas-preferences>button { border:0; padding:5px; border-radius:6px; color:var(--saas-muted); background:transparent; display:inline-flex; cursor:pointer; }
 .saas-canvas-shell { height:100dvh; display:flex; flex-direction:column; }
@@ -90,6 +98,8 @@ button.saas-link { border:0; background:transparent; color:var(--saas-accent); }
 .saas-dashboard>.saas-canvas-page-header { height:auto; min-height:84px; flex-wrap:wrap; padding-block:12px; box-sizing:border-box; }
 .saas-canvas-page-navigation { display:flex; align-items:center; flex-wrap:wrap; gap:16px; }
 .saas-canvas-page-header>.saas-account-actions { flex-wrap:wrap; min-width:0; max-width:100%; }
+.saas-canvas-shell .awwo-header { flex-wrap:wrap; }
+.saas-canvas-shell .awwo-header-actions,.saas-canvas-shell .awwo-account-controls { min-width:0; max-width:100%; }
 .saas-invite-acceptance { max-width:560px; }
 .saas-primary-link { background:var(--saas-accent); color:var(--saas-accent-text); padding:12px 16px; border-radius:8px; text-align:center; text-decoration:none; }
 .account-member-add { display:flex; align-items:end; gap:12px; flex-wrap:wrap; padding:16px 0; }

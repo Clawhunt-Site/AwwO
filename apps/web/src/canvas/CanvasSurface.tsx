@@ -1565,7 +1565,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // The viewport is not an edit: panning is navigation, and letting it clear the redo stack
     // would silently destroy a redo the user was about to reach for.
     const t = setTimeout(
-      () => patchDoc((prev) => (prev.view === view ? prev : { ...prev, view }), { silent: true }),
+      () => patchDoc((prev) => (prev.view === view || (prev.view?.x === view.x && prev.view?.y === view.y && prev.view?.scale === view.scale)
+        ? prev : { ...prev, view }), { silent: true }),
       400,
     );
     return () => clearTimeout(t);
@@ -1771,6 +1772,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       {nodes.length > 0 && <button type="button" disabled={planningBusy} onClick={() => setAssistantOpen(true)}>{locale === 'zh' ? '开始编排' : 'Start planning'}</button>}
     </div>} /> : undefined;
 
+  const currentModelCatalogue = cloudScope && palette?.tenantId === cloudScope.tenant.id && palette.canvasId === cloudScope.canvasId
+    ? palette.models : undefined;
+
   const renderInspector = (node: CanvasNode, inline = false) => (
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
       readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || running} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
@@ -1790,6 +1794,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   return (
     <AgentWorkspace readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
       modelShelf={modelShelf}
+      modelCatalogue={currentModelCatalogue}
       personaControls={modelShelf ? <ModelPersonaControls personaId={palettePersona} onPersonaChange={setPalettePersona}
         disabled={!canEdit || planningBusy || initializing || bindingLocked} /> : undefined}
       onModelDrop={onModelDrop} onModelDragOver={event => {
@@ -1928,6 +1933,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <RunTimeline
           nodes={nodes}
           runs={runs}
+          modelCatalogue={currentModelCatalogue}
           runStartedAt={runStartedAt}
           now={now}
           onClose={() => setTimelineOpen(false)}

@@ -1,5 +1,5 @@
 import { readInitialLocale, type UiLocale } from '../locale';
-import { SaaSApiError, saasErrorMessage } from './api';
+import { SaaSApiError, runtimeUnavailableMessages, saasErrorMessage } from './api';
 
 export function canvasLocale(): UiLocale {
   const language = document.documentElement.lang;
@@ -9,7 +9,7 @@ export function canvasLocale(): UiLocale {
 export const canvasText = (zh: string, en: string): string => canvasLocale() === 'zh' ? zh : en;
 
 const runErrors: Record<string, [string, string]> = {
-  runtime_unavailable: ['Pi 执行服务暂不可用，请稍后重试。', 'The Pi execution service is unavailable. Please try again later.'],
+  runtime_unavailable: runtimeUnavailableMessages,
   runtime_session_busy: ['执行服务中的会话仍在运行，请稍后重试。', 'The runtime session is still busy. Please try again later.'],
   runtime_rejected: ['执行服务未接受此请求，请检查运行配置。', 'The runtime did not accept this request. Check the runtime configuration.'],
   // Retrying is safe rather than guaranteed: nothing was applied, and the cause is malformed

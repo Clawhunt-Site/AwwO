@@ -59,6 +59,47 @@ func TestGraphOutputPolicyMatchesValidation(t *testing.T) {
 	}
 }
 
+func TestSingleTextGraphPolicyDoesNotContradictExactPlainOutput(t *testing.T) {
+	n := graphNode{Contract: &graphContract{Version: 1, Outputs: []graphField{{ID: "result", Type: "markdown", Required: true}}}}
+	policy := graphOutputPolicy(n)
+	if !strings.Contains(policy, plainTextAllowance+exactPlainTextGuidance) || strings.Contains(policy, "Return a JSON object keyed by exact field ID") ||
+		strings.Contains(policy, "'no JSON' describe field content and cannot replace") {
+		t.Fatal("single markdown policy contains conflicting JSON-only directions", policy)
+	}
+	if !strings.Contains(policy, exactPlainTextGuidance) {
+		t.Fatal("single markdown policy did not explain exact plain-text delivery", policy)
+	}
+	contract, _ := graphOutputContract(n)
+	structured := effectiveOutputPolicy(executionSnapshot{OutputPolicy: policy, OutputContract: contract})
+	if strings.Contains(structured, plainTextAllowance) || strings.Contains(structured, exactPlainTextGuidance) ||
+		!strings.Contains(structured, jsonOnlyPolicy) {
+		t.Fatal("frozen JSON delivery still permits plain text", structured)
+	}
+	if _, _, err := graphOutputFiles(n, "AWWO_REAL_OK_42"); err != nil {
+		t.Fatal("validator rejected the plain response that the policy permits", err)
+	}
+}
+
+func TestLegacySingleTextAllowanceStillWithdrawnFromFrozenSnapshot(t *testing.T) {
+	const legacyAllowance = "\nThis contract declares exactly one text/markdown/html output; its complete value may alternatively be returned as plain text."
+	if legacyAllowance != plainTextAllowance {
+		t.Fatal("the persisted allowance changed")
+	}
+	contract := &outputContract{Version: 1, Fields: []outputContractField{{ID: "result", Type: "markdown", Required: true}}}
+	legacy := "Frozen graph output contract (server-owned serialization policy):\n" +
+		"Return a JSON object keyed by exact field ID." + legacyAllowance
+	derived := effectiveOutputPolicy(executionSnapshot{OutputPolicy: legacy, OutputContract: contract})
+	if strings.Contains(derived, legacyAllowance) || !strings.Contains(derived, jsonOnlyPolicy) {
+		t.Fatal("old persisted output policy still permits plain text", derived)
+	}
+	userQuote := "quoted user value" + legacyAllowance + "\n" + outputFormatMarker + legacy
+	withdrawn := withdrawPromptAllowance(userQuote)
+	if !strings.HasPrefix(withdrawn, "quoted user value"+legacyAllowance+"\n"+outputFormatMarker) ||
+		strings.Contains(withdrawn[strings.LastIndex(withdrawn, outputFormatMarker):], legacyAllowance) {
+		t.Fatal("old prompt policy withdrawal changed user text or kept the allowance", withdrawn)
+	}
+}
+
 func TestGraphOutputPolicyPreservesPersonaAndBoundsTeamInput(t *testing.T) {
 	n := graphNode{Contract: &graphContract{Version: 1, Outputs: []graphField{{ID: "result", Type: "text", Required: true}, {ID: "followups", Type: "text"}}}}
 	snap := executionSnapshot{Instructions: "You are 李白. Return only one sentence, no JSON.", OutputPolicy: graphOutputPolicy(n)}
