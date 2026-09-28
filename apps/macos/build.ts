@@ -11,8 +11,9 @@ const source = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(source, '../..');
 const local = path.join(root, '.local/macos-production');
 const configuration = readProductionConfiguration(process.env);
-const version = '0.6.0';
-const build = '5';
+const version = '0.8.1';
+const build = '6';
+const brand = path.join(root, 'assets/brand/awwo-fold');
 
 async function run(command: string, args: string[]): Promise<string> {
   const result = await exec(command, args, { cwd: root, timeout: 120_000, maxBuffer: 2_000_000 });
@@ -35,6 +36,9 @@ async function main(): Promise<void> {
   const executable = path.join(contents, 'MacOS/AwwOLocal');
   await mkdir(path.dirname(executable), { recursive: true });
   await mkdir(resources);
+  // Use the approved raster directly: the native shell never redraws or
+  // approximates the canonical Fold paths, transform or blue palette.
+  await copyFile(path.join(brand, 'png/mark-blue-1024.png'), path.join(resources, 'AwwOFoldMark.png'));
   await copyFile(path.join(source, 'Info.plist'), path.join(contents, 'Info.plist'));
   const plist = path.join(contents, 'Info.plist');
   await run('/usr/bin/plutil', ['-replace', 'AwwOCloudURL', '-string', configuration.cloudURL, plist]);
@@ -53,15 +57,18 @@ async function main(): Promise<void> {
       await run('/usr/bin/sips', ['-z', String(size * scale), String(size * scale), icon, '--out', path.join(iconset, `icon_${size}x${size}${scale === 2 ? '@2x' : ''}.png`)]);
     }
   }
-  await run('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', path.join(resources, 'AwwOBlue.icns')]);
+  await run('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', path.join(resources, 'AwwOFold.icns')]);
   await copyFile(path.join(root, 'LICENSE'), path.join(resources, 'LICENSE'));
   await writeFile(path.join(resources, 'metadata.json'), JSON.stringify({
     version, build, revision, builtAt: new Date().toISOString(), environment: configuration.environment,
     defaultMode: 'cloud', cloudURL: configuration.cloudURL, architecture: 'arm64', minimumMacOS: '14.0',
     nativeSourceSHA256: nativeSHA, signing: 'ad-hoc-local-only', modelCredentialsIncluded: false,
     localRuntimeIncluded: false, hostedReleaseManagedSeparately: true,
-    modifiedFiles: (await run('/usr/bin/git', ['status', '--porcelain', '--', 'apps/macos'])).split('\n').filter(Boolean),
-    iconSHA256: await hash(path.join(resources, 'AwwOBlue.icns')),
+    modifiedFiles: (await run('/usr/bin/git', ['status', '--porcelain', '--', 'apps/macos', 'assets/brand/awwo-fold', 'LICENSE'])).split('\n').filter(Boolean),
+    iconBrand: 'Fold',
+    canonicalMarkSHA256: await hash(path.join(brand, 'png/mark-blue-1024.png')),
+    canonicalVectorSHA256: await hash(path.join(brand, 'vector-source.json')),
+    iconSHA256: await hash(path.join(resources, 'AwwOFold.icns')),
   }, null, 2) + '\n');
   await run('/usr/bin/codesign', ['--force', '--sign', '-', executable]);
   await run('/usr/bin/codesign', ['--force', '--sign', '-', app]);
