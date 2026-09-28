@@ -498,7 +498,7 @@ button.saas-primary:hover:not(:disabled), .saas-primary-link:hover { background:
   .saas-login *, .saas-dashboard *, .saas-canvas-shell * { scroll-behavior: auto; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
-/* The same rounded W mark is used by the hosted app and the native Mac icon. */
+/* The same canonical Fold mark is used by the hosted app and the native Mac icon. */
 .saas-logo::before,
 .saas-login-brand > span::before {
   content: '';

@@ -18,8 +18,9 @@ const plist = JSON.parse(plistOutput.stdout) as Record<string, unknown>;
 const metadata = JSON.parse(await readFile(path.join(resources, 'metadata.json'), 'utf8')) as Record<string, unknown>;
 assert.equal(plist.CFBundleIdentifier, 'store.clawhunt.awwo.local');
 assert.equal(plist.CFBundleDisplayName, 'AwwO');
-assert.equal(plist.CFBundleShortVersionString, '0.6.0');
-assert.equal(plist.CFBundleVersion, '5');
+assert.equal(plist.CFBundleShortVersionString, '0.8.1');
+assert.equal(plist.CFBundleVersion, '6');
+assert.equal(plist.CFBundleIconFile, 'AwwOFold');
 assert.equal(plist.AwwOEnvironment, expected.environment);
 assert.equal(plist.AwwOCloudURL, expected.cloudURL);
 assert.equal(metadata.version, plist.CFBundleShortVersionString);
@@ -29,9 +30,20 @@ assert.equal(metadata.cloudURL, expected.cloudURL);
 assert.equal(metadata.defaultMode, 'cloud');
 assert.equal(metadata.modelCredentialsIncluded, false);
 assert.equal(metadata.localRuntimeIncluded, false);
-assert.deepEqual((await readdir(resources)).sort(), ['AwwOBlue.icns', 'LICENSE', 'metadata.json']);
-const source = path.join(path.dirname(fileURLToPath(import.meta.url)), 'AwwOLocal.swift');
-assert.equal(metadata.nativeSourceSHA256, createHash('sha256').update(await readFile(source)).digest('hex'));
+assert.deepEqual((await readdir(resources)).sort(), ['AwwOFold.icns', 'AwwOFoldMark.png', 'LICENSE', 'metadata.json']);
+const source = path.dirname(fileURLToPath(import.meta.url));
+const brand = path.resolve(source, '../../assets/brand/awwo-fold');
+async function hash(file: string): Promise<string> {
+  return createHash('sha256').update(await readFile(file)).digest('hex');
+}
+assert.equal(metadata.nativeSourceSHA256, await hash(path.join(source, 'AwwOLocal.swift')));
+assert.equal(metadata.iconBrand, 'Fold');
+assert.equal(metadata.canonicalVectorSHA256, await hash(path.join(brand, 'vector-source.json')));
+assert.equal(metadata.canonicalMarkSHA256, await hash(path.join(brand, 'png/mark-blue-1024.png')));
+assert.equal(metadata.canonicalMarkSHA256, await hash(path.join(resources, 'AwwOFoldMark.png')));
+assert.equal(metadata.iconSHA256, await hash(path.join(resources, 'AwwOFold.icns')));
+assert.equal(await hash(path.join(resources, 'LICENSE')), await hash(path.resolve(source, '../../LICENSE')));
 await exec('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
 console.log(JSON.stringify({ app, version: metadata.version, build: metadata.build, environment: metadata.environment,
-  cloudURL: metadata.cloudURL, nativeSourceMatches: true, signatureVerified: true, localServicesAbsent: true }, null, 2));
+  cloudURL: metadata.cloudURL, nativeSourceMatches: true, iconBrand: metadata.iconBrand, iconHashesVerified: true,
+  signatureVerified: true, localServicesAbsent: true }, null, 2));

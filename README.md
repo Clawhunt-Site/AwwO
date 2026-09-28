@@ -1,12 +1,15 @@
 # AwwO
 
+![AwwO Fold](assets/brand/awwo-fold/svg/lockup-blue.svg)
+
 作者：[Boxpo](https://github.com/Boxpo)
 
 AwwO 是一个协作式 AI 画布。登录账号后，选择执行引擎并连接自己的模型服务，把 Bot、角色和任务连成可以运行的工作流。
 
-## 使用线上版与 Windows 版
+## 使用线上版与桌面版
 
 - **线上版**：[awwo.clawhunt.store](https://awwo.clawhunt.store)。如站点启用了访问门禁，需要先通过门禁，再登录 AwwO 账号。
+- **Mac 版**：Apple Silicon、macOS 14 或更新版本。安装包见 [GitHub Releases](https://github.com/Clawhunt-Site/AwwO/releases)，使用与线上版相同的账号、工作区和执行服务。构建与安装说明见 [apps/macos](apps/macos/README.md)。当前包为 ad-hoc 签名，未完成 Apple 公证，首次打开可能被系统阻止。
 - **Windows 版**：轻量 WebView2 客户端，与线上版共用账号、工作区和执行服务。安装包通过 [GitHub Releases](https://github.com/Clawhunt-Site/AwwO/releases) 发布；构建方式见 [`apps/windows`](apps/windows/README.md)。需要 Windows 10/11 和网络连接。
 - Windows 客户端不会另外创建本地数据库，也不会自动运行本机命令。原有本地执行客户端保留在 `apps/desktop`；新客户端以 **AwwO Cloud** 独立安装，保留旧版和数据。
 

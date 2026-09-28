@@ -1460,9 +1460,16 @@ private func testWindowLifecycle() throws {
     print("Window lifecycle: owned close, WebKit teardown and reopen passed")
 }
 
-// Build-time utility: produce the app's original artwork without external tools,
-// an interactive application session, or any dependency on the legacy desktop.
+// Build-time utility: place the approved Fold raster on a macOS app tile.
+// The bundled source is copied verbatim from assets/brand/awwo-fold, so the
+// paths, transform and palette have one source of truth and cannot drift here.
 private func writeIcon(to path: String) throws {
+    guard let markURL = Bundle.main.url(forResource: "AwwOFoldMark", withExtension: "png"),
+        let mark = NSImage(contentsOf: markURL),
+        let markPixels = NSBitmapImageRep(data: try Data(contentsOf: markURL)),
+        markPixels.pixelsWide == 1024, markPixels.pixelsHigh == 1024 else {
+        throw LaunchError("应用包缺少已批准的 1024px Fold 图标资源。")
+    }
     guard (path as NSString).isAbsolutePath,
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1024, pixelsHigh: 1024,
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -1471,37 +1478,11 @@ private func writeIcon(to path: String) throws {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = context
     context.imageInterpolation = .high
-    // ClawHunt iOS blue anchors the native app. A continuous, rounded double arch
-    // forms the lowercase "w" without tiny details that disappear in the Dock.
     let tile = NSBezierPath(roundedRect: NSRect(x: 54, y: 54, width: 916, height: 916), xRadius: 210, yRadius: 210)
-    let forest = NSGradient(starting: NSColor(calibratedRed: 0.184, green: 0.490, blue: 0.965, alpha: 1),
-        ending: NSColor(calibratedRed: 0.086, green: 0.310, blue: 0.769, alpha: 1))!
-    forest.draw(in: tile, angle: -68)
-    NSColor(calibratedRed: 0.80, green: 0.89, blue: 1.0, alpha: 0.20).setStroke()
-    tile.lineWidth = 2
-    tile.stroke()
-
-    let mark = NSBezierPath()
-    mark.lineWidth = 104
-    mark.lineCapStyle = .round
-    mark.lineJoinStyle = .round
-    mark.move(to: NSPoint(x: 245, y: 662))
-    mark.line(to: NSPoint(x: 334, y: 405))
-    mark.curve(to: NSPoint(x: 416, y: 405), controlPoint1: NSPoint(x: 349, y: 365), controlPoint2: NSPoint(x: 400, y: 365))
-    mark.line(to: NSPoint(x: 480, y: 570))
-    mark.curve(to: NSPoint(x: 544, y: 570), controlPoint1: NSPoint(x: 493, y: 604), controlPoint2: NSPoint(x: 531, y: 604))
-    mark.line(to: NSPoint(x: 608, y: 405))
-    mark.curve(to: NSPoint(x: 690, y: 405), controlPoint1: NSPoint(x: 624, y: 365), controlPoint2: NSPoint(x: 675, y: 365))
-    mark.line(to: NSPoint(x: 779, y: 662))
-    NSGraphicsContext.saveGraphicsState()
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor(calibratedRed: 0.01, green: 0.03, blue: 0.12, alpha: 0.24)
-    shadow.shadowOffset = NSSize(width: 0, height: -7)
-    shadow.shadowBlurRadius = 15
-    shadow.set()
-    NSColor(calibratedRed: 1, green: 1, blue: 1, alpha: 1).setStroke()
-    mark.stroke()
-    NSGraphicsContext.restoreGraphicsState()
+    NSColor(deviceRed: 248.0 / 255.0, green: 250.0 / 255.0, blue: 252.0 / 255.0, alpha: 1).setFill()
+    tile.fill()
+    mark.draw(in: NSRect(x: 128, y: 128, width: 768, height: 768),
+        from: .zero, operation: .sourceOver, fraction: 1)
     NSGraphicsContext.restoreGraphicsState()
     guard let data = bitmap.representation(using: .png, properties: [:]) else { throw LaunchError("无法编码应用图标。") }
     try data.write(to: URL(fileURLWithPath: path), options: .atomic)

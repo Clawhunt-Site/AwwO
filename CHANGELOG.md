@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-28
+
+### Changed
+
+- Replace the earlier W badge with the original AwwO Fold identity. Include editable SVG logos, custom wordmarks and transparent PNG icons in `assets/brand/awwo-fold`.
+- Update the hosted web mark and favicon to Fold, and rebuild the Apple Silicon Mac client as version 0.8.1, build 6, with the same identity.
+- Keep the Mac client's existing bundle identity and hosted account/workspace connection. The package includes no model credentials or local execution services. Native package release and hosted-site deployment remain separate operations.
+- Package verified DMG, ZIP and Fold brand-kit downloads with SHA256 checksums from a clean source commit.
+
+### Fixed
+
+- Validate downloaded run-evidence content across Node and browser Blob realms instead of requiring the same constructor identity.
+
 ## [0.8.0] - 2026-09-27
 
 ### Added
