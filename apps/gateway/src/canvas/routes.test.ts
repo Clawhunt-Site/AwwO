@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { createGatewayApp } from '../app.js';
 import { createCanvasPlannerRouter } from './routes.js';
-import { PlannerError, type CanvasPlanner } from './provider.js';
+import { PlannerError, type CanvasPlanner, type PlannerProgressReporter } from './provider.js';
 import type { CodexModelCatalog } from './model-catalog.js';
 
 const TOKEN = 'canvas-test-token';
@@ -24,6 +24,65 @@ async function serve(provider: CanvasPlanner, peer?: string, modelCatalog?: Code
 function provider(): CanvasPlanner {
   return { status: vi.fn(async () => ({ available: true, provider: 'codex' })), plan: vi.fn(async () => plan) };
 }
+const streamHeaders = { ...headers, accept: 'text/event-stream, application/json' };
+async function frames(response: Response) {
+  return (await response.text()).split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)));
+}
+describe('canvas planning progress stream', () => {
+  it('streams accepted, observed progress and exactly one plan to a caller that accepts it', async () => {
+    const p = provider();
+    p.plan = vi.fn(async (_request, _signal, onProgress?: PlannerProgressReporter) => {
+      onProgress?.({ stage: 'thinking', characters: 0, nodes: 0, edges: 0, reasoning: 12 });
+      onProgress?.({ stage: 'streaming', characters: 40, nodes: 1, edges: 0, reasoning: 12, template: 'data' });
+      return plan;
+    });
+    const { base } = await serve(p);
+    const response = await fetch(`${base}/api/canvas/plan`, { method: 'POST', headers: streamHeaders, body: JSON.stringify({ prompt: 'build', context: 'graph' }) });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toMatch(/^text\/event-stream/);
+    expect(await frames(response)).toEqual([
+      { type: 'progress', stage: 'running', characters: 0, nodes: 0, edges: 0, reasoning: 0 },
+      { type: 'progress', stage: 'thinking', characters: 0, nodes: 0, edges: 0, reasoning: 12 },
+      { type: 'progress', stage: 'streaming', characters: 40, nodes: 1, edges: 0, reasoning: 12, template: 'data' },
+      { type: 'plan', plan, provider: 'codex' },
+    ]);
+    expect(p.plan).toHaveBeenCalledWith({ prompt: 'build', context: 'graph' }, expect.any(AbortSignal), expect.any(Function));
+  });
+  it('coalesces running counts but never withholds a stage change or a new node', async () => {
+    const p = provider();
+    p.plan = vi.fn(async (_request, _signal, onProgress?: PlannerProgressReporter) => {
+      for (let characters = 1; characters <= 50; characters++) onProgress?.({ stage: 'streaming', characters, nodes: characters >= 30 ? 2 : 1, edges: characters >= 45 ? 1 : 0, reasoning: 0 });
+      return plan;
+    });
+    const { base } = await serve(p);
+    const progress = (await frames(await fetch(`${base}/api/canvas/plan`, { method: 'POST', headers: streamHeaders, body: '{"prompt":"x","context":"y"}' })))
+      .filter(frame => frame.type === 'progress');
+    expect(progress.map(frame => [frame.characters, frame.nodes, frame.edges])).toEqual([[0, 0, 0], [1, 1, 0], [30, 2, 0], [45, 2, 1]]);
+  });
+  it('reports a failure as one safe error frame and keeps its stable code', async () => {
+    for (const [error, code, text] of [[new PlannerError('timeout'), 'timeout', 'AI 规划超时'], [new Error('SECRET path/key'), 'execution_failed', 'AI 规划未完成']] as const) {
+      const p = provider(); p.plan = async () => { throw error; };
+      const { base } = await serve(p);
+      const response = await fetch(`${base}/api/canvas/plan`, { method: 'POST', headers: streamHeaders, body: '{"prompt":"x","context":"y"}' });
+      const body = await frames(response);
+      expect(response.status).toBe(200);
+      expect(body.at(-1)).toMatchObject({ type: 'error', code });
+      expect(body.at(-1).error).toContain(text);
+      expect(body.filter(frame => frame.type === 'plan')).toEqual([]);
+      expect(JSON.stringify(body)).not.toContain('SECRET');
+    }
+  });
+  it('still refuses an unavailable planner with its status before any stream starts', async () => {
+    const p = provider();
+    p.status = vi.fn(async () => ({ available: false, provider: 'codex' }));
+    const { base } = await serve(p);
+    const response = await fetch(`${base}/api/canvas/plan`, { method: 'POST', headers: streamHeaders, body: '{"prompt":"x","context":"y"}' });
+    expect(response.status).toBe(503);
+    expect(response.headers.get('content-type')).toMatch(/json/);
+    expect(p.plan).not.toHaveBeenCalled();
+  });
+});
+
 describe('canvas planning HTTP API', () => {
   it('protects model discovery with loopback and the existing control token', async () => {
     const catalog = { read: vi.fn() };

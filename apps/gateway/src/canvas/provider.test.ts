@@ -5,7 +5,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { access, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createCanvasPlanner, parsePlannerOutput, resolveCodexCommand } from './provider.js';
+import { createCanvasPlanner, createCodexProgress, parsePlannerOutput, resolveCodexCommand, type PlannerProgress } from './provider.js';
 
 const plan = { version: 1, summary: 'Create a frontend node', operations: [{ type: 'add_node', ref: 'web', templateId: 'frontend' }] };
 const output = (text: string) => `${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } })}\n${JSON.stringify({ type: 'turn.completed' })}\n`;
@@ -22,7 +22,10 @@ function harness() {
   const resolveCommand = vi.fn(async () => ({ executable: process.execPath, prefixArgs: ['codex.js'] }));
   return { child, launch, terminate, resolveCommand };
 }
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+// Private scratchpad text a model reasons with; it must never leave the planner.
+const REASONING = 'weigh 权衡 the private ledger 44102 first';
+const line = (event: unknown) => `${JSON.stringify(event)}\n`;
 
 describe('planning output', () => {
   it('parses only a completed Codex assistant message as an object', () => {
@@ -49,6 +52,109 @@ describe('planning output', () => {
     expect(() => parsePlannerOutput(usageLimitMessage)).toThrow(expect.objectContaining({ code: 'invalid_output' }));
     const quotedPlan = { ...plan, summary: usageLimitMessage };
     expect(parsePlannerOutput(output(JSON.stringify(quotedPlan)))).toEqual(quotedPlan);
+  });
+});
+
+describe('planning progress', () => {
+  it('projects Codex events onto counts and never keeps their text', () => {
+    const seen: PlannerProgress[] = [];
+    const observe = createCodexProgress(progress => seen.push(progress));
+    observe(JSON.stringify({ type: 'thread.started', thread_id: 't' }));
+    observe(JSON.stringify({ type: 'turn.started' }));
+    observe('{not json');
+    observe(JSON.stringify({ type: 'item.started', item: { id: 'r1', type: 'reasoning', text: '' } }));
+    observe(JSON.stringify({ type: 'item.completed', item: { id: 'r1', type: 'reasoning', text: REASONING } }));
+    // An unchanged observation is not reported twice.
+    observe(JSON.stringify({ type: 'item.completed', item: { id: 'r1', type: 'reasoning', text: REASONING } }));
+    observe(JSON.stringify({ type: 'item.completed', item: { id: 'm1', type: 'agent_message', text: JSON.stringify(plan) } }));
+    expect(seen).toEqual([
+      { stage: 'running', characters: 0, nodes: 0, edges: 0, reasoning: 0 },
+      { stage: 'thinking', characters: 0, nodes: 0, edges: 0, reasoning: 0 },
+      { stage: 'thinking', characters: 0, nodes: 0, edges: 0, reasoning: [...REASONING].length },
+      { stage: 'streaming', characters: JSON.stringify(plan).length, nodes: 1, edges: 0, reasoning: [...REASONING].length, template: 'frontend' },
+    ]);
+    expect(JSON.stringify(seen)).not.toContain('44102');
+    // Without a reporter it is a no-op rather than an error.
+    expect(() => createCodexProgress()(JSON.stringify({ type: 'turn.started' }))).not.toThrow();
+  });
+  it('reports Codex progress from lines split across chunks and survives a reporter that throws', async () => {
+    const deps = harness();
+    const seen: PlannerProgress[] = [];
+    let calls = 0;
+    const result = createCanvasPlanner(config, deps).plan({ prompt: 'x', context: 'y' }, undefined, progress => {
+      seen.push(progress);
+      if (++calls === 1) throw new Error('reporter failure');
+    });
+    await vi.waitFor(() => expect(deps.launch).toHaveBeenCalledOnce());
+    const text = line({ type: 'turn.started' }) + line({ type: 'item.completed', item: { id: 'r', type: 'reasoning', text: REASONING } }) + output(JSON.stringify(plan));
+    for (let at = 0; at < text.length; at += 7) deps.child.stdout.write(text.slice(at, at + 7));
+    await vi.waitFor(() => expect(seen.at(-1)?.stage).toBe('streaming'));
+    deps.child.emit('close', 0);
+    await expect(result).resolves.toEqual(plan);
+    expect(seen.map(item => item.stage)).toEqual(['running', 'thinking', 'streaming']);
+    expect(seen.at(-1)).toMatchObject({ nodes: 1, edges: 0, template: 'frontend', reasoning: [...REASONING].length });
+  });
+});
+
+describe('OpenAI-compatible planning', () => {
+  const openai = { provider: 'openai' as const, cliPath: 'codex', timeoutMs: 1000, baseUrl: 'https://planner.invalid/v1', apiKey: 'test-key', model: 'fixture-model' };
+  // A string starting with ':' is an SSE comment line, as providers send for keep-alive.
+  const sse = (...chunks: unknown[]) => new Response(chunks.map(chunk => typeof chunk === 'string' && chunk.startsWith(':')
+    ? `${chunk}\n\n` : `data: ${typeof chunk === 'string' ? chunk : JSON.stringify(chunk)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } });
+  const delta = (value: Record<string, unknown>) => ({ choices: [{ index: 0, delta: value }] });
+  it('streams the plan, counts reasoning without keeping it, and validates the whole answer', async () => {
+    const text = JSON.stringify({ ...plan, operations: [...plan.operations, { type: 'add_node', ref: 'api', templateId: 'backend' },
+      { type: 'connect', fromNode: 'web', fromField: 'api', toNode: 'api', toField: 'brief' }] });
+    // Cut inside the first templateId pair, then again after it, so each node's template is
+    // seen in its own chunk and the split pair still has to be joined across chunks.
+    const pair = text.indexOf('"templateId":"frontend"');
+    const cuts = [0, pair + 5, pair + 30, text.length];
+    const fetch = vi.fn(async () => sse(delta({ role: 'assistant', reasoning_content: REASONING.slice(0, 9) }), delta({ reasoning_content: REASONING.slice(9) }),
+      delta({ content: text.slice(cuts[0], cuts[1]) }), ': keep-alive comment', delta({ content: text.slice(cuts[1], cuts[2]) }),
+      delta({ content: text.slice(cuts[2], cuts[3]) }), '[DONE]'));
+    vi.stubGlobal('fetch', fetch);
+    const seen: PlannerProgress[] = [];
+    await expect(createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' }, undefined, progress => seen.push(progress))).resolves.toEqual(JSON.parse(text));
+    const body = JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.stream).toBe(true);
+    expect(seen.map(item => item.stage).filter((stage, index, all) => stage !== all[index - 1])).toEqual(['thinking', 'streaming']);
+    expect(seen.at(-1)).toEqual({ stage: 'streaming', characters: text.length, nodes: 2, edges: 1, reasoning: [...REASONING].length, template: 'backend' });
+    // A template is only ever an identifier named by the plan, never other model text, and a
+    // new node never borrows its predecessor's template while its own is still unwritten.
+    expect(new Set(seen.map(item => item.template).filter(Boolean))).toEqual(new Set(['frontend', 'backend']));
+    for (const item of seen) if (item.nodes === 2 && item.template === 'frontend') throw new Error('node 2 showed node 1\'s template');
+    expect(JSON.stringify(seen)).not.toContain('44102');
+  });
+  it('still accepts a server that ignores streaming and answers with one JSON body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }), { headers: { 'content-type': 'application/json' } })));
+    await expect(createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' })).resolves.toEqual(plan);
+  });
+  it('names a node only by its own closed-set template, however the stream is cut', async () => {
+    // node 1 is followed by an operation that writes templateId before its "type"; the second
+    // node also carries a template outside the set and a nested templateId key.
+    const text = JSON.stringify({ version: 1, summary: 's', operations: [] }).replace('[]',
+      '[{"type":"add_node","ref":"a","templateId":"data"},{"templateId":"users","type":"add_node","ref":"b"},'
+      + '{"type":"add_node","ref":"c","inputValues":{"templateId":"review"},"templateId":"private_role"}]');
+    for (let cut = 1; cut < text.length; cut += 3) {
+      vi.stubGlobal('fetch', vi.fn(async () => sse(delta({ content: text.slice(0, cut) }), delta({ content: text.slice(cut) }), '[DONE]')));
+      const seen: PlannerProgress[] = [];
+      await createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' }, undefined, progress => seen.push(progress)).catch(() => undefined);
+      for (const item of seen) {
+        if (item.template !== undefined) expect([item.nodes, item.template]).toEqual([1, 'data']);
+      }
+    }
+  });
+  it('rejects a malformed or empty stream instead of inventing a plan', async () => {
+    for (const response of [() => sse('{broken'), () => sse(delta({ reasoning_content: REASONING }), '[DONE]'), () => sse(delta({ content: 'not a plan' }))]) {
+      vi.stubGlobal('fetch', vi.fn(async () => response()));
+      await expect(createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' })).rejects.toMatchObject({ code: 'invalid_output' });
+    }
+  });
+  it('keeps provider failures classified and their bodies unread into errors', async () => {
+    for (const [status, code] of [[429, 'usage_limit_exceeded'], [401, 'execution_failed'], [500, 'execution_failed'], [400, 'invalid_output']] as const) {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('SECRET provider diagnostics', { status })));
+      await expect(createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' })).rejects.toMatchObject({ code });
+    }
   });
 });
 

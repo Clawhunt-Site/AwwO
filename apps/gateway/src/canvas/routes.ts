@@ -1,6 +1,6 @@
-import { Router, json, type ErrorRequestHandler } from 'express';
+import { Router, json, type ErrorRequestHandler, type Response } from 'express';
 import { isLoopbackRequest } from '../automation/routes.js';
-import { PlannerError, type CanvasPlanner, type PlanningRequest } from './provider.js';
+import { PlannerError, type CanvasPlanner, type PlannerProgress, type PlanningRequest } from './provider.js';
 import type { CodexModelCatalog } from './model-catalog.js';
 
 const ERRORS = {
@@ -11,6 +11,12 @@ const ERRORS = {
   execution_failed: { status: 502, error: 'AI 规划未完成，请检查本机 Codex 登录或模型可用性后重试。' },
   usage_limit_exceeded: { status: 429, code: 'usage_limit_exceeded', error: '当前 Codex 账户的使用额度已耗尽，请在额度恢复或补充额度后重试。' },
 };
+
+// The model streams per token, but a reader needs a readable refresh rate. A stage change
+// or a newly declared node is still reported at once.
+const PROGRESS_INTERVAL_MS = 250;
+// Keeps idle intermediaries from closing a stream while a model reasons in silence.
+const HEARTBEAT_MS = 15000;
 
 export function parsePlanningRequest(body: unknown): PlanningRequest {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('invalid input');
@@ -56,6 +62,10 @@ export function createCanvasPlannerRouter(deps: { provider: CanvasPlanner; contr
     try {
       const status = await deps.provider.status();
       if (!status.available) throw new PlannerError('unavailable');
+      if (req.accepts(['application/json', 'text/event-stream']) === 'text/event-stream') {
+        await streamPlan(deps.provider, request, controller.signal, status.provider, res);
+        return;
+      }
       const plan = await deps.provider.plan(request, controller.signal);
       if (!controller.signal.aborted) res.json({ plan, provider: status.provider });
     } catch (error) {
@@ -75,4 +85,39 @@ export function createCanvasPlannerRouter(deps: { provider: CanvasPlanner; contr
   };
   router.use('/canvas', invalidJson);
   return router;
+}
+
+/** Answer as a progress stream. From its first byte the transport status is 200, so its
+ * own frames carry the outcome: exactly one plan or one error, never an empty plan. */
+async function streamPlan(provider: CanvasPlanner, request: PlanningRequest, signal: AbortSignal, name: string, res: Response): Promise<void> {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+  const send = (frame: unknown) => { if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(frame)}\n\n`); };
+  const heartbeat = setInterval(() => { if (!res.writableEnded && !res.destroyed) res.write(': heartbeat\n\n'); }, HEARTBEAT_MS);
+  heartbeat.unref();
+  let last: PlannerProgress = { stage: 'running', characters: 0, nodes: 0, edges: 0, reasoning: 0 };
+  let lastAt = Date.now();
+  // The planner accepted the request and is starting: say so before it reports anything.
+  send({ type: 'progress', ...last });
+  const report = (progress: PlannerProgress) => {
+    // A new stage, node, connection or template is what a reader waits for.
+    const urgent = progress.stage !== last.stage || progress.nodes !== last.nodes || progress.edges !== last.edges || progress.template !== last.template;
+    const same = !urgent && progress.characters === last.characters && progress.reasoning === last.reasoning;
+    if (same || (!urgent && Date.now() - lastAt < PROGRESS_INTERVAL_MS)) return;
+    last = { ...progress };
+    lastAt = Date.now();
+    send({ type: 'progress', ...last });
+  };
+  try {
+    const plan = await provider.plan(request, signal, report);
+    if (!signal.aborted) send({ type: 'plan', plan, provider: name });
+  } catch (error) {
+    if (!signal.aborted) {
+      const code = error instanceof PlannerError ? error.code : 'execution_failed';
+      const { status: _status, ...failure } = error instanceof PlannerError ? ERRORS[error.code] : ERRORS.execution_failed;
+      send({ type: 'error', code, ...failure });
+    }
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  }
 }

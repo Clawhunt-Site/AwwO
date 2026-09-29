@@ -5,7 +5,17 @@ import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:pat
 import type { CanvasPlannerConfig } from './config.js';
 
 export interface PlanningRequest { prompt: string; context: string }
-export interface CanvasPlanner { status(): Promise<{ available: boolean; provider: string; error?: string }>; plan(request: PlanningRequest, signal?: AbortSignal): Promise<unknown> }
+/** What a planning run is observably doing. Counts only — never plan text or reasoning —
+ * and never a ratio: the plan's final length is unknown until it has been written. The
+ * template is an identifier the latest declared node names, never free text. */
+export interface PlannerProgress {
+  stage: 'running' | 'thinking' | 'streaming'; characters: number; nodes: number; edges: number; reasoning: number; template?: string;
+}
+export type PlannerProgressReporter = (progress: PlannerProgress) => void;
+export interface CanvasPlanner {
+  status(): Promise<{ available: boolean; provider: string; error?: string }>;
+  plan(request: PlanningRequest, signal?: AbortSignal, onProgress?: PlannerProgressReporter): Promise<unknown>;
+}
 type ErrorCode = 'unavailable' | 'cancelled' | 'timeout' | 'invalid_output' | 'execution_failed' | 'usage_limit_exceeded';
 export class PlannerError extends Error { constructor(public code: ErrorCode) { super(code); } }
 export interface PlannerCommand { executable: string; prefixArgs: string[] }
@@ -17,6 +27,140 @@ interface PlannerDeps {
 
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const MAX_PLAN_LENGTH = 120000;
+// A streamed response carries framing around every token, so its transport is bounded
+// separately from, and more loosely than, the answer it carries.
+const MAX_STREAM_BYTES = 16 * 1024 * 1024;
+// Matched as whole quoted JSON literals, as the browser and the SaaS host count them, so
+// a "disconnect" or a field's own type value can never be counted as a node or connection.
+const NODE_MARKER = '"add_node"';
+const EDGE_MARKER = '"connect"';
+// Only a member of the closed template set the canvas catalogue and the SaaS plan gate accept
+// (apps/web/src/canvas/agentTemplates.ts, backend planning.go) is ever reported as a template.
+const TEMPLATE_IDS: ReadonlySet<string> = new Set(['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review']);
+const TEMPLATE_PAIR = /^"templateId"\s{0,8}:\s{0,8}"([a-z]{1,16})"/;
+// How much of the stream a template is read from: a node's templateId is found only while its
+// marker is still inside this window; one written further away is simply not shown.
+const TEMPLATE_TAIL = 2048;
+// A Chat Completions provider's own reasoning fields, in the order they are read; the
+// first non-empty one is the delta, so a provider sending two aliases counts once.
+const REASONING_FIELDS = ['reasoning_content', 'reasoning', 'reasoning_text'] as const;
+
+function codePoints(text: string): number {
+  let count = 0;
+  for (const _ of text) count += 1;
+  return count;
+}
+
+/** Count a marker across a stream without rescanning it: only the new chunk is searched,
+ * behind a tail one character shorter than the marker, so a marker split across chunks is
+ * counted exactly once and none can lie wholly inside the tail. */
+function createMarkerCounter(marker: string): (chunk: string) => number {
+  let tail = '';
+  let total = 0;
+  return chunk => {
+    const window = tail + chunk;
+    total += window.split(marker).length - 1;
+    tail = window.slice(-(marker.length - 1));
+    return total;
+  };
+}
+
+/** The newest declared node's template, read from the text after its marker as JSON: only a
+ * templateId key directly inside the same operation object counts, never one in a nested value,
+ * a string, or a later operation (a model writing templateId ahead of "type" for its next node).
+ * Without its own template the newest node shows none, never a predecessor's. `null` means the
+ * newest marker is not in the text, so the text cannot change the previous decision. */
+function newestTemplate(text: string): string | undefined | null {
+  const marker = text.lastIndexOf(NODE_MARKER);
+  if (marker < 0) return null;
+  const rest = text.slice(marker + NODE_MARKER.length);
+  let template: string | undefined;
+  let depth = 0, inString = false, escaped = false;
+  for (let index = 0; index < rest.length; index++) {
+    const character = rest[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '{' || character === '[') depth++;
+    else if (character === '}' || character === ']') {
+      if (depth === 0) return template; // the operation object closed
+      depth--;
+    } else if (character === '"') {
+      const match = depth === 0 ? TEMPLATE_PAIR.exec(rest.slice(index)) : null;
+      if (match) {
+        const id = match[1];
+        template = id && TEMPLATE_IDS.has(id) ? id : undefined;
+        index += match[0].length - 1;
+        continue;
+      }
+      inString = true;
+    }
+  }
+  return template;
+}
+
+/** Follow the newest node's template across a stream, deciding inside one bounded window
+ * that always holds a marker together with everything written after it. */
+function createTemplateTracker(): (chunk: string) => string | undefined {
+  let tail = '';
+  let latest: string | undefined;
+  return chunk => {
+    const window = tail + chunk;
+    const seen = newestTemplate(window);
+    if (seen !== null) latest = seen;
+    tail = window.slice(-TEMPLATE_TAIL);
+    return latest;
+  };
+}
+
+/** Everything progress reports about a complete message, in one pass per value. */
+function messageCounts(text: string): Pick<PlannerProgress, 'characters' | 'nodes' | 'edges' | 'template'> {
+  const template = newestTemplate(text) ?? undefined;
+  return { characters: codePoints(text), nodes: text.split(NODE_MARKER).length - 1, edges: text.split(EDGE_MARKER).length - 1, ...(template ? { template } : {}) };
+}
+
+function progressStage(characters: number, reasoningSeen: boolean): PlannerProgress['stage'] {
+  return characters > 0 ? 'streaming' : reasoningSeen ? 'thinking' : 'running';
+}
+
+/** Project Codex's JSONL events onto progress counts. It reads only the fields it counts
+ * and keeps nothing, so the final strict parse of the whole output stays the one
+ * authority over whether a plan was produced. */
+export function createCodexProgress(onProgress?: PlannerProgressReporter): (line: string) => void {
+  const reasoning = new Map<string, number>();
+  let reasoningSeen = false;
+  let started = false;
+  let message: Pick<PlannerProgress, 'characters' | 'nodes' | 'edges' | 'template'> = { characters: 0, nodes: 0, edges: 0 };
+  let last = '';
+  return line => {
+    if (!onProgress || !line.trim()) return;
+    let event: Record<string, unknown>;
+    try { event = JSON.parse(line) as Record<string, unknown>; } catch { return; }
+    if (!event || typeof event !== 'object') return;
+    const item = event.item as { id?: unknown; type?: unknown; text?: unknown } | undefined;
+    if (event.type === 'turn.started') started = true;
+    else if ((event.type === 'item.started' || event.type === 'item.updated' || event.type === 'item.completed') && item && typeof item === 'object') {
+      if (item.type === 'reasoning') {
+        reasoningSeen = true;
+        // A reasoning item is re-sent whole as it grows, so each item keeps its latest size.
+        if (typeof item.text === 'string') reasoning.set(typeof item.id === 'string' ? item.id : '', codePoints(item.text));
+      } else if (item.type === 'agent_message' && typeof item.text === 'string') {
+        message = messageCounts(item.text);
+      } else return;
+    } else return;
+    if (!started && !reasoningSeen && message.characters === 0) return;
+    let total = 0;
+    for (const size of reasoning.values()) total += size;
+    const progress: PlannerProgress = { stage: progressStage(message.characters, reasoningSeen), ...message, reasoning: total };
+    const key = JSON.stringify(progress);
+    if (key === last) return;
+    last = key;
+    onProgress(progress);
+  };
+}
 const DISABLED_CAPABILITIES = [
   'shell_tool', 'apps', 'plugins', 'remote_plugin', 'multi_agent', 'browser_use',
   'browser_use_external', 'browser_use_full_cdp_access', 'computer_use', 'image_generation',
@@ -136,10 +280,10 @@ export function createCanvasPlanner(config: CanvasPlannerConfig, deps: PlannerDe
       } catch { /* Presence only; do not expose filesystem or configuration errors. */ }
       return { available: false, provider: 'codex', error: '未找到可用的 Codex CLI，请在本机安装并登录后重试。' };
     },
-    async plan(request, signal) {
+    async plan(request, signal, onProgress) {
       if (config.provider === 'disabled') throw new PlannerError('unavailable');
       if (signal?.aborted) throw new PlannerError('cancelled');
-      if (config.provider === 'openai') return planWithOpenAI(config, request, signal);
+      if (config.provider === 'openai') return planWithOpenAI(config, request, signal, onProgress);
       const command = await resolveCommand(config.cliPath);
       if (!command) throw new PlannerError('unavailable');
       const cwd = await mkdtemp(join(tmpdir(), 'awwo-canvas-planner-'));
@@ -154,6 +298,12 @@ export function createCanvasPlanner(config: CanvasPlannerConfig, deps: PlannerDe
           try { child = launch(command.executable, args, { cwd, shell: false, windowsHide: true, detached: process.platform !== 'win32' }); }
           catch { reject(new PlannerError('execution_failed')); return; }
           let output = ''; let outputBytes = 0; let settled = false; let stopping = false;
+          // Lines are observed as they complete; the full output is still parsed whole at the end.
+          // The search resumes where the previous chunk's ended, so a line that never ends is
+          // scanned once rather than once per chunk.
+          let pendingLine = '';
+          let scannedLine = 0;
+          const observe = createCodexProgress(onProgress);
           const finish = (error?: PlannerError, value?: unknown) => {
             if (settled) return;
             settled = true;
@@ -176,6 +326,14 @@ export function createCanvasPlanner(config: CanvasPlannerConfig, deps: PlannerDe
             outputBytes += Buffer.byteLength(chunk);
             if (outputBytes > MAX_OUTPUT_BYTES) { stop(new PlannerError('invalid_output')); return; }
             output += chunk;
+            pendingLine += chunk;
+            for (let newline = pendingLine.indexOf('\n', scannedLine); newline !== -1; newline = pendingLine.indexOf('\n')) {
+              const line = pendingLine.slice(0, newline);
+              pendingLine = pendingLine.slice(newline + 1);
+              // Progress is observability: a reporter that throws must never end the plan.
+              try { observe(line); } catch { /* the run continues unobserved */ }
+            }
+            scannedLine = pendingLine.length;
           });
           child.stderr.resume(); // Drain without retaining or disclosing CLI/auth diagnostics.
           child.stdin.on('error', () => stop(new PlannerError('execution_failed')));
@@ -205,13 +363,92 @@ export function createCanvasPlanner(config: CanvasPlannerConfig, deps: PlannerDe
 }
 
 
-async function planWithOpenAI(config: CanvasPlannerConfig, request: PlanningRequest, signal?: AbortSignal): Promise<unknown> {
+/** Read an OpenAI-compatible chat stream into its answer text. Reasoning the provider
+ * streams in its own field is counted and discarded, never kept or returned. */
+async function readChatStream(body: ReadableStream<Uint8Array>, onProgress?: PlannerProgressReporter): Promise<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const countNodes = createMarkerCounter(NODE_MARKER);
+  const countEdges = createMarkerCounter(EDGE_MARKER);
+  const followTemplate = createTemplateTracker();
+  let buffer = '';
+  // Where the newline search resumes, so a line that never ends is scanned once, not per read.
+  let scanned = 0;
+  let content = '';
+  let transport = 0;
+  let contentBytes = 0;
+  let characters = 0;
+  let nodes = 0;
+  let edges = 0;
+  let template: string | undefined;
+  let reasoning = 0;
+  let reasoningSeen = false;
+  const report = () => {
+    if (!onProgress || (!reasoningSeen && characters === 0)) return;
+    // Progress is observability: a reporter that throws must never end the plan.
+    try {
+      onProgress({ stage: progressStage(characters, reasoningSeen), characters, nodes, edges, reasoning, ...(template ? { template } : {}) });
+    } catch { /* unobserved */ }
+  };
+  const readLine = (line: string) => {
+    if (!line.startsWith('data:')) return;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') return;
+    let chunk: { choices?: { delta?: Record<string, unknown> }[] };
+    try { chunk = JSON.parse(payload); } catch { throw new PlannerError('invalid_output'); }
+    const delta = chunk?.choices?.[0]?.delta;
+    if (!delta || typeof delta !== 'object') return;
+    if (typeof delta.content === 'string' && delta.content) {
+      contentBytes += Buffer.byteLength(delta.content);
+      if (contentBytes > MAX_OUTPUT_BYTES) throw new PlannerError('invalid_output');
+      content += delta.content;
+      characters += codePoints(delta.content);
+      nodes = countNodes(delta.content);
+      edges = countEdges(delta.content);
+      template = followTemplate(delta.content);
+    }
+    const thought = REASONING_FIELDS.map(field => delta[field]).find(value => typeof value === 'string' && value) as string | undefined;
+    if (thought) { reasoningSeen = true; reasoning += codePoints(thought); }
+    report();
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      transport += value.byteLength;
+      if (transport > MAX_STREAM_BYTES) throw new PlannerError('invalid_output');
+      buffer += decoder.decode(value, { stream: true });
+      for (let newline = buffer.indexOf('\n', scanned); newline !== -1; newline = buffer.indexOf('\n')) {
+        readLine(buffer.slice(0, newline).replace(/\r$/, ''));
+        buffer = buffer.slice(newline + 1);
+      }
+      scanned = buffer.length;
+    }
+    readLine((buffer + decoder.decode()).replace(/\r$/, ''));
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return content;
+}
+
+/** The answer of a non-streamed completion, for a server that ignored `stream: true`. */
+function chatMessageContent(raw: string): string {
+  if (Buffer.byteLength(raw) > MAX_OUTPUT_BYTES) throw new PlannerError('invalid_output');
+  let parsed: any;
+  try { parsed = JSON.parse(raw); } catch { throw new PlannerError('invalid_output'); }
+  const content = parsed?.choices?.[0]?.message?.content;
+  return typeof content === 'string' ? content : '';
+}
+
+async function planWithOpenAI(config: CanvasPlannerConfig, request: PlanningRequest, signal?: AbortSignal, onProgress?: PlannerProgressReporter): Promise<unknown> {
   if (!config.apiKey || !config.baseUrl || !config.model) throw new PlannerError('unavailable');
   if (signal?.aborted) throw new PlannerError('cancelled');
   const url = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const body = {
     model: config.model,
     temperature: 0,
+    // Streamed so the plan's progress is observable; the answer is still validated whole.
+    stream: true,
     messages: [
       { role: 'system', content: PLANNER_INSTRUCTION },
       { role: 'user', content: `Canvas context and protocol:\n${request.context}\n\nCurrent user request:\n${request.prompt}\n` },
@@ -234,16 +471,14 @@ async function planWithOpenAI(config: CanvasPlannerConfig, request: PlanningRequ
     });
     if (response.status === 429) throw new PlannerError('usage_limit_exceeded');
     if (response.status === 401 || response.status === 403) throw new PlannerError('execution_failed');
-    const raw = await response.text();
     if (!response.ok) {
       // Never echo provider bodies (may contain auth diagnostics).
+      await response.body?.cancel().catch(() => undefined);
       throw new PlannerError(response.status >= 500 ? 'execution_failed' : 'invalid_output');
     }
-    if (Buffer.byteLength(raw) > MAX_OUTPUT_BYTES) throw new PlannerError('invalid_output');
-    let parsed: any;
-    try { parsed = JSON.parse(raw); } catch { throw new PlannerError('invalid_output'); }
-    const content = parsed?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) throw new PlannerError('invalid_output');
+    const streamed = (response.headers.get('content-type') || '').includes('text/event-stream') && response.body;
+    const content = streamed ? await readChatStream(response.body!, onProgress) : chatMessageContent(await response.text());
+    if (!content.trim()) throw new PlannerError('invalid_output');
     return parsePlanObject(content);
   } catch (error) {
     if (error instanceof PlannerError) throw error;
