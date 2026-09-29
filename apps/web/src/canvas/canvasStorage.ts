@@ -4,6 +4,13 @@ export function configureCanvasStorage(userId: string, tenantId: string, canvasI
   scope = [userId, tenantId, canvasId].map(encodeURIComponent).join(':');
 }
 export function canvasStorageKey(key: string): string { return scope ? `awwo.saas:${scope}:${key}` : key; }
+/** The same account and workspace namespace without the canvas, for small facts that describe how
+ * this workspace behaves rather than one canvas (such as how long its plans take). */
+export function workspaceStorage(): Pick<Storage, 'getItem' | 'setItem'> {
+  const captured = scope.split(':').slice(0, 2).join(':');
+  const keyOf = (key: string) => captured ? `awwo.saas:${captured}:${key}` : key;
+  return { getItem: key => localStorage.getItem(keyOf(key)), setItem: (key, value) => localStorage.setItem(keyOf(key), value) };
+}
 export function canvasStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { keys(): string[] } {
   // Capture the namespace so a pending operation cannot cross a later account boundary.
   const captured = scope;

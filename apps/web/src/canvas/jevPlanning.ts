@@ -105,7 +105,7 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
   const check = () => { controller.signal.throwIfAborted(); if (stale()) throw new DOMException('Workspace changed', 'AbortError'); };
   const sourceRevision = canvasPlanRevision(doc);
   try {
-    onProgress?.({ stage: 'queued', characters: 0, nodes: 0 });
+    onProgress?.({ stage: 'queued', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 });
     const [status, palette] = await Promise.all([readJevStatus(captured.tenant.id, controller.signal, locale), readModelPalette(controller.signal, locale)]);
     check();
     const reason = unavailable(status, locale);
@@ -128,7 +128,7 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
       role_2: { type: 'choice', instructions: 'What is the second distinct complementary responsibility needed for the goal, after the primary responsibility? Prefer omit if one role suffices. Do not repeat the primary responsibility.', criteria: roleOptions },
       role_3: { type: 'choice', instructions: 'What is the third distinct responsibility needed for the goal, after the primary and second responsibilities? Prefer omit if fewer than three roles suffice. Do not repeat a responsibility.', criteria: roleOptions },
     };
-    onProgress?.({ stage: 'running', characters: 0, nodes: 0 });
+    onProgress?.({ stage: 'running', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 });
     const first = await evaluateJev(captured.tenant.id, { state, questions }, status, controller.signal, locale);
     check();
     const evaluations = [first];
@@ -206,7 +206,8 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
         operations.push({ type: 'connect', fromNode: refs[index - 1], fromField: 'result', toNode: ref, toField: 'context' });
       }
     });
-    onProgress?.({ stage: 'validating', characters: 0, nodes: ordered.length });
+    onProgress?.({ stage: 'validating', characters: 0, nodes: ordered.length,
+      edges: operations.filter(operation => operation.type === 'connect').length, reasoning: 0, attempt: 1 });
     const summary = jevMessage(locale,
       `Jev 选择了 ${ordered.length} 个角色，按${sequential ? '顺序' : '独立'}方式编排，并分配了工作区可用模型：${ordered.map(role => role.name).join('、')}。尚未运行节点；导入的人设不会安装原有工具或技能。`,
       `Jev selected ${ordered.length} roles for ${sequential ? 'sequential' : 'independent'} work and assigned available workspace models: ${ordered.map(role => role.name).join(', ')}. Nodes have not run; role instructions do not install their original tools or skills.`);

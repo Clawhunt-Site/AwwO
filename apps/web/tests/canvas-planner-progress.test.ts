@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { emptyDocument } from '../src/canvas/canvasDoc';
-import { requestCanvasPlan, type PlanProgress } from '../src/canvas/canvasPlanning';
+import { observedProgress, requestCanvasPlan, type PlanProgress } from '../src/canvas/canvasPlanning';
 import {
   PLAN_OPEN_TIMEOUT_MS, PLAN_STALL_TIMEOUT_MS, clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave,
-  countPlannedNodes, createPlannedNodeCounter,
+  countPlannedEdges, countPlannedNodes,
 } from '../src/saas/canvasBridge';
 
 const tenant = { id: 'tenant', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 } as const;
@@ -12,6 +12,11 @@ const plan = { version: 1, summary: '增加数据与后端节点', operations: [
   { type: 'add_node', ref: 'backend', templateId: 'backend', title: '后端', persona: '', inputValues: {} },
   { type: 'connect', fromNode: 'data', fromField: 'schema', toNode: 'backend', toField: 'schema' },
 ] };
+const planText = JSON.stringify(plan);
+
+/** A progress row exactly as the Go host writes it for a planner run: counts, never the plan. */
+const hostProgress = (stage: 'thinking' | 'streaming', counts: Partial<Record<'characters' | 'nodes' | 'edges' | 'reasoning', number>> & { template?: string } = {}) =>
+  ({ type: 'progress', stage, characters: 0, nodes: 0, edges: 0, reasoning: 0, ...counts });
 
 const frames = (...events: unknown[]) => events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
 const sse = (body: string) => new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
@@ -52,46 +57,127 @@ const online = (lang = 'zh-CN') => {
   configureSaaSCanvas({ tenant, canvasId: 'canvas' });
   configureSaaSCanvasSave(async () => {});
 };
+const stages = (seen: PlanProgress[]) => seen.map(item => item.stage).filter((stage, index, all) => stage !== all[index - 1]);
 afterEach(() => { clearSaaSCanvas(); configureSaaSCanvasSave(null); vi.unstubAllGlobals(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('canvas planning reports observed progress instead of an indeterminate wait', () => {
-  it('surfaces queued, running and streaming stages with the real measured counts', async () => {
+  it('follows the host from queued through thinking and writing to validation, with its real counts', async () => {
     online();
-    const text = JSON.stringify(plan);
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')
       ? new Response(JSON.stringify({ id: 'planning-run' }), { status: 202 })
+      // Exactly the rows Go writes: no proposal fragment appears before the completed event.
       : sse(frames(
         { type: 'queued' },
         { type: 'running' },
-        { type: 'text_delta', delta: text.slice(0, 40) },
-        { type: 'text_delta', delta: text.slice(40) },
-        { type: 'completed', text },
+        hostProgress('thinking', { reasoning: 320 }),
+        hostProgress('streaming', { characters: 60, reasoning: 320 }),
+        hostProgress('streaming', { characters: 120, nodes: 1, reasoning: 320, template: 'data' }),
+        // Node 2 has been declared but has not named its template yet.
+        hostProgress('streaming', { characters: 150, nodes: 2, reasoning: 320 }),
+        hostProgress('streaming', { characters: 200, nodes: 2, reasoning: 320, template: 'backend' }),
+        hostProgress('streaming', { characters: 260, nodes: 2, edges: 1, reasoning: 320, template: 'backend' }),
+        { type: 'completed', text: planText },
       ))));
     const seen: PlanProgress[] = [];
     await expect(requestCanvasPlan('做数据到后端的流程', emptyDocument(), [], new AbortController().signal, 'zh',
-      progress => seen.push(progress))).resolves.toMatchObject({ version: 1, summary: plan.summary });
+      progress => seen.push({ ...progress }))).resolves.toMatchObject({ version: 1, summary: plan.summary });
 
     // Every distinct stage the run really passed through is reported, in order.
-    expect(seen.map(item => item.stage).filter((stage, index, all) => stage !== all[index - 1]))
-      .toEqual(['queued', 'running', 'streaming', 'validating']);
-    // The final measured totals are the true ones, never a coalesced partial or a reset.
-    const last = seen.at(-1)!;
-    expect(last).toMatchObject({ stage: 'validating', characters: text.length, nodes: 2 });
-    // Counts only ever move forward, so the UI cannot appear to lose progress.
-    expect(seen.map(item => item.characters)).toEqual([...seen.map(item => item.characters)].sort((a, b) => a - b));
+    expect(stages(seen)).toEqual(['queued', 'running', 'thinking', 'streaming', 'validating']);
+    expect(seen.find(item => item.stage === 'thinking')).toMatchObject({ reasoning: 320, characters: 0 });
+    expect(seen.map(item => item.template).filter(Boolean)).toEqual(expect.arrayContaining(['data', 'backend']));
+    // Node 2 is never shown under node 1's template while its own is still unwritten.
+    expect(seen.some(item => item.nodes === 2 && item.template === 'data')).toBe(false);
+    // The final totals are settled on the whole proposal, never a coalesced partial.
+    expect(seen.at(-1)).toMatchObject({ stage: 'validating', characters: [...planText].length, nodes: 2, edges: 1, attempt: 1 });
+    // Counts only ever move forward, so the surface cannot appear to lose progress.
+    for (const key of ['characters', 'nodes', 'edges'] as const) {
+      expect(seen.map(item => item[key])).toEqual([...seen.map(item => item[key])].sort((a, b) => a - b));
+    }
   });
 
-  it('reports no fabricated completion ratio, only measurements the run actually produced', async () => {
+  it('keeps only measured fields and forwards a template only as an identifier', async () => {
     online();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')
       ? new Response(JSON.stringify({ id: 'planning-run' }), { status: 202 })
-      : sse(frames({ type: 'completed', text: JSON.stringify(plan) }))));
+      : sse(frames(
+        hostProgress('streaming', { characters: 40, nodes: 1, template: 'data' }),
+        { ...hostProgress('streaming', { characters: 80, nodes: 1 }), template: '<img src=x onerror=alert(1)>' },
+        { ...hostProgress('streaming', { characters: 90, nodes: 1 }), characters: -5, nodes: 'many', percent: 50 },
+        { type: 'completed', text: planText },
+      ))));
     const seen: PlanProgress[] = [];
-    await requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh', progress => seen.push(progress));
+    await requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh', progress => seen.push({ ...progress }));
     for (const progress of seen) {
-      expect(Object.keys(progress).sort()).toEqual(['characters', 'nodes', 'stage']);
+      expect(Object.keys(progress).filter(key => key !== 'template').sort()).toEqual(['attempt', 'characters', 'edges', 'nodes', 'reasoning', 'stage']);
       expect(progress).not.toHaveProperty('percent');
+      if (progress.template !== undefined) expect(progress.template).toBe('data');
     }
+    // A malformed count keeps the last real one instead of erasing or inventing work.
+    expect(seen.some(item => item.characters < 0)).toBe(false);
+  });
+
+  it('forwards a template only beside the node count the host reported it with', async () => {
+    online();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')
+      ? new Response(JSON.stringify({ id: 'planning-run' }), { status: 202 })
+      : sse(frames(hostProgress('streaming', { characters: 40, nodes: 1, template: 'data' }),
+        { type: 'progress', stage: 'streaming', characters: 60, template: 'backend' },
+        { type: 'progress', stage: 'streaming', characters: 70, nodes: '2', template: 'backend' },
+        { type: 'completed', text: planText }))));
+    const seen: PlanProgress[] = [];
+    await requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh', progress => seen.push({ ...progress }));
+    expect(seen.some(item => item.nodes === 1 && item.template === 'backend')).toBe(false);
+  });
+
+  it('never carries a template onto a node that arrived after the last coalesced row', async () => {
+    online();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')
+      ? new Response(JSON.stringify({ id: 'planning-run' }), { status: 202 })
+      // The last row the host wrote named node 1; node 2 was written before the next row was due.
+      : sse(frames(hostProgress('streaming', { characters: 90, nodes: 1, template: 'data' }), { type: 'completed', text: planText }))));
+    const seen: PlanProgress[] = [];
+    await requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh', progress => seen.push({ ...progress }));
+    expect(seen.some(item => item.nodes === 2 && item.template === 'data')).toBe(false);
+    expect(seen.at(-1)).toMatchObject({ stage: 'validating', nodes: 2 });
+  });
+
+  it('merges a host frame over what was observed, keeping real counts when a field is malformed', () => {
+    const previous: PlanProgress = { stage: 'streaming', characters: 50, nodes: 2, edges: 1, reasoning: 9, template: 'data', attempt: 2 };
+    // A malformed template is never shown, and never replaced by the previous node's either.
+    expect(observedProgress({ stage: 'invented', characters: 'x', nodes: 3.9, edges: -1, reasoning: Infinity, template: 'Bad Id' }, previous))
+      .toEqual({ stage: 'streaming', characters: 50, nodes: 3, edges: 0, reasoning: 9, attempt: 2 });
+    // An identifier outside the closed template set is dropped just the same.
+    expect(observedProgress({ stage: 'streaming', nodes: 3, template: 'private_role' }, previous)).not.toHaveProperty('template');
+    // A template is only kept beside the node count it was reported with.
+    for (const nodes of [undefined, '3', -1, Number.NaN]) {
+      expect(observedProgress({ stage: 'streaming', nodes, template: 'users' }, previous)).not.toHaveProperty('template');
+    }
+    // A frame is a whole snapshot: no template means the newest node has not named one yet.
+    expect(observedProgress({ stage: 'streaming', characters: 60, nodes: 3 }, previous)).not.toHaveProperty('template');
+    expect(observedProgress({ stage: 'streaming', nodes: 3, template: 'users' }, previous)).toMatchObject({ nodes: 3, template: 'users' });
+  });
+
+  it('marks every report of the single retry as the second attempt', async () => {
+    online();
+    let runs = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/plan')) { runs += 1; return new Response(JSON.stringify({ id: `planning-run-${runs}` }), { status: 202 }); }
+      // The first run completes with text that is not a plan; the retry succeeds.
+      return sse(runs === 1
+        ? frames({ type: 'running' }, hostProgress('streaming', { characters: 12 }), { type: 'completed', text: '{"version":1,' })
+        : frames({ type: 'running' }, hostProgress('streaming', { characters: 30, nodes: 1 }), { type: 'completed', text: planText }));
+    }));
+    const seen: PlanProgress[] = [];
+    await expect(requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh',
+      progress => seen.push({ ...progress }))).resolves.toMatchObject({ version: 1 });
+    const retryAt = seen.findIndex(item => item.stage === 'retrying');
+    expect(retryAt).toBeGreaterThan(0);
+    expect(seen.slice(0, retryAt).every(item => item.attempt === 1)).toBe(true);
+    // The retry starts its counts over and says so on every report until it ends.
+    expect(seen[retryAt]).toMatchObject({ characters: 0, nodes: 0, edges: 0, attempt: 2 });
+    expect(seen.slice(retryAt).every(item => item.attempt === 2)).toBe(true);
+    expect(seen.at(-1)).toMatchObject({ stage: 'validating', attempt: 2 });
   });
 
   it('stops a planning run that reports nothing at all, and leaves the canvas unchanged', async () => {
@@ -130,7 +216,6 @@ describe('canvas planning reports observed progress instead of an indeterminate 
   it('does not stop a slow run that keeps reporting, however long the model takes overall', async () => {
     vi.useFakeTimers();
     online();
-    const text = JSON.stringify(plan);
     const cancelled: string[] = [];
     let stream!: ReturnType<typeof controllable>;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -143,12 +228,12 @@ describe('canvas planning reports observed progress instead of an indeterminate 
     await vi.advanceTimersByTimeAsync(0);
 
     // Total elapsed time far exceeds one stall window; each individual gap stays inside it.
-    for (const chunk of [text.slice(0, 20), text.slice(20, 60), text.slice(60)]) {
+    for (const frame of [hostProgress('thinking', { reasoning: 90 }), hostProgress('streaming', { characters: 60 }), hostProgress('streaming', { characters: 200, nodes: 2 })]) {
       await vi.advanceTimersByTimeAsync(PLAN_STALL_TIMEOUT_MS - 5_000);
-      stream.push({ type: 'text_delta', delta: chunk });
+      stream.push(frame);
       await vi.advanceTimersByTimeAsync(0);
     }
-    stream.push({ type: 'completed', text });
+    stream.push({ type: 'completed', text: planText });
     stream.finish();
     await vi.advanceTimersByTimeAsync(0);
 
@@ -161,13 +246,28 @@ describe('canvas planning reports observed progress instead of an indeterminate 
     const document = { ...emptyDocument(), updatedAt: 99 };
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')
       ? new Response(JSON.stringify({ id: 'planning-run' }), { status: 202 })
-      : sse(frames({ type: 'queued' }, { type: 'running' }, { type: 'text_delta', delta: '{"version":1' }))));
+      : sse(frames({ type: 'queued' }, { type: 'running' }, hostProgress('streaming', { characters: 12, nodes: 1 })))));
     await expect(requestCanvasPlan('做流程', document, [], new AbortController().signal, 'zh')).rejects.toThrow(/连接中断/);
     expect(document).toMatchObject({ updatedAt: 99, nodes: [], edges: [] });
   });
 
+  it('reads a local planner progress stream with the same stages and counts', async () => {
+    // No SaaS scope: the native gateway streams the same frame vocabulary when it can.
+    vi.stubGlobal('fetch', vi.fn(async () => sse(frames(
+      { type: 'progress', stage: 'running', characters: 0, nodes: 0, edges: 0, reasoning: 0 },
+      { type: 'progress', stage: 'thinking', characters: 0, nodes: 0, edges: 0, reasoning: 45 },
+      { type: 'progress', stage: 'streaming', characters: planText.length, nodes: 2, edges: 1, reasoning: 45, template: 'backend' },
+      { type: 'plan', plan, provider: 'codex' },
+    ))));
+    const seen: PlanProgress[] = [];
+    await expect(requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh',
+      progress => seen.push({ ...progress }))).resolves.toMatchObject({ version: 1 });
+    expect(stages(seen)).toEqual(['running', 'thinking', 'streaming', 'validating']);
+    expect(seen.at(-1)).toMatchObject({ nodes: 2, edges: 1, reasoning: 45, template: 'backend' });
+  });
+
   it('keeps the non-streaming planner working and reports only what it can observe', async () => {
-    // No SaaS scope: the native gateway answers with one JSON body and no run events.
+    // No SaaS scope: an older native gateway answers with one JSON body and no run events.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ plan }), { headers: { 'Content-Type': 'application/json' } })));
     const seen: PlanProgress[] = [];
     await expect(requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh',
@@ -176,37 +276,19 @@ describe('canvas planning reports observed progress instead of an indeterminate 
   });
 });
 
-describe('planned-node counting measures the proposal, not incidental text', () => {
+describe('planned-structure counting measures the proposal, not incidental text', () => {
   it('counts whole quoted operation literals only', () => {
     expect(countPlannedNodes('')).toBe(0);
-    expect(countPlannedNodes(JSON.stringify(plan))).toBe(2);
+    expect(countPlannedNodes(planText)).toBe(2);
+    expect(countPlannedEdges(planText)).toBe(1);
     // "disconnect" must not read as "connect", and a field's own type value is not an operation.
-    expect(countPlannedNodes(JSON.stringify({ operations: [
+    const other = JSON.stringify({ operations: [
       { type: 'disconnect', edgeId: 'e1' },
       { type: 'add_field', nodeId: 'n', side: 'output', field: { id: 'f', type: 'markdown' } },
-    ] }))).toBe(0);
-    // A partially streamed proposal counts the nodes whose marker has fully arrived.
+    ] });
+    expect(countPlannedNodes(other)).toBe(0);
+    expect(countPlannedEdges(other)).toBe(0);
+    // A partial proposal counts the operations whose marker has fully arrived.
     expect(countPlannedNodes('{"operations":[{"type":"add_node","ref":"a"},{"type":"add_n')).toBe(1);
-  });
-
-  it('counts each marker exactly once however the stream is chunked', () => {
-    const text = JSON.stringify(plan);
-    // Every possible split point must agree with counting the whole text at once, so a marker
-    // straddling a chunk boundary is neither missed nor double counted.
-    for (let cut = 0; cut <= text.length; cut += 1) {
-      const count = createPlannedNodeCounter();
-      count(text.slice(0, cut));
-      expect(count(text.slice(cut))).toBe(2);
-    }
-    // Also correct when chunks are smaller than the marker itself, one character at a time.
-    const perCharacter = createPlannedNodeCounter();
-    let last = 0;
-    for (const character of text) last = perCharacter(character);
-    expect(last).toBe(2);
-    // An empty chunk reports the running total without disturbing the boundary window.
-    const counter = createPlannedNodeCounter();
-    counter('{"type":"add_no');
-    expect(counter('')).toBe(0);
-    expect(counter('de","ref":"a"}')).toBe(1);
   });
 });

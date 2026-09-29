@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_TEMPLATES, createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createFormNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { buildPlanningContext, loadPlanningConversation, PLANNING_STORAGE_KEY, readPlannerStatus, requestCanvasPlan,
-  savePlanningConversation, type PlanningMessage } from '../src/canvas/canvasPlanning';
+import { buildPlanningContext, loadLastPlanDuration, loadPlanningConversation, PLANNING_STORAGE_KEY, readPlannerStatus, requestCanvasPlan,
+  saveLastPlanDuration, savePlanningConversation, type PlanningMessage } from '../src/canvas/canvasPlanning';
+import { configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { appendTurn, resetAllSessions } from '../src/canvas/sessions';
 
 vi.mock('../src/chatAutomations', () => ({ gatewayApiBase: () => '/fixture-gateway' }));
@@ -277,4 +278,31 @@ describe('a malformed plan gets exactly one more attempt', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+});
+
+describe('planning duration expectation', () => {
+  afterEach(() => configureCanvasStorage('', '', ''));
+
+  it('keeps the last measured duration per account and workspace, shared by its canvases', () => {
+    configureCanvasStorage('user-a', 'tenant-a', 'canvas-1');
+    expect(loadLastPlanDuration()).toBeUndefined();
+    saveLastPlanDuration(47.6);
+    expect(loadLastPlanDuration()).toBe(48);
+    // A new canvas in the same workspace is exactly where the first long wait happens.
+    configureCanvasStorage('user-a', 'tenant-a', 'canvas-2');
+    expect(loadLastPlanDuration()).toBe(48);
+    // Another account or workspace never sees it.
+    configureCanvasStorage('user-b', 'tenant-a', 'canvas-2');
+    expect(loadLastPlanDuration()).toBeUndefined();
+    configureCanvasStorage('user-a', 'tenant-b', 'canvas-1');
+    expect(loadLastPlanDuration()).toBeUndefined();
+  });
+
+  it('ignores values that are not a plausible measurement', () => {
+    configureCanvasStorage('user-a', 'tenant-a', 'canvas-1');
+    for (const seconds of [0, -3, Number.NaN, 7_200]) saveLastPlanDuration(seconds);
+    expect(loadLastPlanDuration()).toBeUndefined();
+    localStorage.setItem('awwo.saas:user-a:tenant-a:awwo.canvas.planning.duration.v1', 'soon');
+    expect(loadLastPlanDuration()).toBeUndefined();
+  });
 });

@@ -167,21 +167,22 @@ describe('canvas planning integration', () => {
     render(<CanvasSurface planRequest={pending.request} />);
     submit('生成一个产品研发流程', '生成画布');
     // Before any report, the surface still says it is working rather than showing nothing.
-    expect(screen.getByRole('status')).toHaveTextContent('正在生成画布');
+    expect(screen.getByRole('status')).toHaveTextContent('正在提交需求');
 
     const report = pending.request.mock.calls[0][5]!;
     expect(typeof report).toBe('function');
-    await act(async () => { report({ stage: 'running', characters: 0, nodes: 0 }); });
-    expect(screen.getByRole('status')).toHaveTextContent('已启动，等待首个输出');
-    await act(async () => { report({ stage: 'streaming', characters: 640, nodes: 3 }); });
+    await act(async () => { report({ stage: 'running', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 }); });
+    expect(screen.getByRole('status')).toHaveTextContent('模型正在构思整体结构');
+    await act(async () => { report({ stage: 'streaming', characters: 640, nodes: 3, edges: 0, reasoning: 0, template: 'frontend', attempt: 1 }); });
     const streaming = screen.getByRole('status');
-    expect(streaming).toHaveTextContent('正在接收方案');
-    expect(streaming).toHaveTextContent('已规划 3 个节点');
+    expect(streaming).toHaveTextContent('正在规划第 3 个节点：前端开发');
+    expect(streaming).toHaveTextContent('3 个节点');
 
     await act(async () => { pending.resolve(newProductPlan()); });
     await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(3));
     // A finished request leaves no progress readout behind for the next one to inherit.
-    expect(screen.queryByText('正在接收方案')).toBeNull();
+    expect(screen.queryByText(/正在规划第/)).toBeNull();
+    expect(screen.queryByRole('progressbar')).toBeNull();
   });
 
   it('drops progress reported by a request the operator already cancelled', async () => {
@@ -190,8 +191,8 @@ describe('canvas planning integration', () => {
     submit('生成一个产品研发流程', '生成画布');
     const report = pending.request.mock.calls[0][5]!;
     fireEvent.click(screen.getByRole('button', { name: '取消', exact: true }));
-    await act(async () => { report({ stage: 'streaming', characters: 900, nodes: 4 }); });
-    expect(screen.queryByText('正在接收方案')).toBeNull();
+    await act(async () => { report({ stage: 'streaming', characters: 900, nodes: 4, edges: 0, reasoning: 0, attempt: 1 }); });
+    expect(screen.queryByText(/正在规划第/)).toBeNull();
     expect(screen.queryByRole('status')).toBeNull();
   });
 

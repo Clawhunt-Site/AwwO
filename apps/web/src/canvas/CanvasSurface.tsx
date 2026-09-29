@@ -37,7 +37,7 @@ import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
 import { applyCanvasPlan, canvasPlanRevision } from './canvasPlan';
-import { loadPlanningConversation, savePlanningConversation, requestCanvasPlan, readPlannerStatus, type PlanProgress } from './canvasPlanning';
+import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus, type PlanProgress } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
@@ -1580,6 +1580,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // Progress observed for the in-flight plan only; cleared with every new request so a finished
   // run never leaves stale counts next to the next one.
   const [planningProgress, setPlanningProgress] = useState<PlanProgress | undefined>(undefined);
+  // How long the last successful plan took here: a measurement shown as the next one's expectation.
+  const [lastPlanSeconds, setLastPlanSeconds] = useState<number | undefined>(() => readOnly ? undefined : loadLastPlanDuration());
   const [plannerStatus, setPlannerStatus] = useState<{ available: boolean; provider: string; error?: string } | null>(null);
   const [jevStatus, setJevStatus] = useState<Awaited<ReturnType<typeof readJevPlannerStatus>> | null>(null);
   const [plannerProvider, setPlannerProvider] = useState<'pi' | 'jev'>(() => {
@@ -1647,6 +1649,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const snapshot = docRef.current;
     const revision = canvasPlanRevision(snapshot);
     const id = `plan-${Date.now()}-${++planningSequence.current}`;
+    const startedAt = Date.now();
     const controller = new AbortController();
     planningRequest.current = { id, controller, prompt };
     setPlanningBusy(true);
@@ -1681,6 +1684,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }
       appendPlanningMessage(`${id}-assistant`, applied.summary, plan.operations.length ? 'applied' : undefined);
       if (!jev) setPlannerStatus(previous => ({ available: true, provider: previous?.provider || 'AI' }));
+      // Only a plan that arrived and was accepted is a measurement worth setting expectations with,
+      // and only for the same planner: Jev decides differently and takes a different time.
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
+      if (!jev && seconds > 0) { saveLastPlanDuration(seconds); setLastPlanSeconds(seconds); }
     } catch (error) {
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       const message = planFailureMessage(t, error);
@@ -1710,7 +1717,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     messages: planning.messages, draft: planning.draft, busy: planningBusy, error: planningError,
     ...(plannerProvider === 'jev' ? { submitLabel: locale === 'zh' ? '新增工作流' : 'Add workflow' } : {}),
     submitDisabled: Boolean(planningUnavailableReason),
-    progress: planningProgress,
+    progress: planningProgress, expectedSeconds: plannerProvider === 'jev' ? undefined : lastPlanSeconds,
     onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
     onSend: () => { void sendPlanningMessage(); }, onCancel: cancelPlanning,
     onUndo: () => {

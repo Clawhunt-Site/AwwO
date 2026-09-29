@@ -1,7 +1,7 @@
-import { canvasStorage } from './canvasStorage';
+import { canvasStorage, workspaceStorage } from './canvasStorage';
 import { canvasFetch, currentSaaSCanvas } from '../saas/canvasBridge';
 import { gatewayApiBase } from '../chatAutomations';
-import { getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
+import { AGENT_TEMPLATE_IDS, getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import type { CanvasDocument } from './canvasDoc';
 import { CANVAS_PLAN_PROTOCOL, parseCanvasPlan, type CanvasPlan } from './canvasPlan';
 import type { UiLocale } from '../locale';
@@ -16,19 +16,65 @@ export interface PlanningMessage {
 }
 export interface PlanningConversation { draft: string; messages: PlanningMessage[] }
 export const PLANNING_STORAGE_KEY = 'awwo.canvas.planning.v1';
+/** Seconds the last successful plan took in this workspace on this device; a measurement, shown as
+ * the next plan's expectation. Kept per workspace, not per canvas, so a new canvas has one too. */
+export const PLAN_DURATION_STORAGE_KEY = 'awwo.canvas.planning.duration.v1';
 
 /** Observed planner progress. Every field is a real measurement, never an estimated percentage:
- * the runtime does not know the plan's final length, so a progress bar would be fabricated. */
+ * the runtime does not know the plan's final length, so a completion ratio would be fabricated. */
 export interface PlanProgress {
-  /** queued = accepted, waiting for a runtime slot; running = runtime started, nothing emitted yet;
-   *  streaming = the plan text is actually arriving; validating = stream ended, checking the proposal. */
-  stage: 'queued' | 'running' | 'streaming' | 'validating' | 'retrying';
-  /** Characters of plan text received so far. */
+  /** queued = accepted, waiting for a runtime slot; running = runtime started, nothing observed yet;
+   *  thinking = the model is reasoning before it writes; streaming = the plan is being written;
+   *  validating = the plan arrived and is being checked; retrying = a malformed plan is being retried. */
+  stage: 'queued' | 'running' | 'thinking' | 'streaming' | 'validating' | 'retrying';
+  /** Characters of plan text written so far. */
   characters: number;
-  /** Nodes the streamed proposal has declared so far (counted from completed add_node markers). */
+  /** Nodes the proposal has declared so far (counted from whole add_node markers). */
   nodes: number;
+  /** Connections the proposal has declared so far (counted from whole connect markers). */
+  edges: number;
+  /** Characters of reasoning the model produced before writing; a count, never its text. */
+  reasoning: number;
+  /** Template id of the node declared most recently, when the host observed one. */
+  template?: string;
+  /** 1 for the first attempt, 2 for the single retry of a malformed plan. */
+  attempt: number;
 }
 export type PlanProgressReporter = (progress: PlanProgress) => void;
+
+const PLAN_STAGES: ReadonlyArray<PlanProgress['stage']> = ['queued', 'running', 'thinking', 'streaming', 'validating', 'retrying'];
+
+const validCount = (value: unknown): boolean => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+/** The progress a host reported, merged over what was already observed. Counts that are
+ * missing or malformed keep their previous value, so a bad frame cannot erase real work. A
+ * frame is a whole snapshot, though, so its template is taken as sent: absent means the newest
+ * node has not named one yet, and the previous node's must not stand in for it. */
+export function observedProgress(frame: Record<string, unknown>, previous: PlanProgress): PlanProgress {
+  const count = (value: unknown, fallback: number) =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
+  const stage = PLAN_STAGES.includes(frame.stage as PlanProgress['stage']) ? frame.stage as PlanProgress['stage'] : previous.stage;
+  // Only a member of the closed template set is kept, and only beside the node count it was
+  // reported with: a frame whose count is unusable cannot say which node the template names.
+  const template = typeof frame.template === 'string' && AGENT_TEMPLATE_IDS.has(frame.template) && validCount(frame.nodes)
+    ? frame.template : undefined;
+  return { stage, characters: count(frame.characters, previous.characters), nodes: count(frame.nodes, previous.nodes),
+    edges: count(frame.edges, previous.edges), reasoning: count(frame.reasoning, previous.reasoning),
+    ...(template ? { template } : {}), attempt: previous.attempt };
+}
+
+export function loadLastPlanDuration(): number | undefined {
+  try {
+    const value = Number(workspaceStorage().getItem(PLAN_DURATION_STORAGE_KEY));
+    return Number.isInteger(value) && value > 0 && value <= 3_600 ? value : undefined;
+  } catch { return undefined; }
+}
+
+export function saveLastPlanDuration(seconds: number): void {
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3_600) return;
+  try { workspaceStorage().setItem(PLAN_DURATION_STORAGE_KEY, String(Math.max(1, Math.round(seconds)))); }
+  catch { /* An expectation is a convenience; without storage the next plan simply shows none. */ }
+}
 
 
 /** Keep the shared structural protocol, with only the Go host's supported operations/types. */
@@ -147,13 +193,7 @@ async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale
   await readSseFrames(body, (_event, frame: any) => {
     if (proposal || failure) return;
     if (frame?.type === 'progress') {
-      const count = (value: unknown, fallback: number) =>
-        typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
-      observed.last = {
-        stage: frame.stage === 'queued' || frame.stage === 'running' || frame.stage === 'validating' || frame.stage === 'retrying' ? frame.stage : 'streaming',
-        characters: count(frame.characters, observed.last.characters),
-        nodes: count(frame.nodes, observed.last.nodes),
-      };
+      observed.last = observedProgress(frame, observed.last);
       onProgress?.(observed.last);
     } else if (frame?.type === 'plan') proposal = { plan: frame.plan };
     else if (frame?.type === 'error') {
@@ -209,7 +249,7 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
 export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
   locale: UiLocale = 'zh', onProgress?: PlanProgressReporter): Promise<CanvasPlan> {
   const saas = currentSaaSCanvas() !== null;
-  const observed = { last: { stage: 'queued', characters: 0, nodes: 0 } as PlanProgress };
+  const observed = { last: { stage: 'queued', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 } as PlanProgress };
   // Exactly one more attempt, and only for a malformed plan. A second retry would let a persistently
   // broken model spend the workspace's run quota in a loop, and retrying a runtime fault, a quota
   // rejection or a cancellation would spend it on something that cannot succeed. Each attempt is its
@@ -227,8 +267,9 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
       if (signal.aborted || !malformedPlan(error)) throw error;
       diagnosis = error;
       // The next attempt starts from nothing, so the counts restart with it; keeping the previous
-      // ones would report work that no longer exists.
-      observed.last = { stage: 'retrying', characters: 0, nodes: 0 };
+      // ones would report work that no longer exists. The attempt number stays on every report
+      // that follows, so the reader knows this is the second run rather than a restart.
+      observed.last = { stage: 'retrying', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 2 };
       onProgress?.(observed.last);
     }
   }

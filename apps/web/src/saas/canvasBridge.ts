@@ -3,6 +3,7 @@ import { modelEffortCapability, runtimeDefinitions, runtimeModels, type SaaSRunt
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
+import { AGENT_TEMPLATE_IDS } from '../canvas/agentTemplates';
 
 type CanvasScope = { tenant: Tenant; canvasId: string };
 let active: CanvasScope | null = null;
@@ -37,15 +38,19 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 export const PLAN_STALL_TIMEOUT_MS = 240_000;
 /** Opening the event stream is a single request, not model work, so it gets a much shorter bound. */
 export const PLAN_OPEN_TIMEOUT_MS = 30_000;
-/** Progress frames are coalesced: the model streams per token, but the UI only needs a readable
- * refresh rate. Stage changes are always emitted immediately. */
+/** Progress frames are coalesced: the host reports about once a second, and a stage change,
+ * a newly declared node or connection is always forwarded immediately. */
 export const PLAN_PROGRESS_INTERVAL_MS = 250;
 // Whole quoted JSON literals only, so "disconnect" never counts as "connect" and a field's
 // `type` value (text/markdown/number/boolean/file/html) can never collide with an operation name.
-const ADD_NODE_LITERAL = '"add_node"';
 const ADD_NODE_MARKER = /"add_node"/g;
-/** Nodes the partially streamed proposal has declared so far — a measurement, not an estimate. */
+const CONNECT_MARKER = /"connect"/g;
+/** Nodes a proposal has declared — a measurement, not an estimate. */
 export const countPlannedNodes = (text: string): number => text.match(ADD_NODE_MARKER)?.length ?? 0;
+/** Connections a proposal has declared — a measurement, not an estimate. */
+export const countPlannedEdges = (text: string): number => text.match(CONNECT_MARKER)?.length ?? 0;
+type PlanStreamProgress = { stage: 'queued' | 'running' | 'thinking' | 'streaming'; characters: number; nodes: number;
+  edges: number; reasoning: number; template?: string };
 
 /** Marks a `file` deliverable whose bytes the server actually holds, rather than a bare path. */
 export const ARTIFACT_REF_PREFIX = 'awwo-file:';
@@ -63,22 +68,6 @@ export function storedArtifactUrl(value: string): string | null {
   return `${API_BASE}${tenantPath(scope.tenant.id)}/artifacts/${encodeURIComponent(id)}`;
 }
 
-/** Count markers across a stream without rescanning the whole proposal on every chunk (which is
- * quadratic over a 100k-character plan). Only the new chunk is scanned, prefixed by the tail that
- * a marker could still be split across; that tail is shorter than the marker, so no match can lie
- * wholly inside it and none is counted twice. */
-export function createPlannedNodeCounter(): (chunk: string) => number {
-  const overlap = ADD_NODE_LITERAL.length - 1;
-  let tail = '';
-  let total = 0;
-  return (chunk: string) => {
-    if (!chunk) return total;
-    const window = tail + chunk;
-    total += countPlannedNodes(window);
-    tail = window.slice(-overlap);
-    return total;
-  };
-}
 const operationStatus = (operationId: string, run?: any) => ({ operationId,
   state: !run ? 'not_started' : run.terminal ? 'terminal' : 'accepted',
   issueId: run?.sessionId ?? null, runId: run?.id ?? null, terminal: run?.terminal ?? false,
@@ -171,10 +160,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       const stream = new ReadableStream<Uint8Array>({ async start(controller) {
         let closed = false;
         let output = '';
-        let stage: 'queued' | 'running' | 'streaming' = 'queued';
-        let nodes = 0;
+        let observed: PlanStreamProgress = { stage: 'queued', characters: 0, nodes: 0, edges: 0, reasoning: 0 };
         let lastEmit = 0;
-        let lastStage = '';
+        let lastKey = '';
         let completed = false;
         let failure = '';
         // The code is kept beside the message because the caller decides whether to retry, and a
@@ -182,7 +170,6 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
         let failureCode = '';
         let stalled = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
-        const countNodes = createPlannedNodeCounter();
         // A caller that stops reading cancels the stream, after which enqueue/close throw. Progress
         // reporting must never turn that into an unhandled stream error.
         const emit = (frame: unknown) => {
@@ -190,14 +177,18 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
           try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`)); }
           catch { closed = true; }
         };
-        // Coalescing must never hide a stage change or the final measured totals, so both bypass it.
+        // Coalescing must never hide a stage change, a newly declared node or connection, or the
+        // final measured totals, so those bypass it.
         const progress = (force: boolean) => {
           const now = Date.now();
-          if (!force && stage === lastStage && now - lastEmit < PLAN_PROGRESS_INTERVAL_MS) return;
+          const key = `${observed.stage}:${observed.nodes}:${observed.edges}:${observed.template ?? ''}`;
+          if (!force && key === lastKey && now - lastEmit < PLAN_PROGRESS_INTERVAL_MS) return;
           lastEmit = now;
-          lastStage = stage;
-          emit({ type: 'progress', stage, characters: output.length, nodes });
+          lastKey = key;
+          emit({ type: 'progress', ...observed });
         };
+        const count = (value: unknown, fallback: number) =>
+          typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
         const watch = () => { clearTimeout(timer); timer = setTimeout(() => { stalled = true; reader.abort(); }, PLAN_STALL_TIMEOUT_MS); };
         try {
           watch();
@@ -205,23 +196,30 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
           await readSseFrames(upstream, (_event, event: any) => {
             if (completed || failure) return;
             watch(); // Any frame proves the run is still observably alive.
-            if (event.type === 'text_delta') {
-              const delta = typeof event.delta === 'string' ? event.delta : '';
-              if (!delta) return;
-              output += delta;
-              nodes = countNodes(delta);
-              stage = 'streaming';
+            if (event.type === 'progress') {
+              // The host withholds the proposal until it is validated and reports counts instead:
+              // how much is written, how many nodes and connections, how much the model reasoned.
+              // Each row is a whole snapshot, so a missing template means the newest node has not
+              // named one yet; keeping the previous node's would put the wrong name on it.
+              observed = { stage: event.stage === 'thinking' || event.stage === 'streaming' ? event.stage : observed.stage,
+                characters: count(event.characters, observed.characters), nodes: count(event.nodes, observed.nodes),
+                edges: count(event.edges, observed.edges), reasoning: count(event.reasoning, observed.reasoning),
+                // Only a member of the closed template set is forwarded, never other model text, and
+                // only beside the node count it was reported with.
+                ...(typeof event.template === 'string' && AGENT_TEMPLATE_IDS.has(event.template)
+                  && typeof event.nodes === 'number' && Number.isFinite(event.nodes) && event.nodes >= 0 ? { template: event.template } : {}) };
               progress(false);
             } else if (event.type === 'queued' || event.type === 'running') {
-              stage = event.type;
+              observed = { ...observed, stage: event.type };
               progress(true);
             } else if (event.type === 'completed') {
-              if (typeof event.text === 'string') {
-                if (!event.text.startsWith(output)) { failure = canvasText('规划结果与流式输出不一致。', 'The plan does not match the streamed output.'); return; }
-                output = event.text;
-              }
-              // The authoritative text may extend past the deltas, so settle the count on the whole.
-              nodes = countPlannedNodes(output);
+              if (typeof event.text === 'string') output = event.text;
+              // Progress rows are coalesced, so settle the totals on the whole proposal. The last
+              // reported template still names the newest node only if no node arrived after it.
+              const { template, ...counts } = observed;
+              const nodes = countPlannedNodes(output);
+              observed = { ...counts, characters: [...output].length, nodes, edges: countPlannedEdges(output),
+                ...(template && nodes === observed.nodes ? { template } : {}) };
               completed = true;
             } else if (['failed', 'interrupted', 'cancelled'].includes(event.type)) {
               failure = canvasErrorMessage(event.message, event.code) || canvasText('规划未完成，请重试。', 'Planning did not complete. Please try again.');

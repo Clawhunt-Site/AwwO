@@ -1,8 +1,10 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowUp, Loader2, Square, Undo2, X } from 'lucide-react';
 import './canvas-assistant.css';
-import { useCanvasI18n, type CanvasTextKey } from './i18n';
+import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
+import { getAgentTemplates } from './agentTemplates';
 import type { PlanProgress } from './canvasPlanning';
+import type { UiLocale } from '../locale';
 
 export interface CanvasAssistantMessage {
   id: string;
@@ -28,20 +30,64 @@ export interface CanvasAssistantProps {
   submitDisabled?: boolean;
   /** Last progress the host observed for the in-flight plan; absent until the run reports. */
   progress?: PlanProgress;
+  /** Seconds the last successful plan took, measured on this device; shown as an expectation. */
+  expectedSeconds?: number;
 }
 
-const STAGE_LABEL: Record<PlanProgress['stage'], CanvasTextKey> = {
-  queued: 'assistant.stageQueued',
-  running: 'assistant.stageRunning',
-  streaming: 'assistant.stageStreaming',
-  validating: 'assistant.stageValidating',
-  retrying: 'assistant.stageRetrying',
+/** The four observable steps of a plan. They advance only on events the run reported. */
+const STEPS: ReadonlyArray<CanvasTextKey> = ['assistant.stepSubmit', 'assistant.stepThink', 'assistant.stepWrite', 'assistant.stepCheck'];
+function stepOf(stage: PlanProgress['stage'] | undefined): number {
+  if (stage === 'running' || stage === 'thinking') return 1;
+  if (stage === 'streaming') return 2;
+  if (stage === 'validating') return 3;
+  return 0; // not yet reported, queued, or starting over after a malformed plan
+}
+
+// A stage that has lasted this long gets a line saying what the wait usually means, so the
+// status never reads the same for a minute. Each is a fact about the stage, not a forecast.
+const HINT_AFTER: Partial<Record<PlanProgress['stage'], { seconds: number; key: CanvasTextKey }>> = {
+  queued: { seconds: 8, key: 'assistant.hintQueued' },
+  running: { seconds: 15, key: 'assistant.hintRunning' },
+  thinking: { seconds: 20, key: 'assistant.hintThinking' },
 };
+const LONG_WAIT_SECONDS = 90;
+// Before the host reports anything, the request is only known to be in flight.
+const AWAITING_AFTER_SECONDS = 4;
+
+function formatDuration(t: CanvasTranslate, seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return whole < 60 ? t('assistant.durationSeconds', { seconds: whole })
+    : t('assistant.durationMinutes', { minutes: Math.floor(whole / 60), seconds: whole % 60 });
+}
+
+function formatCount(locale: UiLocale, value: number): string {
+  return new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
+/** What the run is doing, in one line: the stage, and within writing, which part of the plan. */
+function headline(t: CanvasTranslate, progress: PlanProgress | undefined, template: string | undefined, waitedSeconds: number): string {
+  if (!progress) return t(waitedSeconds >= AWAITING_AFTER_SECONDS ? 'assistant.statusAwaiting' : 'assistant.statusSubmitting');
+  switch (progress.stage) {
+    case 'queued': return t('assistant.statusQueued');
+    case 'retrying': return t('assistant.statusRetrying');
+    case 'running': return t('assistant.statusRunning');
+    case 'thinking': return t('assistant.statusThinking');
+    case 'validating': return t('assistant.statusValidating');
+    case 'streaming':
+      // Connections are declared after the nodes they join, so they are the later part of a plan.
+      if (progress.edges > 0) return t('assistant.statusConnecting');
+      if (progress.nodes > 0) {
+        return template ? t('assistant.statusPlanningNodeAs', { count: progress.nodes, template })
+          : t('assistant.statusPlanningNode', { count: progress.nodes });
+      }
+      return t('assistant.statusWriting');
+  }
+}
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
 export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
-  onClose, onUndo, canUndo = false, runtimeControls, progress, submitLabel, submitDisabled = false }: CanvasAssistantProps) {
-  const { t } = useCanvasI18n();
+  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false }: CanvasAssistantProps) {
+  const { locale, t } = useCanvasI18n();
   const examples = [t('assistant.exampleSaas'), t('assistant.exampleData'), t('assistant.exampleContent')];
   const welcome = mode === 'welcome';
   const sendLabel = submitLabel || t(welcome ? 'assistant.generate' : 'assistant.modify');
@@ -59,13 +105,19 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   // Elapsed time is the one progress fact available even before the run emits anything, so a
   // silent model is still visibly alive. It is measured from this request, never accumulated.
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const startedAt = useRef(0);
   useEffect(() => {
     if (!busy) { setElapsedSeconds(0); return; }
-    const startedAt = Date.now();
+    startedAt.current = Date.now();
     setElapsedSeconds(0);
-    const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000)), 1000);
     return () => clearInterval(timer);
   }, [busy]);
+  // How long the current stage has lasted, so a hint follows the stage rather than the request.
+  // Taken when the stage changes, in the same render, so a new stage never inherits a hint.
+  const stage = busy ? progress?.stage : undefined;
+  const stageStartedAt = useMemo(() => Date.now(), [stage, busy]);
+  const stageSeconds = busy ? Math.max(0, Math.floor((Date.now() - stageStartedAt) / 1000)) : 0;
 
   const send = () => { if (canSend) onSend(); };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -75,6 +127,39 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
     event.stopPropagation();
     send();
   };
+
+  let status: ReactNode = null;
+  if (busy) {
+    const step = stepOf(progress?.stage);
+    const template = progress?.template ? getAgentTemplates(locale).find(item => item.id === progress.template)?.title : undefined;
+    const facts = [formatDuration(t, elapsedSeconds)];
+    if (progress?.stage === 'thinking' && progress.reasoning > 0) facts.push(t('assistant.factReasoning', { count: formatCount(locale, progress.reasoning) }));
+    if (progress && progress.nodes > 0) facts.push(t('assistant.factNodes', { count: progress.nodes }));
+    if (progress && progress.edges > 0) facts.push(t('assistant.factEdges', { count: progress.edges }));
+    if (progress && progress.characters > 0) facts.push(t('assistant.factCharacters', { count: formatCount(locale, progress.characters) }));
+    if (progress && progress.attempt > 1) facts.push(t('assistant.factAttempt', { count: progress.attempt }));
+    if (expectedSeconds) facts.push(t('assistant.factExpected', { duration: formatDuration(t, expectedSeconds) }));
+    const hint = elapsedSeconds >= LONG_WAIT_SECONDS && progress?.stage !== 'validating' ? t('assistant.hintLong')
+      : (() => { const rule = progress ? HINT_AFTER[progress.stage] : undefined; return rule && stageSeconds >= rule.seconds ? t(rule.key) : ''; })();
+    status = <div className="awwo-assistant-status" role="status" aria-label={t('assistant.progressDetail')}>
+      <p className="awwo-assistant-status-headline">
+        <Loader2 size={14} aria-hidden="true" />
+        <span>{headline(t, progress, template, elapsedSeconds)}</span>
+      </p>
+      {/* The clock ticks every second; it is left to the headline and step to be announced. */}
+      <p className="awwo-assistant-status-meta" aria-hidden="true">
+        <span className="awwo-assistant-status-dot" />
+        <span className="awwo-assistant-status-facts">{facts.join(' · ')}</span>
+        {hint ? <span className="awwo-assistant-status-hint">{hint}</span> : null}
+      </p>
+      <div className="awwo-assistant-steps" role="progressbar" aria-valuemin={0} aria-valuemax={STEPS.length} aria-valuenow={step}
+        aria-valuetext={t('assistant.progressStep', { step: step + 1, total: STEPS.length, name: t(STEPS[step]) })}>
+        {STEPS.map((label, index) => <span key={label} className={`awwo-assistant-step ${index < step ? 'is-done' : index === step ? 'is-active' : ''}`}>
+          <i aria-hidden="true" /><span>{t(label)}</span>
+        </span>)}
+      </div>
+    </div>;
+  }
 
   return <section className={`awwo-canvas-assistant awwo-canvas-assistant--${mode}`} aria-label={t('assistant.panelTitle')}>
     <header className="awwo-assistant-header">
@@ -103,19 +188,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
           value={draft} disabled={busy} rows={3} maxLength={8000}
           onChange={event => onDraftChange(event.target.value)} onKeyDown={onKeyDown}
           onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} />
-        {busy ? <div className="awwo-assistant-progress" role="status" aria-label={t('assistant.progressDetail')}>
-          <Loader2 size={14} aria-hidden="true" />
-          <span className="awwo-assistant-progress-stage">
-            {progress ? t(STAGE_LABEL[progress.stage]) : t(welcome ? 'assistant.generating' : 'assistant.modifying')}
-          </span>
-          <span className="awwo-assistant-progress-facts">
-            {[
-              t('assistant.progressElapsed', { seconds: elapsedSeconds }),
-              ...(progress && progress.nodes > 0 ? [t('assistant.progressNodes', { count: progress.nodes })] : []),
-              ...(progress && progress.characters > 0 ? [t('assistant.progressCharacters', { count: progress.characters })] : []),
-            ].join(' · ')}
-          </span>
-        </div> : null}
+        {status}
         <div className="awwo-assistant-composer-actions">
           {busy ? <button type="button" className="awwo-assistant-cancel" onClick={onCancel}><Square size={12} aria-hidden="true" />{t('assistant.cancel')}</button> : null}
           <button type="submit" className="awwo-assistant-send" disabled={!canSend}><span>{sendLabel}</span><ArrowUp size={15} aria-hidden="true" /></button>

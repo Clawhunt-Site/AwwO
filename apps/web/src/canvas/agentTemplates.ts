@@ -201,6 +201,9 @@ const LEGACY_TITLES: Record<AgentTemplateId, ReadonlyArray<string>> = {
   review: ['交付验收', 'Delivery review'],
 };
 
+/** The closed template set; the only values planning progress may name a node with. */
+export const AGENT_TEMPLATE_IDS: ReadonlySet<string> = new Set<AgentTemplateId>(['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review']);
+
 /** The legacy export remains Chinese so existing callers and saved documents keep their defaults. */
 export function getAgentTemplates(locale: UiLocale): ReadonlyArray<AgentTemplate> {
   return locale === 'en' ? EN_AGENT_TEMPLATES : AGENT_TEMPLATES;
