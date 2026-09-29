@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -111,11 +112,22 @@ type runArchiveEvent struct {
 	Text           string    `json:"text,omitempty"`
 	Code           string    `json:"code,omitempty"`
 	PayloadOmitted bool      `json:"payloadOmitted,omitempty"`
+	// Planner progress carries counts only. They are pointers so a progress row keeps
+	// its zero counts while every other event type serializes exactly as before.
+	Stage      string `json:"stage,omitempty"`
+	Characters *int   `json:"characters,omitempty"`
+	Nodes      *int   `json:"nodes,omitempty"`
+	Edges      *int   `json:"edges,omitempty"`
+	Reasoning  *int   `json:"reasoning,omitempty"`
+	Template   string `json:"template,omitempty"`
 }
 
 func projectRunArchiveEvent(id int64, at time.Time, raw []byte) runArchiveEvent {
 	event := runArchiveEvent{ID: id, CreatedAt: at, Type: "unsupported", PayloadOmitted: true}
-	var wire struct{ Type, Delta, Text, Code string }
+	var wire struct {
+		Type, Delta, Text, Code, Stage, Template string
+		Characters, Nodes, Edges, Reasoning      *int
+	}
 	if json.Unmarshal(raw, &wire) != nil {
 		return event
 	}
@@ -128,11 +140,22 @@ func projectRunArchiveEvent(id int64, at time.Time, raw []byte) runArchiveEvent 
 		event.Type, event.Text, event.PayloadOmitted = wire.Type, wire.Text, false
 	case "failed":
 		event.Type, event.Code, event.PayloadOmitted = wire.Type, wire.Code, false
+	case "progress":
+		// Only the two stages Go writes and non-negative counts are projected; a row
+		// that is anything else stays an opaque, omitted payload like any unknown type.
+		if (wire.Stage == "thinking" || wire.Stage == "streaming") && validCount(wire.Characters) && validCount(wire.Nodes) &&
+			validCount(wire.Edges) && validCount(wire.Reasoning) && (wire.Template == "" || slices.Contains(planTemplateIDs, wire.Template)) {
+			event.Type, event.Stage, event.PayloadOmitted = wire.Type, wire.Stage, false
+			event.Characters, event.Nodes, event.Edges, event.Reasoning = wire.Characters, wire.Nodes, wire.Edges, wire.Reasoning
+			event.Template = wire.Template
+		}
 	}
 	// Arbitrary metadata, headers, credentials and worker request objects never
 	// cross this projection, including fields added to known event types.
 	return event
 }
+
+func validCount(n *int) bool { return n != nil && *n >= 0 }
 
 func sanitizeRunArchiveEvents(events []runArchiveEvent, secrets []string) {
 	var joined strings.Builder

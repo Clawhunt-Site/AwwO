@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -566,8 +567,15 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		finish("failed", "", "accounting_commit_failed")
 		return
 	}
+	// Only a planner run opts in to reasoning activity: it is the one run kind whose
+	// output is withheld while it streams, so it is the one that needs another signal.
+	var progress *plannerProgress
+	var activity http.Header
+	if kind == "planner" {
+		progress, activity = &plannerProgress{}, plannerActivityHeader()
+	}
 	admissionStart := time.Now()
-	resp, e := a.admitRuntime(ctx, defaultRuntime(snapshot.Runtime), body)
+	resp, e := a.admitRuntimeWith(ctx, defaultRuntime(snapshot.Runtime), body, activity)
 	facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
 	if errors.Is(e, errSessionBusy) {
 		facts.Admission = "rejected_before_start"
@@ -627,6 +635,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			Text          string          `json:"text"`
 			Code          string          `json:"code"`
 			Message       string          `json:"message"`
+			Characters    *int            `json:"characters"`
 			Observability json.RawMessage `json:"observability"`
 		}
 		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev) != nil {
@@ -643,18 +652,40 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				return
 			}
 			produced += len(ev.Delta)
+			spanned := reasoning.inSpan()
 			delta := reasoning.push(ev.Delta)
 			output.WriteString(delta)
 			// Structured proposals are emitted only after schema validation and
 			// normalization; unvalidated token fragments are not a canvas plan.
+			// What a planner run publishes meanwhile is progress, never the text.
+			if progress != nil {
+				if spanned || reasoning.inSpan() {
+					// Whatever this delta carried beyond what it released belongs to a
+					// leading reasoning span, or to the whitespace that closed one.
+					progress.reasonInline(utf8.RuneCountInString(ev.Delta) - utf8.RuneCountInString(delta))
+				}
+				progress.write(delta)
+				a.reportPlannerProgress(ctx, tid, id, progress)
+				continue
+			}
 			// A withheld delta has nothing to persist or replay either.
-			if kind == "planner" || delta == "" {
+			if delta == "" {
 				continue
 			}
 			if !a.appendDelta(ctx, tid, id, delta) {
 				finish("failed", output.String(), "event_persistence_failed")
 				return
 			}
+		case "reasoning":
+			// Reasoning activity is a count the worker sends only to a run that asked
+			// for it. Anywhere else it is a worker ignoring the protocol, which stays
+			// the same failure as any other event this run cannot account for.
+			if progress == nil || ev.Characters == nil || *ev.Characters < 0 {
+				finish("failed", output.String(), "invalid_runtime_event")
+				return
+			}
+			progress.reasonReported(*ev.Characters)
+			a.reportPlannerProgress(ctx, tid, id, progress)
 		case "completed":
 			answer, delivered := reasoningAnswer(ev.Text)
 			if !strings.HasPrefix(answer, output.String()) {
@@ -1197,6 +1228,13 @@ func (a *App) admitPI(ctx context.Context, body []byte) (*http.Response, error) 
 	return a.admitRuntime(ctx, runtimePI, body)
 }
 func (a *App) admitRuntime(ctx context.Context, runtime string, body []byte) (*http.Response, error) {
+	return a.admitRuntimeWith(ctx, runtime, body, nil)
+}
+
+// admitRuntimeWith is admission with extra request headers. Headers, unlike body
+// fields, are not part of the worker's strict request schema, so an opt-in carried
+// here is ignored by a worker that predates it instead of rejecting the run.
+func (a *App) admitRuntimeWith(ctx context.Context, runtime string, body []byte, extra http.Header) (*http.Response, error) {
 	endpoint, token, err := a.runtimeEndpoint(runtime)
 	if err != nil {
 		return nil, err
@@ -1224,6 +1262,11 @@ func (a *App) admitRuntime(ctx context.Context, runtime string, body []byte) (*h
 		if e != nil {
 			observe("rejected_invalid")
 			return nil, e
+		}
+		for key, values := range extra {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")

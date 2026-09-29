@@ -92,7 +92,7 @@ Cookie 为 HttpOnly、SameSite，staging/production 必须 Secure。写请求验
 
 Pi 固定发布版本 `@earendil-works/pi-coding-agent@0.85.1`，直接依赖和 lockfile 一起管理。官方原 `badlogic/pi-mono` 已迁移至 `earendil-works/pi`。Node 要求至少 22.19.0，实际本地验证版本另外记录。
 
-内部最小契约：Go 按 runtime 将服务器验证过的 runId、tenantId、sessionId、prompt、messages、纯文本 systemPrompt、model、runtime 和固定工具 ID 发送到对应 worker 的 `POST /internal/runs`，每个 worker 使用独立 service token。返回 SSE 增量及终态；`DELETE /internal/runs/{runId}` 精确取消。model 只能选择对应 runtime 的服务器目录 ID；base URL、密钥、工具实现与子进程环境由服务器管理，不从浏览器透传。
+内部最小契约：Go 按 runtime 将服务器验证过的 runId、tenantId、sessionId、prompt、messages、纯文本 systemPrompt、model、runtime 和固定工具 ID 发送到对应 worker 的 `POST /internal/runs`，每个 worker 使用独立 service token。返回 SSE 增量及终态；`DELETE /internal/runs/{runId}` 精确取消。只有规划 run 的请求带 `X-Awwo-Run-Activity: reasoning`，此时 worker 可额外发送只含字数的 `reasoning` 事件（模型在独立思考字段里的推理，不含内容）；不认识该头的旧 worker 照常忽略，其他 run 收到该事件按协议错误失败。model 只能选择对应 runtime 的服务器目录 ID；base URL、密钥、工具实现与子进程环境由服务器管理，不从浏览器透传。
 
 Go 根据 Pi health 公布的模型输入预算保留最近完整对话轮次，优先丢弃最老的整对历史；当前提示词和指令不被静默截断。Pi 再次按 UTF-8 字节保守预留输出容量，超限明确失败，不能用较大的传输体积上限冒充模型上下文容量。画布规划发送当前图快照，不不断累积过去的规划请求；模板自带的重复说明被压缩，保留用户自定义指令与实际输入。
 

@@ -268,6 +268,12 @@ func (s *reasoningStream) push(delta string) string {
 	return out.String()
 }
 
+// inSpan reports whether the stream is currently discarding a leading reasoning span
+// (or the whitespace that closed one). It observes the filter; it never changes it.
+func (s *reasoningStream) inSpan() bool {
+	return s.phase == reasoningInside || s.phase == reasoningTrailing
+}
+
 // release commits to the answer, flushing everything that was held back.
 func (s *reasoningStream) release(out *strings.Builder, rest string) string {
 	out.Write(s.head)

@@ -119,7 +119,7 @@ func validatePlan(raw string) bool {
 		typ, _ := op["type"].(string)
 		switch typ {
 		case "add_node":
-			if !planKeys(op, "type", "ref", "templateId", "title", "persona", "inputValues") || !planID(op["ref"]) || !oneOf(op["templateId"], "general", "frontend", "backend", "data", "users", "materials", "review") {
+			if !planKeys(op, "type", "ref", "templateId", "title", "persona", "inputValues") || !planID(op["ref"]) || !oneOf(op["templateId"], planTemplateIDs...) {
 				return false
 			}
 			ref := op["ref"].(string)
