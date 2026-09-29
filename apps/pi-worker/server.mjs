@@ -96,14 +96,18 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
       'X-Accel-Buffering': 'no',
     });
     response.flushHeaders();
+    // Reasoning activity is a count the caller opts in to with a header. A caller that
+    // predates it never asks, so it keeps receiving exactly the stream it always did.
+    const reasoningActivity = request.headers['x-awwo-run-activity'] === 'reasoning';
     const release = () => { active.delete(body.runId); sessions.delete(sessionKey); clearInterval(heartbeat); resolveReleased(); };
     const emit = (event) => {
       observed(event);
+      if (event.type === 'reasoning' && !reasoningActivity) return;
       if (response.destroyed || response.writableEnded) return;
       response.write(`data: ${JSON.stringify(event)}\n\n`);
       // A slow client must not create an unbounded process-memory queue.
       if (response.writableLength > 1_048_576) { entry.cancelRequested = true; entry.handle?.cancel(); response.destroy(); }
-      if (event.type !== 'text_delta') response.end();
+      if (event.type !== 'text_delta' && event.type !== 'reasoning') response.end();
     };
     const heartbeat = setInterval(() => {
       if (!response.destroyed && !response.writableEnded) response.write(': heartbeat\n\n');

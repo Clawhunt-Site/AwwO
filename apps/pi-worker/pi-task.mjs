@@ -6,6 +6,15 @@ let activeSession;
 let cancelled = false;
 const controller = new AbortController();
 let started = false;
+// Provider reasoning is reported as a count, never its text, and at most this often:
+// a reader needs to see that the model is working, not each token of its scratchpad.
+const REASONING_REPORT_MS = 500;
+
+function codePoints(text) {
+  let count = 0;
+  for (const _ of text) count += 1;
+  return count;
+}
 
 function emit(event) {
   return new Promise((resolve) => {
@@ -124,11 +133,40 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     let finalMessage;
     let forbiddenTool = false;
     let eventQueue = Promise.resolve();
+    let reasoningCharacters = 0;
+    let reasoningStarted = false;
+    let reportedReasoning = -1;
+    let reportedAt = 0;
+    // Nothing is reported for a model that never reasons: a count of zero would tell the
+    // reader it is thinking when it is simply answering.
+    const reportReasoning = (force) => {
+      if (!reasoningStarted || reasoningCharacters === reportedReasoning) return;
+      const now = Date.now();
+      if (!force && now - reportedAt < REASONING_REPORT_MS) return;
+      reportedReasoning = reasoningCharacters;
+      reportedAt = now;
+      const characters = reasoningCharacters;
+      eventQueue = eventQueue.then(() => emit({ type: 'reasoning', characters }));
+    };
     unsubscribe = activeSession.subscribe((event) => {
-      if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
-        const delta = event.assistantMessageEvent.delta;
-        text += delta;
-        eventQueue = eventQueue.then(() => emit({ type: 'text_delta', delta }));
+      if (event.type === 'message_update') {
+        const update = event.assistantMessageEvent;
+        // A start is reported at once, even with nothing counted yet: that the model
+        // began reasoning is itself the fact a waiting reader lacks.
+        if (update.type === 'thinking_start') {
+          reasoningStarted = true;
+          reportReasoning(true);
+        } else if (update.type === 'thinking_delta' && typeof update.delta === 'string') {
+          reasoningStarted = true;
+          reasoningCharacters += codePoints(update.delta);
+          reportReasoning(false);
+        } else if (update.type === 'text_delta') {
+          // The last coalesced count goes out before the answer it preceded.
+          reportReasoning(true);
+          const delta = update.delta;
+          text += delta;
+          eventQueue = eventQueue.then(() => emit({ type: 'text_delta', delta }));
+        }
       }
       if (event.type === 'message_end' && event.message.role === 'assistant') {
         finalMessage = event.message;

@@ -13,6 +13,8 @@ const TOKEN = 'local-test-service-token-with-32-characters';
 const REQUEST = { runId: 'run_1', tenantId: 'tenant_1', sessionId: 'session_1', prompt: 'current request', messages: [] };
 const ENV = { AWWO_PI_TOKEN: TOKEN, AWWO_PI_PROVIDER: 'openai', AWWO_PI_MODEL: 'test-model', AWWO_PI_API_KEY: 'provider-test-key' };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Private scratchpad text a provider streams in its reasoning field; it must never leave the worker.
+const REASONING_TEXT = 'weigh 权衡 the private ledger 44102 before answering';
 
 test('Gate-only Pi personal configuration advertises its policy', () => {
   const env = { AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'true', AWWO_PI_TOKEN: TOKEN };
@@ -101,6 +103,13 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
       } else if (mode === 'oversize') {
         // Fewer than 1024 characters, but more than 1024 UTF-8 bytes.
         send({ role: 'assistant', content: '汉'.repeat(400) });
+        send({}, 'stop');
+      } else if (mode === 'reasoning') {
+        // A provider that streams its reasoning in a separate field before answering.
+        send({ role: 'assistant', reasoning_content: REASONING_TEXT.slice(0, 12) });
+        send({ reasoning_content: REASONING_TEXT.slice(12) });
+        send({ content: 'Hello ' });
+        send({ content: 'from Pi' });
         send({}, 'stop');
       } else {
         send({ role: 'assistant', content: 'Hello ' });
@@ -373,6 +382,8 @@ test('real Pi SDK streams OpenAI-compatible output, restores role-based history,
   await handle.done;
   assert.deepEqual(businessEvent(events.at(-1)), { type: 'completed', text: 'Hello from Pi' });
   assert.equal(events.filter((event) => event.type === 'text_delta').map((event) => event.delta).join(''), 'Hello from Pi');
+  // A model that never reasons produces no reasoning report at all, not even a zero.
+  assert.equal(events.filter((event) => event.type === 'reasoning').length, 0);
   assert.equal(model.requests.length, 1);
   const sent = model.requests[0];
   assert.equal(sent.url, '/v1/chat/completions');
@@ -401,6 +412,23 @@ test('Ollama uses the OpenAI-compatible path without requiring a remote provider
   await handle.done;
   assert.equal(events.at(-1).type, 'completed');
   assert.equal(model.requests[0].body.max_tokens, 4096);
+});
+
+test('provider reasoning crosses the isolated child as a count, never as its text', { timeout: 20000 }, async (t) => {
+  const model = await provider(t, { mode: 'reasoning' });
+  const { handle, events } = await run(t, configuration(model.baseURL));
+  await handle.done;
+  assert.deepEqual(businessEvent(events.at(-1)), { type: 'completed', text: 'Hello from Pi' });
+  const counts = events.filter(event => event.type === 'reasoning');
+  // The start is reported before anything is counted; the settled total precedes the answer.
+  assert.ok(counts.length >= 2);
+  assert.deepEqual(counts[0], { type: 'reasoning', characters: 0 });
+  assert.deepEqual(counts.at(-1), { type: 'reasoning', characters: [...REASONING_TEXT].length });
+  assert.ok(events.indexOf(counts.at(-1)) < events.findIndex(event => event.type === 'text_delta'));
+  assert.equal(events.filter(event => event.type === 'text_delta').map(event => event.delta).join(''), 'Hello from Pi');
+  for (const count of counts) assert.deepEqual(Object.keys(count).sort(), ['characters', 'type']);
+  const everything = JSON.stringify(events);
+  assert.ok(!everything.includes('44102') && !everything.includes('权衡'), 'the scratchpad left the worker');
 });
 
 test('provider authentication failures are redacted and do not produce a successful mock answer', { timeout: 20000 }, async (t) => {
@@ -580,6 +608,42 @@ test('HTTP to isolated Pi to model protocol returns the documented SSE completio
     assert.ok((await next.text()).includes('"type":"completed"'));
   }
   assert.equal(model.requests.length, 4);
+});
+
+test('HTTP relays reasoning counts only to a caller that opted in, and they never end the stream', { timeout: 20000 }, async (t) => {
+  const model = await provider(t, { mode: 'reasoning' });
+  const app = createPiServer(configuration(model.baseURL));
+  const url = await listen(app.server);
+  t.after(() => app.close());
+  const plainModel = await provider(t);
+  const plainApp = createPiServer(configuration(plainModel.baseURL));
+  const plainURL = await listen(plainApp.server);
+  t.after(() => plainApp.close());
+  const read = async (runId, extra = {}, base = url) => {
+    const response = await fetch(`${base}/internal/runs`, { method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', ...extra },
+      body: JSON.stringify({ ...REQUEST, runId }) });
+    assert.equal(response.status, 200);
+    return (await response.text()).split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)));
+  };
+  // A caller that predates the header receives exactly the stream it always did.
+  const plain = await read('reasoning_plain');
+  assert.equal(plain.filter(event => event.type === 'reasoning').length, 0);
+  assert.deepEqual(plain.map(event => event.type), ['text_delta', 'text_delta', 'completed']);
+  // Anything else in the header is not the opt-in.
+  const other = await read('reasoning_other', { 'x-awwo-run-activity': 'everything' });
+  assert.equal(other.filter(event => event.type === 'reasoning').length, 0);
+  const opted = await read('reasoning_opted', { 'x-awwo-run-activity': 'reasoning' });
+  const counts = opted.filter(event => event.type === 'reasoning');
+  assert.ok(counts.length >= 2);
+  assert.equal(counts.at(-1).characters, [...REASONING_TEXT].length);
+  // Reasoning is not terminal: the answer and its completion still follow on the same stream.
+  assert.deepEqual(businessEvent(opted.at(-1)), { type: 'completed', text: 'Hello from Pi' });
+  assert.equal(opted.filter(event => event.type === 'text_delta').map(event => event.delta).join(''), 'Hello from Pi');
+  assert.ok(!JSON.stringify(opted).includes('44102'), 'the scratchpad crossed HTTP');
+  // Opting in never invents activity: a model that does not reason reports none.
+  const silent = await read('reasoning_silent', { 'x-awwo-run-activity': 'reasoning' }, plainURL);
+  assert.deepEqual(silent.map(event => event.type), ['text_delta', 'text_delta', 'completed']);
 });
 
 test('terminal delivery waits for an actual child to stop and frees the same session without overlapping processes', { timeout: 20000 }, async (t) => {
