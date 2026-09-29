@@ -679,7 +679,7 @@ export const SessionTile = memo(function SessionTile({
                 </div> : null}
                 {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
                   <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={() => setInputOpen(false)}><X size={14} /></button></header>
-                  <ContractFields fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
+                  <ContractFields valuesFirst fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className="awwo-node-panel awwo-node-panel--conversation">
                   {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>

@@ -150,7 +150,7 @@ describe('durable collaboration details', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === base ? { items: [data] }
       : url.endsWith('/turns') ? { items: [] } : { id: 'run-a3', tenantId: 'tenant-a', status: 'completed' })));
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly /></SaaSPreferencesProvider>);
-    fireEvent.click(screen.getByRole('button', { name: /Background runs & collaboration/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
     expect(await screen.findByText('Final synthesis')).toBeVisible();
     expect(screen.queryByText('Invalid graph run response')).toBeNull();
     expect(screen.queryByRole('region', { name: 'Selected-node collaboration' })).toBeNull();
@@ -160,7 +160,7 @@ describe('durable collaboration details', () => {
     const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => { expect(url).toBe(base); return json({ items: [snapshot()] }); });
     vi.stubGlobal('fetch', fetcher);
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly /></SaaSPreferencesProvider>);
-    fireEvent.click(screen.getByRole('button', { name: /Background runs & collaboration/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
     const region = within(await screen.findByRole('region', { name: 'Selected-node collaboration' }));
     expect(region.getByText('3/5 calls admitted · Synthesizer: Agent a')).toBeInTheDocument();
     expect(region.getByText('run-a2')).toBeInTheDocument();
@@ -176,7 +176,7 @@ describe('durable collaboration details', () => {
     failed.turns = failed.turns.map(turn => turn.ordinal === 3 ? { ...turn, status: 'failed', error: 'provider_rate_limited' } : turn);
     vi.stubGlobal('fetch', vi.fn(async () => json({ items: [snapshot({ collaboration: failed })] })));
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly /></SaaSPreferencesProvider>);
-    fireEvent.click(screen.getByRole('button', { name: /Background runs & collaboration/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
     const region = within(await screen.findByRole('region', { name: 'Selected-node collaboration' }));
     expect(region.getByText('The model provider is rate limited. Please try again later.')).toBeVisible();
     expect(region.queryByText('provider_rate_limited')).toBeNull();
@@ -185,7 +185,7 @@ describe('durable collaboration details', () => {
   it('labels completed synthesis without claiming another review of the final result', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ items: [completed()] })));
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" /></SaaSPreferencesProvider>);
-    fireEvent.click(screen.getByRole('button', { name: /Background runs & collaboration/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
     expect(await screen.findByText('Synthesis after peer review is complete. The synthesis has not had an additional independent review.')).toBeVisible();
     expect(screen.getByText('Node result')).toBeVisible();
   });

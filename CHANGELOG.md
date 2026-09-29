@@ -6,6 +6,18 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Changed
+
+- Keep workspace navigation focused on the active workspace and account; move language, theme, guidance and maintenance actions into an accessible overflow menu.
+- Show one short automatic introduction per account and device, with detailed guidance available on demand. Preserve the model library on the left and Bot list on the right.
+- Put provider and API key first during engine setup, group runtime/name options under advanced settings, and offer a direct return after verified model availability.
+- Make node inputs start with task values; reveal editable field structure only when requested. Move canvas rename/delete into per-card menus and hide pagination on single-page lists.
+
+### Fixed
+
+- Keep menu and run-history keyboard focus inside the open layer, prevent canvas shortcuts from acting behind it, and restore trigger focus on Escape.
+
+
 ## [0.9.0] - 2026-09-28
 
 ### Added

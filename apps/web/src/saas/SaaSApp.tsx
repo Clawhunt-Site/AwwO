@@ -21,6 +21,7 @@ import { InviteAcceptance } from './InviteAcceptance';
 import { AdminPanel } from './AdminPanel';
 import { RuntimeSettings } from './RuntimeSettings';
 import { CanvasList } from './CanvasList';
+import { ActionMenu } from './ActionMenu';
 import { AppearanceScope } from './SaaSAppearance';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink } from './SaaSOnboarding';
 import { clearSSOReturnURL, clawHuntAccountURL, clawHuntStartURL, clawHuntWaitlistURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
@@ -209,7 +210,7 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
   const requested = params.get('tenant');
   const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
   const canvasId = params.get('canvas');
-  const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} canvasId={canvasId} onProfile={onProfile} />;
+  const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} />;
   if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。可以新建工作区，或请所有者发送邀请链接。', 'You have not joined a workspace. Create one or ask its owner for an invitation.')}</p>{identity.user.platformRole === 'admin' && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
   const readOnly = tenant.role === 'reader';
   if (canvasId) return readOnly ? <ReadOnlyCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} /> : <CloudCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} />;
@@ -217,22 +218,24 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
     <CanvasList key={identity.user.id + ':' + tenant.id + ':' + tenant.role} tenant={tenant} onOpen={id => navigate(tenant.id, id)} />
   </main>;
 }
-function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity: Identity; tenant?: Tenant; canvasId?: string | null; onProfile: (name: string) => void }) {
+function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity; tenant?: Tenant; onProfile: (name: string) => void }) {
   const { locale, t } = useSaaSPreferences();
   const [error, setError] = useState('');
   const [managementTenant, setManagementTenant] = useState<string | null>(tenant?.id || null);
   const [creatingWorkspace, setCreatingWorkspace] = useState(() => new URLSearchParams(window.location.search).get('createWorkspace') === '1');
   const accountApi = useMemo(() => createSaaSAccountApi(onProfile), [identity.user.id, onProfile]);
-  return <div className="saas-account-actions" data-onboarding="workspace-actions"><PreferenceControls /><GuideLauncher /><MainSiteLink />
+  return <div className="saas-account-actions" data-onboarding="workspace-actions">
     {identity.tenants.length > 0 && <select aria-label={t('切换工作区', 'Switch workspace')} value={tenant?.id || ''} onChange={event => navigate(event.target.value)}>{!tenant && <option value="" disabled>{t('选择工作区', 'Choose a workspace')}</option>}{identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? t('（已暂停）', ' (suspended)') : ''}</option>)}</select>}
-    <button className="saas-create-workspace-trigger" title={t('新建工作区', 'Create workspace')} aria-label={t('新建工作区', 'Create workspace')} onClick={() => setCreatingWorkspace(true)}><Plus size={16}/><span>{t('新建工作区', 'Create workspace')}</span></button>
-    {creatingWorkspace && <CreateWorkspaceDialog onClose={() => setCreatingWorkspace(false)} onCreated={id => navigate(id)} />}
-    {canvasId && tenant && <button title={t('返回画布列表', 'Back to canvases')} aria-label={t('返回画布列表', 'Back to canvases')} onClick={() => navigate(tenant.id)}><ArrowLeft size={16}/></button>}
-    {identity.user.platformRole === 'admin' && <a href="/admin" title={t('平台管理', 'Platform administration')} aria-label={t('平台管理', 'Platform administration')}><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
-    {identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}<a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
+    {identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
       workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi,
         ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined } } : {}) }} />
+    <ActionMenu label={t('更多选项', 'More options')}>{close => <>
+      <PreferenceControls />
+      <GuideLauncher onLaunch={close} /><MainSiteLink />
+      <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
+      <a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
+      {identity.user.platformRole === 'admin' && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => {
       try {
         const result = await api<null | { logoutURL: string }>('/auth/logout', { method: 'POST' });
@@ -243,6 +246,8 @@ function WorkspaceControls({ identity, tenant, canvasId, onProfile }: { identity
         } else location.reload();
       } catch { setError(t('退出失败，请重试。', 'Sign-out failed. Please try again.')); }
     }}><LogOut size={16}/></button>
+    </>}</ActionMenu>
+    {creatingWorkspace && <CreateWorkspaceDialog onClose={() => setCreatingWorkspace(false)} onCreated={id => navigate(id)} />}
     {error && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
   </div>;
 }

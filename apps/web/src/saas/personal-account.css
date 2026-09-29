@@ -95,6 +95,38 @@
 .saas-gate-card {
   border-top: 3px solid var(--saas-accent);
 }
+.saas-personal .saas-key-storage-note {
+  margin-bottom: 0;
+  color: var(--saas-muted);
+}
+.saas-connection-advanced {
+  border-block: 1px solid var(--saas-border);
+}
+.saas-connection-advanced summary {
+  padding: 14px 0;
+  cursor: pointer;
+  color: var(--saas-muted);
+  font-size: 13px;
+}
+.saas-connection-advanced summary:focus-visible {
+  outline: 2px solid var(--saas-accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.saas-connection-advanced-fields {
+  display: grid;
+  gap: 14px;
+  padding: 0 0 18px;
+}
+.saas-connection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.saas-connection-success {
+  color: var(--saas-accent);
+}
 .saas-connection-list {
   margin-top: 24px;
 }

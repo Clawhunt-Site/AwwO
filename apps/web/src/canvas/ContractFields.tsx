@@ -20,6 +20,8 @@ export interface ContractFieldsProps {
   sources?: Record<string, string>;
   onChange: (fields: ContractField[]) => void;
   readOnly?: boolean;
+  /** Task entry starts with values; contract customization remains available on demand. */
+  valuesFirst?: boolean;
   label: string;
 }
 
@@ -71,9 +73,11 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
   </div>;
 }
 
-export function ContractFields({ fields, resolvedFields, sources, onChange, readOnly = false, label }: ContractFieldsProps) {
+export function ContractFields({ fields, resolvedFields, sources, onChange, readOnly = false, valuesFirst = false, label }: ContractFieldsProps) {
   const { locale, t } = useCanvasI18n();
   const instanceId = useId();
+  const [editingSchema, setEditingSchema] = useState(false);
+  const showSchema = !valuesFirst || editingSchema;
   const nextField = useRef(0);
   const errors = validateContractFields(resolvedFields ?? fields);
   const patch = (id: string, update: Partial<ContractField>) => {
@@ -86,6 +90,7 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
     onChange([...fields, { id, label: t('contract.defaultField', { count: fields.length + 1 }), type: 'text', required: false, value: '' }]);
   };
   return <section className="awwo-contract-fields" aria-label={t('contract.fields', { label })}>
+    {valuesFirst && !readOnly && <button type="button" className="awwo-field-structure-toggle" aria-expanded={editingSchema} onClick={() => setEditingSchema(value => !value)}>{locale === 'zh' ? (editingSchema ? '完成结构编辑' : '编辑字段结构') : (editingSchema ? 'Done editing fields' : 'Edit field structure')}</button>}
     {fields.length === 0 ? <div className="awwo-contract-empty">{t('contract.empty', { label })}</div> : null}
     {fields.map((field, index) => {
       const name = field.label || t('contract.defaultField', { count: index + 1 });
@@ -94,7 +99,7 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
       const valueReadOnly = readOnly || Boolean(source);
       const helpId = field.help ? `${instanceId}-field-${index}-help` : undefined;
       return <div key={field.id} className="awwo-contract-field">
-        <div className="awwo-field-header">
+        {showSchema ? <><div className="awwo-field-header">
           <input className="awwo-field-name" aria-label={t('contract.fieldName', { count: index + 1 })} value={field.label} placeholder={t('contract.fieldNamePlaceholder')}
             disabled={readOnly} onChange={(event) => patch(field.id, { label: event.target.value })} />
           <select aria-label={t('contract.fieldType', { name })} value={field.type} disabled={readOnly}
@@ -107,7 +112,7 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
           </button>
         </div>
         <label className="awwo-field-required"><input type="checkbox" aria-label={locale === 'zh' ? `${name}${t('contract.required')}` : `${name} ${t('contract.required')}`} checked={field.required}
-          disabled={readOnly} onChange={(event) => patch(field.id, { required: event.target.checked })} />{t('contract.required')}</label>
+          disabled={readOnly} onChange={(event) => patch(field.id, { required: event.target.checked })} />{t('contract.required')}</label></> : <div className="awwo-field-value-label"><strong>{name}</strong>{field.required && <span>{t('contract.required')}</span>}</div>}
         {helpId ? <p className="awwo-field-help" id={helpId}>{field.help}</p> : null}
         {source && <p className="awwo-field-hint">{t(resolvedFields ? 'contract.sourceResolved' : 'contract.sourceWaiting', { source })}</p>}
         {field.type === 'markdown' ? <MarkdownValue field={displayed} name={name} readOnly={valueReadOnly} placeholder={field.placeholder} describedBy={helpId} onChange={(value) => patch(field.id, { value })} />
@@ -126,6 +131,6 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
     {errors.length > 0 ? <ul className="awwo-contract-errors" role="alert" aria-label={t('contract.validation', { label })}>
       {errors.map((error, index) => <li key={`${index}:${error}`}>{error}</li>)}
     </ul> : null}
-    <button type="button" className="awwo-field-add" disabled={readOnly} onClick={add}><Plus size={15} aria-hidden="true" />{t('contract.addField')}</button>
+    {showSchema && <button type="button" className="awwo-field-add" disabled={readOnly} onClick={add}><Plus size={15} aria-hidden="true" />{t('contract.addField')}</button>}
   </section>;
 }

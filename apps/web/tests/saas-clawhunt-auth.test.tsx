@@ -181,7 +181,8 @@ it('does not claim unified sign-out when the server fails to return the main-sit
     ? response(appearanceFixture) : url.endsWith('/auth/logout') ? response(null, 204) : response({ items: [] }));
   vi.stubGlobal('fetch', fetch);
   render(<SaaSApp />);
-  fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
+  fireEvent.click(await screen.findByRole('button', { name: '更多选项' }));
+  fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('无法确认 ClawHunt 主站退出');
   expect(fetch.mock.calls.filter(([url]) => url.endsWith('/auth/logout'))).toHaveLength(1);
 });

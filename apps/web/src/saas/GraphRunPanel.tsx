@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
 import { graphPath, graphIsActive, validGraphCollaboration, type GraphRunSnapshot, type GraphCollaborationPhase } from './graphRuns';
 import { TeamRunDetails } from './TeamRunDetails';
 import { RunEvidence } from './RunEvidence';
 import { useSaaSPreferences } from './preferences';
+import { containDialogTab } from '../ui/Popover';
 import './graph-runs.css';
 
 type GraphRunPanelProps = { tenantId: string; canvasId: string; readOnly?: boolean };
@@ -14,6 +15,8 @@ export function GraphRunPanel(props: GraphRunPanelProps) {
 function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPanelProps) {
   const { locale, t } = useSaaSPreferences();
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLElement>(null);
   const [items, setItems] = useState<GraphRunSnapshot[]>([]);
   const [selected, setSelected] = useState('');
   const [nodeId, setNodeId] = useState('');
@@ -48,13 +51,12 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
   }, [tenantId, canvasId, open, refresh]);
   useEffect(() => {
     if (!open) return;
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
-    window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape);
+    panel.current?.focus({ preventScroll: true });
   }, [open]);
   return <div className="saas-graph-control">
-    <button data-onboarding="run-history" onClick={() => setOpen(!open)} aria-expanded={open}>{active ? '● ' : ''}{t('后台运行与协作记录', 'Background runs & collaboration')}</button>
-    {open && <section className="saas-graph-panel" role="dialog" aria-label={t('后台运行与协作记录', 'Background runs & collaboration')}>
-      <header><h2>{t('后台运行与协作记录', 'Background runs & collaboration')}</h2><button aria-label={t('关闭运行记录', 'Close run history')} onClick={() => setOpen(false)}>×</button></header>
+    <button ref={trigger} data-onboarding="run-history" onClick={() => setOpen(!open)} aria-expanded={open}>{active ? '● ' : ''}{t('运行记录', 'Run history')}</button>
+    {open && <section ref={panel} tabIndex={-1} onKeyDown={event => { event.stopPropagation(); containDialogTab(event); if (event.key === 'Escape') { event.preventDefault(); setOpen(false); trigger.current?.focus(); } }} className="saas-graph-panel" role="dialog" aria-label={t('运行记录', 'Run history')}>
+      <header><h2>{t('运行记录', 'Run history')}</h2><button aria-label={t('关闭运行记录', 'Close run history')} onClick={() => { setOpen(false); trigger.current?.focus(); }}>×</button></header>
       <p>{t('任务提交后由后台继续调度。离开或关闭页面不会停止任务。', 'Accepted tasks keep running in the background when you leave or close this page.')}</p>
       {error !== null && <p role="alert">{saasErrorMessage(error, locale)} <button onClick={() => setRefresh(refresh + 1)}>{t('重试', 'Retry')}</button></p>}
       {!items.length && error === null && <p role="status">{t('还没有后台整图运行记录。', 'No background graph runs yet.')}</p>}

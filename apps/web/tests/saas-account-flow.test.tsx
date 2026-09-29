@@ -8,7 +8,7 @@ const owner = { user: { id: 'alice', name: 'Alice', email: 'alice@example.test',
 const members = [{ userId: 'alice', name: 'Alice', email: 'alice@example.test', role: 'owner' }, { userId: 'bob', name: 'Bob', email: 'bob@example.test', role: 'admin' }];
 const response = (data: unknown, status = 200) => new Response(status === 204 ? null : JSON.stringify(data), { status });
 beforeEach(() => {
-  localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/');
+  localStorage.clear(); localStorage.setItem('awwo.onboarding.v1:alice:workspace', 'completed'); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/');
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
 });
@@ -167,8 +167,12 @@ it('translates the original account panel when changing the SaaS language', asyn
   vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(owner) : response({ items: new URL(url, 'http://localhost').pathname.endsWith('/members') ? members : [] })));
   render(<SaaSApp />); fireEvent.click(await screen.findByRole('button', { name: '账号与工作区' }));
   expect(await screen.findByRole('heading', { name: '工作区资料' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '关闭账号面板' }));
+  fireEvent.click(screen.getByRole('button', { name: '更多选项' }));
   fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));
-  expect(screen.getByRole('heading', { name: 'Workspace profile' })).toBeVisible();
+  fireEvent.keyDown(screen.getByRole('dialog', { name: 'More options' }), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Account & workspaces' }));
+  expect(await screen.findByRole('heading', { name: 'Workspace profile' })).toBeVisible();
   expect(screen.getByRole('textbox', { name: 'Display name' })).toHaveValue('Alice');
   expect(screen.queryByText('ClawHunt account')).toBeNull();
 });

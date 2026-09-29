@@ -54,7 +54,8 @@ it('ignores a late canvas list response from a previous tenant and starts the ne
   await screen.findByRole('heading', { name: 'Only B' });
   await act(async () => resolveOld(json({ items: [{ ...record(1), name: 'Private A' }], nextCursor: 'a-next' })));
   expect(screen.queryByText('Private A')).toBeNull();
-  expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
+  expect(screen.getByRole('button', { name: '刷新列表' })).toBeEnabled();
   expect(fetcher.mock.calls[1][0]).toBe('/api/v1/tenants/tenant-b/canvases?limit=50');
 });
 
@@ -79,7 +80,8 @@ it('does not write when renaming is cancelled, including before the initial read
     return new Promise<Response>(resolve => { resolveRead = resolve; });
   }));
   render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()}/>));
-  fireEvent.click(await screen.findByRole('button', { name: '改名：Canvas 0' }));
+  fireEvent.click(await screen.findByRole('button', { name: '画布选项：Canvas 0' }));
+  fireEvent.click(screen.getByRole('button', { name: '改名', exact: true }));
   fireEvent.change(screen.getByRole('textbox', { name: '画布名称' }), { target: { value: 'Cancelled name' } });
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   await act(async () => resolveRead(json(record(0))));
@@ -96,7 +98,8 @@ it('renames with the latest document and exact CAS version, preserving input on 
     return input.includes('?') ? json({ items: [record(0)], nextCursor: null }) : json({ ...record(0), document: cloudDocument, version });
   }));
   render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()}/>));
-  fireEvent.click(await screen.findByRole('button', { name: '改名：Canvas 0' }));
+  fireEvent.click(await screen.findByRole('button', { name: '画布选项：Canvas 0' }));
+  fireEvent.click(screen.getByRole('button', { name: '改名', exact: true }));
   const dialog = within(screen.getByRole('dialog', { name: '更改画布名称' }));
   await waitFor(() => expect(dialog.getByRole('button', { name: '保存名称' })).toBeEnabled());
   fireEvent.change(dialog.getByRole('textbox', { name: '画布名称' }), { target: { value: 'My rename' } });
@@ -119,10 +122,12 @@ it('requires explicit deletion, sends nothing on cancel, and preserves the canva
     return json({ items: removed ? [] : [record(0)], nextCursor: null });
   }));
   render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()}/>));
-  fireEvent.click(await screen.findByRole('button', { name: '删除：Canvas 0' }));
+  fireEvent.click(await screen.findByRole('button', { name: '画布选项：Canvas 0' }));
+  fireEvent.click(screen.getByRole('button', { name: '删除', exact: true }));
   expect(screen.getByRole('dialog')).toHaveTextContent('全部会话和运行历史');
   fireEvent.click(screen.getByRole('button', { name: '取消' })); expect(writes).toEqual([]);
-  fireEvent.click(screen.getByRole('button', { name: '删除：Canvas 0' }));
+  fireEvent.click(screen.getByRole('button', { name: '画布选项：Canvas 0' }));
+  fireEvent.click(screen.getByRole('button', { name: '删除', exact: true }));
   fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('正在执行');
   expect(screen.getByRole('heading', { name: 'Canvas 0' })).toBeVisible();
@@ -168,7 +173,8 @@ it('keeps a new canvas name when creation fails', async () => {
 it('offers workspace creation even to a user without memberships and cancels without a request', async () => {
   const fetcher = vi.fn(async (url: string) => json(url.endsWith('/appearance') ? appearanceFixture : { user: { id: 'u', name: 'User', email: 'u@example.test', platformRole: 'user' }, tenants: [] })); vi.stubGlobal('fetch', fetcher);
   render(<SaaSApp/>);
-  fireEvent.click(await screen.findByRole('button', { name: '新建工作区' }));
+  fireEvent.click(await screen.findByRole('button', { name: '更多选项' }));
+  fireEvent.click(screen.getByRole('button', { name: '新建工作区' }));
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(screen.queryByRole('dialog')).toBeNull(); expect(fetcher.mock.calls.filter(call => !String(call[0]).endsWith('/appearance'))).toHaveLength(1);
 });

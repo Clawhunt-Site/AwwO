@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createSessionNode, emptyDocument } from '../src/canvas/canvasDoc';
 import { GraphRunPanel } from '../src/saas/GraphRunPanel';
+import { useCanvasKeys } from '../src/canvas/useCanvasKeys';
 import type { GraphRunSnapshot, TeamTurn } from '../src/saas/graphRuns';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 
@@ -20,7 +21,7 @@ const turns: TeamTurn[] = [
   { id: 'turn-3', memberId: 'writer', memberName: 'Writer Ada', role: 'member', round: 2, status: 'completed', model: 'writer-profile', output: 'Revised proposal incorporating the review' },
 ];
 const renderPanel = (readOnly = false) => render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly={readOnly}/></SaaSPreferencesProvider>);
-const openPanel = () => fireEvent.click(screen.getByRole('button', { name: /Background runs & collaboration/ }));
+const openPanel = () => fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'en'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
 
@@ -45,7 +46,7 @@ it('labels a delivery-contract failure in both locales and leaves an unmapped de
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal('fetch', fetcher); renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: locale === 'zh' ? /后台运行/ : /Background runs & collaboration/ }));
+    fireEvent.click(screen.getByRole('button', { name: locale === 'zh' ? /运行记录/ : /Run history/ }));
     const panel = within(await screen.findByRole('dialog'));
     await panel.findByText(expected);
     cleanup(); vi.unstubAllGlobals();
@@ -61,7 +62,7 @@ it('renders actual member rounds, per-agent models, review text and final node o
     throw new Error(`Unexpected request: ${url}`);
   });
   vi.stubGlobal('fetch', fetcher); renderPanel(); openPanel();
-  const panel = within(await screen.findByRole('dialog', { name: 'Background runs & collaboration' }));
+  const panel = within(await screen.findByRole('dialog', { name: 'Run history' }));
   await panel.findByText('Revised proposal incorporating the review');
   expect(panel.getByText('Research consensus from the server')).toBeVisible();
   expect(panel.getByText('1/2 nodes completed')).toBeVisible();
@@ -137,4 +138,78 @@ it('reports a malformed history response without crashing the canvas shell', asy
   renderPanel(); openPanel();
   expect(await screen.findByRole('alert')).toHaveTextContent('Invalid graph run response');
   expect(screen.getByRole('button', { name: 'Close run history' })).toBeVisible();
+});
+
+
+it('contains run-history shortcuts and restores the canvas trigger without changing its selection', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ items: [] })));
+  const canvasAction = vi.fn();
+  function CanvasHarness() {
+    useCanvasKeys({
+      onDeleteSelection: canvasAction,
+      onUndo: canvasAction,
+      onRedo: canvasAction,
+      onPalette: canvasAction,
+      onFocusToggle: canvasAction,
+      onEscape: canvasAction,
+    });
+    return <GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" />;
+  }
+  render(<SaaSPreferencesProvider><CanvasHarness /></SaaSPreferencesProvider>);
+  const trigger = screen.getByRole('button', { name: 'Run history' });
+  fireEvent.click(trigger);
+  const panel = screen.getByRole('dialog', { name: 'Run history' });
+  const close = within(panel).getByRole('button', { name: 'Close run history' });
+  expect(panel).toHaveFocus();
+  await within(panel).findByText('No background graph runs yet.');
+  for (const target of [panel, close]) {
+    for (const key of ['Delete', 'Backspace']) fireEvent.keyDown(target, { key });
+    for (const key of ['z', 'y', 'p', 'e']) {
+      fireEvent.keyDown(target, { key, ctrlKey: true });
+      fireEvent.keyDown(target, { key, metaKey: true });
+    }
+  }
+  fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+  expect(close).toHaveFocus();
+  for (const shiftKey of [false, true]) {
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Delete' });
+  }
+  expect(canvasAction).not.toHaveBeenCalled();
+  fireEvent.keyDown(close, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(trigger).toHaveFocus();
+  expect(canvasAction).not.toHaveBeenCalled();
+  fireEvent.keyDown(window, { key: 'Delete' });
+  expect(canvasAction).toHaveBeenCalledOnce();
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole('button', { name: 'Close run history' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(trigger).toHaveFocus();
+});
+
+it('wraps run-history Tab focus through the controls in both directions', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ items: [graph({ status: 'completed', nodes: [
+    { nodeId: 'a', state: 'done' }, { nodeId: 'b', state: 'done' },
+  ] })] })));
+  render(<SaaSPreferencesProvider><button>Outside canvas action</button><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" /></SaaSPreferencesProvider>);
+  openPanel();
+  const panel = screen.getByRole('dialog');
+  const first = within(panel).getByRole('button', { name: 'Close run history' });
+  const selector = await within(panel).findByRole('combobox', { name: 'Select run' });
+  const nodeA = within(panel).getByRole('button', { name: 'Research team · Completed' });
+  const last = within(panel).getByRole('button', { name: 'Delivery team · Completed' });
+  expect(panel).toHaveFocus();
+  for (const expected of [first, selector, nodeA, last, first]) {
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+    expect(expected).toHaveFocus();
+  }
+  for (const expected of [last, nodeA, selector, first, last]) {
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+    expect(expected).toHaveFocus();
+  }
+  fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Run history' })).toHaveFocus();
 });

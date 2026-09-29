@@ -160,8 +160,8 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     ? <button type="button" className="awwo-rail-link" onClick={open}>{label}</button>
     : <>{label}</>;
   const emptyRailHint = locale === 'zh'
-    ? <>先在右侧{railLink('Bot 清单', openBotRail)}选择人设（可选），再从左侧{railLink('模型栏', openModelRail)}添加模型；也可以直接选用已有 Bot。</>
-    : <>Optionally choose a persona in the {railLink('Bot list', openBotRail)} on the right, then add a model from the {railLink('model rail', openModelRail)} on the left. You can also use an existing Bot.</>;
+    ? <>从左侧{railLink('模型栏', openModelRail)}添加模型，或从右侧{railLink('Bot 清单', openBotRail)}选择协作者。人设可选，写清任务就能开始。</>
+    : <>Add a model from the {railLink('model rail', openModelRail)} on the left, or choose a collaborator from the {railLink('Bot list', openBotRail)} on the right. Personas are optional; start with a clear task.</>;
 
   const botRailToggle = modelShelf ? <button type="button" className="awwo-icon-button awwo-rail-toggle" aria-expanded={!botRailCollapsed}
     aria-label={t(botRailCollapsed ? 'workspace.expandBots' : 'workspace.collapseBots')} title={t(botRailCollapsed ? 'workspace.expandBots' : 'workspace.collapseBots')}

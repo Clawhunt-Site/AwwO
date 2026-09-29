@@ -129,6 +129,54 @@ it("selects a supported engine and links to LLM Gate from personal settings", as
   ).not.toBeInTheDocument();
 });
 
+it("keeps optional setup collapsed and resets the engine and key when the provider changes", async () => {
+  history.replaceState(null, "", "/?account=engines");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(catalog)));
+  gate();
+  await screen.findByText("Connect your first engine");
+  const advanced = screen.getByText("Advanced options").closest("details")!;
+  expect(advanced).not.toHaveAttribute("open");
+  expect(screen.getByLabelText("API Key")).toBeVisible();
+  expect(screen.getByLabelText("Execution engine")).not.toBeVisible();
+  expect(screen.getByLabelText("Connection name (optional)")).not.toBeVisible();
+  fireEvent.click(screen.getByText("Advanced options"));
+  expect(screen.getByLabelText("Execution engine")).toBeVisible();
+  expect(screen.getByLabelText("Execution engine")).toHaveValue("openai-agents");
+  fireEvent.change(screen.getByLabelText("Execution engine"), { target: { value: "pi" } });
+  fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "synthetic-user-secret" } });
+  fireEvent.change(screen.getByLabelText("Model provider"), { target: { value: "anthropic" } });
+  expect(screen.getByLabelText("Execution engine")).toHaveValue("pi");
+  expect(screen.getByLabelText("API Key")).toHaveValue("");
+  fireEvent.change(screen.getByLabelText("Model provider"), { target: { value: "llmgate" } });
+  expect(screen.getByLabelText("Execution engine")).toHaveValue("openai-agents");
+});
+
+it("offers an adjacent return to the same canvas only after a usable connection is read back", async () => {
+  history.replaceState(null, "", "/?tenant=team-a&canvas=canvas-b&account=engines");
+  let readback!: (value: Response) => void;
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(response(catalog))
+    .mockResolvedValueOnce(response({ id: "new-connection" }, 201))
+    .mockImplementationOnce(() => new Promise<Response>(resolve => { readback = resolve; }));
+  vi.stubGlobal("fetch", fetcher);
+  gate();
+  await screen.findByText("Connect your first engine");
+  fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "synthetic-user-secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "Verify and save" }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+  expect(screen.queryByRole("link", { name: "Return to canvas" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Verifying…" })).toBeDisabled();
+  readback(response({ ...catalog, items: [{
+    id: "new-connection", name: "Work", provider: "llmgate", runtime: "openai-agents", models: ["model"], hasKey: true,
+  }] }));
+  const next = await screen.findByRole("link", { name: "Return to canvas" });
+  expect(next).toHaveAttribute("href", "/?tenant=team-a&canvas=canvas-b");
+  const form = screen.getByLabelText("API Key").closest("form")!;
+  expect(form).toContainElement(next);
+  expect(within(form).getByRole("status")).toHaveTextContent("Credentials encrypted and model catalog verified.");
+  expect(screen.getByLabelText("API Key")).toHaveValue("");
+});
+
 it("shows a completed connection only after verification and server readback, without storing the key", async () => {
   history.replaceState(null, "", "/?account=engines");
   const fetch = vi

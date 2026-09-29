@@ -8,6 +8,7 @@ export type FirstRunScene = 'workspace' | 'canvas' | 'engines';
 export type FirstRunAction = 'engines' | 'create-canvas' | 'provider-key';
 export type FirstRunTourProps = {
   open: boolean;
+  overview?: boolean;
   scene: FirstRunScene;
   locale: 'zh' | 'en';
   mainSiteURL?: string;
@@ -26,7 +27,7 @@ const viewport = () => ({ width: window.innerWidth, height: window.innerHeight }
 
 function stepsFor(scene: FirstRunScene, readOnly: boolean, personalEngines: boolean): Step[] {
   if (scene === 'engines') return [
-    { key: 'provider', title: ['选好模型服务', 'Choose a model provider'], instruction: ['在「模型服务」中选择服务商，再选择执行引擎；不确定时保留默认引擎。', 'Choose your model provider and an execution engine; keep the default engine if you are unsure.'], targets: ['engine-setup'] },
+    { key: 'provider', title: ['选好模型服务', 'Choose a model provider'], instruction: ['选择模型服务商，填写 API Key；执行引擎可保持默认。', 'Choose your model provider and enter an API key. You can keep the default execution engine.'], targets: ['engine-setup'] },
     { key: 'key', title: ['填入你自己的 API Key', 'Add your own API key'], instruction: ['把所选服务商的 API Key 填入密钥框，再点击「验证并保存」。', 'Paste the selected provider’s API key into the key field, then choose “Verify and save”.'], hint: ['这里填写模型凭证，不是 AwwO 登录密码。', 'Use a model credential here, not your AwwO password.'], targets: ['provider-key', 'engine-setup'], action: 'provider-key', actionLabel: ['去填写 API Key', 'Enter my API key'] },
     { key: 'verified', title: ['验证后就能选择模型', 'Verify, then choose your models'], instruction: ['验证成功后返回工作区；如果需要我们的模型服务，先通过 LLM Gate 获取凭证。', 'After verification, return to your workspace; use LLM Gate to get a credential for our model service.'], hint: ['只有你主动运行任务时，才会使用你的模型连接。', 'Your model connection is used when you choose to run a task.'], targets: ['provider-verify', 'gate-purchase', 'engine-setup'] },
   ];
@@ -34,7 +35,7 @@ function stepsFor(scene: FirstRunScene, readOnly: boolean, personalEngines: bool
     { key: 'models', title: readOnly ? ['查看节点的模型信息', 'Review node model information'] : ['模型在左侧', 'Models live on the left'], instruction: readOnly ? ['查看画布中各节点使用的模型；编辑和运行需要工作区成员权限。', 'Review each node’s model; editing and execution require workspace member access.'] : ['打开左侧模型栏，点击或拖动一个可用模型，把它加入画布。', 'Open the model rail on the left, then click or drag an available model onto the canvas.'], hint: readOnly ? ['浏览节点与历史不需要连接个人模型凭证。', 'Browsing nodes and history does not require a personal model credential.'] : personalEngines ? ['模型未就绪时，可从「我的引擎」检查个人连接。', 'If models are unavailable, check your personal connections in “My engines”.'] : ['模型由工作区提供；未就绪时请联系工作区管理员。', 'Models are provided by your workspace; contact its administrator if they are unavailable.'], targets: readOnly ? ['canvas-stage'] : ['models', 'canvas-stage'], mobileTargets: readOnly ? ['canvas-stage'] : ['models-toggle', 'canvas-stage'] },
     { key: 'bots', title: readOnly ? ['定位画布中的 Bot', 'Locate a Bot on the canvas'] : ['Bot 在右侧', 'Bots live on the right'], instruction: readOnly ? ['打开画布导航，选择一个 Bot 来定位并查看它的内容。', 'Open canvas navigation and select a Bot to locate and inspect it.'] : ['在右侧选用工作区或产品 Bot，也可以先选人设，再从左侧添加模型。', 'Choose a workspace or product Bot on the right, or choose a persona before adding a model from the left.'], targets: ['bots', 'canvas-stage'], mobileTargets: ['bots-toggle', 'canvas-stage'] },
     { key: 'task', title: readOnly ? ['打开节点查看内容', 'Open a node to inspect it'] : ['给节点一个明确任务', 'Give the node a clear task'], instruction: readOnly ? ['打开画布中的节点，查看它的任务、会话和已保存的产物。', 'Open a canvas node to review its task, conversation and saved deliverables.'] : ['打开画布中的节点，写清要做什么、需要什么结果，再检查输入。', 'Open a canvas node, describe the task and expected result, then review its inputs.'], targets: ['node-task', 'canvas-stage'] },
-    { key: 'run', title: readOnly ? ['查看运行与产物', 'Review runs and deliverables'] : ['运行，然后检查结果', 'Run, then review the result'], instruction: readOnly ? ['打开「后台运行与协作记录」查看进度，再从节点的产物区域核对结果。', 'Open “Background runs & collaboration” to check progress, then review the node’s deliverables.'] : ['准备好后主动点击「运行图」，再从节点产物和运行记录中检查结果。', 'When ready, choose “Run graph”, then review the node’s deliverables and run history.'], hint: readOnly ? ['只读权限允许浏览和导出，不会发起模型调用。', 'Read-only access allows browsing and export without starting model calls.'] : ['引导不会替你运行任务；未连接引擎时仍可编辑画布。', 'This tour never runs tasks for you. You can edit the canvas before connecting an engine.'], targets: readOnly ? ['run-history', 'canvas-stage'] : ['run-controls', 'canvas-stage'] },
+    { key: 'run', title: readOnly ? ['查看运行与产物', 'Review runs and deliverables'] : ['运行，然后检查结果', 'Run, then review the result'], instruction: readOnly ? ['打开「运行记录」查看进度，再从节点的产物区域核对结果。', 'Open “Run history” to check progress, then review the node’s deliverables.'] : ['准备好后主动点击「运行图」，再从节点产物和运行记录中检查结果。', 'When ready, choose “Run graph”, then review the node’s deliverables and run history.'], hint: readOnly ? ['只读权限允许浏览和导出，不会发起模型调用。', 'Read-only access allows browsing and export without starting model calls.'] : ['引导不会替你运行任务；未连接引擎时仍可编辑画布。', 'This tour never runs tasks for you. You can edit the canvas before connecting an engine.'], targets: readOnly ? ['run-history', 'canvas-stage'] : ['run-controls', 'canvas-stage'] },
   ];
   return [
     { key: 'welcome', title: ['欢迎来到 AwwO', 'Welcome to AwwO'], instruction: readOnly ? ['先打开一张画布，了解模型、任务与 Bot 如何在同一处协作。', 'Open a canvas to see how models, tasks and Bots work together.'] : personalEngines ? ['先连接模型，再建立画布，让你的 Bot 围绕同一个任务协作。', 'Connect a model, create a canvas, and bring your Bots together around one task.'] : ['先建立画布，再选择工作区提供的模型，让 Bot 围绕同一个任务协作。', 'Create a canvas, choose a workspace model, and bring your Bots together around one task.'], targets: [], diagram: true },
@@ -61,7 +62,7 @@ function findSpotlight(names: string[], width: number, height: number): Rect | n
 }
 
 /** A presentation-only guide. Native modal inertness prevents clicks reaching highlighted controls. */
-export function FirstRunTour({ open, scene, locale, mainSiteURL, readOnly = false, personalEngines = true, onClose, onAction }: FirstRunTourProps) {
+export function FirstRunTour({ overview = false, open, scene, locale, mainSiteURL, readOnly = false, personalEngines = true, onClose, onAction }: FirstRunTourProps) {
   const [requestedIndex, setIndex] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const card = useRef<HTMLElement>(null);
@@ -70,7 +71,10 @@ export function FirstRunTour({ open, scene, locale, mainSiteURL, readOnly = fals
   const [layout, setLayout] = useState<Layout>(() => ({ spotlight: null, card: {}, ...viewport() }));
   const id = useId();
   const siteURL = safeMainSiteURL(mainSiteURL, mainSiteEnvironment());
-  const steps = stepsFor(scene, readOnly, personalEngines).filter(step => !step.siteLink || Boolean(siteURL));
+  const overviewStep: Step = { key: 'overview', title: ['让任务在画布上完成', 'Take a task from plan to result'],
+    instruction: readOnly ? ['打开画布，查看 Bot 的任务、运行进度与结果。', 'Open a canvas to review Bot tasks, progress and results.'] : ['添加模型或 Bot，写清任务，运行并查看结果。需要协作时，再把节点连起来。', 'Add a model or Bot, describe the task, then run and review the result. Connect nodes when the task needs collaboration.'],
+    hint: readOnly ? ['你可以浏览和导出；编辑、运行需要成员权限。', 'You can browse and export; editing and execution require member access.'] : personalEngines ? ['运行前连接自己的 API Key。稍后可从「更多选项 → 使用引导」查看详细操作。', 'Connect your API key before running. Find the full tour under More options → Getting started.'] : ['稍后可从「更多选项 → 使用引导」查看详细操作。', 'Find the full tour under More options → Getting started.'], targets: [], diagram: true };
+  const steps = overview ? [overviewStep] : stepsFor(scene, readOnly, personalEngines).filter(step => !step.siteLink || Boolean(siteURL));
   const index = Math.min(requestedIndex, steps.length - 1);
   const step = steps[index];
   const zh = locale === 'zh';
@@ -136,7 +140,7 @@ export function FirstRunTour({ open, scene, locale, mainSiteURL, readOnly = fals
     <section ref={card} className="first-run-tour-card" style={layout.card} data-spotlight={spotlight ? 'visible' : 'missing'}>
       <header className="first-run-tour-header"><span className="first-run-tour-brand"><Sparkles size={15} aria-hidden="true" />AwwO <span>{zh ? '使用引导' : 'Getting started'}</span></span><button className="first-run-tour-close" type="button" aria-label={zh ? '关闭引导' : 'Close tour'} onClick={() => finish(false)}><X size={18} /></button></header>
       <div className="first-run-tour-content">
-        <span className="first-run-tour-count">{zh ? `第 ${index + 1} / ${steps.length} 步` : `Step ${index + 1} of ${steps.length}`}</span>
+        {!overview && <span className="first-run-tour-count">{zh ? `第 ${index + 1} / ${steps.length} 步` : `Step ${index + 1} of ${steps.length}`}</span>}
         <h2 ref={heading} id={`${id}-title`} tabIndex={-1}>{text(step.title)}</h2>
         <p id={`${id}-instruction`}>{text(step.instruction)}</p>
         {step.diagram && <div className="first-run-tour-map" aria-label={readOnly ? (zh ? '模型、画布任务与 Bot' : 'Models, canvas tasks and Bots') : (zh ? '左侧模型，中间任务画布，右侧 Bot' : 'Models on the left, task canvas in the center, Bots on the right')}>
@@ -146,7 +150,7 @@ export function FirstRunTour({ open, scene, locale, mainSiteURL, readOnly = fals
         {step.action && step.actionLabel && onAction && <button type="button" className="first-run-tour-action" onClick={() => { finish(false); onAction(step.action!); }}>{text(step.actionLabel)}<ArrowRight size={15} /></button>}
         {step.siteLink && siteURL && <a className="first-run-tour-action" href={siteURL} target="_blank" rel="noopener noreferrer">{zh ? '打开 ClawHunt 主站' : 'Open ClawHunt'}<ExternalLink size={14} /></a>}
       </div>
-      <footer className="first-run-tour-footer"><div className="first-run-tour-progress" aria-hidden="true">{steps.map((item, position) => <span key={item.key} className={position <= index ? 'is-reached' : undefined} />)}</div><div className="first-run-tour-buttons"><button className="first-run-tour-skip" type="button" onClick={() => finish(false)}>{zh ? '暂时跳过' : 'Skip for now'}</button><div>{index > 0 && <button className="first-run-tour-back" type="button" aria-label={zh ? '上一步' : 'Previous step'} onClick={() => setIndex(Math.max(0, index - 1))}><ArrowLeft size={16} /></button>}<button className="first-run-tour-next" type="button" onClick={() => index === steps.length - 1 ? finish(true) : setIndex(index + 1)}>{index === steps.length - 1 ? (zh ? '知道了' : 'Got it') : (zh ? '下一步' : 'Next')}{index === steps.length - 1 ? <Check size={15} /> : <ArrowRight size={15} />}</button></div></div></footer>
+      <footer className="first-run-tour-footer"><div className="first-run-tour-progress" aria-hidden="true">{steps.map((item, position) => <span key={item.key} className={position <= index ? 'is-reached' : undefined} />)}</div><div className="first-run-tour-buttons"><button className="first-run-tour-skip" type="button" onClick={() => finish(false)}>{zh ? '暂时跳过' : 'Skip for now'}</button><div>{index > 0 && <button className="first-run-tour-back" type="button" aria-label={zh ? '上一步' : 'Previous step'} onClick={() => setIndex(Math.max(0, index - 1))}><ArrowLeft size={16} /></button>}<button className="first-run-tour-next" type="button" onClick={() => index === steps.length - 1 ? finish(true) : setIndex(index + 1)}>{index === steps.length - 1 ? (overview ? (zh ? '开始使用' : 'Get started') : (zh ? '知道了' : 'Got it')) : (zh ? '下一步' : 'Next')}{index === steps.length - 1 ? <Check size={15} /> : <ArrowRight size={15} />}</button></div></div></footer>
     </section>
   </dialog>, document.body);
 }

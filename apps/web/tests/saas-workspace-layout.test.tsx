@@ -67,7 +67,7 @@ it('turns the empty-canvas hint into the controls that reveal a collapsed rail',
   const onExpandModelRail = vi.fn();
   const view = render(<AgentWorkspace {...props()} nodes={[]} modelRailCollapsed onExpandModelRail={onExpandModelRail}><div /></AgentWorkspace>);
   const note = () => document.querySelector('.awwo-empty-note') as HTMLElement;
-  expect(note()).toHaveTextContent('先在右侧Bot 清单选择人设（可选），再从左侧模型栏添加模型；也可以直接选用已有 Bot。');
+  expect(note()).toHaveTextContent('从左侧模型栏添加模型，或从右侧Bot 清单选择协作者。人设可选，写清任务就能开始。');
   fireEvent.click(within(note()).getByRole('button', { name: '模型栏' }));
   expect(onExpandModelRail).toHaveBeenCalledOnce();
   fireEvent.click(within(note()).getByRole('button', { name: 'Bot 清单' }));
@@ -75,7 +75,7 @@ it('turns the empty-canvas hint into the controls that reveal a collapsed rail',
   // Both rails are open: the hint is plain text again, pointing at what is now on screen.
   view.rerender(<AgentWorkspace {...props()} nodes={[]} modelRailCollapsed={false} onExpandModelRail={onExpandModelRail}><div /></AgentWorkspace>);
   expect(within(note()).queryAllByRole('button')).toHaveLength(0);
-  expect(note()).toHaveTextContent('先在右侧Bot 清单选择人设（可选），再从左侧模型栏添加模型；也可以直接选用已有 Bot。');
+  expect(note()).toHaveTextContent('从左侧模型栏添加模型，或从右侧Bot 清单选择协作者。人设可选，写清任务就能开始。');
 });
 
 it('lets users select the complete product Bot catalogue from the right sidebar', () => {

@@ -109,3 +109,17 @@ it('does not enable local HTTP in a production build even with development mode'
   expect(mainSiteEnvironment({ DEV: false, MODE: 'development' })).toBe('production');
   expect(mainSiteEnvironment({ DEV: true, MODE: 'test' })).toBe('production');
 });
+
+
+it('does not interrupt each destination with another automatic tour after the first introduction', async () => {
+  const user = identity();
+  const view = render(content(user));
+  await screen.findByRole('dialog');
+  fireEvent.click(screen.getByRole('button', { name: 'Complete guide' }));
+  view.unmount();
+  history.replaceState(null, '', '/?tenant=team&canvas=one');
+  render(<SaaSPreferencesProvider><SaaSOnboarding identity={user}><GuideLauncher /><div data-onboarding="canvas-stage" /></SaaSOnboarding></SaaSPreferencesProvider>);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Getting started' }));
+  expect(screen.getByRole('dialog', { name: 'canvas' })).toBeVisible();
+});

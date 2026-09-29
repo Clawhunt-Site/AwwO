@@ -179,6 +179,8 @@ export function ConnectionSettings({
   const [removing, setRemoving] = useState<Connection | null>(null);
   const providerForm = useRef<HTMLFormElement>(null);
   const removalTrigger = useRef<HTMLButtonElement | null>(null);
+  const canContinue = catalog.items.some(item => connectionUsable(item, catalog));
+  const returnToCanvas = new URLSearchParams(location.search).has('canvas');
   useEffect(() => {
     if (removing) return;
     const trigger = removalTrigger.current;
@@ -196,8 +198,8 @@ export function ConnectionSettings({
           : t("我的执行引擎", "My engines")
       }
       intro={t(
-        "选择模型服务，填写自己的 API Key。每次任务使用发起者的个人凭证。",
-        "Choose a provider and add your API key. Each task uses the credentials of the person who starts it.",
+        "选择服务，填入 API Key，即可在画布使用自己的模型。",
+        "Choose a provider and add your API key to use your models on the canvas.",
       )}
     >
       {onboarding && <ol className="saas-onboarding-steps" aria-label={t('开始使用', 'Getting started')}>
@@ -280,33 +282,6 @@ export function ConnectionSettings({
               ))}
             </select>
           </label>
-          <label>
-            {t("执行引擎", "Execution engine")}
-            <select
-              value={runtime}
-              disabled={busy}
-              onChange={(e) => setRuntime(e.target.value)}
-            >
-              {provider?.runtimes.map((id) => (
-                <option key={id} value={id}>
-                  {engineName(id)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="saas-field-hint">{runtime === 'pi'
-            ? t('Pi：通过所选服务商运行 Agent，支持多种模型。', 'Pi runs Agents through your selected provider and supports multiple models.')
-            : t('OpenAI Agents：通过兼容接口运行 Agent，也可使用 LLM Gate 的模型。不确定时保留默认选择即可。', 'OpenAI Agents runs Agents through a compatible API, including LLM Gate models. Keep the default if you are unsure.')}</p>
-          <label>
-            {t("连接名称（可选）", "Connection name (optional)")}
-            <input
-              value={name}
-              maxLength={80}
-              disabled={busy}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("例如：我的工作账号", "For example: Work account")}
-            />
-          </label>
           <SecretInput key={providerID} label="API Key" name="provider-api-key" data-onboarding="provider-key"
             autoComplete="new-password" spellCheck={false} required minLength={8} maxLength={4096}
             value={key} disabled={busy} onChange={(e) => setKey(e.target.value)}
@@ -314,23 +289,43 @@ export function ConnectionSettings({
           <p id="provider-key-help" className="saas-field-hint">{t(
             `请填写 ${provider?.name || ''} 的 API Key，不是 AwwO 登录密码。`,
             `Use an API key from ${provider?.name || 'your provider'}, not your AwwO password.`)}</p>
-          <small>
+          <small className="saas-key-storage-note">
             {t(
-              "密钥加密保存在服务端，不写入画布或浏览器存储。验证会读取服务商的模型目录。",
-              "Your key is encrypted on the server, never stored in canvases or browser storage. Verification reads the provider’s model catalog.",
+              "密钥在服务端加密保存，不写入画布或浏览器。验证仅查询模型目录。",
+              "Your key is encrypted on the server, never saved in the canvas or browser. Verification only reads the model catalog.",
             )}
           </small>
+          <details className="saas-connection-advanced">
+            <summary>{t("高级选项", "Advanced options")}</summary>
+            <div className="saas-connection-advanced-fields">
+              <label>
+                {t("执行引擎", "Execution engine")}
+                <select value={runtime} disabled={busy} onChange={(e) => setRuntime(e.target.value)}>
+                  {provider?.runtimes.map(id => <option key={id} value={id}>{engineName(id)}</option>)}
+                </select>
+              </label>
+              <p className="saas-field-hint">{t('已选好默认引擎，不确定时无需修改。', 'A default engine is selected. Keep it if you are unsure.')}</p>
+              <label>
+                {t("连接名称（可选）", "Connection name (optional)")}
+                <input value={name} maxLength={80} disabled={busy} onChange={(e) => setName(e.target.value)}
+                  placeholder={t("例如：我的工作账号", "For example: Work account")} />
+              </label>
+            </div>
+          </details>
           {error !== null && (
             <p role="alert" className="saas-error">
               {saasErrorMessage(error, locale)}
             </p>
           )}
-          {notice && <p role="status">{notice}</p>}
-          <button data-onboarding="provider-verify" className="saas-primary" disabled={busy || !provider || !key}>
-            {busy
-              ? t("正在验证…", "Verifying…")
-              : t("验证并保存", "Verify and save")}
-          </button>
+          {notice && <p className="saas-connection-success" role="status">{notice}</p>}
+          <div className="saas-connection-actions">
+            <button data-onboarding="provider-verify" className={canContinue ? undefined : "saas-primary"} disabled={busy || !provider || !key}>
+              {busy ? t("正在验证…", "Verifying…") : t("验证并保存", "Verify and save")}
+            </button>
+            {canContinue && <a className="saas-primary saas-buy-link" href={home()}>
+              {returnToCanvas ? t("返回画布", "Return to canvas") : t("进入工作区", "Open workspace")}
+            </a>}
+          </div>
         </form>
         <aside className="saas-card saas-gate-card">
           <span className="saas-eyebrow">LLM GATE</span>
@@ -406,11 +401,6 @@ export function ConnectionSettings({
               "Removing a connection prevents new calls. To rotate a key, add a replacement and remove the old connection. Calls already in progress may finish.",
             )}
           </p>
-          {!onboarding && (
-            <a className="saas-primary saas-buy-link" href={home()}>
-              {t("进入工作区", "Open workspace")}
-            </a>
-          )}
         </section>
       )}
     </AccountLayout>

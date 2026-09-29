@@ -55,6 +55,7 @@ describe('AwwO conversational cards', () => {
     }
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑字段结构' }));
     fireEvent.click(screen.getByRole('button', { name: '添加字段' }));
     fireEvent.change(screen.getByLabelText('字段 1 名称'), { target: { value: '需求' } });
     fireEvent.change(screen.getByLabelText('需求的值'), { target: { value: '可访问的登录页' } });
@@ -66,7 +67,8 @@ describe('AwwO conversational cards', () => {
     setStreaming('frontend', true);
     render(<SessionTile node={node()} scale={1} focused onUpdateNode={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
-    expect((screen.getByRole('button', { name: '添加字段' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: '编辑字段结构' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '添加字段' })).toBeNull();
     cleanup(); resetAllSessions();
     render(<SessionTile node={node()} scale={1} focused />);
     fireEvent.click(screen.getByRole('button', { name: '展开交付物' }));

@@ -49,14 +49,17 @@ export function SaaSOnboarding({ identity, children }: { identity: Identity; chi
   const scene = route?.scene;
   const key = scene ? onboardingStorageKey(identity.user.id, scene) : '';
   const [open, setOpen] = useState(false);
+  const [overview, setOverview] = useState(true);
+  const hasSeenIntro = () => (['workspace', 'canvas', 'engines'] as const).some(value => wasSeen(onboardingStorageKey(identity.user.id, value)));
   useEffect(() => {
     setOpen(false);
-    if (!scene || wasSeen(key)) return;
+    if (!scene || hasSeenIntro()) return;
     const selector = scene === 'canvas' ? '[data-onboarding="canvas-stage"]' : scene === 'engines' ? '[data-onboarding="engine-setup"]' : '[data-onboarding="canvas-list"]';
     const ready = () => {
       // A user can launch and dismiss the guide while the page is still loading.
-      if (wasSeen(key)) return true;
+      if (hasSeenIntro()) return true;
       if (!document.querySelector(selector) || document.querySelector('dialog[open], [role="dialog"], .saas-draft-recovery')) return false;
+      setOverview(true);
       setOpen(true);
       return true;
     };
@@ -65,7 +68,7 @@ export function SaaSOnboarding({ identity, children }: { identity: Identity; chi
     observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['open'] });
     return () => observer.disconnect();
   }, [key, scene]);
-  const launch = useMemo(() => scene ? () => setOpen(true) : null, [scene]);
+  const launch = useMemo(() => scene ? () => { setOverview(false); setOpen(true); } : null, [scene]);
   const close = (completed: boolean) => {
     memorySeen.add(key);
     try { localStorage.setItem(key, completed ? 'completed' : 'dismissed'); } catch { /* The guide remains usable when browser storage is unavailable. */ }
@@ -73,15 +76,15 @@ export function SaaSOnboarding({ identity, children }: { identity: Identity; chi
   };
   return <GuideContext.Provider value={launch}>
     {children}
-    {scene && <FirstRunTour open={open} scene={scene} readOnly={route?.readOnly} locale={locale} personalEngines={identity.personalCredentialsRequired === true} mainSiteURL={mainSiteURL} onClose={close} onAction={guideAction} />}
+    {scene && <FirstRunTour overview={overview} open={open} scene={scene} readOnly={route?.readOnly} locale={locale} personalEngines={identity.personalCredentialsRequired === true} mainSiteURL={mainSiteURL} onClose={close} onAction={guideAction} />}
   </GuideContext.Provider>;
 }
 
-export function GuideLauncher() {
+export function GuideLauncher({ onLaunch }: { onLaunch?: () => void } = {}) {
   const launch = useContext(GuideContext);
   const { t } = useSaaSPreferences();
   if (!launch) return null;
-  return <button type="button" className="saas-guide-launch" onClick={launch} title={t('使用引导', 'Getting started')} aria-label={t('使用引导', 'Getting started')}><CircleHelp size={16} aria-hidden="true" /><span>{t('使用引导', 'Getting started')}</span></button>;
+  return <button type="button" className="saas-guide-launch" onClick={() => { onLaunch?.(); launch(); }} title={t('使用引导', 'Getting started')} aria-label={t('使用引导', 'Getting started')}><CircleHelp size={16} aria-hidden="true" /><span>{t('使用引导', 'Getting started')}</span></button>;
 }
 
 export function MainSiteLink() {

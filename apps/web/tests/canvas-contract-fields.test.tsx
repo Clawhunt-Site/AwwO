@@ -6,9 +6,9 @@ import { canvasText } from '../src/canvas/i18n';
 import type { ContractField } from '../src/canvas/nodeContracts';
 
 afterEach(cleanup);
-function Editor({ initial, readOnly = false }: { initial: ContractField[]; readOnly?: boolean }) {
+function Editor({ initial, readOnly = false, valuesFirst = false }: { initial: ContractField[]; readOnly?: boolean; valuesFirst?: boolean }) {
   const [fields, setFields] = useState(initial);
-  return <><ContractFields fields={fields} onChange={setFields} readOnly={readOnly} label="输入" /><output data-testid="raw">{JSON.stringify(fields)}</output></>;
+  return <><ContractFields valuesFirst={valuesFirst} fields={fields} onChange={setFields} readOnly={readOnly} label="输入" /><output data-testid="raw">{JSON.stringify(fields)}</output></>;
 }
 const field = (over: Partial<ContractField> = {}): ContractField => ({ id: 'brief', label: '需求', type: 'markdown', required: true, value: '# 登录页\n\n**可访问**的表单。', ...over });
 
@@ -102,4 +102,28 @@ describe('node contract field editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '预览需求' }));
     expect(screen.getByRole('heading', { name: '登录页' })).toBeTruthy();
   });
+});
+
+
+it('keeps task entry focused on values without changing its contract until customization is requested', () => {
+  const initial = field();
+  render(<Editor initial={[initial]} valuesFirst />);
+  expect(screen.queryByLabelText('字段 1 名称')).toBeNull();
+  expect(screen.queryByRole('button', { name: '添加字段' })).toBeNull();
+  fireEvent.change(screen.getByLabelText('需求的值'), { target: { value: '新的任务' } });
+  const value = { ...initial, value: '新的任务' };
+  expect(JSON.parse(screen.getByTestId('raw').textContent!)).toEqual([value]);
+  fireEvent.click(screen.getByRole('button', { name: '编辑字段结构' }));
+  expect(screen.getByLabelText('字段 1 名称')).toHaveValue('需求');
+  expect(screen.getByLabelText('需求的类型')).toHaveValue('markdown');
+  expect(JSON.parse(screen.getByTestId('raw').textContent!)).toEqual([value]);
+  fireEvent.click(screen.getByRole('button', { name: '完成结构编辑' }));
+  expect(screen.queryByLabelText('字段 1 名称')).toBeNull();
+  expect(screen.getByLabelText('需求的值')).toHaveValue('新的任务');
+});
+
+it('keeps wired values and reader access locked in the simplified input view', () => {
+  render(<ContractFields valuesFirst fields={[field()]} sources={{ brief: '上游' }} label="输入" readOnly onChange={() => { throw new Error('must not write'); }} />);
+  expect(screen.getByLabelText('需求的值')).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '编辑字段结构' })).toBeNull();
 });

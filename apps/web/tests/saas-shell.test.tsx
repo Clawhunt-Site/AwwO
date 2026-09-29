@@ -8,7 +8,7 @@ import { configureSaaSCanvasSave, clearSaaSCanvas } from '../src/saas/canvasBrid
 const identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' },
   tenants: [{ id: 'tenant-a', name: '真实工作区', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 }] };
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
-beforeEach(() => { Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } }); Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } }); localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/'); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
+beforeEach(() => { Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } }); Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } }); localStorage.clear(); localStorage.setItem('awwo.onboarding.v1:user-a:workspace', 'completed'); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/'); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); vi.unstubAllGlobals(); });
 
 it('shows login on a missing server session without reading legacy identity tokens', async () => {
@@ -31,6 +31,7 @@ it('keeps platform administration and logout reachable for a bootstrap administr
   vi.stubGlobal('fetch', vi.fn(async (url: string) => response(url.endsWith('/appearance') ? appearanceFixture : { ...identity, user: { ...identity.user, platformRole: 'admin' }, tenants: [] })));
   render(<SaaSApp />);
   expect(await screen.findByRole('link', { name: '进入平台管理' })).toHaveAttribute('href', '/admin');
+  fireEvent.click(screen.getByRole('button', { name: '更多选项' }));
   expect(screen.getByRole('button', { name: '退出登录' })).toBeVisible();
 });
 
@@ -42,6 +43,7 @@ it('keeps tenant switching and logout available on a suspended tenant and does n
   expect(await screen.findByRole('heading', { name: '工作区已暂停' })).toBeVisible();
   expect(screen.getByRole('combobox', { name: '切换工作区' })).toHaveValue('tenant-a');
   expect(screen.getByRole('option', { name: '另一工作区' })).toHaveValue('tenant-b');
+  fireEvent.click(screen.getByRole('button', { name: '更多选项' }));
   expect(screen.getByRole('button', { name: '退出登录' })).toBeVisible();
   expect(fetch.mock.calls.filter(call => !String(call[0]).endsWith('/appearance'))).toHaveLength(1);
 });

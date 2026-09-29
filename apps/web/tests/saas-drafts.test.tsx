@@ -53,7 +53,7 @@ it('reload_after_409 retains the local draft, blocks the editor and never overwr
   expect(canvasStorage().getItem(CANVAS_STORAGE_KEY)).toContain('409 后必须保留的修改');
   expect(document.querySelector('.awwo-workspace')).toBeNull();
   expect(writes).toBe(1);
-  fireEvent.click(screen.getByRole('button', { name: '使用云端版本，保留草稿' }));
+  fireEvent.click(await screen.findByRole('button', { name: '使用云端版本，保留草稿' }));
   await writerReady();
   expect(readCanvasDrafts(canvasStorage())[0].draft?.document.nodes[0].title).toBe('409 后必须保留的修改');
   expect(writes).toBe(1);
