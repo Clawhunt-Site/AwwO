@@ -36,6 +36,7 @@ function server({ canvases = [], create, runtime = ready }: { canvases?: CanvasR
 const view = ({ role = 'owner', onOpen = vi.fn() }: { role?: string; onOpen?: (id: string) => void } = {}) =>
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role }} onOpen={onOpen} /></SaaSPreferencesProvider>);
 const box = () => screen.getByRole('textbox', { name: '画布需求' });
+const openExamples = () => fireEvent.click(screen.getByRole('button', { name: '需要灵感？看看案例' }));
 
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); sessionStorage.clear(); });
@@ -139,6 +140,11 @@ it('creates an untitled blank canvas without planning, keeping the typed request
 it('filters examples by category and fills the box without creating or planning anything', async () => {
   const { posts } = server();
   view();
+  const toggle = screen.getByRole('button', { name: '需要灵感？看看案例' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('region', { name: '从案例开始' })).toBeNull();
+  openExamples();
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
   const gallery = within(screen.getByRole('region', { name: '从案例开始' }));
   expect(gallery.getAllByRole('listitem')).toHaveLength(11);
   expect(gallery.getByRole('button', { name: '全部' })).toHaveAttribute('aria-pressed', 'true');
@@ -158,6 +164,9 @@ it('filters examples by category and fills the box without creating or planning 
   fireEvent.click(gallery.getByRole('button', { name: '全部' }));
   expect(gallery.getAllByRole('listitem')).toHaveLength(11);
   expect(posts).toHaveLength(0);
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('region', { name: '从案例开始' })).toBeNull();
 });
 
 it('names the canvas after an example sent unedited, and after the request once it is edited', async () => {
@@ -165,6 +174,7 @@ it('names the canvas after an example sent unedited, and after the request once 
   const onOpen = vi.fn();
   view({ onOpen });
   const saas = example('team-collaboration-saas');
+  openExamples();
   fireEvent.click(screen.getByRole('button', { name: saas.title.zh }));
   fireEvent.keyDown(box(), { key: 'Enter' });
   await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
@@ -173,6 +183,7 @@ it('names the canvas after an example sent unedited, and after the request once 
 
   cleanup(); sessionStorage.clear();
   view({ onOpen });
+  openExamples();
   fireEvent.click(screen.getByRole('button', { name: saas.title.zh }));
   fireEvent.change(box(), { target: { value: saas.prompt.zh.replace('中小团队', '设计团队') } });
   fireEvent.keyDown(box(), { key: 'Enter' });
@@ -184,6 +195,7 @@ it('sets the operator’s own text aside when an example replaces it, and restor
   server();
   view();
   fireEvent.change(box(), { target: { value: '我自己的需求' } });
+  openExamples();
   fireEvent.click(screen.getByRole('button', { name: example('monthly-content-calendar').title.zh }));
   // A second example replaces the first; the text worth restoring is still the operator's.
   fireEvent.click(screen.getByRole('button', { name: example('launch-content-kit').title.zh }));
@@ -207,6 +219,7 @@ it('gives readers the canvas list without a prompt box or examples, and reads no
   expect(screen.getByRole('heading', { level: 1, name: 'Workspace A' })).toBeVisible();
   expect(screen.queryByRole('textbox', { name: '画布需求' })).toBeNull();
   expect(screen.queryByRole('button', { name: '空白画布' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '需要灵感？看看案例' })).toBeNull();
   expect(screen.queryByRole('region', { name: '从案例开始' })).toBeNull();
   expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual(['/api/v1/tenants/tenant-a/canvases?limit=50']);
 });
@@ -220,6 +233,7 @@ it('reads in English', async () => {
   expect(screen.getByRole('button', { name: 'Generate canvas' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Blank canvas' })).toBeEnabled();
   expect(await screen.findByRole('heading', { name: 'Continue working' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Need inspiration? Explore examples' }));
   const gallery = within(screen.getByRole('region', { name: 'Start from an example' }));
   fireEvent.click(gallery.getByRole('button', { name: 'Research reports' }));
   fireEvent.click(gallery.getByRole('button', { name: example('competitor-research').title.en }));

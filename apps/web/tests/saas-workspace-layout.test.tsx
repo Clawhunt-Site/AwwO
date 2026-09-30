@@ -12,7 +12,7 @@ const props = () => ({ nodes: [createAgentTemplate('general', { x: 0, y: 0 })], 
   onFocusNode: vi.fn(), onAddAgent: vi.fn(), onCreateTemplate: vi.fn(), onSearch: vi.fn(), onAddMarketAgent: vi.fn(),
   modelShelf: <div>Execution model fixture</div>, personaControls: <div>Persona fixture</div> });
 const bots = () => screen.getByRole('complementary', { name: 'Bot 清单' });
-const expandBots = () => fireEvent.click(within(bots()).getByRole('button', { name: '展开 Bot 清单' }));
+const openBotTools = () => fireEvent.click(within(bots()).getByRole('button', { name: '搜索与筛选 Bot' }));
 
 it('separates models on the left, the canvas in the middle and Bots/personas on the right', () => {
   const p = props();
@@ -20,54 +20,88 @@ it('separates models on the left, the canvas in the middle and Bots/personas on 
   const models = screen.getByRole('complementary', { name: '模型库' });
   const main = screen.getByRole('main');
   expect(within(models).getByText('Execution model fixture')).toBeVisible();
-  // The desktop Bot rail starts collapsed: only the expand control and the add-Bot action remain.
-  expect(bots()).toHaveClass('is-collapsed');
-  expect(within(bots()).getByRole('button', { name: '添加 Bot', exact: true })).toBeEnabled();
-  expect(within(bots()).queryByRole('button', { name: /定位/ })).toBeNull();
-  expandBots();
   expect(bots()).not.toHaveClass('is-collapsed');
+  expect(within(bots()).getByRole('button', { name: '添加 Bot', exact: true })).toBeEnabled();
+  expect(within(bots()).getByRole('button', { name: /定位/ })).toBeVisible();
+  expect(within(bots()).queryByRole('searchbox', { name: '查找 Agent' })).toBeNull();
+  expect(within(bots()).queryByRole('button', { name: '产品 Bot' })).toBeNull();
+  expect(within(bots()).queryByText('人设预设')).toBeNull();
+  openBotTools();
   fireEvent.click(within(bots()).getByText('人设预设'));
   expect(within(bots()).getByText('Persona fixture')).toBeVisible();
-  expect(within(bots()).getByRole('button', { name: /定位/ })).toBeVisible();
   expect(models.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(main.compareDocumentPosition(bots()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('keeps the right Bot roster on a read-only cloud canvas without an editable model shelf', () => {
+  const { container } = render(<AgentWorkspace {...props()} storageMode="cloud" readOnly modelShelf={undefined}><div /></AgentWorkspace>);
+  expect(container.querySelector('.awwo-workspace')).toHaveClass('has-model-library');
+  expect(screen.queryByRole('complementary', { name: '模型库' })).toBeNull();
+  expect(within(bots()).getByRole('button', { name: /定位/ })).toBeVisible();
+  expect(within(bots()).getByRole('button', { name: '添加 Bot' })).toBeDisabled();
+  expect(screen.queryByRole('complementary', { name: '工作区导航' })).toBeNull();
+});
+
+it('keeps the canvas bar focused and never leaves a hidden Bot search active', () => {
+  render(<AgentWorkspace {...props()} headerTitle={<span>Current canvas</span>} toolbar={<button type="button">Run</button>}><div /></AgentWorkspace>);
+  expect(screen.getByRole('button', { name: 'Run' })).toBeVisible();
+  expect(screen.queryByText('Agent 节点：1')).toBeNull();
+  expect(screen.queryByText('拖动画布平移')).toBeNull();
+  expect(screen.queryByRole('contentinfo')).toBeNull();
+  openBotTools();
+  fireEvent.change(within(bots()).getByRole('searchbox', { name: '查找 Agent' }), { target: { value: 'missing' } });
+  expect(within(bots()).getByText('没有找到匹配的 Agent')).toBeVisible();
+  openBotTools();
+  expect(within(bots()).queryByRole('searchbox', { name: '查找 Agent' })).toBeNull();
+  expect(within(bots()).getByRole('button', { name: /定位/ })).toBeVisible();
+});
+
+it('returns to canvas Bots when source filters are closed', () => {
+  render(<AgentWorkspace {...props()}><div /></AgentWorkspace>);
+  openBotTools();
+  fireEvent.click(within(bots()).getByRole('button', { name: '产品 Bot' }));
+  expect(within(bots()).queryByRole('button', { name: /定位/ })).toBeNull();
+  openBotTools();
+  expect(within(bots()).queryByRole('button', { name: '产品 Bot' })).toBeNull();
+  expect(within(bots()).getByRole('button', { name: /定位/ })).toBeVisible();
 });
 
 it('remembers the Bot rail state per browser, reports rail changes and survives blocked storage', () => {
   const onRailsChange = vi.fn();
   const view = render(<AgentWorkspace {...props()} onRailsChange={onRailsChange}><div /></AgentWorkspace>);
-  expandBots();
+  fireEvent.click(within(bots()).getByRole('button', { name: '收起 Bot 清单' }));
   expect(onRailsChange).toHaveBeenCalledOnce();
-  expect(localStorage.getItem(RAIL_BOT_KEY)).toBe('0');
+  expect(localStorage.getItem(RAIL_BOT_KEY)).toBe('1');
   view.unmount();
   render(<AgentWorkspace {...props()}><div /></AgentWorkspace>);
-  expect(bots()).not.toHaveClass('is-collapsed');
-  const collapse = within(bots()).getByRole('button', { name: '收起 Bot 清单' });
-  expect(collapse).toHaveAttribute('aria-expanded', 'true');
-  vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('storage blocked'); });
-  fireEvent.click(collapse);
   expect(bots()).toHaveClass('is-collapsed');
-  expect(within(bots()).getByRole('button', { name: '展开 Bot 清单' })).toHaveAttribute('aria-expanded', 'false');
+  const expand = within(bots()).getByRole('button', { name: '展开 Bot 清单' });
+  expect(expand).toHaveAttribute('aria-expanded', 'false');
+  vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('storage blocked'); });
+  fireEvent.click(expand);
+  expect(bots()).not.toHaveClass('is-collapsed');
+  expect(within(bots()).getByRole('button', { name: '收起 Bot 清单' })).toHaveAttribute('aria-expanded', 'true');
 });
 
 it('keeps keyboard focus on the Bot rail toggle while it collapses and expands the rail', () => {
   render(<AgentWorkspace {...props()}><div /></AgentWorkspace>);
-  const toggle = within(bots()).getByRole('button', { name: '展开 Bot 清单' });
+  const toggle = within(bots()).getByRole('button', { name: '收起 Bot 清单' });
   toggle.focus();
   fireEvent.click(toggle);
-  expect(bots()).not.toHaveClass('is-collapsed');
-  expect(document.activeElement).toBe(toggle);
-  expect(toggle).toHaveAttribute('aria-label', '收起 Bot 清单');
-  fireEvent.click(toggle);
   expect(bots()).toHaveClass('is-collapsed');
+  expect(document.activeElement).toBe(toggle);
+  expect(toggle).toHaveAttribute('aria-label', '展开 Bot 清单');
+  fireEvent.click(toggle);
+  expect(bots()).not.toHaveClass('is-collapsed');
   expect(document.activeElement).toBe(toggle);
 });
 
 it('turns the empty-canvas hint into the controls that reveal a collapsed rail', () => {
+  localStorage.setItem(RAIL_BOT_KEY, '1');
   const onExpandModelRail = vi.fn();
   const view = render(<AgentWorkspace {...props()} nodes={[]} modelRailCollapsed onExpandModelRail={onExpandModelRail}><div /></AgentWorkspace>);
   const note = () => document.querySelector('.awwo-empty-note') as HTMLElement;
-  expect(note()).toHaveTextContent('从左侧模型栏添加模型，或从右侧Bot 清单选择协作者。人设可选，写清任务就能开始。');
+  expect(note()).toHaveTextContent('从左侧模型栏添加模型，或在右侧Bot 清单选择协作者。');
   fireEvent.click(within(note()).getByRole('button', { name: '模型栏' }));
   expect(onExpandModelRail).toHaveBeenCalledOnce();
   fireEvent.click(within(note()).getByRole('button', { name: 'Bot 清单' }));
@@ -75,13 +109,13 @@ it('turns the empty-canvas hint into the controls that reveal a collapsed rail',
   // Both rails are open: the hint is plain text again, pointing at what is now on screen.
   view.rerender(<AgentWorkspace {...props()} nodes={[]} modelRailCollapsed={false} onExpandModelRail={onExpandModelRail}><div /></AgentWorkspace>);
   expect(within(note()).queryAllByRole('button')).toHaveLength(0);
-  expect(note()).toHaveTextContent('从左侧模型栏添加模型，或从右侧Bot 清单选择协作者。人设可选，写清任务就能开始。');
+  expect(note()).toHaveTextContent('从左侧模型栏添加模型，或在右侧Bot 清单选择协作者。');
 });
 
 it('lets users select the complete product Bot catalogue from the right sidebar', () => {
   const p = props();
   render(<AgentWorkspace {...p}><div /></AgentWorkspace>);
-  expandBots();
+  openBotTools();
   fireEvent.click(within(bots()).getByRole('button', { name: '产品 Bot' }));
   const first = getTeamMarketAgents()[0];
   fireEvent.click(within(bots()).getByRole('button', { name: `选择 ${first.name} · ${first.source.teamName}` }));
@@ -93,7 +127,7 @@ it('keeps Bot creation locked during execution', () => {
   const p = props();
   render(<AgentWorkspace {...p} running><div /></AgentWorkspace>);
   expect(within(bots()).getByRole('button', { name: '添加 Bot', exact: true })).toBeDisabled();
-  expandBots();
+  openBotTools();
   fireEvent.click(within(bots()).getByRole('button', { name: '产品 Bot' }));
   const first = getTeamMarketAgents()[0];
   fireEvent.click(within(bots()).getByRole('button', { name: `选择 ${first.name} · ${first.source.teamName}` }));

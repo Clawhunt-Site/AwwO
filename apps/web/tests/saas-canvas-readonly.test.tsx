@@ -50,7 +50,8 @@ describe('original canvas reader mode', () => {
     expect(container.querySelectorAll('.canvas-wire').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: /停止/ })).toBeNull();
-    expect(screen.getByRole('button', { name: '添加 Agent', exact: true })).toBeDisabled();
+    expect(screen.getByRole('complementary', { name: 'Bot 清单' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '添加 Bot', exact: true })).toBeDisabled();
     expect(container.querySelector('.awwo-planner-sidebar')).toBeNull();
     expect([...container.querySelectorAll('.canvas-port')].every(port => (port as HTMLButtonElement).disabled)).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '打开 方案顾问', exact: true }));

@@ -53,6 +53,12 @@ it('reserves drawer space only as a focused minimum without adding it again to s
   expect(presentationNodes([large], null)[0]).toMatchObject({ w: 260, h: 128 });
 });
 
+it('projects a narrow focused node to the available mobile stage without changing the saved size', () => {
+  const original = { ...session(), w: 940, h: 380, deliverablesOpen: true };
+  expect(presentationNodes([original], original.id, 334)[0]).toMatchObject({ w: 334, h: 380 });
+  expect(original.w).toBe(940);
+});
+
 it('anchors real contract ports to the projected card geometry while keeping connection rules unchanged', () => {
   const source = session();
   const target = createAgentTemplate('backend', { x: 600, y: 120 });

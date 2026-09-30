@@ -33,6 +33,8 @@ type DownloadProps = { downloadUrl?: string; canDownload?: boolean; onStoredDown
 
 export interface ArtifactPreviewProps extends DownloadProps {
   source: string;
+  /** Reading-only rendition. Source view and downloads always keep the exact stored bytes. */
+  previewSource?: string;
   type: PreviewType;
   title: string;
   renderMarkdown: MarkdownRenderer;
@@ -92,7 +94,7 @@ function ExpandedPreview({ title, closeLabel, onClose, children }: { title: stri
 }
 
 /** A rendition of published bytes. Switching presentation never republishes an output. */
-export function ArtifactPreview({ source, type, title, renderMarkdown, downloadUrl, canDownload = true, onStoredDownload, allowExpand = true }: ArtifactPreviewProps) {
+export function ArtifactPreview({ source, previewSource, type, title, renderMarkdown, downloadUrl, canDownload = true, onStoredDownload, allowExpand = true }: ArtifactPreviewProps) {
   const { locale, t } = useCanvasI18n();
   const text = messages[locale];
   const [mode, setMode] = useState<'preview' | 'source'>('preview');
@@ -122,10 +124,10 @@ export function ArtifactPreview({ source, type, title, renderMarkdown, downloadU
         : type === 'html' ? <>
           <iframe className="awwo-artifact-frame" title={`${title} · ${text.html}`} sandbox="" referrerPolicy="no-referrer" srcDoc={html} />
           <p className="awwo-artifact-note">{text.static}</p>
-        </> : <div className="awwo-artifact-markdown awwo-markdown-preview">{renderMarkdown(source)}</div>}
+        </> : <div className="awwo-artifact-markdown awwo-markdown-preview">{renderMarkdown(previewSource ?? source)}</div>}
     {downloadError && <p className="awwo-artifact-status" role="alert">{t('deliverable.downloadFailed')}</p>}
     {expanded && <ExpandedPreview title={title} closeLabel={text.close} onClose={() => setExpanded(false)}>
-      <ArtifactPreview source={source} type={type} title={title} renderMarkdown={renderMarkdown} downloadUrl={downloadUrl}
+      <ArtifactPreview source={source} previewSource={previewSource} type={type} title={title} renderMarkdown={renderMarkdown} downloadUrl={downloadUrl}
         canDownload={canDownload} onStoredDownload={onStoredDownload} allowExpand={false} />
     </ExpandedPreview>}
   </div>;

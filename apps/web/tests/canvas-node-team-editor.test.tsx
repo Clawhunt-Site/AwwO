@@ -157,7 +157,8 @@ describe('node team configuration', () => {
     expect(screen.getByRole('checkbox', { name: 'Enable multiple Agents' })).toBeInTheDocument(); expect(screen.getByLabelText('Maximum model calls')).toBeInTheDocument(); await screen.findAllByRole('option', { name: 'model-a' });
     expect(screen.getByText(/Shared session history includes completed user exchanges/)).toHaveTextContent('not every earlier member response');
     unmount(); render(<CanvasI18nProvider locale="en"><SessionTile node={initial} compact scale={1} focused={false} /></CanvasI18nProvider>);
-    expect(screen.getByTestId('node-team-badge-node-a')).toHaveTextContent('2 Agent · Parallel and aggregate');
+    expect(screen.getByTestId('node-team-badge-node-a')).toHaveTextContent('2 Agent');
+    expect(screen.getByTestId('node-team-badge-node-a')).toHaveAttribute('title', '2 Agent · Parallel and aggregate');
   });
 });
 

@@ -10,9 +10,9 @@ import * as jev from '../src/canvas/jevPlanning';
 import { presentationNodes } from '../src/canvas/nodePresentation';
 import { RAIL_MODEL_KEY } from '../src/canvas/railState';
 
-// Both desktop rails start collapsed; the catalog and the persona presets are behind their toggles.
+// The model catalog and persona presets are behind their own disclosure controls.
 const expandModels = () => fireEvent.click(screen.getByRole('button', { name: '展开模型' }));
-const expandBots = () => fireEvent.click(screen.getByRole('button', { name: '展开 Bot 清单' }));
+const openBotTools = () => fireEvent.click(screen.getByRole('button', { name: '搜索与筛选 Bot' }));
 
 const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
 const status = { configured: true, available: true, plannerAvailable: true,
@@ -52,9 +52,23 @@ it('starts with the model rail collapsed on a desktop stage and remembers expans
   expect(localStorage.getItem(RAIL_MODEL_KEY)).toBe('1');
 });
 
+it('shows configured models first and keeps every brand searchable on request', async () => {
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
+  expandModels();
+  expect(await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
+  expect(screen.queryByText('Codex / OpenAI')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看全部 5 个品牌' }));
+  expect(screen.getByText('Codex / OpenAI')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '搜索模型' }));
+  const search = screen.getByRole('searchbox', { name: '查找模型' });
+  fireEvent.change(search, { target: { value: 'qwen' } });
+  expect(screen.getByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
+  expect(screen.queryByText('Codex / OpenAI')).toBeNull();
+});
+
 it('adds a selected persona on a real catalog model with generic inputs, and undoes it as one action', async () => {
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
-  expandBots();
+  openBotTools();
   fireEvent.click(screen.getByText('人设预设'));
   fireEvent.click(screen.getByRole('radio', { name: '前端开发' }));
   expandModels();

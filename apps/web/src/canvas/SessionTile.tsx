@@ -175,6 +175,39 @@ function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<Con
   return '';
 }
 
+/** The overview shows a published result before any newer chat snippet. */
+function firstMeaningfulLine(value: string): string {
+  const lines = value.split(/\\n|\r?\n/).map(line => line.trim()).filter(Boolean);
+  return lines[0]?.endsWith(':') || lines[0]?.endsWith('：') ? (lines[1] || lines[0]) : (lines[0] || '');
+}
+
+function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField, 'id'>>, locale: UiLocale): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  try {
+    const parsed: unknown = JSON.parse(fenced ? fenced[1] : trimmed);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const values = parsed as Record<string, unknown>;
+      for (const id of outputs.length ? outputs.map(field => field.id) : ['result', 'output', 'text']) {
+        const value = values[id];
+        if (typeof value !== 'string') continue;
+        const summary = htmlPreviewSummary(value, locale) || firstMeaningfulLine(value);
+        if (summary) return summary;
+      }
+    }
+  } catch {
+    // Historical results can contain JSON-shaped text with unescaped quotes inside the value.
+    // Only extract its first visible line for the card; the full raw payload stays in Deliverables.
+    const looseField = trimmed.match(/^\s*\{\s*"(?:result|output|text)"\s*:\s*"([\s\S]*)$/);
+    if (looseField) {
+      const first = firstMeaningfulLine(looseField[1]).replace(/"\s*\}\s*$/, '');
+      if (first) return first;
+    }
+  }
+  return htmlPreviewSummary(trimmed, locale) || firstMeaningfulLine(trimmed);
+}
+
 function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass: string; label: string } {
   if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: canvasText(locale, 'tile.form') };
   const meta = AGENT_KIND_META[node.agentKind];
@@ -497,6 +530,12 @@ export const SessionTile = memo(function SessionTile({
     }
     return livePreview(session.turns, node.contract?.outputs, locale) || htmlPreviewSummary(node.preview, locale) || node.preview;
   }, [node, session.turns, locale, t]);
+  const compactPreview = node.kind === 'session'
+    ? node.lastOutput
+      ? `${node.lastOutput.partial ? `${t('tile.partialOutput')} · ` : ''}${publishedPreview(node.lastOutput.text, node.contract?.outputs ?? [], locale) || t('tile.deliveryUpdated')}`
+      : currentThread?.lastOutput ? t('tile.historicalAvailable')
+        : publishedPreview(preview, node.contract?.outputs ?? [], locale) || t('tile.noDeliverables')
+    : preview;
 
   const bind =
     node.kind === 'session'
@@ -603,7 +642,7 @@ export const SessionTile = memo(function SessionTile({
             {badge}
           </span>
         ) : null}
-        {bind ? (
+        {bind && (!compact || bind.cls !== 'bound') ? (
           <span className={`canvas-tile-bind canvas-tile-bind--${bind.cls}`} data-testid={`canvas-tile-bind-${nodeId}`}>
             {bind.text}
           </span>
@@ -635,9 +674,13 @@ export const SessionTile = memo(function SessionTile({
         if (event.shiftKey || event.metaKey || event.ctrlKey) return;
         onToggleFocus?.(nodeId);
       }}>
-        <span className="awwo-compact-summary">{preview || (node.lastOutput ? t('tile.deliveryUpdated') : currentThread?.lastOutput ? t('tile.historicalAvailable') : node.contract?.outputs.length ? t('tile.deliverySummary', { fields: node.contract.outputs.map(field => field.label).join(' / ') }) : t('tile.noDeliverables'))}</span>
-        <span className="awwo-compact-footer"><span>{node.team ? <span className="node-team-badge" data-testid={`node-team-badge-${nodeId}`}>{node.team.members.length} Agent · {nodeTeamModeLabel(node.team.mode, locale)}</span>
-          : <>{getNodeThreads(node).length} Session{node.lastOutput || currentThread?.lastOutput ? t('tile.hasDeliverables') : ''}</>}</span><span>{t('tile.open')}<ChevronRight size={13} /></span></span>
+        {node.team && <span className="node-team-count" data-testid={`node-team-badge-${nodeId}`}
+          title={`${node.team.members.length} Agent · ${nodeTeamModeLabel(node.team.mode, locale)}`}
+          aria-label={`${node.team.members.length} Agent · ${nodeTeamModeLabel(node.team.mode, locale)}`}>
+          {node.team.members.length} Agent
+        </span>}
+        <span className="awwo-compact-summary" title={compactPreview}>{compactPreview}</span>
+        <ChevronRight className="awwo-compact-chevron" size={16} aria-hidden="true" />
       </button> : !showBody && !configurationPanel ? (
         // glance: identity only. The preview line is PERSISTED on the node, so a freshly reloaded
         // canvas reads correctly before any history has been fetched.

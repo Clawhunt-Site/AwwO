@@ -33,12 +33,15 @@
 .model-persona-shelf button:focus-visible, .model-persona-shelf input:focus-visible, .model-persona-shelf select:focus-visible { outline: 2px solid var(--strong, #667861); outline-offset: 3px; }
 .model-persona-shelf-toggle { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; background: none; border: 1px solid var(--line, #dce0d8); border-radius: 7px; }
 .model-persona-shelf-toggle span { font-size: 22px; line-height: 1; }
-.model-persona-shelf-body { display: flex; flex-direction: column; gap: 18px; overflow-y: auto; overscroll-behavior: contain; padding: 14px 12px; min-height: 0; scrollbar-width: thin; }
+.model-persona-shelf-body { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; padding: 12px 10px; min-height: 0; scrollbar-width: thin; }
 .model-persona-shelf-body[hidden] { display: none; }
 .model-persona-shelf-orchestration { min-width: 0; padding-bottom: 14px; border-bottom: 1px solid var(--line, #dce0d8); }
 .model-persona-shelf-orchestration select { max-width: 100%; }
 .model-persona-shelf-hint { margin-top: 5px !important; color: var(--muted, #686e65); font-size: 11px; line-height: 1.5; }
-.model-persona-shelf-search { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px; min-height: 38px; margin-top: 12px; padding: 5px 8px; border: 1px solid var(--line, #dce0d8); border-radius: 10px; background: var(--panel, #f7f8f5); color: var(--muted, #686e65); }
+.model-persona-shelf-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
+.model-persona-shelf-search-toggle { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted, #686e65); }
+.model-persona-shelf-search-toggle:hover, .model-persona-shelf-search-toggle[aria-expanded='true'] { background: var(--shelf-selected); color: var(--text); }
+.model-persona-shelf-search { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px; min-height: 38px; margin-top: 8px; padding: 5px 8px; border: 1px solid var(--line, #dce0d8); border-radius: 10px; background: var(--panel, #f7f8f5); color: var(--muted, #686e65); }
 .model-persona-shelf-search:focus-within { border-color: var(--strong, #667861); }
 .model-persona-shelf-search input { flex: 1; width: 0; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text, #202720); font: inherit; font-size: 11px; }
 .model-persona-shelf-search input::-webkit-search-cancel-button { display: none; }
@@ -46,18 +49,23 @@
 .model-persona-shelf-search button { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; }
 .model-persona-shelf-search button:hover { background: var(--shelf-selected); }
 .model-persona-shelf-search-count { margin-top: 7px !important; color: var(--muted, #686e65); font-size: 10px; }
-.model-persona-shelf-group { margin-top: 13px; }
-.model-persona-shelf-group-head { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; margin-bottom: 6px; }
+.model-persona-shelf-group { margin-top: 7px; }
+.model-persona-shelf-group-head { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; margin: 0 6px 5px; }
 .model-persona-shelf-badge { color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
-.model-persona-shelf-model { position: relative; display: block; width: 100%; padding: 10px 28px 10px 10px; margin-top: 6px; border: 1px solid var(--line, #dce0d8); border-radius: 9px; background: var(--card, #fff); text-align: left; }
-.model-persona-shelf-model:not(:disabled):hover { border-color: var(--strong, #667861); }
+.model-persona-shelf-model { position: relative; display: block; width: 100%; min-height: 38px; padding: 9px 28px 9px 10px; margin-top: 2px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; }
+.model-persona-shelf-model:not(:disabled):hover, .model-persona-shelf-model:not(:disabled):focus-visible { background: var(--shelf-selected); border-color: var(--line, #dce0d8); }
 .model-persona-shelf-model[draggable=true] { cursor: grab; }
 .model-persona-shelf-model[draggable=true]:active { cursor: grabbing; }
 .model-persona-shelf-model:disabled { opacity: .58; }
-.model-persona-shelf-model-title { display: block; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.model-persona-shelf-model-title { display: block; font-size: 12px; font-weight: 580; overflow-wrap: anywhere; }
 .model-persona-shelf-model-connection { display: block; margin-top: 3px; color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
-.model-persona-shelf-model-meta { display: flex; flex-wrap: wrap; gap: 2px 7px; margin-top: 4px; color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
-.model-persona-shelf-model-add { position: absolute; right: 10px; top: 11px; color: var(--muted, #686e65); }
+.model-persona-shelf-model-meta { display: block; margin-top: 3px; color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.model-persona-shelf-model-add { position: absolute; right: 10px; top: 8px; color: var(--muted, #686e65); opacity: 0; font-size: 17px; }
+.model-persona-shelf-model:hover .model-persona-shelf-model-add, .model-persona-shelf-model:focus-visible .model-persona-shelf-model-add { opacity: 1; }
+.model-persona-shelf-group-more { width: 100%; margin-top: 3px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted, #686e65); font-size: 11px; text-align: left; }
+.model-persona-shelf-group-more:hover, .model-persona-shelf-group-more:focus-visible { background: var(--shelf-selected); color: var(--text); }
+.model-persona-shelf-all-brands { width: 100%; margin-top: 10px; padding: 8px 10px; border: 0; border-top: 1px solid var(--line, #dce0d8); background: transparent; color: var(--muted, #686e65) !important; text-align: left; }
+.model-persona-shelf-all-brands:hover { color: var(--text) !important; }
 .model-persona-shelf-status, .model-persona-shelf-error { margin-top: 10px !important; line-height: 1.5; overflow-wrap: anywhere; }
 .model-persona-shelf-error { color: var(--danger, #a83c30); }
 .model-persona-shelf-error button { margin-top: 7px; padding: 4px 10px; border: 1px solid currentColor; border-radius: 6px; background: transparent; }

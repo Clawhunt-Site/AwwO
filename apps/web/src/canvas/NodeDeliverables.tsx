@@ -66,6 +66,15 @@ function DeliverableMarkdown({ children }: { children: string }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={deliveryUrlTransform} components={deliveryMarkdownComponents}>{children}</ReactMarkdown>;
 }
 
+/** Recover a readable preview from a legacy one-field result with unescaped inner quotes. */
+function legacyWrappedPreview(source: string, fieldId: string): string | undefined {
+  const trimmed = source.trim();
+  const prefix = `{"${fieldId}":"`;
+  if (!trimmed.startsWith(prefix) || !trimmed.endsWith('"}')) return;
+  try { JSON.parse(trimmed); return; } catch { /* The original source remains available below. */ }
+  return trimmed.slice(prefix.length, -2).replace(/\\n/g, '\n').replace(/\\"/g, '"');
+}
+
 export interface NodeDeliverablesProps {
   node: SessionNode;
   readOnly: boolean;
@@ -138,6 +147,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
           <div className={`awwo-deliverable-body${field.type === 'html' || field.type === 'markdown' || artifactUrl ? ' awwo-deliverable-with-preview' : ''}`}>
             {field.type === 'html' || field.type === 'markdown'
               ? <ArtifactPreview key={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
+                  previewSource={field.type === 'markdown' ? legacyWrappedPreview(value, field.id) : undefined}
                   title={field.label || field.id} canDownload={Boolean(value.trim()) && !output.partial}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}

@@ -100,6 +100,9 @@ const COALESCE_MS = 900;
 const HISTORY_LIMIT = 60;
 /** Stage padding reserved around a focused node (room for the composer and the delivery drawer). */
 const FOCUS_FIT_PADDING = { x: 28, top: 24, bottom: 82 } as const;
+// The focused delivery overlays the conversation whenever the usable stage cannot fit both
+// panes at a readable scale, including laptops with both rails visible.
+const narrowFocusWidth = (stageWidth: number) => stageWidth > 0 && stageWidth <= 900 ? Math.max(280, stageWidth - FOCUS_FIT_PADDING.x * 2) : undefined;
 /** Stage changes (window resize, rail toggles) settle for this long before the overview refits. */
 const REFIT_DEBOUNCE_MS = 150;
 /** A camera within this many pixels of the one the app fitted, at the same scale, is still the app's.
@@ -424,7 +427,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId), [nodes, focusedId]);
+  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId, narrowFocusWidth(size.w)), [nodes, focusedId, size.w]);
   const renderNodeById = useMemo(() => new globalThis.Map(renderNodes.map(node => [node.id, node])), [renderNodes]);
   // Focus pushes the pre-focus viewport so a second press returns exactly where you were.
   const focusReturn = useRef<ViewportState | null>(null);
@@ -496,8 +499,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const focusNode = useCallback(
     (nodeId: string) => {
       if (inspectorCloseLocked.current) return;
-      const node = presentationNodes(docRef.current.nodes, nodeId).find((n) => n.id === nodeId);
       const box = viewportSize();
+      const node = presentationNodes(docRef.current.nodes, nodeId, narrowFocusWidth(box?.w ?? sizeRef.current.w)).find((n) => n.id === nodeId);
       if (!node) return;
       if (focusedId !== nodeId) {
         if (!focusedId) focusReturn.current = viewRef.current;
@@ -1887,7 +1890,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
-    <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} ref={rootRef}>
+    <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} ref={rootRef}>
       <CanvasViewport
         view={view}
         onViewChange={setView}
@@ -1979,7 +1982,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.fitAll} title={viewText.fitAll} disabled={!nodes.length} onClick={fitAll}><Maximize2 size={16} /></button>
         <button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={readOnly || running || initializing || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
-        <button aria-label={viewText.showMinimap} title={viewText.showMinimap} aria-pressed={minimapOpen} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
+        <button className="awwo-minimap-toggle" aria-label={viewText.showMinimap} title={viewText.showMinimap} aria-pressed={minimapOpen} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.undo} title={viewText.undo} disabled={readOnly || running || initializing || !history.undo} onClick={undo}><Undo2 size={16} /></button>
         <button aria-label={viewText.redo} title={viewText.redo} disabled={readOnly || running || initializing || !history.redo} onClick={redo}><Redo2 size={16} /></button>

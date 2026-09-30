@@ -58,7 +58,7 @@ it('lets a signed-in owner without a personal key inspect, export and edit an ex
   const fetcher = server({ personal: true }); render(<SaaSApp />); await ready();
   expect(await screen.findByText('尚未连接执行引擎')).toBeVisible();
   expect(screen.getByRole('link', { name: '连接执行引擎' })).toHaveAttribute('href', '/?tenant=tenant-a&canvas=canvas-a&account=engines');
-  expect(screen.getByText('Navigation fixture')).toBeVisible();
+  expect(screen.getByRole('button', { name: '打开 Navigation fixture' })).toBeVisible();
   expect(screen.getByRole('button', { name: '导出画布 JSON' })).toBeEnabled();
   expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
   expect(screen.getByText(/画布仍可编辑/)).toBeVisible();
@@ -71,7 +71,7 @@ it('lets a signed-in owner without a personal key inspect, export and edit an ex
 it('keeps the old canvas editable and execution closed when the runtime-status request fails', async () => {
   const fetcher = server({ personal: true, runtimeRead: () => Promise.reject(new TypeError('offline')) });
   render(<SaaSApp />); await ready();
-  expect(screen.getByText('Navigation fixture')).toBeVisible();
+  expect(screen.getByRole('button', { name: '打开 Navigation fixture' })).toBeVisible();
   expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
   expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
   expect(screen.getByRole('button', { name: /运行图/ })).toHaveAttribute('title', '暂时无法确认执行引擎状态。画布仍可编辑，请稍后刷新后再运行。');
@@ -83,7 +83,7 @@ it('keeps the old canvas editable and execution closed when the runtime-status r
 it('does not offer execution when runtime health claims ready without a model catalog', async () => {
   const fetcher = server({ personal: true, runtimeRead: async () => response({ configured: true, available: true }) });
   render(<SaaSApp />); await ready();
-  expect(screen.getByText('Navigation fixture')).toBeVisible();
+  expect(screen.getByRole('button', { name: '打开 Navigation fixture' })).toBeVisible();
   expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
   expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith('/initialize') && init?.method === 'POST')).toBe(false);
 });

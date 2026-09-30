@@ -17,7 +17,7 @@ import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocume
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { resetAllSessions } from '../src/canvas/sessions';
-import { RAIL_MODEL_KEY } from '../src/canvas/railState';
+import { RAIL_BOT_KEY, RAIL_MODEL_KEY } from '../src/canvas/railState';
 
 /** A ResizeObserver that never delivers — the exact condition that stranded focus/fit. */
 class SilentResizeObserver {
@@ -109,6 +109,19 @@ describe('CanvasSurface fit fallback', () => {
 });
 
 describe('CanvasSurface fits the real stage', () => {
+  it('keeps a delivery open at readable width when the two rails leave a 700px stage', async () => {
+    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(seed({ w: 520, h: 380, deliverablesOpen: true })));
+    const stage = { w: 700, h: 700 };
+    stubStage(stage);
+    render(<CanvasSurface />);
+    fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话', exact: true }));
+    const tile = await screen.findByTestId('canvas-tile-s1');
+    await waitFor(() => expect(tile.dataset.lod).toBe('focus'));
+    expect(document.querySelector('.canvas-root')).toHaveAttribute('data-narrow-focus', 'true');
+    expect(tile.style.width).toBe('520px');
+    expect(transformOf(document.querySelector('.canvas-world') as HTMLElement)[2]).toBeGreaterThanOrEqual(0.95);
+  });
+
   it('caps the focus scale so a node with its delivery drawer never overflows the stage', async () => {
     // Saved 1400x900 with the drawer open: wider AND taller than a 1280x720 stage minus padding.
     localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(seed({ w: 1400, h: 900, deliverablesOpen: true })));
@@ -282,6 +295,7 @@ describe('CanvasSurface fits the real stage (cloud rails)', () => {
   it('refits an app-fitted overview when a side rail toggles, but never an operator camera or a focused node', async () => {
     const stage = { w: 1200, h: 800 };
     stubStage(stage);
+    localStorage.setItem(RAIL_BOT_KEY, '1');
     renderCloud();
     const world = document.querySelector('.canvas-world') as HTMLElement;
     const node = { x: 900, y: 700, w: 260, h: 128 };

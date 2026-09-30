@@ -25,6 +25,43 @@ beforeEach(() => {
 });
 
 describe('SessionTile compact header actions', () => {
+  it('leads with the published delivery instead of a later chat line, without Session chrome', () => {
+    const delivered = node({
+      preview: 'A newer chat reply',
+      contract: { version: 1, inputs: [], outputs: [{ id: 'result', label: '交付结果', type: 'text', required: true, value: '' }] },
+      lastOutput: { text: '{"result":"两步验收建议\\n核对输出与上下游"}', source: 'run', at: 1 },
+      binding: { companyId: 'c1', agentId: 'a1', agentName: 'Agent' },
+    });
+    render(<SessionTile node={delivered} compact scale={1} focused={false} onToggleFocus={vi.fn()} />);
+    const card = screen.getByRole('button', { name: '打开 LLM 会话' });
+    expect(card).toHaveTextContent('两步验收建议');
+    expect(card).not.toHaveTextContent('A newer chat reply');
+    expect(card).not.toHaveTextContent('Session');
+    expect(screen.getByTestId('canvas-tile-s1')).not.toHaveTextContent('已连接');
+  });
+
+  it('marks an incomplete published result as partial in the compact card', () => {
+    render(<SessionTile node={node({ lastOutput: { text: '仅有部分内容', source: 'run', at: 1, partial: true } })}
+      compact scale={1} focused={false} onToggleFocus={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '打开 LLM 会话' })).toHaveTextContent('产出（未完成，仅部分）');
+  });
+
+  it('summarizes a saved JSON preview when no published output field is present', () => {
+    render(<SessionTile node={node({ preview: '{"result":"完成内容：\\n核对任务顺序"}' })}
+      compact scale={1} focused={false} onToggleFocus={vi.fn()} />);
+    const card = screen.getByRole('button', { name: '打开 LLM 会话' });
+    expect(card).toHaveTextContent('核对任务顺序');
+    expect(card).not.toHaveTextContent('{"result"');
+  });
+
+  it('keeps malformed historical JSON-shaped output legible in the compact card', () => {
+    render(<SessionTile node={node({ preview: '{"result":"完成内容：\\n回答"任务顺序"。"}' })}
+      compact scale={1} focused={false} onToggleFocus={vi.fn()} />);
+    const card = screen.getByRole('button', { name: '打开 LLM 会话' });
+    expect(card).toHaveTextContent('回答"任务顺序"。');
+    expect(card).not.toHaveTextContent('{"result"');
+  });
+
   it('keeps 配置 reachable at the FOCUS level, so a focused unbound node can still be bound', () => {
     const onConfigure = vi.fn();
     render(

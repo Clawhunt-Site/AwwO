@@ -134,7 +134,7 @@
 .canvas-root .awwo-node .canvas-tile-glyph { width: 24px; height: 24px; border-radius: 6px; }
 .canvas-root .awwo-node .canvas-tile-glyph svg { width: 14px; height: 14px; }
 .canvas-root .awwo-node .canvas-tile-title { font-size: 13px; }
-.canvas-root .awwo-node .canvas-tile-bind { padding: 2px 4px; font-size: 10px; border: 0; }
+.canvas-root .awwo-node .canvas-tile-bind { flex: 0 0 auto; padding: 2px 4px; font-size: 10px; border: 0; white-space: nowrap; }
 .canvas-root .awwo-node .canvas-tile-body { border-radius: 0 0 12px 12px; }
 .canvas-root .awwo-node-tools { position: relative; display: flex; align-items: center; gap: 3px; margin-left: auto; flex-shrink: 0; }
 .canvas-root .awwo-node-tools > button, .canvas-root .awwo-session-heading button, .canvas-root .awwo-chat-heading button,
@@ -207,16 +207,18 @@
 
 /* The graph stays quiet until one Agent is opened. */
 .canvas-root .awwo-node.is-compact { border-radius: 10px; box-shadow: 0 2px 8px #24362b08; }
-.canvas-root .awwo-node.is-compact .canvas-tile-head { min-height: 39px; padding: 9px 11px 5px; border-bottom: 0; gap: 5px; }
+.canvas-root .awwo-node.is-compact .canvas-tile-head { min-height: 48px; padding: 12px 14px 5px; border-bottom: 0; gap: 8px; }
 .canvas-root .awwo-node.is-compact .canvas-tile-glyph { width: 22px; height: 22px; }
 .canvas-root .awwo-node.is-compact .canvas-tile-title { font-weight: 600; }
-.canvas-root .awwo-node.is-compact .canvas-tile-bind { font-size: 9px; padding: 2px 4px; }
-.canvas-root .awwo-node.is-compact .canvas-tile-badge { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
-.canvas-root .awwo-compact-open { display: flex; flex: 1; min-height: 0; width: 100%; flex-direction: column; justify-content: space-between; gap: 8px; padding: 5px 13px 12px; border: 0; border-radius: 0 0 10px 10px; background: transparent; color: var(--awwo-ink); text-align: left; font: inherit; }
+.canvas-root .awwo-node.is-compact .canvas-tile-bind { font-size: 10px; padding: 2px 5px; }
+.canvas-root .awwo-node.is-compact .canvas-tile-badge { max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.canvas-root .awwo-node.is-compact .canvas-tile-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-root .awwo-node.is-compact .node-team-count { flex: 0 0 auto; padding-right: 7px; border-right: 1px solid var(--awwo-border); color: var(--awwo-muted); font-size: 10px; white-space: nowrap; }
+.canvas-root .awwo-compact-open { display: flex; flex: 1; min-height: 0; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 15px 15px; border: 0; border-radius: 0 0 10px 10px; background: transparent; color: var(--awwo-ink); text-align: left; font: inherit; }
 .canvas-root .awwo-compact-open:hover { background: var(--awwo-soft); }
-.canvas-root .awwo-compact-summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: inherit; line-height: 1.5; color: var(--awwo-muted); }
-.canvas-root .awwo-compact-footer { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-size: .9em; color: var(--awwo-muted); width: 100%; }
-.canvas-root .awwo-compact-footer > span:last-child { display: inline-flex; align-items: center; gap: 2px; color: var(--awwo-teal); }
+.canvas-root .awwo-compact-summary { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; line-height: 1.5; color: var(--awwo-muted); }
+.canvas-root .awwo-compact-chevron { flex: 0 0 auto; color: var(--awwo-muted); opacity: .55; }
+.canvas-root .awwo-compact-open:hover .awwo-compact-chevron, .canvas-root .awwo-compact-open:focus-visible .awwo-compact-chevron { opacity: 1; color: var(--awwo-teal); }
 .canvas-root .awwo-node.is-compact .canvas-port-field-label { opacity: 0; pointer-events: none; transition: opacity .12s; }
 .canvas-root .awwo-node.is-compact:hover .canvas-port-field-label, .canvas-root .awwo-node.is-compact:focus-within .canvas-port-field-label { opacity: 1; }
 .canvas-root .awwo-node.is-compact .canvas-port { width: 10px; height: 10px; }
@@ -224,10 +226,17 @@
 .canvas-root .awwo-node.is-compact { padding: 0; }
 .canvas-root .awwo-node.is-compact .canvas-tile-bind { white-space: nowrap; flex-shrink: 0; }
 .canvas-root .awwo-node.is-compact .awwo-compact-summary { min-height: 1.5em; }
-.canvas-root .awwo-node.is-compact .awwo-compact-footer { flex-shrink: 0; }
 
 /* Contain every node's port layer so folded neighbours cannot cover the active workspace. */
 .canvas-root .awwo-node:not(.canvas-tile--selected):not(.canvas-tile--focus) { z-index: 0; }
+
+.canvas-root[data-narrow-focus='true'] .awwo-node.canvas-tile--focus .awwo-node-delivery-drawer { position: absolute; inset: 0; z-index: 8; width: 100%; border-left: 0; }
+
+@media (max-width: 600px) {
+  .canvas-root .awwo-node.canvas-tile--focus .canvas-tile-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .canvas-root .awwo-node.canvas-tile--focus .canvas-tile-bind--bound { display: none; }
+  .canvas-root .awwo-node.canvas-tile--focus .awwo-node-tools > button > span { display: none; }
+}
 
 /* Template-specific content is disclosed inside the active node only. */
 .canvas-root .awwo-node[data-template] .canvas-tile-glyph { color: var(--template-accent, var(--awwo-teal)); background: var(--template-soft, var(--awwo-tint)); }

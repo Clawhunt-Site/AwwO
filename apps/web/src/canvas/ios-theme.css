@@ -188,7 +188,7 @@ button.saas-primary:hover:not(:disabled), .saas-primary-link:hover { background:
 .awwo-header { min-height: 58px; padding: 10px 22px; }
 .awwo-breadcrumb, :root[data-theme='dark'] .awwo-breadcrumb { font-size: 12px; color: var(--saas-text); font-weight: 600; gap: 10px; }
 .awwo-breadcrumb > span, :root[data-theme='dark'] .awwo-breadcrumb > span { color: var(--saas-muted); font-weight: 400; }
-.awwo-canvas-bar { min-height: 50px; padding-inline: 22px; gap: 18px; border-top: 1px solid var(--saas-border); }
+.awwo-canvas-bar { min-height: 44px; padding-inline: 22px; gap: 12px; border-top: 1px solid var(--saas-border); }
 .awwo-canvas-tab { border-bottom-width: 2px; font-size: 12px; }
 .awwo-canvas-meta { font-size: 11px; color: var(--saas-muted); }
 .awwo-icon-button { width: 34px; height: 34px; border-radius: 10px; }
@@ -248,26 +248,27 @@ button.saas-primary:hover:not(:disabled), .saas-primary-link:hover { background:
 .awwo-catalog-list > button { border-radius: 14px; background: var(--saas-input); }
 .awwo-secondary, :root[data-theme='dark'] .awwo-secondary { background: var(--saas-input); color: var(--saas-text); border-radius: 11px; }
 
-/* Models use compact source cards; disabled models stay visibly unavailable. */
+/* The left rail is a quiet model roster; details appear only where names collide. */
 .awwo-workspace .model-persona-shelf { background: var(--saas-card); font-size: 12px; }
 .model-persona-shelf-head { min-height: 56px; padding: 12px 16px; }
 .model-persona-shelf h2 { font-size: 14px; letter-spacing: -.2px; font-weight: 650; }
 .model-persona-shelf h3, .model-persona-shelf legend { font-size: 12px; font-weight: 600; }
 .model-persona-shelf h4 { font-size: 11px; font-weight: 600; }
 .model-persona-shelf-toggle { border: 0; border-radius: 9px; width: 32px; height: 32px; background: var(--saas-input); color: var(--saas-muted) !important; }
-.model-persona-shelf-body { gap: 22px; padding: 18px 16px; }
-.model-persona-shelf-orchestration { padding-bottom: 18px; }
+.awwo-workspace.has-model-library .awwo-model-sidebar .awwo-workspace-name { display: none; }
+.model-persona-shelf-body { gap: 15px; padding: 12px 12px; }
+.model-persona-shelf-orchestration { padding-bottom: 14px; }
 .awwo-orchestration-choice select { min-height: 38px; border-radius: 10px; padding: 8px 10px; background: var(--saas-input); font-size: 12px; }
 .awwo-orchestration-choice small { font-size: 11px; }
 .model-persona-shelf-hint { line-height: 1.65; font-size: 11px; }
-.model-persona-shelf-group { margin-top: 18px; }
-.model-persona-shelf-group-head { gap: 7px; margin-bottom: 8px; }
+.model-persona-shelf-group { margin-top: 12px; }
+.model-persona-shelf-group-head { gap: 7px; margin-bottom: 5px; }
 .model-persona-shelf-badge { border-radius: 6px; padding: 2px 5px; background: var(--saas-input); font-size: 9px; }
-.model-persona-shelf-model { padding: 12px 33px 12px 12px; border-radius: 13px; background: var(--saas-input); border-color: var(--saas-border); margin-top: 7px; transition: border-color .15s, background .15s; }
-.model-persona-shelf-model:not(:disabled):hover { background: var(--saas-soft); border-color: #2f7df680; }
+.model-persona-shelf-model { min-height: 36px; padding: 8px 29px 8px 10px; border-radius: 9px; background: transparent; border-color: transparent; margin-top: 1px; transition: border-color .15s, background .15s; }
+.model-persona-shelf-model:not(:disabled):hover, .model-persona-shelf-model:not(:disabled):focus-visible { background: var(--saas-soft); border-color: var(--saas-border); }
 .model-persona-shelf-model-title { font-size: 12px; line-height: 1.5; }
 .model-persona-shelf-model-meta { font-family: var(--ios-mono); font-size: 9px; line-height: 1.6; margin-top: 4px; }
-.model-persona-shelf-model-add { display: grid; place-items: center; width: 21px; height: 21px; top: 12px; right: 10px; border-radius: 7px; background: var(--saas-card); color: var(--saas-accent); font-size: 16px; }
+.model-persona-shelf-model-add { display: grid; place-items: center; width: 21px; height: 21px; top: 8px; right: 8px; border-radius: 7px; background: transparent; color: var(--saas-accent); font-size: 16px; }
 .model-persona-shelf-model:disabled { opacity: .62; background: transparent; }
 .model-persona-shelf-persona-grid { gap: 7px; margin-top: 12px; }
 .model-persona-shelf-persona { min-height: 35px; padding: 8px; gap: 7px; border-radius: 10px; background: var(--saas-card); }
@@ -330,22 +331,34 @@ button.saas-primary:hover:not(:disabled), .saas-primary-link:hover { background:
 .awwo-workspace .awwo-rail-link:focus-visible { outline: 2px solid var(--saas-accent); outline-offset: 2px; border-radius: 3px; }
 .awwo-bot-sidebar > header, .awwo-bot-sidebar > .awwo-bot-heading {
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  min-height: 58px; flex-shrink: 0; border-bottom: 1px solid var(--saas-border); margin-inline: -14px; padding: 12px 18px;
+  min-height: 50px; flex-shrink: 0; border-bottom: 1px solid var(--saas-border); margin-inline: -14px; padding: 8px 12px 8px 18px;
 }
 .awwo-bot-sidebar h2 { margin: 0; color: var(--saas-text); font-size: 14px; letter-spacing: -.2px; font-weight: 650; }
-.awwo-bot-header h2 { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
-.awwo-bot-header .awwo-eyebrow { font-size: 9px; letter-spacing: 1px; }
+.awwo-bot-header h2 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.awwo-bot-header-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.awwo-bot-header-actions .awwo-icon-button { width: 30px; height: 30px; }
+.awwo-bot-header-actions .awwo-bot-add { color: var(--saas-accent); background: var(--saas-soft); }
+.awwo-bot-header-actions .awwo-bot-add:hover { background: var(--saas-input); }
 .awwo-bot-sidebar h3 { margin: 0; color: var(--saas-text); font-size: 12px; font-weight: 600; }
 .awwo-bot-sidebar .awwo-new-agent { flex-shrink: 0; margin: 16px 0; }
+.awwo-bot-tools { flex-shrink: 0; max-height: min(45vh, 300px); overflow-y: auto; overscroll-behavior: contain; padding: 12px 0; border-bottom: 1px solid var(--saas-border); }
+.awwo-bot-tools .awwo-search { margin: 10px 0 0; border: 1px solid var(--saas-border); background: var(--saas-input); }
+.awwo-bot-tools .awwo-bot-personas { margin-top: 10px; padding-top: 8px; }
 .awwo-bot-tabs { display: flex; flex-shrink: 0; gap: 4px; padding: 4px; background: var(--saas-input); border: 1px solid var(--saas-border); border-radius: 11px; }
 .awwo-bot-tabs button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 4px; min-width: 0; min-height: 31px; padding: 7px 5px; border: 0; border-radius: 8px; background: transparent; color: var(--saas-muted); font-size: 11px; }
 .awwo-bot-tabs button[aria-pressed='true'] { color: var(--saas-accent); background: var(--saas-card); box-shadow: 0 2px 6px #1832550c; }
 .awwo-bot-tabs button > span { font: 9px var(--ios-mono); }
 .awwo-bot-sidebar .awwo-search, .awwo-bot-sidebar > .awwo-list-heading { flex-shrink: 0; }
 .awwo-bot-sidebar .awwo-agent-list { flex: 1; min-height: 76px; overscroll-behavior: contain; scrollbar-width: thin; }
+.awwo-bot-sidebar .awwo-agent-row { min-height: 54px; border-radius: 11px; }
+.awwo-bot-sidebar .awwo-agent-row-icon { color: var(--saas-accent); background: var(--saas-soft); }
+.awwo-bot-sidebar .awwo-agent-row:hover { background: var(--saas-input); }
+.awwo-bot-sidebar .awwo-agent-row.is-selected { background: var(--saas-soft); border-color: transparent; box-shadow: none; }
+.awwo-bot-sidebar .awwo-agent-row-copy strong { font-size: 12px; }
+.awwo-bot-sidebar .awwo-agent-row-copy small { color: var(--saas-muted); font-size: 10px; }
 .awwo-bot-sidebar .awwo-sidebar-footer { flex-shrink: 0; margin-top: 0; padding-top: 8px; }
 .awwo-bot-content { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
-.awwo-bot-sidebar .awwo-bot-content { padding-top: 18px; }
+.awwo-bot-sidebar .awwo-bot-content { padding-top: 10px; }
 .awwo-bot-content .awwo-library-sources { margin-top: 12px; margin-bottom: 12px; display: flex; flex-wrap: nowrap; gap: 4px; padding: 4px; background: var(--saas-input); border: 1px solid var(--saas-border); border-radius: 11px; }
 .awwo-bot-content .awwo-library-sources button { flex: 1; min-width: 0; border: 0; border-radius: 8px; padding: 8px 5px; font-size: 11px; white-space: normal; }
 .awwo-bot-content .awwo-library-sources button[aria-pressed='true'] { background: var(--saas-card); color: var(--saas-accent); box-shadow: 0 2px 5px #1832550b; }

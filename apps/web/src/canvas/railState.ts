@@ -1,7 +1,7 @@
 // Side-rail disclosure state (the model shelf on the left, the Bot list on the right).
 //
-// Both rails default to collapsed on a desktop stage so the canvas gets the width; the operator's
-// choice is a per-browser convenience, so it lives in localStorage and never in the document.
+// Each rail has its own default and remembers an explicit choice per browser. This preference
+// lives in localStorage and never in the canvas document.
 // Storage can be absent, full or blocked (private windows, cleared site data): every access is
 // guarded and a failure simply falls back to the default.
 

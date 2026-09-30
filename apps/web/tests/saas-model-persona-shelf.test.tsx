@@ -18,6 +18,8 @@ afterEach(cleanup);
 describe('model and persona shelf', () => {
   it('shows the real model in its supplied group and all unavailable groups honestly', () => {
     render(<ModelPersonaShelf {...props()} />);
+    expect(screen.queryByText('未配置')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '查看全部 5 个品牌' }));
     expect(screen.getAllByText('未配置')).toHaveLength(4);
     const platform = screen.getByRole('region', { name: 'ClawHunt · 平台模型' });
     expect(within(platform).getByRole('button', { name: /添加 Qwen fixture/ })).toBeEnabled();
@@ -33,13 +35,14 @@ describe('model and persona shelf', () => {
     const list = groups.map(group => group.id === 'clawhunt' ? { ...group, models: [qwen] }
       : group.id === 'claude' ? { ...group, models: [claude], available: true } : group);
     render(<ModelPersonaShelf {...props({ groups: list, onAddModel })} />);
+    fireEvent.click(screen.getByRole('button', { name: '搜索模型' }));
     const search = screen.getByRole('searchbox', { name: '查找模型' });
     fireEvent.change(search, { target: { value: 'alias-7' } });
     expect(screen.getByRole('status')).toHaveTextContent('找到 1 个模型');
     expect(screen.getByRole('button', { name: /添加 qwen3.8-p6 · Work connection · llmgate \/ alias-7/ })).toBeVisible();
     expect(screen.queryByRole('region', { name: 'claude' })).toBeNull();
     expect(screen.getByText('qwen3.8-p6')).toBeVisible();
-    expect(screen.getByText('Work connection · llmgate / alias-7')).toBeVisible();
+    expect(screen.queryByText('Work connection · llmgate / alias-7')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /添加 qwen3.8-p6/ }));
     expect(onAddModel).toHaveBeenCalledWith(qwen, null);
     fireEvent.change(search, { target: { value: 'Claude' } });
@@ -53,6 +56,18 @@ describe('model and persona shelf', () => {
     fireEvent.click(screen.getByRole('button', { name: '清除模型搜索' }));
     expect(search).toHaveFocus();
     expect(search).toHaveValue('');
+  });
+
+  it('keeps large provider catalogues short until requested while search reaches every model', () => {
+    const entries = Array.from({ length: 6 }, (_, index) => ({ ...model, key: `model-${index}`, model: `model-${index}`, label: `model-${index}` }));
+    render(<ModelPersonaShelf {...props({ groups: [{ ...groups[4], models: entries }] })} />);
+    expect(screen.getAllByRole('button', { name: /^添加 model-/ })).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: '查看全部 6 个模型' }));
+    expect(screen.getAllByRole('button', { name: /^添加 model-/ })).toHaveLength(6);
+    fireEvent.click(screen.getByRole('button', { name: '收起' }));
+    fireEvent.click(screen.getByRole('button', { name: '搜索模型' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: '查找模型' }), { target: { value: 'model-5' } });
+    expect(screen.getByRole('button', { name: /^添加 model-5/ })).toBeVisible();
   });
 
   it('passes identical model and independent persona for click and drag; preserves the workspace entry', () => {
@@ -141,6 +156,16 @@ it('keeps same-model personal connections visibly distinct and selects the inten
   fireEvent.click(screen.getByRole('button', { name: 'Add gpt-5 · Personal · openai / conn-b · Agents' }));
   expect(onAddModel.mock.calls[0][0]).toMatchObject({ model: 'personal-b', label: entries[1].label });
   expect(screen.getByRole('button', { name: 'Add gpt-5 · Work · openai / conn-a · Agents' })).toBeEnabled();
+});
+
+it('distinguishes identical model names offered by different runtimes', () => {
+  const group: ModelPaletteGroup = { id: 'clawhunt', label: 'ClawHunt', available: true, models: [
+    { ...model, label: 'shared-model', model: 'shared-model', key: 'pi:shared-model' },
+    { ...model, label: 'shared-model', model: 'shared-model', key: 'agents:shared-model', runtime: 'openai-agents' },
+  ] };
+  render(<ModelPersonaShelf {...props({ groups: [group] })} />);
+  expect(screen.getByText('Pi')).toBeVisible();
+  expect(screen.getByText('Agents')).toBeVisible();
 });
 
 it('offers model configuration without enabling unavailable models', () => {

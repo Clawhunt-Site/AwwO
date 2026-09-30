@@ -36,6 +36,14 @@
 .awwo-agent-row-copy strong { display: block; font-size: 11px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .awwo-agent-row-copy small { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: var(--awwo-muted); font-size: 10px; }
 .awwo-agent-index { margin-left: auto; color: #88938c; font: 10px ui-monospace, monospace; }
+.awwo-bot-header-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.awwo-bot-tools { flex-shrink: 0; padding: 12px 0; border-bottom: 1px solid var(--awwo-border); }
+.awwo-bot-tools .awwo-search { margin: 10px 0 0; border-color: var(--awwo-border); background: var(--awwo-surface); }
+.awwo-bot-sidebar .awwo-agent-row { gap: 10px; padding: 8px; margin: 2px 0; }
+.awwo-bot-sidebar .awwo-agent-row-icon { width: 38px; height: 38px; border-radius: 11px; background: var(--awwo-accent-soft); }
+.awwo-bot-sidebar .awwo-agent-row.is-selected { box-shadow: none; }
+.awwo-bot-sidebar .awwo-agent-row-copy strong { font-size: 12px; font-weight: 600; }
+.awwo-bot-sidebar .awwo-agent-row-copy small { margin-top: 2px; }
 .awwo-status-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #8b988e; flex-shrink: 0; }
 .awwo-status-dot.is-done { background: #33805c; }.awwo-status-dot.is-running { background: #bf8824; }.awwo-status-dot.is-failed, .awwo-status-dot.is-blocked { background: #b04444; }
 .awwo-list-empty { font-size: 12px; line-height: 1.9; color: #859086; padding: 15px 12px; white-space: pre-line; }
@@ -167,6 +175,9 @@
 /* Focus scrolls the field panel, never offsets the canvas coordinate system. */
 .awwo-workspace .canvas-root, .awwo-workspace .awwo-stage { overflow: clip; }
 @media (max-width: 720px) { .awwo-workspace .canvas-minimap { bottom: 72px !important; right: 14px !important; } }
+@media (max-width: 600px) {
+  .awwo-workspace .canvas-minimap, .awwo-workspace .awwo-minimap-toggle { display: none !important; }
+}
 .awwo-account-controls { display: flex; align-items: center; gap: 12px; }
 .awwo-workspace .canvas-port--output .canvas-port-field-label { margin-top: -13px; }
 .awwo-workspace .canvas-port--input .canvas-port-field-label { margin-top: 13px; }

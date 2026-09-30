@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type DragEventHandler } from 'react';
-import { ArrowRight, Bot, ChevronRight, Code2, Cpu, Database, FolderOpen, GitBranch, Layers3, Menu, MessageSquare, PanelRightClose, PanelRightOpen, Plus, Search, Settings2, TerminalSquare, X } from 'lucide-react';
-import { RAIL_BOT_KEY, isDesktopStage, readRailCollapsed, writeRailCollapsed } from './railState';
+import { ArrowRight, ChevronRight, Code2, Cpu, Database, FolderOpen, GitBranch, Layers3, Menu, MessageSquare, PanelRightClose, PanelRightOpen, Plus, Search, Settings2, TerminalSquare, X } from 'lucide-react';
+import { RAIL_BOT_KEY, readRailCollapsed, writeRailCollapsed } from './railState';
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
 import type { RunNodeStatus } from './runGraph';
 import { AGENT_TEMPLATE_VERSION, getAgentTemplateForNode, getAgentTemplates, type AgentTemplateId } from './agentTemplates';
@@ -56,7 +56,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -70,10 +70,14 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 900);
   const [navExpanded, setNavExpanded] = useState(false);
   const [botSource, setBotSource] = useState<'canvas' | 'workspace' | 'market'>('canvas');
-  // The desktop Bot rail starts collapsed so the stage gets the width; the choice is remembered
-  // per browser. The mobile drawer is a different surface and always shows the full list.
-  const [botCollapsed, setBotCollapsed] = useState(() => readRailCollapsed(RAIL_BOT_KEY, isDesktopStage()));
-  const botRailCollapsed = Boolean(modelShelf) && !mobile && botCollapsed;
+  const [botToolsOpen, setBotToolsOpen] = useState(false);
+  // A cloud canvas keeps the same right-hand Bot roster while loading or read-only, even
+  // when its editable model shelf is unavailable. The older local canvas keeps its layout.
+  const modernRails = Boolean(modelShelf) || storageMode === 'cloud';
+  // The Bot roster is visible by default. An explicit collapse choice is still remembered per
+  // browser; the mobile drawer always shows the full list regardless of that desktop choice.
+  const [botCollapsed, setBotCollapsed] = useState(() => readRailCollapsed(RAIL_BOT_KEY, false));
+  const botRailCollapsed = modernRails && !mobile && botCollapsed;
   const toggleBotRail = () => {
     const next = !botCollapsed;
     setBotCollapsed(next);
@@ -86,7 +90,9 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
   const botSidebarRef = useRef<HTMLElement>(null);
   const modelOpenButtonRef = useRef<HTMLButtonElement>(null);
   const botOpenButtonRef = useRef<HTMLButtonElement>(null);
+  const botSearchRef = useRef<HTMLInputElement>(null);
   const skipLibraryReturnFocus = useRef(false);
+  useEffect(() => { if (botToolsOpen && botSource === 'canvas') botSearchRef.current?.focus(); }, [botToolsOpen, botSource]);
   useEffect(() => {
     const resize = () => {
       const next = window.innerWidth <= 900; setMobile(next);
@@ -164,17 +170,34 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     ? <button type="button" className="awwo-rail-link" onClick={open}>{label}</button>
     : <>{label}</>;
   const emptyRailHint = locale === 'zh'
-    ? <>从左侧{railLink('模型栏', openModelRail)}添加模型，或从右侧{railLink('Bot 清单', openBotRail)}选择协作者。人设可选，写清任务就能开始。</>
-    : <>Add a model from the {railLink('model rail', openModelRail)} on the left, or choose a collaborator from the {railLink('Bot list', openBotRail)} on the right. Personas are optional; start with a clear task.</>;
+    ? <>从左侧{railLink('模型栏', openModelRail)}添加模型，或在右侧{railLink('Bot 清单', openBotRail)}选择协作者。</>
+    : <>Add a model from the {railLink('model rail', openModelRail)} or choose a collaborator from the {railLink('Bot list', openBotRail)}.</>;
 
-  const botRailToggle = modelShelf ? <button type="button" className="awwo-icon-button awwo-rail-toggle" aria-expanded={!botRailCollapsed}
+  const botRailToggle = modernRails ? <button type="button" className="awwo-icon-button awwo-rail-toggle" aria-expanded={!botRailCollapsed}
     aria-label={t(botRailCollapsed ? 'workspace.expandBots' : 'workspace.collapseBots')} title={t(botRailCollapsed ? 'workspace.expandBots' : 'workspace.collapseBots')}
     onClick={toggleBotRail}>{botRailCollapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}</button> : null;
 
   // One header for both rail states: the toggle keeps its child slot, so collapsing or expanding
   // updates the very button that was pressed instead of replacing it, and keyboard focus stays on it.
+  const addBotLabel = modernRails ? (locale === 'zh' ? '添加 Bot' : 'Add Bot') : t('workspace.addAgent');
+  const botTitle = locale === 'zh'
+    ? { canvas: 'Bot 清单', workspace: '工作区 Bot', market: '产品 Bot' }[botSource]
+    : { canvas: 'Bots', workspace: 'Workspace Bots', market: 'Product Bots' }[botSource];
+  const toggleBotTools = () => {
+    if (botToolsOpen) {
+      setQuery('');
+      setBotSource('canvas');
+    }
+    setBotToolsOpen(!botToolsOpen);
+  };
   const botHeader = <header className="awwo-bot-header">
-    {!botRailCollapsed && <div><span className="awwo-eyebrow">YOUR TEAM</span><h2><Bot size={20} />{locale === 'zh' ? 'Bot 清单' : 'Bots'}</h2></div>}
+    {!botRailCollapsed && <h2>{botTitle}</h2>}
+    {!botRailCollapsed && <div className="awwo-bot-header-actions">
+      <button type="button" className="awwo-icon-button" data-onboarding="bot-tools" aria-label={locale === 'zh' ? '搜索与筛选 Bot' : 'Search and filter Bots'}
+        title={locale === 'zh' ? '搜索与筛选 Bot' : 'Search and filter Bots'} aria-controls={botToolsOpen ? 'awwo-bot-tools' : undefined} aria-expanded={botToolsOpen} onClick={toggleBotTools}><Search size={17} /></button>
+      <button type="button" className="awwo-icon-button awwo-bot-add" aria-label={addBotLabel} title={addBotLabel}
+        disabled={readOnly || running} onClick={() => { setSidebarOpen(false); setLibraryOpen(true); }}><Plus size={18} /></button>
+    </div>}
     {botRailToggle}
     {!botRailCollapsed && <button type="button" className="awwo-icon-button awwo-mobile-menu" aria-label={t('workspace.closeNavigation')} onClick={() => setSidebarOpen(false)}><X size={18} /></button>}
   </header>;
@@ -184,8 +207,6 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
     setLibraryOpen(false);
     revealModelRail();
   } : undefined;
-  const addBotLabel = modelShelf ? (locale === 'zh' ? '添加 Bot' : 'Add Bot') : t('workspace.addAgent');
-
   const botSidebar = botRailCollapsed ? (
     // Collapsed rail: identity, the expand control and the add-Bot affordance only.
     <aside data-onboarding="bots" ref={botSidebarRef} className="awwo-sidebar awwo-bot-sidebar is-collapsed" aria-label={locale === 'zh' ? 'Bot 清单' : 'Bot list'}>
@@ -193,22 +214,26 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
       <button className="awwo-new-agent" aria-label={addBotLabel} title={addBotLabel} disabled={readOnly || running} onClick={() => { setSidebarOpen(false); setLibraryOpen(true); }}><Plus size={17} /></button>
     </aside>
   ) : (
-<aside data-onboarding="bots" ref={botSidebarRef} className={`awwo-sidebar${modelShelf ? ' awwo-bot-sidebar' : ''}`} aria-label={modelShelf ? (locale === 'zh' ? 'Bot 清单' : 'Bot list') : t('workspace.navigation')}>
-      {modelShelf ? botHeader : <>
+<aside data-onboarding="bots" ref={botSidebarRef} className={`awwo-sidebar${modernRails ? ' awwo-bot-sidebar' : ''}`} aria-label={modernRails ? (locale === 'zh' ? 'Bot 清单' : 'Bot list') : t('workspace.navigation')}>
+      {modernRails ? botHeader : <>
       <div className="awwo-brand"><button className="awwo-brand-mark" aria-label={t(navExpanded ? 'workspace.collapseNavigation' : 'workspace.expandNavigation')} title={t('workspace.navigationTitle')} onClick={() => setNavExpanded(!navExpanded)}><GitBranch size={23} /></button><span>AwwO</span><span className="awwo-brand-caption">{t('workspace.caption')}</span></div>
       <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{workspaceName || t('workspace.name')}</strong><small>{workspaceCaption || t('workspace.local')}</small></div></div>
       </>}
-      {!modelShelf && <div className="awwo-nav-active" aria-current="page"><Layers3 size={17} /><span>{t('workspace.canvas')}</span><span className="awwo-nav-badge">{nodes.length}</span></div>}
-      <button className="awwo-new-agent" aria-label={addBotLabel} title={addBotLabel} disabled={readOnly || running} onClick={() => { setSidebarOpen(false); setLibraryOpen(true); }}><Plus size={17} />{addBotLabel}</button>
-      {modelShelf && <div className="awwo-bot-tabs" role="group" aria-label={locale === 'zh' ? 'Bot 来源' : 'Bot source'}>
+      {!modernRails && <div className="awwo-nav-active" aria-current="page"><Layers3 size={17} /><span>{t('workspace.canvas')}</span><span className="awwo-nav-badge">{nodes.length}</span></div>}
+      {!modernRails && <button className="awwo-new-agent" aria-label={addBotLabel} title={addBotLabel} disabled={readOnly || running} onClick={() => { setSidebarOpen(false); setLibraryOpen(true); }}><Plus size={17} />{addBotLabel}</button>}
+      {modernRails && botToolsOpen && <div id="awwo-bot-tools" className="awwo-bot-tools">
+        <div className="awwo-bot-tabs" role="group" aria-label={locale === 'zh' ? 'Bot 来源' : 'Bot source'}>
         <button type="button" aria-pressed={botSource === 'canvas'} onClick={() => setBotSource('canvas')}>{locale === 'zh' ? '画布中' : 'Canvas'}<span>{nodes.length}</span></button>
-        {loadWorkspaceAgents && onAddWorkspaceAgent && <button type="button" aria-pressed={botSource === 'workspace'} onClick={() => setBotSource('workspace')}>{locale === 'zh' ? '工作区' : 'Workspace'}</button>}
-        {onAddMarketAgent && <button type="button" aria-pressed={botSource === 'market'} onClick={() => setBotSource('market')}>{locale === 'zh' ? '产品 Bot' : 'Product Bots'}</button>}
+        {!readOnly && loadWorkspaceAgents && onAddWorkspaceAgent && <button type="button" aria-pressed={botSource === 'workspace'} onClick={() => { setQuery(''); setBotSource('workspace'); }}>{locale === 'zh' ? '工作区' : 'Workspace'}</button>}
+        {!readOnly && onAddMarketAgent && <button type="button" aria-pressed={botSource === 'market'} onClick={() => { setQuery(''); setBotSource('market'); }}>{locale === 'zh' ? '产品 Bot' : 'Product Bots'}</button>}
+        </div>
+        {botSource === 'canvas' && <label className="awwo-search"><Search size={15} /><input ref={botSearchRef} type="search" aria-label={t('workspace.findAgent')} placeholder={t('workspace.findAgentPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></label>}
+        {personaControls && <details className="awwo-bot-personas"><summary>{locale === 'zh' ? '人设预设' : 'Persona presets'}</summary>{personaControls}</details>}
       </div>}
       <div className="awwo-bot-content">
-      {(!modelShelf || botSource === 'canvas') && <>
-      <div className="awwo-list-heading"><span>{modelShelf ? (locale === 'zh' ? '画布中的 Bot' : 'Bots on canvas') : t('workspace.canvasAgents')}</span><span>{nodes.length.toString().padStart(2, '0')}</span></div>
-      <label className="awwo-search"><Search size={15} /><input type="search" aria-label={t('workspace.findAgent')} placeholder={t('workspace.findAgentPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></label>
+      {(!modernRails || botSource === 'canvas') && <>
+      {!modernRails && <><div className="awwo-list-heading"><span>{t('workspace.canvasAgents')}</span><span>{nodes.length.toString().padStart(2, '0')}</span></div>
+      <label className="awwo-search"><Search size={15} /><input type="search" aria-label={t('workspace.findAgent')} placeholder={t('workspace.findAgentPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></label></>}
       <div className="awwo-agent-list">
         {visible.map((node, i) => {
           const state = runs[node.id]?.state;
@@ -216,21 +241,21 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
           return <button key={node.id} className={`awwo-agent-row${selectedIds.includes(node.id) ? ' is-selected' : ''}`} aria-label={t('workspace.locateAgent', { title: node.title })} title={node.title} onClick={() => { onFocusNode(node.id); setSidebarOpen(false); }}>
             <span className="awwo-agent-row-icon"><AgentGlyph title={node.title} templateId={node.kind === 'session' ? getAgentTemplateForNode(node, locale)?.id : undefined} size={17} /></span>
             <span className="awwo-agent-row-copy"><strong>{node.title}</strong><small><i className={`awwo-status-dot is-${state ?? 'draft'}`} />{caption}</small></span>
-            <span className="awwo-agent-index">{(i + 1).toString().padStart(2, '0')}</span>
+            {!modernRails && <span className="awwo-agent-index">{(i + 1).toString().padStart(2, '0')}</span>}
           </button>;
         })}
         {!visible.length && <p className="awwo-list-empty">{query ? t('workspace.noAgentMatch') : t('workspace.firstAgent')}</p>}
       </div>
       </>}
-      {modelShelf && botSource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent && <WorkspaceAgentPicker onStartNew={startNewBot} compact loadPage={loadWorkspaceAgents} catalogue={modelCatalogue} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setBotSource('canvas'); setSidebarOpen(false); }} />}
-      {modelShelf && botSource === 'market' && onAddMarketAgent && <TeamMarketAgentPicker compact disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddMarketAgent(agent); setBotSource('canvas'); setSidebarOpen(false); }} />}
-      {personaControls && <details className="awwo-bot-personas"><summary>{locale === 'zh' ? '人设预设' : 'Persona presets'}</summary>{personaControls}</details>}
+      {modelShelf && botSource === 'workspace' && loadWorkspaceAgents && onAddWorkspaceAgent && <WorkspaceAgentPicker onStartNew={startNewBot} compact loadPage={loadWorkspaceAgents} catalogue={modelCatalogue} disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddWorkspaceAgent(agent); setBotSource('canvas'); setBotToolsOpen(false); setQuery(''); setSidebarOpen(false); }} />}
+      {modelShelf && botSource === 'market' && onAddMarketAgent && <TeamMarketAgentPicker compact disabled={readOnly || running} onSelect={agent => { if (readOnly || running) return; onAddMarketAgent(agent); setBotSource('canvas'); setBotToolsOpen(false); setQuery(''); setSidebarOpen(false); }} />}
+      {!modernRails && personaControls && <details className="awwo-bot-personas"><summary>{locale === 'zh' ? '人设预设' : 'Persona presets'}</summary>{personaControls}</details>}
       </div>
-      <div className="awwo-sidebar-footer"><div className="awwo-workspace-note"><GitBranch size={16} /><span>{t('workspace.independentChats')}</span></div>{!modelShelf && onOpenSettings && <button onClick={onOpenSettings}><Settings2 size={17} />{t('workspace.settings')}<ChevronRight size={14} /></button>}</div>
+      {!modernRails && <div className="awwo-sidebar-footer"><div className="awwo-workspace-note"><GitBranch size={16} /><span>{t('workspace.independentChats')}</span></div>{onOpenSettings && <button onClick={onOpenSettings}><Settings2 size={17} />{t('workspace.settings')}<ChevronRight size={14} /></button>}</div>}
     </aside>
   );
 
-  return <div className={`awwo-workspace${sidebarOpen ? ' is-sidebar-open' : ''}${modelLibraryOpen ? ' is-model-library-open' : ''}${modelShelf ? ' has-model-library' : navExpanded ? '' : ' is-nav-compact'}`}>
+  return <div className={`awwo-workspace${sidebarOpen ? ' is-sidebar-open' : ''}${modelLibraryOpen ? ' is-model-library-open' : ''}${modernRails ? ' has-model-library' : navExpanded ? '' : ' is-nav-compact'}`}>
     {(sidebarOpen || modelLibraryOpen) && <button className="awwo-sidebar-scrim" aria-label={t('workspace.closeNavigation')} onClick={() => { setSidebarOpen(false); setModelLibraryOpen(false); }} />}
     {modelShelf && <aside data-onboarding="models" ref={modelSidebarRef} className="awwo-model-sidebar" aria-label={locale === 'zh' ? '模型库' : 'Model library'} onPointerDown={() => setSidebarOpen(false)}>
       <div className="awwo-brand"><span className="awwo-brand-mark" aria-hidden="true"><GitBranch size={23} /></span><span>AwwO</span><button type="button" className="awwo-icon-button awwo-mobile-menu" aria-label={locale === 'zh' ? '关闭模型库' : 'Close model library'} onClick={() => setModelLibraryOpen(false)}><X size={18} /></button></div>
@@ -238,7 +263,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
       {modelShelf}
       {onOpenSettings && <div className="awwo-sidebar-footer"><button onClick={onOpenSettings}><Settings2 size={17} />{t('workspace.settings')}<ChevronRight size={14} /></button></div>}
     </aside>}
-    {!modelShelf && botSidebar}
+    {!modernRails && botSidebar}
     <main className="awwo-main" inert={mobile && (modelLibraryOpen || sidebarOpen)}>
       <header className="awwo-header">
         {modelShelf && <button data-onboarding="models-toggle" ref={modelOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={locale === 'zh' ? '打开模型库' : 'Open model library'} aria-expanded={modelLibraryOpen} onClick={revealModelRail}><Cpu size={19} /></button>}
@@ -246,7 +271,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
         <div className="awwo-page-title">{headerTitle ?? <div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{workspaceName || t('workspace.name')}</span></div>}</div>
         <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{headerActions}{accountControl}</div>
       </header>
-      <div className="awwo-canvas-bar">{onToggleAssistant && nodes.length > 0 ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}<div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div><span className="awwo-canvas-meta">{t('workspace.agentCount', { count: nodes.length })}<span>·</span>{t('workspace.connectionCount', { count: edges.length })}</span><div className="awwo-run-slot">{toolbar}</div></div>
+      <div className="awwo-canvas-bar">{onToggleAssistant && nodes.length > 0 ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}{!headerTitle && <div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div>}<div className="awwo-run-slot">{toolbar}</div></div>
       <section className="awwo-stage" aria-label={t('workspace.stage')}>
         {assistant ? <aside className="awwo-planner-sidebar" aria-label={t('workspace.planning')}>{assistant}</aside> : null}
         <div data-onboarding="canvas-stage" className="awwo-stage-canvas" onDragOver={onModelDragOver} onDrop={onModelDrop}>{children}
@@ -269,9 +294,9 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
         </div>}
         </div>
       </section>
-      <footer className="awwo-statusbar"><span><span className="awwo-status-dot is-draft" />{connected ? t('workspace.connectedCount', { count: connected }) : t('workspace.noneConnected')}</span><span>{t('workspace.panHint')}<span className="awwo-status-divider">/</span>{t('workspace.zoomHint')}<span className="awwo-status-divider">/</span>{t('workspace.focusHint')}</span><span className="awwo-local-tag">{storageMode === 'cloud' ? `${t('workspace.cloudCanvas')}${readOnly ? ` · ${t('common.readOnly')}` : ''}` : t(readOnly ? 'common.readOnly' : 'workspace.localCanvas')}</span></footer>
+      {!headerTitle && <footer className="awwo-statusbar"><span><span className="awwo-status-dot is-draft" />{connected ? t('workspace.connectedCount', { count: connected }) : t('workspace.noneConnected')}</span><span className="awwo-local-tag">{storageMode === 'cloud' ? `${t('workspace.cloudCanvas')}${readOnly ? ` · ${t('common.readOnly')}` : ''}` : t(readOnly ? 'common.readOnly' : 'workspace.localCanvas')}</span></footer>}
     </main>
-    {modelShelf && botSidebar}
+    {modernRails && botSidebar}
     {libraryOpen && <div className="awwo-library-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) setLibraryOpen(false); }} onKeyDown={e => { if (e.key === 'Escape') setLibraryOpen(false); }}>
       <section ref={libraryRef} className="awwo-agent-library" role="dialog" aria-modal="true" aria-label={addBotLabel}>
         <header><div><span className="awwo-eyebrow">AGENT LIBRARY</span><h2>{t('workspace.chooseCollaborator')}</h2></div><button className="awwo-icon-button" aria-label={t('workspace.closeAddAgent')} onClick={() => setLibraryOpen(false)}><X size={19} /></button></header>

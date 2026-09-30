@@ -20,6 +20,19 @@ const node = (over: Partial<SessionNode> = {}): SessionNode => ({
 describe('node deliverables', () => {
   const html = '<!doctype html><html><head><title>页面</title></head><body><script>window.__unsafe = true</script><img src="https://example.com/private.png"><h1>交付页面</h1></body></html>';
 
+  it('previews a malformed legacy single-field result without changing its source', () => {
+    const original = '{"result":"完成内容：\\n回答"可见顺序"。\\n第二步"}';
+    render(<NodeDeliverables node={node({
+      contract: { version: 1, inputs: [], outputs: [field({ id: 'result', label: '交付结果' })] },
+      lastOutput: { text: original, at: 1, source: 'run' },
+    })} readOnly />);
+    const delivery = screen.getByTestId('canvas-tile-output-frontend');
+    expect(within(delivery).getByText(/回答"可见顺序"/)).toBeVisible();
+    expect(within(delivery).queryByText(/\{"result"/)).toBeNull();
+    fireEvent.click(within(delivery).getByRole('button', { name: '源码', exact: true }));
+    expect(within(delivery).getByLabelText('Markdown 源码')).toHaveTextContent(original);
+  });
+
   it('defaults to an isolated HTML preview while keeping exact source available', () => {
     const { container } = render(<NodeDeliverables node={node({
       contract: { version: 1, inputs: [], outputs: [field({ type: 'html', value: '' })] },

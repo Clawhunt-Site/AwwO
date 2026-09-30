@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Plus } from 'lucide-react';
+import { ArrowUp, ChevronDown, Plus } from 'lucide-react';
 import { api, tenantPath, saasErrorMessage, type CanvasRecord, type Identity, type Tenant } from './api';
 import { emptyDocument } from '../canvas/canvasDoc';
 import { useCanvasI18n } from '../canvas/i18n';
@@ -52,6 +52,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const sending = useRef(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const [examplesOpen, setExamplesOpen] = useState(false);
   // The operator's own text, set aside when an example replaced it.
   const [replaced, setReplaced] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
@@ -65,6 +66,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const hintId = useId();
   const errorId = useId();
   const noteId = useId();
+  const examplesId = useId();
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // Planning needs a ready engine. Knowing that before sending lets the page say so honestly;
@@ -181,9 +183,9 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
 
   return <>
     <section className="saas-home-hero" aria-labelledby={titleId}>
-      <p className="saas-home-workspace"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><span>{tenant.name}</span></p>
+      <p className="saas-home-workspace">{tenant.name}</p>
       <h1 id={titleId}>{text('assistant.title')}</h1>
-      <p className="saas-home-lead">{t('写下目标，AwwO 会新建画布并规划 Agent 分工。', 'Describe your goal. AwwO creates a canvas and plans how Agents share the work.')}</p>
+      <p className="saas-home-lead">{t('写下目标，生成可执行画布。', 'Describe a goal. Build an executable canvas.')}</p>
       <form className="saas-home-composer" data-onboarding="canvas-create" aria-labelledby={titleId} onSubmit={event => { event.preventDefault(); send(); }}>
         <textarea ref={input} aria-label={text('assistant.input')} aria-describedby={describedBy}
           placeholder={text('assistant.welcomePlaceholder')} value={draft} rows={3} maxLength={HOME_PROMPT_MAX_CHARACTERS}
@@ -205,6 +207,15 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {plannerIssue && <p id={noteId} className="saas-home-planner-note">{t(`规划暂不可用：${plannerIssue}。仍会新建画布，需求会保留在画布输入框中。`, `Planning is not available yet: ${plannerIssue}. A canvas will still be created, and your request will stay in its prompt box.`)}</p>}
     </section>
     <CanvasList tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <CaseGallery onPick={pick} disabled={busy} />
+    <section className="saas-home-examples" aria-label={t('案例灵感', 'Example ideas')}>
+      <button type="button" className="saas-home-examples-toggle" aria-expanded={examplesOpen} aria-controls={examplesId}
+        onClick={() => setExamplesOpen(value => !value)}>
+        <span>{t('需要灵感？看看案例', 'Need inspiration? Explore examples')}</span>
+        <ChevronDown size={16} aria-hidden="true" />
+      </button>
+      <div id={examplesId} hidden={!examplesOpen}>
+        {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
+      </div>
+    </section>
   </>;
 }

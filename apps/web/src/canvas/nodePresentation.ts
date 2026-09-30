@@ -11,11 +11,13 @@ export const DELIVERY_DRAWER_WIDTH = 320;
  * remain untouched, so closing a conversation does not resize or discard the user's work.
  * Use these same nodes for cards, port anchors, wires, minimap, selection and viewport fitting.
  */
-export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: string | null): CanvasNode[] {
+export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: string | null, narrowFocusWidth?: number): CanvasNode[] {
   return nodes.map(node => {
     if (node.kind !== 'session') return node;
     const w = node.id === focusedId
-      ? Math.max(node.w, FOCUSED_SESSION_MIN_SIZE.w + (node.deliverablesOpen ? DELIVERY_DRAWER_WIDTH : 0))
+      ? narrowFocusWidth
+        ? Math.min(Math.max(280, narrowFocusWidth), Math.max(node.w, FOCUSED_SESSION_MIN_SIZE.w))
+        : Math.max(node.w, FOCUSED_SESSION_MIN_SIZE.w + (node.deliverablesOpen ? DELIVERY_DRAWER_WIDTH : 0))
       : COMPACT_SESSION_SIZE.w;
     const h = node.id === focusedId ? Math.max(node.h, FOCUSED_SESSION_MIN_SIZE.h) : COMPACT_SESSION_SIZE.h;
     return node.w === w && node.h === h ? node : { ...node, w, h };
