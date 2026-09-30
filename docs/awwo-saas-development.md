@@ -1,6 +1,6 @@
 # AwwO SaaS 本地开发与部署说明
 
-本入口运行 Go API、PostgreSQL、Pi worker 和复用原画布的 SaaS Web，独立于历史 `npm run dev` 的 Node/Codex 模式。架构见 [架构设计](awwo-saas-architecture.md)；2026-09-08 新增节点团队、独立成员模型和 Go 后台整图的完整契约见 [节点团队设计](awwo-node-teams.md)。本文给出操作步骤，不代替本轮实际验收报告。
+本入口运行 Go API、PostgreSQL、Pi 与 OpenAI Agents worker，以及复用原画布的 SaaS Web，独立于历史 `npm run dev` 的 Node/Codex 模式。架构见 [架构设计](awwo-saas-architecture.md)；2026-09-08 新增节点团队、独立成员模型和 Go 后台整图的完整契约见 [节点团队设计](awwo-node-teams.md)。本文给出操作步骤，不代替本轮实际验收报告。
 
 ## 本地启动
 
@@ -10,6 +10,8 @@
 npm run setup:saas
 npm run dev:saas
 ```
+
+`dev:saas` 会在启动数据库和服务前检查 Pi 与 OpenAI Agents worker 的 SDK 是否可加载。若提示依赖缺失，先运行 `npm run setup:saas`；只启动数据库的 `--database-only` 模式不需要这些 SDK。
 
 默认地址 `http://127.0.0.1:5189/`，管理入口 `/admin`。Go 8087、Pi 8097、PostgreSQL 55483。启动前检查端口，不会停止已有服务。首次生成的数据库、内部服务和管理员密码只保存在当前 worktree 的 `.local/awwo-saas/.env`，管理员邮箱默认 `admin@awwo.local`。打开该本地文件查看初始密码；不要提交或分享该文件。
 

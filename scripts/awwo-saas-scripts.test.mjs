@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { EventEmitter } from 'node:events';
 import { readFile } from 'node:fs/promises';
-import { parseEnv, port, resolveCommand, serviceEnvironments, waitForHttp } from './awwo-saas-lib.mjs';
-import { runDevelopment } from './awwo-saas-dev.mjs';
+import path from 'node:path';
+import { parseEnv, port, resolveCommand, root, serviceEnvironments, waitForHttp } from './awwo-saas-lib.mjs';
+import { assertWorkerDependencies, runDevelopment } from './awwo-saas-dev.mjs';
 test('local dotenv reads literal values without executing shell expressions', () => {
   assert.deepEqual(parseEnv('# comment\nMODEL=abc\nKEY="a=b"\nEMPTY=\nLITERAL=$(touch danger)\n'), { MODEL:'abc',KEY:'a=b',EMPTY:'',LITERAL:'$(touch danger)' });
   assert.throws(() => parseEnv('export KEY=x'));
@@ -97,6 +98,7 @@ function launcherFixture() {
     runtime, logger: { log: value => messages.push(value), error: value => messages.push(value) },
     loadEnv: async () => ({ env, envFile: '/test-only/env', managedDatabase: false }),
     assertFree: async () => {},
+    checkDependencies: async () => {},
     startDb: async () => { throw new Error('This test must not start PostgreSQL'); },
     runCommand: async (command, args, options) => { commands.push({command, args, ...(options ? {options} : {})}); },
     waitHttp: async (url, _child, _timeout, options) => { waits.push({url, options}); },
@@ -110,6 +112,81 @@ function launcherFixture() {
   };
   return { runtime, stopped, commands, children, messages, waits, env, options };
 }
+
+test('worker SDK preflight imports from each package directory without inheriting credentials', async () => {
+  const calls = [];
+  await assertWorkerDependencies('/test/bin/node', async (command, args, options) => {
+    calls.push({ command, args, options });
+  }, { API_KEY: 'must-not-pass' });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].options.cwd, path.join(root, 'apps/pi-worker'));
+  assert.equal(calls[1].options.cwd, path.join(root, 'apps/openai-agents-worker'));
+  assert.match(calls[0].args.at(-1), /@earendil-works\/pi-coding-agent/);
+  assert.match(calls[1].args.at(-1), /@openai\/agents/);
+  for (const call of calls) {
+    assert.equal(call.command, '/test/bin/node');
+    assert.deepEqual(call.args.slice(0, 2), ['--input-type=module', '-e']);
+    assert.deepEqual(call.options.env, { PATH: path.dirname('/test/bin/node') });
+    assert.equal(call.options.stdio, 'ignore');
+  }
+});
+
+test('worker SDK preflight preserves only Windows loader variables when present', async () => {
+  const calls = [];
+  await assertWorkerDependencies('/test/bin/node', async (_command, _args, options) => calls.push(options), {
+    SystemRoot: 'C:\\Windows', WINDIR: 'C:\\Windows', API_KEY: 'must-not-pass', HOME: 'must-not-pass',
+  });
+  assert.equal(calls.length, 2);
+  for (const options of calls) assert.deepEqual(options.env, {
+    PATH: path.dirname('/test/bin/node'), SystemRoot: 'C:\\Windows', WINDIR: 'C:\\Windows',
+  });
+});
+
+test('missing worker SDK fails before local database, build, or service launch', async () => {
+  const fixture = launcherFixture();
+  fixture.options.loadEnv = async () => ({ env: fixture.env, envFile: '/test-only/env', managedDatabase: true });
+  let databaseStarted = false;
+  fixture.options.startDb = async () => { databaseStarted = true; };
+  fixture.options.checkDependencies = async () => { throw new Error('Run npm run setup:saas before npm run dev:saas.'); };
+  await runDevelopment(fixture.options);
+  assert.equal(fixture.runtime.exitCode, 1);
+  assert.deepEqual(fixture.messages, ['Run npm run setup:saas before npm run dev:saas.']);
+  assert.equal(databaseStarted, false);
+  assert.deepEqual(fixture.commands, []);
+  assert.deepEqual(fixture.children, []);
+});
+
+test('startup passes its injected command runner to worker dependency preflight', async () => {
+  const fixture = launcherFixture();
+  let checked = false;
+  fixture.options.checkDependencies = async (executable, runCommand) => {
+    assert.equal(executable, fixture.runtime.execPath);
+    assert.equal(runCommand, fixture.options.runCommand);
+    checked = true;
+  };
+  await runDevelopment(fixture.options);
+  assert.equal(checked, true);
+  fixture.runtime.emit('SIGTERM');
+  await fixture.stopped.promise;
+});
+
+test('dependency preflight names the failed worker and setup command', async () => {
+  let checks = 0;
+  await assert.rejects(assertWorkerDependencies('/test/bin/node', async () => {
+    if (++checks === 2) throw new Error('module not found');
+  }), /apps\/openai-agents-worker SDK dependencies are unavailable\. Run npm run setup:saas/);
+  assert.equal(checks, 2);
+});
+
+test('database-only startup does not require worker SDKs', async () => {
+  const fixture = launcherFixture();
+  fixture.runtime.argv = ['node', 'scripts/awwo-saas-dev.mjs', '--database-only'];
+  fixture.options.checkDependencies = async () => { throw new Error('Worker preflight must be skipped'); };
+  await runDevelopment(fixture.options);
+  assert.equal(fixture.runtime.exitCode, undefined);
+  assert.equal(fixture.messages.length, 1);
+  assert.deepEqual(fixture.children, []);
+});
 
 test('SIGTERM during the Go build prevents all subsequent service launches', async () => {
   const fixture = launcherFixture(), entered = deferred(), build = deferred();

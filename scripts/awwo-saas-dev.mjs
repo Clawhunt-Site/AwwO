@@ -3,9 +3,35 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { root, stateDir, loadLocalEnv, startDatabase, run, assertPortFree, waitForHttp, serviceEnvironments } from './awwo-saas-lib.mjs';
 
+// Both runtimes import their SDK only when the first run starts. Their HTTP
+// health checks can therefore succeed even when setup:saas was never run.
+export async function assertWorkerDependencies(executable = process.execPath, runCommand = run, systemEnvironment = process.env) {
+  const environment = { PATH: path.dirname(executable) };
+  for (const name of ['SystemRoot', 'WINDIR']) {
+    if (typeof systemEnvironment[name] === 'string' && systemEnvironment[name]) environment[name] = systemEnvironment[name];
+  }
+  for (const [directory, packages] of [
+    ['apps/pi-worker', ['@earendil-works/pi-ai', '@earendil-works/pi-coding-agent']],
+    ['apps/openai-agents-worker', ['@openai/agents', 'openai', 'zod']],
+  ]) {
+    try {
+      await runCommand(executable, ['--input-type=module', '-e', `await Promise.all(${JSON.stringify(packages)}.map(name => import(name)))`], {
+        cwd: path.join(root, directory),
+        // Check the exact worker imports without exposing local credentials to
+        // third-party modules in the preflight process.
+        env: environment,
+        stdio: 'ignore',
+      });
+    } catch {
+      throw new Error(`${directory} SDK dependencies are unavailable. Run npm run setup:saas before npm run dev:saas.`);
+    }
+  }
+}
+
 export async function runDevelopment({
   runtime = process, logger = console, spawnChild = spawn, runCommand = run,
   loadEnv = loadLocalEnv, startDb = startDatabase, assertFree = assertPortFree, waitHttp = waitForHttp,
+  checkDependencies = assertWorkerDependencies,
 } = {}) {
   const children = [];
   let database;
@@ -43,6 +69,10 @@ export async function runDevelopment({
     if (await finishIfStopping()) return;
     await Promise.all([Number(env.AWWO_API_PORT), Number(env.AWWO_PI_PORT), Number(env.AWWO_OPENAI_AGENTS_PORT), Number(env.VITE_AWWO_WEB_PORT)].map(assertFree));
     if (await finishIfStopping()) return;
+    if (!runtime.argv.includes('--database-only')) {
+      await checkDependencies(runtime.execPath, runCommand);
+      if (await finishIfStopping()) return;
+    }
     if (managedDatabase) database = await startDb(env);
     if (await finishIfStopping()) return;
     if (runtime.argv.includes('--database-only')) {
