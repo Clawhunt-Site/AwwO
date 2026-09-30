@@ -3,6 +3,7 @@ import type { canvasStorage } from '../canvas/canvasStorage';
 
 export const CANVAS_DRAFT_PREFIX = 'awwo.cloud.draft.v1:';
 export const CANVAS_BASELINE_KEY = 'awwo.cloud.baseline.v1';
+export const CANVAS_KEPT_DRAFTS_KEY = 'awwo.cloud.kept-drafts.v1';
 type ScopedStorage = ReturnType<typeof canvasStorage>;
 export type CanvasDraft = {
   schemaVersion: 1;
@@ -14,6 +15,36 @@ export type CanvasDraft = {
   document: CanvasDocument;
 };
 export type SavedCanvasDraft = { key: string; raw: string; draft: CanvasDraft | null };
+type KeptDraftIdentity = { key: string; revision: string; baseVersion: number } | { key: string; raw: string };
+const MAX_KEPT_CORRUPT_RAW_LENGTH = 64 * 1024;
+
+function keptDraftIdentity(saved: SavedCanvasDraft): KeptDraftIdentity | null {
+  if (saved.draft) return { key: saved.key, revision: saved.draft.revision, baseVersion: saved.draft.baseVersion };
+  // Exact bytes avoid hiding a changed corrupt record; bound the extra storage cost.
+  return saved.raw.length <= MAX_KEPT_CORRUPT_RAW_LENGTH ? { key: saved.key, raw: saved.raw } : null;
+}
+
+/** A cloud-choice only dismisses the exact valid draft revisions the user reviewed. */
+export function unreviewedCanvasDrafts(storage: ScopedStorage, drafts: SavedCanvasDraft[]): SavedCanvasDraft[] {
+  let kept: KeptDraftIdentity[] = [];
+  try {
+    const parsed = JSON.parse(storage.getItem(CANVAS_KEPT_DRAFTS_KEY) || 'null');
+    if (parsed?.schemaVersion === 1 && Array.isArray(parsed.drafts)) kept = parsed.drafts;
+  } catch { /* A damaged marker must never conceal a draft. */ }
+  return drafts.filter(saved => {
+    const identity = keptDraftIdentity(saved);
+    if (!identity) return true;
+    return !kept.some(item => item?.key === identity.key && ('raw' in identity
+      ? 'raw' in item && item.raw === identity.raw
+      : 'revision' in item && item.revision === identity.revision && item.baseVersion === identity.baseVersion));
+  });
+}
+
+/** Keep the source bytes untouched. A concurrent edit must not be dismissed unseen. */
+export function rememberKeptCanvasDrafts(storage: ScopedStorage, drafts: SavedCanvasDraft[]): void {
+  if (drafts.some(saved => storage.getItem(saved.key) !== saved.raw)) throw new Error('草稿状态刚被另一个页面更新，请重新连接后核对。');
+  storage.setItem(CANVAS_KEPT_DRAFTS_KEY, JSON.stringify({ schemaVersion: 1, drafts: drafts.map(keptDraftIdentity).filter((item): item is KeptDraftIdentity => item !== null) }));
+}
 
 /** Object key order is transport metadata; array order and every document value remain significant. */
 export function canonicalCanvasDocumentJSON(document: unknown): string {

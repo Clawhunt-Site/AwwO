@@ -6,7 +6,7 @@ import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye } from
 import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
-import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
+import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
 import { CanvasSurface, type InitialPlanRequest } from '../canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
@@ -333,6 +333,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const [runtime, setRuntime] = useState<{ configured: boolean; available: boolean; reason?: string; models?: unknown[] } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [recovery, setRecovery] = useState<SavedCanvasDraft[] | null>(null);
+  const [localDraftCount, setLocalDraftCount] = useState(0);
+  const [manualRecovery, setManualRecovery] = useState(false);
   // A request typed on the workspace home for this canvas, handed to the surface to plan once.
   const [initialPlan, setInitialPlan] = useState<InitialPlanRequest | null>(null);
   const current = useRef<CanvasRecord | null>(null);
@@ -348,7 +350,11 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const controller = new AbortController();
     configureCanvasStorage(identity.user.id, tenant.id, canvasId);
     const storage = canvasStorage(); scopedStorage.current = storage;
-    try { const saved = readCanvasDrafts(storage); if (saved.length) setRecovery(saved); }
+    try {
+      const saved = readCanvasDrafts(storage);
+      setLocalDraftCount(saved.length);
+      if (unreviewedCanvasDrafts(storage, saved).length) setRecovery(saved);
+    }
     catch (error) { setError(`无法读取本机草稿：${message(error)}`); return () => controller.abort(); }
     // Canvas data stays available when the separate runtime-status request fails.
     // Its failure still disables execution until a later reload confirms readiness.
@@ -366,7 +372,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
         if (rawJournal && !hasJournal) storage.setItem(`${CANVAS_RUN_JOURNAL_KEY}.corrupt.${Date.now()}`, rawJournal);
         // Migrate pre-draft caches conservatively, including edits whose draft write hit a storage error.
         // A confirmed clean cache can follow a newer server version without a false recovery prompt.
-        if (!saved.length && cached) {
+        if (!unreviewedCanvasDrafts(storage, saved).length && cached) {
           let document: CanvasDocument | null = null;
           try { const parsed = JSON.parse(cached); if (parsed?.version === 2 && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) document = sanitizeDocument(parsed); } catch { /* Preserve the raw payload below. */ }
           if (!document || (!isKnownSyncedCache(storage, document) && canonicalCanvasDocumentJSON(document) !== canonicalCanvasDocumentJSON(value.document)) || (hasJournal && baseVersion !== value.version)) {
@@ -375,12 +381,13 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
             saved = readCanvasDrafts(storage);
           }
         }
-        if (saved.length) { setRecovery(saved); setSaveState('存在未同步草稿'); }
+        setLocalDraftCount(saved.length);
+        if (unreviewedCanvasDrafts(storage, saved).length) { setManualRecovery(false); setRecovery(saved); setSaveState('存在未同步草稿'); }
         else {
           if (!hasJournal) storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(sanitizeDocument(value.document)));
           storage.setItem('awwo.cloud.version', String(value.version));
           rememberCanvasBaseline(storage, value.version, value.document);
-          setSaveState('已同步');
+          setRecovery(null); setSaveState('已同步');
         }
         if (!hasJournal) {
           // Cloud execution is discoverable on another browser/device. Local journals are
@@ -449,6 +456,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
             rememberCanvasBaseline(storage, saved.version, saved.document);
             acknowledgeCanvasDraft(storage, sent, saved.version);
             if (restoredSource.current) { removeCanvasDraft(storage, restoredSource.current); restoredSource.current = null; }
+            if (!disposed) { try { setLocalDraftCount(readCanvasDrafts(storage).length); } catch { /* Draft count is decorative; save acknowledgement remains authoritative. */ } }
             if (draft.current?.revision === sent.revision) draft.current = null;
             else if (draft.current) draft.current = { ...draft.current, baseVersion: saved.version };
             current.current = saved;
@@ -542,9 +550,15 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     if (pending.current) timer = setTimeout(() => void flush().catch(() => {}), 450);
     return () => { disposed = true; setupAbort.abort(); configureSaaSCanvasSave(null); configureSaaSCanvasInitialize(null); clearTimeout(timer); window.removeEventListener('awwo:canvas-cache-write', observe); window.removeEventListener('beforeunload', leave); };
   }, [record, recovery, tenant.id, canvasId, writerId]);
-  const useCloud = () => {
+  const useCloud = (reviewedDrafts?: SavedCanvasDraft[]) => {
     const storage = scopedStorage.current!;
     try {
+      const reviewed = reviewedDrafts ?? recovery ?? [];
+      const currentDrafts = readCanvasDrafts(storage);
+      if (currentDrafts.length !== reviewed.length || currentDrafts.some(saved => reviewed.find(item => item.key === saved.key)?.raw !== saved.raw)) {
+        setRecovery(currentDrafts); setError('草稿状态刚被另一个页面更新，请重新连接后核对。'); return;
+      }
+      const kept = [...reviewed];
       const cloud = JSON.stringify(sanitizeDocument(current.current!.document));
       const cached = storage.getItem(CANVAS_STORAGE_KEY);
       if (storage.getItem(CANVAS_RUN_JOURNAL_KEY) && cached) {
@@ -557,21 +571,36 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           const backupWriter = crypto.randomUUID();
           if (document && Number.isInteger(baseVersion) && baseVersion > 0) persistCanvasDraft(storage, backupWriter, baseVersion, document);
           else storage.setItem(`${CANVAS_DRAFT_PREFIX}${backupWriter}`, JSON.stringify({ unrecognizedCache: cached, baseVersion }));
+          const backup = readCanvasDrafts(storage).find(saved => saved.key === `${CANVAS_DRAFT_PREFIX}${backupWriter}`);
+          if (backup) kept.push(backup);
         }
       }
       storage.setItem(CANVAS_STORAGE_KEY, cloud);
       storage.setItem('awwo.cloud.version', String(current.current!.version));
       rememberCanvasBaseline(storage, current.current!.version, current.current!.document);
+      rememberKeptCanvasDrafts(storage, kept);
+      const latest = readCanvasDrafts(storage);
+      const changed = latest.some(saved => !kept.some(item => item.key === saved.key && item.raw === saved.raw));
       // Keep the journal: CanvasSurface reconciles accepted runs by GET and blocks unsent nodes.
-      setRecovery(null); setError(''); setSaveState('已同步');
+      setLocalDraftCount(latest.length);
+      setRecovery(changed ? latest : null);
+      setManualRecovery(false);
+      setError(changed ? '草稿状态刚被另一个页面更新，请重新连接后核对。' : '');
+      setSaveState(changed ? '存在未同步草稿' : '已同步');
     } catch (error) { setError(message(error)); }
   };
   if (recovery) return <DraftRecovery tenantId={tenant.id} controls={controls} record={record} drafts={recovery} error={error}
-    hasJournal={Boolean(scopedStorage.current && loadRunJournal(scopedStorage.current))} onUseCloud={useCloud}
+    hasJournal={Boolean(scopedStorage.current && loadRunJournal(scopedStorage.current))} manual={manualRecovery} onUseCloud={() => useCloud()}
     onRestore={saved => {
       if (!saved.draft || !current.current || saved.draft.baseVersion !== current.current.version) return;
       const storage = scopedStorage.current!;
       try {
+        if (storage.getItem(saved.key) !== saved.raw) {
+          const latest = readCanvasDrafts(storage);
+          setLocalDraftCount(latest.length); setRecovery(latest); setManualRecovery(false);
+          setError('草稿状态刚被另一个页面更新，请重新连接后核对。');
+          return;
+        }
         draft.current = persistCanvasDraft(storage, writerId, saved.draft.baseVersion, saved.draft.document);
         restoredSource.current = saved; pending.current = saved.draft.document;
         storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(saved.draft.document));
@@ -582,7 +611,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       const storage = scopedStorage.current!;
       if (!removeCanvasDraft(storage, saved)) { const remaining = readCanvasDrafts(storage); if (remaining.length) setRecovery(remaining); setError('草稿状态刚被另一个页面更新，请重新连接后核对。'); return; }
       const remaining = readCanvasDrafts(storage);
-      if (remaining.length) setRecovery(remaining); else useCloud();
+      setLocalDraftCount(remaining.length);
+      if (remaining.length) setRecovery(remaining); else useCloud(remaining);
     }} />;
   if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><section className="saas-page-intro"><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p>{error && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</section></main>;
   const exportLocal = () => {
@@ -604,13 +634,18 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
-      headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={exportLocal}><Download size={16} aria-hidden="true" /></button></div>} />
+      headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {
+        if (pending.current || saving.current || failed.current || !scopedStorage.current) return;
+        const saved = readCanvasDrafts(scopedStorage.current);
+        setLocalDraftCount(saved.length);
+        if (saved.length) { setManualRecovery(true); setRecovery(saved); }
+      }}><span className="saas-draft-desktop-label">{t('查看本机草稿', 'View local drafts')}</span><span className="saas-draft-mobile-label">{t('草稿', 'Drafts')}</span><span aria-hidden="true">({localDraftCount})</span></button>}<button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={exportLocal}><Download size={16} aria-hidden="true" /></button></div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
 
-function DraftRecovery({ tenantId, controls, record, drafts, error, hasJournal, onRestore, onDiscard, onUseCloud }: {
-  tenantId: string; controls: React.ReactNode; record: CanvasRecord | null; drafts: SavedCanvasDraft[]; error: string; hasJournal: boolean;
+function DraftRecovery({ tenantId, controls, record, drafts, error, hasJournal, manual, onRestore, onDiscard, onUseCloud }: {
+  tenantId: string; controls: React.ReactNode; record: CanvasRecord | null; drafts: SavedCanvasDraft[]; error: string; hasJournal: boolean; manual: boolean;
   onRestore: (saved: SavedCanvasDraft) => void; onDiscard: (saved: SavedCanvasDraft) => void; onUseCloud: () => void;
 }) {
   const { locale, t } = useSaaSPreferences();
@@ -618,7 +653,8 @@ function DraftRecovery({ tenantId, controls, record, drafts, error, hasJournal, 
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const selected = drafts.find(saved => saved.key === selectedKey) || drafts[0];
   const canRestore = Boolean(record && selected?.draft && selected.draft.baseVersion === record.version);
-  return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenantId} controls={controls} /><section className="saas-page-intro"><h1>{t('发现未同步的本机草稿', 'Unsynced local drafts found')}</h1><p role="status">{t('本机修改已保留。确认如何处理后才会打开编辑器；重新加载不会丢弃草稿。', 'Your local changes are preserved. Choose how to handle them before opening the editor. Reloading will not discard drafts.')}</p></section>
+  if (!selected) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenantId} controls={controls} /><section className="saas-page-intro"><h1>{t('本机草稿已变化', 'Local drafts changed')}</h1><p role="alert" className="saas-error">{error ? saasErrorMessage(error, locale) : t('请重新连接云端后核对。', 'Reconnect to the cloud to review the latest version.')}</p><button onClick={() => window.location.reload()}>{t('重新连接云端', 'Reconnect to cloud')}</button></section></main>;
+  return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenantId} controls={controls} /><section className="saas-page-intro"><h1>{manual ? t('已保留的本机草稿', 'Saved local drafts') : t('发现未同步的本机草稿', 'Unsynced local drafts found')}</h1><p role="status">{manual ? t('草稿仍留在这台设备上，可导出核对；画布继续使用云端版本。', 'These drafts remain on this device for review or export. The canvas continues using the cloud version.') : t('本机修改已保留。确认如何处理后才会打开编辑器；重新加载不会丢弃草稿。', 'Your local changes are preserved. Choose how to handle them before opening the editor. Reloading will not discard drafts.')}</p></section>
     {error && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
     <section className="saas-card saas-draft-recovery"><label>{t('选择本机草稿', 'Choose a local draft')}<select aria-label={t('选择本机草稿', 'Choose a local draft')} value={selected?.key || ''} onChange={event => { setSelectedKey(event.target.value); setConfirmDiscard(false); }}>{drafts.map((saved, index) => <option key={saved.key} value={saved.key}>{t('草稿', 'Draft')} {index + 1}{saved.draft ? ' · ' + new Date(saved.draft.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : t(' · 需要人工检查', ' · Manual inspection required')}</option>)}</select></label>
       {selected?.draft ? <><p>{t('草稿基于云端版本', 'Draft base version:')} {selected.draft.baseVersion}{t('；当前云端版本', '; current cloud version:')} {record?.version ?? t('读取中', 'loading')}。</p><p>{t('包含节点：', 'Nodes: ')}{selected.draft.document.nodes.map(node => node.title).join(', ') || t('空画布', 'Empty canvas')}</p>{record && !canRestore && <p className="saas-error">{t('云端版本已有变化。请导出草稿后核对，当前草稿不会自动覆盖较新的云端内容。', 'The cloud version has changed. Export and review your draft. It will not automatically overwrite newer cloud content.')}</p>}</> : <p className="saas-error">{t('草稿格式无法自动恢复。原始内容仍可导出，尚未删除。', 'This draft format cannot be restored automatically. Its original content is preserved and can be exported.')}</p>}

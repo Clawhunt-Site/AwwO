@@ -145,12 +145,15 @@
 .saas-sync-pill.is-pending svg { animation: saas-pulse 1.2s ease-in-out infinite; }
 .saas-canvas-shell .awwo-header-actions { gap: 6px; flex-shrink: 0; }
 .saas-canvas-doc-actions { display: flex; align-items: center; gap: 4px; padding-right: 8px; margin-right: 2px; border-right: 1px solid var(--saas-hairline); }
-.saas-canvas-doc-actions .saas-graph-control > button, .saas-icon-action {
+.saas-canvas-doc-actions .saas-graph-control > button, .saas-icon-action, .saas-local-drafts-action {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: 10px;
   border: 1px solid transparent; background: transparent; color: var(--saas-muted); font: 500 13px/1 var(--ios-font); cursor: pointer; transition: background-color .15s, color .15s;
 }
 .saas-icon-action { width: 34px; padding: 0; }
-.saas-canvas-doc-actions .saas-graph-control > button:hover, .saas-icon-action:hover, .saas-canvas-doc-actions .saas-graph-control > button[aria-expanded='true'] { background: var(--saas-soft); color: var(--saas-text); }
+.saas-draft-mobile-label { display: none; }
+.saas-canvas-doc-actions .saas-graph-control > button:hover, .saas-icon-action:hover, .saas-local-drafts-action:hover:not(:disabled), .saas-canvas-doc-actions .saas-graph-control > button[aria-expanded='true'] { background: var(--saas-soft); color: var(--saas-text); }
+.saas-local-drafts-action:focus-visible { outline: 2px solid var(--ios-blue); outline-offset: 2px; }
+.saas-local-drafts-action:disabled { opacity: .5; cursor: not-allowed; }
 .saas-canvas-shell .awwo-command-search { color: var(--saas-muted); }
 .saas-canvas-shell .awwo-account-controls { gap: 6px; }
 .saas-graph-panel { top: 64px; }
@@ -170,6 +173,9 @@
   .saas-dashboard .saas-account-actions > select { max-width: 150px; }
   .saas-canvas-shell .awwo-header-actions { width: 100%; justify-content: flex-end; }
   .saas-canvas-doc-actions { border-right: 0; padding-right: 0; }
+  .saas-local-drafts-action { padding: 0 8px; font-size: 12px; }
+  .saas-draft-desktop-label { display: none; }
+  .saas-draft-mobile-label { display: inline; }
 }
 .saas-canvas-list .saas-canvas-open > span.saas-canvas-card-body { display: flex; place-items: initial; width: auto; height: auto; border-radius: 0; background: none; color: inherit; font-size: inherit; }
 

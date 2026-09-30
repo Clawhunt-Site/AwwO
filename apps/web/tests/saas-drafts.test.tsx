@@ -7,7 +7,7 @@ import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, sanitizeDocument,
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { clearSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
 import * as canvasBridge from '../src/saas/canvasBridge';
-import { acknowledgeCanvasDraft, persistCanvasDraft, readCanvasDrafts } from '../src/saas/canvasDraft';
+import { CANVAS_DRAFT_PREFIX, CANVAS_KEPT_DRAFTS_KEY, acknowledgeCanvasDraft, persistCanvasDraft, readCanvasDrafts, rememberKeptCanvasDrafts, unreviewedCanvasDrafts } from '../src/saas/canvasDraft';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
 import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 
@@ -57,6 +57,79 @@ it('reload_after_409 retains the local draft, blocks the editor and never overwr
   await writerReady();
   expect(readCanvasDrafts(canvasStorage())[0].draft?.document.nodes[0].title).toBe('409 后必须保留的修改');
   expect(writes).toBe(1);
+  reconnect(); await writerReady();
+  expect(screen.queryByRole('heading', { name: '发现未同步的本机草稿' })).toBeNull();
+  expect(canvasStorage().getItem(CANVAS_STORAGE_KEY)).toContain('其他页面的新内容');
+  fireEvent.click(screen.getByRole('button', { name: '查看本机草稿 (1)' }));
+  expect(screen.getByRole('heading', { name: '已保留的本机草稿' })).toBeVisible();
+  expect(screen.getByText(/409 后必须保留的修改/)).toBeVisible();
+  expect(screen.getByRole('button', { name: '导出未同步草稿' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: '使用云端版本，保留草稿' }));
+  await writerReady();
+  expect(writes).toBe(1);
+  cloud = record(documentWith('云端又保存的新版本'), 9);
+  reconnect(); await writerReady();
+  expect(screen.queryByRole('heading', { name: '发现未同步的本机草稿' })).toBeNull();
+  expect(canvasStorage().getItem(CANVAS_STORAGE_KEY)).toContain('云端又保存的新版本');
+  expect(readCanvasDrafts(canvasStorage())[0].draft?.document.nodes[0].title).toBe('409 后必须保留的修改');
+});
+
+it('reopens recovery for a changed draft revision while an unchanged kept draft stays quiet', async () => {
+  persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('旧草稿'));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(identity)
+    : url.endsWith('/runtime') ? response({ available: false, models: [] }) : response(record(documentWith('云端'), 8))));
+  render(<SaaSApp />);
+  fireEvent.click(await screen.findByRole('button', { name: '使用云端版本，保留草稿' }));
+  await writerReady();
+  reconnect(); await writerReady();
+  expect(screen.queryByRole('heading', { name: '发现未同步的本机草稿' })).toBeNull();
+  persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('另一页面的新草稿'));
+  reconnect();
+  expect(await screen.findByRole('heading', { name: '发现未同步的本机草稿' })).toBeVisible();
+  expect(screen.getByText(/另一页面的新草稿/)).toBeVisible();
+  expect(canvasStorage().getItem(CANVAS_STORAGE_KEY)).toContain('云端');
+});
+
+it('never hides a corrupt draft or a draft in another canvas behind a keep-cloud choice', () => {
+  persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('画布 A 草稿'));
+  const original = readCanvasDrafts(canvasStorage());
+  rememberKeptCanvasDrafts(canvasStorage(), original);
+  expect(unreviewedCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage()))).toHaveLength(0);
+  canvasStorage().setItem(`${CANVAS_DRAFT_PREFIX}broken`, '{not JSON');
+  expect(unreviewedCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage())).map(saved => saved.key)).toEqual([`${CANVAS_DRAFT_PREFIX}broken`]);
+  rememberKeptCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage()));
+  expect(unreviewedCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage()))).toHaveLength(0);
+  canvasStorage().setItem(`${CANVAS_DRAFT_PREFIX}broken`, '{changed raw');
+  expect(unreviewedCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage())).map(saved => saved.key)).toEqual([`${CANVAS_DRAFT_PREFIX}broken`]);
+  configureCanvasStorage('user-a', 'tenant-a', 'canvas-b');
+  persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('画布 B 草稿'));
+  expect(unreviewedCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage()))).toHaveLength(1);
+});
+
+it('keeps a reviewed corrupt draft quiet until its raw content changes', async () => {
+  canvasStorage().setItem(`${CANVAS_DRAFT_PREFIX}broken`, '{damaged');
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/appearance') ? response(appearanceFixture) : url.endsWith('/auth/me') ? response(identity)
+    : url.endsWith('/runtime') ? response({ available: false, models: [] }) : response(record())));
+  render(<SaaSApp />);
+  fireEvent.click(await screen.findByRole('button', { name: '使用云端版本，保留草稿' }));
+  await writerReady();
+  reconnect(); await writerReady();
+  expect(screen.queryByRole('heading', { name: '发现未同步的本机草稿' })).toBeNull();
+  expect(screen.getByRole('button', { name: '查看本机草稿 (1)' })).toBeEnabled();
+  canvasStorage().setItem(`${CANVAS_DRAFT_PREFIX}broken`, '{new damage');
+  reconnect();
+  expect(await screen.findByRole('heading', { name: '发现未同步的本机草稿' })).toBeVisible();
+});
+
+it('fails closed when another tab replaces a reviewed draft or the keep marker is damaged', () => {
+  persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('已查看'));
+  const reviewed = readCanvasDrafts(canvasStorage());
+  persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('后来改动'));
+  expect(() => rememberKeptCanvasDrafts(canvasStorage(), reviewed)).toThrow('草稿状态刚被另一个页面更新');
+  expect(unreviewedCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage()))).toHaveLength(1);
+  rememberKeptCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage()));
+  canvasStorage().setItem(CANVAS_KEPT_DRAFTS_KEY, '{not JSON');
+  expect(unreviewedCanvasDrafts(canvasStorage(), readCanvasDrafts(canvasStorage()))).toHaveLength(1);
 });
 
 it('network_failure preserves an exportable draft across reload even while the cloud remains unreachable', async () => {
@@ -126,6 +199,33 @@ it('explicitly restores a same-version draft and only removes its source after t
   await writerReady();
   await waitFor(() => expect(readCanvasDrafts(canvasStorage())).toHaveLength(0));
   expect(writes).toBe(1);
+});
+
+it('refuses to restore a stale snapshot after another tab replaces the same draft key', async () => {
+  persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('旧内容'));
+  let writes = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/auth/me')) return response(identity);
+    if (url.endsWith('/runtime')) return response({ available: false, models: [] });
+    if (init.method === 'PUT') writes++;
+    return response(record());
+  }));
+  render(<SaaSApp />);
+  const restore = await screen.findByRole('button', { name: '恢复草稿并继续同步' });
+  await waitFor(() => expect(restore).toBeEnabled());
+  persistCanvasDraft(canvasStorage(), 'previous-editor', 7, documentWith('另一标签页更新的内容'));
+  fireEvent.click(restore);
+  expect(screen.getByRole('alert')).toHaveTextContent('草稿状态刚被另一个页面更新');
+  expect(screen.getByText(/另一标签页更新的内容/)).toBeVisible();
+  expect(readCanvasDrafts(canvasStorage())).toHaveLength(1);
+  expect(document.querySelector('.awwo-workspace')).toBeNull();
+  expect(writes).toBe(0);
+  canvasStorage().removeItem(`${CANVAS_DRAFT_PREFIX}previous-editor`);
+  fireEvent.click(screen.getByRole('button', { name: '恢复草稿并继续同步' }));
+  expect(screen.getByRole('heading', { name: '本机草稿已变化' })).toBeVisible();
+  expect(screen.getByRole('button', { name: '重新连接云端' })).toBeVisible();
+  expect(writes).toBe(0);
 });
 
 it('retains edits made during an in-flight save when the older revision is acknowledged', async () => {
