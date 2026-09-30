@@ -21,6 +21,7 @@ export type SurfaceNotice =
   | 'planning_busy'
   | 'plan_stale'
   | 'plan_cancelled'
+  | 'plan_interrupted'
   | 'plan_undone';
 
 const NOTICE_KEYS = {
@@ -41,6 +42,7 @@ const NOTICE_KEYS = {
   planning_busy: 'surface.planningBusy',
   plan_stale: 'surface.planStale',
   plan_cancelled: 'surface.planCancelled',
+  plan_interrupted: 'surface.planInterrupted',
   plan_undone: 'surface.planUndone',
 } as const;
 

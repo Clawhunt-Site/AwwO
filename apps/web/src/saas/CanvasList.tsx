@@ -1,55 +1,95 @@
-import { useEffect, useRef, useState } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, RefreshCw, Search } from 'lucide-react';
 import { CanvasThumbnail, canvasShape, relativeTime } from './CanvasThumbnail';
 import { ActionMenu } from './ActionMenu';
-import { emptyDocument } from '../canvas/canvasDoc';
 import { api, tenantPath, saasErrorMessage, type CanvasRecord, type Tenant } from './api';
 import { ListPager, usePagedList } from './ListPager';
 import { useSaaSPreferences } from './preferences';
 
-export function CanvasList({ tenant, onOpen }: { tenant: Tenant; onOpen: (canvasId: string) => void }) {
+const updatedAt = (canvas: CanvasRecord) => Date.parse(canvas.updatedAt) || 0;
+/** Most recently touched first; canvases touched at the same time keep the server's order. */
+const byRecentUpdate = (items: ReadonlyArray<CanvasRecord>) => [...items].sort((a, b) => updatedAt(b) - updatedAt(a));
+
+/** The workspace's canvases, most recently updated first. With `recentLimit`, only that many are
+ * shown until the operator expands the full list in place (its pages, rename and delete). Search
+ * filters the page already loaded; it never sends a request. */
+export function CanvasList({ tenant, onOpen, recentLimit }: { tenant: Tenant; onOpen: (canvasId: string) => void; recentLimit?: number }) {
   const { locale, t } = useSaaSPreferences();
   const path = tenantPath(tenant.id, '/canvases');
   const listing = usePagedList<CanvasRecord>(path);
   const readOnly = tenant.role === 'reader' || tenant.status !== 'active';
-  const [error, setError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
-  const [name, setName] = useState('');
   const [editing, setEditing] = useState<{ canvas: CanvasRecord; action: 'rename' | 'delete' } | null>(null);
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  return <>
-    {readOnly && <p className="saas-runtime-note" role="status">{t('只读成员：可以浏览画布、会话和导出副本，不能编辑或运行。', 'Reader: browse canvases and conversations or export a copy. Editing and execution require member access.')}</p>}
-    <div className="saas-library-toolbar">
-      {!readOnly && <form data-onboarding="canvas-create" className="saas-create" onSubmit={async event => {
-        event.preventDefault(); if (busy) return; setBusy(true); setError(null);
-        try {
-          const canvas = await api<CanvasRecord>(path, { method: 'POST', body: JSON.stringify({ name: name.trim() || t('未命名', 'Untitled'), document: emptyDocument() }) });
-          if (mounted.current) onOpen(canvas.id);
-        } catch (cause) { if (mounted.current) setError(cause); }
-        finally { if (mounted.current) setBusy(false); }
-      }}><input aria-label={t('新画布名称', 'New canvas name')} placeholder={t('为新画布起个名字', 'Name your new canvas')} value={name} onChange={event => setName(event.target.value)} maxLength={100} disabled={busy}/><button disabled={busy} className="saas-primary"><Plus size={16} aria-hidden="true"/>{busy ? t('正在创建…', 'Creating…') : t('新建画布', 'Create canvas')}</button></form>}
-      <div className="saas-library-meta">
-        {listing.page && <span className="saas-library-count">{t(`${listing.page.items.length} 张画布`, `${listing.page.items.length} ${listing.page.items.length === 1 ? 'canvas' : 'canvases'}`)}</span>}
-        {(listing.pageNumber > 1 || Boolean(listing.next)) ? <ListPager label={t('画布分页', 'Canvas pages')} page={listing.pageNumber} busy={listing.loading || busy} previous={listing.previous} next={listing.next} refresh={listing.refresh}/> : <button type="button" className="saas-list-refresh" disabled={listing.loading || busy} onClick={listing.refresh}><RefreshCw size={14} aria-hidden="true"/>{t('刷新列表', 'Refresh list')}</button>}
-      </div>
-    </div>
-    {(error || listing.error) && <p role="alert" className="saas-error">{saasErrorMessage(error || listing.error, locale)}</p>}
-    {listing.loading ? <div className="saas-canvas-list is-loading" role="status" aria-label={t('正在加载画布…', 'Loading canvases…')}>{[0, 1, 2].map(index => <div key={index} className="saas-canvas-card saas-canvas-skeleton" aria-hidden="true"><span /><i /><i /></div>)}</div> : listing.page && <div data-onboarding="canvas-list" className="saas-canvas-list">{listing.page.items.map(canvas => {
-      const shape = canvasShape(canvas.document);
-      return <article key={canvas.id} className="saas-canvas-card">
-      <button className="saas-canvas-open" onClick={() => onOpen(canvas.id)}><CanvasThumbnail document={canvas.document} /><span className="saas-canvas-card-body"><h2>{canvas.name}</h2><span className="saas-canvas-card-meta"><time dateTime={canvas.updatedAt} title={new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}>{t('更新于', 'Updated')} {relativeTime(canvas.updatedAt, locale)}</time><span>{shape.boxes.length ? t(`${shape.boxes.length} 个节点`, `${shape.boxes.length} ${shape.boxes.length === 1 ? 'node' : 'nodes'}`) : t('空白画布', 'Blank')}</span></span></span></button>
+  const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState(false);
+  const titleId = useId();
+  const listId = useId();
+  // A page restored from the back/forward cache shows the list as it was when it was left.
+  const refresh = useRef(listing.refresh);
+  refresh.current = listing.refresh;
+  useEffect(() => {
+    const restored = (event: PageTransitionEvent) => { if (event.persisted) refresh.current(); };
+    window.addEventListener('pageshow', restored);
+    return () => window.removeEventListener('pageshow', restored);
+  }, []);
+
+  const items = listing.page ? byRecentUpdate(listing.page.items) : [];
+  const needle = query.trim().toLocaleLowerCase();
+  const matches = needle ? items.filter(canvas => canvas.name.toLocaleLowerCase().includes(needle)) : items;
+  const limit = recentLimit ?? Infinity;
+  const collapsible = recentLimit !== undefined;
+  const showingAll = !collapsible || expanded;
+  const morePages = listing.pageNumber > 1 || Boolean(listing.next);
+  // A search shows every match on the page; otherwise the collapsed view shows the most recent few.
+  const visible = needle || showingAll ? matches : matches.slice(0, limit);
+  const canExpand = collapsible && (items.length > limit || morePages);
+  const count = listing.page && listing.pageNumber === 1 ? (listing.next ? `${items.length}+` : String(items.length)) : '';
+  const toggle = () => {
+    // The collapsed view shows the newest canvases, which live on the first page.
+    if (expanded && listing.pageNumber > 1) listing.refresh();
+    setExpanded(!expanded);
+  };
+  const searchStatus = !needle || !listing.page ? ''
+    : `${matches.length ? t(`找到 ${matches.length} 张画布`, `${matches.length} ${matches.length === 1 ? 'canvas' : 'canvases'} found`)
+      : t(`没有名称包含“${query.trim()}”的画布`, `No canvas name contains “${query.trim()}”`)}${morePages ? t('（只搜索当前页）', ' (this page only)') : ''}`;
+
+  const card = (canvas: CanvasRecord) => {
+    const shape = canvasShape(canvas.document);
+    return <article key={canvas.id} className="saas-canvas-card">
+      <button className="saas-canvas-open" onClick={() => onOpen(canvas.id)}><CanvasThumbnail document={canvas.document} /><span className="saas-canvas-card-body"><h3>{canvas.name}</h3><span className="saas-canvas-card-meta"><time dateTime={canvas.updatedAt} title={new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}>{t('更新于', 'Updated')} {relativeTime(canvas.updatedAt, locale)}</time><span>{shape.boxes.length ? t(`${shape.boxes.length} 个节点`, `${shape.boxes.length} ${shape.boxes.length === 1 ? 'node' : 'nodes'}`) : t('空白画布', 'Blank')}</span></span></span></button>
       {!readOnly && <div className="saas-canvas-actions"><ActionMenu label={t(`画布选项：${canvas.name}`, `Canvas options: ${canvas.name}`)}>{close => <>
         <button onClick={() => { close(); setEditing({ canvas, action: 'rename' }); }}>{t('改名', 'Rename')}</button>
         <button className="saas-danger-action" onClick={() => { close(); setEditing({ canvas, action: 'delete' }); }}>{t('删除', 'Delete')}</button>
       </>}</ActionMenu></div>}
-    </article>; })}{listing.page.items.length === 0 && <section className="saas-empty-guide">
-      <div className="saas-empty-art" aria-hidden="true"><span /><span /><span /></div>
-      <h2>{listing.pageNumber === 1 ? t('从第一张画布开始', 'Start with your first canvas') : t('当前页没有画布', 'No canvases on this page')}</h2>
-      <p>{readOnly ? t('请工作区成员创建画布后，刷新列表查看。', 'Ask a workspace member to create a canvas, then refresh this list.') : listing.pageNumber > 1 ? t('返回上一页，或新建一张画布。', 'Go to the previous page or create a canvas.') : t('新建画布，从左侧添加模型，或从右侧 Bot 清单选择协作者。写清任务后运行，结果会保留在画布中。', 'Create a canvas. Add a model from the left or choose a collaborator from the Bot list on the right. Describe the task and run it; results stay on the canvas.')}</p>
-    </section>}</div>}
+    </article>;
+  };
+
+  return <section className="saas-home-section saas-home-recent" aria-labelledby={titleId}>
+    <div className="saas-home-section-header">
+      <div className="saas-home-section-title">
+        <h2 id={titleId}>{t('继续工作', 'Continue working')}</h2>
+        {count && <span className="saas-library-count">{t(`${count} 张画布`, `${count} ${count === '1' ? 'canvas' : 'canvases'}`)}</span>}
+      </div>
+      <div className="saas-library-meta">
+        {(items.length > 0 || query) && <label className="saas-list-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label={t('按名称搜索画布', 'Search canvases by name')} placeholder={t('搜索画布', 'Search canvases')} value={query} onChange={event => setQuery(event.target.value)} maxLength={100} /></label>}
+        {showingAll && morePages ? <ListPager label={t('画布分页', 'Canvas pages')} page={listing.pageNumber} busy={listing.loading} previous={listing.previous} next={listing.next} refresh={listing.refresh}/> : <button type="button" className="saas-list-refresh" disabled={listing.loading} onClick={listing.refresh}><RefreshCw size={14} aria-hidden="true"/>{t('刷新列表', 'Refresh list')}</button>}
+        {canExpand && <button type="button" className="saas-list-toggle" aria-expanded={expanded} aria-controls={listId} onClick={toggle}>
+          {expanded ? <><ChevronUp size={14} aria-hidden="true" />{t('收起', 'Show recent only')}</> : <><ChevronDown size={14} aria-hidden="true" />{listing.next || listing.pageNumber > 1 ? t('查看全部画布', 'View all canvases') : t(`查看全部 ${items.length} 张`, `View all ${items.length}`)}</>}
+        </button>}
+      </div>
+    </div>
+    {readOnly && <p className="saas-runtime-note" role="status">{t('只读成员：可以浏览画布、会话和导出副本，不能编辑或运行。', 'Reader: browse canvases and conversations or export a copy. Editing and execution require member access.')}</p>}
+    {Boolean(listing.error) && <p role="alert" className="saas-error">{saasErrorMessage(listing.error, locale)}</p>}
+    <p className="saas-list-search-status" role="status">{searchStatus}</p>
+    <div id={listId}>
+      {listing.loading ? <div className={`saas-canvas-list is-loading${showingAll ? '' : ' is-recent'}`} role="status" aria-label={t('正在加载画布…', 'Loading canvases…')}>{Array.from({ length: showingAll ? 3 : Math.min(limit, 4) }, (_, index) => <div key={index} className="saas-canvas-card saas-canvas-skeleton" aria-hidden="true"><span /><i /><i /></div>)}</div>
+        : listing.page && <div data-onboarding="canvas-list" className={`saas-canvas-list${showingAll || needle ? '' : ' is-recent'}`}>{visible.map(card)}{items.length === 0 && <section className="saas-empty-guide">
+          <div className="saas-empty-art" aria-hidden="true"><span /><span /><span /></div>
+          <h3>{listing.pageNumber === 1 ? t('从第一张画布开始', 'Start with your first canvas') : t('当前页没有画布', 'No canvases on this page')}</h3>
+          <p>{readOnly ? t('请工作区成员创建画布后，刷新列表查看。', 'Ask a workspace member to create a canvas, then refresh this list.') : listing.pageNumber > 1 ? t('返回上一页，或新建一张画布。', 'Go to the previous page or create a canvas.') : t('在上方写下目标，AwwO 会新建画布并规划分工；也可以新建空白画布，从左侧添加模型，或从右侧 Bot 清单选择协作者。', 'Describe a goal above and AwwO creates a canvas and plans the work. Or start a blank canvas: add a model from the left, or choose a collaborator from the Bot list on the right.')}</p>
+        </section>}</div>}
+    </div>
     {editing && !readOnly && <CanvasAction key={`${tenant.id}:${editing.canvas.id}:${editing.action}`} tenantId={tenant.id} {...editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); listing.refresh(); }}/>}
-  </>;
+  </section>;
 }
 
 function CanvasAction({ tenantId, canvas, action, onClose, onSaved }: { tenantId: string; canvas: CanvasRecord; action: 'rename' | 'delete'; onClose: () => void; onSaved: () => void }) {

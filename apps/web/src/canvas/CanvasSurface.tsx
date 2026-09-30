@@ -151,6 +151,22 @@ export interface CanvasSurfaceProps {
   runtimeReadJson?: (path: string, init?: RequestInit & { headers?: Record<string, string> }) => Promise<any>;
   /** Take the user to where companies are created — binding needs one and the canvas makes none. */
   onCreateCompany?: () => void;
+  /** A request the host carried here for this canvas (the hosted workspace home). The surface puts
+   *  it in the planning prompt box and, when `start` holds, plans it once. Native never passes it. */
+  initialPlan?: InitialPlanRequest | null;
+}
+
+/** A planning request handed over by the host, with the host's own record of whether it was sent. */
+export interface InitialPlanRequest {
+  prompt: string;
+  /** Plan it as soon as the canvas can. False only restores the prompt to the box. */
+  start: boolean;
+  /** An earlier page sent this request and never reported back, so it was not applied. */
+  interrupted: boolean;
+  /** Records the request as sent, just before sending. False means it must not be sent from here. */
+  claim: () => boolean;
+  /** The request is settled: planned, restored to the box, or refused with a reason shown. */
+  done: () => void;
 }
 
 /** LIVE companies a bind can target. Read straight from the control plane — the canvas no longer
@@ -192,7 +208,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, planRequest = requestCanvasPlan }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   const readOnlyRef = useRef(readOnly);
@@ -1638,11 +1654,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     : canInitialize && plannerProvider === 'pi' && plannerStatus?.available === false
       ? plannerStatus.error || (locale === 'zh' ? '画布助手暂不可用，请重试。' : 'The canvas assistant is unavailable. Please retry.')
       : '');
-  const sendPlanningMessage = async () => {
+  // `request` plans a prompt the host handed over rather than the box's own draft.
+  const sendPlanningMessage = async (request?: string) => {
     if (readOnlyRef.current) return;
     // Keep the draft untouched and refuse before allocating a request or calling either planner.
     if (planningUnavailableReason) { setPlanningError(planningUnavailableReason); return; }
-    const prompt = planning.draft.trim();
+    const prompt = (request ?? planning.draft).trim();
     if (!prompt || planningRequest.current) return;
     if (journal.current || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
       setPlanningError(surfaceNotice(t, 'planning_busy'));
@@ -1712,6 +1729,45 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     appendPlanningMessage(`${request.id}-cancelled`, surfaceNotice(t, 'plan_cancelled'));
     setPlanning(previous => ({ ...previous, draft: previous.draft || request.prompt }));
   };
+  // A request carried over from the workspace home. The canvas opens with it in the prompt box, so
+  // the operator sees what is being planned, and plans it exactly once: only on an empty canvas,
+  // only while the box still holds it unchanged, and only once the planner's status is known. It is
+  // sent from a timer cleared on cleanup, so a remount (StrictMode's simulated one included) can
+  // neither abort it nor send it twice; the host's claim is the durable guard against a reload.
+  const initialPlanSettled = useRef(false);
+  const initialPlanShown = useRef(false);
+  const plannerStatusKnown = plannerProvider === 'jev' ? jevStatus !== null : plannerStatus !== null;
+  useEffect(() => {
+    const request = initialPlan;
+    if (!request || readOnly || initialPlanSettled.current) return;
+    const settle = () => { initialPlanSettled.current = true; request.done(); };
+    // Content already on the canvas came from an earlier plan or from the operator: never plan over it.
+    if (docRef.current.nodes.length) { settle(); return; }
+    if (planning.draft !== request.prompt) {
+      // Once the prompt has been shown, any change is the operator's edit and theirs to send.
+      if (initialPlanShown.current) { settle(); return; }
+      // An unrelated draft already waiting in the box is kept rather than overwritten.
+      if (planning.draft.trim()) { settle(); return; }
+      setPlanning(previous => previous.draft.trim() ? previous : { ...previous, draft: request.prompt });
+      return;
+    }
+    initialPlanShown.current = true;
+    if (!request.start) {
+      if (request.interrupted) appendPlanningMessage(`plan-interrupted-${Date.now()}`, surfaceNotice(t, 'plan_interrupted'));
+      settle();
+      return;
+    }
+    if (runUnavailableReason) { setPlanningError(runUnavailableReason); settle(); return; }
+    if (!plannerStatusKnown) return;
+    if (planningUnavailableReason) { setPlanningError(planningUnavailableReason); settle(); return; }
+    const timer = setTimeout(() => {
+      initialPlanSettled.current = true;
+      if (!request.claim()) { request.done(); return; }
+      // An unmount mid-plan leaves the claim in place, so the next page says the plan was interrupted.
+      void sendPlanningMessage(request.prompt).finally(() => { if (mounted.current) request.done(); });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [initialPlan, readOnly, planning.draft, plannerStatusKnown, planningUnavailableReason, runUnavailableReason]);
   const canUndoPlan = !readOnly && !planningBusy && !running && !bindingLocked && history.undo > 0
     && lastPlanRevision !== null && canvasPlanRevision(doc) === lastPlanRevision
     && Boolean(lastCommit.current?.label.startsWith('ai:'));

@@ -7,7 +7,7 @@ import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Te
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
-import { CanvasSurface } from '../canvas/CanvasSurface';
+import { CanvasSurface, type InitialPlanRequest } from '../canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
 import { withCanvasRunOwnership } from '../canvas/runOwnership';
@@ -21,7 +21,8 @@ import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls } from 
 import { InviteAcceptance } from './InviteAcceptance';
 import { AdminPanel } from './AdminPanel';
 import { RuntimeSettings } from './RuntimeSettings';
-import { CanvasList } from './CanvasList';
+import { WorkspaceHome } from './WorkspaceHome';
+import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
 import { AppearanceScope } from './SaaSAppearance';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink } from './SaaSOnboarding';
@@ -239,8 +240,8 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
   if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。可以新建工作区，或请所有者发送邀请链接。', 'You have not joined a workspace. Create one or ask its owner for an invitation.')}</p>{identity.user.platformRole === 'admin' && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
   const readOnly = tenant.role === 'reader';
   if (canvasId) return readOnly ? <ReadOnlyCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} /> : <CloudCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} />;
-  return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('选择画布，继续你的团队任务。', 'Choose a canvas to continue your team’s work.')}</p></section>
-    <CanvasList key={identity.user.id + ':' + tenant.id + ':' + tenant.role} tenant={tenant} onOpen={id => navigate(tenant.id, id)} />
+  return <main className="saas-dashboard saas-home"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header>
+    <WorkspaceHome key={identity.user.id + ':' + tenant.id + ':' + tenant.role} identity={identity} tenant={tenant} onOpen={id => navigate(tenant.id, id)} />
   </main>;
 }
 function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity; tenant?: Tenant; onProfile: (name: string) => void }) {
@@ -332,6 +333,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const [runtime, setRuntime] = useState<{ configured: boolean; available: boolean; reason?: string; models?: unknown[] } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [recovery, setRecovery] = useState<SavedCanvasDraft[] | null>(null);
+  // A request typed on the workspace home for this canvas, handed to the surface to plan once.
+  const [initialPlan, setInitialPlan] = useState<InitialPlanRequest | null>(null);
   const current = useRef<CanvasRecord | null>(null);
   const pending = useRef<CanvasDocument | null>(null);
   const writerId = useRef(crypto.randomUUID()).current;
@@ -531,6 +534,11 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       initializationQueue = next.catch(() => {});
       return next;
     });
+    // Planning saves through the hook configured above; before it exists the bridge refuses a plan.
+    const handoffScope = { user: identity.user.id, tenant: tenant.id, canvas: canvasId };
+    const handoff = takePlanHandoff(handoffScope);
+    if (handoff) setInitialPlan({ ...handoff, claim: () => claimPlanHandoff(handoffScope),
+      done: () => { clearPlanHandoff(handoffScope); setInitialPlan(null); } });
     if (pending.current) timer = setTimeout(() => void flush().catch(() => {}), 450);
     return () => { disposed = true; setupAbort.abort(); configureSaaSCanvasSave(null); configureSaaSCanvasInitialize(null); clearTimeout(timer); window.removeEventListener('awwo:canvas-cache-write', observe); window.removeEventListener('beforeunload', leave); };
   }, [record, recovery, tenant.id, canvasId, writerId]);
@@ -593,7 +601,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status">{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true}
-      executionUnavailableReason={executionUnavailableReason}
+      executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
       headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={exportLocal}><Download size={16} aria-hidden="true" /></button></div>} />

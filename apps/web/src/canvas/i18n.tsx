@@ -529,6 +529,7 @@ const EN = {
   'surface.planStale': 'The canvas changed while the plan was generated. Send the request again to update the latest graph.',
   'surface.planFailed': 'The canvas plan could not be generated. Try again.',
   'surface.planCancelled': 'Planning cancelled. The canvas was not changed.',
+  'surface.planInterrupted': 'The last plan was not applied to the canvas. Your request is back in the box, so you can generate it again.',
   'surface.planUndone': 'The latest AI change was undone.',
   'surface.plannerConnecting': 'Connecting to planning service…',
   'surface.plannerReady': '{provider} · Canvas planning',
@@ -682,7 +683,7 @@ const ZH: Record<CanvasTextKey, string> = {
   'surface.bindBeforeRun': '请先完成并保存当前 Agent 的绑定，再运行画布。', 'surface.waitConversation': '请等待当前会话完成，再运行画布。', 'surface.storageUnavailable': '本地存储不可用，尚未启动任务。', 'surface.storageWriteFailed': '无法保存运行恢复数据，请保持当前页面打开。',
   'surface.recoveryNotDispatched': '页面中断前尚未下发。', 'surface.recoveryIdentityMissing': '缺少原生运行标识；重试前请先核对工作区运行记录。', 'surface.recoveryInvalidOutput': '已恢复的产出未通过节点输出约束。', 'surface.upstreamIncomplete': '上游节点未完成', 'surface.cachedOutputMissing': '缺少可沿用的上游产出', 'surface.cachedOutputEmpty': '上游旧产出没有可用交付物', 'surface.recoveryUnconfirmed': '尚无法确认原生运行状态；请重试恢复或核对工作区运行记录。', 'surface.stopUnconfirmed': '停止尚未确认：{detail}',
   'surface.settlementUnconfirmed': '本轮已结束，正在确认已进入等待下一条消息的状态。',
-  'surface.planningBusy': '节点正在执行或连接，请结束后再修改画布。', 'surface.planStale': '生成期间画布已有新的调整。请重新发送需求，AI 会基于最新结构继续修改。', 'surface.planFailed': '无法生成画布方案，请重试。', 'surface.planCancelled': '已取消本次规划，画布未修改。', 'surface.planUndone': '已撤销最近一次 AI 更改。',
+  'surface.planningBusy': '节点正在执行或连接，请结束后再修改画布。', 'surface.planStale': '生成期间画布已有新的调整。请重新发送需求，AI 会基于最新结构继续修改。', 'surface.planFailed': '无法生成画布方案，请重试。', 'surface.planCancelled': '已取消本次规划，画布未修改。', 'surface.planInterrupted': '上次的规划没有应用到画布，需求已放回输入框，可以重新生成。', 'surface.planUndone': '已撤销最近一次 AI 更改。',
   'surface.plannerConnecting': '连接规划服务…', 'surface.plannerReady': '{provider} · 画布规划', 'surface.plannerDisconnected': '规划服务未连接', 'surface.retryPlanner': '重试连接',
   'surface.viewTools': '画布视图', 'surface.zoomOut': '缩小', 'surface.zoomIn': '放大', 'surface.fitAll': '查看全部节点', 'surface.arrange': '整理布局', 'surface.arrangeUndoable': '整理布局 · 可撤销', 'surface.showMinimap': '显示小地图', 'surface.undo': '撤销', 'surface.redo': '重做', 'surface.runSelection': '运行所选及下游',
 };

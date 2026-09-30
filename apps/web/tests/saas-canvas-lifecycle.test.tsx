@@ -146,28 +146,104 @@ it('shows reader canvases without create, rename or delete controls', async () =
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
-it('creates with a default name when the input is left empty', async () => {
-  const writes: any[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (_input: string, init: RequestInit = {}) => {
-    if (init.method === 'POST') { writes.push(JSON.parse(init.body as string)); return json({ ...record(0), name: '未命名' }, 201); }
-    return json({ items: [], nextCursor: null });
-  }));
-  const onOpen = vi.fn();
-  render(wrap(<CanvasList tenant={tenant} onOpen={onOpen}/>));
-  const button = await screen.findByRole('button', { name: '新建画布' });
-  expect(button).toBeEnabled();
-  fireEvent.click(button);
-  await waitFor(() => expect(writes).toHaveLength(1));
-  expect(writes[0].name).toBe('未命名');
-  expect(onOpen).toHaveBeenCalledWith('canvas-0');
+// Creating canvases moved to the workspace home's prompt box; saas-workspace-home.test.tsx covers
+// the untitled blank canvas and keeping the request when creation fails. The list itself creates nothing.
+it('offers no creation control of its own', async () => {
+  const fetcher = vi.fn(async (_input: string, _init?: RequestInit) => json({ items: [record(0)], nextCursor: null })); vi.stubGlobal('fetch', fetcher);
+  render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()} recentLimit={4}/>));
+  await screen.findByRole('heading', { name: 'Canvas 0' });
+  expect(screen.queryByRole('button', { name: '新建画布' })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: '新画布名称' })).toBeNull();
+  expect(fetcher.mock.calls.every(([, init]) => !init?.method)).toBe(true);
 });
 
-it('keeps a new canvas name when creation fails', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (_input: string, init: RequestInit = {}) => init.method === 'POST' ? json({ error: { message: 'network save failed' } }, 503) : json({ items: [], nextCursor: null })));
-  render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()}/>));
-  fireEvent.change(screen.getByRole('textbox', { name: '新画布名称' }), { target: { value: 'keep this name' } });
-  fireEvent.click(screen.getByRole('button', { name: '新建画布' }));
-  await screen.findByRole('alert'); expect(screen.getByRole('textbox', { name: '新画布名称' })).toHaveValue('keep this name');
+const titles = () => screen.getAllByRole('heading', { level: 3 }).map(heading => heading.textContent);
+
+it('shows the most recently updated canvases first and expands the full list in place', async () => {
+  const rows = [
+    { ...record(0), name: 'Oldest', updatedAt: '2026-09-01T00:00:00Z' }, { ...record(1), name: 'Newest', updatedAt: '2026-09-06T00:00:00Z' },
+    { ...record(2), name: 'Middle', updatedAt: '2026-09-03T00:00:00Z' }, { ...record(3), name: 'Second', updatedAt: '2026-09-05T00:00:00Z' },
+    { ...record(4), name: 'Third', updatedAt: '2026-09-04T00:00:00Z' }, { ...record(5), name: 'Fifth', updatedAt: '2026-09-02T00:00:00Z' },
+  ];
+  const fetcher = vi.fn(async () => json({ items: rows, nextCursor: null })); vi.stubGlobal('fetch', fetcher);
+  render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()} recentLimit={4}/>));
+  await screen.findByRole('heading', { name: 'Newest' });
+  expect(screen.getByRole('heading', { level: 2, name: '继续工作' })).toBeVisible();
+  expect(screen.getByText('6 张画布')).toBeVisible();
+  expect(titles()).toEqual(['Newest', 'Second', 'Third', 'Middle']);
+  const toggle = screen.getByRole('button', { name: '查看全部 6 张' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toContainElement(screen.getByRole('heading', { name: 'Newest' }));
+  expect(screen.queryByRole('navigation', { name: '画布分页' })).toBeNull();
+  fireEvent.click(toggle);
+  expect(titles()).toEqual(['Newest', 'Second', 'Third', 'Middle', 'Fifth', 'Oldest']);
+  expect(screen.getAllByRole('button', { name: /^画布选项：/ })).toHaveLength(6);
+  const collapse = screen.getByRole('button', { name: '收起' });
+  expect(collapse).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(collapse);
+  expect(titles()).toEqual(['Newest', 'Second', 'Third', 'Middle']);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('searches the loaded page by name, case-insensitively, without another request', async () => {
+  const rows = ['Launch plan A', 'Launch plan B', 'Budget', 'launch plan C', 'Launch plan D', 'LAUNCH plan E'].map((name, i) => ({ ...record(i), name }));
+  const fetcher = vi.fn(async () => json({ items: rows, nextCursor: null })); vi.stubGlobal('fetch', fetcher);
+  render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()} recentLimit={4}/>));
+  await screen.findByRole('heading', { name: 'Launch plan A' });
+  const search = screen.getByRole('searchbox', { name: '按名称搜索画布' });
+  fireEvent.change(search, { target: { value: 'launch' } });
+  // A search shows every match, not only the four most recent.
+  expect(titles()).toEqual(['Launch plan A', 'Launch plan B', 'launch plan C', 'Launch plan D', 'LAUNCH plan E']);
+  expect(screen.getByText('找到 5 张画布').closest('[role="status"]')).not.toBeNull();
+  fireEvent.change(search, { target: { value: '  BUDGET ' } });
+  expect(titles()).toEqual(['Budget']);
+  fireEvent.change(search, { target: { value: 'zzz' } });
+  expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0);
+  expect(screen.getByText('没有名称包含“zzz”的画布')).toBeVisible();
+  expect(screen.queryByText('从第一张画布开始')).toBeNull();
+  fireEvent.change(search, { target: { value: '' } });
+  expect(titles()).toHaveLength(4);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('pages only the expanded list, says a search covers this page only, and collapses back to the newest page', async () => {
+  const rows = Array.from({ length: 120 }, (_, i) => record(i));
+  const requests: URL[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const url = new URL(input, 'http://localhost'); requests.push(url);
+    const offset = Number(url.searchParams.get('cursor') || 0), limit = Number(url.searchParams.get('limit'));
+    return json({ items: rows.slice(offset, offset + limit), nextCursor: offset + limit < rows.length ? String(offset + limit) : null });
+  }));
+  render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()} recentLimit={4}/>));
+  await screen.findByRole('heading', { name: 'Canvas 0' });
+  expect(titles()).toEqual(['Canvas 0', 'Canvas 1', 'Canvas 2', 'Canvas 3']);
+  expect(screen.getByText('50+ 张画布')).toBeVisible();
+  expect(screen.queryByRole('navigation', { name: '画布分页' })).toBeNull();
+  fireEvent.change(screen.getByRole('searchbox', { name: '按名称搜索画布' }), { target: { value: 'Canvas 1' } });
+  expect(screen.getByText('找到 11 张画布（只搜索当前页）')).toBeVisible();
+  fireEvent.change(screen.getByRole('searchbox', { name: '按名称搜索画布' }), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: '查看全部画布' }));
+  const pager = within(screen.getByRole('navigation', { name: '画布分页' }));
+  fireEvent.click(pager.getByRole('button', { name: '下一页' }));
+  await screen.findByRole('heading', { name: 'Canvas 50' });
+  fireEvent.click(screen.getByRole('button', { name: '收起' }));
+  await screen.findByRole('heading', { name: 'Canvas 0' });
+  expect(titles()).toEqual(['Canvas 0', 'Canvas 1', 'Canvas 2', 'Canvas 3']);
+  expect(requests.map(url => url.searchParams.get('cursor'))).toEqual([null, '50', null]);
+});
+
+it('reloads a list restored from the back/forward cache', async () => {
+  let name = 'Before leaving';
+  const fetcher = vi.fn(async () => json({ items: [{ ...record(0), name }], nextCursor: null })); vi.stubGlobal('fetch', fetcher);
+  render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()} recentLimit={4}/>));
+  await screen.findByRole('heading', { name: 'Before leaving' });
+  name = 'Renamed elsewhere';
+  act(() => { window.dispatchEvent(new Event('pageshow')); });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const restored = new Event('pageshow'); Object.defineProperty(restored, 'persisted', { value: true });
+  act(() => { window.dispatchEvent(restored); });
+  await screen.findByRole('heading', { name: 'Renamed elsewhere' });
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
 it('offers workspace creation even to a user without memberships and cancels without a request', async () => {

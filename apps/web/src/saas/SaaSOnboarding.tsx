@@ -33,10 +33,10 @@ function guideAction(action: FirstRunAction) {
     location.assign('/?' + query);
     return;
   }
-  const selector = action === 'create-canvas' ? '[data-onboarding="canvas-create"] input' : '[data-onboarding="provider-key"]';
+  const selector = action === 'create-canvas' ? '[data-onboarding="canvas-create"] textarea' : '[data-onboarding="provider-key"]';
   // Wait for modal cleanup/focus restoration before moving to the real control.
   requestAnimationFrame(() => {
-    const element = document.querySelector<HTMLInputElement>(selector);
+    const element = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
     if (!element || element.disabled) return;
     element.scrollIntoView({ block: 'center', behavior: 'auto' });
     element.focus({ preventScroll: true });

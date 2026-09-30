@@ -7,9 +7,10 @@ import type { Identity } from '../src/saas/api';
 import type { FirstRunTourProps } from '../src/saas/FirstRunTour';
 
 vi.mock('../src/saas/FirstRunTour', () => ({
-  FirstRunTour: ({ open, scene, readOnly, personalEngines, onClose }: FirstRunTourProps) => open ? <section role="dialog" aria-label={scene}>
+  FirstRunTour: ({ open, scene, readOnly, personalEngines, onClose, onAction }: FirstRunTourProps) => open ? <section role="dialog" aria-label={scene}>
     <span>{readOnly ? 'Read only' : 'Editable'}</span><span>{personalEngines ? 'Personal' : 'Workspace engine'}</span>
     <button onClick={() => onClose(false)}>Dismiss guide</button><button onClick={() => onClose(true)}>Complete guide</button>
+    <button onClick={() => { onClose(false); onAction?.('create-canvas'); }}>Create canvas action</button>
   </section> : null,
 }));
 let sequence = 0;
@@ -51,6 +52,21 @@ it('does not reopen after a manual dismissal during page loading', async () => {
   view.rerender(content(user));
   await waitFor(() => expect(localStorage.getItem(onboardingStorageKey(user.user.id, 'workspace'))).toBe('dismissed'));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('takes the create-canvas step to the home prompt box, only focusing it', async () => {
+  const scroll = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll });
+  const submitted = vi.fn(event => event.preventDefault());
+  render(<SaaSPreferencesProvider><SaaSOnboarding identity={identity()}><GuideLauncher />
+    <form data-onboarding="canvas-create" onSubmit={submitted}><textarea aria-label="Canvas request" defaultValue="" /></form>
+    <div data-onboarding="canvas-list" /></SaaSOnboarding></SaaSPreferencesProvider>);
+  await screen.findByRole('dialog', { name: 'workspace' });
+  fireEvent.click(screen.getByRole('button', { name: 'Create canvas action' }));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: 'Canvas request' })).toHaveFocus());
+  expect(scroll).toHaveBeenCalledWith({ block: 'center', behavior: 'auto' });
+  expect(submitted).not.toHaveBeenCalled();
+  delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
 });
 
 it('waits for an existing modal to close instead of stealing it', async () => {

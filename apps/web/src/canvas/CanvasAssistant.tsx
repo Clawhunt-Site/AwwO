@@ -1,8 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, Loader2, Square, Undo2, X } from 'lucide-react';
 import './canvas-assistant.css';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { getAgentTemplates } from './agentTemplates';
+import { useEnterToSend } from './composerKeys';
 import type { PlanProgress } from './canvasPlanning';
 import type { UiLocale } from '../locale';
 
@@ -117,7 +118,6 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const welcome = mode === 'welcome';
   const sendLabel = submitLabel || t(welcome ? 'assistant.generate' : 'assistant.modify');
   const errorId = useId();
-  const composing = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const canSend = !busy && !submitDisabled && Boolean(draft.trim());
@@ -149,13 +149,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const quietSeconds = busy ? Math.max(0, Math.floor((Date.now() - changedAt) / 1000)) : 0;
 
   const send = () => { if (canSend) onSend(); };
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey) return;
-    if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
-    event.preventDefault();
-    event.stopPropagation();
-    send();
-  };
+  const composerKeys = useEnterToSend(send);
 
   let status: ReactNode = null;
   if (busy) {
@@ -219,8 +213,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
         <textarea ref={input} aria-label={t('assistant.input')} aria-describedby={error ? errorId : undefined}
           placeholder={t(welcome ? 'assistant.welcomePlaceholder' : 'assistant.panelPlaceholder')}
           value={draft} disabled={busy} rows={3} maxLength={8000}
-          onChange={event => onDraftChange(event.target.value)} onKeyDown={onKeyDown}
-          onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} />
+          onChange={event => onDraftChange(event.target.value)} {...composerKeys} />
         {status}
         <div className="awwo-assistant-composer-actions">
           {busy ? <button type="button" className="awwo-assistant-cancel" onClick={onCancel}><Square size={12} aria-hidden="true" />{t('assistant.cancel')}</button> : null}
