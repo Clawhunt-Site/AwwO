@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { isTaskFrame } from '../canvas/taskFrame';
-import { saasErrorMessage } from './api';
-import { readRunEvidence, downloadRunArchive, type RunEvidenceSummary } from './runEvidenceApi';
+import { SaaSApiError, saasErrorMessage } from './api';
+import { readRunEvidence, readRunInvocations, downloadRunArchive, type RunEvidenceSummary, type RunInvocation } from './runEvidenceApi';
 import { useSaaSPreferences } from './preferences';
 import './run-evidence.css';
 
@@ -13,6 +13,7 @@ export function RunEvidence(props: Props) {
 function RunEvidenceView({ tenantId, runId, runStatus }: Props) {
   const { locale, t } = useSaaSPreferences();
   const [open, setOpen] = useState(false);
+  const [callsOpen, setCallsOpen] = useState(false);
   const [summary, setSummary] = useState<RunEvidenceSummary | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [refresh, setRefresh] = useState(0);
@@ -37,7 +38,11 @@ function RunEvidenceView({ tenantId, runId, runStatus }: Props) {
   const frame = isTaskFrame(summary?.taskFrame) ? summary.taskFrame : null;
   const sourceName = (source: string) => ({ model_output: t('模型输出', 'Model output'), contract_validated: t('交付格式检查', 'Delivery format check'), artifact_stored: t('已保存附件', 'Stored artifact') }[source] || source);
   return <section className="saas-run-evidence" aria-label={t('运行证据', 'Run evidence')}>
-    <button type="button" className="saas-evidence-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>{t('证据摘要', 'Evidence summary')}</button>
+    <div className="saas-evidence-actions">
+      <button type="button" className="saas-evidence-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>{t('证据摘要', 'Evidence summary')}</button>
+      <button type="button" className="saas-evidence-toggle" aria-expanded={callsOpen} onClick={() => setCallsOpen(value => !value)}>{t('模型调用', 'Model calls')}</button>
+    </div>
+    {callsOpen && <ModelInvocationEvidence tenantId={tenantId} runId={runId} runStatus={runStatus} />}
     {open && <div className="saas-evidence-body">
       {error !== null && <p role="alert">{saasErrorMessage(error, locale)} <button type="button" onClick={() => setRefresh(value => value + 1)}>{t('重试', 'Retry')}</button></p>}
       {!summary && error === null && <p role="status">{t('正在读取证据…', 'Loading evidence…')}</p>}
@@ -67,4 +72,84 @@ function RunEvidenceView({ tenantId, runId, runStatus }: Props) {
       </>}
     </div>}
   </section>;
+}
+
+function ModelInvocationEvidence({ tenantId, runId, runStatus }: Props) {
+  const { locale, t } = useSaaSPreferences();
+  const [items, setItems] = useState<RunInvocation[] | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [refresh, setRefresh] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const controller = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!tenantId || !runId) return;
+    const request = new AbortController();
+    controller.current = request;
+    setItems(null); setCursor(null); setError(null); setLoadingMore(false);
+    void readRunInvocations(tenantId, runId, request.signal).then(page => {
+      if (request.signal.aborted) return;
+      setItems(page.items); setCursor(page.page.nextCursor);
+    }).catch(error => {
+      if (request.signal.aborted) return;
+      setItems(null); setCursor(null); setError(error);
+    });
+    return () => { request.abort(); if (controller.current === request) controller.current = null; };
+  }, [tenantId, runId, runStatus, refresh]);
+
+  const loadMore = async () => {
+    const request = controller.current;
+    if (!request || !cursor || loadingMore) return;
+    setLoadingMore(true); setError(null);
+    try {
+      const page = await readRunInvocations(tenantId, runId, request.signal, cursor);
+      if (request.signal.aborted) return;
+      setItems(previous => {
+        const seen = new Set(previous?.map(item => item.id) || []);
+        return [...(previous || []), ...page.items.filter(item => !seen.has(item.id))];
+      });
+      setCursor(page.page.nextCursor);
+    } catch (error) {
+      if (!request.signal.aborted) {
+        if (error instanceof SaaSApiError && [401, 403, 404].includes(error.status)) { setItems(null); setCursor(null); }
+        setError(error);
+      }
+    } finally { if (!request.signal.aborted) setLoadingMore(false); }
+  };
+  const message = error instanceof SaaSApiError && error.code === 'invalid_run_invocations'
+    ? t('模型调用记录响应无效，请重试。', 'Invalid model call record. Please retry.') : saasErrorMessage(error, locale);
+  const states: Record<string, string> = { running: t('运行中', 'Running'), completed: t('完成', 'Completed'), failed: t('失败', 'Failed'), cancelled: t('已停止', 'Cancelled'), interrupted: t('已中断', 'Interrupted') };
+  const runState = (status: string) => states[status] || status;
+  const usageText = (item: RunInvocation) => {
+    const { inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens, reasoningTokens, providerTotalTokens, computedTotalTokens } = item.usage;
+    const supplementary = [
+      cachedInputTokens === null ? '' : `${t('缓存输入', 'Cached input')} ${cachedInputTokens}`,
+      cacheWriteTokens === null ? '' : `${t('写入缓存', 'Cache write')} ${cacheWriteTokens}`,
+      reasoningTokens === null ? '' : `${t('推理', 'Reasoning')} ${reasoningTokens}`,
+      providerTotalTokens === null || computedTotalTokens !== null ? '' : `${t('服务商总量', 'Provider total')} ${providerTotalTokens}`,
+    ].filter(Boolean);
+    const extra = supplementary.length ? ` · ${supplementary.join(' · ')}` : '';
+    if (item.usageStatus === 'reported') return `${t('输入', 'Input')} ${inputTokens} · ${t('输出', 'Output')} ${outputTokens}${computedTotalTokens !== null ? ` · ${t('合计', 'Total')} ${computedTotalTokens}` : ''}${extra} tokens`;
+    if (item.usageStatus === 'partial') return `${t('部分用量：', 'Partial usage: ')}${t('输入', 'Input')} ${inputTokens ?? t('未提供', 'unavailable')} · ${t('输出', 'Output')} ${outputTokens ?? t('未提供', 'unavailable')}${extra} tokens`;
+    if (item.usageStatus === 'unknown') return t('用量待确认', 'Usage is unknown');
+    if (item.usageStatus === 'invalid') return t('服务商用量数据无效', 'Provider usage data is invalid');
+    return t('服务商未提供用量', 'Provider did not report usage');
+  };
+
+  return <div className="saas-invocations" aria-label={t('本次模型调用', 'Model calls for this run')}>
+    {error !== null && <p role="alert">{message} <button type="button" onClick={() => setRefresh(value => value + 1)}>{t('重试', 'Retry')}</button></p>}
+    {items === null && error === null && <p role="status">{t('正在读取模型调用…', 'Loading model calls…')}</p>}
+    {items?.length === 0 && <p>{t('本次运行尚无模型调用记录。', 'No model calls have been recorded for this run.')}</p>}
+    {items && items.length > 0 && <ol>{items.map(item => {
+      const canvasModel = /^byok_/i.test(item.modelId) ? '' : item.modelId;
+      const providerModel = /^byok_/i.test(item.providerModel) ? '' : item.providerModel;
+      return <li key={item.id}>
+        <div className="saas-invocation-heading"><strong>{item.provider || t('服务商未记录', 'Provider unavailable')} · {providerModel || canvasModel || t('模型未记录', 'Model unavailable')}</strong><span>{runState(item.status)}</span></div>
+        {providerModel && canvasModel && canvasModel !== providerModel && <p>{t('画布模型：', 'Canvas model: ')}{canvasModel}</p>}
+        <p>{usageText(item)}</p>
+      </li>;
+    })}</ol>}
+    {items && cursor && <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? t('正在读取…', 'Loading…') : t('加载更多调用', 'Load more calls')}</button>}
+  </div>;
 }
