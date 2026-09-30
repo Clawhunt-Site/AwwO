@@ -238,10 +238,13 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
         {visible.map((node, i) => {
           const state = runs[node.id]?.state;
           const caption = state ? t(`status.${state}`) : node.kind === 'session' && node.binding ? t('status.bound') : t('status.unbound');
-          return <button key={node.id} className={`awwo-agent-row${selectedIds.includes(node.id) ? ' is-selected' : ''}`} aria-label={t('workspace.locateAgent', { title: node.title })} title={node.title} onClick={() => { onFocusNode(node.id); setSidebarOpen(false); }}>
+          const peers = nodes.filter(candidate => candidate.title === node.title);
+          const ordinal = peers.length > 1 ? peers.findIndex(candidate => candidate.id === node.id) + 1 : null;
+          const rosterTitle = ordinal ? `${node.title} · ${ordinal}` : node.title;
+          return <button key={node.id} className={`awwo-agent-row${selectedIds.includes(node.id) ? ' is-selected' : ''}`} aria-label={t('workspace.locateAgent', { title: rosterTitle })} title={rosterTitle} onClick={() => { onFocusNode(node.id); setSidebarOpen(false); }}>
             <span className="awwo-agent-row-icon"><AgentGlyph title={node.title} templateId={node.kind === 'session' ? getAgentTemplateForNode(node, locale)?.id : undefined} size={17} /></span>
             <span className="awwo-agent-row-copy"><strong>{node.title}</strong><small><i className={`awwo-status-dot is-${state ?? 'draft'}`} />{caption}</small></span>
-            {!modernRails && <span className="awwo-agent-index">{(i + 1).toString().padStart(2, '0')}</span>}
+            {(!modernRails || ordinal) && <span className="awwo-agent-index">{(modernRails ? ordinal! : i + 1).toString().padStart(2, '0')}</span>}
           </button>;
         })}
         {!visible.length && <p className="awwo-list-empty">{query ? t('workspace.noAgentMatch') : t('workspace.firstAgent')}</p>}

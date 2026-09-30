@@ -42,6 +42,18 @@ it('keeps the right Bot roster on a read-only cloud canvas without an editable m
   expect(screen.queryByRole('complementary', { name: '工作区导航' })).toBeNull();
 });
 
+it('distinguishes same-name Bots in the roster and accessible labels', () => {
+  const p = props();
+  const duplicate = { ...p.nodes[0], id: 'another-bot' };
+  render(<AgentWorkspace {...p} nodes={[p.nodes[0], duplicate]}><div /></AgentWorkspace>);
+  const rows = within(bots()).getAllByRole('button', { name: /定位/ });
+  expect(rows).toHaveLength(2);
+  expect(rows[0]).toHaveAttribute('aria-label', expect.stringContaining('· 1'));
+  expect(rows[1]).toHaveAttribute('aria-label', expect.stringContaining('· 2'));
+  expect(within(rows[0]).getByText('01')).toBeVisible();
+  expect(within(rows[1]).getByText('02')).toBeVisible();
+});
+
 it('keeps the canvas bar focused and never leaves a hidden Bot search active', () => {
   render(<AgentWorkspace {...props()} headerTitle={<span>Current canvas</span>} toolbar={<button type="button">Run</button>}><div /></AgentWorkspace>);
   expect(screen.getByRole('button', { name: 'Run' })).toBeVisible();
