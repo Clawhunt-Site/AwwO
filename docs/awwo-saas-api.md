@@ -157,7 +157,7 @@ SaaS 普通聊天按输入原文提交 prompt，不自动附加旧节点任务�
 
 run 对象包含 `{id,tenantId,sessionId,operationId,status,output,outputAvailable,terminal,error,createdAt,updatedAt}`。运行状态：queued、running、completed、failed、cancelled、interrupted。`terminal` 是状态派生值；`outputAvailable` 仅说明有文本，部分输出不等于成功。服务重启产生 interrupted，不能把它自动归为 completed。
 
-SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、running、text_delta、progress、completed、failed、cancelled、interrupted；文本增量使用 delta 字段。规划 run 不发布 text_delta：方案在通过校验前不公开，流式期间改为约每秒一条（阶段变化、新增节点/连线/模板时立即一条）的 `progress`，只含计数 `{stage:"thinking"|"streaming",characters,nodes,edges,reasoning,template?}`——`characters` 为已写出的方案字符数，`nodes`/`edges` 为已声明的节点与连线数，`reasoning` 为模型思考字符数（从不包含思考内容），`template` 仅在属于固定模板集合时出现。这些都是实测值，不是完成比例。关闭 SSE 不等价于取消，取消必须走 cancel API。重连只补读事件，不重新执行任务。普通 HTTP 接受请求也不等价于运行完成。
+SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、running、text_delta、progress、completed、failed、cancelled、interrupted；文本增量使用 delta 字段。规划 run 不发布 text_delta：方案在通过校验前不公开，流式期间改为约每秒一条（阶段变化、新增节点/连线/模板、正在写的操作或其所属节点变化时立即一条）的 `progress`，只含计数 `{stage:"thinking"|"streaming",characters,nodes,edges,reasoning,template?,operation?,target?}`——`characters` 为已写出的方案字符数，`nodes`/`edges` 为已声明的节点与连线数，`reasoning` 为模型思考字符数（从不包含思考内容），`template` 为最新声明节点的模板 ID，`operation` 为方案正在写的最新操作类型（固定操作集合；只认根对象 `operations` 数组中操作对象自身的 `type`，嵌套对象、字符串里写得像操作的内容都不算），`target` 为该操作所属单个节点的模板 ID（仅对作用于单个节点的操作、且该节点由本次方案声明时才能对应；连线类操作不带 `target`；ref、节点 ID 等模型文本只在进程内用于对应，从不发布）。`template`/`operation`/`target` 仅在属于固定集合时出现。这些都是实测值，不是完成比例。关闭 SSE 不等价于取消，取消必须走 cancel API。重连只补读事件，不重新执行任务。普通 HTTP 接受请求也不等价于运行完成。
 
 ### 成员输入审计
 

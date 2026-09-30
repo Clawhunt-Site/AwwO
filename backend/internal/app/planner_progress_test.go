@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -121,6 +120,179 @@ func TestPlannerProgressCountsOnlyWhatArrived(t *testing.T) {
 	}
 }
 
+// operationPlan has the shape a real model produced for a five-node request: every node
+// first, then an input for each node, then the connections.
+const operationPlan = `{"version":1,"summary":"预约系统","operations":[` +
+	`{"type":"add_node","ref":"data-node","templateId":"data","title":"数据"},` +
+	`{"type":"add_node","ref":"api-node","templateId":"backend","title":"后端"},` +
+	`{"type":"set_input","nodeId":"api-node","fieldId":"brief","value":"会员预约与排课规则"},` +
+	`{"type":"set_input","nodeId":"data-node","fieldId":"brief","value":"课程、教练与预约数据"},` +
+	`{"type":"connect","fromNode":"data-node","fromField":"schema","toNode":"api-node","toField":"schema"}]}`
+
+// inPlan wraps operations in a proposal's root object, where operations live.
+func inPlan(operations string) string {
+	return `{"version":1,"summary":"s","operations":[` + operations + `]}`
+}
+
+// operationAt feeds a proposal up to the end of the first occurrence of marker (or all of it)
+// and reports the operation and target the stream shows at that point.
+func operationAt(text, marker string) (string, string) {
+	var p plannerProgress
+	end := len(text)
+	if marker != "" {
+		end = strings.Index(text, marker) + len(marker)
+	}
+	p.write(text[:end])
+	return p.operation, p.target
+}
+
+func TestPlannerProgressFollowsTheNewestOperation(t *testing.T) {
+	for _, step := range []struct{ upTo, operation, target string }{
+		{`"summary":"预约系统"`, "", ""},
+		{`"type":"add_node","ref":"data-node"`, "add_node", ""},
+		{`"templateId":"data"`, "add_node", "data"},
+		{`"templateId":"backend"`, "add_node", "backend"},
+		{`{"type":"set_input"`, "set_input", ""},
+		{`"nodeId":"api-node"`, "set_input", "backend"},
+		{`"会员预约与排课规则"`, "set_input", "backend"},
+		{`"nodeId":"data-node"`, "set_input", "data"},
+		{`"type":"connect"`, "connect", ""},
+		{"", "connect", ""},
+	} {
+		if operation, target := operationAt(operationPlan, step.upTo); operation != step.operation || target != step.target {
+			t.Fatalf("after %q: operation %q target %q, want %q %q", step.upTo, operation, target, step.operation, step.target)
+		}
+	}
+	// However the deltas are cut, the stream ends on the same decision and the legacy
+	// template still names the newest declared node.
+	for cut := 0; cut <= len(operationPlan); cut++ {
+		if cut < len(operationPlan) && !utf8.RuneStart(operationPlan[cut]) {
+			continue
+		}
+		var q plannerProgress
+		q.write(operationPlan[:cut])
+		q.write(operationPlan[cut:])
+		if q.operation != "connect" || q.target != "" || q.template != "backend" || len(q.refs) != 2 {
+			t.Fatalf("cut %d: operation %q target %q template %q refs %v", cut, q.operation, q.target, q.template, q.refs)
+		}
+	}
+	// One byte at a time, a node's input still names that node while it is written.
+	var bytewise plannerProgress
+	upTo := strings.Index(operationPlan, `"会员预约`)
+	for i := 0; i < upTo; i++ {
+		bytewise.write(operationPlan[i : i+1])
+	}
+	if bytewise.operation != "set_input" || bytewise.target != "backend" {
+		t.Fatalf("byte-wise stream: operation %q target %q", bytewise.operation, bytewise.target)
+	}
+	// Only an element of the root "operations" array is an operation, and only its own "type"
+	// names it: a ref, a field id, a string, or a nested object spelled like an operation —
+	// even one with its own "type" and "nodeId" — is not.
+	for _, raw := range []string{
+		inPlan(`{"type":"add_node","ref":"set_input","templateId":"frontend"}`),
+		inPlan(`{"type":"add_node","ref":"a","templateId":"frontend","inputValues":{"connect":"x"}}`),
+		inPlan(`{"type":"add_node","ref":"a","templateId":"frontend","title":"{\"type\":\"remove_node\"}"}`),
+		inPlan(`{"type":"add_node","ref":"api-node","templateId":"backend"},{"type":"add_node","ref":"form","templateId":"frontend","inputValues":{"type":"set_input","nodeId":"api-node"}}`),
+		inPlan(`{"type":"add_node","ref":"a","templateId":"frontend","inputValues":{"operations":[{"type":"remove_node","nodeId":"a"}]}}`),
+		inPlan(`{"type":"add_node","ref":"a","templateId":"frontend","inputValues":[{"type":"connect"}]}`),
+		`{"type":"set_input","nodeId":"api-node","operations":[{"type":"add_node","ref":"a","templateId":"frontend"}]}`,
+	} {
+		if operation, target := operationAt(raw, ""); operation != "add_node" || target != "frontend" {
+			t.Fatalf("%s read as operation %q target %q", raw, operation, target)
+		}
+	}
+	for raw, want := range map[string]string{
+		inPlan(`{"type":"add_field","nodeId":"a","side":"input","field":{"id":"connect","type":"text"}}`):                               "add_field",
+		inPlan(`{"type":"update_field","nodeId":"a","side":"input","fieldId":"f","changes":{"type":"markdown","label":"remove_node"}}`): "update_field",
+		`{"type":"connect","summary":"x"}`:                  "",
+		`{"type":"add_node","ref":"a","templateId":"data"}`: "",
+	} {
+		if operation, _ := operationAt(raw, ""); operation != want {
+			t.Fatalf("%s read as operation %q, want %q", raw, operation, want)
+		}
+	}
+	// A node already on the canvas, an escaped id and a node declared with a template outside
+	// the set are all unnamed rather than guessed.
+	for _, raw := range []string{
+		inPlan(`{"type":"add_node","ref":"a","templateId":"data"},{"type":"set_input","nodeId":"existing","fieldId":"f","value":"v"}`),
+		inPlan(`{"type":"add_node","ref":"a\"b","templateId":"data"},{"type":"remove_node","nodeId":"a\"b"}`),
+		inPlan(`{"type":"add_node","ref":"a","templateId":"exfiltrate"},{"type":"update_field","nodeId":"a","side":"input","fieldId":"f","changes":{"label":"x"}}`),
+	} {
+		if _, target := operationAt(raw, ""); target != "" {
+			t.Fatalf("%s named target %q", raw, target)
+		}
+	}
+	// The object's own keys name it in whatever order they are written.
+	if operation, target := operationAt(inPlan(`{"type":"add_node","ref":"a","templateId":"data"},{"nodeId":"a","type":"update_node","title":"x"}`), ""); operation != "update_node" || target != "data" {
+		t.Fatalf("keys ahead of type: operation %q target %q", operation, target)
+	}
+	// Every node-level operation names a node this proposal declared; a connection names none.
+	for _, kind := range []string{"update_node", "set_input", "add_field", "update_field", "remove_field", "remove_node"} {
+		raw := inPlan(`{"type":"add_node","ref":"r","templateId":"users"},{"type":"` + kind + `","nodeId":"r"}`)
+		if operation, target := operationAt(raw, ""); operation != kind || target != "users" {
+			t.Fatalf("%s: operation %q target %q", kind, operation, target)
+		}
+	}
+	for _, raw := range []string{
+		inPlan(`{"type":"add_node","ref":"r","templateId":"users"},{"type":"disconnect","edgeId":"e"}`),
+		inPlan(`{"type":"add_node","ref":"r","templateId":"users"},{"type":"connect","fromNode":"r","fromField":"f","toNode":"r","nodeId":"r"}`),
+	} {
+		if operation, target := operationAt(raw, ""); (operation != "disconnect" && operation != "connect") || target != "" {
+			t.Fatalf("%s: operation %q target %q", raw, operation, target)
+		}
+	}
+	// A long input keeps its decision after its operation scrolls out of the window.
+	var long plannerProgress
+	long.write(`{"operations":[{"type":"add_node","ref":"a","templateId":"review"},{"type":"set_input","nodeId":"a","fieldId":"f","value":"`)
+	for i := 0; i < 20; i++ {
+		long.write(strings.Repeat("长", 200))
+	}
+	if long.operation != "set_input" || long.target != "review" {
+		t.Fatalf("a long input lost its decision: %q %q", long.operation, long.target)
+	}
+	// Neither nesting nor an endless identifier can grow what the scanner keeps.
+	var deep plannerProgress
+	deep.write(`{"operations":[` + strings.Repeat(`{"a":[`, 10*plannerScanDepth) + `"` + strings.Repeat("x", 100_000) + `"`)
+	if len(deep.structure.stack) > plannerScanDepth || cap(deep.structure.text) > 2*plannerIdentifierLimit {
+		t.Fatalf("scanner kept %d frames / %d bytes", len(deep.structure.stack), cap(deep.structure.text))
+	}
+	// The refs a stream can make the process remember are bounded by what a valid plan holds.
+	var many plannerProgress
+	var b strings.Builder
+	b.WriteString(`{"operations":[`)
+	for i := 0; i < 3*plannerRefLimit; i++ {
+		fmt.Fprintf(&b, `{"type":"add_node","ref":"n%d","templateId":"data"},`, i)
+	}
+	many.write(b.String())
+	if len(many.refs) != plannerRefLimit {
+		t.Fatalf("remembered %d refs, limit %d", len(many.refs), plannerRefLimit)
+	}
+	many.write(fmt.Sprintf(`{"type":"set_input","nodeId":"n%d"}`, 2*plannerRefLimit))
+	if many.target != "" {
+		t.Fatalf("a ref past the limit was named %q", many.target)
+	}
+	many.write(`{"type":"set_input","nodeId":"n7"}`)
+	if many.target != "data" {
+		t.Fatalf("a remembered ref was not named: %q", many.target)
+	}
+	// An operation change is urgent, so the headline follows within the urgent interval.
+	var p plannerProgress
+	start := time.Unix(1_000, 0)
+	p.write(`{"operations":[{"type":"add_node","ref":"a","templateId":"data"},`)
+	if _, ok := p.due(start); !ok {
+		t.Fatal("the first node was not published")
+	}
+	p.write(`{"type":"set_input","nodeId":"a","fieldId":"f","value":"x"`)
+	frame, ok := p.due(start.Add(plannerProgressUrgentInterval))
+	if !ok || frame.Operation != "set_input" || frame.Target != "data" || frame.Nodes != 1 {
+		t.Fatalf("the new operation waited for the interval: %+v %v", frame, ok)
+	}
+	encoded, _ := json.Marshal(frame)
+	if !strings.Contains(string(encoded), `"operation":"set_input","target":"data"`) {
+		t.Fatalf("frame JSON: %s", encoded)
+	}
+}
+
 func TestPlannerProgressCoalescesButNeverHidesAStageOrANode(t *testing.T) {
 	var p plannerProgress
 	start := time.Unix(1_000, 0)
@@ -204,11 +376,19 @@ func TestRunArchiveProjectsPlannerProgressCountsOnly(t *testing.T) {
 		*event.Edges != 0 || *event.Reasoning != 0 || event.Template != "data" || event.Text != "" {
 		t.Fatalf("progress not projected as counts: %+v", event)
 	}
+	event = projectRunArchiveEvent(3, time.Now(), []byte(`{"type":"progress","stage":"streaming","characters":40,"nodes":2,"edges":0,"reasoning":0,"template":"backend","operation":"set_input","target":"data"}`))
+	if event.PayloadOmitted || event.Operation != "set_input" || event.Target != "data" || event.Template != "backend" {
+		t.Fatalf("operation and target not projected: %+v", event)
+	}
 	for _, raw := range []string{
 		`{"type":"progress","stage":"done","characters":1,"nodes":0,"edges":0,"reasoning":0}`,
 		`{"type":"progress","stage":"streaming","characters":-1,"nodes":0,"edges":0,"reasoning":0}`,
 		`{"type":"progress","stage":"thinking","nodes":0,"edges":0,"reasoning":0}`,
 		`{"type":"progress","stage":"streaming","characters":1,"nodes":0,"edges":0,"reasoning":0,"template":"free text"}`,
+		`{"type":"progress","stage":"streaming","characters":1,"nodes":0,"edges":0,"reasoning":0,"operation":"exec"}`,
+		`{"type":"progress","stage":"streaming","characters":1,"nodes":0,"edges":0,"reasoning":0,"operation":"set_input","target":"api-node"}`,
+		`{"type":"progress","stage":"streaming","characters":1,"nodes":0,"edges":0,"reasoning":0,"target":"data"}`,
+		`{"type":"progress","stage":"streaming","characters":1,"nodes":0,"edges":0,"reasoning":0,"operation":"connect","target":"data"}`,
 	} {
 		if got := projectRunArchiveEvent(4, time.Now(), []byte(raw)); got.Type != "unsupported" || !got.PayloadOmitted || got.Characters != nil {
 			t.Fatalf("malformed progress row was projected: %s -> %+v", raw, got)
@@ -217,7 +397,7 @@ func TestRunArchiveProjectsPlannerProgressCountsOnly(t *testing.T) {
 	// Every other event type serializes exactly as before: no count keys appear.
 	for _, raw := range []string{`{"type":"text_delta","delta":"a"}`, `{"type":"completed","text":"b"}`, `{"type":"queued"}`} {
 		encoded, _ := json.Marshal(projectRunArchiveEvent(5, time.Unix(0, 0).UTC(), []byte(raw)))
-		for _, key := range []string{"stage", "characters", "nodes", "edges", "reasoning", "template"} {
+		for _, key := range []string{"stage", "characters", "nodes", "edges", "reasoning", "template", "operation", "target"} {
 			if strings.Contains(string(encoded), `"`+key+`"`) {
 				t.Fatalf("%s gained %q: %s", raw, key, encoded)
 			}
@@ -299,6 +479,18 @@ func progressRows(events []storedEvent) []storedEvent {
 	return out
 }
 
+// cutAfter cuts a proposal into deltas that each end just after the next of the given markers.
+func cutAfter(text string, markers ...string) []map[string]any {
+	var out []map[string]any
+	start := 0
+	for _, marker := range markers {
+		end := start + strings.Index(text[start:], marker) + len(marker)
+		out = append(out, map[string]any{"type": "text_delta", "delta": text[start:end]})
+		start = end
+	}
+	return append(out, map[string]any{"type": "text_delta", "delta": text[start:]})
+}
+
 // planChunks cuts on rune boundaries, as a worker's decoded JSON deltas always are.
 func planChunks(plan string, size int) []map[string]any {
 	var out []map[string]any
@@ -352,22 +544,7 @@ func TestPostgresPlannerPublishesProgressButNeverTheProposal(t *testing.T) {
 	stages := []string{}
 	lastCharacters, lastNodes := -1.0, -1.0
 	for _, row := range progress {
-		keys := make([]string, 0, len(row.data))
-		for key := range row.data {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		if joined := strings.Join(keys, ","); joined != "characters,edges,nodes,reasoning,stage,type" && joined != "characters,edges,nodes,reasoning,stage,template,type" {
-			t.Fatalf("progress row carries more than counts: %s", row.raw)
-		}
-		if template, present := row.data["template"]; present && !slices.Contains(planTemplateIDs, template.(string)) {
-			t.Fatalf("progress row carries a template outside the set: %s", row.raw)
-		}
-		for _, fragment := range []string{"数据与后端", "templateId", "add_node", "schema", "fromField"} {
-			if strings.Contains(row.raw, fragment) {
-				t.Fatalf("progress row leaked %q: %s", fragment, row.raw)
-			}
-		}
+		assertCountOnlyProgress(t, row, "数据与后端", "templateId", `"api"`, `"ref"`, "schema", "fromField")
 		if row.id > completedAt {
 			t.Fatalf("progress was written after the terminal event: %s", row.raw)
 		}
@@ -404,6 +581,66 @@ func TestPostgresPlannerPublishesProgressButNeverTheProposal(t *testing.T) {
 	}
 	if replayed != len(progress) {
 		t.Fatalf("replay carried %d of %d progress frames: %s", replayed, len(progress), replay)
+	}
+}
+
+// assertCountOnlyProgress fails a progress row that carries anything but its counts and the
+// closed-set values progress may name, or that contains any of the given proposal fragments.
+func assertCountOnlyProgress(t *testing.T, row storedEvent, fragments ...string) {
+	t.Helper()
+	for _, key := range []string{"type", "stage", "characters", "nodes", "edges", "reasoning"} {
+		if _, present := row.data[key]; !present {
+			t.Fatalf("progress row lacks %q: %s", key, row.raw)
+		}
+	}
+	for key, value := range row.data {
+		switch key {
+		case "type", "stage", "characters", "nodes", "edges", "reasoning":
+		case "template", "target":
+			if !slices.Contains(planTemplateIDs, value.(string)) {
+				t.Fatalf("progress row names %s outside the template set: %s", key, row.raw)
+			}
+		case "operation":
+			if !slices.Contains(planOperationTypes, value.(string)) {
+				t.Fatalf("progress row names an operation outside the set: %s", row.raw)
+			}
+		default:
+			t.Fatalf("progress row carries more than counts: %s", row.raw)
+		}
+	}
+	for _, fragment := range fragments {
+		if strings.Contains(row.raw, fragment) {
+			t.Fatalf("progress row leaked %q: %s", fragment, row.raw)
+		}
+	}
+}
+
+// The headline a reader sees follows the operation the model is writing, and names the node
+// it concerns: through the node declarations, then each node's input, then the connections.
+func TestPostgresPlannerProgressNamesTheOperationAndItsNode(t *testing.T) {
+	var activity atomic.Value
+	pi := plannerWorker(t, &activity, func(string) []map[string]any {
+		// Each delta ends where the next step is decided, so each step is its own row.
+		deltas := cutAfter(operationPlan, `"templateId":"data"`, `"templateId":"backend"`, `"nodeId":"api-node"`, `"nodeId":"data-node"`, `"type":"connect"`)
+		return append(deltas, map[string]any{"type": "completed", "text": operationPlan})
+	}, pacedGap)
+	defer pi.Close()
+	h := newHarness(t, pi.URL)
+	c, tid, _ := h.register(t, "planner-operations@awwo.invalid")
+	id := startPlan(t, h, c, tid, "planner-operations")
+	h.awaitRun(t, c, tid, id, "completed")
+	var seen []string
+	for _, row := range progressRows(runEvents(t, h, tid, id)) {
+		assertCountOnlyProgress(t, row, "预约系统", "data-node", "api-node", "brief", "会员", "schema", "templateId", "nodeId")
+		operation, _ := row.data["operation"].(string)
+		target, _ := row.data["target"].(string)
+		if step := operation + ":" + target; operation != "" && (len(seen) == 0 || seen[len(seen)-1] != step) {
+			seen = append(seen, step)
+		}
+	}
+	want := []string{"add_node:data", "add_node:backend", "set_input:backend", "set_input:data", "connect:"}
+	if strings.Join(seen, " ") != strings.Join(want, " ") {
+		t.Fatalf("operation steps %v, want %v", seen, want)
 	}
 }
 

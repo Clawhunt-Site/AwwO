@@ -19,12 +19,14 @@ import (
 //
 // plannerProgress reports what such a run is measurably doing instead — how much of
 // the proposal has arrived, how many nodes and connections it has declared, which
-// template the latest node uses, how much the model has reasoned — and never a byte of
-// what it wrote. The template is the one value taken from the stream, and only as a
-// member of the closed template set the plan gate itself accepts, so no free text the
-// model produced can cross. Every number is observed, never estimated: the proposal's
-// final length is unknown until it ends, so nothing here is, or can be turned into, a
-// completion ratio.
+// template the latest node uses, which kind of operation the model is writing now and
+// which node that operation concerns, how much the model has reasoned — and never a
+// byte of what it wrote. Templates and operation kinds are the only values taken from
+// the stream, and only as members of the closed sets the plan gate itself accepts, so
+// no free text the model produced can cross; the refs and node IDs used to tell which
+// node an operation concerns stay in this process. Every number is observed, never
+// estimated: the proposal's final length is unknown until it ends, so nothing here
+// is, or can be turned into, a completion ratio.
 
 const (
 	// Progress rows are coalesced to at most one per interval. A stage change or a
@@ -46,6 +48,15 @@ const (
 	// while its marker is still inside this window, so it bounds both the scan and how far
 	// apart a model may write the two; a template written further away is simply not shown.
 	plannerTemplateTail = 2048
+	// The refs a proposal declares are what lets a later operation on one of its nodes be
+	// named. The plan gate admits no more operations than this, so no valid proposal can
+	// declare more refs, and a stream that tries cannot grow the map beyond it.
+	plannerRefLimit = 100
+	// How deep the proposal's structure is followed, and how long an identifier may be (the
+	// plan gate's own limit). A valid plan nests a handful of levels; deeper nesting is only
+	// counted, and longer strings name nothing, so a hostile stream cannot grow this state.
+	plannerScanDepth       = 64
+	plannerIdentifierLimit = 128
 	// A worker that opts in reports provider reasoning as a count. Sent only on a
 	// planner admission: every other run keeps sending exactly the request it sent
 	// before, and a worker that does not know the header simply ignores it.
@@ -57,6 +68,14 @@ const (
 // validates against it, and progress reports a template only when it is one of these.
 var planTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review"}
 
+// planOperationTypes is the closed set of operations a proposal may contain; the plan gate
+// rejects any other, and progress names the newest one only as a member of this set.
+var planOperationTypes = []string{"add_node", "update_node", "set_input", "add_field", "update_field", "remove_field", "remove_node", "connect", "disconnect"}
+
+// planNodeOperationTypes are the operations that concern one node, so progress may name that
+// node's template beside them; a connection concerns two, and naming one would misstate it.
+var planNodeOperationTypes = []string{"add_node", "update_node", "set_input", "add_field", "update_field", "remove_field", "remove_node"}
+
 var plannerTemplatePattern = regexp.MustCompile(`^"templateId"\s{0,8}:\s{0,8}"([a-z]{1,16})"`)
 
 type plannerProgressFrame struct {
@@ -67,6 +86,10 @@ type plannerProgressFrame struct {
 	Edges      int    `json:"edges"`
 	Reasoning  int    `json:"reasoning"`
 	Template   string `json:"template,omitempty"`
+	// The newest operation the proposal has begun, and the template of the node it concerns
+	// when that node was declared by this same proposal.
+	Operation string `json:"operation,omitempty"`
+	Target    string `json:"target,omitempty"`
 }
 
 // markerCount counts one marker across a stream without rescanning it. Only the new
@@ -98,6 +121,14 @@ type plannerProgress struct {
 	// The template window is rescanned whole each time; re-finding a pair already
 	// seen only confirms the same latest value, so overlap needs no bookkeeping.
 	templateTail string
+	// The proposal's structure, followed so that the newest operation and the node it
+	// concerns are read only from an operation object's own keys.
+	structure planScanner
+	operation string
+	target    string
+	// ref → template for the nodes this proposal declared. It is how a later operation
+	// names its node, and it is never published: refs are text the model chose.
+	refs map[string]string
 	// Reasoning arrives two ways: spans the stream filter withheld from the
 	// proposal, and counts a worker reported for reasoning its provider streamed
 	// in a separate field. They are kept apart because the worker's figure is
@@ -132,6 +163,8 @@ func (p *plannerProgress) write(visible string) {
 		window = window[len(window)-plannerTemplateTail:]
 	}
 	p.templateTail = window
+	p.structure.scan(visible, p.learn)
+	p.follow()
 }
 
 // newestNodeTemplate reads the template of the newest declared node from a window of the
@@ -188,6 +221,196 @@ func newestNodeTemplate(window string) (string, bool) {
 	return template, true
 }
 
+// learn remembers the template of a node this proposal declared once its operation is
+// complete, so that a later operation on that node can name it.
+func (p *plannerProgress) learn(op *planOp) {
+	if op.kind != "add_node" || op.ref == "" || !slices.Contains(planTemplateIDs, op.templateID) {
+		return
+	}
+	if _, known := p.refs[op.ref]; !known && len(p.refs) >= plannerRefLimit {
+		return
+	}
+	if p.refs == nil {
+		p.refs = map[string]string{}
+	}
+	p.refs[op.ref] = op.templateID
+}
+
+// follow takes the operation and its node from the newest operation object once that object's
+// kind is written; until then the previous decision stands. An operation on a node this
+// proposal did not declare (one already on the canvas) names none.
+func (p *plannerProgress) follow() {
+	op := p.structure.newest
+	if op == nil || !slices.Contains(planOperationTypes, op.kind) {
+		return
+	}
+	p.operation, p.target = op.kind, ""
+	switch {
+	case op.kind == "add_node":
+		if slices.Contains(planTemplateIDs, op.templateID) {
+			p.target = op.templateID
+		}
+	case slices.Contains(planNodeOperationTypes, op.kind) && op.nodeID != "":
+		p.target = p.refs[op.nodeID]
+	}
+}
+
+// planOp is what progress reads of one operation: its own direct keys, as plain strings.
+type planOp struct{ kind, ref, templateID, nodeID string }
+
+// planFrame is one open object or array of the proposal.
+type planFrame struct {
+	object     bool
+	expectKey  bool    // object: the next string is a key
+	key        string  // object: the key whose value comes next, for the objects whose keys matter
+	operations bool    // array: the root object's "operations" array
+	op         *planOp // object: an operation, a direct element of that array
+}
+
+// planScanner follows the proposal's JSON structure across deltas, reading every byte once, so
+// an operation is recognised only as a direct element of the root object's "operations" array
+// and its identifiers only as that object's own keys — never a key inside a nested value such
+// as inputValues, inside a string, or text spelled like one. The structural bytes are ASCII,
+// which never occurs inside a multi-byte rune, so the scan is exact however the deltas were
+// cut. Text outside the root object, such as a code fence, holds no structure and is passed over.
+type planScanner struct {
+	stack    []planFrame
+	overflow int // nesting beyond plannerScanDepth, counted rather than followed
+	inString bool
+	escaped  bool
+	keep     bool // the string being read is a key or value that matters
+	bad      bool // the kept string had an escape or outgrew an identifier, so it names nothing
+	text     []byte
+	newest   *planOp
+}
+
+func (s *planScanner) top() *planFrame {
+	if s.overflow > 0 || len(s.stack) == 0 {
+		return nil
+	}
+	return &s.stack[len(s.stack)-1]
+}
+
+// scan reads one delta; closed is told about each operation object as it closes.
+func (s *planScanner) scan(chunk string, closed func(*planOp)) {
+	for i := 0; i < len(chunk); i++ {
+		c := chunk[i]
+		if s.inString {
+			switch {
+			case s.escaped:
+				s.escaped = false
+			case c == '\\':
+				s.escaped, s.bad = true, true
+			case c == '"':
+				s.inString = false
+				s.endString()
+			case s.keep && !s.bad:
+				if len(s.text) == plannerIdentifierLimit {
+					s.bad = true
+				} else {
+					s.text = append(s.text, c)
+				}
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			s.inString, s.escaped, s.bad, s.text = true, false, false, s.text[:0]
+			s.keep = s.keeps()
+		case '{', '[':
+			s.open(c == '{')
+		case '}', ']':
+			s.close(closed)
+		case ':':
+			if top := s.top(); top != nil && top.object {
+				top.expectKey = false
+			}
+		case ',':
+			if top := s.top(); top != nil && top.object {
+				top.expectKey, top.key = true, ""
+			}
+		}
+	}
+}
+
+// keeps reports whether the string about to be read matters: a key of the root object or of
+// an operation, or the value of an operation's own type, ref, templateId or nodeId.
+func (s *planScanner) keeps() bool {
+	top := s.top()
+	if top == nil || !top.object {
+		return false
+	}
+	if top.expectKey {
+		return len(s.stack) == 1 || top.op != nil
+	}
+	if top.op == nil {
+		return false
+	}
+	switch top.key {
+	case "type", "ref", "templateId", "nodeId":
+		return true
+	}
+	return false
+}
+
+func (s *planScanner) endString() {
+	top := s.top()
+	if !s.keep || top == nil {
+		return
+	}
+	value := ""
+	if !s.bad {
+		value = string(s.text)
+	}
+	if top.expectKey {
+		top.key = value // a key that is not an identifier matches nothing, so its value is not read
+		return
+	}
+	switch top.key {
+	case "type":
+		top.op.kind = value
+	case "ref":
+		top.op.ref = value
+	case "templateId":
+		top.op.templateID = value
+	case "nodeId":
+		top.op.nodeID = value
+	}
+}
+
+func (s *planScanner) open(object bool) {
+	if s.overflow > 0 || len(s.stack) == plannerScanDepth {
+		s.overflow++
+		return
+	}
+	frame := planFrame{object: object, expectKey: object}
+	if parent := s.top(); parent != nil {
+		switch {
+		case object && !parent.object && parent.operations:
+			frame.op = &planOp{}
+			s.newest = frame.op
+		case !object && parent.object && len(s.stack) == 1 && !parent.expectKey && parent.key == "operations":
+			frame.operations = true
+		}
+	}
+	s.stack = append(s.stack, frame)
+}
+
+func (s *planScanner) close(closed func(*planOp)) {
+	if s.overflow > 0 {
+		s.overflow--
+		return
+	}
+	if len(s.stack) == 0 {
+		return
+	}
+	frame := s.stack[len(s.stack)-1]
+	s.stack = s.stack[:len(s.stack)-1]
+	if frame.op != nil && closed != nil {
+		closed(frame.op)
+	}
+}
+
 // reasonInline records runes the stream filter withheld as a leading reasoning span.
 func (p *plannerProgress) reasonInline(runes int) {
 	if runes > 0 {
@@ -217,7 +440,7 @@ func (p *plannerProgress) frame() plannerProgressFrame {
 		stage = "thinking"
 	}
 	return plannerProgressFrame{Type: "progress", Stage: stage, Characters: p.characters, Nodes: p.nodes.total, Edges: p.edges.total,
-		Reasoning: p.inlineReasoning + p.workerReasoning, Template: p.template}
+		Reasoning: p.inlineReasoning + p.workerReasoning, Template: p.template, Operation: p.operation, Target: p.target}
 }
 
 // due returns the frame to publish now, if any. Nothing is published before the run
@@ -227,8 +450,9 @@ func (p *plannerProgress) due(now time.Time) (plannerProgressFrame, bool) {
 	if next.Stage == "" || next == p.last {
 		return next, false
 	}
-	// A new stage, node, connection or template is what a reader waits for.
-	urgent := next.Stage != p.last.Stage || next.Nodes != p.last.Nodes || next.Edges != p.last.Edges || next.Template != p.last.Template
+	// A new stage, node, connection, template or operation is what a reader waits for.
+	urgent := next.Stage != p.last.Stage || next.Nodes != p.last.Nodes || next.Edges != p.last.Edges || next.Template != p.last.Template ||
+		next.Operation != p.last.Operation || next.Target != p.last.Target
 	wait := plannerProgressInterval
 	if urgent {
 		wait = plannerProgressUrgentInterval

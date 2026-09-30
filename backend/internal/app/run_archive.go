@@ -120,13 +120,15 @@ type runArchiveEvent struct {
 	Edges      *int   `json:"edges,omitempty"`
 	Reasoning  *int   `json:"reasoning,omitempty"`
 	Template   string `json:"template,omitempty"`
+	Operation  string `json:"operation,omitempty"`
+	Target     string `json:"target,omitempty"`
 }
 
 func projectRunArchiveEvent(id int64, at time.Time, raw []byte) runArchiveEvent {
 	event := runArchiveEvent{ID: id, CreatedAt: at, Type: "unsupported", PayloadOmitted: true}
 	var wire struct {
-		Type, Delta, Text, Code, Stage, Template string
-		Characters, Nodes, Edges, Reasoning      *int
+		Type, Delta, Text, Code, Stage, Template, Operation, Target string
+		Characters, Nodes, Edges, Reasoning                         *int
 	}
 	if json.Unmarshal(raw, &wire) != nil {
 		return event
@@ -141,13 +143,16 @@ func projectRunArchiveEvent(id int64, at time.Time, raw []byte) runArchiveEvent 
 	case "failed":
 		event.Type, event.Code, event.PayloadOmitted = wire.Type, wire.Code, false
 	case "progress":
-		// Only the two stages Go writes and non-negative counts are projected; a row
-		// that is anything else stays an opaque, omitted payload like any unknown type.
+		// Only the two stages Go writes, non-negative counts and members of the closed template
+		// and operation sets are projected, and a target only beside an operation on one node;
+		// a row that is anything else stays an opaque, omitted payload like any unknown type.
 		if (wire.Stage == "thinking" || wire.Stage == "streaming") && validCount(wire.Characters) && validCount(wire.Nodes) &&
-			validCount(wire.Edges) && validCount(wire.Reasoning) && (wire.Template == "" || slices.Contains(planTemplateIDs, wire.Template)) {
+			validCount(wire.Edges) && validCount(wire.Reasoning) && (wire.Template == "" || slices.Contains(planTemplateIDs, wire.Template)) &&
+			(wire.Operation == "" || slices.Contains(planOperationTypes, wire.Operation)) &&
+			(wire.Target == "" || (slices.Contains(planNodeOperationTypes, wire.Operation) && slices.Contains(planTemplateIDs, wire.Target))) {
 			event.Type, event.Stage, event.PayloadOmitted = wire.Type, wire.Stage, false
 			event.Characters, event.Nodes, event.Edges, event.Reasoning = wire.Characters, wire.Nodes, wire.Edges, wire.Reasoning
-			event.Template = wire.Template
+			event.Template, event.Operation, event.Target = wire.Template, wire.Operation, wire.Target
 		}
 	}
 	// Arbitrary metadata, headers, credentials and worker request objects never
