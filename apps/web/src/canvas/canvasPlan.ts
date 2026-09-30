@@ -22,6 +22,18 @@ export type CanvasPlanOperation =
   | { type: 'set_execution'; mode: 'review'; maxRounds: number; reviewerNodeId: string; verdictFieldId: string }
   | { type: 'disconnect'; edgeId: string };
 
+export type CanvasPlanOperationType = CanvasPlanOperation['type'];
+const OPERATION_TYPES = ['add_node', 'update_node', 'set_input', 'add_field', 'update_field', 'remove_field', 'remove_node',
+  'connect', 'set_edge_kind', 'set_execution', 'disconnect'] as const satisfies ReadonlyArray<CanvasPlanOperationType>;
+// An operation type added to CanvasPlanOperation but not listed above fails to compile here.
+const everyOperationListed: [Exclude<CanvasPlanOperationType, typeof OPERATION_TYPES[number]>] extends [never] ? true : never = true;
+void everyOperationListed;
+/** Every operation type a plan may contain: the closed set planning progress may name. */
+export const CANVAS_PLAN_OPERATION_TYPES: ReadonlySet<string> = new Set(OPERATION_TYPES);
+/** The operation types that concern one node, beside which progress may name that node's template. */
+export const CANVAS_PLAN_NODE_OPERATION_TYPES: ReadonlySet<string> = new Set(['add_node', 'update_node', 'set_input', 'add_field',
+  'update_field', 'remove_field', 'remove_node'] satisfies CanvasPlanOperationType[]);
+
 export interface CanvasPlan { version: 1; summary: string; operations: CanvasPlanOperation[] }
 export interface AppliedCanvasPlan { doc: CanvasDocument; addedNodeIds: string[]; summary: string }
 

@@ -50,7 +50,9 @@ const HINT_AFTER: Partial<Record<PlanProgress['stage'], { seconds: number; key: 
   running: { seconds: 15, key: 'assistant.hintRunning' },
   thinking: { seconds: 20, key: 'assistant.hintThinking' },
 };
-const LONG_WAIT_SECONDS = 90;
+// A run that keeps reporting is progressing however long it takes; only a run that has reported
+// nothing new for this long is told the wait may not end on its own.
+const STALLED_AFTER_SECONDS = 30;
 // Before the host reports anything, the request is only known to be in flight.
 const AWAITING_AFTER_SECONDS = 4;
 
@@ -65,7 +67,8 @@ function formatCount(locale: UiLocale, value: number): string {
 }
 
 /** What the run is doing, in one line: the stage, and within writing, which part of the plan. */
-function headline(t: CanvasTranslate, progress: PlanProgress | undefined, template: string | undefined, waitedSeconds: number): string {
+function headline(t: CanvasTranslate, progress: PlanProgress | undefined, template: string | undefined, target: string | undefined,
+  waitedSeconds: number): string {
   if (!progress) return t(waitedSeconds >= AWAITING_AFTER_SECONDS ? 'assistant.statusAwaiting' : 'assistant.statusSubmitting');
   switch (progress.stage) {
     case 'queued': return t('assistant.statusQueued');
@@ -73,15 +76,37 @@ function headline(t: CanvasTranslate, progress: PlanProgress | undefined, templa
     case 'running': return t('assistant.statusRunning');
     case 'thinking': return t('assistant.statusThinking');
     case 'validating': return t('assistant.statusValidating');
-    case 'streaming':
+    case 'streaming': return writingHeadline(t, progress, template, target);
+  }
+}
+
+/** Within writing: the operation the plan is on, and the node it concerns when the host could name
+ * it. A host that reports no operation leaves the order plans are written in: nodes, then connections. */
+function writingHeadline(t: CanvasTranslate, progress: PlanProgress, template: string | undefined, target: string | undefined): string {
+  const node = () => template ? t('assistant.statusPlanningNodeAs', { count: progress.nodes, template })
+    : t('assistant.statusPlanningNode', { count: progress.nodes });
+  const about = (plain: CanvasTextKey, named: CanvasTextKey) => target ? t(named, { template: target }) : t(plain);
+  switch (progress.operation) {
+    case 'add_node': return progress.nodes > 0 ? node() : t('assistant.statusWriting');
+    case 'set_input': return about('assistant.statusFillingInputs', 'assistant.statusFillingInputsAs');
+    case 'update_node': return about('assistant.statusUpdatingNode', 'assistant.statusUpdatingNodeAs');
+    case 'add_field': case 'update_field': case 'remove_field': return about('assistant.statusEditingFields', 'assistant.statusEditingFieldsAs');
+    case 'remove_node': return about('assistant.statusRemovingNode', 'assistant.statusRemovingNodeAs');
+    case 'connect': return t('assistant.statusConnecting');
+    case 'disconnect': case 'set_edge_kind': return t('assistant.statusRewiring');
+    case 'set_execution': return t('assistant.statusSettingExecution');
+    case undefined:
       // Connections are declared after the nodes they join, so they are the later part of a plan.
       if (progress.edges > 0) return t('assistant.statusConnecting');
-      if (progress.nodes > 0) {
-        return template ? t('assistant.statusPlanningNodeAs', { count: progress.nodes, template })
-          : t('assistant.statusPlanningNode', { count: progress.nodes });
-      }
-      return t('assistant.statusWriting');
+      return progress.nodes > 0 ? node() : t('assistant.statusWriting');
   }
+}
+
+/** Everything the run has reported, so a change in any of it counts as progress. */
+function progressSignature(progress: PlanProgress | undefined): string {
+  if (!progress) return 'awaiting';
+  const { stage, characters, reasoning, nodes, edges, template, operation, target, attempt } = progress;
+  return [stage, characters, reasoning, nodes, edges, template ?? '', operation ?? '', target ?? '', attempt].join('|');
 }
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
@@ -118,6 +143,10 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const stage = busy ? progress?.stage : undefined;
   const stageStartedAt = useMemo(() => Date.now(), [stage, busy]);
   const stageSeconds = busy ? Math.max(0, Math.floor((Date.now() - stageStartedAt) / 1000)) : 0;
+  // How long since the run last reported anything new, taken the same way.
+  const signature = busy ? progressSignature(progress) : 'idle';
+  const changedAt = useMemo(() => Date.now(), [signature]);
+  const quietSeconds = busy ? Math.max(0, Math.floor((Date.now() - changedAt) / 1000)) : 0;
 
   const send = () => { if (canSend) onSend(); };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -131,7 +160,9 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   let status: ReactNode = null;
   if (busy) {
     const step = stepOf(progress?.stage);
-    const template = progress?.template ? getAgentTemplates(locale).find(item => item.id === progress.template)?.title : undefined;
+    const titleOf = (id: string | undefined) => id ? getAgentTemplates(locale).find(item => item.id === id)?.title : undefined;
+    const template = titleOf(progress?.template);
+    const target = titleOf(progress?.target);
     const facts = [formatDuration(t, elapsedSeconds)];
     if (progress?.stage === 'thinking' && progress.reasoning > 0) facts.push(t('assistant.factReasoning', { count: formatCount(locale, progress.reasoning) }));
     if (progress && progress.nodes > 0) facts.push(t('assistant.factNodes', { count: progress.nodes }));
@@ -139,12 +170,14 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
     if (progress && progress.characters > 0) facts.push(t('assistant.factCharacters', { count: formatCount(locale, progress.characters) }));
     if (progress && progress.attempt > 1) facts.push(t('assistant.factAttempt', { count: progress.attempt }));
     if (expectedSeconds) facts.push(t('assistant.factExpected', { duration: formatDuration(t, expectedSeconds) }));
-    const hint = elapsedSeconds >= LONG_WAIT_SECONDS && progress?.stage !== 'validating' ? t('assistant.hintLong')
+    // A queue wait is not a stall (its own hint explains it), and a plan being checked is moments from done.
+    const stalled = quietSeconds >= STALLED_AFTER_SECONDS && progress?.stage !== 'queued' && progress?.stage !== 'validating';
+    const hint = stalled ? t('assistant.hintStalled', { duration: formatDuration(t, quietSeconds) })
       : (() => { const rule = progress ? HINT_AFTER[progress.stage] : undefined; return rule && stageSeconds >= rule.seconds ? t(rule.key) : ''; })();
     status = <div className="awwo-assistant-status" role="status" aria-label={t('assistant.progressDetail')}>
       <p className="awwo-assistant-status-headline">
         <Loader2 size={14} aria-hidden="true" />
-        <span>{headline(t, progress, template, elapsedSeconds)}</span>
+        <span>{headline(t, progress, template, target, elapsedSeconds)}</span>
       </p>
       {/* The clock ticks every second; it is left to the headline and step to be announced. */}
       <p className="awwo-assistant-status-meta" aria-hidden="true">

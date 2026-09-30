@@ -181,11 +181,69 @@ describe('canvas assistant UI', () => {
       expect(status()).not.toHaveTextContent('思考结束后');
       act(() => { vi.advanceTimersByTime(21_000); });
       expect(status()).toHaveTextContent('思考结束后会立即开始写出方案');
-      // Past a long total wait the line says so plainly and offers what can be done.
-      act(() => { vi.advanceTimersByTime(60_000); });
-      expect(status()).toHaveTextContent('耗时较长，可继续等待，或取消后把需求拆小');
-      expect(status()).toHaveTextContent('1 分 37 秒');
+      // Only a run that has reported nothing new for a while is told the wait may not end on its
+      // own, and the line says for how long.
+      act(() => { vi.advanceTimersByTime(8_000); });
+      expect(status()).not.toHaveTextContent('没有新进展');
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(status()).toHaveTextContent('已 30 秒没有新进展，可继续等待，或取消后把需求拆小');
+      // Any new report is progress: the stall hint goes, and the stage's own hint returns.
+      rerender(<Harness draft="做一个看板" busy progress={progress({ stage: 'thinking', reasoning: 40 })} />);
+      expect(status()).not.toHaveTextContent('没有新进展');
+      expect(status()).toHaveTextContent('思考结束后会立即开始写出方案');
     } finally { vi.useRealTimers(); }
+  });
+
+  it('never calls a run that keeps reporting, or a queue wait, a stall', () => {
+    vi.useFakeTimers();
+    try {
+      // A plan that takes minutes but reports every second is progressing the whole time.
+      const { rerender } = render(<Harness draft="做一个看板" busy progress={progress({ stage: 'streaming', characters: 1 })} />);
+      const status = () => screen.getByRole('status');
+      for (let second = 2; second <= 150; second++) {
+        act(() => { vi.advanceTimersByTime(1_000); });
+        rerender(<Harness draft="做一个看板" busy progress={progress({ stage: 'streaming', characters: second * 30, nodes: 5 })} />);
+        expect(status()).not.toHaveTextContent('没有新进展');
+      }
+      expect(status()).toHaveTextContent('2 分 29 秒');
+      expect(status()).not.toHaveTextContent('耗时较长');
+      // Waiting for a runtime slot has its own explanation however long it lasts.
+      rerender(<Harness draft="做一个看板" busy progress={progress({ stage: 'queued' })} />);
+      act(() => { vi.advanceTimersByTime(90_000); });
+      expect(status()).toHaveTextContent('正在等待空闲的执行资源');
+      expect(status()).not.toHaveTextContent('没有新进展');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('names the operation the plan is writing and the node it concerns', () => {
+    const writing = (value: Partial<PlanProgress>) => progress({ stage: 'streaming', characters: 900, nodes: 5, template: 'review', ...value });
+    const { rerender } = render(<Harness draft="做一个看板" busy progress={writing({ operation: 'add_node', nodes: 2, template: 'data', target: 'data' })} />);
+    const status = () => screen.getByRole('status');
+    expect(status()).toHaveTextContent('正在规划第 2 个节点：数据治理');
+    // After the last node the model writes each node's input: the line follows it node by node
+    // instead of staying on the last node it declared.
+    rerender(<Harness draft="做一个看板" busy progress={writing({ operation: 'set_input', target: 'backend' })} />);
+    expect(status()).toHaveTextContent('正在填写节点需求：后端服务');
+    expect(status()).not.toHaveTextContent('正在规划第 5 个节点');
+    expect(status()).toHaveTextContent('5 个节点');
+    rerender(<Harness draft="做一个看板" busy progress={writing({ operation: 'set_input' })} />);
+    expect(status()).toHaveTextContent('正在填写节点需求');
+    expect(status()).not.toHaveTextContent('交付验收');
+    for (const [operation, target, text] of [
+      ['update_node', 'users', '正在调整节点：用户系统'], ['add_field', 'frontend', '正在调整节点字段：前端开发'],
+      ['update_field', undefined, '正在调整节点字段'], ['remove_field', 'data', '正在调整节点字段：数据治理'],
+      ['remove_node', undefined, '正在移除节点'], ['remove_node', 'materials', '正在移除节点：物料制作'],
+      ['connect', undefined, '正在连接节点'], ['disconnect', undefined, '正在调整连线'],
+      ['set_edge_kind', undefined, '正在调整连线'], ['set_execution', undefined, '正在设置执行方式'],
+    ] as const) {
+      rerender(<Harness draft="做一个看板" busy progress={writing({ operation, ...(target ? { target } : {}) })} />);
+      expect(status()).toHaveTextContent(text);
+    }
+    // A host that reports no operation still gets the node-then-connection reading.
+    rerender(<Harness draft="做一个看板" busy progress={writing({ nodes: 3, template: 'backend' })} />);
+    expect(status()).toHaveTextContent('正在规划第 3 个节点：后端服务');
+    rerender(<Harness draft="做一个看板" busy progress={writing({ edges: 2 })} />);
+    expect(status()).toHaveTextContent('正在连接节点');
   });
 
   it('shows the last measured duration as an expectation', () => {
@@ -202,6 +260,10 @@ describe('canvas assistant UI', () => {
     expect(status).toHaveTextContent('1.5K characters');
     expect(status).toHaveTextContent('last took 45s');
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', 'Step 3 of 4: Write');
+    cleanup();
+    render(<LocaleProvider locale="en"><Harness draft="Build a dashboard" busy
+      progress={progress({ stage: 'streaming', nodes: 5, characters: 2400, operation: 'set_input', target: 'backend' })} /></LocaleProvider>);
+    expect(screen.getByRole('status')).toHaveTextContent('Filling in inputs: ');
   });
 
   it('exposes close, undo and runtime controls only through the supplied callbacks and slot', () => {

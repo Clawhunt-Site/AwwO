@@ -4,6 +4,7 @@ import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
 import { AGENT_TEMPLATE_IDS } from '../canvas/agentTemplates';
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES } from '../canvas/canvasPlan';
 
 type CanvasScope = { tenant: Tenant; canvasId: string };
 let active: CanvasScope | null = null;
@@ -50,7 +51,7 @@ export const countPlannedNodes = (text: string): number => text.match(ADD_NODE_M
 /** Connections a proposal has declared — a measurement, not an estimate. */
 export const countPlannedEdges = (text: string): number => text.match(CONNECT_MARKER)?.length ?? 0;
 type PlanStreamProgress = { stage: 'queued' | 'running' | 'thinking' | 'streaming'; characters: number; nodes: number;
-  edges: number; reasoning: number; template?: string };
+  edges: number; reasoning: number; template?: string; operation?: string; target?: string };
 
 /** Marks a `file` deliverable whose bytes the server actually holds, rather than a bare path. */
 export const ARTIFACT_REF_PREFIX = 'awwo-file:';
@@ -181,7 +182,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
         // final measured totals, so those bypass it.
         const progress = (force: boolean) => {
           const now = Date.now();
-          const key = `${observed.stage}:${observed.nodes}:${observed.edges}:${observed.template ?? ''}`;
+          const key = `${observed.stage}:${observed.nodes}:${observed.edges}:${observed.template ?? ''}:${observed.operation ?? ''}:${observed.target ?? ''}`;
           if (!force && key === lastKey && now - lastEmit < PLAN_PROGRESS_INTERVAL_MS) return;
           lastEmit = now;
           lastKey = key;
@@ -207,7 +208,12 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
                 // Only a member of the closed template set is forwarded, never other model text, and
                 // only beside the node count it was reported with.
                 ...(typeof event.template === 'string' && AGENT_TEMPLATE_IDS.has(event.template)
-                  && typeof event.nodes === 'number' && Number.isFinite(event.nodes) && event.nodes >= 0 ? { template: event.template } : {}) };
+                  && typeof event.nodes === 'number' && Number.isFinite(event.nodes) && event.nodes >= 0 ? { template: event.template } : {}),
+                // The operation being written and the node it concerns, as members of the closed
+                // operation and template sets; a target only ever beside an operation on one node.
+                ...(typeof event.operation === 'string' && CANVAS_PLAN_OPERATION_TYPES.has(event.operation) ? { operation: event.operation,
+                  ...(CANVAS_PLAN_NODE_OPERATION_TYPES.has(event.operation) && typeof event.target === 'string'
+                    && AGENT_TEMPLATE_IDS.has(event.target) ? { target: event.target } : {}) } : {}) };
               progress(false);
             } else if (event.type === 'queued' || event.type === 'running') {
               observed = { ...observed, stage: event.type };
@@ -215,8 +221,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             } else if (event.type === 'completed') {
               if (typeof event.text === 'string') output = event.text;
               // Progress rows are coalesced, so settle the totals on the whole proposal. The last
-              // reported template still names the newest node only if no node arrived after it.
-              const { template, ...counts } = observed;
+              // reported template still names the newest node only if no node arrived after it; the
+              // operation being written is over, so it is not carried into the settled totals.
+              const { template, operation: _operation, target: _target, ...counts } = observed;
               const nodes = countPlannedNodes(output);
               observed = { ...counts, characters: [...output].length, nodes, edges: countPlannedEdges(output),
                 ...(template && nodes === observed.nodes ? { template } : {}) };

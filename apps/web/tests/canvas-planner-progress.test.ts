@@ -117,6 +117,75 @@ describe('canvas planning reports observed progress instead of an indeterminate 
     expect(seen.some(item => item.characters < 0)).toBe(false);
   });
 
+  it('follows the operation the host reports and names a node only as a closed-set template', async () => {
+    online();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')
+      ? new Response(JSON.stringify({ id: 'planning-run' }), { status: 202 })
+      // Rows in the order a real model wrote them, several inside one coalescing interval.
+      : sse(frames(
+        { ...hostProgress('streaming', { characters: 60, nodes: 1, template: 'data' }), operation: 'add_node', target: 'data' },
+        { ...hostProgress('streaming', { characters: 120, nodes: 2, template: 'backend' }), operation: 'add_node', target: 'backend' },
+        { ...hostProgress('streaming', { characters: 150, nodes: 2, template: 'backend' }), operation: 'set_input', target: 'backend' },
+        { ...hostProgress('streaming', { characters: 170, nodes: 2, template: 'backend' }), operation: 'set_input', target: 'api-node' },
+        { ...hostProgress('streaming', { characters: 180, nodes: 2, template: 'backend' }), operation: 'exec', target: 'data' },
+        { ...hostProgress('streaming', { characters: 190, nodes: 2, template: 'backend' }), target: 'data' },
+        { ...hostProgress('streaming', { characters: 200, nodes: 2, template: 'backend' }), operation: 'set_input', target: 'data' },
+        { ...hostProgress('streaming', { characters: 260, nodes: 2, edges: 1, template: 'backend' }), operation: 'connect' },
+        { type: 'completed', text: planText },
+      ))));
+    const seen: PlanProgress[] = [];
+    await requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh', progress => seen.push({ ...progress }));
+    const steps = seen.filter(item => item.stage === 'streaming').map(item => `${item.operation ?? ''}:${item.target ?? ''}`)
+      .filter((step, index, all) => step !== all[index - 1]);
+    // Every operation change reaches the reader, however close together the rows were written.
+    expect(steps).toEqual(['add_node:data', 'add_node:backend', 'set_input:backend', 'set_input:', ':', 'set_input:data', 'connect:', ':']);
+    for (const item of seen) {
+      // A target never stands without the operation it was reported for, and nothing outside the
+      // closed sets (a ref, an unknown operation) is ever forwarded.
+      if (item.target !== undefined) expect(item.operation).toBeDefined();
+      expect([undefined, 'add_node', 'set_input', 'connect']).toContain(item.operation);
+      expect([undefined, 'data', 'backend']).toContain(item.target);
+      expect(Object.keys(item).filter(key => !['template', 'operation', 'target'].includes(key)).sort())
+        .toEqual(['attempt', 'characters', 'edges', 'nodes', 'reasoning', 'stage']);
+    }
+    // Once the whole proposal has arrived, the operation being written is over.
+    expect(seen.at(-1)).toMatchObject({ stage: 'validating', nodes: 2, edges: 1 });
+    expect(seen.at(-1)?.operation).toBeUndefined();
+    expect(seen.at(-1)?.target).toBeUndefined();
+  });
+
+  it('merges an operation over what was observed only as a whole snapshot', () => {
+    const start: PlanProgress = { stage: 'streaming', characters: 10, nodes: 1, edges: 0, reasoning: 0, attempt: 1 };
+    const filling = observedProgress({ type: 'progress', stage: 'streaming', characters: 20, nodes: 1, operation: 'set_input', target: 'users' }, start);
+    expect(filling).toMatchObject({ operation: 'set_input', target: 'users' });
+    // A row without an operation means none is observed; the previous one must not stand in.
+    expect(observedProgress({ type: 'progress', stage: 'streaming', characters: 30, nodes: 1 }, filling).operation).toBeUndefined();
+    expect(observedProgress({ type: 'progress', stage: 'streaming', characters: 30, nodes: 1, target: 'users' }, filling).target).toBeUndefined();
+    expect(observedProgress({ type: 'progress', stage: 'streaming', characters: 30, nodes: 1, operation: 'set_input', target: 'Users' }, filling))
+      .not.toHaveProperty('target');
+    expect(observedProgress({ type: 'progress', stage: 'streaming', characters: 30, nodes: 1, operation: 'set_execution' }, filling).operation)
+      .toBe('set_execution');
+    // A connection concerns two nodes, so a target beside one is never kept.
+    const connecting = observedProgress({ type: 'progress', stage: 'streaming', characters: 40, nodes: 2, edges: 1, operation: 'connect', target: 'users' }, filling);
+    expect(connecting.operation).toBe('connect');
+    expect(connecting).not.toHaveProperty('target');
+  });
+
+  it('forwards a target from the host only beside an operation on one node', async () => {
+    online();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')
+      ? new Response(JSON.stringify({ id: 'planning-run' }), { status: 202 })
+      : sse(frames(
+        { ...hostProgress('streaming', { characters: 60, nodes: 2, edges: 1 }), operation: 'connect', target: 'data' },
+        { ...hostProgress('streaming', { characters: 80, nodes: 2, edges: 1 }), operation: 'disconnect', target: 'backend' },
+        { type: 'completed', text: planText },
+      ))));
+    const seen: PlanProgress[] = [];
+    await requestCanvasPlan('做流程', emptyDocument(), [], new AbortController().signal, 'zh', progress => seen.push({ ...progress }));
+    expect(seen.map(item => item.operation).filter(Boolean)).toEqual(expect.arrayContaining(['connect', 'disconnect']));
+    expect(seen.some(item => item.target !== undefined)).toBe(false);
+  });
+
   it('forwards a template only beside the node count the host reported it with', async () => {
     online();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/plan')

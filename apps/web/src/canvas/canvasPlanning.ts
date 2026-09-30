@@ -3,7 +3,8 @@ import { canvasFetch, currentSaaSCanvas } from '../saas/canvasBridge';
 import { gatewayApiBase } from '../chatAutomations';
 import { AGENT_TEMPLATE_IDS, getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import type { CanvasDocument } from './canvasDoc';
-import { CANVAS_PLAN_PROTOCOL, parseCanvasPlan, type CanvasPlan } from './canvasPlan';
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, parseCanvasPlan, type CanvasPlan,
+  type CanvasPlanOperationType } from './canvasPlan';
 import type { UiLocale } from '../locale';
 import { canvasText } from './i18n';
 import { readSseFrames } from '../sse';
@@ -37,6 +38,10 @@ export interface PlanProgress {
   reasoning: number;
   /** Template id of the node declared most recently, when the host observed one. */
   template?: string;
+  /** Kind of operation the proposal is writing now, when the host observed one. */
+  operation?: CanvasPlanOperationType;
+  /** Template id of the node that operation concerns, when the proposal itself declared that node. */
+  target?: string;
   /** 1 for the first attempt, 2 for the single retry of a malformed plan. */
   attempt: number;
 }
@@ -48,8 +53,8 @@ const validCount = (value: unknown): boolean => typeof value === 'number' && Num
 
 /** The progress a host reported, merged over what was already observed. Counts that are
  * missing or malformed keep their previous value, so a bad frame cannot erase real work. A
- * frame is a whole snapshot, though, so its template is taken as sent: absent means the newest
- * node has not named one yet, and the previous node's must not stand in for it. */
+ * frame is a whole snapshot, though, so its template, operation and target are taken as sent:
+ * absent means the host has not observed one yet, and a previous one must not stand in for it. */
 export function observedProgress(frame: Record<string, unknown>, previous: PlanProgress): PlanProgress {
   const count = (value: unknown, fallback: number) =>
     typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
@@ -58,9 +63,15 @@ export function observedProgress(frame: Record<string, unknown>, previous: PlanP
   // reported with: a frame whose count is unusable cannot say which node the template names.
   const template = typeof frame.template === 'string' && AGENT_TEMPLATE_IDS.has(frame.template) && validCount(frame.nodes)
     ? frame.template : undefined;
+  // Likewise only a member of the closed operation set, and a target only beside an operation on
+  // one node: a node is named only through the operation that concerns it.
+  const operation = typeof frame.operation === 'string' && CANVAS_PLAN_OPERATION_TYPES.has(frame.operation)
+    ? frame.operation as CanvasPlanOperationType : undefined;
+  const target = operation && CANVAS_PLAN_NODE_OPERATION_TYPES.has(operation) && typeof frame.target === 'string'
+    && AGENT_TEMPLATE_IDS.has(frame.target) ? frame.target : undefined;
   return { stage, characters: count(frame.characters, previous.characters), nodes: count(frame.nodes, previous.nodes),
     edges: count(frame.edges, previous.edges), reasoning: count(frame.reasoning, previous.reasoning),
-    ...(template ? { template } : {}), attempt: previous.attempt };
+    ...(template ? { template } : {}), ...(operation ? { operation } : {}), ...(target ? { target } : {}), attempt: previous.attempt };
 }
 
 export function loadLastPlanDuration(): number | undefined {
