@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ## [Unreleased]
 
+### Added
+
+- Optional API settings for new workspaces: `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` and `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY` set the model list and daily quota of every workspace created afterwards, and `AWWO_MAX_OWNED_WORKSPACES` makes `POST /tenants` answer `403 workspace_limit` to an account that is not a platform admin and already owns at least that many. Unset keeps the previous behaviour; existing workspaces are not changed.
+
 ### Changed
 
 - Keep workspace navigation focused on the active workspace and account; move language, theme, guidance and maintenance actions into an accessible overflow menu.

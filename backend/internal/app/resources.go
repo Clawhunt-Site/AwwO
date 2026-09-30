@@ -23,14 +23,25 @@ func (a *App) createTenant(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_input", "Workspace name required")
 		return
 	}
-	tx, e := a.db.Begin(r.Context())
+	// Explicit rather than the server default: the ownership cap is race-safe only
+	// when its count reads a snapshot taken after the account lock is granted.
+	tx, e := a.db.BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
 	defer tx.Rollback(r.Context())
+	full, e := a.workspaceLimitReached(r.Context(), tx, currentUser(r))
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if full {
+		fail(w, 403, "workspace_limit", "This account already owns the maximum number of workspaces")
+		return
+	}
 	id := randomID()
-	if _, e = tx.Exec(r.Context(), "INSERT INTO tenants(id,name) VALUES($1,$2)", id, b.Name); e != nil {
+	if e = a.insertTenant(r.Context(), tx, id, b.Name); e != nil {
 		a.dbError(w, e)
 		return
 	}

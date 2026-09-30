@@ -291,7 +291,7 @@ func (a *App) acceptClawHunt(ctx context.Context, id clawHuntIdentity, grant str
 				return u, "", false, err
 			}
 			tid := randomID()
-			if _, err = tx.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,$2)", tid, id.Name+" · AwwO"); err != nil {
+			if err = a.insertTenant(ctx, tx, tid, id.Name+" · AwwO"); err != nil {
 				return u, "", false, err
 			}
 			if _, err = tx.Exec(ctx, "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,'owner')", tid, u.ID); err != nil {

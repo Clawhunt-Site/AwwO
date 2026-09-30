@@ -10,6 +10,18 @@ If the main-site email matches an existing AwwO account, the user must prove own
 
 Unified mode directs profile/password management to ClawHunt and uses invitation links for new workspace members. Direct membership grants by contact email are disabled. The issuer must explicitly approve access; registration or waitlist enrollment alone is insufficient. Existing memberships and workspace roles remain unchanged.
 
+## New workspaces
+
+Three optional API settings shape the workspace a first-time user receives and limit extra ones. They apply only to workspaces created after the API starts with them; existing workspaces keep their models and quotas, and `PATCH /api/v1/admin/tenants/{id}` still changes any single workspace. An invalid value stops API startup.
+
+| Setting | When set | Unset |
+| --- | --- | --- |
+| `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` | Comma-separated model IDs stored as the new workspace's `allowedModels`, under the admin field's rules: at most 64 IDs of up to 200 bytes, none empty or containing whitespace or control characters. Operator credential mode only: personal catalogues name models per connection, so the API refuses this setting with `AWWO_CREDENTIAL_MODE=user` | Unrestricted (NULL) |
+| `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY` | Integer 1–100000 stored as `maxRunsPerDay` | Column default, 100 |
+| `AWWO_MAX_OWNED_WORKSPACES` | `POST /api/v1/tenants` returns `403 workspace_limit` to an account that is not a platform admin and already owns at least this many workspaces | `0`, unlimited |
+
+The defaults reach every creation path: standalone registration, a first ClawHunt sign-in and `POST /tenants`. The workspace created at registration or first sign-in is never refused by the cap. Intended production values, with operator credentials: `AWWO_NEW_WORKSPACE_ALLOWED_MODELS=qwen3.8-27b-p6`, `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY=50`, `AWWO_MAX_OWNED_WORKSPACES=1`.
+
 ## Configuration and protocol
 
 The issuer must implement `/api/awwo/sso/{authorize,token,introspect,revoke,logout}`. AwwO exposes `/api/v1/auth/clawhunt/{start,callback,pending,link}`.

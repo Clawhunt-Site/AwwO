@@ -46,6 +46,13 @@ type Config struct {
 	// Turning it off stops new freezes without touching any workspace entitlement, so
 	// snapshots already frozen still dispatch and drain.
 	StructuredContracts bool
+	// Defaults stamped onto workspaces created after startup (see insertTenant); the
+	// zero values keep the tenants column defaults. MaxOwnedWorkspaces caps how many
+	// workspaces an account that is not a platform admin may own through
+	// POST /tenants; 0 is unlimited.
+	NewWorkspaceModels     modelEntitlement
+	NewWorkspaceRunsPerDay int
+	MaxOwnedWorkspaces     int
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -124,6 +131,9 @@ func ConfigFromEnv() (Config, error) {
 		}
 		c.TrustedProxyCIDRs = append(c.TrustedProxyCIDRs, p)
 	}
+	if err := c.workspaceDefaultsFromEnv(); err != nil {
+		return c, err
+	}
 	if err := c.observabilityFromEnv(); err != nil {
 		return c, err
 	}
@@ -140,6 +150,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.validateClawHunt(); err != nil {
+		return err
+	}
+	if err := c.validateWorkspaceDefaults(); err != nil {
 		return err
 	}
 	if (c.UserCredentials || len(c.CredentialKey) > 0) && len(c.CredentialKey) != 32 {

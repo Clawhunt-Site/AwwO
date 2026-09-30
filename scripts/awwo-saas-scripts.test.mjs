@@ -373,6 +373,20 @@ test('identity and Jev settings reach only the API in Compose and local services
   }
 });
 
+// The deployment template carries these only as commented examples, so Compose must
+// forward an empty value, which the API reads as unset.
+test('new-workspace defaults reach only the API and default to unset', async () => {
+  const compose = await readFile(new URL('../deploy/saas/compose.yml', import.meta.url), 'utf8');
+  const service = name => compose.split(/^ {2}(?=\S)/m).find(block => block.startsWith(`${name}:`)) ?? '';
+  for (const key of ['AWWO_NEW_WORKSPACE_ALLOWED_MODELS', 'AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY', 'AWWO_MAX_OWNED_WORKSPACES']) {
+    assert.ok(service('api').includes(`${key}: \${${key}:-}`), `${key} must reach the API, unset by default`);
+    for (const name of ['pi', 'openai-agents', 'web', 'database']) assert.ok(!service(name).includes(key), `${key} leaked to ${name}`);
+    const local = serviceEnvironments({ [key]: 'synthetic' });
+    assert.equal(local.api[key], 'synthetic');
+    for (const target of [local.pi, local.openAIAgents, local.web, local.build]) assert.equal(target[key], undefined);
+  }
+});
+
 test('personal vault and mail credentials stay API-only while both workers share the mode', () => {
   const env = serviceEnvironments({ PATH: '/usr/bin', AWWO_CREDENTIAL_MODE: 'user', AWWO_CREDENTIAL_ENCRYPTION_KEY: 'synthetic-vault-key', AWWO_SMTP_PASSWORD: 'synthetic-mail-password' });
   for (const target of [env.pi, env.openAIAgents]) assert.equal(target.AWWO_CREDENTIAL_MODE, 'user');

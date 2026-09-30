@@ -141,7 +141,7 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if _, e = tx.Exec(r.Context(), "INSERT INTO tenants(id,name) VALUES($1,$2)", tid, b.TenantName); e != nil {
+	if e = a.insertTenant(r.Context(), tx, tid, b.TenantName); e != nil {
 		a.dbError(w, e)
 		return
 	}
