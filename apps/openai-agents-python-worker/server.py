@@ -67,6 +67,9 @@ async def handle_run(request: web.Request) -> web.StreamResponse:
     if not RUN_ID.fullmatch(run_request.run_id):
         return web.json_response({"error": "invalid_request"}, status=400)
 
+    # Reasoning activity is a count the caller opts in to with a header. A caller that
+    # predates it never asks, so it keeps receiving exactly the stream it always did.
+    reasoning_activity = request.headers.get("X-Awwo-Run-Activity") == "reasoning"
     cancel_event = asyncio.Event()
     state["runs"][run_request.run_id] = cancel_event
     state["active"] += 1
@@ -80,6 +83,8 @@ async def handle_run(request: web.Request) -> web.StreamResponse:
     async def _stream():
         try:
             async for event in stream_run(run_request, run_config, cancel_event):
+                if event.get("type") == "reasoning" and not reasoning_activity:
+                    continue
                 await response.write(f"data: {json.dumps(event)}\n\n".encode("utf-8"))
                 if event.get("type") in ("completed", "failed", "cancelled"):
                     break

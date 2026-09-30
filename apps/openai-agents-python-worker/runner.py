@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import AsyncIterator
@@ -12,6 +13,43 @@ from openai import AsyncOpenAI
 from config import PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
 from errors import RuntimeError, classify_error
 from tools import TOOL_SCHEMAS, ToolInputError, execute_tool, tool_definition_bytes, validate_tool_names
+
+
+# Provider reasoning crosses this worker as a count, never as its text, and at most
+# this often: a reader needs to see that the model is working, not each token of it.
+REASONING_REPORT_SECONDS = 0.5
+# Chat Completions reasoning fields reach the SDK stream as these Responses events,
+# exactly as a Responses model's own reasoning deltas do.
+REASONING_DELTA_EVENTS = frozenset({"response.reasoning_summary_text.delta", "response.reasoning_text.delta"})
+
+
+class ReasoningCounter:
+    """Coalesce streamed provider reasoning into cumulative, content-free counts."""
+
+    def __init__(self, clock=time.monotonic):
+        self.characters = 0
+        self._started = False
+        self._reported = -1
+        self._reported_at = 0.0
+        self._clock = clock
+
+    def start(self) -> None:
+        self._started = True
+
+    def add(self, delta: str) -> None:
+        self._started = True
+        self.characters += len(delta)
+
+    def report(self, force: bool) -> dict | None:
+        """Return the count event to send now, if the count changed and is due. Nothing is
+        reported for a model that never reasons: a zero would claim it is thinking."""
+        if not self._started or self.characters == self._reported:
+            return None
+        now = self._clock()
+        if not force and now - self._reported_at < REASONING_REPORT_SECONDS:
+            return None
+        self._reported, self._reported_at = self.characters, now
+        return {"type": "reasoning", "characters": self.characters}
 
 
 @dataclass
@@ -165,17 +203,38 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
 
         watcher = asyncio.create_task(watch_cancel())
         streamed = ""
+        reasoning = ReasoningCounter()
         try:
             async for event in result.stream_events():
-                if getattr(event, "type", None) == "raw_response_event":
-                    data = getattr(event, "data", None)
-                    if getattr(data, "type", None) == "response.output_text.delta":
-                        delta = getattr(data, "delta", "")
-                        if delta and not tools:
-                            streamed += delta
-                            if len(streamed.encode("utf-8")) > config.max_output_bytes:
-                                raise RuntimeError("OUTPUT_LIMIT")
-                            yield {"type": "text_delta", "delta": delta}
+                if getattr(event, "type", None) != "raw_response_event":
+                    continue
+                data = getattr(event, "data", None)
+                kind = getattr(data, "type", None)
+                if kind == "response.output_text.delta":
+                    delta = getattr(data, "delta", "")
+                    if delta and not tools:
+                        # The settled reasoning count goes out before the answer it preceded.
+                        report = reasoning.report(force=True)
+                        if report:
+                            yield report
+                        streamed += delta
+                        if len(streamed.encode("utf-8")) > config.max_output_bytes:
+                            raise RuntimeError("OUTPUT_LIMIT")
+                        yield {"type": "text_delta", "delta": delta}
+                elif kind in REASONING_DELTA_EVENTS:
+                    delta = getattr(data, "delta", "")
+                    if isinstance(delta, str) and delta:
+                        reasoning.add(delta)
+                        report = reasoning.report(force=False)
+                        if report:
+                            yield report
+                elif kind == "response.output_item.added" and getattr(getattr(data, "item", None), "type", None) == "reasoning":
+                    # That reasoning began is itself the fact a waiting reader lacks, so it is
+                    # reported at once, before anything is counted.
+                    reasoning.start()
+                    report = reasoning.report(force=True)
+                    if report:
+                        yield report
             if cancel_event.is_set():
                 yield {"type": "cancelled"}
                 return
