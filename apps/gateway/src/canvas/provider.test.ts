@@ -71,7 +71,8 @@ describe('planning progress', () => {
       { stage: 'running', characters: 0, nodes: 0, edges: 0, reasoning: 0 },
       { stage: 'thinking', characters: 0, nodes: 0, edges: 0, reasoning: 0 },
       { stage: 'thinking', characters: 0, nodes: 0, edges: 0, reasoning: [...REASONING].length },
-      { stage: 'streaming', characters: JSON.stringify(plan).length, nodes: 1, edges: 0, reasoning: [...REASONING].length, template: 'frontend' },
+      { stage: 'streaming', characters: JSON.stringify(plan).length, nodes: 1, edges: 0, reasoning: [...REASONING].length, template: 'frontend',
+        operation: 'add_node', target: 'frontend' },
     ]);
     expect(JSON.stringify(seen)).not.toContain('44102');
     // Without a reporter it is a no-op rather than an error.
@@ -118,7 +119,8 @@ describe('OpenAI-compatible planning', () => {
     const body = JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.stream).toBe(true);
     expect(seen.map(item => item.stage).filter((stage, index, all) => stage !== all[index - 1])).toEqual(['thinking', 'streaming']);
-    expect(seen.at(-1)).toEqual({ stage: 'streaming', characters: text.length, nodes: 2, edges: 1, reasoning: [...REASONING].length, template: 'backend' });
+    expect(seen.at(-1)).toEqual({ stage: 'streaming', characters: text.length, nodes: 2, edges: 1, reasoning: [...REASONING].length, template: 'backend',
+      operation: 'connect' });
     // A template is only ever an identifier named by the plan, never other model text, and a
     // new node never borrows its predecessor's template while its own is still unwritten.
     expect(new Set(seen.map(item => item.template).filter(Boolean))).toEqual(new Set(['frontend', 'backend']));
@@ -143,6 +145,72 @@ describe('OpenAI-compatible planning', () => {
         if (item.template !== undefined) expect([item.nodes, item.template]).toEqual([1, 'data']);
       }
     }
+  });
+  it('names the operation being written and the node it concerns, however the stream is cut', async () => {
+    // The shape a real model produced: every node, then each node's input, then the connections.
+    const text = JSON.stringify({ version: 1, summary: '预约系统', operations: [
+      { type: 'add_node', ref: 'data-node', templateId: 'data', title: '数据' },
+      { type: 'add_node', ref: 'api-node', templateId: 'backend', title: '后端' },
+      { type: 'set_input', nodeId: 'api-node', fieldId: 'brief', value: '会员预约与排课规则' },
+      { type: 'set_input', nodeId: 'existing', fieldId: 'brief', value: '已有节点' },
+      { type: 'set_input', nodeId: 'data-node', fieldId: 'brief', value: '课程与预约数据' },
+      { type: 'connect', fromNode: 'data-node', fromField: 'schema', toNode: 'api-node', toField: 'schema' },
+    ] });
+    const steps = (seen: PlannerProgress[]) => seen.map(item => `${item.operation ?? ''}:${item.target ?? ''}`)
+      .filter((step, index, all) => step !== ':' && step !== all[index - 1]);
+    for (let cut = 1; cut < text.length; cut += 5) {
+      vi.stubGlobal('fetch', vi.fn(async () => sse(delta({ content: text.slice(0, cut) }), delta({ content: text.slice(cut) }), '[DONE]')));
+      const seen: PlannerProgress[] = [];
+      await createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' }, undefined, progress => seen.push(progress));
+      expect(seen.at(-1)).toMatchObject({ operation: 'connect', template: 'backend' });
+      expect(seen.at(-1)?.target).toBeUndefined();
+      // Only closed-set values ever leave: no ref, node id, field id or input text.
+      for (const fragment of ['data-node', 'api-node', 'existing', 'brief', '会员', 'schema']) expect(JSON.stringify(seen)).not.toContain(fragment);
+    }
+    // Chunked finely, every step is observed in order, and an input on a node the plan did not
+    // declare names none rather than borrowing another node's template.
+    const chunks: unknown[] = [];
+    for (let at = 0; at < text.length; at += 9) chunks.push(delta({ content: text.slice(at, at + 9) }));
+    vi.stubGlobal('fetch', vi.fn(async () => sse(...chunks, '[DONE]')));
+    const seen: PlannerProgress[] = [];
+    await createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' }, undefined, progress => seen.push(progress));
+    expect(steps(seen).filter(step => !step.endsWith(':') || step === 'connect:')).toEqual(
+      ['add_node:data', 'add_node:backend', 'set_input:backend', 'set_input:data', 'connect:']);
+    // The Codex path reads whole snapshots and reaches the same decision.
+    const codex: PlannerProgress[] = [];
+    const observe = createCodexProgress(progress => codex.push(progress));
+    observe(JSON.stringify({ type: 'turn.started' }));
+    const upTo = text.indexOf('会员');
+    observe(JSON.stringify({ type: 'item.updated', item: { id: 'm', type: 'agent_message', text: text.slice(0, upTo) } }));
+    expect(codex.at(-1)).toMatchObject({ operation: 'set_input', target: 'backend', nodes: 2 });
+  });
+  it('never takes a nested object, a string or a root key spelled like an operation for one', async () => {
+    const plan = (operations: string, root = '') => `{"version":1,${root}"summary":"s","operations":[${operations}]}`;
+    for (const text of [
+      // A node whose inputs contain an object with its own "type" and "nodeId".
+      plan('{"type":"add_node","ref":"api-node","templateId":"backend"},{"type":"add_node","ref":"form","templateId":"frontend","inputValues":{"type":"set_input","nodeId":"api-node"}}'),
+      plan('{"type":"add_node","ref":"form","templateId":"frontend","inputValues":{"operations":[{"type":"remove_node","nodeId":"form"}]}}'),
+      plan('{"type":"add_node","ref":"form","templateId":"frontend","title":"{\\"type\\":\\"connect\\"}"}'),
+      plan('{"type":"add_node","ref":"form","templateId":"frontend"}', '"type":"set_input","nodeId":"form",'),
+    ]) {
+      for (let cut = 1; cut < text.length; cut += 7) {
+        vi.stubGlobal('fetch', vi.fn(async () => sse(delta({ content: text.slice(0, cut) }), delta({ content: text.slice(cut) }), '[DONE]')));
+        const seen: PlannerProgress[] = [];
+        await createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' }, undefined, progress => seen.push(progress));
+        expect(seen.at(-1)).toMatchObject({ operation: 'add_node', target: 'frontend' });
+        expect(seen.some(item => item.operation && item.operation !== 'add_node')).toBe(false);
+      }
+      const codex: PlannerProgress[] = [];
+      const observe = createCodexProgress(progress => codex.push(progress));
+      observe(JSON.stringify({ type: 'item.completed', item: { id: 'm', type: 'agent_message', text } }));
+      expect(codex.at(-1)).toMatchObject({ operation: 'add_node', target: 'frontend' });
+    }
+    // A nested field type never replaces the operation that contains it.
+    const field = plan('{"type":"add_node","ref":"r","templateId":"users"},{"type":"update_field","nodeId":"r","side":"input","fieldId":"f","changes":{"type":"markdown","label":"remove_node"}}');
+    vi.stubGlobal('fetch', vi.fn(async () => sse(delta({ content: field }), '[DONE]')));
+    const seen: PlannerProgress[] = [];
+    await createCanvasPlanner(openai).plan({ prompt: 'x', context: 'y' }, undefined, progress => seen.push(progress));
+    expect(seen.at(-1)).toMatchObject({ operation: 'update_field', target: 'users' });
   });
   it('rejects a malformed or empty stream instead of inventing a plan', async () => {
     for (const response of [() => sse('{broken'), () => sse(delta({ reasoning_content: REASONING }), '[DONE]'), () => sse(delta({ content: 'not a plan' }))]) {

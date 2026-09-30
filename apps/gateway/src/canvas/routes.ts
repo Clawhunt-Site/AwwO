@@ -99,8 +99,9 @@ async function streamPlan(provider: CanvasPlanner, request: PlanningRequest, sig
   // The planner accepted the request and is starting: say so before it reports anything.
   send({ type: 'progress', ...last });
   const report = (progress: PlannerProgress) => {
-    // A new stage, node, connection or template is what a reader waits for.
-    const urgent = progress.stage !== last.stage || progress.nodes !== last.nodes || progress.edges !== last.edges || progress.template !== last.template;
+    // A new stage, node, connection, template or operation is what a reader waits for.
+    const urgent = progress.stage !== last.stage || progress.nodes !== last.nodes || progress.edges !== last.edges || progress.template !== last.template
+      || progress.operation !== last.operation || progress.target !== last.target;
     const same = !urgent && progress.characters === last.characters && progress.reasoning === last.reasoning;
     if (same || (!urgent && Date.now() - lastAt < PROGRESS_INTERVAL_MS)) return;
     last = { ...progress };

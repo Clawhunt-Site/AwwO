@@ -5,11 +5,20 @@ import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:pat
 import type { CanvasPlannerConfig } from './config.js';
 
 export interface PlanningRequest { prompt: string; context: string }
+/** The closed set of operations a plan may contain (apps/web/src/canvas/canvasPlan.ts; the SaaS
+ * gate in backend planning.go accepts all but the two review-policy ones); progress names the
+ * newest one only as a member of this set. */
+export const PLAN_OPERATIONS = ['add_node', 'update_node', 'set_input', 'add_field', 'update_field', 'remove_field', 'remove_node',
+  'connect', 'set_edge_kind', 'set_execution', 'disconnect'] as const;
+export type PlanOperation = typeof PLAN_OPERATIONS[number];
 /** What a planning run is observably doing. Counts only — never plan text or reasoning —
  * and never a ratio: the plan's final length is unknown until it has been written. The
- * template is an identifier the latest declared node names, never free text. */
+ * template is an identifier the latest declared node names, the operation is the kind of
+ * operation being written now, and the target is the template of the node that operation
+ * concerns — all members of closed sets, never free text. */
 export interface PlannerProgress {
   stage: 'running' | 'thinking' | 'streaming'; characters: number; nodes: number; edges: number; reasoning: number; template?: string;
+  operation?: PlanOperation; target?: string;
 }
 export type PlannerProgressReporter = (progress: PlannerProgress) => void;
 export interface CanvasPlanner {
@@ -41,6 +50,18 @@ const TEMPLATE_PAIR = /^"templateId"\s{0,8}:\s{0,8}"([a-z]{1,16})"/;
 // How much of the stream a template is read from: a node's templateId is found only while its
 // marker is still inside this window; one written further away is simply not shown.
 const TEMPLATE_TAIL = 2048;
+const OPERATIONS: ReadonlySet<string> = new Set(PLAN_OPERATIONS);
+// The operations that concern one node, so progress may name that node's template beside them;
+// a connection concerns two, and naming one would misstate it.
+const NODE_OPERATIONS: ReadonlySet<string> = new Set(['add_node', 'update_node', 'set_input', 'add_field', 'update_field', 'remove_field', 'remove_node']);
+// A valid plan holds at most this many operations, so it can declare no more refs; a stream
+// that tries cannot make the tracker remember more.
+const REF_LIMIT = 100;
+// How deep a proposal's structure is followed, and how long an identifier may be (the plan
+// gate's own limit): deeper nesting is only counted and longer strings name nothing, so a
+// hostile stream cannot grow what the scanner keeps.
+const SCAN_DEPTH = 64;
+const IDENTIFIER_LIMIT = 128;
 // A Chat Completions provider's own reasoning fields, in the order they are read; the
 // first non-empty one is the delta, so a provider sending two aliases counts once.
 const REASONING_FIELDS = ['reasoning_content', 'reasoning', 'reasoning_text'] as const;
@@ -102,6 +123,99 @@ function newestTemplate(text: string): string | undefined | null {
   return template;
 }
 
+/** What progress reads of one operation: its own direct keys, as plain strings. */
+interface PlanOp { kind: string; ref: string; templateId: string; nodeId: string }
+/** One open object or array of a proposal. */
+interface PlanFrame { object: boolean; expectKey: boolean; key: string; operations: boolean; op?: PlanOp }
+
+/** Follow a proposal's JSON structure across chunks, reading every character once, so an operation
+ * is recognised only as a direct element of the root object's "operations" array and its
+ * identifiers only as that object's own keys — never a key inside a nested value such as
+ * inputValues, inside a string, or text spelled like one. Text outside the root object (a code
+ * fence) holds no structure and is passed over. `closed` is told about each operation as it closes. */
+function createPlanScanner(closed: (op: PlanOp) => void): { scan(chunk: string): void; newest(): PlanOp | undefined } {
+  const stack: PlanFrame[] = [];
+  let overflow = 0, inString = false, escaped = false, keep = false, bad = false, text = '';
+  let newest: PlanOp | undefined;
+  const top = (): PlanFrame | undefined => overflow > 0 ? undefined : stack[stack.length - 1];
+  // A key of the root object or of an operation, or the value of an operation's own type, ref,
+  // templateId or nodeId: the only strings that matter.
+  const keeps = () => {
+    const frame = top();
+    if (!frame?.object) return false;
+    if (frame.expectKey) return stack.length === 1 || Boolean(frame.op);
+    return Boolean(frame.op) && ['type', 'ref', 'templateId', 'nodeId'].includes(frame.key);
+  };
+  const endString = () => {
+    const frame = top();
+    if (!keep || !frame) return;
+    const value = bad ? '' : text;
+    // A key that is not an identifier matches nothing, so its value is not read.
+    if (frame.expectKey) { frame.key = value; return; }
+    if (!frame.op) return;
+    if (frame.key === 'type') frame.op.kind = value;
+    else if (frame.key === 'ref') frame.op.ref = value;
+    else if (frame.key === 'templateId') frame.op.templateId = value;
+    else if (frame.key === 'nodeId') frame.op.nodeId = value;
+  };
+  const open = (object: boolean) => {
+    if (overflow > 0 || stack.length === SCAN_DEPTH) { overflow++; return; }
+    const frame: PlanFrame = { object, expectKey: object, key: '', operations: false };
+    const parent = top();
+    if (parent && object && !parent.object && parent.operations) newest = frame.op = { kind: '', ref: '', templateId: '', nodeId: '' };
+    else if (parent && !object && parent.object && stack.length === 1 && !parent.expectKey && parent.key === 'operations') frame.operations = true;
+    stack.push(frame);
+  };
+  const close = () => {
+    if (overflow > 0) { overflow--; return; }
+    const frame = stack.pop();
+    if (frame?.op) closed(frame.op);
+  };
+  return {
+    scan(chunk) {
+      for (const character of chunk) {
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (character === '\\') { escaped = true; bad = true; }
+          else if (character === '"') { inString = false; endString(); }
+          else if (keep && !bad) { if (text.length >= IDENTIFIER_LIMIT) bad = true; else text += character; }
+          continue;
+        }
+        if (character === '"') { inString = true; escaped = false; bad = false; text = ''; keep = keeps(); }
+        else if (character === '{' || character === '[') open(character === '{');
+        else if (character === '}' || character === ']') close();
+        else if (character === ':') { const frame = top(); if (frame?.object) frame.expectKey = false; }
+        else if (character === ',') { const frame = top(); if (frame?.object) { frame.expectKey = true; frame.key = ''; } }
+      }
+    },
+    newest: () => newest,
+  };
+}
+
+type OperationState = Pick<PlannerProgress, 'operation' | 'target'>;
+
+/** Follow the newest operation a proposal has begun and the node it concerns, learning the template
+ * of every node the proposal declares so that a later operation on that node can name it.
+ * Operations on nodes it did not declare (ones already on the canvas) name none, and until the
+ * newest operation has written its kind the previous decision stands. */
+function createOperationTracker(): (chunk: string) => OperationState {
+  const refs = new Map<string, string>();
+  const scanner = createPlanScanner(op => {
+    if (op.kind === 'add_node' && op.ref && TEMPLATE_IDS.has(op.templateId) && (refs.has(op.ref) || refs.size < REF_LIMIT)) refs.set(op.ref, op.templateId);
+  });
+  let latest: OperationState = {};
+  return chunk => {
+    scanner.scan(chunk);
+    const op = scanner.newest();
+    if (op && OPERATIONS.has(op.kind)) {
+      const target = op.kind === 'add_node' ? (TEMPLATE_IDS.has(op.templateId) ? op.templateId : '')
+        : NODE_OPERATIONS.has(op.kind) && op.nodeId ? refs.get(op.nodeId) ?? '' : '';
+      latest = { operation: op.kind as PlanOperation, ...(target ? { target } : {}) };
+    }
+    return latest;
+  };
+}
+
 /** Follow the newest node's template across a stream, deciding inside one bounded window
  * that always holds a marker together with everything written after it. */
 function createTemplateTracker(): (chunk: string) => string | undefined {
@@ -116,10 +230,13 @@ function createTemplateTracker(): (chunk: string) => string | undefined {
   };
 }
 
+type MessageCounts = Pick<PlannerProgress, 'characters' | 'nodes' | 'edges' | 'template' | 'operation' | 'target'>;
+
 /** Everything progress reports about a complete message, in one pass per value. */
-function messageCounts(text: string): Pick<PlannerProgress, 'characters' | 'nodes' | 'edges' | 'template'> {
+function messageCounts(text: string): MessageCounts {
   const template = newestTemplate(text) ?? undefined;
-  return { characters: codePoints(text), nodes: text.split(NODE_MARKER).length - 1, edges: text.split(EDGE_MARKER).length - 1, ...(template ? { template } : {}) };
+  return { characters: codePoints(text), nodes: text.split(NODE_MARKER).length - 1, edges: text.split(EDGE_MARKER).length - 1,
+    ...(template ? { template } : {}), ...createOperationTracker()(text) };
 }
 
 function progressStage(characters: number, reasoningSeen: boolean): PlannerProgress['stage'] {
@@ -133,7 +250,7 @@ export function createCodexProgress(onProgress?: PlannerProgressReporter): (line
   const reasoning = new Map<string, number>();
   let reasoningSeen = false;
   let started = false;
-  let message: Pick<PlannerProgress, 'characters' | 'nodes' | 'edges' | 'template'> = { characters: 0, nodes: 0, edges: 0 };
+  let message: MessageCounts = { characters: 0, nodes: 0, edges: 0 };
   let last = '';
   return line => {
     if (!onProgress || !line.trim()) return;
@@ -371,6 +488,7 @@ async function readChatStream(body: ReadableStream<Uint8Array>, onProgress?: Pla
   const countNodes = createMarkerCounter(NODE_MARKER);
   const countEdges = createMarkerCounter(EDGE_MARKER);
   const followTemplate = createTemplateTracker();
+  const followOperation = createOperationTracker();
   let buffer = '';
   // Where the newline search resumes, so a line that never ends is scanned once, not per read.
   let scanned = 0;
@@ -381,13 +499,14 @@ async function readChatStream(body: ReadableStream<Uint8Array>, onProgress?: Pla
   let nodes = 0;
   let edges = 0;
   let template: string | undefined;
+  let operation: OperationState = {};
   let reasoning = 0;
   let reasoningSeen = false;
   const report = () => {
     if (!onProgress || (!reasoningSeen && characters === 0)) return;
     // Progress is observability: a reporter that throws must never end the plan.
     try {
-      onProgress({ stage: progressStage(characters, reasoningSeen), characters, nodes, edges, reasoning, ...(template ? { template } : {}) });
+      onProgress({ stage: progressStage(characters, reasoningSeen), characters, nodes, edges, reasoning, ...(template ? { template } : {}), ...operation });
     } catch { /* unobserved */ }
   };
   const readLine = (line: string) => {
@@ -406,6 +525,7 @@ async function readChatStream(body: ReadableStream<Uint8Array>, onProgress?: Pla
       nodes = countNodes(delta.content);
       edges = countEdges(delta.content);
       template = followTemplate(delta.content);
+      operation = followOperation(delta.content);
     }
     const thought = REASONING_FIELDS.map(field => delta[field]).find(value => typeof value === 'string' && value) as string | undefined;
     if (thought) { reasoningSeen = true; reasoning += codePoints(thought); }
