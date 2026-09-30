@@ -5,5 +5,6 @@ import './saas.css';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { SaaSApp } from './SaaSApp';
 import '../canvas/ios-theme.css';
+import './polish.css';
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><ErrorBoundary><SaaSApp /></ErrorBoundary></React.StrictMode>);

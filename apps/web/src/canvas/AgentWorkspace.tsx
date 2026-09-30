@@ -36,6 +36,10 @@ export interface AgentWorkspaceProps {
   onOpenSettings?: () => void;
   toolbar?: ReactNode;
   accountControl?: ReactNode;
+  /** Host-owned title (navigation, document name, sync state); replaces the breadcrumb. */
+  headerTitle?: ReactNode;
+  /** Host-owned document actions shown before the account controls. */
+  headerActions?: ReactNode;
   assistant?: ReactNode;
   modelShelf?: ReactNode;
   personaControls?: ReactNode;
@@ -52,7 +56,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, edges, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -239,8 +243,8 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
       <header className="awwo-header">
         {modelShelf && <button data-onboarding="models-toggle" ref={modelOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={locale === 'zh' ? '打开模型库' : 'Open model library'} aria-expanded={modelLibraryOpen} onClick={revealModelRail}><Cpu size={19} /></button>}
         <button data-onboarding="bots-toggle" ref={botOpenButtonRef} className="awwo-mobile-menu awwo-icon-button" aria-label={t('workspace.openNavigation')} aria-expanded={sidebarOpen} onClick={() => { setSidebarOpen(true); setModelLibraryOpen(false); }}><Menu size={19} /></button>
-        <div className="awwo-page-title"><div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{workspaceName || t('workspace.name')}</span></div></div>
-        <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{accountControl}</div>
+        <div className="awwo-page-title">{headerTitle ?? <div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{workspaceName || t('workspace.name')}</span></div>}</div>
+        <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{headerActions}{accountControl}</div>
       </header>
       <div className="awwo-canvas-bar">{onToggleAssistant && nodes.length > 0 ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}<div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div><span className="awwo-canvas-meta">{t('workspace.agentCount', { count: nodes.length })}<span>·</span>{t('workspace.connectionCount', { count: edges.length })}</span><div className="awwo-run-slot">{toolbar}</div></div>
       <section className="awwo-stage" aria-label={t('workspace.stage')}>

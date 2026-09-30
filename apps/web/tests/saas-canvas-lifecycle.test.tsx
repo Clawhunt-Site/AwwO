@@ -37,7 +37,7 @@ it('makes the 201st canvas reachable through bounded pages, previous and refresh
     fireEvent.click(pager.getByRole('button', { name: '下一页' }));
     await screen.findByRole('heading', { name: `Canvas ${page * 50}` });
   }
-  fireEvent.click(screen.getByRole('button', { name: /↗ Canvas 200/ })); expect(onOpen).toHaveBeenCalledWith('canvas-200');
+  fireEvent.click(screen.getByRole('button', { name: /^Canvas 200/ })); expect(onOpen).toHaveBeenCalledWith('canvas-200');
   expect(pager.getByRole('button', { name: '下一页' })).toBeDisabled();
   fireEvent.click(pager.getByRole('button', { name: '上一页' })); await screen.findByRole('heading', { name: 'Canvas 150' });
   fireEvent.click(pager.getByRole('button', { name: '刷新列表' })); await screen.findByRole('heading', { name: 'Canvas 0' });

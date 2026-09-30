@@ -1,7 +1,8 @@
 import { SecretInput } from './SecretInput';
+import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LogOut, Plus, ArrowLeft, ShieldCheck, Save } from 'lucide-react';
+import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye } from 'lucide-react';
 import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
@@ -37,7 +38,10 @@ const navigate = (tenant?: string, canvas?: string) => window.location.assign(wo
 function CanvasBackLink({ tenantId }: { tenantId: string }) {
   const { t } = useSaaSPreferences();
   // A normal navigation preserves beforeunload protection for unsynced changes.
-  return <a className="saas-canvas-back" href={workspaceURL(tenantId)}><ArrowLeft size={14} aria-hidden="true" />{t('返回画布列表', 'Back to canvases')}</a>;
+  return <a className="saas-canvas-back" href={workspaceURL(tenantId)}><ArrowLeft size={15} aria-hidden="true" /><span>{t('返回画布列表', 'Back to canvases')}</span></a>;
+}
+function CanvasTitle({ tenant, name, status, tone }: { tenant: Tenant; name: string; status: React.ReactNode; tone: 'synced' | 'pending' | 'readonly' | 'warning' }) {
+  return <div className="saas-canvas-title"><CanvasBackLink tenantId={tenant.id} /><div className="saas-canvas-title-text"><span className="saas-canvas-title-workspace">{tenant.name}</span><strong title={name}>{name}</strong></div><span className={`saas-sync-pill is-${tone}`} role="status">{status}</span></div>;
 }
 function CanvasPageHeader({ tenantId, controls }: { tenantId: string; controls: React.ReactNode }) {
   return <header className="saas-canvas-page-header"><div className="saas-canvas-page-navigation"><a href="/" className="saas-logo">AwwO</a><CanvasBackLink tenantId={tenantId} /></div>{controls}</header>;
@@ -172,6 +176,27 @@ function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
   const { locale, t } = useSaaSPreferences();
   return <main className="saas-notice"><PreferenceControls /><strong>AwwO</strong><p role={retry ? 'alert' : 'status'}>{text}</p>{retry && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</main>;
 }
+const LOGIN_PREVIEW_DOCUMENT = {
+  nodes: [
+    { id: 'plan', x: 0, y: 150, w: 300, h: 190 },
+    { id: 'build', x: 420, y: 0, w: 300, h: 190 },
+    { id: 'api', x: 420, y: 300, w: 300, h: 190 },
+    { id: 'review', x: 840, y: 150, w: 300, h: 190 },
+  ],
+  edges: [{ fromNode: 'plan', toNode: 'build' }, { fromNode: 'plan', toNode: 'api' }, { fromNode: 'build', toNode: 'review' }, { fromNode: 'api', toNode: 'review' }],
+};
+/** Decorative: shows what a workspace canvas looks like before the visitor has one. */
+function LoginPreview() {
+  const { t } = useSaaSPreferences();
+  return <div className="saas-login-preview">
+    <CanvasThumbnail document={LOGIN_PREVIEW_DOCUMENT} />
+    <ul>
+      <li>{t('多个 Agent 节点按依赖顺序协作', 'Agent nodes run in dependency order')}</li>
+      <li>{t('每个节点保留独立会话与交付物', 'Every node keeps its own session and output')}</li>
+      <li>{t('使用你自己的模型服务与密钥', 'Bring your own model service and key')}</li>
+    </ul>
+  </div>;
+}
 function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Identity) => void; invited: boolean }) {
   const { locale, t } = useSaaSPreferences();
   const { options, optionsError, retryOptions } = useAuthOptions();
@@ -180,7 +205,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   if (forgot && options?.localAuth === true) return <PasswordRecovery onBack={() => setForgot(false)} />;
-  return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p></div>
+  return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
     : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
     : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a></section>}
@@ -291,8 +316,10 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
     return () => { controller.abort(); clearSaaSCanvas(); configureSaaSCanvasSave(null); };
   }, [identity.user.id, tenant.id, canvasId]);
   if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
-  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><CanvasBackLink tenantId={tenant.id} /><span>{tenant.name} / {record.name}</span><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><span role="status">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span><button onClick={() => downloadDocument(record.document, record.name + '.json')}>{t('导出画布 JSON', 'Export canvas JSON')}</button></div>
-    <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)} />
+  return <div className="saas-canvas-shell">
+    <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)}
+      headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone="readonly" status={<><Eye size={12} aria-hidden="true" /><span title={t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}>{t('只读', 'Read-only')}</span><span className="saas-visually-hidden">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span></>} />}
+      headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
@@ -561,12 +588,15 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       : runtime.reason
         ? saasErrorMessage(runtime.reason, locale)
         : t('当前没有可用的执行引擎。', 'No execution engine is currently available.');
-  return <div className="saas-canvas-shell"><div className="saas-cloud-status"><CanvasBackLink tenantId={tenant.id} /><span>{tenant.name} / {record.name}</span><button onClick={exportLocal}>{t('导出画布 JSON', 'Export canvas JSON')}</button><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><span role="status"><Save size={13}/>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></div>
+  const syncTone = saveState === '已同步' ? 'synced' : saveState === '未同步' || saveState === '存在未同步草稿' ? 'warning' : 'pending';
+  return <div className="saas-canvas-shell">
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status">{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true}
       executionUnavailableReason={executionUnavailableReason}
-      workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)} />
+      workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
+      headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
+      headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={exportLocal}><Download size={16} aria-hidden="true" /></button></div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
