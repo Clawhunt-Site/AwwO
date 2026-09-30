@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { access } from 'node:fs/promises';
 import test from 'node:test';
 import { publicHealth } from './config.mjs';
-import { configuration, fixture, request, run } from './test-support.mjs';
-import { executeAgent } from './agent-runtime.mjs';
+import { REASONING_TEXT, configuration, fixture, request, run } from './test-support.mjs';
+import { executeAgent, reasoningActivity } from './agent-runtime.mjs';
 import { deliveryOutputType, deliverySchemaBytes } from './delivery-contract.mjs';
 import { classifyError } from './errors.mjs';
 import { createProviderObserver } from './usage.mjs';
@@ -34,6 +34,8 @@ test('official SDK chat stream preserves isolated instructions, history and sing
   const task = await run(config, input, (event, released) => { if (event.type === 'completed') assert.equal(released, true); });
   assert.deepEqual(businessEvent(await task.result), { type: 'completed', text: 'Hello from Agents' });
   assert.equal(task.events.filter(e => e.type === 'text_delta').map(e => e.delta).join(''), 'Hello from Agents');
+  // A model that never reasons produces no reasoning report at all, not even a zero.
+  assert.equal(task.events.filter(e => e.type === 'reasoning').length, 0);
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0].url, '/v1/chat/completions');
   assert.equal(f.calls[0].headers.authorization, 'Bearer fixture-key');
@@ -47,10 +49,38 @@ test('official SDK chat stream preserves isolated instructions, history and sing
   assert.throws(() => process.kill(task.pid, 0), /ESRCH/);
 });
 
+test('provider reasoning is measured from raw events without reading it as content', () => {
+  assert.equal(reasoningActivity({ choices: [{ delta: { reasoning_content: '权衡ab' } }] }, 'chat_completions'), 4);
+  // Aliases are read in order and only the first non-empty one counts, never both.
+  assert.equal(reasoningActivity({ choices: [{ delta: { reasoning: 'abc', reasoning_text: 'abc' } }] }, 'chat_completions'), 3);
+  assert.equal(reasoningActivity({ choices: [{ delta: { content: 'answer' } }] }, 'chat_completions'), null);
+  assert.equal(reasoningActivity({ type: 'response.output_item.added', item: { type: 'reasoning' } }, 'responses'), 0);
+  assert.equal(reasoningActivity({ type: 'response.output_item.added', item: { type: 'message' } }, 'responses'), null);
+  assert.equal(reasoningActivity({ type: 'response.reasoning_text.delta', delta: 'xy' }, 'responses'), 2);
+  assert.equal(reasoningActivity({ type: 'response.output_text.delta', delta: 'answer' }, 'responses'), null);
+  assert.equal(reasoningActivity(null, 'responses'), null);
+});
+
+for (const protocol of ['chat_completions', 'responses']) test(`official SDK ${protocol} reasoning crosses the child as a count, never as its text`, { timeout: 15_000 }, async t => {
+  const f = await fixture(t, { mode: 'thinking', text: 'Answer after thinking' });
+  const task = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: protocol }), request());
+  assert.deepEqual(businessEvent(await task.result), { type: 'completed', text: 'Answer after thinking' });
+  const counts = task.events.filter(event => event.type === 'reasoning');
+  assert.ok(counts.length >= 1, JSON.stringify(task.events));
+  // The settled total precedes the answer, and nothing but the number crossed.
+  assert.deepEqual(counts.at(-1), { type: 'reasoning', characters: [...REASONING_TEXT].length });
+  assert.ok(task.events.indexOf(counts.at(-1)) < task.events.findIndex(event => event.type === 'text_delta'));
+  if (protocol === 'responses') assert.deepEqual(counts[0], { type: 'reasoning', characters: 0 });
+  for (const count of counts) assert.deepEqual(Object.keys(count).sort(), ['characters', 'type']);
+  const everything = JSON.stringify(task.events);
+  assert.ok(!everything.includes('44102') && !everything.includes('权衡'), 'the scratchpad left the worker');
+});
+
 test('official SDK Responses protocol preserves instructions and produces real terminal output', { timeout: 15_000 }, async t => {
   const f = await fixture(t, { text: 'Responses fixture output' });
   const task = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: 'responses' }), request({ systemPrompt: 'Independent persona' }));
   assert.deepEqual(businessEvent(await task.result), { type: 'completed', text: 'Responses fixture output' });
+  assert.equal(task.events.filter(e => e.type === 'reasoning').length, 0);
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].url, '/v1/responses');
   const metadata = publicHealth(configuration({ AWWO_OPENAI_AGENTS_PROTOCOL: 'responses' })).models[0];
   assert.equal(metadata.protocol, 'responses'); assert.equal(metadata.providerModel, f.calls[0].body.model);

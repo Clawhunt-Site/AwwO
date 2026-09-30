@@ -58,6 +58,27 @@ test('HTTP admission launches a run carrying exactly the effort its selected pro
   assert.equal(launched.length, 3);
 });
 
+test('HTTP relays reasoning counts only to a caller that opted in, and they never end the stream', { timeout: 5000 }, async t => {
+  const s = await serve(t, configuration(), { startRun: async ({ onEvent, onExit }) => {
+    setTimeout(() => {
+      onEvent({ type: 'reasoning', characters: 0 });
+      onEvent({ type: 'reasoning', characters: 9 });
+      onEvent({ type: 'text_delta', delta: 'ok' });
+      onExit(); onEvent({ type: 'completed', text: 'ok' });
+    }, 0);
+    return { done: Promise.resolve(), cancel() {} };
+  } });
+  const read = async (id, headers = {}) => {
+    const res = await s.send({ ...request(), runId: `run-${id}`, sessionId: `session-${id}` },
+      { headers: { 'content-type': 'application/json', authorization: `Bearer ${configuration().token}`, ...headers } });
+    assert.equal(res.status, 200);
+    return (await events(res)).map(event => event.type);
+  };
+  assert.deepEqual(await read('plain'), ['text_delta', 'completed']);
+  assert.deepEqual(await read('other', { 'x-awwo-run-activity': 'everything' }), ['text_delta', 'completed']);
+  assert.deepEqual(await read('opted', { 'x-awwo-run-activity': 'reasoning' }), ['reasoning', 'reasoning', 'text_delta', 'completed']);
+});
+
 test('SSE requests reserve capacity, reject duplicate/session overlap, and DELETE cancels exactly one child', { timeout: 15000 }, async t => {
   const f = await fixture(t, { mode:'stall' });
   const config = configuration({ AWWO_OPENAI_AGENTS_BASE_URL:f.baseURL, AWWO_OPENAI_AGENTS_MAX_CONCURRENCY:'1' });

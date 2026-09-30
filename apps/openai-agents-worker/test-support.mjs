@@ -3,6 +3,8 @@ import { once } from 'node:events';
 import { loadConfig } from './config.mjs';
 import { startIsolatedRun } from './runner.mjs';
 
+// Private scratchpad text a provider streams in its reasoning field; it must never leave the worker.
+export const REASONING_TEXT = 'weigh 权衡 the private ledger 44102 before answering';
 export const request = (overrides = {}) => ({ runId: 'run-1', tenantId: 'tenant-1', sessionId: 'session-1', prompt: 'Reply briefly.', messages: [], runtime: 'openai-agents', ...overrides });
 export const configuration = (overrides = {}) => loadConfig({
   AWWO_OPENAI_AGENTS_TOKEN: 'test-only-internal-token-at-least-32-characters',
@@ -34,6 +36,26 @@ export async function fixture(t, { mode = 'text', text = 'Hello from Agents', ca
         event('response.output_item.done', { output_index: 0, item });
         event('response.completed', { response }); res.end(); return;
       }
+      if (mode === 'thinking') {
+        // A Responses model that announces its reasoning, streams a summary of it, then answers.
+        const thought = { type: 'reasoning', id: 'rs_fixture', summary: [] };
+        const done = { ...thought, summary: [{ type: 'summary_text', text: REASONING_TEXT }] };
+        const message = { type: 'message', id: 'msg_fixture', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] };
+        const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'fixture-model', output: [done, message], usage: responseUsage };
+        const event = (type, payload) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`);
+        event('response.created', { response: { ...response, status: 'in_progress', output: [] } });
+        event('response.output_item.added', { output_index: 0, item: thought });
+        event('response.reasoning_summary_text.delta', { item_id: thought.id, output_index: 0, summary_index: 0, delta: REASONING_TEXT.slice(0, 12) });
+        event('response.reasoning_summary_text.delta', { item_id: thought.id, output_index: 0, summary_index: 0, delta: REASONING_TEXT.slice(12) });
+        event('response.output_item.done', { output_index: 0, item: done });
+        event('response.output_item.added', { output_index: 1, item: { ...message, status: 'in_progress', content: [] } });
+        event('response.content_part.added', { item_id: message.id, output_index: 1, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } });
+        event('response.output_text.delta', { item_id: message.id, output_index: 1, content_index: 0, delta: text });
+        event('response.output_text.done', { item_id: message.id, output_index: 1, content_index: 0, text });
+        event('response.content_part.done', { item_id: message.id, output_index: 1, content_index: 0, part: message.content[0] });
+        event('response.output_item.done', { output_index: 1, item: message });
+        event('response.completed', { response }); res.end(); return;
+      }
       if (mode === 'empty' || mode === 'reasoning') {
         // A completed response with no message: nothing at all, or out-of-band reasoning only.
         const output = mode === 'reasoning' ? [{ type: 'reasoning', id: 'rs_fixture', summary: [{ type: 'summary_text', text: 'Private reasoning only.' }] }] : [];
@@ -58,6 +80,12 @@ export async function fixture(t, { mode = 'text', text = 'Hello from Agents', ca
     // 'empty' streams no content at all; 'reasoning' streams only out-of-band reasoning.
     if (mode === 'empty') send({ role: 'assistant' });
     else if (mode === 'reasoning') send({ role: 'assistant', reasoning: 'Private reasoning only.' });
+    else if (mode === 'thinking') {
+      // A provider that streams its reasoning in a separate field before answering.
+      send({ role: 'assistant', reasoning_content: REASONING_TEXT.slice(0, 12) });
+      send({ reasoning_content: REASONING_TEXT.slice(12) });
+      send({ content: text });
+    }
     else send({ role: 'assistant', content: mode === 'tool' || mode === 'double-tool' ? 'Provisional preamble.' : text });
     if (mode === 'stall') return;
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));

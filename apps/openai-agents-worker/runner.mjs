@@ -91,6 +91,12 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       outputBytes += Buffer.byteLength(event.delta);
       if (outputBytes > config.maxOutputBytes) stop('output_limit');
       else { firstDeltaMs ??= performance.now() - acceptedAt; onEvent({ type: 'text_delta', delta: event.delta }); }
+    } else if (event.type === 'reasoning') {
+      // Only a well-formed count is relayed, rebuilt rather than passed through, so
+      // nothing but the number can cross this boundary; nothing follows a stop.
+      if (!cancellation && Number.isSafeInteger(event.characters) && event.characters >= 0) {
+        onEvent({ type: 'reasoning', characters: event.characters });
+      }
     } else if (['completed', 'failed', 'cancelled'].includes(event.type)) {
       childObservability = event.observability;
       if (cancellation) rememberTerminal(cancelledEvent());

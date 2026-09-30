@@ -3,6 +3,37 @@ import { parseToolArguments, registeredTools } from './tools.mjs';
 import { RuntimeError } from './errors.mjs';
 import { deliveryGuardrail, deliveryOutputType, deliveryViolation, parseDeliveryText } from './delivery-contract.mjs';
 
+// Provider reasoning is reported as a count, never its text, and at most this often:
+// a reader needs to see that the model is working, not each token of its scratchpad.
+const REASONING_REPORT_MS = 500;
+// The order a Chat Completions provider's own reasoning fields are read in; the first
+// non-empty one is the delta, so a provider sending two aliases is not counted twice.
+const CHAT_REASONING_FIELDS = ['reasoning_content', 'reasoning', 'reasoning_text'];
+const RESPONSES_REASONING_DELTAS = new Set(['response.reasoning_summary_text.delta', 'response.reasoning_text.delta']);
+
+function codePoints(text) {
+  let count = 0;
+  for (const _ of text) count += 1;
+  return count;
+}
+
+/** What one raw provider event says about reasoning: null for nothing, 0 when it only
+ * began, otherwise the size of the reasoning it carried. Never the text itself. */
+export function reasoningActivity(raw, protocol) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (protocol === 'chat_completions') {
+    const delta = raw.choices?.[0]?.delta;
+    if (!delta || typeof delta !== 'object') return null;
+    for (const field of CHAT_REASONING_FIELDS) {
+      if (typeof delta[field] === 'string' && delta[field]) return codePoints(delta[field]);
+    }
+    return null;
+  }
+  if (raw.type === 'response.output_item.added' && raw.item?.type === 'reasoning') return 0;
+  if (RESPONSES_REASONING_DELTAS.has(raw.type) && typeof raw.delta === 'string' && raw.delta) return codePoints(raw.delta);
+  return null;
+}
+
 // The SDK runs the agent and registered functions; Go owns cross-agent planning,
 // tenancy, durable history, retries/admission and model-call accounting.
 export async function executeAgent({ request, modelConfig, signal, emit, observer = createProviderObserver(modelConfig.protocol) }) {
@@ -16,6 +47,17 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
   // A server-derived delivery contract; admission already refused it together with tools.
   const contract = request.outputContract;
   let deliveredText;
+  let reasoningCharacters = 0, reasoningStarted = false, reportedReasoning = -1, reportedAt = 0;
+  // Nothing is reported for a model that never reasons: a count of zero would tell the reader
+  // it is thinking when it is simply answering.
+  const reportReasoning = async (force) => {
+    if (!reasoningStarted || reasoningCharacters === reportedReasoning) return;
+    const now = Date.now();
+    if (!force && now - reportedAt < REASONING_REPORT_MS) return;
+    reportedReasoning = reasoningCharacters;
+    reportedAt = now;
+    await emit({ type: 'reasoning', characters: reasoningCharacters });
+  };
   const endpoint = new URL(`${modelConfig.baseURL.replace(/\/$/, '')}/${modelConfig.protocol === 'responses' ? 'responses' : 'chat/completions'}`);
   const client = new OpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL, maxRetries: 0,
     fetch: (input, init) => {
@@ -33,6 +75,16 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
       if (++calls > 1) throw new RuntimeError('MODEL_CALL_LIMIT');
       for await (const event of inner.getStreamedResponse(input)) {
         if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+        if (event.type === 'model') {
+          const counted = reasoningActivity(event.event, modelConfig.protocol);
+          if (counted !== null) {
+            // That reasoning began is reported at once; the running count is coalesced.
+            const began = !reasoningStarted;
+            reasoningStarted = true;
+            reasoningCharacters += counted;
+            await reportReasoning(began || counted === 0);
+          }
+        }
         if (event.type === 'model' && modelConfig.protocol === 'chat_completions') {
           const choice = event.event?.choices?.[0];
           if (choice?.finish_reason) finishReason = choice.finish_reason;
@@ -91,6 +143,8 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
   try {
     for await (const event of result) {
       if (event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta' && names.length === 0) {
+        // The settled reasoning count goes out before the answer it preceded.
+        await reportReasoning(true);
         streamed += event.data.delta;
         await emit({ type: 'text_delta', delta: event.data.delta });
       }
