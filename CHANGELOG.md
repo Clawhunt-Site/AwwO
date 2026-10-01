@@ -24,6 +24,8 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Preserve confirmed model-run admission errors, including exhausted workspace quotas, without misreporting them as interrupted pages; uncertain or already accepted runs still recover by their original operation ID.
+- Keep workspace dialogs scrollable within the viewport when long model catalogs or member lists exceed the screen height.
 - Keep menu and run-history keyboard focus inside the open layer, prevent canvas shortcuts from acting behind it, and restore trigger focus on Escape.
 
 

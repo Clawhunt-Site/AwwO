@@ -168,6 +168,34 @@ it('allows a SaaS draft composer while retaining its text until initialization a
   await act(async () => reject(new Error('Cannot prepare')));
   await screen.findByText('Cannot prepare'); expect(input).toHaveValue('Keep my request'); expect(input).not.toBeDisabled();
 });
+it('shows a real quota rejection after first-node initialization and allows another send without false page recovery', async () => {
+  seed(); configureSaaSCanvasInitialize(async () => canonical(loadDocumentWithStatus().doc));
+  let submissions = 0;
+  const fetcher = vi.fn(async (input: unknown, init: RequestInit = {}) => {
+    const url = String(input);
+    if (url.endsWith('/runs') && init.method === 'POST') {
+      submissions += 1;
+      return new Response(JSON.stringify({ error: { code: 'quota_exceeded', message: 'Workspace run quota exceeded' } }), { status: 429 });
+    }
+    return new Response(JSON.stringify({ items: [], models: [] }));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+  fireEvent.click(screen.getByRole('button', { name: '打开 Draft node', exact: true }));
+  for (const request of ['First request', 'Try after capacity returns']) {
+    const before = submissions;
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: request } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+    await waitFor(() => expect(submissions).toBe(before + 1));
+    await waitFor(() => expect(loadRunJournal()).toBeNull());
+    expect(screen.getByTestId('composer-input')).toBeEnabled();
+    expect(screen.getAllByText(/工作区运行额度已满|workspace run quota/)[0]).toBeVisible();
+    expect(screen.queryByText('页面中断前尚未下发。')).toBeNull();
+    expect(screen.queryByText('已恢复运行结果；未执行的下游可单独继续。')).toBeNull();
+  }
+  // Only the pre-submission operation lookup is needed: no recovery lookup follows either rejection.
+  expect(fetcher.mock.calls.filter(([url]) => String(url).includes('/runs?operationId='))).toHaveLength(2);
+});
 it('allows conversation before required task input is filled while keeping explicit task validation', async () => {
   seed(); const document = loadDocumentWithStatus().doc;
   document.nodes[0] = { ...document.nodes[0], contract: { version: 1,

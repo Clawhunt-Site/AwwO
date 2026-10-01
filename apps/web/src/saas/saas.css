@@ -55,9 +55,10 @@ button.saas-link { border:0; background:transparent; color:var(--saas-accent); }
 .saas-table-wrap table { width:100%; border-collapse:collapse; font-size:13px; text-align:left; }
 .saas-table-wrap th,.saas-table-wrap td { padding:16px; border-bottom:1px solid var(--saas-border); }
 .saas-table-wrap th { color:var(--saas-muted); font-weight:500; }
-.saas-dialog-backdrop { position:fixed; inset:0; background:#19291f55; z-index:100; display:grid; place-items:center; padding:30px; }
-.saas-dialog-backdrop .saas-card { width:min(440px,90vw); }
-.saas-dialog-backdrop .saas-members { width:min(900px,90vw); max-height:85dvh; overflow:auto; }
+.saas-dialog-backdrop { position:fixed; inset:0; background:#19291f55; z-index:100; display:grid; place-items:center; padding:30px; box-sizing:border-box; overflow:auto; }
+.saas-dialog-backdrop .saas-card { width:min(440px,calc(100vw - 60px)); max-width:100%; max-height:calc(100dvh - 60px); min-height:0; box-sizing:border-box; overflow:auto; overscroll-behavior:contain; }
+.saas-dialog-backdrop .saas-card > * { flex-shrink:0; }
+.saas-dialog-backdrop .saas-members { width:min(900px,calc(100vw - 60px)); max-height:min(85dvh,calc(100dvh - 60px)); }
 .saas-panel-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; }
 .saas-members .saas-create { flex-wrap:wrap; margin:0; }
 .saas-members .saas-create input { width:min(270px,60vw); }

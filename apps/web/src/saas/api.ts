@@ -58,7 +58,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     session_busy: ['此会话正在运行，请稍后重试。', 'This session is running. Try again when it finishes.'],
     context_limit: ['输入超出模型上下文限制，请缩短输入或减少历史内容。', 'The input exceeds the model context limit. Shorten it or reduce the history.'],
     rate_limited: ['请求过于频繁，请稍后重试。', 'Too many requests. Please try again later.'],
-    quota_exceeded: ['工作区运行额度不足，请联系管理员。', 'The workspace run quota has been reached. Contact an administrator.'],
+    quota_exceeded: ['工作区运行额度已满，请等待任务结束或额度恢复后重试。', 'The workspace run quota has been reached. Retry after active tasks finish or the daily quota resets.'],
     personal_engine_required: ['请先到「我的引擎」添加并验证你自己的 API Key。', 'Add and verify your API key in My engines before running.'],
     model_unavailable: ['所选模型不可用，请重新选择服务端提供的模型。', 'The selected model is unavailable. Choose a model offered by the server.'],
     runtime_unavailable: runtimeUnavailableMessages,

@@ -1,4 +1,4 @@
-import { api, API_BASE, tenantPath, type Tenant, type SaaSAgent } from './api';
+import { api, API_BASE, SaaSApiError, tenantPath, type Tenant, type SaaSAgent } from './api';
 import { modelEffortCapability, runtimeDefinitions, runtimeModels, type SaaSRuntimeStatus } from './runtimeCatalog';
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText } from './canvasErrors';
@@ -328,7 +328,19 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
           agentId: decodeURIComponent(send[2]), title: body.message.slice(0, 80) });
         sessionId = session.id;
       }
-      const run = await post('/runs', { sessionId, prompt: body.message, operationId });
+      let run: { id: string };
+      try {
+        run = await post('/runs', { sessionId, prompt: body.message, operationId });
+      } catch (error) {
+        // Only a definite rejection of this new operation proves no run was admitted.
+        // An existing/conflicting identity, lost response or 5xx still needs recovery.
+        // Keep this boundary before event streaming: an events 4xx can follow a paid run.
+        if (!existing && error instanceof SaaSApiError && error.status >= 400 && error.status < 500
+          && error.code !== 'request_failed' && error.code !== 'idempotency_conflict') {
+          return json({ code: error.code, error: canvasErrorMessage(error), admissionRejected: true }, error.status);
+        }
+        throw error;
+      }
       const upstream = await fetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: init.signal });
       if (!upstream.ok || !upstream.body) return json({ error: canvasText('无法连接运行事件，请刷新后恢复。', 'Run events could not be reached. Reload to restore the run.') }, upstream.status || 502);
       const encoder = new TextEncoder();
