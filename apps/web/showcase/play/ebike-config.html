@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orvia 城市电单车 · 配置器</title>
+<style>
+  :root { --frame: #2E4A7D; --hl: #FF9F43; --ink: #1F2328; --muted: #6E7279; --line: #E6E1D8; --bg: #F3F0EA; }
+  * { box-sizing: border-box; }
+  html { font-size: clamp(11px, 1.48vh, 18px); }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .app { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+  header { display: flex; align-items: center; gap: 3rem; padding: 1.3rem 3rem; }
+  .logo { display: flex; align-items: center; gap: .6rem; font-weight: 900; font-size: 1.85rem; letter-spacing: .01em; }
+  .logo i { width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--frame); transition: background .6s; }
+  nav { display: flex; gap: 2.2rem; font-size: 1.02rem; color: var(--muted); }
+  nav .on { color: var(--ink); font-weight: 700; }
+  .cart { margin-left: auto; position: relative; width: 3rem; height: 3rem; border-radius: 50%; background: #fff; display: grid; place-items: center;
+    box-shadow: 0 .15rem .6rem rgba(40,30,20,.08); }
+  .cart svg { width: 1.45rem; height: 1.45rem; }
+  .badge { position: absolute; top: -.3rem; right: -.3rem; min-width: 1.45rem; height: 1.45rem; padding: 0 .3rem; border-radius: 999px; background: #E8553E; color: #fff;
+    font-size: .82rem; font-weight: 800; display: grid; place-items: center; transform: scale(0); transition: transform .35s cubic-bezier(.3,1.7,.5,1); }
+  .badge.on { transform: scale(1); }
+  .badge.bump { animation: bump .5s; }
+  @keyframes bump { 30% { transform: scale(1.45); } 60% { transform: scale(.9); } 100% { transform: scale(1); } }
+  main { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 2rem; padding: 0 3rem 2.2rem; min-height: 0; }
+
+  /* the stage: one full-bleed SVG (studio, street for the test ride, the bike), plus a few HTML overlays */
+  .stage { position: relative; border-radius: 1.6rem; overflow: hidden; background: #ECE7DF; min-height: 0; }
+  .stage > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .studio, .bgword { transition: opacity .7s; }
+  #street { opacity: 0; transition: opacity .7s; }
+  .riding #street { opacity: 1; } .riding .studio { opacity: 0; } .riding .bgword { opacity: .25; }
+  .scroll { animation: slide linear infinite; animation-play-state: paused; }
+  .riding .scroll { animation-play-state: running; }
+  #bld { animation-duration: 9s; --d: -800px; } #trees { animation-duration: 1.25s; --d: -600px; } #dash { animation-duration: .3s; --d: -140px; }
+  @keyframes slide { to { transform: translateX(var(--d)); } }
+  .wheel, .crank { transform-box: fill-box; transform-origin: center; }
+  .riding .wheel { animation: spin 1.7s linear infinite; } .riding .crank { animation: spin 1.15s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .riding #bob { animation: bob .42s ease-in-out infinite alternate; }
+  @keyframes bob { to { transform: translateY(-3px); } }
+  .stand { transform-box: fill-box; transform-origin: 50% 0%; transition: transform .55s cubic-bezier(.5,0,.3,1); }
+  .riding .stand { transform: rotate(74deg); }
+  .beam { opacity: 0; transition: opacity .5s; } .riding .beam { opacity: .9; }
+  .lens { fill: #C8CED6; transition: fill .4s; } .riding .lens { fill: #FFF2B8; }
+  .frs { stroke: var(--frame); transition: stroke .6s; } .frf { fill: var(--frame); transition: fill .6s; }
+  .spokes, .magw, .bat, .sad, #p-basket { transition: opacity .45s, transform .45s; }
+  .magw { opacity: 0; } .mag .magw { opacity: 1; } .mag .spokes { opacity: 0; }
+  .bat.long { opacity: 0; } .long .bat.long { opacity: 1; } .long .bat.std { opacity: 0; }
+  .sad.retro { opacity: 0; } .retro .sad.retro { opacity: 1; } .retro .sad.sport { opacity: 0; }
+  #p-basket { opacity: 0; transform: translateY(-16px); } .wicker #p-basket { opacity: 1; transform: none; } .ghost #p-basket { opacity: .35; transform: none; }
+  .part { transition: filter .25s, opacity .45s, transform .45s; }
+  .part.hl { filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 9px var(--hl)) drop-shadow(0 0 3px var(--hl)); }
+  .stage.flash > svg { animation: flash .6s; }
+  @keyframes flash { 40% { opacity: .35; } }
+  #call { position: absolute; transform: translate(-50%, -130%); background: var(--ink); color: #fff; font-size: .95rem; font-weight: 700; padding: .45rem .9rem;
+    border-radius: 999px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .2s, left .25s, top .25s; }
+  #call::after { content: ''; position: absolute; left: 50%; bottom: -.35rem; width: .7rem; height: .7rem; background: var(--ink); transform: translateX(-50%) rotate(45deg); border-radius: .1rem; }
+  #call.on { opacity: 1; }
+  #ridepill { position: absolute; left: 1.6rem; top: 1.5rem; display: flex; align-items: center; gap: .55rem; background: rgba(31,35,40,.82); color: #fff;
+    font-weight: 700; font-size: .95rem; padding: .5rem 1rem; border-radius: 999px; opacity: 0; transform: translateY(-.4rem); transition: opacity .3s, transform .3s; }
+  #ridepill i { width: .6rem; height: .6rem; border-radius: 50%; background: #5BE39B; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .riding #ridepill { opacity: 1; transform: none; }
+  .specs { position: absolute; left: 1.6rem; right: 1.6rem; bottom: 1.4rem; display: flex; flex-wrap: wrap; gap: .8rem; align-items: flex-end; }
+  .chip { background: rgba(255,255,255,.86); border-radius: 1rem; padding: .7rem 1.1rem; min-width: 7.6rem; box-shadow: 0 .15rem .6rem rgba(40,30,20,.06); }
+  .chip b { font-size: 1.75rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .chip span { font-size: .9rem; font-weight: 700; margin-left: .2rem; }
+  .chip i { display: block; font-style: normal; font-size: .82rem; color: var(--muted); margin-top: .1rem; }
+  .chip.pop b { animation: pop .5s; } @keyframes pop { 40% { color: #E8553E; } }
+  .specs .note { font-size: .8rem; color: var(--muted); margin-left: auto; background: rgba(255,255,255,.78); padding: .3rem .8rem; border-radius: 999px; }
+  #tag { position: absolute; right: 1.6rem; top: 1.5rem; font-size: .82rem; color: #fff; background: rgba(14,17,22,.55); padding: .3rem .8rem; border-radius: 999px; }
+
+  /* the panel */
+  .panel { background: #fff; border-radius: 1.6rem; padding: 2rem 2.3rem; display: flex; flex-direction: column; min-height: 0; overflow: auto;
+    box-shadow: 0 .2rem 1.2rem rgba(40,30,20,.05); }
+  .eyebrow { font-size: .92rem; font-weight: 700; color: var(--muted); letter-spacing: .04em; }
+  h1 { margin: .25rem 0 0; font-size: 2.8rem; line-height: 1.1; font-weight: 900; letter-spacing: -.01em; }
+  .desc { margin: .6rem 0 0; font-size: 1rem; color: var(--muted); line-height: 1.55; }
+  .sec { margin-top: 1.25rem; border-radius: 1rem; padding: .55rem .7rem .7rem; margin-left: -.7rem; margin-right: -.7rem; transition: box-shadow .25s, background .25s; }
+  .sec.hl { background: #FFF7EE; box-shadow: 0 0 0 2px var(--hl); }
+  .lab { display: flex; justify-content: space-between; align-items: baseline; font-size: 1rem; margin-bottom: .6rem; }
+  .lab b { font-weight: 800; } .lab .val { color: var(--muted); font-size: .92rem; }
+  .sw { display: flex; gap: .85rem; }
+  .sw button { width: 2.6rem; height: 2.6rem; border-radius: 50%; border: 0; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); position: relative; transition: transform .2s; }
+  .sw button::after { content: ''; position: absolute; inset: -.32rem; border-radius: 50%; border: 2px solid transparent; transition: border-color .25s; }
+  .sw button.on::after { border-color: var(--ink); }
+  .sw button:hover { transform: scale(1.08); }
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+  .opt { display: flex; justify-content: space-between; align-items: center; gap: .5rem; border: 1.5px solid var(--line); background: #FBFAF8; border-radius: .9rem;
+    padding: .85rem 1rem; font-size: 1rem; font-weight: 700; text-align: left; transition: border-color .25s, background .25s, box-shadow .25s; }
+  .opt em { font-style: normal; font-weight: 700; font-size: .85rem; color: var(--muted); white-space: nowrap; }
+  .opt:hover { border-color: #CFC8BC; }
+  .opt.on { border-color: var(--ink); background: #fff; box-shadow: 0 .2rem .7rem rgba(31,35,40,.08); }
+  .foot { margin-top: auto; padding-top: 1.4rem; border-top: 1px solid var(--line); }
+  .price { display: flex; justify-content: space-between; align-items: baseline; margin-top: 1.1rem; }
+  .price span { font-size: .95rem; font-weight: 700; color: var(--muted); }
+  .price b { font-size: 2.5rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+  .price b.pop { animation: pop .5s; }
+  .fine { font-size: .8rem; color: var(--muted); margin-top: .2rem; text-align: right; }
+  .acts { display: flex; gap: .8rem; margin-top: 1.1rem; height: 3.5rem; }
+  .ride { flex: 0 0 auto; border: 1.5px solid var(--ink); background: #fff; border-radius: 999px; padding: 0 1.6rem; font-weight: 800; font-size: 1.05rem;
+    display: flex; align-items: center; gap: .5rem; transition: background .25s, color .25s; }
+  .ride svg { width: 1.1rem; height: 1.1rem; }
+  .ride.on { background: var(--ink); color: #fff; }
+  .buyw { flex: 1; display: flex; justify-content: center; }
+  .buy { width: 100%; height: 100%; border: 0; border-radius: 999px; background: var(--ink); color: #fff; font-weight: 800; font-size: 1.1rem; position: relative; overflow: hidden;
+    transition: width .4s cubic-bezier(.6,0,.3,1), background .35s; }
+  .buy .txt { transition: opacity .2s .28s; white-space: nowrap; }
+  .buy.loading .txt { transition: opacity .15s 0s; }
+  .buy .spin { position: absolute; left: 50%; top: 50%; width: 1.5rem; height: 1.5rem; margin: -.75rem 0 0 -.75rem; border-radius: 50%; border: 3px solid rgba(255,255,255,.3);
+    border-top-color: #fff; opacity: 0; animation: spin .7s linear infinite; transition: opacity .2s; }
+  .buy.loading { width: 3.5rem; } .buy.loading .txt { opacity: 0; } .buy.loading .spin { opacity: 1; }
+  .buy.done { background: #2F9E6E; }
+  .fly { position: fixed; left: 0; top: 0; width: 1.1rem; height: 1.1rem; margin: -.55rem 0 0 -.55rem; border-radius: 50%; background: #E8553E; z-index: 20; pointer-events: none; }
+
+  #cursor { position: fixed; left: 0; top: 0; width: 30px; height: 30px; z-index: 50; pointer-events: none; transition: scale .1s; filter: drop-shadow(0 2px 3px rgba(0,0,0,.25)); }
+  #cursor.down { scale: .86; }
+  .rip { position: fixed; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; border: 3px solid var(--hl); z-index: 49; pointer-events: none; animation: rip .55s ease-out forwards; }
+  @keyframes rip { to { transform: scale(4.2); opacity: 0; } }
+  body.demo, body.demo * { cursor: none !important; }
+
+  @media (max-width: 900px) {
+    html { font-size: 14px; }
+    body { overflow: auto; }
+    .app { height: auto; }
+    header { gap: 1rem; padding: 1rem 1.2rem; } nav { display: none; }
+    main { grid-template-columns: minmax(0, 1fr); padding: 0 1rem 1.4rem; gap: 1rem; }
+    .stage { aspect-ratio: 6 / 5; }
+    .specs { left: .8rem; right: .8rem; top: .8rem; bottom: auto; gap: .5rem; } .chip { min-width: 0; padding: .5rem .7rem; } .chip b { font-size: 1.3rem; } .specs .note { display: none; }
+    #tag { top: auto; bottom: .8rem; right: .8rem; } #ridepill { top: auto; bottom: .8rem; left: .8rem; }
+    .panel { padding: 1.4rem 1.3rem; overflow: visible; }
+    h1 { font-size: 2.2rem; }
+    .opt { padding: .75rem .8rem; font-size: .95rem; flex-direction: column; align-items: flex-start; gap: .2rem; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo"><i></i>Orvia</div>
+    <nav><span data-t="nav1"></span><span class="on" data-t="nav2"></span><span data-t="nav3"></span><span data-t="nav4"></span></nav>
+    <div class="cart" id="cart"><svg viewBox="0 0 24 24" fill="none" stroke="#1F2328" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2.2l2.2 10.2a1.6 1.6 0 0 0 1.6 1.3h7.6a1.6 1.6 0 0 0 1.6-1.2L20 8H6.2"/><circle cx="9.5" cy="19.5" r="1.3"/><circle cx="16.5" cy="19.5" r="1.3"/></svg><span class="badge" id="badge">0</span></div>
+  </header>
+  <main>
+    <section class="stage" id="stage">
+      <svg id="art" viewBox="0 0 1200 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+      <div id="call"></div>
+      <div id="ridepill"><i></i><span data-t="riding"></span></div>
+      <div id="tag" data-t="tag"></div>
+      <div class="specs">
+        <div class="chip"><b id="s-km">60</b><span>km</span><i data-t="km"></i></div>
+        <div class="chip"><b id="s-kg">21.5</b><span>kg</span><i data-t="kg"></i></div>
+        <div class="chip"><b id="s-h">4.5</b><span>h</span><i data-t="h"></i></div>
+        <div class="chip"><b>5</b><span data-t="lv"></span><i data-t="assist"></i></div>
+        <div class="note" data-t="specnote"></div>
+      </div>
+    </section>
+    <aside class="panel">
+      <div class="eyebrow" data-t="eyebrow"></div>
+      <h1>Orvia City</h1>
+      <p class="desc" data-t="desc"></p>
+      <div id="secs"></div>
+      <div class="foot">
+        <div class="price"><span data-t="price"></span><b id="price">¥3,999</b></div>
+        <div class="fine" data-t="fine"></div>
+        <div class="acts">
+          <button class="ride" id="ride"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l10.5-6.5z"/></svg><span data-t="ride"></span></button>
+          <div class="buyw"><button class="buy" id="buy"><span class="txt" data-t="buy"></span><span class="spin"></span></button></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+<script>
+(() => {
+'use strict';
+const Q = new URLSearchParams(location.search), DEMO = Q.has('demo'), EN = Q.get('lang') === 'en';
+const T = EN ? {
+  nav1: 'Models', nav2: 'Configure', nav3: 'Test ride', nav4: 'Stores', eyebrow: 'CITY COMMUTER E-BIKE', desc: 'Light, low step-through frame for commutes, groceries and school runs.',
+  color: 'Colour', wheels: 'Wheels', saddle: 'Saddle', basket: 'Basket', battery: 'Battery', incl: 'Included',
+  km: 'Range', kg: 'Weight', h: 'Charge time', assist: 'Assist', lv: 'levels', specnote: 'Illustrative specs',
+  price: 'Illustrative price', fine: 'Illustrative price and specs · not a real product', ride: 'Test ride', stop: 'Stop ride', buy: 'Add to cart', added: 'Added to cart',
+  riding: 'Test riding', tag: 'Illustration · AI-generated', title: 'Orvia City e-bike · Configurator' } : {
+  nav1: '车型', nav2: '配置', nav3: '试骑', nav4: '门店', eyebrow: '城市通勤电单车', desc: '轻巧低跨，通勤、买菜、接娃都顺手。',
+  color: '车身颜色', wheels: '轮组', saddle: '车座', basket: '车篮', battery: '电池', incl: '标配',
+  km: '续航', kg: '整车重量', h: '充电时间', assist: '助力档位', lv: '档', specnote: '示意参数',
+  price: '示意价格', fine: '示意价格与参数 · 非真实商品', ride: '试骑', stop: '停止试骑', buy: '加入购物车', added: '已加入购物车',
+  riding: '试骑中', tag: '示意 · AI 生成', title: 'Orvia 城市电单车 · 配置器' };
+const $ = id => document.getElementById(id), $$ = s => document.querySelectorAll(s);
+document.documentElement.lang = EN ? 'en' : 'zh-CN'; document.title = T.title;
+$$('[data-t]').forEach(el => { el.textContent = T[el.dataset.t]; });
+if (DEMO) document.body.classList.add('demo');
+
+const COLORS = [
+  { id: 'white', hex: '#ECEAE5', zh: '雾白', en: 'Mist White' }, { id: 'mint', hex: '#86CDB3', zh: '薄荷', en: 'Mint' },
+  { id: 'coral', hex: '#EF7F67', zh: '珊瑚', en: 'Coral' }, { id: 'navy', hex: '#2E4A7D', zh: '海军蓝', en: 'Navy' },
+  { id: 'graphite', hex: '#3A3D42', zh: '石墨黑', en: 'Graphite' } ];
+const OPTS = {
+  wheels: [{ id: 'spoke', zh: '经典辐条', en: 'Classic spokes', p: 0, kg: 0 }, { id: 'mag', zh: '五辐一体轮', en: 'Five-spoke mag', p: 300, kg: .4 }],
+  saddle: [{ id: 'sport', zh: '运动轻量座', en: 'Sport lite', p: 0, kg: 0 }, { id: 'retro', zh: '复古舒适座', en: 'Retro comfort', p: 200, kg: .3 }],
+  basket: [{ id: 'none', zh: '不加装', en: 'None', p: 0, kg: 0 }, { id: 'wicker', zh: '藤编前车篮', en: 'Wicker front basket', p: 180, kg: .8 }],
+  battery: [{ id: 'std', zh: '标准 360Wh', en: 'Standard 360 Wh', p: 0, kg: 0, km: 60, h: 4.5 }, { id: 'long', zh: '长续航 540Wh', en: 'Long range 540 Wh', p: 800, kg: 1.2, km: 90, h: 6 }] };
+const BASE = 3999, BASE_KG = 21.5, DEF = { color: 'navy', wheels: 'spoke', saddle: 'sport', basket: 'none', battery: 'std' };
+const PART = { color: 'p-frame', wheels: 'p-wheels', saddle: 'p-saddle', basket: 'p-basket', battery: 'p-battery' };
+const ANCHOR = { color: [585, 478], wheels: [760, 262], saddle: [398, 168], basket: [818, 128], battery: [520, 306] };   // callout points, bike coordinates
+let cfg = { ...DEF };
+const name = o => EN ? o.en : o.zh;
+
+// ───────── the panel ─────────
+const secs = $('secs');
+secs.innerHTML = `<section class="sec" data-part="color"><div class="lab"><b>${T.color}</b><span class="val" id="cname"></span></div><div class="sw">` +
+  COLORS.map(c => `<button data-color="${c.id}" style="background:${c.hex}" aria-label="${name(c)}"></button>`).join('') + '</div></section>' +
+  Object.entries(OPTS).map(([k, list]) => `<section class="sec" data-part="${k}"><div class="lab"><b>${T[k]}</b></div><div class="opts">` +
+    list.map(o => `<button class="opt" data-opt="${k}:${o.id}"><span>${name(o)}</span><em>${o.p ? '+¥' + o.p : T.incl}</em></button>`).join('') + '</div></section>').join('');
+secs.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.color) cfg.color = b.dataset.color; else { const [k, v] = b.dataset.opt.split(':'); cfg[k] = v; }
+  apply();
+});
+
+// ───────── the art (studio, street, bike) ─────────
+let sd = 11; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+function wheel(cx, cy, motor) {
+  let sp = '', mg = '';
+  for (let i = 0; i < 32; i++) { const a = i / 32 * Math.PI * 2, b = a + (i % 2 ? .24 : -.24);
+    sp += `<line x1="${(cx + Math.cos(a) * 18).toFixed(1)}" y1="${(cy + Math.sin(a) * 18).toFixed(1)}" x2="${(cx + Math.cos(b) * 122).toFixed(1)}" y2="${(cy + Math.sin(b) * 122).toFixed(1)}"/>`; }
+  for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 - Math.PI / 2, p = (r, w) => `${(cx + Math.cos(a) * r - Math.sin(a) * w).toFixed(1)},${(cy + Math.sin(a) * r + Math.cos(a) * w).toFixed(1)}`;
+    mg += `<polygon points="${p(24, -10)} ${p(121, -18)} ${p(121, 18)} ${p(24, 10)}"/>`; }
+  return `<g class="wheel">
+    <circle cx="${cx}" cy="${cy}" r="147" fill="none" stroke="#1E2023" stroke-width="24"/>
+    <circle cx="${cx}" cy="${cy}" r="152" fill="none" stroke="#2D3034" stroke-width="7" stroke-dasharray="5 9"/>
+    <circle cx="${cx}" cy="${cy}" r="128" fill="none" stroke="#C9CED5" stroke-width="9"/>
+    <circle cx="${cx}" cy="${cy}" r="121" fill="none" stroke="#A3AAB3" stroke-width="2"/>
+    <g class="spokes" stroke="#B4BAC2" stroke-width="2.2">${sp}</g>
+    <g class="magw" fill="#30343A" stroke="#4A4F57" stroke-width="2">${mg}</g>
+    ${motor ? `<circle cx="${cx}" cy="${cy}" r="42" fill="#2A2D31"/><circle cx="${cx}" cy="${cy}" r="33" fill="none" stroke="#454A51" stroke-width="3"/><circle class="frf" cx="${cx + 21}" cy="${cy}" r="5"/>`
+      : `<circle cx="${cx}" cy="${cy}" r="18" fill="#D8DCE1"/><circle cx="${cx}" cy="${cy}" r="7" fill="#9AA1AA"/>`}
+    <rect x="${cx - 4}" y="${cy - 134}" width="8" height="12" rx="2" fill="#7C838C"/>
+  </g>`;
+}
+function strip(period, copies, make) { let s = ''; for (let k = 0; k < copies; k++) s += `<g transform="translate(${k * period} 0)">${make()}</g>`; return s; }
+function buildings() {
+  sd = 11; let s = '', x = 0;
+  while (x < 800) { const w = 70 + rnd() * 70 | 0, h = 120 + rnd() * 200 | 0, y = 790 - h, col = ['#D3DCE6', '#C8D3DF', '#DCE3EA'][rnd() * 3 | 0];
+    s += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${col}"/>`;
+    for (let wy = y + 18; wy < 770; wy += 30) for (let wx = x + 12; wx < x + w - 14; wx += 22) s += `<rect x="${wx}" y="${wy}" width="10" height="14" fill="rgba(255,255,255,.55)"/>`;
+    x += w + 8; }
+  return s;
+}
+const TREES = () => `<rect x="76" y="764" width="10" height="48" fill="#9A7B5F"/><circle cx="81" cy="738" r="40" fill="#9CCB8E"/><circle cx="58" cy="756" r="24" fill="#8DBF80"/>
+  <rect x="372" y="660" width="7" height="152" fill="#6F757D"/><rect x="362" y="652" width="34" height="10" rx="3" fill="#6F757D"/><rect x="372" y="662" width="20" height="5" fill="#FFF3C4"/>
+  <rect x="520" y="776" width="8" height="36" fill="#9A7B5F"/><circle cx="524" cy="756" r="28" fill="#A9D39B"/>`;
+let dashes = ''; for (let x = 0; x < 2400; x += 140) dashes += `<rect x="${x}" y="914" width="62" height="10" rx="5" fill="rgba(255,255,255,.85)"/>`;
+const BIKE = `
+  <ellipse cx="505" cy="594" rx="392" ry="17" fill="rgba(40,30,20,.17)" filter="url(#soft)"/>
+  <path class="beam" d="M 746 226 L 1080 160 L 1080 306 L 746 240 Z" fill="url(#beamG)"/>
+  <g id="p-wheels" class="part">${wheel(250, 430, true)}${wheel(760, 430, false)}</g>
+  <path d="M 440 418 L 250 414 M 440 486 L 250 446" stroke="#2F3338" stroke-width="4" fill="none"/>
+  <g id="p-frame" class="part" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path class="frs" d="M 89.7 387 A 166 166 0 0 1 377.2 323.3" stroke-width="13"/>
+    <path class="frs" d="M 616.2 347 A 166 166 0 0 1 923.5 401.2" stroke-width="13"/>
+    <path class="frs" d="M 440 452 L 250 430" stroke-width="13"/>
+    <path class="frs" d="M 404 268 L 250 430" stroke-width="11"/>
+    <path class="frs" d="M 440 452 L 398 236" stroke-width="26"/>
+    <path class="frs" d="M 712 292 L 566 424 Q 520 462 440 452" stroke-width="34"/>
+    <path d="M 701 291 L 576 404" stroke="rgba(255,255,255,.22)" stroke-width="7"/>
+    <path class="frs" d="M 716 288 C 728 340 744 392 760 430" stroke-width="15"/>
+    <path class="frs" d="M 700 200 L 716 292" stroke-width="30"/>
+  </g>
+  <g id="p-rack" fill="none" stroke="#2B2F35" stroke-linecap="round">
+    <path d="M 200 256 L 372 256" stroke-width="9"/><path d="M 222 256 L 250 428 M 300 256 L 258 424 M 372 256 L 402 248" stroke-width="6"/>
+    <rect x="186" y="248" width="20" height="15" rx="4" fill="#E8553E" stroke="none"/>
+  </g>
+  <g id="p-battery" class="part" stroke-linecap="round">
+    <g class="bat std"><line x1="678.4" y1="290" x2="590.8" y2="369.2" stroke="#2B2F35" stroke-width="30"/><line x1="676" y1="292" x2="593" y2="367" stroke="#40454C" stroke-width="9"/>
+      <circle cx="668" cy="299.4" r="3.6" fill="#7BE3AE"/><circle cx="659.1" cy="307.4" r="3.6" fill="#7BE3AE"/><circle cx="650.2" cy="315.5" r="3.6" fill="#7BE3AE"/></g>
+    <g class="bat long"><line x1="687.1" y1="282.1" x2="561.6" y2="395.6" stroke="#2B2F35" stroke-width="36"/><line x1="684" y1="285" x2="564.5" y2="393" stroke="#40454C" stroke-width="11"/>
+      <circle cx="676.7" cy="291.5" r="3.6" fill="#7BE3AE"/><circle cx="667.8" cy="299.5" r="3.6" fill="#7BE3AE"/><circle cx="658.9" cy="307.6" r="3.6" fill="#7BE3AE"/><circle cx="650" cy="315.6" r="3.6" fill="#7BE3AE"/></g>
+  </g>
+  <g class="stand"><line x1="372" y1="452" x2="364" y2="584" stroke="#2B2F35" stroke-width="9" stroke-linecap="round"/><ellipse cx="364" cy="587" rx="11" ry="4" fill="#2B2F35"/></g>
+  <g class="crank">
+    <circle cx="440" cy="452" r="34" fill="none" stroke="#3A3E44" stroke-width="7" stroke-dasharray="4 3"/><circle cx="440" cy="452" r="12" fill="#5A6068"/>
+    <line x1="440" y1="452" x2="440" y2="384" stroke="#2B2F35" stroke-width="10" stroke-linecap="round" opacity=".5"/><rect x="418" y="378" width="44" height="12" rx="4" fill="#1E2023" opacity=".5"/>
+    <line x1="440" y1="452" x2="440" y2="520" stroke="#2B2F35" stroke-width="10" stroke-linecap="round"/><rect x="418" y="514" width="44" height="12" rx="4" fill="#1E2023"/>
+  </g>
+  <g id="p-bar" fill="none" stroke-linecap="round">
+    <path d="M 700 204 L 690 160" stroke="#2B2F35" stroke-width="12"/><path d="M 690 160 C 668 146 636 146 608 160" stroke="#2B2F35" stroke-width="10"/>
+    <path d="M 618 155 L 594 167" stroke="#3B2F28" stroke-width="17"/><circle cx="664" cy="148" r="8" fill="#C9CED5" stroke="none"/>
+  </g>
+  <rect x="718" y="222" width="28" height="20" rx="7" fill="#E9EDF2"/><circle class="lens" cx="741" cy="232" r="7"/>
+  <g id="p-basket" class="part">
+    <path d="M 772 260 L 758 428 M 858 260 L 764 428" stroke="#9AA1AA" stroke-width="4"/>
+    <path d="M 744 156 L 892 156 L 874 260 L 762 260 Z" fill="#D9A66A"/>
+    <g clip-path="url(#bk)" stroke="#BC8749" stroke-width="3">${[178, 200, 222, 244].map(y => `<line x1="730" y1="${y}" x2="900" y2="${y}"/>`).join('')}</g>
+    <g clip-path="url(#bk)" stroke="#C99558" stroke-width="2.5">${Array.from({ length: 9 }, (_, i) => `<line x1="${752 + i * 17}" y1="150" x2="${758 + i * 15}" y2="266"/>`).join('')}</g>
+    <path d="M 738 154 L 898 154" stroke="#B5803F" stroke-width="10" stroke-linecap="round"/><path d="M 744 200 L 716 212" stroke="#2B2F35" stroke-width="7" stroke-linecap="round"/>
+  </g>
+  <g id="p-saddle" class="part">
+    <line x1="398" y1="238" x2="394" y2="212" stroke="#2B2F35" stroke-width="11" stroke-linecap="round"/>
+    <g class="sad sport"><path d="M 336 208 C 356 196 424 194 456 205 C 446 215 424 218 402 218 C 380 218 350 216 336 208 Z" fill="#24272B"/></g>
+    <g class="sad retro"><path d="M 372 220 l -6 5 l 12 5 l -12 5 l 12 5 l -6 4 M 424 220 l -6 5 l 12 5 l -12 5 l 12 5 l -6 4" stroke="#7C838C" stroke-width="3" fill="none"/>
+      <path d="M 340 200 C 356 182 432 182 452 196 C 458 212 436 222 400 222 C 362 222 336 214 340 200 Z" fill="#8B5A3C"/>
+      <path d="M 352 201 C 368 190 428 190 443 199" stroke="#C49A74" stroke-width="2" stroke-dasharray="4 4" fill="none"/></g>
+  </g>`;
+$('art').innerHTML = `
+  <defs>
+    <radialGradient id="studioG" cx="50%" cy="42%" r="72%"><stop offset="0" stop-color="#FFFFFF"/><stop offset=".62" stop-color="#EEE9E1"/><stop offset="1" stop-color="#E1DACE"/></radialGradient>
+    <linearGradient id="floorG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E7E1D7"/><stop offset="1" stop-color="#DAD2C5"/></linearGradient>
+    <linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CFE7F6"/><stop offset="1" stop-color="#EEF2EE"/></linearGradient>
+    <linearGradient id="beamG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFF4C2" stop-opacity=".95"/><stop offset="1" stop-color="#FFF4C2" stop-opacity="0"/></linearGradient>
+    <filter id="soft" x="-20%" y="-200%" width="140%" height="500%"><feGaussianBlur stdDeviation="9"/></filter>
+    <clipPath id="bk"><path d="M 744 156 L 892 156 L 874 260 L 762 260 Z"/></clipPath>
+  </defs>
+  <g class="studio"><rect width="1200" height="1000" fill="url(#studioG)"/><rect y="842" width="1200" height="158" fill="url(#floorG)"/><rect y="842" width="1200" height="2" fill="rgba(120,100,80,.12)"/></g>
+  <g id="street">
+    <rect width="1200" height="1000" fill="url(#skyG)"/>
+    <g id="bld" class="scroll">${strip(800, 3, buildings)}</g>
+    <rect y="790" width="1200" height="52" fill="#E4DED4"/>
+    <g id="trees" class="scroll">${strip(600, 4, TREES)}</g>
+    <rect y="842" width="1200" height="158" fill="#5C626B"/><rect y="842" width="1200" height="9" fill="#BFC4CA"/>
+    <g id="dash" class="scroll">${dashes}</g>
+  </g>
+  <text class="bgword" x="600" y="205" text-anchor="middle" font-size="168" font-weight="900" fill="rgba(31,35,40,.055)" font-family="system-ui, sans-serif">Orvia City</text>
+  <g transform="translate(33 177) scale(1.12)"><g id="bob">${BIKE}</g></g>`;
+const stage = $('stage'), art = $('art');
+
+// ───────── configuration → art, prices, specs ─────────
+function tween(el, to, fmt, dur = 480) {
+  const from = el._v ?? to; el._v = to; cancelAnimationFrame(el._raf); const t0 = performance.now();
+  const step = now => { const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.textContent = fmt(from + (to - from) * e); if (k < 1) el._raf = requestAnimationFrame(step); };
+  el._raf = requestAnimationFrame(step);
+  if (from !== to) { const box = el.closest('.chip') || el; box.classList.remove('pop'); void box.offsetWidth; box.classList.add('pop'); }
+}
+const pick = k => OPTS[k].find(o => o.id === cfg[k]);
+function apply() {
+  const c = COLORS.find(c => c.id === cfg.color);
+  document.documentElement.style.setProperty('--frame', c.hex);
+  $('cname').textContent = name(c);
+  $$('[data-color]').forEach(b => b.classList.toggle('on', b.dataset.color === cfg.color));
+  $$('[data-opt]').forEach(b => { const [k, v] = b.dataset.opt.split(':'); b.classList.toggle('on', cfg[k] === v); });
+  art.classList.toggle('mag', cfg.wheels === 'mag'); art.classList.toggle('retro', cfg.saddle === 'retro');
+  art.classList.toggle('wicker', cfg.basket === 'wicker'); art.classList.toggle('long', cfg.battery === 'long');
+  art.classList.toggle('ghost', hover === 'basket' && cfg.basket === 'none');
+  const ks = Object.keys(OPTS), price = BASE + ks.reduce((s, k) => s + pick(k).p, 0), kg = BASE_KG + ks.reduce((s, k) => s + pick(k).kg, 0), bt = pick('battery');
+  tween($('price'), price, v => '¥' + Math.round(v).toLocaleString('en-US'));
+  tween($('s-km'), bt.km, v => Math.round(v)); tween($('s-kg'), kg, v => v.toFixed(1)); tween($('s-h'), bt.h, v => v.toFixed(1));
+}
+
+// ───────── hover linking: an option group and its part on the bike light up together ─────────
+let hover = null;
+function setHover(part) {
+  if (hover === part) return; hover = part;
+  $$('.sec').forEach(s => s.classList.toggle('hl', s.dataset.part === part));
+  Object.entries(PART).forEach(([k, id]) => $(id).classList.toggle('hl', k === part));
+  art.classList.toggle('ghost', part === 'basket' && cfg.basket === 'none');
+  const call = $('call');
+  if (part) { call.textContent = T[part]; placeCall(); call.classList.add('on'); } else call.classList.remove('on');
+}
+function placeCall() {
+  if (!hover) return;
+  const r = stage.getBoundingClientRect(), s = Math.max(r.width / 1200, r.height / 1000), ox = (r.width - 1200 * s) / 2, oy = (r.height - 1000 * s) / 2, [bx, by] = ANCHOR[hover];
+  $("call").style.left = (ox + (33 + bx * 1.12) * s) + "px"; $("call").style.top = (oy + (177 + by * 1.12) * s) + "px";
+}
+addEventListener('resize', placeCall);
+if (!DEMO) {
+  $$('.sec').forEach(s => { s.addEventListener('mouseenter', () => setHover(s.dataset.part)); s.addEventListener('mouseleave', () => setHover(null)); });
+  Object.entries(PART).forEach(([k, id]) => { $(id).addEventListener('mouseenter', () => setHover(k)); $(id).addEventListener('mouseleave', () => setHover(null)); });
+}
+
+// ───────── test ride + add to cart ─────────
+let riding = false, buyState = 'idle', count = 0, buyTimer = 0;
+function ride(on) { riding = on; stage.classList.toggle('riding', on); $('ride').classList.toggle('on', on); $('ride').querySelector('span').textContent = on ? T.stop : T.ride; }
+$('ride').addEventListener('click', () => ride(!riding));
+function setBuy(state) {
+  buyState = state; const b = $('buy');
+  b.classList.toggle('loading', state === 'loading'); b.classList.toggle('done', state === 'done');
+  b.querySelector('.txt').textContent = state === 'done' ? '✓ ' + T.added : T.buy;
+}
+function fly() {
+  const a = $('buy').getBoundingClientRect(), c = $('cart').getBoundingClientRect(), x0 = a.left + a.width / 2, y0 = a.top + a.height / 2, x1 = c.left + c.width / 2, y1 = c.top + c.height / 2;
+  const d = document.createElement('div'); d.className = 'fly'; document.body.appendChild(d);
+  const mx = (x0 + x1) / 2, my = Math.min(y0, y1) - 120;
+  d.animate([{ transform: `translate(${x0}px, ${y0}px) scale(1)` }, { transform: `translate(${mx}px, ${my}px) scale(1.3)`, offset: .5 }, { transform: `translate(${x1}px, ${y1}px) scale(.5)` }],
+    { duration: 650, easing: 'ease-in-out' }).onfinish = () => { d.remove(); count++; const bd = $('badge'); bd.textContent = count; bd.classList.add('on'); bd.classList.remove('bump'); void bd.offsetWidth; bd.classList.add('bump'); };
+}
+$('buy').addEventListener('click', () => {
+  if (buyState !== 'idle') return;
+  setBuy('loading'); clearTimeout(buyTimer);
+  setTimeout(fly, 380);
+  setTimeout(() => setBuy('done'), 1050);
+  buyTimer = setTimeout(() => setBuy('idle'), 3600);
+});
+apply();
+window.__state = () => ({ cfg: { ...cfg }, hover, riding, buyState, count, price: $('price').textContent });
+
+// ───────── ?demo: a scripted cursor walks through the configurator, then starts over ─────────
+if (DEMO) {
+  const cur = document.createElement('div'); cur.id = 'cursor';
+  cur.innerHTML = '<svg viewBox="0 0 24 24" width="30" height="30"><path d="M3 2 L3 19.2 L7.7 14.9 L10.8 21.6 L13.6 20.3 L10.6 13.8 L17 13.5 Z" fill="#fff" stroke="#1F2328" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+  document.body.appendChild(cur);
+  let cx = innerWidth * .38, cy = innerHeight * .55;
+  const put = () => { cur.style.transform = `translate(${cx - 3.7}px, ${cy - 2.5}px)`; }; put();
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const moveTo = (x, y, ms = 650) => new Promise(res => {
+    const x0 = cx, y0 = cy, t0 = performance.now();
+    const step = now => { const k = Math.min(1, (now - t0) / ms), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; cx = x0 + (x - x0) * e; cy = y0 + (y - y0) * e; put(); if (k < 1) requestAnimationFrame(step); else res(); };
+    requestAnimationFrame(step);
+  });
+  const go = async (sel, part = null, dx = 0, dy = 0) => { const el = document.querySelector(sel), r = el.getBoundingClientRect(); setHover(null); await moveTo(r.left + r.width / 2 + dx, r.top + r.height / 2 + dy); setHover(part); return el; };
+  const tap = async el => { const rp = document.createElement('div'); rp.className = 'rip'; rp.style.left = cx + 'px'; rp.style.top = cy + 'px'; document.body.appendChild(rp); setTimeout(() => rp.remove(), 600);
+    cur.classList.add('down'); await sleep(120); cur.classList.remove('down'); el.click(); };
+  const choose = async (sel, part, after = 850) => { const el = await go(sel, part); await sleep(320); await tap(el); await sleep(after); };
+  (async () => {
+    await sleep(900);
+    for (;;) {
+      await choose('[data-color="mint"]', 'color', 700);
+      await choose('[data-opt="wheels:mag"]', 'wheels');
+      await choose('[data-opt="saddle:retro"]', 'saddle');
+      await choose('[data-opt="basket:wicker"]', 'basket');
+      await choose('[data-opt="battery:long"]', 'battery', 950);
+      await choose('[data-color="coral"]', 'color', 900);
+      setHover(null);
+      await tap(await go('#ride')); await sleep(500);
+      await go('#stage', null, 0, -60); await sleep(3400);
+      await tap(await go('#ride')); await sleep(700);
+      await tap(await go('#buy')); await sleep(2600);
+      await go('#stage', null, -80, 40); await sleep(900);
+      stage.classList.remove('flash'); void stage.offsetWidth; stage.classList.add('flash');
+      await sleep(240); cfg = { ...DEF }; apply(); count = 0; $('badge').classList.remove('on'); setBuy('idle');
+      await sleep(1300);
+    }
+  })();
+}
+})();
+</script>
+</body>
+</html>

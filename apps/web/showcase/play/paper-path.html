@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>纸间小径 · Paper Path</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #CFEAF8; overflow: hidden; touch-action: none; user-select: none;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif; }
+  #wrap { position: absolute; inset: 0; display: grid; place-items: center; }
+  #stage { position: relative; }
+  canvas { display: block; }
+  .card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; color: #5B3A2A; white-space: nowrap;
+    background: #FFF6E8; border-radius: calc(var(--u) * 2.4); padding: calc(var(--u) * 4.5) calc(var(--u) * 8);
+    box-shadow: 0 calc(var(--u) * .6) 0 #E9D6BC, 0 calc(var(--u) * 2.5) calc(var(--u) * 5) rgba(91,58,42,.22); transition: opacity .35s, transform .35s; }
+  .card.hide { opacity: 0; pointer-events: none; transform: translate(-50%, -46%); }
+  .card h1 { margin: 0; font-size: calc(var(--u) * 10); letter-spacing: calc(var(--u) * .6); color: #E86A55; font-weight: 900; }
+  .card h2 { margin: 0; font-size: calc(var(--u) * 7.5); color: #E86A55; font-weight: 900; }
+  .card p { margin: calc(var(--u) * 1.8) 0 0; font-size: calc(var(--u) * 3.4); font-weight: 700; }
+  .card button { font: inherit; font-weight: 800; border: 0; cursor: pointer; color: #fff; background: #3FA58C; border-radius: 999px;
+    box-shadow: 0 calc(var(--u) * .6) 0 #2B7A66; margin-top: calc(var(--u) * 4); font-size: calc(var(--u) * 3.8); padding: calc(var(--u) * 1.5) calc(var(--u) * 7); }
+  .card button:active { transform: translateY(calc(var(--u) * .4)); box-shadow: 0 calc(var(--u) * .2) 0 #2B7A66; }
+  #bar { position: absolute; top: calc(var(--u) * 2.6); left: calc(var(--u) * 2.6); right: calc(var(--u) * 2.6); display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+  #lvl { background: #FFF6E8; color: #5B3A2A; font-weight: 800; font-size: calc(var(--u) * 3); padding: calc(var(--u) * .9) calc(var(--u) * 3);
+    border-radius: 999px; box-shadow: 0 calc(var(--u) * .5) 0 #E9D6BC; }
+  #bar .btns { display: flex; gap: calc(var(--u) * 1.4); pointer-events: auto; }
+  #bar button { font: inherit; font-weight: 800; border: 0; cursor: pointer; border-radius: 999px; width: calc(var(--u) * 7); height: calc(var(--u) * 7);
+    font-size: calc(var(--u) * 3.2); background: #FFF6E8; color: #5B3A2A; box-shadow: 0 calc(var(--u) * .5) 0 #E9D6BC; }
+  #bar button:active { transform: translateY(calc(var(--u) * .3)); box-shadow: 0 calc(var(--u) * .2) 0 #E9D6BC; }
+  #hint { position: absolute; left: 50%; bottom: calc(var(--u) * 4.4); transform: translateX(-50%); background: rgba(91,58,42,.72); color: #fff;
+    font-size: calc(var(--u) * 3); font-weight: 700; padding: calc(var(--u) * 1) calc(var(--u) * 3.4); border-radius: 999px; white-space: nowrap; transition: opacity .4s; pointer-events: none; }
+  #hint.hide { opacity: 0; }
+  #tag { position: absolute; left: calc(var(--u) * 2.4); bottom: calc(var(--u) * 2.4); font-size: calc(var(--u) * 2.5); color: #fff;
+    background: rgba(14,17,22,.55); padding: calc(var(--u) * .6) calc(var(--u) * 2); border-radius: 999px; pointer-events: none; }
+  body.demo, body.demo * { cursor: none !important; }
+  body.demo #bar .btns { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><div id="stage">
+  <canvas id="c"></canvas>
+  <div id="bar"><div id="lvl"></div><div class="btns"><button id="re" title="R">↺</button><button id="snd" title="M">♪</button></div></div>
+  <div id="hint" class="hide"></div>
+  <div id="title" class="card"><h1 data-t="title"></h1><p data-t="sub"></p><button id="start" data-t="start"></button></div>
+  <div id="home" class="card hide"><h2 data-t="home"></h2></div>
+  <div id="done" class="card hide"><h2 data-t="done"></h2><button id="again" data-t="again"></button></div>
+  <div id="tag" data-t="tag"></div>
+</div></div>
+<script>
+(() => {
+'use strict';
+const Q = new URLSearchParams(location.search), DEMO = Q.has('demo'), EN = Q.get('lang') === 'en', FAST = Math.max(1, +(Q.get('fast') || 1));
+const T = EN ? { title: 'Paper Path', sub: 'Turn the paper world, roll the marble home', start: 'Start', home: 'Home!', done: 'All done', again: 'Play again',
+  lvl: (a, b) => `Level ${a} / ${b}`, h1: 'Drag or press ← → to turn the world', h2: 'Tap the standing flap to fold the bridge down',
+  h3: 'Time the windmill, then fold both bridges down', tag: 'Illustration · AI-generated' }
+ : { title: '纸间小径', sub: '转动纸雕世界，把小球送回家', start: '开始', home: '到家啦！', done: '全部完成', again: '再玩一次',
+  lvl: (a, b) => `第 ${a} / ${b} 关`, h1: '拖动或按 ← → 转动世界', h2: '点一下竖起的纸片，把桥翻下来',
+  h3: '看准风车的空当，再把两座桥翻下来', tag: '示意 · AI 生成' };
+const $ = id => document.getElementById(id);
+document.documentElement.lang = EN ? 'en' : 'zh-CN'; document.title = EN ? 'Paper Path' : '纸间小径';
+document.querySelectorAll('[data-t]').forEach(el => { el.textContent = T[el.dataset.t]; });
+if (DEMO) document.body.classList.add('demo');
+
+const W = 1920, H = 1080, FONT = '"PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif';
+const cv = $('c'), main = cv.getContext('2d'), stage = $('stage');
+let g = main, SC = 1, DPR = 1, K = 1, caches = {};
+function fit() {
+  SC = Math.min(innerWidth / W, innerHeight / H); DPR = Math.min(1.5, window.devicePixelRatio || 1); K = SC * DPR;
+  cv.width = Math.round(W * K); cv.height = Math.round(H * K); cv.style.width = W * SC + 'px'; cv.style.height = H * SC + 'px';
+  stage.style.setProperty('--u', (H * SC / 100) + 'px'); caches = {};
+}
+addEventListener('resize', fit); fit();
+let seed = 7;
+const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, t) => a + (b - a) * t, ease = t => t * t * (3 - 2 * t);
+const D2R = Math.PI / 180;
+
+// ───────── paper art ─────────
+const GRAIN = (() => { const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d'), id = x.createImageData(256, 256);
+  for (let i = 0; i < id.data.length; i += 4) { const v = 128 + (rnd() - .5) * 90; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
+  x.putImageData(id, 0, 0); return c; })();
+const grainPat = main.createPattern(GRAIN, 'repeat');
+function wobble(pts, amp, sd) {                       // hand-cut edges: subdivide and jitter, the same every frame for a given seed
+  const s0 = seed; seed = sd; const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[(i + 1) % pts.length], n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / 40));
+    for (let k = 0; k < n; k++) { const t = k / n; out.push([ax + (bx - ax) * t + (rnd() - .5) * amp, ay + (by - ay) * t + (rnd() - .5) * amp]); }
+  }
+  seed = s0; return out;
+}
+function poly(pts) { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); }
+function paper(pts, fill, depth = 10, shade = .22) {  // one cut-paper piece casting its own soft shadow
+  g.save(); g.shadowColor = `rgba(70,40,30,${shade})`; g.shadowBlur = depth * 1.8 * K; g.shadowOffsetY = depth * .8 * K;
+  poly(pts); g.fillStyle = fill; g.fill(); g.restore();
+}
+function edgeY(pts, x) {                              // the height of a polyline at x
+  for (let i = 0; i < pts.length - 1; i++) { const [ax, ay] = pts[i], [bx, by] = pts[i + 1]; if (x >= ax && x <= bx) return ay + (by - ay) * (x - ax) / (bx - ax || 1); }
+  return pts[pts.length - 1][1];
+}
+function hill(cx, base, w, h, sd, n = 3) {
+  const pts = [];
+  for (let i = 0; i <= 24; i++) { const t = i / 24; pts.push([cx - w / 2 + w * t, base - Math.sin(t * Math.PI) * h * (1 + .08 * Math.sin(t * n * Math.PI * 2 + sd))]); }
+  pts.push([cx + w / 2, base + 700], [cx - w / 2, base + 700]);
+  return wobble(pts, 5, sd);
+}
+const HILL_A = [[-300, 820], [420, 700], [820, 780], [1180, 700], [1560, 760], [2220, 680]];
+const HILL_B = [[-300, 960], [560, 880], [980, 960], [1400, 880], [2220, 960]];
+const hillShape = (top, sd) => wobble([[-300, 1800], ...top, [2220, 1800]], 8, sd);
+
+// ───────── levels (board coordinates; the board turns about PIV) ─────────
+// floor: polylines the marble rolls on · flaps: hinged bridges [hinge x, hinge y, length], standing up until tapped
+// house: [door x, floor y] — reach the doorway to win · mill: a windmill whose blades sweep across the path
+const LEVELS = [
+  { start: [400, 360], house: [1610, 560], hint: 'h1',
+    floor: [[[240, 260], [240, 420], [600, 440], [900, 620], [1260, 640], [1500, 560], [1730, 560]]],
+    pillars: [330, 760, 1330], mills: [420], cogs: [[1080, 70]], trees: [700, 1360] },
+  { start: [360, 330], house: [1520, 520], hint: 'h2',
+    floor: [[[240, 230], [240, 400], [560, 412]], [[790, 412], [1100, 432], [1300, 520], [1640, 520]]],
+    flaps: [[560, 412, 232]],
+    pillars: [330, 1000, 1360], mills: [1220], cogs: [[680, 80]], trees: [420, 960] },
+  { start: [320, 290], house: [1700, 500], hint: 'h3',
+    floor: [[[220, 160], [220, 340], [520, 352]], [[732, 352], [990, 372], [1180, 392]], [[1392, 392], [1500, 410], [1600, 500], [1820, 500]]],
+    flaps: [[520, 352, 214], [1180, 392, 214]],
+    mill: { x: 1010, y: 196, len: 146, speed: 64 },
+    pillars: [300, 850, 1450], mills: [], cogs: [[620, 70], [1290, 60]], trees: [380, 860] }
+];
+const START = clamp(Math.round(+Q.get('level') || 1) - 1, 0, LEVELS.length - 1);   // ?level=3 starts at level 3
+let LV = 0, level = null, segs = [], fixed = [], flaps = [], mill = null;
+const ball = { x: 0, y: 0, vx: 0, vy: 0, r: 24, spin: 0, home: 0 };
+let theta = 0, thetaT = 0, won = false, wonT = 0, started = false, doneShown = false, tLevel = 0, demoTaps = 0;
+let puffs = [], confetti = [], smoke = [], smokeT = 0;
+const seg = (ax, ay, bx, by, px = 0, py = 0, w = 0) => ({ ax, ay, bx, by, px, py, w });
+function load(i) {
+  LV = i; level = LEVELS[i]; won = false; wonT = 0; tLevel = 0; thetaT = 0; doneShown = false; demoTaps = 0;
+  ball.x = level.start[0]; ball.y = level.start[1]; ball.vx = ball.vy = 0; ball.spin = 0; ball.home = 0;
+  flaps = (level.flaps || []).map(([hx, hy, len]) => ({ hx, hy, len, a: -90, target: -90, w: 0 }));
+  mill = level.mill ? { ...level.mill, a: 0 } : null;
+  fixed = [];
+  for (const line of level.floor) for (let k = 0; k < line.length - 1; k++) fixed.push(seg(line[k][0], line[k][1], line[k + 1][0], line[k + 1][1]));
+  const [hx, hy] = level.house; fixed.push(seg(hx + 50, hy, hx + 50, hy - 420));   // the back of the doorway (not drawn)
+  $('lvl').textContent = T.lvl(i + 1, LEVELS.length);
+  $('hint').textContent = T[level.hint];
+  $('home').classList.add('hide');
+  puffs = []; confetti = []; smoke = [];
+}
+function trackY(x) {
+  for (const line of level.floor) for (let k = 0; k < line.length - 1; k++) {
+    const [ax, ay] = line[k], [bx, by] = line[k + 1];
+    if (bx !== ax && x >= Math.min(ax, bx) && x <= Math.max(ax, bx)) return ay + (by - ay) * (x - ax) / (bx - ax);
+  }
+  return 600;
+}
+
+// ───────── physics: a circle on segments; gravity turns with the board; flaps and blades push with their own speed ─────────
+const G = 1500, E = .28, PIV = [960, 600];
+let rollVol = 0;
+function physics(dt) {
+  tLevel += dt;
+  theta += (thetaT - theta) * Math.min(1, dt * 7);
+  for (const f of flaps) { const d = f.target - f.a, st = Math.sign(d) * Math.min(Math.abs(d), dt * 420); f.a += st; f.w = st * D2R / dt; }
+  if (mill) mill.a += mill.speed * D2R * dt;
+  segs = fixed.slice();
+  for (const f of flaps) { const a = f.a * D2R; segs.push(seg(f.hx, f.hy, f.hx + Math.cos(a) * f.len, f.hy + Math.sin(a) * f.len, f.hx, f.hy, f.w)); }
+  if (mill) for (let k = 0; k < 3; k++) { const a = mill.a + k * 120 * D2R; segs.push(seg(mill.x, mill.y, mill.x + Math.cos(a) * mill.len, mill.y + Math.sin(a) * mill.len, mill.x, mill.y, mill.speed * D2R)); }
+  if (won) {
+    wonT += dt; const k = Math.min(1, dt * 6);
+    ball.x += (level.house[0] - ball.x) * k; ball.y += (level.house[1] - 34 - ball.y) * k; ball.home = Math.min(1, ball.home + dt * 2.5); return;
+  }
+  ball.vx += G * Math.sin(theta * D2R) * dt; ball.vy += G * Math.cos(theta * D2R) * dt;
+  ball.x += ball.vx * dt; ball.y += ball.vy * dt;
+  let touching = false;
+  for (let pass = 0; pass < 2; pass++) for (const s of segs) {
+    const ex = s.bx - s.ax, ey = s.by - s.ay, L2 = ex * ex + ey * ey || 1;
+    const t = clamp(((ball.x - s.ax) * ex + (ball.y - s.ay) * ey) / L2, 0, 1), cx = s.ax + ex * t, cy = s.ay + ey * t;
+    let nx = ball.x - cx, ny = ball.y - cy; const d = Math.hypot(nx, ny);
+    if (d >= ball.r || d < 1e-6) continue;
+    nx /= d; ny /= d; ball.x += nx * (ball.r - d); ball.y += ny * (ball.r - d);
+    const svx = -s.w * (cy - s.py), svy = s.w * (cx - s.px);          // the surface's own velocity (it turns about its pivot)
+    const rvx = ball.vx - svx, rvy = ball.vy - svy, vn = rvx * nx + rvy * ny;
+    if (vn < 0) { if (vn < -260 && pass === 0) tok(Math.min(1, -vn / 1400)); ball.vx -= (1 + E) * vn * nx; ball.vy -= (1 + E) * vn * ny; }
+    const tvx = rvx - vn * nx, tvy = rvy - vn * ny, kf = Math.min(1, dt * .35);
+    ball.vx -= tvx * kf; ball.vy -= tvy * kf;                        // rolling resistance on the tangential part
+    touching = true;
+  }
+  const sp = Math.hypot(ball.vx, ball.vy); if (sp > 1500) { ball.vx *= 1500 / sp; ball.vy *= 1500 / sp; }
+  ball.spin += ball.vx / ball.r * dt;
+  rollVol = touching ? Math.min(1, sp / 900) : 0;
+  const [hx, hy] = level.house;
+  if (Math.abs(ball.x - hx) < 80 && Math.abs(ball.y - (hy - 40)) < 80) { win(); return; }
+  if (ball.y > 1500 || ball.x < -300 || ball.x > W + 300) {           // off the paper: a puff, and back to the start
+    puffs.push({ x: level.start[0], y: level.start[1], t: 0 }); rustle(.6);
+    ball.x = level.start[0]; ball.y = level.start[1]; ball.vx = ball.vy = 0;
+  }
+}
+function win() {
+  won = true; wonT = 0; rollVol = 0; chime();
+  for (let i = 0; i < 90; i++) confetti.push({ x: W / 2 + (rnd() - .5) * 1000, y: -40 - rnd() * 320, vx: (rnd() - .5) * 120, vy: 150 + rnd() * 160, a: rnd() * 6, va: (rnd() - .5) * 8,
+    w: 14 + rnd() * 12, h: 8 + rnd() * 8, col: ['#FF8A78', '#7FE0C2', '#FFE08A', '#9DD3FF', '#C9B8FF', '#FFFFFF'][i % 6] });
+  $('home').classList.remove('hide');
+}
+function afterWin() {
+  if (!won || trans || wonT < 2.2) return;
+  if (DEMO) { go(LV + 1 < SCRIPT.length ? LV + 1 : 0); return; }
+  if (LV + 1 < LEVELS.length) go(LV + 1);
+  else if (!doneShown) { doneShown = true; $('home').classList.add('hide'); $('done').classList.remove('hide'); }
+}
+// level changes slide a sheet of paper across the screen; the level swaps while it covers everything
+let trans = null; const TD = 1.2;
+function go(i) { if (trans) return; trans = { t: 0, to: i, swapped: false }; rustle(.8); $('home').classList.add('hide'); }
+function stepTrans(dt) {
+  if (!trans) return; trans.t += dt;
+  if (!trans.swapped && trans.t >= TD / 2) { trans.swapped = true; load(trans.to); }
+  if (trans.t >= TD) trans = null;
+}
+
+// ───────── sound ─────────
+let AC = null, master = null, muted = DEMO, roll = null;
+function audio() {
+  if (DEMO) return;
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  AC = new (window.AudioContext || window.webkitAudioContext)(); master = AC.createGain(); master.gain.value = muted ? 0 : .6; master.connect(AC.destination);
+  const n = AC.createBufferSource(), b = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate), ch = b.getChannelData(0);
+  for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+  n.buffer = b; n.loop = true; const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 220; f.Q.value = .7;
+  const gn = AC.createGain(); gn.gain.value = 0; n.connect(f); f.connect(gn); gn.connect(master); n.start(); roll = gn;
+}
+function burstNoise(d, vol, type, freq, q = 1) {
+  if (!AC || muted) return; const t = AC.currentTime;
+  const n = AC.createBufferSource(), b = AC.createBuffer(1, Math.max(1, (AC.sampleRate * d) | 0), AC.sampleRate), ch = b.getChannelData(0);
+  for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / ch.length, 2);
+  n.buffer = b; const f = AC.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; const gn = AC.createGain(); gn.gain.value = vol;
+  n.connect(f); f.connect(gn); gn.connect(master); n.start(t);
+}
+function tok(v) {
+  if (!AC || muted) return; burstNoise(.05, .35 * v, 'bandpass', 900, 2);
+  const t = AC.currentTime, o = AC.createOscillator(), gn = AC.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(420, t); o.frequency.exponentialRampToValueAtTime(220, t + .08);
+  gn.gain.setValueAtTime(.12 * v, t); gn.gain.exponentialRampToValueAtTime(.0005, t + .1); o.connect(gn); gn.connect(master); o.start(t); o.stop(t + .12);
+}
+function rustle(v = 1) { burstNoise(.22, .22 * v, 'highpass', 2200, .6); }
+function chime() {
+  if (!AC || muted) return; const t = AC.currentTime;
+  [784, 988, 1175, 1568].forEach((f, i) => { const o = AC.createOscillator(), gn = AC.createGain(), t0 = t + i * .09; o.type = 'triangle'; o.frequency.value = f;
+    gn.gain.setValueAtTime(0, t0); gn.gain.linearRampToValueAtTime(.14, t0 + .01); gn.gain.exponentialRampToValueAtTime(.0005, t0 + .9); o.connect(gn); gn.connect(master); o.start(t0); o.stop(t0 + 1); });
+  burstNoise(.4, .15, 'highpass', 3000);
+}
+function setMute(v) { muted = v; if (master) master.gain.value = muted ? 0 : .6; $('snd').textContent = muted ? '✕' : '♪'; }
+
+// ───────── input ─────────
+const keys = {};
+let drag = null, paused = false;
+addEventListener('keydown', e => {
+  if (DEMO) return; audio(); keys[e.code] = true;
+  if (['Space', 'Enter'].includes(e.code)) e.preventDefault();
+  if (!started) { if (['Space', 'Enter'].includes(e.code)) begin(); return; }
+  if (doneShown) { if (['Space', 'Enter'].includes(e.code)) again(); return; }
+  if (e.code === 'KeyR') go(LV);
+  if (e.code === 'KeyM') setMute(!muted);
+  if (e.code === 'Space' && !e.repeat) toggleNearest();
+  if (e.code === 'Digit1' && flaps[0]) toggle(flaps[0]);
+  if (e.code === 'Digit2' && flaps[1]) toggle(flaps[1]);
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+const toScreen = (bx, by) => { const a = theta * D2R, dx = bx - PIV[0], dy = by - PIV[1]; return [PIV[0] + dx * Math.cos(a) - dy * Math.sin(a), PIV[1] + dx * Math.sin(a) + dy * Math.cos(a)]; };
+const toBoard = (x, y) => { const a = -theta * D2R, dx = x - PIV[0], dy = y - PIV[1]; return [PIV[0] + dx * Math.cos(a) - dy * Math.sin(a), PIV[1] + dx * Math.sin(a) + dy * Math.cos(a)]; };
+function flapAt(bx, by) {
+  for (const f of flaps) { const a = f.a * D2R, ex = Math.cos(a) * f.len, ey = Math.sin(a) * f.len, t = clamp(((bx - f.hx) * ex + (by - f.hy) * ey) / (f.len * f.len), 0, 1);
+    if (Math.hypot(bx - f.hx - ex * t, by - f.hy - ey * t) < 64) return f; }
+  return null;
+}
+cv.addEventListener('pointerdown', e => {
+  if (DEMO || !started) return; audio();
+  const r = cv.getBoundingClientRect(), [bx, by] = toBoard((e.clientX - r.left) / SC, (e.clientY - r.top) / SC), f = flapAt(bx, by);
+  if (f) { toggle(f); return; }
+  drag = { x: e.clientX, t0: thetaT }; cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', e => { if (drag) thetaT = clamp(drag.t0 + (e.clientX - drag.x) / (SC * 14), -25, 25); });
+cv.addEventListener('pointerup', () => { drag = null; }); cv.addEventListener('pointercancel', () => { drag = null; });
+function toggle(f) { f.target = f.target === -90 ? 0 : -90; rustle(); }
+function toggleNearest() { let best = null, bd = 1e9; for (const f of flaps) { const d = Math.hypot(ball.x - f.hx, ball.y - f.hy); if (d < bd) { bd = d; best = f; } } if (best) toggle(best); }
+function begin() { if (started) return; started = true; $('title').classList.add('hide'); load(START); }
+function again() { $('done').classList.add('hide'); go(0); }
+$('start').addEventListener('click', () => { audio(); begin(); });
+$('again').addEventListener('click', again);
+$('re').addEventListener('click', () => go(LV));
+$('snd').addEventListener('click', () => { audio(); setMute(!muted); });
+addEventListener('blur', () => { if (!DEMO) paused = true; }); addEventListener('focus', () => { paused = false; });
+
+// ───────── the demo: a scripted hand on the world (tilt keyframes + taps, in level time) ─────────
+const SCRIPT = [
+  { tilt: [[0, 0], [.6, 0], [1.6, 21]], taps: [] },
+  { tilt: [[0, 0], [.5, 0], [1.4, 20]], taps: [[2.6, 0]] },
+  { tilt: [[0, 0], [.5, 0], [1.4, 20]], taps: [[2.6, 0], [5.4, 1]] }
+];
+window.__demo = SCRIPT;                               // exposed so a test can retune the scripted runs
+function keyAt(k, t) {
+  if (t <= k[0][0]) return k[0][1];
+  for (let i = 0; i < k.length - 1; i++) if (t < k[i + 1][0]) return lerp(k[i][1], k[i + 1][1], ease((t - k[i][0]) / (k[i + 1][0] - k[i][0])));
+  return k[k.length - 1][1];
+}
+function runDemo() {
+  const sc = SCRIPT[LV]; if (!sc) return;
+  thetaT = keyAt(sc.tilt, tLevel);
+  while (demoTaps < sc.taps.length && tLevel >= sc.taps[demoTaps][0]) { const f = flaps[sc.taps[demoTaps][1]]; if (f) { toggle(f); ptr.rip.push({ t: 0 }); } demoTaps++; }
+  if (!won && !trans && tLevel > 14) go(LV);
+}
+const ptr = { x: 860, y: 880, p: 0, vis: 0, mode: 'drag', rip: [] }, DRAGX = 860, DRAGY = 880;
+function stepPointer(el) {
+  if (!DEMO) return;
+  ptr.vis += ((started && !trans ? 1 : 0) - ptr.vis) * Math.min(1, el * 5);
+  for (const r of ptr.rip) r.t += el; ptr.rip = ptr.rip.filter(r => r.t < .6);
+  const sc = SCRIPT[LV]; if (!sc) return;
+  let tx = DRAGX + thetaT * 14, ty = DRAGY, down = false; ptr.mode = 'drag';
+  const k = sc.tilt;
+  for (let i = 0; i < k.length - 1; i++) if (tLevel >= k[i][0] && tLevel < k[i + 1][0] && k[i][1] !== k[i + 1][1]) down = true;
+  for (const [tt, fi] of sc.taps) if (tLevel > tt - .9 && tLevel < tt + .35 && flaps[fi]) {
+    const f = flaps[fi]; [tx, ty] = toScreen(f.hx, f.hy - f.len * .55); down = Math.abs(tLevel - tt) < .1; ptr.mode = 'tap';
+  }
+  const kk = Math.min(1, el * 9); ptr.x += (tx - ptr.x) * kk; ptr.y += (ty - ptr.y) * kk; ptr.p += ((down ? 1 : 0) - ptr.p) * Math.min(1, el * 16);
+}
+window.__state = () => ({ lv: LV, x: ball.x | 0, y: ball.y | 0, won, t: +tLevel.toFixed(2), theta: +theta.toFixed(1), trans: !!trans, fps: Math.round(window.__fps || 0) });
+
+// ───────── drawing ─────────
+const BACK = { far: [hill(380, 760, 1100, 300, 11, 2), hill(1500, 740, 1200, 260, 23, 3)],
+  mid: [hill(200, 900, 900, 260, 31), hill(1000, 940, 1000, 220, 41), hill(1800, 900, 1000, 300, 53)] };
+function cloudPts(s, sd) {
+  const pts = []; for (let i = 0; i <= 20; i++) { const t = i / 20 * Math.PI; pts.push([Math.cos(t + Math.PI) * 130 * s, -Math.sin(t) * (50 + 22 * Math.sin(i * 1.7)) * s]); }
+  pts.push([130 * s, 18 * s], [-130 * s, 18 * s]); return wobble(pts, 4, sd);
+}
+const CLOUDS = [[300, 170, 1.1], [1150, 120, .9], [1650, 230, 1.2], [700, 280, .7]].map(([x, y, s], i) => ({ x, y, s, pts: cloudPts(s, 31 + i * 7) }));
+function withTurn(f, k) { g.save(); g.translate(PIV[0], PIV[1]); g.rotate(theta * D2R * k); g.translate(-PIV[0], -PIV[1]); f(); g.restore(); }
+const CX0 = -200, CY0 = -160, CW = 2320, CH = 1620;    // the cached part of the board (covers the screen at any tilt)
+function cached(name, paint) {                        // static board layers are painted once per level and drawn as one image
+  let c = caches[name];
+  if (!c || c.lv !== LV || c.k !== K) {
+    const cvs = c ? c.cv : document.createElement('canvas'); cvs.width = Math.ceil(CW * K); cvs.height = Math.ceil(CH * K);
+    const x = cvs.getContext('2d'); x.setTransform(K, 0, 0, K, -CX0 * K, -CY0 * K);
+    const g0 = g; g = x; paint(); g = g0;
+    c = caches[name] = { lv: LV, k: K, cv: cvs };
+  }
+  g.drawImage(c.cv, CX0, CY0, CW, CH);
+}
+function strip(line, top = '#F6E6CB', edge = '#D9BE9A', th = 22) {   // a folded card strip: edge face, top face, a crease of light
+  const path = dy => { g.beginPath(); line.forEach(([x, y], i) => i ? g.lineTo(x, y + dy) : g.moveTo(x, y + dy)); };
+  g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+  g.shadowColor = 'rgba(70,40,30,.25)'; g.shadowBlur = 18 * K; g.shadowOffsetY = 12 * K;
+  g.strokeStyle = edge; g.lineWidth = th; path(8); g.stroke();
+  g.shadowColor = 'transparent'; g.strokeStyle = top; g.lineWidth = th - 6; path(0); g.stroke();
+  g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 2; path(-6); g.stroke();
+  g.restore();
+}
+function pillar(x, y0, y1, col) { paper(wobble([[x - 10, y0], [x + 10, y0], [x + 14, y1], [x - 14, y1]], 2, x | 0), col, 7, .18); }
+function treeP(x, y, s = 1) {
+  paper([[x - 8 * s, y], [x + 8 * s, y], [x + 8 * s, y - 30 * s], [x - 8 * s, y - 30 * s]], '#C9946B', 4, .15);
+  for (let k = 0; k < 3; k++) paper(wobble([[x, y - (150 - k * 38) * s], [x + (58 - k * 8) * s, y - (40 + k * 36) * s - 10], [x - (58 - k * 8) * s, y - (40 + k * 36) * s - 10]], 3, (x + k) | 0),
+    ['#4FAE84', '#66C596', '#84D8AC'][k], 6, .16);
+}
+function windmillBody(x, y, s = .7) {
+  g.save(); g.translate(x, y); g.scale(s, s);
+  paper(wobble([[-50, 0], [50, 0], [30, -190], [-30, -190]], 3, 71), '#FFF1DC', 8);
+  paper(wobble([[-44, -186], [44, -186], [0, -246]], 3, 72), '#E86A55', 6);
+  paper([[-14, 0], [14, 0], [14, -40], [-14, -40]], '#C9946B', 4);
+  g.restore();
+}
+function windmillBlades(x, y, t, s = .7) {
+  g.save(); g.translate(x, y); g.scale(s, s); g.translate(0, -180); g.rotate(t * .9);
+  for (let k = 0; k < 4; k++) {
+    g.rotate(Math.PI / 2); paper([[0, -8], [150, -26], [150, 26], [0, 8]], k % 2 ? '#FFFFFF' : '#FFE9C9', 5, .16);
+    g.strokeStyle = 'rgba(201,148,107,.55)'; g.lineWidth = 3;
+    for (let q = 40; q < 150; q += 28) { const hw = 8 + q / 150 * 18 - 3; g.beginPath(); g.moveTo(q, -hw); g.lineTo(q, hw); g.stroke(); }
+  }
+  g.restore(); g.fillStyle = '#C9946B'; g.beginPath(); g.arc(x, y - 180 * s, 12 * s, 0, Math.PI * 2); g.fill();
+}
+function cog(x, y, r, t, col = '#F2B36B') {
+  g.save(); g.translate(x, y); g.rotate(t);
+  const pts = []; for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2, rr = i % 2 ? r : r * .82; pts.push([Math.cos(a) * rr, Math.sin(a) * rr]); }
+  paper(pts, col, 8, .2);
+  g.fillStyle = '#F7E0B8'; g.beginPath(); g.arc(0, 0, r * .5, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#C9946B'; g.beginPath(); g.arc(0, 0, r * .16, 0, Math.PI * 2); g.fill();
+  g.restore();
+}
+function win4(wx, wy, col) {
+  g.fillStyle = col; g.fillRect(wx, wy, 30, 30); g.strokeStyle = '#FFF1DC'; g.lineWidth = 4; g.strokeRect(wx, wy, 30, 30);
+  g.beginPath(); g.moveTo(wx + 15, wy); g.lineTo(wx + 15, wy + 30); g.moveTo(wx, wy + 15); g.lineTo(wx + 30, wy + 15); g.stroke();
+}
+function houseBody(x, y) {
+  paper(wobble([[x - 110, y], [x + 110, y], [x + 110, y - 150], [x - 110, y - 150]], 3, 99), '#FFF1DC', 10);
+  paper([[x + 50, y - 230], [x + 78, y - 230], [x + 78, y - 292], [x + 50, y - 292]], '#B98B6A', 4);
+  paper(wobble([[x - 136, y - 140], [x + 136, y - 140], [x + 96, y - 250], [x - 96, y - 250]], 3, 98), '#E25B4D', 10);
+  paper([[x - 96, y - 250], [x + 96, y - 250], [x + 80, y - 262], [x - 80, y - 262]], '#C84439', 4, .15);
+  g.fillStyle = '#7A4A36'; g.beginPath(); g.moveTo(x - 34, y); g.lineTo(x - 34, y - 56); g.arc(x, y - 56, 34, Math.PI, 0); g.lineTo(x + 34, y); g.closePath(); g.fill();
+  g.fillStyle = '#5E3727'; g.fillRect(x - 34, y - 6, 68, 6);
+  for (const wx of [x - 88, x + 58]) win4(wx, y - 118, '#9DD3FF');
+  g.fillStyle = '#FFF1DC'; g.beginPath(); g.arc(x, y - 186, 20, 0, Math.PI * 2); g.fill();          // a round window under the roof
+  g.fillStyle = '#E86A55'; g.beginPath(); g.moveTo(x, y - 176); g.bezierCurveTo(x - 16, y - 186, x - 8, y - 200, x, y - 192); g.bezierCurveTo(x + 8, y - 200, x + 16, y - 186, x, y - 176); g.fill();
+}
+function houseLit(x, y, a) {
+  g.save(); g.globalAlpha = a;
+  const gr = g.createRadialGradient(x, y - 110, 10, x, y - 110, 300); gr.addColorStop(0, 'rgba(255,224,138,.6)'); gr.addColorStop(1, 'rgba(255,224,138,0)');
+  g.fillStyle = gr; g.fillRect(x - 320, y - 420, 640, 460);
+  for (const wx of [x - 88, x + 58]) win4(wx, y - 118, '#FFD66B');
+  g.restore();
+}
+function millTower(m) {
+  const base = edgeY(HILL_A, m.x) + 30;
+  paper(wobble([[m.x - 20, m.y + 4], [m.x + 20, m.y + 4], [m.x + 46, base], [m.x - 46, base]], 3, 61), '#FFF1DC', 10);
+  g.strokeStyle = 'rgba(201,148,107,.45)'; g.lineWidth = 3;
+  for (let y = m.y + 70; y < base - 20; y += 60) { const hw = 20 + (y - m.y) / (base - m.y) * 26 - 4; g.beginPath(); g.moveTo(m.x - hw, y); g.lineTo(m.x + hw, y); g.stroke(); }
+  paper(wobble([[m.x - 32, m.y + 16], [m.x + 32, m.y + 16], [m.x, m.y - 44]], 2, 62), '#E86A55', 6);
+}
+function paintBack() {
+  paper(hillShape(HILL_A, 77 + LV), '#8FDDB8', 16, .22);
+  paper(hillShape(HILL_B, 88 + LV), '#6CC9A0', 16, .22);
+  for (const x of level.trees) treeP(x, edgeY(HILL_A, x) + 8, .9);
+  for (const x of level.mills) windmillBody(x, edgeY(HILL_A, x) + 15);
+}
+function paintFront() {
+  for (const x of level.pillars) pillar(x, trackY(x) + 12, edgeY(HILL_A, x) + 70, '#EFCFA3');
+  if (level.mill) millTower(level.mill);
+  houseBody(level.house[0], level.house[1]);
+  for (const line of level.floor) strip(line);
+}
+function drawFlap(f) {
+  const a = f.a * D2R, ex = f.hx + Math.cos(a) * f.len, ey = f.hy + Math.sin(a) * f.len, k = 1 - Math.abs(Math.sin(a)) * .3;
+  strip([[f.hx, f.hy], [ex, ey]], `rgb(${Math.round(255 * k)},${Math.round(200 * k)},${Math.round(92 * k)})`, '#C98A2E', 28);
+  g.fillStyle = '#B98B6A'; g.beginPath(); g.arc(f.hx, f.hy, 11, 0, Math.PI * 2); g.fill();
+  if (!DEMO && started && f.target === -90) {
+    g.save(); g.globalAlpha = .55 + .3 * Math.sin(performance.now() / 260); g.strokeStyle = '#FFFFFF'; g.lineWidth = 4; g.setLineDash([10, 10]);
+    g.beginPath(); g.arc(ex, ey, 30, 0, Math.PI * 2); g.stroke(); g.restore();
+  }
+}
+function drawMillBlades(m) {
+  g.save(); g.translate(m.x, m.y); g.rotate(m.a);
+  for (let k = 0; k < 3; k++) {
+    paper([[0, -12], [m.len, -20], [m.len, 20], [0, 12]], k ? '#FFFFFF' : '#FFE9C9', 6, .2);
+    g.strokeStyle = 'rgba(201,148,107,.5)'; g.lineWidth = 3;
+    for (let q = 44; q < m.len; q += 30) { const hw = 12 + q / m.len * 8 - 3; g.beginPath(); g.moveTo(q, -hw); g.lineTo(q, hw); g.stroke(); }
+    g.rotate(120 * D2R);
+  }
+  g.restore();
+  g.fillStyle = '#E86A55'; g.beginPath(); g.arc(m.x, m.y, 20, 0, Math.PI * 2); g.fill(); g.fillStyle = '#FFF1DC'; g.beginPath(); g.arc(m.x, m.y, 7, 0, Math.PI * 2); g.fill();
+}
+function drawBall() {
+  const s = 1 - ball.home * .75, r = ball.r * s;
+  g.save(); g.shadowColor = 'rgba(40,20,10,.35)'; g.shadowBlur = 12 * K; g.shadowOffsetY = 9 * K;
+  const c = Math.cos(-theta * D2R), sn = Math.sin(-theta * D2R), ox = -.35 * r * c + .45 * r * sn, oy = -.35 * r * sn - .45 * r * c;   // the light stays top-left on screen
+  const gr = g.createRadialGradient(ball.x + ox, ball.y + oy, r * .1, ball.x, ball.y, r);
+  gr.addColorStop(0, '#A9D6FF'); gr.addColorStop(.35, '#3D7BE0'); gr.addColorStop(1, '#173C8F');
+  g.fillStyle = gr; g.beginPath(); g.arc(ball.x, ball.y, r, 0, Math.PI * 2); g.fill(); g.restore();
+  g.save(); g.beginPath(); g.arc(ball.x, ball.y, r, 0, Math.PI * 2); g.clip();     // a swirl that turns as it rolls
+  g.translate(ball.x, ball.y); g.rotate(ball.spin); g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = r * .22;
+  g.beginPath(); g.arc(0, r * .9, r * 1.05, -Math.PI * .85, -Math.PI * .15); g.stroke(); g.restore();
+  g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.ellipse(ball.x + ox * 1.1, ball.y + oy * 1.1, r * .24, r * .15, -.6 - theta * D2R, 0, Math.PI * 2); g.fill();
+}
+function drawSheet() {
+  if (!trans) return;
+  const sx = W - trans.t / TD * 2.5 * W;
+  g.save();
+  const sg = g.createLinearGradient(sx - 70, 0, sx, 0); sg.addColorStop(0, 'rgba(91,58,42,0)'); sg.addColorStop(1, 'rgba(91,58,42,.28)');
+  g.fillStyle = sg; g.fillRect(sx - 70, 0, 70, H);
+  g.fillStyle = '#FFF6E8'; g.fillRect(sx, 0, W * 1.5, H); g.fillStyle = '#FFFFFF'; g.fillRect(sx, 0, 7, H);
+  g.fillStyle = '#E86A55'; g.font = `900 130px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(T.lvl(trans.to + 1, LEVELS.length), sx + W * .75, H / 2);
+  g.restore();
+}
+function drawPointer() {
+  if (!DEMO || ptr.vis < .02) return;
+  g.save(); g.globalAlpha = ptr.vis;
+  for (const r of ptr.rip) { g.strokeStyle = `rgba(255,255,255,${(1 - r.t / .6) * .95})`; g.lineWidth = 5; g.beginPath(); g.arc(ptr.x, ptr.y, 32 + r.t * 120, 0, Math.PI * 2); g.stroke(); }
+  if (ptr.mode === 'drag' && ptr.p > .05) {               // little arrows while the hand drags the world
+    g.fillStyle = `rgba(255,255,255,${ptr.p * .95})`;
+    for (const d of [-1, 1]) { g.beginPath(); g.moveTo(ptr.x + d * 74, ptr.y); g.lineTo(ptr.x + d * 52, ptr.y - 16); g.lineTo(ptr.x + d * 52, ptr.y + 16); g.closePath(); g.fill(); }
+  }
+  const s = 1 - ptr.p * .14;
+  g.shadowColor = 'rgba(40,20,10,.35)'; g.shadowBlur = 16 * K; g.shadowOffsetY = 6 * K;
+  g.fillStyle = ptr.p > .5 ? 'rgba(255,232,206,.96)' : 'rgba(255,255,255,.94)';
+  g.beginPath(); g.arc(ptr.x, ptr.y, 30 * s, 0, Math.PI * 2); g.fill();
+  g.shadowColor = 'transparent'; g.lineWidth = 4; g.strokeStyle = 'rgba(91,58,42,.55)'; g.stroke();
+  g.restore();
+}
+let clock = 0;
+function draw() {
+  g.setTransform(K, 0, 0, K, 0, 0);
+  const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#A9DDF9'); sky.addColorStop(1, '#EAF7FF'); g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  for (const c of CLOUDS) { g.save(); g.translate(((c.x + clock * 8 * c.s) % (W + 400)) - 200, c.y); paper(c.pts, '#FFFFFF', 8, .14); g.restore(); }
+  withTurn(() => { paper(BACK.far[0], '#CDBEF5', 12, .16); paper(BACK.far[1], '#B7DCF5', 12, .16); }, .22);
+  withTurn(() => { paper(BACK.mid[0], '#FFC2B0', 14, .2); paper(BACK.mid[1], '#FFE3A3', 14, .2); paper(BACK.mid[2], '#BDEBD3', 14, .2); }, .5);
+  withTurn(() => {
+    level.cogs.forEach(([x, r], i) => cog(x, edgeY(HILL_A, x) + 22, r, clock * .6 * (i % 2 ? 1 : -1)));
+    cached('back', paintBack);
+    for (const x of level.mills) windmillBlades(x, edgeY(HILL_A, x) + 15, clock);
+    cached('front', paintFront);
+    const [hx, hy] = level.house;
+    if (won) houseLit(hx, hy, Math.min(1, wonT * 2));
+    for (const p of smoke) { g.fillStyle = `rgba(255,255,255,${(1 - p.t / 2.4) * .85})`; g.beginPath(); g.arc(p.x, p.y, 9 + p.t * 12, 0, Math.PI * 2); g.fill(); }
+    for (const f of flaps) drawFlap(f);
+    drawBall();
+    if (mill) drawMillBlades(mill);
+    for (const p of puffs) {
+      g.save(); g.globalAlpha = 1 - p.t / .8; g.fillStyle = '#FFFFFF';
+      for (let k = 0; k < 7; k++) { const a = k / 7 * Math.PI * 2; g.beginPath(); g.arc(p.x + Math.cos(a) * p.t * 90, p.y + Math.sin(a) * p.t * 90, 16 * (1 - p.t), 0, Math.PI * 2); g.fill(); }
+      g.restore();
+    }
+  }, 1);
+  for (const c of confetti) { g.save(); g.translate(c.x, c.y); g.rotate(c.a); g.scale(1, Math.cos(c.a * 1.7)); g.fillStyle = c.col; g.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); g.restore(); }
+  drawSheet();
+  g.save(); g.globalAlpha = .06; g.globalCompositeOperation = 'multiply'; g.fillStyle = grainPat; g.fillRect(0, 0, W, H); g.restore();
+  drawPointer();
+}
+
+// ───────── loop ─────────
+let last = performance.now(), acc = 0, fpsN = 0, fpsT = 0, hintShown = false; const DT = 1 / 240;
+function frame(now) {
+  const el = Math.max(0, Math.min(.05, (now - last) / 1000)); last = now;
+  fpsN++; fpsT += el; if (fpsT >= 1) { window.__fps = fpsN / fpsT; fpsN = 0; fpsT = 0; }
+  if (!paused) {
+    clock += el;
+    if (DEMO && !started && clock > 1.8) begin();
+    if (started) {
+      if (!DEMO) {
+        if (keys.ArrowLeft || keys.KeyA) thetaT = clamp(thetaT - el * 45, -25, 25);
+        if (keys.ArrowRight || keys.KeyD) thetaT = clamp(thetaT + el * 45, -25, 25);
+      }
+      acc += el * FAST; let n = 0;
+      while (acc >= DT && n++ < 4000) { if (DEMO) runDemo(); physics(DT); acc -= DT; }
+      afterWin(); stepTrans(el * FAST);
+    } else { thetaT = Math.sin(clock * .6) * 8; theta += (thetaT - theta) * Math.min(1, el * 3); }
+    for (const c of confetti) { c.x += c.vx * el; c.y += c.vy * el; c.a += c.va * el; c.vx += Math.sin(clock * 3 + c.a) * 20 * el; }
+    confetti = confetti.filter(c => c.y < H + 60);
+    for (const p of puffs) p.t += el; puffs = puffs.filter(p => p.t < .8);
+    if (won) { smokeT -= el; if (smokeT <= 0) { smokeT = .4; smoke.push({ x: level.house[0] + 64, y: level.house[1] - 300, t: 0 }); } }
+    for (const p of smoke) { p.t += el; p.y -= 46 * el; p.x += 14 * el; } smoke = smoke.filter(p => p.t < 2.4);
+    stepPointer(el);
+    const hs = started && !trans && !won; if (hs !== hintShown) { hintShown = hs; $('hint').classList.toggle('hide', !hs); }   // the hint rests while a level is won or changing
+    if (roll) roll.gain.setTargetAtTime(muted || won ? 0 : rollVol * .5, AC.currentTime, .05);
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+load(START);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

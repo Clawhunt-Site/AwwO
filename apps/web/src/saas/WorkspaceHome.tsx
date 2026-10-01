@@ -11,6 +11,7 @@ import { HOME_PROMPT_MAX_CHARACTERS, canvasNameFromPrompt, clearHomeDraft, readH
 import { savePlanHandoff } from './planHandoff';
 import { STARTER_CASES, type StarterCase } from './starterCases';
 import { OfficialExamples } from './examples/OfficialExamples';
+import { ProductionCases } from './ProductionCases';
 import { type OfficialWorkflow } from './examples/officialWorkflows';
 import { OfficialCopySetup, createOfficialCopyDocument, type OfficialCopyModel } from './examples/OfficialCopySetup';
 import { readOfficialSelection, clearOfficialSelection } from './examples/officialSelection';
@@ -43,6 +44,7 @@ function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
   return <>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    <ProductionCases compact />
     <OfficialExamples compact readOnly />
   </>;
 }
@@ -227,6 +229,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    <ProductionCases compact />
     <OfficialExamples compact onReuse={item => { if (!sending.current) { setError(null); setOfficialCopy(item); } }} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}
       error={error !== null ? saasErrorMessage(error, locale) : undefined} />
