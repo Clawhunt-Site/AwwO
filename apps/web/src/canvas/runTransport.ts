@@ -120,7 +120,7 @@ export async function execAgentViaGateway(
   const identity = operationId ? { recoveryOperationId: operationId } : {};
   const userTurnId = sessions.appendTurn(storeKey, { role: 'user', text: message, ...identity, ...(presentation ? { presentation: { displayText: presentation.displayText, inputKind: presentation.inputKind } } : {}) });
   const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '', ...identity, ...(presentation ? { presentation: { outputContract: presentation.outputContract, outputState: 'streaming' } } : {}) });
-  sessions.setStreaming(storeKey, true);
+  sessions.beginStreaming(storeKey);
   sessions.setStatus(storeKey, 'queued');
 
   let issueId: string | undefined = node.issueId ?? undefined;

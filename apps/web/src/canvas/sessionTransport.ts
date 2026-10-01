@@ -202,7 +202,7 @@ export async function sendMessage({ gatewayBase, node, text, onIssueId, signal }
   markLocalSend(storeKey);
   const userTurnId = sessions.appendTurn(storeKey, { role: 'user', text: message });
   const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '' });
-  sessions.setStreaming(storeKey, true);
+  sessions.beginStreaming(storeKey);
   sessions.setStatus(storeKey, 'queued');
 
   // This node's thread. A server-minted id is reported back so the caller persists it — the
