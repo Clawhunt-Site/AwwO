@@ -1,10 +1,11 @@
-.official-demo { width: 100%; overflow: hidden; box-sizing: border-box; border: 1px solid #dedbd2; border-radius: 20px; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; text-align: left; isolation: isolate; }
+.official-demo { width: 100%; min-width: 0; max-width: 100%; overflow: hidden; box-sizing: border-box; border: 1px solid #dedbd2; border-radius: 20px; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; text-align: left; isolation: isolate; container-type: inline-size; }
 .official-demo *, .official-demo *::before, .official-demo *::after { box-sizing: border-box; }
 .official-demo button, .official-demo input { font: inherit; }
 .official-demo button { cursor: pointer; min-height: 38px; border: 0; letter-spacing: 0; }
 .official-demo button:disabled { cursor: default; opacity: .55; }
 .official-demo button:focus-visible, .official-demo input:focus-visible, .official-demo [tabindex]:focus-visible { outline: 3px solid #9c6cdd; outline-offset: 4px; }
 .official-demo h3, .official-demo h4, .official-demo p { margin: 0; }
+.official-demo :where(header, nav, aside, label, div) { min-width: 0; }
 .official-demo output { font-variant-numeric: tabular-nums; }
 .official-demo .official-demo-eyebrow { font-size: 9px; font-weight: 650; letter-spacing: 1.8px; }
 .official-demo .official-demo-range { display: block; width: 100%; height: 20px; margin: 9px 0 0; padding: 0; accent-color: #b56a4d; cursor: pointer; border: 0; background: transparent; }
@@ -16,7 +17,7 @@
 .official-demo .official-demo-sample { margin-left: auto; color: #767969; font-size: 9px; }
 .official-demo .official-demo-orbit-layout { display: grid; grid-template-columns: 1fr .82fr; padding: 30px; gap: 35px; align-items: center; }
 .official-demo .official-demo-orbit-config > .official-demo-eyebrow { color: #9b5f46; margin-bottom: 13px; }
-.official-demo .official-demo-orbit-config h3 { font-size: clamp(26px, 3vw, 38px); line-height: 1.25; letter-spacing: -1.7px; font-weight: 550; }
+.official-demo .official-demo-orbit-config h3 { font-size: clamp(26px, 4cqi, 38px); line-height: 1.25; letter-spacing: -1.7px; font-weight: 550; }
 .official-demo .official-demo-orbit-config h3 em { font-family: Georgia, "Songti SC", serif; font-style: italic; font-weight: 400; color: #9b624b; }
 .official-demo .official-demo-orbit-config > p { color: #767869; font-size: 11px; max-width: 330px; margin: 14px 0 23px; line-height: 1.8; }
 .official-demo .official-demo-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-bottom: 22px; }
@@ -103,7 +104,7 @@
 .official-demo .official-demo-scene-header h3 > span { color: #99988d; font-size: 20px; font-weight: 350; }
 .official-demo .official-demo-scene-tag { border: 1px solid #cfcfc2; border-radius: 25px; padding: 6px 11px; color: #888c7c; font-size: 8px; letter-spacing: 1px; }
 .official-demo .official-demo-scene-layout { display: grid; grid-template-columns: 1.65fr 1fr; align-items: center; gap: 10px; padding: 0 30px 24px 4px; }
-.official-demo .official-demo-scene-stage { min-width: 0; }
+.official-demo .official-demo-scene-stage { min-width: 0; -webkit-user-select: none; user-select: none; }
 .official-demo .official-demo-scene-stage > svg { width: 100%; display: block; overflow: visible; cursor: grab; touch-action: none; border-radius: 15px; outline-offset: -3px; }
 .official-demo .official-demo-scene-stage > svg:active { cursor: grabbing; }
 .official-demo .official-demo-scene-help { text-align: center; font-size: 8px; color: #8e9284; margin-top: -5px; }
@@ -127,12 +128,13 @@
 .official-demo .official-demo-spin { display: block; width: 100%; margin-top: 12px; color: #f4f2e8; background: #68705b; border-radius: 6px; padding: 8px; font-size: 10px; min-height: 35px; }
 .official-demo .official-demo-spin[aria-pressed="true"] { background: #464f3d; }
 .official-demo .official-demo-scene-controls > .official-demo-scene-footnote { text-align: center; font-size: 8px; margin-top: 8px; max-width: none; }
-@media (min-width: 1000px) {
+/* Embedded results follow their panel width, including on a wide desktop. */
+@container (min-width: 1000px) {
   .official-demo .official-demo-orbit-layout { padding: 35px 50px; gap: 60px; }
   .official-demo .official-demo-game-layout { grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 40px; }
   .official-demo .official-demo-scene-layout { grid-template-columns: minmax(0, 1.8fr) minmax(210px, 1fr); padding-right: 45px; }
 }
-@media (max-width: 700px) {
+@container (max-width: 700px) {
   .official-demo .official-demo-orbit-nav { padding: 12px 18px; gap: 15px; }
   .official-demo .official-demo-orbit-nav > .official-demo-eyebrow { display: none; }
   .official-demo .official-demo-orbit-layout { padding: 22px; gap: 20px; }
@@ -150,8 +152,7 @@
   .official-demo .official-demo-scene-header { padding: 22px 22px 0; }
   .official-demo .official-demo-scene-controls h4 { font-size: 26px; }
 }
-@media (max-width: 540px) {
-  .official-demo { border-radius: 14px; }
+@container (max-width: 600px) {
   .official-demo .official-demo-orbit-layout { grid-template-columns: 1fr; padding: 22px; }
   .official-demo .official-demo-orbit-config > p { max-width: none; }
   .official-demo .official-demo-orbit-summary { padding: 18px 20px; }
@@ -174,6 +175,21 @@
   .official-demo .official-demo-scene-controls h4 br { display: none; }
   .official-demo .official-demo-finish-label { margin-top: 17px; }
   .official-demo .official-demo-views > button { min-height: 38px; font-size: 10px; }
+}
+@container (max-width: 380px) {
+  .official-demo .official-demo-orbit-layout,
+  .official-demo .official-demo-game-layout { padding-inline: 16px; }
+  .official-demo .official-demo-game-header,
+  .official-demo .official-demo-scene-header { padding-inline: 16px; gap: 8px; }
+  .official-demo .official-demo-orbit-nav { padding-inline: 16px; }
+  .official-demo .official-demo-orbit-config h3 { font-size: 28px; }
+  .official-demo .official-demo-plans > button { padding: 10px 7px; }
+  .official-demo .official-demo-plans > button > span { font-size: 11px; }
+  .official-demo .official-demo-plans small { font-size: 10px; }
+  .official-demo .official-demo-game-actions { flex-wrap: wrap; gap: 16px; }
+  .official-demo .official-demo-game-header .official-demo-eyebrow { letter-spacing: .6px; }
+  .official-demo .official-demo-scene-layout { padding-inline: 16px; }
+  .official-demo .official-demo-scene-tag { max-width: 100px; text-align: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .official-demo *, .official-demo *::before, .official-demo *::after { transition: none !important; animation: none !important; }

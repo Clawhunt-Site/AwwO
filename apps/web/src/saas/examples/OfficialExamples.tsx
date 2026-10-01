@@ -8,6 +8,9 @@ import { CREATIVE_CASE_IDS, INTELLIGENCE_CASE_IDS, OPERATIONS_CASE_IDS } from '.
 import { AdvancedCover } from './advanced/AdvancedCover';
 import { OFFICIAL_CATEGORY_LABELS, workflowShape } from './advanced/industryWorkflow';
 import './official-examples.css';
+import { OfficialShowcase } from './OfficialShowcase';
+import { OFFICIAL_GENERATED_RECORDS } from './generatedRecords';
+const GeneratedOfficialDemo = lazy(() => import('./GeneratedOfficialDemo'));
 
 const InteractionDemo = lazy(() => import('./CreativeDemos').then(module => ({ default: module.InteractionDemo })));
 const GameDemo = lazy(() => import('./CreativeDemos').then(module => ({ default: module.GameDemo })));
@@ -63,15 +66,16 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
   const [category, setCategory] = useState('all');
   const [industry, setIndustry] = useState('all');
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<string | null>(() => getOfficialWorkflow(initialId || '')?.id ?? null);
+  const [selected, setSelected] = useState<string | null>(() => getOfficialWorkflow(initialId || '')?.id ?? (standalone ? 'grid-balance' : null));
   const [tab, setTab] = useState<'demo' | 'workflow' | 'guide'>('demo');
   const detail = useRef<HTMLDivElement>(null);
   const firstFilter = useRef<HTMLButtonElement>(null);
   const selectedTrigger = useRef<HTMLButtonElement | null>(null);
-  const shouldFocus = useRef(Boolean(getOfficialWorkflow(initialId || '')));
+  const shouldFocus = useRef(Boolean(getOfficialWorkflow(initialId || '')) || standalone);
   const titleId = useId();
   const tabsId = useId();
   const item = selected ? getOfficialWorkflow(selected) : undefined;
+  const record = item ? OFFICIAL_GENERATED_RECORDS[item.id] : undefined;
   useEffect(() => {
     if (selected && shouldFocus.current) {
       detail.current?.focus({ preventScroll: true });
@@ -104,16 +108,41 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
   const allIndustries = new Set(OFFICIAL_WORKFLOWS.filter(example => example.industry).map(example => example.industry!.en)).size;
 
   const tabItems = [
-    { id: 'demo' as const, label: t('体验作品', 'Try the demo'), icon: Play },
+    { id: 'demo' as const, label: t('同屏体验', 'Workflow + result'), icon: Play },
     { id: 'workflow' as const, label: t('编排画布', 'Workflow canvas'), icon: Workflow },
     { id: 'guide' as const, label: t('复用指南', 'Build your version'), icon: Copy },
   ];
   return <section className="official-examples" aria-labelledby={titleId} id="official-examples">
     <div className="official-heading">
-      <div><span className="official-eyebrow"><span />AWWO ORIGINALS / INDUSTRY SYSTEMS</span><Heading id={titleId}>{t('行业系统，直接上手。', 'Industry systems. Ready to explore.')}</Heading><p>{t('进入一个业务场景，改变约束，观察结果。拆开背后的多角色编排，再构建你的版本。', 'Enter a business scenario, change its constraints and observe the result. Explore the multi-agent workflow, then build your own version.')}</p></div>
-      <span className="official-edition">{t('官方工作流参考', 'OFFICIAL WORKFLOW LIBRARY')}<b>VOL. 002</b></span>
+      <div><span className="official-eyebrow"><span />AWWO ORIGINALS / INDUSTRY SYSTEMS</span><Heading id={titleId}>{t('看它如何构建，亲手操作结果。', 'See the workflow. Work with the result.')}</Heading><p>{t('左边拆解编排过程，右边直接体验成果。从游戏与三维空间，到知识、模型与行业中台。', 'Explore the orchestration on the left, interact with the result on the right. From games and 3D worlds to knowledge, models and industry systems.')}</p></div>
+      <span className="official-edition">{t('官方工作流参考', 'OFFICIAL WORKFLOW LIBRARY')}<b>VOL. 003</b></span>
     </div>
     <div className="official-collection-summary"><span><b>{flagshipCount}</b>{t('行业旗舰', 'industry systems')}</span><span><b>{allIndustries}</b>{t('行业场景', 'industry scenarios')}</span><span><b>{allNodes}</b>{t('编排节点', 'workflow nodes')}</span><p>{t('数据关联 · 真实算法 · 异常处置 · 多阶段交付', 'Linked data · Working algorithms · Exception handling · Staged delivery')}</p></div>
+    <div className="showcase-featured" role="group" aria-label={t('精选同屏案例', 'Featured split-screen examples')}><span>{t('精选演示', 'FEATURED')}</span>{['commerce-ops', 'colony-command', 'habitat-twin', 'research-atlas', 'model-foundry', 'interaction-page'].map(id => { const example = getOfficialWorkflow(id)!; return <button key={id} type="button" aria-pressed={selected === id} onClick={event => open(example, event.currentTarget)}><b>{example.title[locale].split(/ \/ | · /)[0]}</b>{example.categoryLabel[locale]}</button>; })}</div>
+    <div className="showcase-featured showcase-generated-picks" role="group" aria-label={t('模型生成实例', 'Model-generated examples')}><span>{t('已实测模型产物', 'BROWSER-CHECKED MODEL OUTPUT')}</span>{Object.keys(OFFICIAL_GENERATED_RECORDS).map(id => { const example = getOfficialWorkflow(id)!; return <button key={id} type="button" aria-pressed={selected === id} onClick={event => open(example, event.currentTarget)}><b>{example.title[locale].split(/ \/ | · /)[0]}</b>{t('运行过程 + 成果', 'Run + result')}<ArrowUpRight size={12} /></button>; })}</div>
+    {item && <div key={item.id} className="official-detail" ref={detail} tabIndex={-1} aria-label={item.title[locale]} style={{ '--case-accent': item.accent } as CSSProperties}>
+      <div className="official-detail-heading"><button type="button" onClick={close} className="official-back"><ChevronLeft size={16} />{t('收起作品', 'Close example')}</button><a className="official-permalink" href={`${officialSignInURL(item.id, window.location.search)}&examples=1`}>{t('独立打开此案例', 'Open this example directly')} ↗</a></div>
+      <div className="official-detail-title"><div><h3>{item.title[locale]}</h3><p>{item.description[locale]}</p></div>
+        {onReuse ? <button type="button" className="official-primary" disabled={disabled || readOnly} onClick={() => onReuse(item)}><Copy size={16} />{disabled ? t('正在创建…', 'Creating…') : t('复制到我的画布', 'Copy to my canvases')}</button>
+          : !readOnly && <a className="official-primary" href={officialSignInURL(item.id, window.location.search)} onClick={() => rememberOfficialSelection(item.id)}><Copy size={16} />{t('登录并复用', 'Sign in to reuse')}</a>}
+      </div>
+      {item.tier === 'flagship' && <details className="official-case-scope"><summary>{t('业务能力与数据范围', 'Capabilities and data scope')}<span>{item.capabilities?.length} {t('项能力', 'capabilities')} · {item.datasets?.length} {t('组数据', 'data groups')}</span></summary><div className="official-scope-grid"><div><span className="official-eyebrow">{t('场景能力', 'SCENARIO CAPABILITIES')}</span><div>{item.capabilities?.map((value, index) => <span key={index}>{value[locale]}</span>)}</div></div><div><span className="official-eyebrow">{t('数据与约束', 'DATA AND CONSTRAINTS')}</span><ul>{item.datasets?.map((value, index) => <li key={index}>{value[locale]}</li>)}</ul></div></div></details>}
+
+      {readOnly && <p className="official-caption">{t('你可以体验和下载工作流。复制到工作区需要编辑权限。', 'You can explore and download this workflow. Copying into a workspace requires edit access.')}</p>}
+      {error && <p className="saas-error" role="alert">{error}</p>}
+      <div className="official-tabs" role="tablist" aria-label={t('案例内容', 'Example content')}>
+        {tabItems.map(({ id, label, icon: Icon }, index) => <button key={id} id={`${tabsId}-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls={`${tabsId}-panel`} tabIndex={tab === id ? 0 : -1} onClick={() => setTab(id)} onKeyDown={event => {
+          const next = event.key === 'ArrowRight' ? (index + 1) % 3 : event.key === 'ArrowLeft' ? (index + 2) % 3 : event.key === 'Home' ? 0 : event.key === 'End' ? 2 : null;
+          if (next === null) return; event.preventDefault(); setTab(tabItems[next].id); document.getElementById(`${tabsId}-${tabItems[next].id}`)?.focus();
+        }}><Icon size={15} />{label}</button>)}
+      </div>
+      <div id={`${tabsId}-panel`} role="tabpanel" aria-labelledby={`${tabsId}-${tab}`} tabIndex={0}>
+        <div hidden={tab !== 'demo'}><OfficialShowcase item={item} record={record} visible={tab === 'demo'} onOpenWorkflow={() => setTab('workflow')}><Suspense fallback={<p className="official-loading" role="status">{t('正在载入作品…', 'Loading demo…')}</p>}><>{record ? <GeneratedOfficialDemo id={item.id} title={t(`${item.title.zh} · 模型生成成果`, `${item.title.en} · Model-generated result`)} /> : <Demo id={item.id} locale={locale} />}</></Suspense></OfficialShowcase><p className="official-caption">{record ? record.note[locale] : item.limitations[locale]}</p></div>
+        {tab === 'workflow' && <WorkflowInspector item={item} />}
+        {tab === 'guide' && <ReuseGuide item={item} />}
+      </div>
+      <p className="official-provenance">{record ? t('此案例展示已实测的模型节点成果与脱敏运行快照；验收修订另行标注。复制画布仍会创建未执行草稿，不会复制历史结果或触发模型调用。', 'This case shows browser-checked model output and a sanitized run snapshot; QA revisions are labeled. Copying the canvas creates an unexecuted draft; it does not copy run history or trigger model calls.') : t('官方设计的参考实现与编排模板。复制后是未执行的草稿；选择模型并运行后，才会产生你自己的交付物。', 'Officially authored reference implementations and workflow templates. A copy is an unexecuted draft. Choose your models and run it to create your own deliverables.')}</p>
+    </div>}
     <div className="official-discovery">
       <div className="official-tiers" role="group" aria-label={t('案例深度', 'Example depth')}>
         <button type="button" aria-pressed={tier === 'flagship'} onClick={() => selectTier('flagship')}>{t('行业旗舰', 'Industry systems')}<span>{flagshipCount}</span></button>
@@ -136,29 +165,6 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
       </article>)}
     </div>
     {filtered.length === 0 && <div className="official-empty"><h3>{t('没有找到匹配案例', 'No matching examples')}</h3><p>{t('换一个关键词，或清除行业和能力筛选。', 'Try another keyword or clear the industry and capability filters.')}</p><button type="button" onClick={resetFilters}>{t('重新浏览', 'Browse again')}</button></div>}
-    {item && <div key={item.id} className="official-detail" ref={detail} tabIndex={-1} aria-label={item.title[locale]} style={{ '--case-accent': item.accent } as CSSProperties}>
-      <div className="official-detail-heading"><button type="button" onClick={close} className="official-back"><ChevronLeft size={16} />{t('收起作品', 'Close example')}</button><a className="official-permalink" href={`${officialSignInURL(item.id, window.location.search)}&examples=1`}>{t('独立打开此案例', 'Open this example directly')} ↗</a></div>
-      <div className="official-detail-title"><div><h3>{item.title[locale]}</h3><p>{item.description[locale]}</p></div>
-        {onReuse ? <button type="button" className="official-primary" disabled={disabled || readOnly} onClick={() => onReuse(item)}><Copy size={16} />{disabled ? t('正在创建…', 'Creating…') : t('复制到我的画布', 'Copy to my canvases')}</button>
-          : !readOnly && <a className="official-primary" href={officialSignInURL(item.id, window.location.search)} onClick={() => rememberOfficialSelection(item.id)}><Copy size={16} />{t('登录并复用', 'Sign in to reuse')}</a>}
-      </div>
-      {item.tier === 'flagship' && <details className="official-case-scope"><summary>{t('业务能力与数据范围', 'Capabilities and data scope')}<span>{item.capabilities?.length} {t('项能力', 'capabilities')} · {item.datasets?.length} {t('组数据', 'data groups')}</span></summary><div className="official-scope-grid"><div><span className="official-eyebrow">{t('场景能力', 'SCENARIO CAPABILITIES')}</span><div>{item.capabilities?.map((value, index) => <span key={index}>{value[locale]}</span>)}</div></div><div><span className="official-eyebrow">{t('数据与约束', 'DATA AND CONSTRAINTS')}</span><ul>{item.datasets?.map((value, index) => <li key={index}>{value[locale]}</li>)}</ul></div></div></details>}
-
-      {readOnly && <p className="official-caption">{t('你可以体验和下载工作流。复制到工作区需要编辑权限。', 'You can explore and download this workflow. Copying into a workspace requires edit access.')}</p>}
-      {error && <p className="saas-error" role="alert">{error}</p>}
-      <div className="official-tabs" role="tablist" aria-label={t('案例内容', 'Example content')}>
-        {tabItems.map(({ id, label, icon: Icon }, index) => <button key={id} id={`${tabsId}-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls={`${tabsId}-panel`} tabIndex={tab === id ? 0 : -1} onClick={() => setTab(id)} onKeyDown={event => {
-          const next = event.key === 'ArrowRight' ? (index + 1) % 3 : event.key === 'ArrowLeft' ? (index + 2) % 3 : event.key === 'Home' ? 0 : event.key === 'End' ? 2 : null;
-          if (next === null) return; event.preventDefault(); setTab(tabItems[next].id); document.getElementById(`${tabsId}-${tabItems[next].id}`)?.focus();
-        }}><Icon size={15} />{label}</button>)}
-      </div>
-      <div id={`${tabsId}-panel`} role="tabpanel" aria-labelledby={`${tabsId}-${tab}`} tabIndex={0}>
-        {tab === 'demo' ? <><div className="official-live-label"><span />{t('可交互参考实现 · 浏览器本地运行', 'Interactive reference · Runs in your browser')}</div><Suspense fallback={<p className="official-loading" role="status">{t('正在载入作品…', 'Loading demo…')}</p>}><Demo id={item.id} locale={locale} /></Suspense><p className="official-caption">{item.limitations[locale]}</p></>
-          : tab === 'workflow' ? <WorkflowInspector item={item} />
-            : <ReuseGuide item={item} />}
-      </div>
-      <p className="official-provenance">{t('官方设计的参考实现与编排模板。复制后是未执行的草稿；选择模型并运行后，才会产生你自己的交付物。', 'Officially authored reference implementations and workflow templates. A copy is an unexecuted draft. Choose your models and run it to create your own deliverables.')}</p>
-    </div>}
     <div className="official-library-note"><Workflow size={17} /><p>{t('每张画布包含真实依赖、输入输出和验收要求。行业旗舰展示完整本地业务闭环；接入生产数据与服务需要独立实施。', 'Every canvas includes real dependencies, contracts and acceptance criteria. Industry systems demonstrate complete local scenarios; production data and service integrations require separate implementation.')}</p></div>
   </section>;
 }
@@ -217,6 +223,7 @@ export function WorkflowInspector({ item }: { item: OfficialWorkflow }) {
 }
 
 function ReuseGuide({ item }: { item: OfficialWorkflow }) {
+  const record = OFFICIAL_GENERATED_RECORDS[item.id];
   const { locale, t } = useSaaSPreferences();
   const [downloadError, setDownloadError] = useState(false);
   const download = () => {
@@ -229,7 +236,7 @@ function ReuseGuide({ item }: { item: OfficialWorkflow }) {
       setDownloadError(false);
     } catch { if (url) URL.revokeObjectURL(url); setDownloadError(true); }
   };
-  return <div className="official-guide"><div><h4>{t('把这一套，变成你的下一套。', 'Make this workflow your starting point.')}</h4><ol><li>{t('复制画布，保留所有节点、依赖和交付约定。', 'Copy the canvas with its nodes, dependencies and deliverable contracts.')}</li><li>{t('在节点的任务输入中替换目标、数据与约束。', 'Replace the goals, data and constraints in each node’s task input.')}</li><li>{t('使用工作区已配置的引擎初始化节点，确认模型后运行。', 'Initialize nodes with your workspace engine, confirm your models and run.')}</li><li>{t('核对验收节点的记录，再决定是否发布成果。', 'Check the review node’s evidence before publishing your results.')}</li></ol><button type="button" onClick={download}><ArrowDownToLine size={16} />{t('下载画布 JSON', 'Download canvas JSON')}</button>{downloadError && <p role="alert">{t('下载失败，请重试。', 'Download failed. Please retry.')}</p>}</div><div><h4>{t('输入目标', 'The brief')}</h4><p className="official-brief">{item.brief[locale]}</p><h4>{t('预期交付', 'Expected deliverables')}</h4><ul>{item.artifacts.map((artifact, i) => <li key={i}>{artifact[locale]}</li>)}</ul><p className="official-caption">{item.limitations[locale]}</p></div></div>;
+  return <div className="official-guide"><div><h4>{t('把这一套，变成你的下一套。', 'Make this workflow your starting point.')}</h4><ol><li>{t('复制画布，保留所有节点、依赖和交付约定。', 'Copy the canvas with its nodes, dependencies and deliverable contracts.')}</li><li>{t('在节点的任务输入中替换目标、数据与约束。', 'Replace the goals, data and constraints in each node’s task input.')}</li><li>{t('使用工作区已配置的引擎初始化节点，确认模型后运行。', 'Initialize nodes with your workspace engine, confirm your models and run.')}</li><li>{t('核对验收节点的记录，再决定是否发布成果。', 'Check the review node’s evidence before publishing your results.')}</li></ol><button type="button" onClick={download}><ArrowDownToLine size={16} />{t('下载画布 JSON', 'Download canvas JSON')}</button>{downloadError && <p role="alert">{t('下载失败，请重试。', 'Download failed. Please retry.')}</p>}</div><div><h4>{t('输入目标', 'The brief')}</h4><p className="official-brief">{item.brief[locale]}</p><h4>{t('预期交付', 'Expected deliverables')}</h4><ul>{item.artifacts.map((artifact, i) => <li key={i}>{artifact[locale]}</li>)}</ul><p className="official-caption">{record ? record.note[locale] : item.limitations[locale]}</p></div></div>;
 }
 
 export function PublicOfficialExamples() {

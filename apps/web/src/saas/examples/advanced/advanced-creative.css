@@ -1,6 +1,7 @@
-.advanced-creative { --ac-bg:#f3f4ed; --ac-panel:#fafbf6; --ac-soft:#e9ece2; --ac-line:#d3dbcf; --ac-text:#293c34; --ac-muted:#748278; --ac-accent:#5c9683; --ac-ink:#fff; width:100%; color:var(--ac-text); background:var(--ac-bg); border:1px solid var(--ac-line); border-radius:18px; overflow:hidden; font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; line-height:1.5; text-align:left; container-type:inline-size; }
-.advanced-creative *, .advanced-creative *::before, .advanced-creative *::after { box-sizing:border-box; }
+.advanced-creative { --ac-bg:#f3f4ed; --ac-panel:#fafbf6; --ac-soft:#e9ece2; --ac-line:#d3dbcf; --ac-text:#293c34; --ac-muted:#748278; --ac-accent:#5c9683; --ac-ink:#fff; width:100%; min-width:0; max-width:100%; color:var(--ac-text); background:var(--ac-bg); border:1px solid var(--ac-line); border-radius:18px; overflow:hidden; font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; line-height:1.5; text-align:left; container-type:inline-size; }
+.advanced-creative, .advanced-creative *, .advanced-creative *::before, .advanced-creative *::after { box-sizing:border-box; }
 .advanced-creative h3, .advanced-creative h4, .advanced-creative h5, .advanced-creative p { margin:0; }
+.advanced-creative :where(header, footer, section, article, div, aside, form, label) { min-width:0; }
 .advanced-creative button, .advanced-creative input, .advanced-creative select { font:inherit; }
 .advanced-creative button { cursor:pointer; color:var(--ac-text); background:var(--ac-panel); border:1px solid var(--ac-line); border-radius:6px; padding:8px 12px; min-height:34px; font-size:11px; }
 .advanced-creative button:hover:not(:disabled) { border-color:var(--ac-accent); filter:brightness(1.06); }
@@ -15,7 +16,7 @@
 .advanced-creative .ac-header h3 { font-size:29px; letter-spacing:-1px; font-weight:620; line-height:1.35; margin:7px 0; }
 .advanced-creative .ac-header h3>span { color:var(--ac-muted); font-size:15px; letter-spacing:1px; font-weight:400; }
 .advanced-creative .ac-header p { font-size:11px; color:var(--ac-muted); }
-.advanced-creative .ac-view-nav { display:flex; gap:0; border-block:1px solid var(--ac-line); padding:0 24px; background:var(--ac-panel); }
+.advanced-creative .ac-view-nav { display:flex; flex-wrap:wrap; gap:0; border-block:1px solid var(--ac-line); padding:0 24px; background:var(--ac-panel); }
 .advanced-creative .ac-view-nav button { border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; display:flex; gap:9px; align-items:center; padding:14px 19px; font-size:11px; color:var(--ac-muted); }
 .advanced-creative .ac-view-nav button>span { font:9px ui-monospace,monospace; opacity:.65; }
 .advanced-creative .ac-view-nav button[aria-pressed=true] { color:var(--ac-accent); border-bottom-color:var(--ac-accent); }
@@ -355,7 +356,9 @@
   .advanced-creative .ac-reservation-builder { grid-template-columns:1fr; gap:17px; }
   .advanced-creative .ac-reservation-builder>div>p { max-width:540px; }
 }
-@container (max-width:570px) {
+/* In the workflow/result split, preserve usable maps and previews before the
+   inspector's minimum width squeezes their primary interaction surface. */
+@container (max-width:680px) {
   .advanced-creative .ac-header { padding:20px 18px; align-items:flex-start; gap:10px; }
   .advanced-creative .ac-header h3 { font-size:23px; }
   .advanced-creative .ac-header p { font-size:10px; }
@@ -413,5 +416,26 @@
   .advanced-creative .ac-footer>span { width:100%; }
   .advanced-creative .ac-footer>label { flex-wrap:wrap; font-size:8px; }
   .advanced-creative .ac-footer input[type=range] { width:60px; }
+}
+@container (max-width:420px) {
+  .advanced-creative .ac-header { flex-wrap:wrap; }
+  .advanced-creative .ac-header>div:first-child { flex:1 1 190px; }
+  .advanced-creative .ac-project-meta,.advanced-creative .ac-hotel-dates { margin-left:auto; }
+  .advanced-creative .ac-resource-strip { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .advanced-creative .ac-resource-strip>div:nth-child(4) { border-left:0; }
+  .advanced-creative .ac-resource-strip>div:nth-child(n+4) { border-top:1px solid var(--ac-line); }
+  .advanced-creative .ac-resource-strip small { font-size:8px; white-space:normal; }
+  .advanced-creative .ac-sensor-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .advanced-creative .ac-comparison-cards { grid-template-columns:1fr; }
+  .advanced-creative .ac-comparison-cards>div { display:flex; align-items:center; flex-wrap:wrap; gap:5px 12px; }
+  .advanced-creative .ac-comparison-cards b { margin:0 0 0 auto; }
+  .advanced-creative .ac-comparison-cards p { width:100%; text-align:right; }
+  .advanced-creative .ac-scene-legend { flex-wrap:wrap; gap:6px; }
+  .advanced-creative .ac-scene-toolbar { gap:8px; }
+  .advanced-creative .ac-asset-library article { flex-wrap:wrap; }
+  .advanced-creative .ac-booking-quote { grid-column:1 / -1; }
+  .advanced-creative .ac-goal-list>div { grid-template-columns:70px minmax(0,1fr) 58px; gap:6px; }
+  .advanced-creative .ac-transport { flex-wrap:wrap; }
+  .advanced-creative .ac-transport>input[type=range] { flex:1 1 100px; width:auto; }
 }
 @media (prefers-reduced-motion:reduce) { .advanced-creative *, .advanced-creative *::before,.advanced-creative *::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }

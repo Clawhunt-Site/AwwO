@@ -1,6 +1,6 @@
 # AwwO official industry systems
 
-The home page and sign-in page now distinguish **12 flagship industry systems** from the **6 starter studies**. The public entry is `/?examples=1`; a direct example link is `/?examples=1&official=<allowlisted-id>`. Hosting access gates still apply. Viewing the collection does not request credentials or call a model.
+The home page and sign-in page now distinguish **12 flagship industry systems** from the **6 starter studies**. The public entry is `/?examples=1`; a direct example link is `/?examples=1&official=<allowlisted-id>`. Hosting access gates still apply. Viewing the collection does not request credentials or call a model. The public page opens a split-screen example above the searchable collection.
 
 For step-by-step Chinese walkthroughs, see the [industry tour](official-industry-tour.zh-CN.md).
 
@@ -25,6 +25,16 @@ Each system is a local, interactive reference with connected state, multiple vie
 
 The six original studies remain available under **Starter studies**: Orbit pricing, Signal Run maze, FIELD 3D projection, Knowledge retrieval, Model Lab logistic regression and Control budget approvals. Their existing IDs and links remain valid.
 
+## Process and result together
+
+The default **Workflow + result** tab keeps a dependency-stage rail on the left and the working result on the right. Select a node to inspect its output and real upstream/downstream contracts; the optional play control explains successive DAG stages, including parallel branches. It is a local tour, not a replay of provider timestamps or a new model run. It never marks unexecuted nodes successful.
+
+The result remains mounted when selecting nodes, focusing the result, or visiting the canvas/reuse tabs. **Reset result** explicitly starts the embedded result again. Switching cases starts a fresh case. Smaller screens stack the panes, and embedded systems use their container width for layout.
+
+**Browser-checked model output** entries use curated artifacts rather than the authored reference. The initial collection contains Signal Run (6/6 completed), Orbit pricing (5/6, guide quota failure), Model Lab (4/6, numerical review quota failure and blocked model card), and FLUX (a continuation with 2/4 completed and five reused inputs; final delivery failed HTML validation). Game, training and energy outputs explicitly disclose their official QA revisions. Their run receipts retain failed/blocked nodes and separate newly executed steps from reused upstream results. A completed build can be useful even when the guide or final delivery failed; these are not advertised as successful whole-graph runs. Original output and any explicit QA revision have separate SHA-256 digests. Public receipts exclude tenant, canvas, session and private run identifiers; original evidence remains private.
+
+Generated HTML is rendered only for its selected case and runs inside the existing artifact sanitizer with an opaque `allow-scripts` iframe sandbox. It receives no same-origin, navigation, popup, form, network or credential access. Checked-in source strings are inert data, never inserted into the parent DOM. Reuse still creates a clean draft rather than copying execution history.
+
 ## Explore the orchestration
 
 Every flagship carries 12–13 domain-specific nodes. The gallery shows the actual node and handoff counts. The workflow view includes:
@@ -47,7 +57,7 @@ The **Build your version** tab provides the full brief, expected deliverables an
 
 ## Evidence and scope
 
-These are authored reference implementations and reusable workflows. Real execution must be assessed from its own run records; the reference is not evidence that an agent generated or deployed it. All business data is synthetic and computations run locally. Simulated roles are not server authorization; local orders, approvals, dispatch, registry actions and deadlines do not contact production systems. Knowledge retrieval is lexical, claim differences require human interpretation, and model training uses small synthetic data rather than LLM fine-tuning. Contract examples illustrate explicit rules rather than legal judgments. Currency, taxes, prices and rates are fictional example inputs.
+Entries labeled **Interactive reference** are authored implementations and reusable workflows. Entries labeled **Model-generated result** or **QA revision** have an explicit curated run snapshot and browser acceptance record. A reference is not evidence that an agent generated it, and a node result does not prove the entire graph completed. All business data is synthetic and computations run locally. Simulated roles are not server authorization; local orders, approvals, dispatch, registry actions and deadlines do not contact production systems. Knowledge retrieval is lexical, claim differences require human interpretation, and model training uses small synthetic data rather than LLM fine-tuning. Contract examples illustrate explicit rules rather than legal judgments. Currency, taxes, prices and rates are fictional example inputs.
 
 An implementation being visible, a graph being valid, a model run succeeding and production deployment are separate acceptance claims. Hosting the references does not prove the future generated artifacts will have identical behavior.
 
@@ -59,6 +69,9 @@ An implementation being visible, a graph being valid, a model run succeeding and
 - `examples/advanced/industryWorkflow.ts`: checked topological compilation and graph metrics.
 - `examples/advanced/catalog.ts`: industry catalog registry.
 - `examples/OfficialExamples.tsx`: discovery, direct links, graph exploration and reuse.
+- `examples/OfficialShowcase.tsx`: simultaneous dependency tour and persistent interactive result.
+- `examples/generatedRecords.ts` and `examples/generated/*`: sanitized public run receipts and curated artifact strings.
+- `examples/GeneratedOfficialDemo.tsx`: lazy, sandboxed HTML presentation using the existing artifact security policy.
 - `examples/officialWorkflows.ts`: starter catalog plus clean document generation.
 
 All paths above are relative to `apps/web/src/saas/`.
