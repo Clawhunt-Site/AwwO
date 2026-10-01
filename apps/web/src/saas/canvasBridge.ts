@@ -284,6 +284,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       const result = await request(`/sessions/${history[2]}/messages`);
       return json({ complete: true, messages: result.items.map((item: any) => ({ body: item.content, runId: item.runId,
         ...(item.collaboration ? { collaboration: item.collaboration } : {}),
+        ...(Object.hasOwn(item, 'presentation') ? { presentation: item.presentation } : {}),
         ...(item.role === 'assistant' || item.role === 'agent' ? { authorAgentId: 'pi' } : {}) })) });
     }
     const index = /^\/conversations\/([^/]+)$/.exec(path);

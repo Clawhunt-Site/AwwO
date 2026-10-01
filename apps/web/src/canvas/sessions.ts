@@ -43,12 +43,26 @@ export interface TurnPresentation {
   outputState?: 'streaming' | 'final' | 'failed';
 }
 
+/** Server-owned output metadata, bound to the exact history message read from its Session. */
+export interface ServerTurnPresentation {
+  companyId: string;
+  runId: string;
+  sessionId: string;
+  nodeId: string;
+  outputState: NonNullable<TurnPresentation['outputState']>;
+  outputContract?: NodeContract;
+  sourceText: string;
+}
+
 export interface Turn {
   id: number;
   role: TurnRole;
   text: string;
   tone?: TurnTone;
   presentation?: TurnPresentation;
+  serverPresentation?: ServerTurnPresentation;
+  /** Explicit but invalid server metadata must never fall back to a local success cache. */
+  presentationRejected?: true;
   collaboration?: CollaborationMessageContext;
   nativeCommentId?: string;
   nativeOperationId?: string;

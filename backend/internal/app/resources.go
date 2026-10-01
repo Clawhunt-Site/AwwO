@@ -537,14 +537,136 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Session not found")
 		return
 	}
-	// Display metadata comes from the actual graph turn, never markers in message content.
-	// Keep the stored prompt and peer evidence unchanged for audit and model history.
-	v, e := rowsJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',m.id,'sessionId',m.session_id,'role',m.role,'content',m.content,'runId',m.run_id,'createdAt',m.created_at) ||
+	// Read the message, its run state, and its graph admission snapshot in one query.
+	// Neither the current canvas document nor text inside the message can establish
+	// a historical output contract. The joins keep tenant, run, Session and node
+	// identities together, including collaboration's multiple runs per node.
+	rows, e := a.db.Query(r.Context(), `SELECT
+		jsonb_build_object('id',m.id,'sessionId',m.session_id,'role',m.role,'content',m.content,'runId',m.run_id,'createdAt',m.created_at) ||
 		CASE WHEN m.role='user' AND g.collaboration IS NOT NULL AND n.session_id=m.session_id THEN
-		jsonb_build_object('collaboration',jsonb_build_object('nodeId',t.node_id,'sessionId',m.session_id,'runId',m.run_id,'phase',t.phase,'round',t.round,'goal',g.collaboration->>'goal')) ELSE '{}'::jsonb END
-		FROM messages m LEFT JOIN graph_collaboration_turns t ON t.tenant_id=m.tenant_id AND t.run_id=m.run_id
-		LEFT JOIN graph_runs g ON g.tenant_id=t.tenant_id AND g.id=t.graph_id
-		LEFT JOIN graph_run_nodes n ON n.tenant_id=t.tenant_id AND n.graph_id=t.graph_id AND n.node_id=t.node_id
+		jsonb_build_object('collaboration',jsonb_build_object('nodeId',t.node_id,'sessionId',m.session_id,'runId',m.run_id,'phase',t.phase,'round',t.round,'goal',g.collaboration->>'goal')) ELSE '{}'::jsonb END ||
+		CASE WHEN m.role='assistant' AND g.id IS NOT NULL THEN jsonb_build_object('presentation',NULL) ELSE '{}'::jsonb END,
+		m.role,COALESCE(m.run_id,''),m.session_id,COALESCE(r.status,''),COALESCE(n.state,''),COALESCE(n.node_id,''),
+		COALESCE(jsonb_typeof(r.execution_snapshot)='object' AND r.execution_snapshot<>'{}'::jsonb,false),
+		COALESCE(r.execution_snapshot ? 'outputContract',false),r.execution_snapshot->'outputContract',frozen.contract,
+		COALESCE(g.id IS NOT NULL AND (
+			(g.collaboration IS NULL AND t.run_id IS NULL AND n.run_id=r.id) OR
+			(g.collaboration IS NOT NULL AND t.phase='synthesis' AND t.state='completed'
+				AND t.run_id=n.run_id AND r.status='completed' AND g.status='completed'
+				AND n.state='done' AND n.node_id=g.collaboration->>'synthesizerNodeId')
+		),false)
+		FROM messages m
+		LEFT JOIN node_sessions s ON s.tenant_id=m.tenant_id AND s.id=m.session_id
+		LEFT JOIN runs r ON r.tenant_id=m.tenant_id AND r.id=m.run_id AND r.session_id=m.session_id
+		LEFT JOIN graph_collaboration_turns t ON t.tenant_id=r.tenant_id AND t.run_id=r.id
+		LEFT JOIN graph_run_nodes n ON n.tenant_id=r.tenant_id AND n.session_id=r.session_id
+			AND n.node_id=s.node_id AND ((t.run_id IS NULL AND n.run_id=r.id)
+			OR (t.run_id IS NOT NULL AND n.graph_id=t.graph_id AND n.node_id=t.node_id))
+		LEFT JOIN graph_runs g ON g.tenant_id=n.tenant_id AND g.id=n.graph_id AND g.canvas_id=s.canvas_id
+		LEFT JOIN LATERAL (SELECT CASE WHEN count(*)=1 AND bool_and(node->>'kind'='session')
+			THEN (jsonb_agg(node->'contract'))->0 ELSE NULL END AS contract FROM jsonb_array_elements(
+			CASE WHEN jsonb_typeof(g.document->'nodes')='array' THEN g.document->'nodes' ELSE '[]'::jsonb END
+		) node WHERE node->>'id'=n.node_id) frozen ON true
 		WHERE m.tenant_id=$1 AND m.session_id=$2 ORDER BY m.created_at,m.id`, r.PathValue("tenantId"), r.PathValue("id"))
-	a.replyList(w, v, e)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	defer rows.Close()
+	v := []json.RawMessage{}
+	for rows.Next() {
+		var raw, machine, frozen json.RawMessage
+		var role, runID, sessionID, status, nodeState, nodeID string
+		var snapshotPresent, machinePresent, graphProven bool
+		if e = rows.Scan(&raw, &role, &runID, &sessionID, &status, &nodeState, &nodeID,
+			&snapshotPresent, &machinePresent, &machine, &frozen, &graphProven); e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if role == "assistant" && graphProven && snapshotPresent {
+			if contract, ok := frozenMessageOutputContract(frozen, machine, machinePresent); ok {
+				state := messageOutputState(status, nodeState)
+				var message map[string]json.RawMessage
+				if e = json.Unmarshal(raw, &message); e != nil {
+					a.dbError(w, e)
+					return
+				}
+				presentation, marshalErr := json.Marshal(map[string]any{"runId": runID, "sessionId": sessionID,
+					"nodeId": nodeID, "outputState": state, "outputContract": contract})
+				if marshalErr != nil {
+					a.dbError(w, marshalErr)
+					return
+				}
+				message["presentation"] = presentation
+				raw, e = json.Marshal(message)
+				if e != nil {
+					a.dbError(w, e)
+					return
+				}
+			}
+		}
+		v = append(v, raw)
+	}
+	a.replyList(w, v, rows.Err())
+}
+
+// Child-run completion precedes graph-node output validation and artifact
+// storage. Only a committed node delivery may be displayed as final.
+func messageOutputState(runStatus, nodeState string) string {
+	if runStatus == "completed" && nodeState == "done" {
+		return "final"
+	}
+	if runStatus == "failed" || runStatus == "cancelled" || runStatus == "interrupted" ||
+		nodeState == "failed" || nodeState == "blocked" || nodeState == "cancelled" {
+		return "failed"
+	}
+	return "streaming"
+}
+
+// Output fields are presentation data, not the execution snapshot itself: the
+// latter contains prompts, history and credentials that must never enter a
+// transcript response. The graph admission document supplies labels, while a
+// frozen machine contract, when present, must agree exactly or we leave raw
+// history untouched. Form values are always stripped.
+type messagePresentationField struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
+	Value    string `json:"value"`
+}
+
+type messagePresentationContract struct {
+	Version int                        `json:"version"`
+	Inputs  []messagePresentationField `json:"inputs"`
+	Outputs []messagePresentationField `json:"outputs"`
+}
+
+func frozenMessageOutputContract(frozen, machine json.RawMessage, machinePresent bool) (*messagePresentationContract, bool) {
+	var c graphContract
+	if len(frozen) == 0 || json.Unmarshal(frozen, &c) != nil || c.Version != 1 || len(c.Outputs) == 0 || len(c.Outputs) > 32 {
+		return nil, false
+	}
+	fields := make([]messagePresentationField, 0, len(c.Outputs))
+	seen := map[string]bool{}
+	for _, f := range c.Outputs {
+		if strings.TrimSpace(f.ID) == "" || seen[f.ID] || !outputContractTypes[f.Type] {
+			return nil, false
+		}
+		seen[f.ID] = true
+		fields = append(fields, messagePresentationField{ID: f.ID, Label: f.Label, Type: f.Type, Required: f.Required, Value: ""})
+	}
+	if machinePresent {
+		var typed outputContract
+		if len(machine) == 0 || json.Unmarshal(machine, &typed) != nil || !validOutputContract(&typed) ||
+			len(typed.Fields) != len(fields) {
+			return nil, false
+		}
+		for i, f := range typed.Fields {
+			if f.ID != fields[i].ID || f.Type != fields[i].Type || f.Required != fields[i].Required {
+				return nil, false
+			}
+		}
+	}
+	return &messagePresentationContract{Version: 1, Inputs: []messagePresentationField{}, Outputs: fields}, true
 }

@@ -1,7 +1,7 @@
 import type { SessionNode } from './canvasDoc';
 import { activeThreadId } from './nodeThreads';
 import { normalizeContract } from './nodeContracts';
-import type { Turn, TurnPresentation } from './sessions';
+import type { ServerTurnPresentation, Turn, TurnPresentation } from './sessions';
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
 type ReadStore = Pick<Storage, 'getItem'>;
@@ -36,6 +36,19 @@ function normalizePresentation(value: unknown): TurnPresentation | undefined {
     ...(p.outputState !== undefined ? { outputState: p.outputState } : {}),
     ...(outputContract ? { outputContract } : {}),
   };
+}
+
+/** Accept only explicit transport metadata belonging to this exact run and requested Session. */
+export function serverConversationPresentation(
+  value: unknown, runId: string | undefined, sessionId: string, sourceText: string, companyId: string,
+): ServerTurnPresentation | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !runId || !sessionId || !companyId || typeof sourceText !== 'string') return undefined;
+  const p = value as Partial<ServerTurnPresentation>;
+  if (p.runId !== runId || p.sessionId !== sessionId || typeof p.nodeId !== 'string' || !p.nodeId.trim()
+    || typeof p.outputState !== 'string' || !['streaming', 'final', 'failed'].includes(p.outputState)) return undefined;
+  const outputContract = normalizeContract(p.outputContract);
+  if (p.outputContract !== undefined && !outputContract) return undefined;
+  return { companyId, runId, sessionId, nodeId: p.nodeId, sourceText, outputState: p.outputState!, ...(outputContract ? { outputContract } : {}) };
 }
 
 function key(node: SessionNode): string | null {
@@ -131,11 +144,29 @@ export function projectConversationTurns<T extends Omit<Turn, 'id'>>(
   const records = read(node, store ?? browserStorage()) ?? [];
   return turns.map(turn => {
     if (turn.role === 'system') return turn;
+    if (turn.role === 'agent' && turn.presentationRejected) {
+      const raw = { ...turn }; delete raw.presentation; return raw;
+    }
     const operationId = turn.nativeOperationId || turn.recoveryOperationId;
     const runId = turn.nativeRunId || turn.recoveryRunId;
     // Conflicting native/recovery markers cannot safely select a display projection.
     if ((turn.nativeOperationId && turn.recoveryOperationId && turn.nativeOperationId !== turn.recoveryOperationId)
-      || (turn.nativeRunId && turn.recoveryRunId && turn.nativeRunId !== turn.recoveryRunId)) return turn;
+      || (turn.nativeRunId && turn.recoveryRunId && turn.nativeRunId !== turn.recoveryRunId)) {
+      if (turn.serverPresentation) { const raw = { ...turn }; delete raw.presentation; return raw; }
+      return turn;
+    }
+    if (turn.serverPresentation) {
+      // Check node ownership only now: the history reader knows the Session, while this
+      // projection knows the node. A local streaming cache must never replace server truth.
+      const server = turn.role === 'agent' && node.binding && node.issueId
+        && turn.serverPresentation.companyId === node.binding.companyId
+        ? serverConversationPresentation(turn.serverPresentation, turn.nativeRunId, node.issueId, turn.serverPresentation.sourceText, node.binding.companyId) : undefined;
+      if (!server || server.nodeId !== node.id || server.sourceText !== turn.text
+        || [turn.runId, turn.recoveryRunId].some(id => id && id !== server.runId)) {
+        const raw = { ...turn }; delete raw.presentation; return raw;
+      }
+      return { ...turn, presentation: { outputState: server.outputState, ...(server.outputContract ? { outputContract: server.outputContract } : {}) } };
+    }
     const matches = records.filter(record => record.issueId === node.issueId && (
       operationId ? record.operationId === operationId : turn.role === 'agent' && runId && record.runId === runId
     ) && (!runId || !record.runId || record.runId === runId));

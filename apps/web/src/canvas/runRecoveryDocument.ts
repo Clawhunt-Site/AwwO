@@ -6,7 +6,7 @@ import { invalidateOutputs } from './invalidateOutputs';
 import type { CanvasRunJournal } from './runJournal';
 import { activeThreadId, updateThreadIssueId } from './nodeThreads';
 import { reconcileEdges } from './ports';
-import type { TurnPresentation } from './sessions';
+import type { ServerTurnPresentation, TurnPresentation } from './sessions';
 
 export type FingerprintedRunJournal = CanvasRunJournal & { inputFingerprint: string };
 
@@ -24,6 +24,8 @@ export interface RecoveredConversationTurn {
   nativeRunId?: string;
   nativeSource?: 'issue_description';
   presentation?: TurnPresentation;
+  serverPresentation?: ServerTurnPresentation;
+  presentationRejected?: true;
   runId?: string;
 }
 

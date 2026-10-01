@@ -35,7 +35,7 @@ describe('SaaS node configuration save', () => {
     const p = props({ onInitialize: initialize, onClose: close, onCloseLockChange: value => { locked = value; } });
     render(<InspectorPanel {...p} />);
     expect(screen.getByText('当前工作区：当前项目')).toBeInTheDocument();
-    expect(screen.getByText('未指定执行框架时使用 Pi；未指定模型时使用所选执行框架的服务端默认模型。')).toBeInTheDocument();
+    expect(screen.getByText('未指定执行框架或模型时，使用工作区的服务端默认配置。')).toBeInTheDocument();
     expect(screen.queryByText('绑定真实 Agent')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('绑定到公司')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '绑定并创建真实 Agent' })).not.toBeInTheDocument();
@@ -149,7 +149,7 @@ describe('SaaS node configuration save', () => {
     const p = props({ onInitialize: vi.fn().mockRejectedValue(null), liveCompanies: [] });
     render(<LocaleProvider locale="en"><InspectorPanel {...p} /></LocaleProvider>);
     expect(screen.queryByText('Create company')).not.toBeInTheDocument();
-    expect(screen.getByText('An unspecified runtime uses Pi. An unspecified model uses the selected runtime’s server default.')).toBeInTheDocument();
+    expect(screen.getByText('Unspecified runtime or model settings use the workspace’s server defaults.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save and prepare to run' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed. Your draft is kept: Saving could not complete. Try again.');
   });

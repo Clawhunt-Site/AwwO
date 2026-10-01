@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
-import { beginConversationPresentation, nativeConversationOperation, projectConversationTurns, updateConversationPresentation } from '../src/canvas/conversationPresentation';
+import { beginConversationPresentation, nativeConversationOperation, projectConversationTurns, serverConversationPresentation, updateConversationPresentation } from '../src/canvas/conversationPresentation';
 import type { NodeContract } from '../src/canvas/nodeContracts';
 import type { Turn, TurnPresentation } from '../src/canvas/sessions';
 
@@ -36,6 +36,66 @@ function saved(current = node(), cache = store(), operationId = 'operation-1', r
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('conversation presentation identity', () => {
+  it('clears an already attached projection after explicit server metadata rejection while leaving manual input compatible', () => {
+    const { current, cache } = saved();
+    const rejected: NativeTurn = { role: 'agent', text: rawOutput, nativeRunId: 'run-1', presentationRejected: true,
+      presentation: { outputState: 'final', outputContract: presentation().outputContract } };
+    const result = projectConversationTurns(current, [rejected], cache)[0];
+    expect(Object.hasOwn(result, 'presentation')).toBe(false);
+    expect(result.text).toBe(rawOutput);
+    expect(result.presentationRejected).toBe(true);
+    const manual: NativeTurn = { role: 'user', text: rawInput, nativeOperationId: 'operation-1', presentationRejected: true };
+    expect(projectConversationTurns(current, [manual], cache)[0].presentation).toEqual({ inputKind: 'manual', displayText: '改成抽屉' });
+  });
+
+  it.each(['final', 'failed', 'streaming'] as const)('gives verified server %s metadata precedence over a stale local contract and state', outputState => {
+    const { current, cache } = saved();
+    const historicalContract = presentation().outputContract!;
+    historicalContract.outputs[0].label = 'Server historical result';
+    current.contract = { version: 1, inputs: [], outputs: [{ id: 'current', label: 'Current unrelated contract', type: 'number', required: true, value: '' }] };
+    const serverPresentation = serverConversationPresentation({ runId: 'run-1', sessionId: 'issue-1', nodeId: 'node-1', outputState, outputContract: historicalContract }, 'run-1', 'issue-1', rawOutput, 'company-1')!;
+    const turn: NativeTurn = { role: 'agent', text: rawOutput, runId: 'run-1', nativeRunId: 'run-1', serverPresentation };
+    const projected = projectConversationTurns(current, [turn], cache)[0];
+    expect(projected.presentation).toEqual({ outputState, outputContract: historicalContract });
+    expect(projected.text).toBe(rawOutput);
+    expect(projected.presentation?.outputContract).not.toEqual(current.contract);
+    expect(projected.presentation?.outputContract?.outputs[0].label).toBe('Server historical result');
+  });
+
+  it.each(['company', 'node', 'session', 'native-run', 'run', 'recovery-run', 'text', 'role'] as const)('does not attach a server projection to mismatched %s evidence', mismatch => {
+    const current = node();
+    const serverPresentation = serverConversationPresentation({ runId: 'run-1', sessionId: 'issue-1', nodeId: 'node-1', outputState: 'final', outputContract: presentation().outputContract }, 'run-1', 'issue-1', rawOutput, 'company-1')!;
+    const turn: NativeTurn = { role: 'agent', text: rawOutput, runId: 'run-1', nativeRunId: 'run-1', serverPresentation,
+      presentation: { outputState: 'final', outputContract: presentation().outputContract } };
+    if (mismatch === 'company') current.binding = { ...current.binding!, companyId: 'another-company' };
+    if (mismatch === 'node') current.id = 'another-node';
+    if (mismatch === 'session') current.issueId = 'another-session';
+    if (mismatch === 'native-run') turn.nativeRunId = 'another-run';
+    if (mismatch === 'run') turn.runId = 'another-run';
+    if (mismatch === 'recovery-run') turn.recoveryRunId = 'another-run';
+    if (mismatch === 'text') turn.text += '\n';
+    if (mismatch === 'role') turn.role = 'user';
+    expect(projectConversationTurns(current, [turn], store())[0].presentation).toBeUndefined();
+  });
+
+  it('requires explicit valid server state and independently supplied native identity', () => {
+    const metadata = { runId: 'run-1', sessionId: 'issue-1', nodeId: 'node-1', outputState: 'final', outputContract: presentation().outputContract };
+    expect(serverConversationPresentation(metadata, undefined, 'issue-1', rawOutput, 'company-1')).toBeUndefined();
+    expect(serverConversationPresentation(metadata, 'another-run', 'issue-1', rawOutput, 'company-1')).toBeUndefined();
+    expect(serverConversationPresentation(metadata, 'run-1', 'another-session', rawOutput, 'company-1')).toBeUndefined();
+    expect(serverConversationPresentation({ ...metadata, outputState: 'candidate' }, 'run-1', 'issue-1', rawOutput, 'company-1')).toBeUndefined();
+    expect(serverConversationPresentation({ ...metadata, outputContract: { version: 2, inputs: [], outputs: [] } }, 'run-1', 'issue-1', rawOutput, 'company-1')).toBeUndefined();
+    expect(serverConversationPresentation({ ...metadata, nodeId: '' }, 'run-1', 'issue-1', rawOutput, 'company-1')).toBeUndefined();
+  });
+
+  it('does not inherit a local or current contract when the verified server message has none', () => {
+    const { current, cache } = saved();
+    current.contract = presentation().outputContract;
+    const serverPresentation = serverConversationPresentation({ runId: 'run-1', sessionId: 'issue-1', nodeId: 'node-1', outputState: 'final' }, 'run-1', 'issue-1', rawOutput, 'company-1')!;
+    const turn: NativeTurn = { role: 'agent', text: rawOutput, runId: 'run-1', nativeRunId: 'run-1', serverPresentation };
+    expect(projectConversationTurns(current, [turn], cache)[0].presentation).toEqual({ outputState: 'final' });
+  });
+
   it('restores by the native operation/run markers and preserves exact raw text and comment identity', () => {
     const { current, cache } = saved();
     const turns: NativeTurn[] = [

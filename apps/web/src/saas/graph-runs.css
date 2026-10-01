@@ -11,6 +11,15 @@
 .saas-graph-panel button { color: inherit; background: transparent; border: 1px solid var(--saas-border); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
 .saas-graph-panel button[aria-pressed=true] { border-color: #659bff; background: #659bff25; }
 .saas-graph-panel pre { font-family: inherit; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; margin-bottom: 0; }
+.saas-graph-node-output { margin-top: 16px; }
+.saas-graph-node-output > summary { font-weight: 600; cursor: pointer; }
+.saas-graph-output-fields { display: grid; gap: 12px; margin-top: 12px; }
+.saas-graph-output-field { min-width: 0; border: 1px solid var(--saas-border); border-radius: 8px; overflow: hidden; --line: var(--saas-border); --fg: var(--saas-text); --muted: var(--saas-muted); }
+.saas-graph-output-field h3 { margin: 0; padding: 8px 12px; font-size: 12px; border-bottom: 1px solid var(--saas-border); }
+.saas-graph-output-value { display: block; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.saas-graph-output-raw { margin-top: 12px; }
+.saas-graph-output-raw > summary { color: var(--saas-muted); font-size: 12px; cursor: pointer; }
+.saas-graph-output-notice { font-size: 12px; color: var(--saas-muted); }
 .saas-team-turn { padding: 14px 0; border-top: 1px solid var(--saas-border); }
 .saas-team-turn span, .saas-team-turn small { opacity: .72; }
 .saas-canvas-shell .canvas-runline { background: var(--awwo-surface); color: var(--awwo-ink); border-color: var(--awwo-border); }

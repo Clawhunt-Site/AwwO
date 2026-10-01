@@ -4,6 +4,7 @@ import { runErrorText } from './canvasErrors';
 import { graphPath, graphIsActive, validGraphCollaboration, type GraphRunSnapshot, type GraphCollaborationPhase } from './graphRuns';
 import { TeamRunDetails } from './TeamRunDetails';
 import { RunEvidence } from './RunEvidence';
+import { GraphNodeOutput } from './GraphNodeOutput';
 import { useSaaSPreferences } from './preferences';
 import { containDialogTab } from '../ui/Popover';
 import './graph-runs.css';
@@ -93,7 +94,7 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
         <nav aria-label={t('运行节点', 'Run nodes')}>{current.nodes.map(item => <button key={item.nodeId} aria-pressed={node?.nodeId === item.nodeId} onClick={() => setNodeId(item.nodeId)}>
           {current.document?.nodes.find(n => n.id === item.nodeId)?.title || item.nodeId} · {status(item.state)}
         </button>)}</nav>
-        {node && <><p>{node.detail && status(node.detail)}</p>{node.output && <details open><summary>{node.partial || (current.collaboration && (current.status !== 'completed' || node.nodeId !== current.collaboration.synthesizerNodeId)) ? t('节点候选结果', 'Node candidate result') : t('节点最终结果', 'Node result')}</summary><pre>{node.output}</pre></details>}</>}
+        {node && <><p>{node.detail && status(node.detail)}</p><GraphNodeOutput key={`${current.id}:${node.nodeId}`} graph={current} node={node} /></>}
         {!current.collaboration && (node?.runId ? <TeamRunDetails tenantId={tenantId} runId={node.runId} runStatus={node.state} defaultOpen />
           : <p>{t('此节点还没有实际调用记录。', 'This node has no model call record yet.')}</p>)}
       </>}

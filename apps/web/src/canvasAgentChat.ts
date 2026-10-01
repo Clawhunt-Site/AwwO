@@ -7,9 +7,9 @@ import { canvasFetch } from './saas/canvasBridge';
 // control token (same as mission planning) — the client never handles the token.
 // Fail-soft: any transport failure yields a single 'error' frame, never a throw.
 import { readSseFrames } from './sse';
-import { nativeConversationOperation } from './canvas/conversationPresentation';
+import { nativeConversationOperation, serverConversationPresentation } from './canvas/conversationPresentation';
 import { collaborationMessageContext } from './canvas/readableTranscript';
-import type { CollaborationMessageContext } from './canvas/sessions';
+import type { CollaborationMessageContext, ServerTurnPresentation } from './canvas/sessions';
 
 export type AgentChatFrame =
   // The turn landed on the agent's dedicated issue and the wake fired.
@@ -201,6 +201,8 @@ export interface ConversationSummary {
 /** A stored transcript turn, normalized from an issue comment. */
 export interface StoredMessage {
   collaboration?: CollaborationMessageContext;
+  serverPresentation?: ServerTurnPresentation;
+  presentationRejected?: true;
   runId?: string;
   role: 'user' | 'agent';
   text: string;
@@ -292,12 +294,16 @@ export async function fetchConversationMessages(
         const nativeRunId = typeof d.createdByRunId === 'string' && d.createdByRunId ? d.createdByRunId
           : typeof d.runId === 'string' && d.runId ? d.runId : undefined;
         const collaboration = role === 'user' ? collaborationMessageContext(d.collaboration, nativeRunId, issueId) : undefined;
+        const serverPresentation = role === 'agent' && !(typeof d.runId === 'string' && d.runId && d.runId !== nativeRunId)
+          ? serverConversationPresentation(d.presentation, nativeRunId, issueId, text, companyId) : undefined;
         return { role, text, ...(Number.isFinite(createdAt) ? { createdAt } : {}),
           ...(typeof d.runId === 'string' && d.runId ? { runId: d.runId } : {}),
           ...(typeof d.id === 'string' && d.id ? { nativeCommentId: d.id } : {}),
           ...(nativeOperationId ? { nativeOperationId } : {}),
           ...(nativeRunId ? { nativeRunId } : {}),
           ...(collaboration ? { collaboration } : {}),
+          ...(serverPresentation ? { serverPresentation } : {}),
+          ...(role === 'agent' && Object.hasOwn(d, 'presentation') && !serverPresentation ? { presentationRejected: true as const } : {}),
           ...(d.source === 'issue_description' ? { nativeSource: 'issue_description' as const } : {}),
         };
       })
