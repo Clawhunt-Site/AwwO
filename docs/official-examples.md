@@ -1,39 +1,71 @@
-# AwwO official examples
+# AwwO official industry systems
 
-The workspace home and sign-in page include six authored reference implementations. The gallery can also be opened at `/?examples=1` without an application session. An outer hosting access gate, if configured, still applies. The gallery makes no API requests until a signed-in editor explicitly copies a workflow.
+The home page and sign-in page now distinguish **12 flagship industry systems** from the **6 starter studies**. The public entry is `/?examples=1`; a direct example link is `/?examples=1&official=<allowlisted-id>`. Hosting access gates still apply. Viewing the collection does not request credentials or call a model.
 
-| Example | Working reference | Workflow |
+For step-by-step Chinese walkthroughs, see the [industry tour](official-industry-tour.zh-CN.md).
+
+## Flagship collection
+
+Each system is a local, interactive reference with connected state, multiple views, synthetic domain data and deterministic calculations. Different actions affect the same underlying business model; metrics are computed from that model.
+
+| Industry / reference | What to explore | An exception to try |
 | --- | --- | --- |
-| Orbit | Plan, seat and billing-period price calculation; local proposal state | Scope → copy and pricing states in parallel → page → review → delivery |
-| Signal Run | A playable 7×7 maze, collectible energy, locked exit, win/loss and reset; focused keyboard and touch controls | Rules → mechanics and visual feedback in parallel → game → regression → guide |
-| FIELD | Three-dimensional mesh projection, depth ordering, shading, drag/keyboard orbit, presets, material and zoom | Scene → geometry and controls in parallel → renderer → mathematical checks → guide |
-| Knowledge | Editable documents; weighted TF-IDF cosine retrieval, source text and unmatched queries | Corpus → indexing and query evaluation in parallel → interface → citation checks → guide |
-| Model Lab | Actual batch gradient descent for logistic regression; 180 training and 60 held-out samples, loss curves, probability regions and prediction | Data → optimization and evaluation in parallel → experiment → numerical review → model card |
-| Control | Searchable budget requests, approval/rejection with reason, completion, totals and local action history | Business model → validation/copy and state rules in parallel → operations UI → consistency review → handoff |
+| Games — **KEPLER** colony command | Seeded map, infrastructure connectivity, resource production, maintenance, technology, weather, mission goals and replayable actions | Build disconnected infrastructure, exhaust life support or replay the same seed |
+| Logistics — **NEXUS** urban dispatch | Directed shortest paths, two depots, four vehicles, capacity, delivery windows, assignment policies and route progress | Close a bridge, isolate a destination or tighten windows |
+| Enterprise R&D — **ATLAS** evidence workspace | Document versions, passage BM25, role visibility before indexing, entity evidence, explicit claim differences and query evaluation | Switch visible roles, change a source version or compare conflicting values |
+| Architecture — **HABITAT** digital twin | Three-dimensional buildings and floors, camera controls, asset selection, live local sensor scenarios, maintenance and energy comparison | Inspect an affected floor and compare operating scenarios |
+| Retail — **MERIDIAN** fulfillment | Multi-item baskets, three warehouses, reservations, approval, shipping, whole-order returns, refunds and margin reconciliation | Reserve beyond available stock or transfer goods already reserved |
+| Machine learning — **FOUNDRY** experiments | Separate training/validation/test partitions, logistic regression and a decision stump, parameter trials, confusion matrix, ROC, thresholds, cost and drift | Change the threshold and compare errors, or introduce distribution shift |
+| Media — **FRAME** production | Multi-track timeline, storyboard preview, materials, dependencies, versions, budget and production checks | Create a timing/dependency problem and inspect the generated production record |
+| Manufacturing — **FORGE** scheduling | BOM inventories, shifts, machines, dependent operations, Gantt scheduling, downtime and quality quarantine | Reduce materials, stop equipment or fail a quality check |
+| Education — **CAMPUS** learning paths | Prerequisite graph, question feedback, mastery updates, explainable recommendations, time budgets and learning history | Attempt a locked prerequisite or reduce the available study budget |
+| Hospitality — **STAY** revenue scenarios | Room types, dated inventory, pricing, channel commission, reservations, cancellations and demand scenarios | Attempt an overbooking, cancel a booking and check availability recovery |
+| Energy — **FLUX** microgrid | Twenty-four-hour load, solar, tariffs, battery state of charge, power/efficiency constraints, policy comparison and energy balance | Introduce an outage, change solar/load or lower battery capacity |
+| Professional services — **CLAUSE** delivery review | Synthetic contract versions, line differences, explicit obligations, simulated deadlines, source-linked findings and versioned review records | Add an impossible date or edit a reviewed version |
+
+The six original studies remain available under **Starter studies**: Orbit pricing, Signal Run maze, FIELD 3D projection, Knowledge retrieval, Model Lab logistic regression and Control budget approvals. Their existing IDs and links remain valid.
+
+## Explore the orchestration
+
+Every flagship carries 12–13 domain-specific nodes. The gallery shows the actual node and handoff counts. The workflow view includes:
+
+- A node directory that moves to the selected node in the canvas.
+- Zoom and fit controls for large graphs.
+- A dependency-chain view that highlights transitive ancestors and descendants.
+- Node tasks, concrete output contracts, acceptance criteria, and clickable upstream/downstream handoffs.
+- Parallel work, merges, review, a finite repair pass and delivery with review evidence.
+
+The displayed graph is compiled into the actual `CanvasDocument`; it is not a separate decorative diagram. The repair pass is an ordinary dependency path, not unsupported scheduler looping or conditional execution. Each upstream result has its own required input port. Reviewers must distinguish source inspection from observed execution.
 
 ## Reuse
 
-Open an example, select **Workflow canvas**, and choose a node to read its task, expected output, acceptance criteria and incoming/outgoing handoffs. Canvas zoom and horizontal scrolling support larger graphs and small screens. **Build your version** includes the full brief and a JSON download.
+**Copy to my canvases** uses the existing tenant canvas endpoint. Copies have fresh identities and no model, runtime, credentials, bindings, history or invented outputs. Copying creates a draft; it does not run a planner, submit a model request, spend credits, or overwrite the home prompt. Initialize nodes with a configured workspace engine, choose models and execute when ready. Reader members can inspect and download but cannot create copies.
 
-**Copy to my canvases** posts a complete, independent `CanvasDocument` to the existing tenant canvas endpoint. Every node and edge receives a new ID. Model, runtime, effort, bindings, conversations and outputs are empty; a copy never submits a plan, starts a run, spends model credits, or overwrites the home prompt. Initialize nodes using the workspace engine before execution. Read-only members can inspect and download but cannot create a copy.
+The **Build your version** tab provides the full brief, expected deliverables and downloadable canvas JSON. An allowlisted example selection survives sign-in for 30 minutes in tab-local storage. Existing invitation validation is preserved; arbitrary redirect URLs are not carried across sign-in.
 
-Visitors selecting an example before unified sign-in retain only its allowlisted public ID in tab-local storage for 30 minutes. The selection cannot redirect to another origin and does not create anything after sign-in. It is cleared after a successful copy.
+## Evidence and scope
 
-## Evidence and limits
+These are authored reference implementations and workflows awaiting execution. They are not fabricated evidence that an agent generated or deployed the reference. All business data is synthetic and computations run locally. Simulated roles are not server authorization; local orders, approvals, dispatch, registry actions and deadlines do not contact production systems. Knowledge retrieval is lexical, claim differences require human interpretation, and model training uses small synthetic data rather than LLM fine-tuning. Contract examples illustrate explicit rules rather than legal judgments. Currency, taxes, prices and rates are fictional example inputs.
 
-These are authored demonstration implementations and executable workflow templates, not a fabricated record of model-generated work. The references run locally in the browser and do not use external services. Knowledge retrieval is lexical, not an enterprise semantic index. Model Lab trains a small classifier on synthetic data, not a large language model. Budget approvals only change local demo state and do not implement server authorization or make payments. FIELD uses perspective projection in SVG, not a GPU engine or a downloadable model.
+An implementation being visible, a graph being valid, a model run succeeding and production deployment are separate acceptance claims. Hosting the references does not prove the future generated artifacts will have identical behavior.
 
-Each workflow is a six-node DAG with a separate input port for every upstream dependency. Build nodes output a complete HTML artifact; review nodes receive the actual source and must distinguish source review from observed execution. The final node receives both the artifact and review findings. No unsupported feedback execution or invented success history is stored.
+## Implementation
 
-## Implementation and checks
+- `examples/advanced/*Catalog.ts`: complete domain briefs, data scope and step contracts.
+- `examples/advanced/*Engine.ts`: pure scenario algorithms and state transitions.
+- `examples/advanced/Advanced*Demos.tsx`: interactive systems, loaded on demand.
+- `examples/advanced/industryWorkflow.ts`: checked topological compilation and graph metrics.
+- `examples/advanced/catalog.ts`: industry catalog registry.
+- `examples/OfficialExamples.tsx`: discovery, direct links, graph exploration and reuse.
+- `examples/officialWorkflows.ts`: starter catalog plus clean document generation.
 
-- `apps/web/src/saas/examples/officialWorkflows.ts`: bilingual catalog and document factory.
-- `OfficialExamples.tsx` and `official-examples.css`: gallery, graph inspector and reuse/download controls.
-- `CreativeDemos.tsx`: configurator, game and projected 3D scene.
-- `IntelligenceDemos.tsx` / `intelligenceMath.ts`: retrieval, training and operations.
-- `officialSelection.ts`: bounded sign-in handoff.
-- `WorkspaceHome.tsx` / `SaaSApp.tsx`: homepage and existing API integration.
+All paths above are relative to `apps/web/src/saas/`.
 
-Run `npm run test:saas --prefix apps/web`, `npm run typecheck:saas --prefix apps/web`, and `npm run build:saas --prefix apps/web`. The official workflow tests exercise real frontend graph validation and scheduler handoffs with fixture executors; demo tests exercise the actual game and learning/retrieval algorithms. These tests do not make paid provider calls.
+```sh
+npm run test:saas --prefix apps/web -- --maxWorkers=2
+npm run typecheck:saas --prefix apps/web
+npm run build:saas --prefix apps/web
+VITE_AWWO_WEB_PORT=5196 npm run dev:saas --prefix apps/web
+```
 
-For a local browser preview, run `npm run dev:saas --prefix apps/web` and open `/?examples=1`. Verify each demo, both languages, graph selection/zoom, JSON download, the authenticated copy action, and a mobile viewport. Deployment must be verified separately from build and test success.
+Algorithm tests check invariants and meaningful edge cases: inventory conservation, resource connectivity, energy balance, scheduling constraints, train/validation/test isolation and source visibility. Graph tests use the real frontend scheduler with fixture executors and verify failure blocking. No paid provider calls are made by these tests. Actual browser acceptance should exercise the industry exceptions, linked totals, responsive layouts, graph navigation, locale switching and exports. Deployment is verified separately.

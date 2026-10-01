@@ -19,12 +19,12 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.se
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const view = (props = {}) => render(<SaaSPreferencesProvider><OfficialExamples {...props} /></SaaSPreferencesProvider>);
 
-it('shows all six official categories and filters without creating or running anything', () => {
+it('starts with twelve flagship systems and filters capabilities without creating or running anything', () => {
   const onReuse = vi.fn(); view({ onReuse });
-  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(6);
-  fireEvent.click(screen.getByRole('button', { name: '模型训练', exact: true }));
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(12);
+  fireEvent.click(screen.getByRole('button', { name: /^模型与实验/ }));
   expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(1);
-  expect(screen.getByRole('button', { name: /查看官方案例：Model Lab/ })).toBeVisible();
+  expect(screen.getByRole('button', { name: `查看官方案例：${OFFICIAL_WORKFLOWS.find(item => item.tier === 'flagship' && item.category === 'training')!.title.zh}` })).toBeVisible();
   expect(onReuse).not.toHaveBeenCalled();
 });
 
@@ -32,8 +32,9 @@ it('exposes the real graph and each selected node contract with keyboard accessi
   view({ initialId: first.id });
   fireEvent.click(screen.getByRole('tab', { name: '编排画布' }));
   const panel = screen.getByRole('tabpanel');
+  const graph = screen.getByLabelText('工作流画布，可横向滚动并选择节点');
   const last = first.nodes.at(-1)!;
-  fireEvent.click(within(panel).getByRole('button', { name: new RegExp(last.title.zh) }));
+  fireEvent.click(within(graph).getByRole('button', { name: new RegExp(last.title.zh) }));
   expect(within(panel).getByRole('heading', { name: last.title.zh })).toBeVisible();
   expect(within(panel).getByText(last.task.zh)).toBeVisible();
   expect(within(panel).getByText(last.acceptance[0].zh)).toBeVisible();
@@ -46,7 +47,7 @@ it('provides a public gallery without requesting auth, personal credentials or A
   history.replaceState({}, '', '/?examples=1');
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
   render(<SaaSApp />);
-  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(6);
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(12);
   expect(fetcher).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: /进入工作区/ })).toHaveAttribute('href', '/');
 });
@@ -116,9 +117,9 @@ it('keeps a curated selection across SSO without accepting arbitrary paths or st
 it('returns focus to the category controls when the selected card has been filtered away', () => {
   view();
   fireEvent.click(screen.getByRole('button', { name: `查看官方案例：${first.title.zh}` }));
-  fireEvent.click(screen.getByRole('button', { name: '模型训练', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: /^模型与实验/ }));
   fireEvent.click(screen.getByRole('button', { name: '收起作品' }));
-  expect(screen.getByRole('button', { name: /^全部作品/ })).toHaveFocus();
+  expect(screen.getByRole('button', { name: /^全部能力/ })).toHaveFocus();
 });
 
 it('preserves a valid invitation through case sign-in without carrying arbitrary redirect parameters', () => {
@@ -130,4 +131,48 @@ it('preserves a valid invitation through case sign-in without carrying arbitrary
   expect(href).toBe(`/?official=${first.id}&invite=${invite}`);
   expect(clawHuntStartURL(href.slice(1))).toBe(`/api/v1/auth/clawhunt/start?invite=${invite}`);
   expect(officialSignInURL(first.id, '?invite=https://untrusted.example/')).toBe(`/?official=${first.id}`);
+});
+
+
+it('combines industry and text filters, clears empty results, and retains starter studies', () => {
+  view();
+  const industryCase = OFFICIAL_WORKFLOWS.find(item => item.tier === 'flagship')!;
+  fireEvent.change(screen.getByRole('combobox', { name: '行业筛选' }), { target: { value: industryCase.industry!.en } });
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(1);
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜索案例' }), { target: { value: 'no-such-industry-zzzz' } });
+  expect(screen.queryAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(0);
+  expect(screen.getByRole('heading', { name: '没有找到匹配案例' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '重新浏览' }));
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(12);
+  fireEvent.click(screen.getByRole('button', { name: /^基础练习/ }));
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(6);
+  expect(screen.getByRole('button', { name: /查看官方案例：Signal Run/ })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: /^全部案例/ }));
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(18);
+});
+
+it('explores large workflows through the node directory and highlights actual dependency paths', () => {
+  view({ initialId: first.id });
+  fireEvent.click(screen.getByRole('tab', { name: '编排画布' }));
+  const directory = screen.getByRole('navigation', { name: '节点目录' });
+  expect(within(directory).getAllByRole('button')).toHaveLength(first.nodes.length);
+  const target = first.nodes[2];
+  fireEvent.click(within(directory).getByRole('button', { name: new RegExp(target.title.zh) }));
+  expect(screen.getByRole('heading', { name: target.title.zh })).toBeVisible();
+  fireEvent.click(screen.getByRole('checkbox', { name: '突出依赖链' }));
+  expect(screen.getByRole('checkbox', { name: '突出依赖链' })).toBeChecked();
+  const graph = screen.getByLabelText('工作流画布，可横向滚动并选择节点');
+  expect(within(graph).getByRole('button', { name: new RegExp(target.title.zh) })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '总览' })).toBeVisible();
+});
+
+
+it('ignores unknown direct ids and returns focus when reopening an already selected case', () => {
+  view({ initialId: 'unknown-case' });
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(12);
+  const card = screen.getByRole('button', { name: `查看官方案例：${first.title.zh}` });
+  fireEvent.click(card);
+  card.focus();
+  fireEvent.click(card);
+  expect(screen.getByLabelText(first.title.zh)).toHaveFocus();
 });

@@ -1,3 +1,4 @@
+import { INDUSTRY_WORKFLOWS } from './advanced/catalog';
 import type { AgentTemplateId } from '../../canvas/agentTemplates';
 import { createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../../canvas/canvasDoc';
 import type { ContractField } from '../../canvas/nodeContracts';
@@ -19,6 +20,10 @@ export interface OfficialWorkflowNode {
 }
 export interface OfficialWorkflow {
   readonly id: string;
+  readonly tier?: 'flagship' | 'starter';
+  readonly industry?: Localized;
+  readonly capabilities?: ReadonlyArray<Localized>;
+  readonly datasets?: ReadonlyArray<Localized>;
   readonly category: OfficialWorkflowCategory;
   readonly categoryLabel: Localized;
   readonly title: Localized;
@@ -41,7 +46,7 @@ const e = (from: string, to: string, zh: string, en: string) => ({ from, to, lab
 
 /** Authored reference workflows. These describe work to run, not historical execution evidence.
  * All examples start with bounded, local sample data and require no external service credentials. */
-export const OFFICIAL_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [
+const STARTER_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [
   {
     id: 'interaction-page', category: 'design', categoryLabel: l('交互页面', 'Interactive page'), accent: '#a78bfa',
     title: l('Orbit / 团队套餐配置器', 'Orbit / Team plan configurator'),
@@ -229,6 +234,8 @@ export const OFFICIAL_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [
     limitations: l('六条模拟预算申请仅本地变化；没有角色权限、后端、通知或付款，也没有生产审计。真实服务端能力需另行实现。', 'Six sample budget requests change locally only. No roles, backend, notifications, payments or production audit. Actual server capabilities require separate implementation.'),
   },
 ];
+
+export const OFFICIAL_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...INDUSTRY_WORKFLOWS, ...STARTER_WORKFLOWS];
 
 export function getOfficialWorkflow(id: string): OfficialWorkflow | undefined {
   return OFFICIAL_WORKFLOWS.find(item => item.id === id);

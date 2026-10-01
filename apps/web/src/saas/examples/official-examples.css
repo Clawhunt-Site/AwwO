@@ -5,7 +5,7 @@ body:has(.official-examples) { overflow-y: auto; }
 .official-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 28px; padding-bottom: 28px; }
 .official-eyebrow { display: flex; align-items: center; gap: 9px; font: 600 10px/1.5 ui-monospace, monospace; letter-spacing: 1.5px; color: var(--saas-muted); }
 .official-eyebrow>span { width: 7px; height: 7px; background: #50a57b; border-radius: 50%; }
-.official-heading :is(h1,h2) { margin: 12px 0; font-size: clamp(25px, 3vw, 36px); line-height: 1.25; font-weight: 600; letter-spacing: -1.1px; }
+.official-heading :is(h1,h2) { max-width: none; width: auto; margin: 12px 0; font-size: clamp(25px, 3vw, 36px); line-height: 1.25; font-weight: 600; letter-spacing: -1.1px; }
 .official-heading p { margin: 0; max-width: 620px; color: var(--saas-muted); font-size: 14px; line-height: 1.8; }
 .official-edition { flex-shrink: 0; display: grid; gap: 8px; text-align: right; font-size: 10px; color: var(--saas-muted); letter-spacing: 1px; }
 .official-edition b { color: var(--saas-text); font: 500 20px/1.2 ui-monospace, monospace; }
@@ -141,3 +141,71 @@ body:has(.official-examples) { overflow-y: auto; }
 @media (max-width: 700px) { .official-examples { margin-top: 38px; } .official-cards { gap: 16px; } .official-heading { padding-bottom: 18px; } .official-heading p { font-size: 12px; } .official-filters { gap: 2px; } .saas-dashboard .official-filters button,.saas-login .official-filters button { padding: 7px 10px; font-size: 11px; } .official-detail { padding: 15px; margin-inline: -5px; } .official-detail-title { align-items: flex-start; flex-direction: column; gap: 16px; } .official-detail-title h3 { font-size: 23px; } .official-detail-heading>span { text-align: right; max-width: 60%; } .official-guide,.official-node-inspector { grid-template-columns: 1fr; gap: 10px; } .official-tabs { gap: 20px; } .official-public-nav { gap: 8px; } }
 @media (max-width: 520px) { .official-cards { grid-template-columns: 1fr; } .official-cover { height: 210px; } .official-card p { min-height: 0; } .official-card-copy { padding: 16px 18px; } .official-canvas-toolbar { flex-wrap: wrap; } .official-tabs { gap: 13px; } .saas-dashboard .official-tabs button,.saas-login .official-tabs button { font-size: 11px; } .official-library-note { align-items: flex-start; } }
 @media (prefers-reduced-motion: reduce) { .official-examples *, .official-examples *::before, .official-examples *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+
+/* Industry collection */
+.official-collection-summary { display:flex; align-items:center; gap:34px; padding:20px 0 24px; border-top:1px solid var(--official-line); border-bottom:1px solid var(--official-line); }
+.official-collection-summary>span { display:flex; align-items:baseline; gap:10px; color:var(--saas-muted); font-size:11px; }
+.official-collection-summary b { font:500 27px ui-monospace,monospace; letter-spacing:-1px; color:var(--saas-text); }
+.official-collection-summary>p { margin:0 0 0 auto; font-size:11px; color:var(--saas-muted); }
+.official-discovery { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:24px 0 12px; }
+.official-tiers { display:flex; gap:4px; padding:4px; border:1px solid var(--official-line); background:var(--saas-soft); border-radius:9px; flex-shrink:0; }
+.saas-dashboard .official-tiers button,.saas-login .official-tiers button { display:flex; gap:10px; align-items:center; border:0; padding:9px 13px; background:transparent; color:var(--saas-muted); font-size:12px; border-radius:5px; white-space:nowrap; }
+.saas-dashboard .official-tiers button[aria-pressed=true],.saas-login .official-tiers button[aria-pressed=true] { background:var(--saas-card); color:var(--saas-text); box-shadow:0 1px 5px #0001; }
+.official-tiers span { font:10px ui-monospace,monospace; opacity:.65; }
+.official-search-controls { display:flex; gap:10px; align-items:center; max-width:600px; width:49%; }
+.saas-dashboard .official-search-controls input,.saas-login .official-search-controls input,.saas-dashboard .official-search-controls select,.saas-login .official-search-controls select { min-width:0; margin:0; height:41px; font-size:12px; padding:8px 11px; border:1px solid var(--official-line); border-radius:7px; background:var(--saas-card); color:var(--saas-text); }
+.official-search-controls input { flex:1; }.official-search-controls select { width:150px; }
+.official-discovery+.official-filters { border-top:0; padding:5px 0 7px; }
+.official-result-count { display:flex; gap:12px; align-items:center; min-height:37px; margin:0 0 12px; font-size:10px; color:var(--saas-muted); }
+.saas-dashboard .official-result-count button,.saas-login .official-result-count button { padding:2px 6px; border:0; background:transparent; font-size:10px; text-decoration:underline; color:var(--saas-text); }
+.official-empty { display:grid; justify-items:center; padding:50px 20px; border:1px dashed var(--official-line); border-radius:12px; }
+.official-empty h3 { font-size:16px; }.official-empty p { color:var(--saas-muted); font-size:12px; }
+.official-card-capabilities { display:flex; flex-wrap:wrap; gap:5px; margin-top:12px; }
+.official-card-capabilities>span { padding:3px 6px; border:1px solid var(--official-line); border-radius:4px; color:var(--saas-muted); font-size:9px; line-height:1.5; }
+.official-industry-cover { position:relative; height:220px; overflow:hidden; background:#0e202b; color:#a8e1d6; isolation:isolate; }
+.official-industry-cover-heading { position:absolute; z-index:2; left:20px; top:24px; max-width:205px; display:flex; flex-direction:column; gap:12px; }
+.official-industry-cover-heading small { font:8px/1.5 ui-monospace,monospace; letter-spacing:1.3px; opacity:.65; }
+.official-industry-cover-heading b { font:600 26px/1.1 ui-sans-serif,system-ui,sans-serif; letter-spacing:-1px; max-width:155px; }
+.official-industry-cover>svg { position:absolute; width:100%; height:100%; inset:0; }
+.official-industry-cover-footer { position:absolute; bottom:16px; left:20px; right:14px; display:flex; align-items:center; gap:8px; font:7px/1.5 ui-monospace,monospace; letter-spacing:.4px; opacity:.66; }
+.official-industry-cover-footer i { width:2px; height:2px; background:currentColor; border-radius:50%; }
+.cover-colony-command { background:#101829; color:#cbdc96; }.cover-habitat-twin { background:#dce3de; color:#3c655b; }
+.cover-studio-pipeline { background:#30223a; color:#f1bdb7; }.cover-stay-revenue { background:#eee1cf; color:#68563d; }
+.cover-research-atlas { background:#e0e9ee; color:#3c6077; }.cover-model-foundry { background:#211f3b; color:#bab9f5; }
+.cover-learning-campus { background:#dce9dd; color:#3a6950; }.cover-contract-desk { background:#ece7de; color:#715b4b; }
+.cover-dispatch-network { background:#102e28; color:#b7dcb0; }.cover-commerce-ops { background:#eae1de; color:#985c48; }
+.cover-factory-orchestrator { background:#263240; color:#bfd4ef; }.cover-grid-balance { background:#e8edd5; color:#5e763c; }
+.official-case-scope { display:block; padding:18px 0; margin:0 0 10px; border-top:1px solid var(--official-line); border-bottom:1px solid var(--official-line); }
+.official-scope-grid>div>div { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+.official-scope-grid>div>div>span { padding:5px 8px; background:var(--saas-soft); border:1px solid var(--official-line); border-radius:5px; font-size:10px; color:var(--saas-muted); }
+.official-case-scope ul { padding:0 0 0 14px; margin:8px 0 0; font-size:11px; line-height:1.8; color:var(--saas-muted); }
+.official-workflow-shape { display:flex; gap:22px; align-items:center; flex-wrap:wrap; margin-bottom:16px; color:var(--saas-muted); font-size:11px; }.official-workflow-shape b { color:var(--saas-text); margin-right:5px; }
+.official-graph-explorer { display:grid; grid-template-columns:210px minmax(0,1fr); border:1px solid var(--official-line); border-radius:10px; overflow:hidden; }
+.official-node-directory { padding:10px; background:var(--saas-soft); border-right:1px solid var(--official-line); max-height:590px; overflow-y:auto; }
+.official-node-directory>p { font:9px ui-monospace,monospace; color:var(--saas-muted); margin:5px 7px 12px; }
+.saas-dashboard .official-node-directory button,.saas-login .official-node-directory button { display:flex; align-items:flex-start; gap:9px; width:100%; padding:10px 8px; background:transparent; border:1px solid transparent; color:var(--saas-muted); border-radius:5px; text-align:left; font-size:11px; }
+.official-node-directory button>span { font:9px ui-monospace,monospace; margin-top:2px; color:var(--case-accent); }
+.official-node-directory strong { font-weight:500; }.official-node-directory small { display:block; font:8px/1.8 ui-monospace,monospace; opacity:.65; }
+.saas-dashboard .official-node-directory button[aria-current=step],.saas-login .official-node-directory button[aria-current=step] { border-color:var(--official-line); background:var(--saas-card); color:var(--saas-text); }
+.official-graph-area { min-width:0; }.official-graph-area .official-canvas-toolbar { border:0; border-bottom:1px solid var(--official-line); border-radius:0; flex-wrap:wrap; }.official-graph-area .official-canvas-scroll { border:0; border-radius:0; height:540px; max-height:540px; }
+.official-workflow .official-graph-node.unrelated,.official-workflow .official-wires .unrelated { opacity:.2; }
+.official-chain-toggle { font-size:10px; display:flex; align-items:center; gap:5px; color:var(--saas-muted); }.official-chain-toggle input { width:12px; height:12px; margin:0; }
+.official-node-paths { display:flex; flex-direction:column; gap:5px; }
+.saas-dashboard .official-node-paths button,.saas-login .official-node-paths button { text-align:left; font-size:11px; padding:7px 9px; color:var(--saas-muted); background:var(--saas-soft); border:1px solid var(--official-line); border-radius:5px; }
+@media(max-width:1050px) { .official-discovery { align-items:stretch; flex-direction:column; }.official-search-controls { width:100%; max-width:none; }.official-tiers { align-self:flex-start; }.official-collection-summary>p { display:none; }.official-graph-explorer { grid-template-columns:170px minmax(0,1fr); } }
+@media(max-width:700px) { .official-collection-summary { gap:16px; padding:16px 0; }.official-collection-summary>span { flex-direction:column; gap:5px; font-size:9px; }.official-collection-summary b { font-size:24px; }.official-scope-grid { grid-template-columns:1fr; gap:18px; }.official-graph-explorer { display:flex; flex-direction:column; }.official-node-directory { display:flex; gap:4px; overflow:auto; max-height:none; border-right:0; border-bottom:1px solid var(--official-line); }.official-node-directory>p { display:none; }.saas-dashboard .official-node-directory button,.saas-login .official-node-directory button { width:145px; flex-shrink:0; }.official-graph-area .official-canvas-scroll { height:380px; }.official-workflow-shape { gap:12px; font-size:10px; }.official-search-controls select { width:125px; }.saas-dashboard .official-tiers button,.saas-login .official-tiers button { padding:9px 10px; font-size:11px; }.official-tiers { max-width:100%; overflow:auto; } }
+.official-permalink { color:var(--saas-muted); text-decoration:none; font-size:11px; }.official-permalink:hover { color:var(--saas-text); text-decoration:underline; }
+
+.official-case-scope summary { display:flex; gap:10px; align-items:center; cursor:pointer; color:var(--saas-text); font-size:11px; }
+.official-case-scope summary>span { margin-left:auto; font-size:10px; color:var(--saas-muted); }.official-case-scope summary::after { content:'+'; font:18px ui-monospace,monospace; }.official-case-scope[open] summary::after { content:'−'; }
+.official-scope-grid { display:grid; grid-template-columns:1.4fr 1fr; gap:25px; margin-top:18px; }
+@media(max-width:700px) { .official-scope-grid { grid-template-columns:1fr; gap:18px; } }
+
+.official-loading { min-height: 680px; display: grid; place-items: center; color: var(--saas-muted); }
+
+.official-workflow { --workflow-accent: color-mix(in srgb, var(--case-accent) 40%, var(--saas-text)); }
+.official-workflow .official-wires path { vector-effect: non-scaling-stroke; stroke-width: 1; }
+.official-workflow .official-wires .active path { stroke: var(--workflow-accent); stroke-width: 1.6; }
+.official-workflow .official-wires .active circle { fill: var(--workflow-accent); }
+.official-workflow .official-node-directory button>span,.official-workflow .official-graph-node>span { color: var(--workflow-accent); }
+.saas-dashboard .official-workflow button.official-graph-node[aria-pressed=true],.saas-login .official-workflow button.official-graph-node[aria-pressed=true] { border-color: var(--workflow-accent); box-shadow: 0 0 0 2px color-mix(in srgb,var(--workflow-accent) 20%,transparent); }

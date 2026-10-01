@@ -7,19 +7,34 @@ import { OFFICIAL_WORKFLOWS, createOfficialDocument, getOfficialWorkflow } from 
 
 const locales = ['zh', 'en'] as const;
 
-it('covers all six official examples with stable identities and localized descriptions', () => {
-  expect(OFFICIAL_WORKFLOWS.map(item => item.id)).toEqual([
+it('covers twelve flagship industries and preserves six starter identities with localized contracts', () => {
+  expect(OFFICIAL_WORKFLOWS).toHaveLength(18);
+  expect(OFFICIAL_WORKFLOWS.filter(item => item.tier !== 'flagship').map(item => item.id)).toEqual([
     'interaction-page', 'orbit-game', 'spatial-studio', 'knowledge-desk', 'model-lab', 'operations-hub',
   ]);
+  const flagships = OFFICIAL_WORKFLOWS.filter(item => item.tier === 'flagship');
+  expect(flagships).toHaveLength(12);
+  expect(new Set(flagships.map(item => item.industry!.en)).size).toBe(12);
+  expect(new Set(OFFICIAL_WORKFLOWS.map(item => item.id)).size).toBe(18);
   expect(new Set(OFFICIAL_WORKFLOWS.map(item => item.category)).size).toBe(6);
   expect(getOfficialWorkflow('untrusted-or-missing-id')).toBeUndefined();
   for (const item of OFFICIAL_WORKFLOWS) {
     expect(getOfficialWorkflow(item.id)).toBe(item);
-    for (const localized of [item.title, item.summary, item.description, item.categoryLabel, item.pattern, item.brief, item.limitations, ...item.artifacts]) {
+    for (const localized of [item.title, item.summary, item.description, item.categoryLabel, item.pattern, item.brief, item.limitations, ...item.artifacts, ...(item.industry ? [item.industry] : []), ...(item.capabilities || []), ...(item.datasets || [])]) {
       for (const locale of locales) expect(localized[locale].trim()).not.toBe('');
     }
-    expect(item.nodes.length).toBeGreaterThanOrEqual(5);
-    expect(item.nodes.length).toBeLessThanOrEqual(8);
+    expect(item.nodes.length).toBeGreaterThanOrEqual(item.tier === 'flagship' ? 11 : 5);
+    expect(item.nodes.length).toBeLessThanOrEqual(item.tier === 'flagship' ? 14 : 8);
+    if (item.tier === 'flagship') {
+      expect(item.capabilities!.length).toBeGreaterThanOrEqual(6);
+      expect(item.datasets!.length).toBeGreaterThan(0);
+      expect(item.nodes.filter(node => node.role === 'review').length).toBeGreaterThanOrEqual(1);
+      expect(item.edges.length).toBeGreaterThan(item.nodes.length);
+      expect(Math.max(...item.nodes.map(node => node.column))).toBeGreaterThanOrEqual(5);
+      const terminal = item.nodes.filter(node => !item.edges.some(edge => edge.from === node.id));
+      expect(terminal).toHaveLength(1);
+      expect(item.edges.filter(edge => edge.to === terminal[0].id).length).toBeGreaterThanOrEqual(2);
+    }
     expect(new Set(item.nodes.map(node => node.id)).size).toBe(item.nodes.length);
     for (const node of item.nodes) {
       for (const localized of [node.title, node.task, node.output, ...node.acceptance]) {
