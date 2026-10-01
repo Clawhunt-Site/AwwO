@@ -59,6 +59,22 @@ beforeEach(() => {
 });
 
 describe('undo / redo', () => {
+  it('forwards the latest edited document when the cache itself cannot be written', async () => {
+    const failed = vi.fn();
+    render(<CanvasSurface onLocalDocumentSaveFailed={failed} />);
+    const original = localStorage.getItem(CANVAS_STORAGE_KEY);
+    const write = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+      if (key === CANVAS_STORAGE_KEY) throw new DOMException('full', 'QuotaExceededError');
+      return write(key, value);
+    });
+    deleteTile('a');
+    await waitFor(() => expect(screen.queryByTestId('canvas-tile-a')).toBeNull());
+    expect(failed).toHaveBeenCalled();
+    expect(failed.mock.lastCall?.[0].nodes.map((node: { id: string }) => node.id)).toEqual(['b']);
+    expect(localStorage.getItem(CANVAS_STORAGE_KEY)).toBe(original);
+  });
+
   it('brings back a deleted node — and its wires — then removes it again on redo', async () => {
     render(<CanvasSurface />);
     await waitFor(() => expect(screen.getByTestId('canvas-tile-a')).toBeTruthy());

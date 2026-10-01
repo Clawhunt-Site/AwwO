@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
@@ -183,7 +183,10 @@ describe('CanvasSurface review Graph native transport integration', () => {
     expect(final.nodes.every(node => node.lastOutput?.partial === true)).toBe(true);
     expect(prepareNodeConversation(final.nodes[1] as SessionNode, final.nodes, final.edges).error).toContain('完整产出');
     expect(peer.turns).toHaveLength(2);
-    expect(screen.getByText(/达到轮次上限|已达.*轮.*上限|达到.*轮上限|轮次已用完/)).not.toBeNull();
+    const controls = within(screen.getByRole('group', { name: '运行控制' }));
+    expect(controls.getByRole('status')).toHaveTextContent('已达 1 轮上限，尚未通过评审，请查看修改意见。');
+    const timeline = within(screen.getByRole('region', { name: '执行时间线' }));
+    expect(within(timeline.getByTestId('runline-review-reviewer')).getByText('已达轮次上限且尚未通过评审，请查看修改意见后继续。')).toBeVisible();
   });
 
   it('sends real Stop for the active native run and never starts the next review turn', async () => {

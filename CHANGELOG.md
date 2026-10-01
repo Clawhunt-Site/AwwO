@@ -27,6 +27,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Recover local draft writes from storage pressure by reclaiming only the current canvas's optional sync-proof cache. Acknowledge confirmed saves before replacing that cache, surface failed working-cache writes, and export the latest in-memory edits without removing other drafts or run history.
 - Retry an unavailable execution-engine status without reloading the canvas, losing input, or starting work automatically.
 - Show failed-node reasons in the execution timeline and open the relevant node directly. Completed runs link to their actual terminal deliveries, with a choice when several outputs are available.
 - Announce the latest planning failure once, clarify quota recovery, and translate expired account sessions while preserving retry behavior.

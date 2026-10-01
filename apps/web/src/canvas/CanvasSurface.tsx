@@ -150,6 +150,8 @@ export interface CanvasSurfaceProps {
   personalCredentialsRequired?: boolean;
   /** A host-provided reason execution is unavailable. Cloud canvases remain editable. */
   executionUnavailableReason?: string;
+  /** Preserve the latest in-memory edits when even the local working cache cannot be written. */
+  onLocalDocumentSaveFailed?: (document: CanvasDocument) => void;
   /** Host inventory reader (App.readJson) for the inspector's contract-driven RuntimePicker.
    *  Absent → runtime selection is hidden, fail-closed. */
   runtimeReadJson?: (path: string, init?: RequestInit & { headers?: Record<string, string> }) => Promise<any>;
@@ -212,7 +214,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   const readOnlyRef = useRef(readOnly);
@@ -297,9 +299,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // Compare revisions in the same normalized shape the loader returns. The last successful
   // local save is also the base of an edit whose autosave effect has not committed yet.
   const lastSavedRevision = useRef<string | null>(null);
+  const localSaveFailure = useRef(onLocalDocumentSaveFailed);
+  localSaveFailure.current = onLocalDocumentSaveFailed;
   if (lastSavedRevision.current === null) lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(doc));
   const saveLocalDocument = useCallback((next: CanvasDocument): boolean => {
-    if (!saveDocument(next)) return false;
+    if (!saveDocument(next)) {
+      localSaveFailure.current?.(next);
+      return false;
+    }
     lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(next));
     return true;
   }, []);

@@ -6,7 +6,7 @@ import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye } from
 import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
-import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
+import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, isCanvasStorageQuotaError, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
 import { CanvasSurface, type InitialPlanRequest } from '../canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
@@ -342,6 +342,9 @@ function readCloudRuntimeStatus(value: unknown): CloudRuntimeStatus {
 
 function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
   const { locale, t } = useSaaSPreferences();
+  const localDraftFailure = (error: unknown) => isCanvasStorageQuotaError(error)
+    ? t('本机存储空间已满，自动保存已暂停。请先导出本地副本保留最新编辑。', 'Local browser storage is full. Autosave is paused. Export a local copy to preserve your latest edits.')
+    : `本机草稿保存失败：${message(error)}。请立即导出本地副本。`;
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
   const [saveState, setSaveState] = useState('正在加载…');
@@ -363,6 +366,13 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const saving = useRef(false);
   const failed = useRef(false);
   const runtimeReader = useRef(createCanvasRuntimeReader()).current;
+  const localDocumentSaveFailed = useCallback((document: CanvasDocument) => {
+    pending.current = document;
+    failed.current = true;
+    setSaveState('未同步');
+    setError(t('本机无法保存最新编辑，自动保存已暂停。请先导出本地副本，保留当前页面中的修改。',
+      'Your latest edits could not be saved on this device. Autosave is paused. Export a local copy to preserve the changes in this page.'));
+  }, [t]);
   useEffect(() => {
     setRuntime(null); setRuntimeChecking(false);
     return () => {
@@ -486,29 +496,37 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
               if (!disposed) setSaveState('已同步');
             } catch (error) {
               failed.current = true;
-              if (!disposed) { setSaveState('未同步'); setError(`本机草稿保存失败：${message(error)}。请立即导出本地副本。`); }
+              if (!disposed) { setSaveState('未同步'); setError(localDraftFailure(error)); }
             }
             break;
           }
           const sent: CanvasDraft = draft.current || persistCanvasDraft(storage, writerId, current.current!.version, pending.current);
           const document: CanvasDocument = sent.document; pending.current = null;
           setSaveState('正在保存…');
+          let serverConfirmed = false;
           try {
             const saved: CanvasRecord = await api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { method: 'PUT', body: JSON.stringify({ name: current.current!.name, document, version: current.current!.version }) });
-            rememberCanvasBaseline(storage, saved.version, saved.document);
+            serverConfirmed = true;
+            // Release this page's confirmed revision before writing a full baseline.
+            // Other writers' drafts remain untouched: Storage cannot atomically compare/delete them.
             acknowledgeCanvasDraft(storage, sent, saved.version);
+            rememberCanvasBaseline(storage, saved.version, saved.document);
             if (restoredSource.current) { removeCanvasDraft(storage, restoredSource.current); restoredSource.current = null; }
             if (!disposed) { try { setLocalDraftCount(readCanvasDrafts(storage).length); } catch { /* Draft count is decorative; save acknowledgement remains authoritative. */ } }
             if (draft.current?.revision === sent.revision) draft.current = null;
             else if (draft.current) draft.current = { ...draft.current, baseVersion: saved.version };
             current.current = saved;
             storage.setItem('awwo.cloud.version', String(Math.max(saved.version, Number(storage.getItem('awwo.cloud.version')) || 0)));
-            if (!disposed) setSaveState(pending.current ? '等待同步…' : '已同步');
+            if (!disposed) setSaveState(failed.current ? '未同步' : pending.current ? '等待同步…' : '已同步');
           } catch (error) {
+            const alreadyFailed = failed.current;
             failed.current = true; pending.current ||= document;
             if (!disposed) {
               setSaveState('未同步');
-              setError(error instanceof SaaSApiError && error.status === 409 ? '画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。' : `保存失败：${message(error)}。未同步草稿保留在本机，重新加载后可恢复或导出。`);
+              // A newer local save failure means pending may exist only in memory.
+              // Do not replace its export warning with a claim that all edits are on disk.
+              if (!alreadyFailed) setError(serverConfirmed || isCanvasStorageQuotaError(error) ? localDraftFailure(error)
+                : error instanceof SaaSApiError && error.status === 409 ? '画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。' : `保存失败：${message(error)}。未同步草稿保留在本机，重新加载后可恢复或导出。`);
             }
           }
         }
@@ -523,7 +541,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
         pending.current = document;
         draft.current = persistCanvasDraft(storage, writerId, current.current!.version, pending.current!);
       } catch (error) {
-        failed.current = true; setSaveState('未同步'); setError(`本机草稿保存失败：${message(error)}。请立即导出本地副本。`); return;
+        failed.current = true; setSaveState('未同步'); setError(localDraftFailure(error)); return;
       }
       setSaveState('等待同步…'); clearTimeout(timer); timer = setTimeout(() => void flush().catch(() => {}), 450);
     };
@@ -658,7 +676,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     }} />;
   if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><section className="saas-page-intro"><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p>{error && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</section></main>;
   const exportLocal = () => {
-    const url = URL.createObjectURL(new Blob([scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}'], { type: 'application/json' }));
+    const latest = pending.current ?? draft.current?.document;
+    const bytes = latest ? JSON.stringify(latest) : scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}';
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/json' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-canvas-recovery.json'; anchor.click(); URL.revokeObjectURL(url);
   };
   const executionUnavailableReason = runtime === null
@@ -672,7 +692,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   return <div className="saas-canvas-shell">
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
-    <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true}
+    <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
