@@ -229,6 +229,9 @@ func (a *App) Handler() http.Handler {
 	// handler cannot apply that workspace's model entitlement, and a stale client
 	// asking for one must get a visible 404 rather than the whole catalogue.
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runtime", a.tenant(a.runtime, 1))
+	a.registerKnowledgeRoutes(m)
+	a.registerWikiCompilerRoutes(m)
+	a.registerOpenMausRoutes(m)
 	if a.cfg.UserCredentials && !a.cfg.TypeSafeSponsoredPlanning {
 		// Hosted ingress must route both TypeSafe endpoints through this guard in
 		// personal mode. Its separate service still uses operator credentials.

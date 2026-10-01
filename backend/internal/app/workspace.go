@@ -647,7 +647,7 @@ func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instr
 		a.finish(tid, rid, status, "", code)
 	}
 	p := snap.Workspace
-	if kind == "planner" || snap.Team != nil || snap.Runtime != runtimeOpenAIAgents || p == nil || p.Version != 1 || p.MaxModelCalls < 2 || p.MaxModelCalls > maxWorkspaceModelCalls || snap.OutputContract != nil || !validWorkspaceCallbackURL(a.cfg.WorkspaceCallbackURL) || !validWorkspaceCapability(snap.Runtime, snap.Health.Workspace) || p.MaxModelCalls > snap.Health.Workspace.MaxModelCalls {
+	if kind == "planner" || kind == "knowledge" || snap.Team != nil || snap.Runtime != runtimeOpenAIAgents || p == nil || p.Version != 1 || p.MaxModelCalls < 2 || p.MaxModelCalls > maxWorkspaceModelCalls || snap.OutputContract != nil || !validWorkspaceCallbackURL(a.cfg.WorkspaceCallbackURL) || !validWorkspaceCapability(snap.Runtime, snap.Health.Workspace) || p.MaxModelCalls > snap.Health.Workspace.MaxModelCalls {
 		failRun("workspace_unavailable")
 		return
 	}

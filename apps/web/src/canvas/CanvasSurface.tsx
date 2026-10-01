@@ -145,6 +145,9 @@ export interface CanvasSurfaceProps {
   accountControl?: ReactNode;
   headerTitle?: ReactNode;
   headerActions?: ReactNode;
+  previewDesk?: ReactNode;
+  /** A new external draft, never sent without the normal planning action. */
+  taskDraft?: { id: string; prompt: string } | null;
   onOpenSettings?: () => void;
   /** Hosted accounts either supply their own model credential or use a platform-managed one. */
   personalCredentialsRequired?: boolean;
@@ -212,7 +215,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, previewDesk, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   const readOnlyRef = useRef(readOnly);
@@ -1615,6 +1618,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   // The planning conversation is local UI history, separate from node execution Sessions.
   const [planning, setPlanning] = useState(() => readOnly ? { draft: '', messages: [] } as ReturnType<typeof loadPlanningConversation> : loadPlanningConversation());
+  const appliedTaskDraft = useRef('');
+  useEffect(() => {
+    if (!taskDraft || readOnly || appliedTaskDraft.current === taskDraft.id) return;
+    appliedTaskDraft.current = taskDraft.id;
+    setPlanning(previous => ({ ...previous, draft: [previous.draft.trim(), taskDraft.prompt].filter(Boolean).join('\n\n') }));
+    setAssistantOpen(true);
+  }, [taskDraft, readOnly]);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState('');
@@ -1896,7 +1906,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       onToggleAssistant={readOnly ? undefined : () => setAssistantOpen(value => !value)}
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
-      headerTitle={headerTitle} headerActions={headerActions}
+      headerTitle={headerTitle} headerActions={headerActions} previewDesk={previewDesk}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked || initializing}>{accountControl}</div>}
       toolbar={<>{!cloudScope && <GraphSettings doc={doc} selectedNodeId={selection[0]} selectedEdgeId={selectedEdgeId}
         disabled={readOnly || running || initializing || bindingLocked} onChange={next => { if (canEditStructure()) patchDoc(() => next, { label: 'graph-settings' }); }}

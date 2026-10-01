@@ -84,6 +84,15 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 18, "migrations/018_clawhunt_identity.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 19, "migrations/019_knowledge.sql"); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 20, "migrations/020_openmaus_dispatch.sql"); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 21, "migrations/021_knowledge_source_origins.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

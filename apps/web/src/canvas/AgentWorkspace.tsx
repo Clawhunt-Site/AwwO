@@ -40,6 +40,8 @@ export interface AgentWorkspaceProps {
   headerTitle?: ReactNode;
   /** Host-owned document actions shown before the account controls. */
   headerActions?: ReactNode;
+  /** Persistent, host-owned delivery previews alongside the execution canvas. */
+  previewDesk?: ReactNode;
   assistant?: ReactNode;
   modelShelf?: ReactNode;
   personaControls?: ReactNode;
@@ -56,7 +58,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, previewDesk, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -275,7 +277,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
         <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{headerActions}{accountControl}</div>
       </header>
       <div className="awwo-canvas-bar">{onToggleAssistant && nodes.length > 0 ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}{!headerTitle && <div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div>}<div className="awwo-run-slot">{toolbar}</div></div>
-      <section className="awwo-stage" aria-label={t('workspace.stage')}>
+      <section className={`awwo-stage${previewDesk ? ' awwo-stage-with-deliveries' : ''}`} aria-label={t('workspace.stage')}>
         {assistant ? <aside className="awwo-planner-sidebar" aria-label={t('workspace.planning')}>{assistant}</aside> : null}
         <div data-onboarding="canvas-stage" className="awwo-stage-canvas" onDragOver={onModelDragOver} onDrop={onModelDrop}>{children}
         {!nodes.length && <div className={`awwo-empty${welcome ? ' has-assistant' : ''}`}>
@@ -296,6 +298,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
           <span className="awwo-empty-note">{welcome ? t('workspace.templateHint') : t('workspace.draftHint')}</span></>}
         </div>}
         </div>
+        {previewDesk && <aside className="awwo-stage-deliveries" aria-label={locale === 'zh' ? '画布预览工作台' : 'Canvas preview workbench'}>{previewDesk}</aside>}
       </section>
       {!headerTitle && <footer className="awwo-statusbar"><span><span className="awwo-status-dot is-draft" />{connected ? t('workspace.connectedCount', { count: connected }) : t('workspace.noneConnected')}</span><span className="awwo-local-tag">{storageMode === 'cloud' ? `${t('workspace.cloudCanvas')}${readOnly ? ` · ${t('common.readOnly')}` : ''}` : t(readOnly ? 'common.readOnly' : 'workspace.localCanvas')}</span></footer>}
     </main>

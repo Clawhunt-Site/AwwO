@@ -248,9 +248,10 @@ func (a *App) getRun(w http.ResponseWriter, r *http.Request) {
 }
 
 type runInput struct {
-	SessionID   string `json:"sessionId"`
-	Prompt      string `json:"prompt"`
-	OperationID string `json:"operationId"`
+	SessionID            string   `json:"sessionId"`
+	Prompt               string   `json:"prompt"`
+	OperationID          string   `json:"operationId"`
+	KnowledgeRevisionIDs []string `json:"knowledgeRevisionIds,omitempty"`
 }
 
 func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +266,10 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_input", "Session, prompt (up to 128000 bytes) and operationId (8–200 bytes) required")
 		return
 	}
-	body, _ := json.Marshal(struct{ SessionID, Prompt string }{b.SessionID, b.Prompt})
+	body, _ := json.Marshal(struct {
+		SessionID, Prompt    string
+		KnowledgeRevisionIDs []string `json:",omitempty"`
+	}{b.SessionID, b.Prompt, b.KnowledgeRevisionIDs})
 	hash := tokenHash(string(body))
 	tid := r.PathValue("tenantId")
 	tx, e := a.db.Begin(r.Context())
@@ -334,7 +338,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var model, instructions, kind, runtime, effort, agentID string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind='planner' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID)
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind IN ('planner','knowledge') OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -358,6 +362,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	if kind == "planner" || kind == "knowledge" {
+		// Internal service sessions cannot inherit a user-authored node that happens
+		// to reuse the reserved node id, persona, team, or task frame.
+		document, nodeID = []byte(`{}`), ""
+	}
 	team, e := savedNodeTeam(document, nodeID)
 	if e != nil {
 		fail(w, 400, "invalid_team", e.Error())
@@ -377,7 +386,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	catalog := runtimeCatalog{}
-	if kind == "planner" && a.cfg.UserCredentials {
+	if (kind == "planner" || kind == "knowledge") && a.cfg.UserCredentials {
 		// A planner session is shared with its canvas, but its model credential is
 		// always the current actor's. Never write a personal selector into that Agent.
 		runtime, model, e = a.personalPlanner(r.Context(), entitlement, catalog)
@@ -392,7 +401,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.runtimeAdmissionError(w, e)
 		return
 	}
-	if kind == "planner" {
+	if kind == "planner" || kind == "knowledge" {
 		snapshot.Workspace = nil
 	} else if e = a.requireWorkspaceSnapshot(snapshot); e != nil {
 		a.runtimeAdmissionError(w, e)
@@ -408,8 +417,14 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	budget, overhead := snapshot.Budget, snapshot.Overhead
-	framedInstructions := taskFrameSystemPrompt(instructions, snapshot.TaskFrame)
-	if team == nil && (len(b.Prompt)+len(framedInstructions)+overhead > budget || (snapshot.TaskFrame != nil && len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
+	snapshot.Knowledge, e = freezeKnowledgeContext(r.Context(), tx, tid, b.KnowledgeRevisionIDs)
+	if e != nil {
+		a.knowledgeFailure(w, e)
+		return
+	}
+	framedInstructions := knowledgeSystemPrompt(taskFrameSystemPrompt(instructions, snapshot.TaskFrame), snapshot.Knowledge)
+	framedPrompt := knowledgeUserPrompt(b.Prompt, snapshot.Knowledge)
+	if team == nil && (len(framedPrompt) > 128000 || len(framedPrompt)+len(framedInstructions)+overhead > budget || ((snapshot.TaskFrame != nil || snapshot.Knowledge != nil) && len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		fail(w, 413, "context_limit", "Prompt and instructions exceed the selected runtime context budget")
 		return
 	}
@@ -536,12 +551,14 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
 		return
 	}
+	instructions = knowledgeSystemPrompt(instructions, snapshot.Knowledge)
+	prompt = knowledgeUserPrompt(prompt, snapshot.Knowledge)
 	if snapshot.Workspace != nil {
 		a.executeWorkspace(ctx, tid, id, sid, prompt, instructions, kind, snapshot)
 		return
 	}
 	instructions = taskFrameSystemPrompt(instructions, snapshot.TaskFrame)
-	if snapshot.TaskFrame != nil && (len(prompt)+len(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
+	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil) && (len(prompt)+len(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
 		a.finish(tid, id, "failed", "", "context_limit")
 		return
 	}
@@ -562,7 +579,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		finish("failed", "", "history_unavailable")
 		return
 	}
-	if kind == "planner" {
+	if kind == "planner" || kind == "knowledge" {
 		history = []json.RawMessage{}
 	} else {
 		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions)+outputContractReserve(snapshot), budget, overhead)
@@ -928,7 +945,8 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 	var sid string
 	if status == "completed" {
 		var kind string
-		if e = tx.QueryRow(ctx, "SELECT s.kind FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND r.id=$2", tid, id).Scan(&kind); e != nil {
+		var raw json.RawMessage
+		if e = tx.QueryRow(ctx, "SELECT s.kind,r.execution_snapshot FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND r.id=$2", tid, id).Scan(&kind, &raw); e != nil {
 			if noRows(e) {
 				return nil
 			}
@@ -940,6 +958,12 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 				code = "invalid_canvas_plan"
 			} else {
 				output = normalizePlanJSON(output)
+			}
+		}
+		if kind == "knowledge" {
+			var snapshot executionSnapshot
+			if json.Unmarshal(raw, &snapshot) != nil || !validateWikiCompilationWithContext(output, snapshot.Knowledge) {
+				status, code = "failed", "invalid_knowledge_compilation"
 			}
 		}
 	}

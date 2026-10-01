@@ -37,6 +37,7 @@ it('reload_after_409 retains the local draft, blocks the editor and never overwr
   let cloud = record(); let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { writes++; cloud = record(documentWith('其他页面的新内容'), 8); return response({ error: { code: 'conflict', message: 'Changed elsewhere' } }, 409); }
@@ -136,6 +137,7 @@ it('network_failure preserves an exportable draft across reload even while the c
   let offline = false;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { offline = true; throw new TypeError('network unavailable'); }
@@ -157,6 +159,7 @@ it('successful_save_clears_draft and StrictMode reload of a saved document does 
   let cloud = record(); let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { const body = JSON.parse(init.body as string); cloud = record(body.document, body.version + 1); writes++; }
@@ -187,6 +190,7 @@ it('explicitly restores a same-version draft and only removes its source after t
   let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { writes++; const body = JSON.parse(init.body as string); expect(body.document.nodes[0].title).toBe('待恢复的真实内容'); expect(body.version).toBe(7); return response(record(body.document, 8)); }
@@ -206,6 +210,7 @@ it('refuses to restore a stale snapshot after another tab replaces the same draf
   let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') writes++;
@@ -233,6 +238,7 @@ it('retains edits made during an in-flight save when the older revision is ackno
   let writes = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { writes++; if (writes === 1) return new Promise<Response>(resolve => { resolveSave = resolve; }); throw new TypeError('network interrupted'); }
@@ -323,6 +329,7 @@ it.each(['completed', 'changed-inputs', 'unreachable'] as const)('opens the clou
   const requests: { url: string; method: string; body?: string }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     requests.push({ url, method: init.method || 'GET', body: init.body as string | undefined });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });

@@ -84,17 +84,18 @@ func verifiedRunOutputContract(contract *outputContract, output string) bool {
 }
 
 type runEvidence struct {
-	RunID            string     `json:"runId"`
-	Status           string     `json:"status"`
-	OutputPresent    bool       `json:"outputPresent"`
-	OutputBytes      int        `json:"outputBytes"`
-	ArtifactCount    int        `json:"artifactCount"`
-	EvidenceSources  []string   `json:"evidenceSources"`
-	Observational    bool       `json:"observational"`
-	Preview          string     `json:"preview"`
-	PreviewTruncated bool       `json:"previewTruncated"`
-	TaskFrame        *taskFrame `json:"taskFrame,omitempty"`
-	Contract         struct {
+	RunID               string               `json:"runId"`
+	Status              string               `json:"status"`
+	OutputPresent       bool                 `json:"outputPresent"`
+	OutputBytes         int                  `json:"outputBytes"`
+	ArtifactCount       int                  `json:"artifactCount"`
+	EvidenceSources     []string             `json:"evidenceSources"`
+	Observational       bool                 `json:"observational"`
+	Preview             string               `json:"preview"`
+	PreviewTruncated    bool                 `json:"previewTruncated"`
+	TaskFrame           *taskFrame           `json:"taskFrame,omitempty"`
+	KnowledgeReferences []knowledgeReference `json:"knowledgeReferences,omitempty"`
+	Contract            struct {
 		Declared  bool `json:"declared"`
 		Validated bool `json:"validated"`
 	} `json:"contract"`
@@ -112,6 +113,11 @@ func observeRun(id, status, output string, snapshot []byte, artifacts int, secre
 	var snap executionSnapshot
 	if json.Unmarshal(snapshot, &snap) == nil {
 		v.TaskFrame = snap.TaskFrame
+		if snap.Knowledge != nil {
+			for _, item := range snap.Knowledge.Items {
+				v.KnowledgeReferences = append(v.KnowledgeReferences, item.knowledgeReference)
+			}
+		}
 		v.ManualAcceptance.Required = snap.TaskFrame != nil &&
 			(len(snap.TaskFrame.Constraints) > 0 || len(snap.TaskFrame.AcceptanceCriteria) > 0)
 		v.Contract.Declared = snap.OutputPolicy != "" || snap.OutputContract != nil

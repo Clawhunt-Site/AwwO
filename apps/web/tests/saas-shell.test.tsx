@@ -54,6 +54,7 @@ it('gives readers a cloud-backed browse and export view without mounting the wri
   const calls: Array<{ url: string; init: RequestInit }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response({ ...identity, tenants: [{ ...identity.tenants[0], role: 'reader' }] });
     if (url.includes('/messages')) return response({ items: [{ id: 'msg-1', role: 'assistant', content: '真实云端会话' }] });
@@ -76,6 +77,7 @@ it('lets an owner add a registered member, change the role and remove by userId 
   const calls: Array<{ url: string; init: RequestInit }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/canvases') || url.endsWith('/invites')) return response({ items: [] });
@@ -119,6 +121,7 @@ it('hydrates the real canvas and stops cloud writes on a version conflict', asyn
   const calls: Array<{ url: string; init: RequestInit }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     calls.push({ url, init });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, configured: false, models: [] });

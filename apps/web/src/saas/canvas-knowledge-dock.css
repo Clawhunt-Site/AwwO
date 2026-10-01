@@ -1,0 +1,17 @@
+.awwo-stage-deliveries{flex:0 0 48%;min-width:390px;max-width:800px;border-left:1px solid var(--awwo-border);overflow:hidden;background:var(--awwo-bg)}
+.awwo-stage-with-deliveries{position:relative}
+.awwo-stage-deliveries:has(.awwo-knowledge-dock.is-focused){position:absolute;inset:0;z-index:40;max-width:none;width:100%;border-left:0}
+.awwo-knowledge-dock{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--awwo-ink)}
+.awwo-knowledge-dock-bar{display:flex;align-items:center;gap:8px;min-height:42px;padding:7px 10px;border-bottom:1px solid var(--awwo-border);font-size:11px}
+.awwo-knowledge-dock-bar>span{flex:1;min-width:0;color:var(--awwo-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.awwo-knowledge-dock-bar button{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;background:var(--awwo-surface);color:inherit;border:1px solid var(--awwo-border);border-radius:7px;padding:5px 7px;cursor:pointer}
+.awwo-knowledge-dock-error,.awwo-knowledge-dock-notice{font-size:11px;margin:0;padding:7px 12px;overflow-wrap:anywhere;background:var(--awwo-surface)}
+.awwo-knowledge-dock-error{color:#c14040}
+.awwo-knowledge-overlay{position:fixed;inset:52px 20px 20px;margin:0;padding:0;width:calc(100% - 40px);height:calc(100% - 72px);max-width:none;max-height:none;z-index:500;display:flex;flex-direction:column;color:var(--awwo-ink,#25302d);background:var(--awwo-bg,#f7f7f5);border:1px solid var(--awwo-border,#ddd);border-radius:14px;box-shadow:0 24px 100px #0004;overflow:hidden}
+.awwo-knowledge-overlay::backdrop{background:#0005}
+.awwo-knowledge-overlay>*{flex:1;min-width:0;min-height:0}
+.awwo-knowledge-overlay>.awwo-knowledge-dock-error{flex:0 0 auto}
+.awwo-knowledge-overlay>.awwo-knowledge-resume{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:8px 14px;font-size:12px;border-bottom:1px solid var(--awwo-border);overflow:auto}
+.awwo-knowledge-resume label{display:flex;gap:8px;align-items:center}
+.awwo-knowledge-resume select,.awwo-knowledge-resume button{font:inherit;color:inherit;background:var(--awwo-surface);border:1px solid var(--awwo-border);border-radius:6px;padding:4px 8px}
+@media(max-width:1100px){.awwo-stage-with-deliveries{flex-direction:column;overflow:auto}.awwo-stage-with-deliveries .awwo-stage-canvas{flex:1 0 300px;min-height:300px}.awwo-stage-deliveries{flex:1 0 540px;min-width:0;max-width:none;width:100%;border-left:0;border-top:1px solid var(--awwo-border)}.awwo-knowledge-overlay{inset:12px;width:calc(100% - 24px);height:calc(100% - 24px)}}

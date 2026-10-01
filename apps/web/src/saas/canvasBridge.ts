@@ -8,6 +8,16 @@ import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES } from '.
 
 type CanvasScope = { tenant: Tenant; canvasId: string };
 let active: CanvasScope | null = null;
+let knowledgeSelection: { scope: CanvasScope; revisionIds: string[] } | null = null;
+/** A selection belongs to the exact mounted canvas. The API resolves immutable revisions again. */
+export function configureCanvasKnowledge(revisionIds: readonly string[]): void {
+  if (!active) throw new Error('Canvas is not ready');
+  if (revisionIds.length > 8 || revisionIds.some(id => typeof id !== 'string' || !id || id.length > 200)) throw new Error('Select up to eight knowledge revisions');
+  knowledgeSelection = { scope: active, revisionIds: [...new Set(revisionIds)] };
+}
+export function canvasKnowledgeRevisionIds(): string[] {
+  return knowledgeSelection?.scope === active ? [...knowledgeSelection.revisionIds] : [];
+}
 let initializeCanvas: ((scope?: readonly string[], signal?: AbortSignal) => Promise<CanvasDocument>) | null = null;
 export function configureSaaSCanvasInitialize(initialize: typeof initializeCanvas): void { initializeCanvas = initialize; }
 export async function initializeSaaSCanvas(scope?: readonly string[], signal?: AbortSignal): Promise<CanvasDocument> {
@@ -20,7 +30,7 @@ export async function initializeSaaSCanvas(scope?: readonly string[], signal?: A
 let saveCanvas: (() => Promise<number | void>) | null = null;
 export function configureSaaSCanvas(scope: CanvasScope): void { active = scope; }
 export function configureSaaSCanvasSave(save: (() => Promise<number | void>) | null): void { saveCanvas = save; }
-export function clearSaaSCanvas(): void { active = null; saveCanvas = null; initializeCanvas = null; }
+export function clearSaaSCanvas(): void { active = null; knowledgeSelection = null; saveCanvas = null; initializeCanvas = null; }
 /** Capture a tenant/canvas scope once; an in-flight operation must not follow a workspace switch. */
 export function currentSaaSCanvas(): CanvasScope | null { return active; }
 export async function flushSaaSCanvas(): Promise<number | void> {
@@ -79,6 +89,7 @@ const normalizeStatus = (status: string) => status === 'completed' ? 'succeeded'
 /** Explicit adapter for the existing canvas protocols; never replaces global fetch. */
 export async function canvasFetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
   const scope = active;
+  const knowledgeRevisionIds = canvasKnowledgeRevisionIds();
   if (!scope) return fetch(input, init);
   const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   const url = new URL(raw, window.location.origin);
@@ -119,7 +130,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       await saveCanvas();
       if (active !== scope || init.signal?.aborted) throw new Error(canvasText('工作区已切换或操作已取消。', 'The workspace changed or the operation was cancelled.'));
       const operationId = crypto.randomUUID();
-      const run = await post(`/canvases/${encodeURIComponent(scope.canvasId)}/plan`, { prompt: body.prompt, context: body.context, operationId });
+      const run = await post(`/canvases/${encodeURIComponent(scope.canvasId)}/plan`, { prompt: body.prompt, context: body.context, operationId, ...(knowledgeRevisionIds.length ? { knowledgeRevisionIds } : {}) });
       // A user cancel and the stall backstop can land together; cancelling once keeps that race
       // from issuing a second request the server would only have to discard.
       let cancelRequested = false;
@@ -328,7 +339,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
           agentId: decodeURIComponent(send[2]), title: body.message.slice(0, 80) });
         sessionId = session.id;
       }
-      const run = await post('/runs', { sessionId, prompt: body.message, operationId });
+      const run = await post('/runs', { sessionId, prompt: body.message, operationId, ...(knowledgeRevisionIds.length ? { knowledgeRevisionIds } : {}) });
       const upstream = await fetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: init.signal });
       if (!upstream.ok || !upstream.body) return json({ error: canvasText('无法连接运行事件，请刷新后恢复。', 'Run events could not be reached. Reload to restore the run.') }, upstream.status || 502);
       const encoder = new TextEncoder();

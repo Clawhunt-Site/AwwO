@@ -36,7 +36,8 @@ type nodeTeam struct {
 	Members        []teamMember `json:"members"`
 }
 type executionSnapshot struct {
-	Workspace *workspacePlan `json:"workspace,omitempty"`
+	Workspace *workspacePlan    `json:"workspace,omitempty"`
+	Knowledge *knowledgeContext `json:"knowledge,omitempty"`
 
 	Runtime          string             `json:"runtime,omitempty"`
 	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`

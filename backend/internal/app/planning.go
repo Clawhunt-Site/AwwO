@@ -14,9 +14,10 @@ const plannerInstructions = `You are the Awwo canvas planner. Return one JSON ob
 
 func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Prompt      string `json:"prompt"`
-		Context     string `json:"context"`
-		OperationID string `json:"operationId"`
+		Prompt               string   `json:"prompt"`
+		Context              string   `json:"context"`
+		OperationID          string   `json:"operationId"`
+		KnowledgeRevisionIDs []string `json:"knowledgeRevisionIds,omitempty"`
 	}
 	if !a.decode(w, r, &b) {
 		return
@@ -80,7 +81,7 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	data, _ := json.Marshal(runInput{SessionID: sid, Prompt: prompt, OperationID: b.OperationID})
+	data, _ := json.Marshal(runInput{SessionID: sid, Prompt: prompt, OperationID: b.OperationID, KnowledgeRevisionIDs: b.KnowledgeRevisionIDs})
 	next := r.Clone(r.Context())
 	next.Body = io.NopCloser(bytes.NewReader(data))
 	next.ContentLength = int64(len(data))
