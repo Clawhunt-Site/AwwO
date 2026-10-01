@@ -2,12 +2,49 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+func TestPersonalDiscoveryCatalogCapacity(t *testing.T) {
+	provider, _ := providerByID("llmgate")
+	for _, count := range []int{64, 65, 256, 257} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			entries := []map[string]string{{"id": "text-embedding-excluded"}}
+			for i := count - 1; i >= 0; i-- {
+				entry := map[string]string{"id": fmt.Sprintf("chat-%03d", i)}
+				entries = append(entries, entry, entry) // Duplicates do not consume capacity.
+			}
+			raw, _ := json.Marshal(map[string]any{"data": entries})
+			a := New(nil, testConfig())
+			a.client.Transport = personalTransport(func(r *http.Request) (*http.Response, error) {
+				body := string(raw)
+				if r.URL.Path == "/v1/user/balance" {
+					body = `{"is_active":true}`
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			})
+			models, err := a.discoverConnectionModels(t.Context(), provider, "synthetic-personal-secret")
+			if count > 256 {
+				if err == nil || models != nil {
+					t.Fatal("oversized catalog silently truncated or accepted")
+				}
+				if strings.Contains(err.Error(), "synthetic-personal-secret") {
+					t.Fatal("credential exposed")
+				}
+				return
+			}
+			if err != nil || len(models) != count || models[0] != "chat-000" || models[count-1] != fmt.Sprintf("chat-%03d", count-1) {
+				t.Fatal("catalog lost models or stable order", err)
+			}
+		})
+	}
+}
 
 func TestGatePublicCatalogCannotAuthenticateInvalidKey(t *testing.T) {
 	provider, _ := providerByID("llmgate")

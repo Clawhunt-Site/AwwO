@@ -10,6 +10,8 @@ from dataclasses import dataclass, field, replace
 from tools import tool_metadata
 
 MODEL_SELECTOR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$")
+MAX_CATALOG_MODELS = 256  # Includes the required default profile.
+MAX_CATALOG_BYTES = 512 * 1024
 EFFORT_LEVELS = ["low", "medium", "high"]
 PROTOCOLS = {"chat_completions", "responses"}
 DEFAULT_BASE_URLS = {"openai": "https://api.openai.com/v1", "llmgate": "https://api.clawhunt.site/v1"}
@@ -102,14 +104,14 @@ def _parse_efforts(levels, fallback: str | None) -> tuple[tuple, str]:
 def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, missing: list) -> list:
     if serialized is None or serialized == "":
         return [default]
-    if len(serialized) > 65536:
+    if len(serialized.encode("utf-8")) > MAX_CATALOG_BYTES:
         raise ConfigError("AWWO_OPENAI_AGENTS_MODELS_JSON too large")
     try:
         values = json.loads(serialized)
     except json.JSONDecodeError:
         raise ConfigError("AWWO_OPENAI_AGENTS_MODELS_JSON must be a JSON array")
-    if not isinstance(values, list) or len(values) > 32:
-        raise ConfigError("AWWO_OPENAI_AGENTS_MODELS_JSON must be a JSON array of at most 32 profiles")
+    if not isinstance(values, list) or len(values) >= MAX_CATALOG_MODELS:
+        raise ConfigError("AWWO_OPENAI_AGENTS_MODELS_JSON must be a JSON array of at most 255 additional profiles")
     profiles = [default]
     ids = {default.id}
     for value in values:

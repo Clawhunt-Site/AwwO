@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // User input never supplies a network address. Keys are sent only to these
@@ -225,8 +227,8 @@ func (a *App) discoverConnectionModels(ctx context.Context, p connectionProvider
 		}
 	}
 	sort.Strings(models)
-	if len(models) > 64 {
-		models = models[:64]
+	if len(models) > maxRuntimeModels {
+		return nil, errors.New("compatible text model catalog exceeds limit")
 	}
 	if len(models) == 0 {
 		return nil, errors.New("no compatible text models available")
@@ -365,6 +367,68 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 201, map[string]any{"id": id, "provider": b.Provider, "runtime": b.Runtime, "name": b.Name, "models": models, "hasKey": true})
 }
+
+// Refresh uses the encrypted owner-bound credential already stored by the API.
+// Provider I/O happens before the transaction; an exact conditional update then
+// prevents a deleted or replaced connection from being recreated by a late reply.
+func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
+	uid, id := currentUser(r).ID, r.PathValue("id")
+	var provider, runtime string
+	var sealed []byte
+	e := a.db.QueryRow(r.Context(), "SELECT provider,runtime,secret FROM user_connections WHERE id=$1 AND user_id=$2", id, uid).Scan(&provider, &runtime, &sealed)
+	if errors.Is(e, pgx.ErrNoRows) {
+		fail(w, 404, "not_found", "Connection not found")
+		return
+	}
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	p, ok := providerByID(provider)
+	if !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) {
+		fail(w, 400, "invalid_connection", "This provider or execution engine is not supported")
+		return
+	}
+	key, e := a.openCredential(uid, id, sealed)
+	if e != nil {
+		fail(w, 503, "vault_unavailable", "Credential storage is unavailable")
+		return
+	}
+	models, e := a.discoverConnectionModels(r.Context(), p, key)
+	if e != nil {
+		fail(w, 422, "provider_verification_failed", "Could not refresh the model catalog. The saved connection is unchanged.")
+		return
+	}
+	tx, e := a.db.Begin(r.Context())
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	raw, _ := json.Marshal(models)
+	var view json.RawMessage
+	e = tx.QueryRow(r.Context(), `UPDATE user_connections SET models=$3
+		WHERE id=$1 AND user_id=$2 AND secret=$4 AND provider=$5 AND runtime=$6
+		RETURNING jsonb_build_object('id',id,'provider',provider,'runtime',runtime,'name',name,'models',models,'createdAt',created_at,'hasKey',true)`, id, uid, raw, sealed, provider, runtime).Scan(&view)
+	if errors.Is(e, pgx.ErrNoRows) {
+		fail(w, 404, "not_found", "Connection not found or changed during refresh")
+		return
+	}
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if e = audit(r.Context(), tx, uid, "", "connection.refreshed", id); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if e = tx.Commit(r.Context()); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
 func (a *App) deleteConnection(w http.ResponseWriter, r *http.Request) {
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {

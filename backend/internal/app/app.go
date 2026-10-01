@@ -204,6 +204,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("PATCH /api/v1/auth/profile", a.auth(a.updateProfile))
 	m.HandleFunc("GET /api/v1/auth/connections", a.auth(a.listConnections))
 	m.HandleFunc("POST /api/v1/auth/connections", a.auth(a.authRate(a.createConnection)))
+	m.HandleFunc("POST /api/v1/auth/connections/{id}/refresh", a.auth(a.authRate(a.refreshConnection)))
 	m.HandleFunc("DELETE /api/v1/auth/connections/{id}", a.auth(a.deleteConnection))
 	m.HandleFunc("POST /api/v1/auth/password", a.auth(a.authRate(a.changePassword)))
 	m.HandleFunc("GET /api/v1/auth/sessions", a.auth(a.listAuthSessions))

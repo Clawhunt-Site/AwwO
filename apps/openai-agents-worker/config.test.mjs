@@ -8,6 +8,33 @@ import { classifyError } from './errors.mjs';
 import { configuration, request } from './test-support.mjs';
 import { bindUserModel } from '../user-models.ts';
 
+test('catalog supports 256 total models without dropping late IDs or leaking credentials', () => {
+  const profiles = Array.from({ length: 255 }, (_, i) => ({
+    id: `catalog-${i}`, provider: 'openai', model: `upstream-${i}`, apiKeyEnv: 'CATALOG_KEY',
+  }));
+  const load = value => configuration({ CATALOG_KEY: 'catalog-test-secret', AWWO_OPENAI_AGENTS_MODELS_JSON: value });
+  const config = load(JSON.stringify(profiles));
+  assert.equal(config.models.length, 256);
+  assert.equal(config.ready, true);
+  assert.equal(resolveModelConfig(config, 'catalog-254').model, 'upstream-254');
+  const health = JSON.stringify(publicHealth(config));
+  assert.ok(Buffer.byteLength(health) > 65_536, 'fixture exercises the larger Go health bound');
+  for (const value of ['catalog-test-secret', 'CATALOG_KEY', 'apiKey', 'baseURL']) assert.ok(!health.includes(value));
+  for (const values of [[...profiles, { ...profiles[0], id: 'overflow' }], [...profiles.slice(0, -1), profiles[0]]]) {
+    assert.throws(() => load(JSON.stringify(values)), /MODELS_JSON/);
+  }
+  const missing = profiles.map((profile, i) => i === 254 ? { ...profile, apiKeyEnv: 'MISSING_LAST_KEY' } : profile);
+  assert.equal(load(JSON.stringify(missing)).ready, false);
+});
+
+test('catalog configuration has a bounded 512 KiB UTF-8 envelope', () => {
+  const load = value => configuration({ AWWO_OPENAI_AGENTS_MODELS_JSON: value });
+  assert.equal(load(' '.repeat(512 * 1024 - 2) + '[]').models.length, 1);
+  for (const value of [' '.repeat(512 * 1024 - 1) + '[]', JSON.stringify([{ baseURL: 'https://example.test/' + 'é'.repeat(270_000) }])]) {
+    assert.throws(() => load(value), /512 KiB/);
+  }
+});
+
 test('Gate-only personal mode admits the Gate endpoint and rejects direct providers', () => {
   const env = { AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'true', AWWO_OPENAI_AGENTS_TOKEN: 'x'.repeat(32) };
   const config = loadConfig(env);

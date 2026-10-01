@@ -10,11 +10,13 @@ Canvas planning chooses an available engine from the requesting user's connectio
 
 1. Register with email and a password of at least 12 bytes, or sign in.
 2. Select **My engines**: choose a provider, its supported execution engine, and your API key.
-3. **Verify and save** reads the provider's model catalog and encrypts the key. Failed verification does not complete onboarding.
+3. **Verify and save** reads the provider's model catalog and encrypts the key. Failed verification does not complete onboarding. Each connection can discover up to 256 unique compatible text models from a response no larger than 1 MiB; excess models cause an explicit failure rather than a partial catalog.
 4. Select a model from the left-hand model shelf and a persona from the right-hand Bot list. Workspace/canvas membership controls remain in effect.
 5. Open **Account security** to change your password or revoke individual sessions. A password change/reset signs out all sessions.
 
 To use ClawHunt's model service, open [LLM Gate](https://api.clawhunt.site/), purchase credit there and create your own credential, then select LLM Gate in AwwO. AwwO does not purchase credit or reuse an operator's model key for personal runs.
+
+An authenticated owner can refresh an existing connection with `POST /api/v1/auth/connections/{id}/refresh`. The API decrypts that connection's existing credential, verifies it with the configured provider and atomically replaces only the model list with a `connection.refreshed` audit event. The response contains connection metadata and models, never the key. Provider or audit failure preserves the saved catalog; deletion during discovery cannot recreate the connection. The connection ID stays fixed, so selectors for models still present remain valid. Workspace model allowlists, credential mode and Gate-only routing are unchanged.
 
 | Provider | Supported engines | API |
 | --- | --- | --- |
