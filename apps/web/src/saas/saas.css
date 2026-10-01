@@ -1,6 +1,9 @@
 :root { --saas-bg:#f7f8f6; --saas-card:#fff; --saas-text:#23342b; --saas-muted:#66766b; --saas-border:#dfe5dd; --saas-accent:#31563d; --saas-accent-text:#fff; --saas-soft:#eef3e9; --saas-input:#fafbf9; --saas-danger:#aa392d; --saas-danger-bg:#fff0ec; --saas-warning:#79541c; --saas-warning-bg:#fcf2df; }
 :root[data-theme='dark'] { --saas-bg:#19201c; --saas-card:#222b25; --saas-text:#e3ece6; --saas-muted:#a2b3a7; --saas-border:#425048; --saas-accent:#94cbb1; --saas-accent-text:#162d21; --saas-soft:#2d3c32; --saas-input:#1c261f; --saas-danger:#ffac9c; --saas-danger-bg:#492b28; --saas-warning:#e3c183; --saas-warning-bg:#3c3322; }
-body { margin: 0; }
+/* Shared desktop styles lock the body; SaaS documents need native page scrolling. */
+body { margin: 0; overflow-y: auto; }
+/* The canvas owns its pan/zoom and panel scrolling within the viewport. */
+body:has(.saas-canvas-shell) { overflow: hidden; }
 .saas-login,.saas-notice,.saas-dashboard,.saas-canvas-shell { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--saas-text); background: var(--saas-bg); }
 .saas-login { min-height:100dvh; display:grid; grid-template-columns:1fr minmax(330px,440px); align-items:center; gap:10%; padding:8%; box-sizing:border-box; }
 .saas-auth-choices { min-width:0; display:grid; gap:16px; }
