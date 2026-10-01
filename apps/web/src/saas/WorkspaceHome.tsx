@@ -38,12 +38,12 @@ export function WorkspaceHome(props: HomeProps) {
   return props.tenant.role === 'reader' || props.tenant.status !== 'active' ? <ReaderHome {...props} /> : <PromptHome {...props} />;
 }
 
-function ReaderHome({ tenant, onOpen }: HomeProps) {
+function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
   const { t } = useSaaSPreferences();
   return <>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
-    <CanvasList tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <OfficialExamples readOnly />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    <OfficialExamples compact readOnly />
   </>;
 }
 
@@ -192,7 +192,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     <section className="saas-home-hero" aria-labelledby={titleId}>
       <p className="saas-home-workspace">{tenant.name}</p>
       <h1 id={titleId}>{text('assistant.title')}</h1>
-      <p className="saas-home-lead">{t('写下目标，生成可执行画布。', 'Describe a goal. Build an executable canvas.')}</p>
+      <p className="saas-home-lead">{t('描述你想交付的成果。先确认分工，再开始执行。', 'Describe what you want to deliver. Review the plan, then run it.')}</p>
       <form className="saas-home-composer" data-onboarding="canvas-create" aria-labelledby={titleId} onSubmit={event => { event.preventDefault(); send(); }}>
         <textarea ref={input} aria-label={text('assistant.input')} aria-describedby={describedBy}
           placeholder={text('assistant.welcomePlaceholder')} value={draft} rows={3} maxLength={HOME_PROMPT_MAX_CHARACTERS}
@@ -204,6 +204,16 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
           <button type="submit" className="saas-primary saas-home-send" disabled={busy || !draft.trim()}><span>{busy ? t('正在创建…', 'Creating…') : text('assistant.generate')}</span><ArrowUp size={15} aria-hidden="true" /></button>
         </div>
       </form>
+      <div className="saas-home-quick-starts" role="group" aria-label={t('快速填写需求', 'Start with a prompt')}>
+        {['product-site-trial', 'weekly-sales-report', 'competitor-research'].map(id => {
+          const item = STARTER_CASES.find(candidate => candidate.id === id)!;
+          return <button type="button" key={id} disabled={busy} onClick={() => pick(item)} aria-label={t(`填写示例：${item.title.zh}`, `Use prompt: ${item.title.en}`)}>{item.title[locale]}</button>;
+        })}
+        <button type="button" disabled={busy} aria-expanded={examplesOpen} aria-controls={examplesId}
+          aria-label={t('需要灵感？看看案例', 'Need inspiration? Explore examples')} onClick={() => setExamplesOpen(value => !value)}>
+          {t('更多灵感', 'More ideas')}<ChevronDown size={14} aria-hidden="true" />
+        </button>
+      </div>
       <div className="saas-home-notice" role="status">{noticeText && <span>{noticeText}</span>}{example && replaced !== null && <button type="button" className="saas-link" onClick={restore}>{t('恢复原输入', 'Restore my text')}</button>}</div>
       {error !== null && <p id={errorId} className="saas-error saas-home-error" role="alert">{saasErrorMessage(error, locale)}</p>}
       {stranded && <p className="saas-error saas-home-error" role="alert">
@@ -213,22 +223,15 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       </p>}
       {plannerIssue && <p id={noteId} className="saas-home-planner-note">{t(`规划暂不可用：${plannerIssue}。仍会新建画布，需求会保留在画布输入框中。`, `Planning is not available yet: ${plannerIssue}. A canvas will still be created, and your request will stay in its prompt box.`)}</p>}
     </section>
-    <CanvasList tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <OfficialExamples onReuse={item => { if (!sending.current) { setError(null); setOfficialCopy(item); } }} disabled={busy}
+    <section id={examplesId} className="saas-home-prompt-ideas" aria-label={t('案例灵感', 'Example ideas')} hidden={!examplesOpen}>
+      {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
+    </section>
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    <OfficialExamples compact onReuse={item => { if (!sending.current) { setError(null); setOfficialCopy(item); } }} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}
       error={error !== null ? saasErrorMessage(error, locale) : undefined} />
     {officialCopy && <OfficialCopySetup key={`${tenant.id}:${officialCopy.id}`} item={officialCopy} tenantId={tenant.id} locale={locale} busy={busy}
       error={error !== null ? saasErrorMessage(error, locale) : undefined} onClose={() => setOfficialCopy(null)}
       onConfirm={model => create(null, officialCopy, model)} />}
-    <section className="saas-home-examples" aria-label={t('案例灵感', 'Example ideas')}>
-      <button type="button" className="saas-home-examples-toggle" aria-expanded={examplesOpen} aria-controls={examplesId}
-        onClick={() => setExamplesOpen(value => !value)}>
-        <span>{t('需要灵感？看看案例', 'Need inspiration? Explore examples')}</span>
-        <ChevronDown size={16} aria-hidden="true" />
-      </button>
-      <div id={examplesId} hidden={!examplesOpen}>
-        {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
-      </div>
-    </section>
   </>;
 }

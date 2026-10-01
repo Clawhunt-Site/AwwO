@@ -35,8 +35,10 @@ describe('model and persona shelf', () => {
     const list = groups.map(group => group.id === 'clawhunt' ? { ...group, models: [qwen] }
       : group.id === 'claude' ? { ...group, models: [claude], available: true } : group);
     render(<ModelPersonaShelf {...props({ groups: list, onAddModel })} />);
-    fireEvent.click(screen.getByRole('button', { name: '搜索模型' }));
     const search = screen.getByRole('searchbox', { name: '查找模型' });
+    expect(search).toBeVisible();
+    expect(search).toHaveAttribute('placeholder', '搜索模型、品牌或连接');
+    expect(search).not.toHaveFocus();
     fireEvent.change(search, { target: { value: 'alias-7' } });
     expect(screen.getByRole('status')).toHaveTextContent('找到 1 个模型');
     expect(screen.getByRole('button', { name: /添加 qwen3.8-p6 · Work connection · llmgate \/ alias-7/ })).toBeVisible();
@@ -58,14 +60,14 @@ describe('model and persona shelf', () => {
     expect(search).toHaveValue('');
   });
 
-  it('keeps large provider catalogues short until requested while search reaches every model', () => {
+  it('starts each provider with two choices while expansion and search reach every model', () => {
     const entries = Array.from({ length: 6 }, (_, index) => ({ ...model, key: `model-${index}`, model: `model-${index}`, label: `model-${index}` }));
     render(<ModelPersonaShelf {...props({ groups: [{ ...groups[4], models: entries }] })} />);
-    expect(screen.getAllByRole('button', { name: /^添加 model-/ })).toHaveLength(3);
+    expect(screen.getAllByRole('button', { name: /^添加 model-/ })).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: '查看全部 6 个模型' }));
     expect(screen.getAllByRole('button', { name: /^添加 model-/ })).toHaveLength(6);
     fireEvent.click(screen.getByRole('button', { name: '收起' }));
-    fireEvent.click(screen.getByRole('button', { name: '搜索模型' }));
+    expect(screen.getAllByRole('button', { name: /^添加 model-/ })).toHaveLength(2);
     fireEvent.change(screen.getByRole('searchbox', { name: '查找模型' }), { target: { value: 'model-5' } });
     expect(screen.getByRole('button', { name: /^添加 model-5/ })).toBeVisible();
   });
@@ -114,6 +116,7 @@ describe('model and persona shelf', () => {
     fireEvent.click(toggle); expect(p.onCollapsedChange).toHaveBeenCalledWith(true);
     view.rerender(<ModelPersonaShelf {...p} collapsed />);
     expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByRole('searchbox')).toBeNull();
     expect(screen.getByRole('button', { name: '展开模型与人设' })).toHaveAttribute('aria-expanded', 'false');
   });
 
@@ -166,6 +169,19 @@ it('distinguishes identical model names offered by different runtimes', () => {
   render(<ModelPersonaShelf {...props({ groups: [group] })} />);
   expect(screen.getByText('Pi')).toBeVisible();
   expect(screen.getByText('Agents')).toBeVisible();
+});
+
+it('shows runtime and capability even for a model with a unique name and retains its effort', () => {
+  const entry: ModelPaletteSelection = { ...model, effort: 'high', execution: 'text' };
+  const p = props({ groups: [{ ...groups[4], models: [entry] }] });
+  render(<ModelPersonaShelf {...p} />);
+  const card = screen.getByRole('button', { name: '添加 Qwen fixture · Pi · high' });
+  expect(within(card).getByText('Pi')).toBeVisible();
+  expect(within(card).getByText('文本生成')).toBeVisible();
+  fireEvent.click(card);
+  fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn() } });
+  expect(p.onAddModel).toHaveBeenCalledWith(entry, null);
+  expect(p.onModelDragStart).toHaveBeenCalledWith(expect.anything(), entry, null);
 });
 
 it('labels project execution separately from text generation without claiming full Codex capabilities', () => {

@@ -99,6 +99,7 @@ it('keeps the selected workflow visible and reports a rejected create without op
 it('lets readers inspect templates without exposing a workspace create action', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => json({ items: [], nextCursor: null })));
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role: 'reader' }} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: '查看全部 18 个案例' }));
   fireEvent.click(screen.getByRole('button', { name: `查看官方案例：${first.title.zh}` }));
   expect(screen.queryByRole('button', { name: '复制到我的画布' })).toBeNull();
   expect(screen.queryByRole('link', { name: '登录并复用' })).toBeNull();
@@ -179,4 +180,34 @@ it('ignores unknown direct ids and returns focus when reopening an already selec
   card.focus();
   fireEvent.click(card);
   expect(screen.getByLabelText(first.title.zh)).toHaveFocus();
+});
+
+
+it('keeps the compact home library to three approachable works until explicitly expanded', () => {
+  const onReuse = vi.fn(); view({ compact: true, onReuse });
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(3);
+  expect(screen.queryByRole('searchbox', { name: '搜索案例' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看全部 18 个案例' }));
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(18);
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜索案例' }), { target: { value: 'no-such-work' } });
+  expect(screen.getByText('没有找到匹配案例')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '收起案例库' }));
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(3);
+  expect(screen.queryByText('没有找到匹配案例')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看全部 18 个案例' }));
+  expect(screen.getByRole('searchbox', { name: '搜索案例' })).toHaveValue('');
+  expect(screen.getAllByRole('button', { name: /^查看官方案例/ })).toHaveLength(18);
+  expect(onReuse).not.toHaveBeenCalled();
+});
+
+it('keeps compact deep links usable and restores focus when a selected card disappears', () => {
+  view({ compact: true, initialId: first.id });
+  expect(screen.getByRole('link', { name: '登录并复用' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '收起作品' }));
+  expect(screen.getByRole('button', { name: '查看全部 18 个案例' })).toHaveFocus();
+  fireEvent.click(screen.getByRole('button', { name: '查看全部 18 个案例' }));
+  fireEvent.click(screen.getByRole('button', { name: `查看官方案例：${first.title.zh}` }));
+  fireEvent.click(screen.getByRole('button', { name: '收起案例库' }));
+  fireEvent.click(screen.getByRole('button', { name: '收起作品' }));
+  expect(screen.getByRole('button', { name: '查看全部 18 个案例' })).toHaveFocus();
 });

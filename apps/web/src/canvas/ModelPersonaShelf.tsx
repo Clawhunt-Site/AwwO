@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useId, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Asterisk, Boxes, Code2, Search, Sparkles, Slash, X } from 'lucide-react';
 import { getAgentTemplates, type AgentTemplateId } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
@@ -6,6 +6,7 @@ import type { ModelPaletteGroup, ModelPaletteSelection } from './modelPalette';
 import './model-persona-shelf.css';
 
 const providerGlyphs = { codex: Code2, claude: Asterisk, grok: Slash, gemini: Sparkles, clawhunt: Boxes };
+const collapsedGroupSize = 2;
 
 export interface ModelPersonaShelfProps {
   groups: readonly ModelPaletteGroup[];
@@ -58,13 +59,11 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
   const en = locale === 'en';
   const id = useId();
   const [query, setQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
   const [showAllBrands, setShowAllBrands] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set());
   const searchInput = useRef<HTMLInputElement>(null);
   const blocked = disabled || loading || Boolean(error);
   const search = query.trim().toLocaleLowerCase();
-  useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
   const configuredGroups = groups.filter(group => group.models.length > 0);
   const listedGroups = showAllBrands || !configuredGroups.length ? groups : configuredGroups;
   const visibleGroups = search ? groups.flatMap(group => {
@@ -94,17 +93,17 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
       <section className="model-persona-shelf-models" aria-labelledby={`${id}-models`}>
         <div className="model-persona-shelf-section-head">
           <h3 id={`${id}-models`}>{en ? 'Execution models' : '执行模型'}</h3>
-          {groups.some(group => group.models.length) && <button type="button" className="model-persona-shelf-search-toggle"
-            aria-label={en ? 'Search models' : '搜索模型'} aria-expanded={searchOpen}
-            onClick={() => { if (searchOpen) setQuery(''); setSearchOpen(!searchOpen); }}><Search size={15} aria-hidden="true" /></button>}
         </div>
-        {searchOpen && <div className="model-persona-shelf-search">
+        <div className="model-persona-shelf-search">
           <Search size={15} aria-hidden="true" />
           <input ref={searchInput} type="search" value={query} aria-label={en ? 'Find a model' : '查找模型'}
-            placeholder={en ? 'Search models or connections' : '搜索模型或连接'} onChange={event => setQuery(event.target.value)}
+            placeholder={en ? 'Model, brand, or connection' : '搜索模型、品牌或连接'} onChange={event => setQuery(event.target.value)}
             onKeyDown={event => { if (event.key === 'Escape' && query) { event.preventDefault(); event.stopPropagation(); setQuery(''); } }} />
           {query && <button type="button" aria-label={en ? 'Clear model search' : '清除模型搜索'} onClick={() => { setQuery(''); searchInput.current?.focus(); }}><X size={14} aria-hidden="true" /></button>}
-        </div>}
+        </div>
+        {!search && !blocked && configuredGroups.length > 0 && <p className="model-persona-shelf-hint">
+          {onModelDragStart ? (en ? 'Click to add, or drag onto the canvas.' : '点击添加，或拖到画布。') : (en ? 'Click a model to add it to the canvas.' : '点击模型，添加到画布。')}
+        </p>}
         {search && !loading && !error && <p className="model-persona-shelf-search-count" role="status">{en ? `${modelCount} matching ${modelCount === 1 ? 'model' : 'models'}` : `找到 ${modelCount} 个模型`}</p>}
         {loading && <p className="model-persona-shelf-status" role="status">{en ? 'Loading model catalog…' : '正在读取模型目录…'}</p>}
         {error && <div className="model-persona-shelf-error" role="alert"><p>{error}</p>
@@ -117,13 +116,12 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
               {loading ? (en ? 'Loading' : '读取中') : error ? (en ? 'Not loaded' : '未读取') : group.models.length ? (en ? 'Not ready' : '未就绪') : (en ? 'Not configured' : '未配置')}
             </span>}
           </div>
-          {(search || expandedGroups.has(group.id) ? group.models : group.models.slice(0, 3)).map(model => {
+          {(search || expandedGroups.has(group.id) ? group.models : group.models.slice(0, collapsedGroupSize)).map(model => {
             const canAdd = !blocked && group.available && model.available;
             const reason = model.reason || (!group.available ? group.reason : undefined) || unavailable;
             const runtimeLabel = model.runtime === 'pi' ? 'Pi' : model.runtime === 'openai-agents' ? 'Agents' : model.runtime;
             const [modelName, ...connection] = model.label.split(' · ');
             const sameNameModels = group.models.filter(item => item.label.split(' · ')[0] === modelName);
-            const showRuntime = sameNameModels.some(item => item.runtime !== model.runtime);
             return <button key={model.key} type="button" className="model-persona-shelf-model" disabled={!canAdd}
               draggable={canAdd && Boolean(onModelDragStart)}
               aria-label={`${en ? 'Add' : '添加'} ${model.label} · ${runtimeLabel}${model.effort ? ` · ${model.effort}` : ''}`}
@@ -134,20 +132,23 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
                 onModelDragStart(event, model, personaId);
               }}>
               <span className="model-persona-shelf-model-title">{modelName}</span>
-              <span className="model-persona-shelf-model-meta" title={model.execution === 'workspace'
-                ? (en ? 'An isolated workspace can read and write files and run project commands.' : '可在隔离工作区读写文件、执行项目命令。')
-                : model.execution === 'workspace-unavailable' ? (en ? 'The project execution environment is not ready.' : '项目执行环境尚未就绪。')
-                  : (en ? 'This runtime generates text and source; project execution is not enabled.' : '当前服务生成文本与源码，未启用项目执行。')}>
-                {model.execution === 'workspace' ? (en ? 'Project execution' : '项目执行')
-                  : model.execution === 'workspace-unavailable' ? (en ? 'Project unavailable' : '项目执行未就绪') : (en ? 'Text generation' : '文本生成')}
+              <span className="model-persona-shelf-model-details">
+                <span>{runtimeLabel}</span><span aria-hidden="true">·</span>
+                <span className="model-persona-shelf-model-meta" title={model.execution === 'workspace'
+                  ? (en ? 'An isolated workspace can read and write files and run project commands.' : '可在隔离工作区读写文件、执行项目命令。')
+                  : model.execution === 'workspace-unavailable' ? (en ? 'The project execution environment is not ready.' : '项目执行环境尚未就绪。')
+                    : (en ? 'This runtime generates text and source; project execution is not enabled.' : '当前服务生成文本与源码，未启用项目执行。')}>
+                  {model.execution === 'workspace' ? (en ? 'Project execution' : '项目执行')
+                    : model.execution === 'workspace-unavailable' ? (en ? 'Project unavailable' : '项目执行未就绪') : (en ? 'Text generation' : '文本生成')}
+                </span>
               </span>
-              {sameNameModels.length > 1 && (connection.length > 0 || showRuntime)
-                && <span className="model-persona-shelf-model-connection">{[...connection, ...(showRuntime ? [runtimeLabel] : [])].join(' · ')}</span>}
-              {(!group.available || !model.available) && <span className="model-persona-shelf-model-meta">{reason}</span>}
+              {sameNameModels.length > 1 && connection.length > 0
+                && <span className="model-persona-shelf-model-connection">{connection.join(' · ')}</span>}
+              {(!group.available || !model.available) && <span className="model-persona-shelf-model-reason">{reason}</span>}
               <span className="model-persona-shelf-model-add" aria-hidden="true">+</span>
             </button>;
           })}
-          {!search && group.models.length > 3 && <button type="button" className="model-persona-shelf-group-more"
+          {!search && group.models.length > collapsedGroupSize && <button type="button" className="model-persona-shelf-group-more"
             aria-expanded={expandedGroups.has(group.id)}
             onClick={() => setExpandedGroups(current => {
               const next = new Set(current);

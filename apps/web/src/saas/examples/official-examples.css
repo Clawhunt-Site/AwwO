@@ -209,3 +209,17 @@ body:has(.official-examples) { overflow-y: auto; }
 .official-workflow .official-wires .active circle { fill: var(--workflow-accent); }
 .official-workflow .official-node-directory button>span,.official-workflow .official-graph-node>span { color: var(--workflow-accent); }
 .saas-dashboard .official-workflow button.official-graph-node[aria-pressed=true],.saas-login .official-workflow button.official-graph-node[aria-pressed=true] { border-color: var(--workflow-accent); box-shadow: 0 0 0 2px color-mix(in srgb,var(--workflow-accent) 20%,transparent); }
+
+/* Home and sign-in present three approachable examples before the full library. */
+.official-examples-compact { margin-top: 40px; }
+.official-examples-compact .official-heading { gap: 18px; padding-bottom: 20px; align-items: center; }
+.official-examples-compact .official-heading h2 { font-size: 23px; letter-spacing: -.5px; margin: 0 0 6px; }
+.official-examples-compact .official-heading p { font-size: 13px; }
+.official-examples-compact .official-library-toggle { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; min-height: 40px; font-size: 12px; }
+.official-examples-compact .official-cover { height: 175px; }
+.official-examples-compact .official-card-copy { padding: 16px 18px; }
+.official-examples-compact .official-card-meta>span:last-child { display: none; }
+.official-examples-compact .official-card-copy h3 { font-size: 17px; }
+.official-examples-compact .official-card-copy p { min-height: 0; font-size: 12px; line-height: 1.65; }
+.official-examples-compact .official-card-footer { justify-content: flex-end; margin-top: 16px; }
+@media (max-width: 700px) { .official-examples-compact .official-heading { align-items: flex-start; flex-direction: column; gap: 12px; } .official-examples-compact .official-library-toggle { min-height: 44px; } }

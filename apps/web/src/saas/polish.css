@@ -438,3 +438,11 @@ a.saas-buy-link:hover { filter: brightness(1.08); }
   .awwo-workspace .canvas-root .awwo-node .canvas-transcript-turn,
   .awwo-workspace .canvas-root .saas-team-run-details { animation: none; }
 }
+
+/* Prompt choices stay next to the user's draft; they never submit on selection. */
+.saas-home-quick-starts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+.saas-dashboard .saas-home-quick-starts button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 7px 12px; border: 1px solid var(--saas-hairline); border-radius: 20px; background: var(--saas-card); color: var(--saas-muted); font-size: 12px; line-height: 1.4; }
+.saas-dashboard .saas-home-quick-starts button:hover { color: var(--saas-text); border-color: var(--saas-accent); }
+.saas-home-quick-starts button[aria-expanded='true'] svg { transform: rotate(180deg); }
+.saas-home-prompt-ideas .saas-home-cases { margin-top: 16px; }
+@media (max-width: 600px) { .saas-dashboard .saas-home-quick-starts button { min-height: 44px; } }

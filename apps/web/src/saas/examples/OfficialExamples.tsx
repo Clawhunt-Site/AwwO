@@ -57,10 +57,14 @@ type GalleryProps = {
   error?: string;
   initialId?: string;
   standalone?: boolean;
+  compact?: boolean;
 };
 
-export function OfficialExamples({ onReuse, disabled = false, readOnly = false, error, initialId, standalone = false }: GalleryProps) {
+export function OfficialExamples({ onReuse, disabled = false, readOnly = false, error, initialId, standalone = false, compact = false }: GalleryProps) {
   const { locale, t } = useSaaSPreferences();
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const libraryToggle = useRef<HTMLButtonElement>(null);
+  const libraryId = useId();
   const flagshipCount = OFFICIAL_WORKFLOWS.filter(example => example.tier === 'flagship').length;
   const [tier, setTier] = useState<'flagship' | 'starter' | 'all'>(() => getOfficialWorkflow(initialId || '') && getOfficialWorkflow(initialId || '')?.tier !== 'flagship' ? 'starter' : flagshipCount ? 'flagship' : 'starter');
   const [category, setCategory] = useState('all');
@@ -94,7 +98,7 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
     setTab('demo');
     setSelected(example.id);
   };
-  const close = () => { setSelected(null); (selectedTrigger.current?.isConnected ? selectedTrigger.current : firstFilter.current)?.focus(); };
+  const close = () => { setSelected(null); (selectedTrigger.current?.isConnected ? selectedTrigger.current : firstFilter.current || libraryToggle.current)?.focus(); };
   const Heading = standalone ? 'h1' : 'h2';
   const inTier = (example: OfficialWorkflow) => tier === 'all' || (example.tier || 'starter') === tier;
   const industries = Array.from(new Map(OFFICIAL_WORKFLOWS.filter(inTier).filter(example => example.industry).map(example => [example.industry!.en, example.industry!])).entries());
@@ -104,6 +108,13 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
     && terms.every(term => [example.id, example.title.zh, example.title.en, example.summary[locale], example.industry?.[locale], ...(example.capabilities || []).map(value => value[locale])].join(' ').toLocaleLowerCase().includes(term)));
   const resetFilters = () => { setCategory('all'); setIndustry('all'); setQuery(''); };
   const selectTier = (value: 'flagship' | 'starter' | 'all') => { setTier(value); resetFilters(); };
+  const preview = ['interaction-page', 'orbit-game', 'knowledge-desk'].map(id => getOfficialWorkflow(id)!).filter(Boolean);
+  const visibleExamples = compact && !libraryOpen ? preview : filtered;
+  const showLibrary = !compact || libraryOpen;
+  const toggleLibrary = () => {
+    if (!libraryOpen) selectTier('all');
+    setLibraryOpen(value => !value);
+  };
   const allNodes = OFFICIAL_WORKFLOWS.reduce((sum, example) => sum + example.nodes.length, 0);
   const allIndustries = new Set(OFFICIAL_WORKFLOWS.filter(example => example.industry).map(example => example.industry!.en)).size;
 
@@ -112,14 +123,16 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
     { id: 'workflow' as const, label: t('编排画布', 'Workflow canvas'), icon: Workflow },
     { id: 'guide' as const, label: t('复用指南', 'Build your version'), icon: Copy },
   ];
-  return <section className="official-examples" aria-labelledby={titleId} id="official-examples">
+  return <section className={`official-examples${compact ? ' official-examples-compact' : ''}`} aria-labelledby={titleId} id="official-examples">
     <div className="official-heading">
-      <div><span className="official-eyebrow"><span />AWWO ORIGINALS / INDUSTRY SYSTEMS</span><Heading id={titleId}>{t('看它如何构建，亲手操作结果。', 'See the workflow. Work with the result.')}</Heading><p>{t('左边拆解编排过程，右边直接体验成果。从游戏与三维空间，到知识、模型与行业中台。', 'Explore the orchestration on the left, interact with the result on the right. From games and 3D worlds to knowledge, models and industry systems.')}</p></div>
-      <span className="official-edition">{t('官方工作流参考', 'OFFICIAL WORKFLOW LIBRARY')}<b>VOL. 003</b></span>
+      <div>{!compact && <span className="official-eyebrow"><span />AWWO ORIGINALS / INDUSTRY SYSTEMS</span>}<Heading id={titleId}>{compact ? t('从一个作品开始', 'Start with something you can try') : t('看它如何构建，亲手操作结果。', 'See the workflow. Work with the result.')}</Heading><p>{compact ? t('先体验成果，喜欢再复制成自己的画布。', 'Try a result, then copy the workflow to make it yours.') : t('左边拆解编排过程，右边直接体验成果。从游戏与三维空间，到知识、模型与行业中台。', 'Explore the orchestration on the left, interact with the result on the right. From games and 3D worlds to knowledge, models and industry systems.')}</p></div>
+      {compact ? <button type="button" className="official-library-toggle" ref={libraryToggle} aria-expanded={libraryOpen} aria-controls={libraryId} onClick={toggleLibrary}>{libraryOpen ? t('收起案例库', 'Show featured only') : t(`查看全部 ${OFFICIAL_WORKFLOWS.length} 个案例`, `Browse all ${OFFICIAL_WORKFLOWS.length} examples`)}<ArrowUpRight size={15} aria-hidden="true" /></button> : <span className="official-edition">{t('官方工作流参考', 'OFFICIAL WORKFLOW LIBRARY')}<b>VOL. 003</b></span>}
     </div>
+    {!compact && <>
     <div className="official-collection-summary"><span><b>{flagshipCount}</b>{t('行业旗舰', 'industry systems')}</span><span><b>{allIndustries}</b>{t('行业场景', 'industry scenarios')}</span><span><b>{allNodes}</b>{t('编排节点', 'workflow nodes')}</span><p>{t('数据关联 · 真实算法 · 异常处置 · 多阶段交付', 'Linked data · Working algorithms · Exception handling · Staged delivery')}</p></div>
     <div className="showcase-featured" role="group" aria-label={t('精选同屏案例', 'Featured split-screen examples')}><span>{t('精选演示', 'FEATURED')}</span>{['commerce-ops', 'colony-command', 'habitat-twin', 'research-atlas', 'model-foundry', 'interaction-page'].map(id => { const example = getOfficialWorkflow(id)!; return <button key={id} type="button" aria-pressed={selected === id} onClick={event => open(example, event.currentTarget)}><b>{example.title[locale].split(/ \/ | · /)[0]}</b>{example.categoryLabel[locale]}</button>; })}</div>
     <div className="showcase-featured showcase-generated-picks" role="group" aria-label={t('模型生成实例', 'Model-generated examples')}><span>{t('已实测模型产物', 'BROWSER-CHECKED MODEL OUTPUT')}</span>{Object.keys(OFFICIAL_GENERATED_RECORDS).map(id => { const example = getOfficialWorkflow(id)!; return <button key={id} type="button" aria-pressed={selected === id} onClick={event => open(example, event.currentTarget)}><b>{example.title[locale].split(/ \/ | · /)[0]}</b>{t('运行过程 + 成果', 'Run + result')}<ArrowUpRight size={12} /></button>; })}</div>
+    </>}
     {item && <div key={item.id} className="official-detail" ref={detail} tabIndex={-1} aria-label={item.title[locale]} style={{ '--case-accent': item.accent } as CSSProperties}>
       <div className="official-detail-heading"><button type="button" onClick={close} className="official-back"><ChevronLeft size={16} />{t('收起作品', 'Close example')}</button><a className="official-permalink" href={`${officialSignInURL(item.id, window.location.search)}&examples=1`}>{t('独立打开此案例', 'Open this example directly')} ↗</a></div>
       <div className="official-detail-title"><div><h3>{item.title[locale]}</h3><p>{item.description[locale]}</p></div>
@@ -143,6 +156,8 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
       </div>
       <p className="official-provenance">{record ? t('此案例展示已实测的模型节点成果与脱敏运行快照；验收修订另行标注。复制画布仍会创建未执行草稿，不会复制历史结果或触发模型调用。', 'This case shows browser-checked model output and a sanitized run snapshot; QA revisions are labeled. Copying the canvas creates an unexecuted draft; it does not copy run history or trigger model calls.') : t('官方设计的参考实现与编排模板。复制后是未执行的草稿；选择模型并运行后，才会产生你自己的交付物。', 'Officially authored reference implementations and workflow templates. A copy is an unexecuted draft. Choose your models and run it to create your own deliverables.')}</p>
     </div>}
+    <div id={libraryId}>
+    {showLibrary && <>
     <div className="official-discovery">
       <div className="official-tiers" role="group" aria-label={t('案例深度', 'Example depth')}>
         <button type="button" aria-pressed={tier === 'flagship'} onClick={() => selectTier('flagship')}>{t('行业旗舰', 'Industry systems')}<span>{flagshipCount}</span></button>
@@ -156,16 +171,18 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
       {Object.entries(OFFICIAL_CATEGORY_LABELS).map(([key, label]) => <button type="button" key={key} aria-pressed={category === key} onClick={() => setCategory(key)}>{label[locale]}<span>{OFFICIAL_WORKFLOWS.filter(example => inTier(example) && example.category === key).length}</span></button>)}
     </div>
     <div className="official-result-count" aria-live="polite">{t(`当前显示 ${filtered.length} 个案例`, `Showing ${filtered.length} examples`)}{(query || industry !== 'all' || category !== 'all') && <button type="button" onClick={resetFilters}>{t('清除筛选', 'Clear filters')}</button>}</div>
+    </>}
     <div className="official-cards">
-      {filtered.map((example) => <article key={example.id} className="official-card" style={{ '--case-accent': example.accent } as CSSProperties}>
+      {visibleExamples.map((example) => <article key={example.id} className="official-card" style={{ '--case-accent': example.accent } as CSSProperties}>
         <button type="button" className="official-card-open" onClick={event => open(example, event.currentTarget)} aria-label={t(`查看官方案例：${example.title.zh}`, `Open official example: ${example.title.en}`)} aria-expanded={selected === example.id}>
           {example.tier === 'flagship' ? <AdvancedCover item={example} /> : <CaseCover category={example.category} />}
-          <div className="official-card-copy"><div className="official-card-meta"><span>{example.industry?.[locale] || example.categoryLabel[locale]}</span><span><GitBranch size={12} />{example.nodes.length} {t('节点', 'nodes')} · {example.edges.length} {t('依赖', 'handoffs')}</span></div><h3>{example.title[locale]}<ArrowUpRight size={19} /></h3><p>{example.summary[locale]}</p>{example.capabilities && <div className="official-card-capabilities">{example.capabilities.slice(0, 3).map((value, index) => <span key={index}>{value[locale]}</span>)}</div>}<div className="official-card-footer"><span>{example.tier === 'flagship' ? t(`${workflowShape(example).stages} 个编排阶段 · ${workflowShape(example).merges} 处交付汇合`, `${workflowShape(example).stages} stages · ${workflowShape(example).merges} result merges`) : example.pattern[locale]}</span><strong>{t('进入案例', 'Explore')} ↗</strong></div></div>
+          <div className="official-card-copy"><div className="official-card-meta"><span>{example.industry?.[locale] || example.categoryLabel[locale]}</span><span><GitBranch size={12} />{example.nodes.length} {t('节点', 'nodes')} · {example.edges.length} {t('依赖', 'handoffs')}</span></div><h3>{example.title[locale]}<ArrowUpRight size={19} /></h3><p>{example.summary[locale]}</p>{!compact && example.capabilities && <div className="official-card-capabilities">{example.capabilities.slice(0, 3).map((value, index) => <span key={index}>{value[locale]}</span>)}</div>}<div className="official-card-footer">{!compact && <span>{example.tier === 'flagship' ? t(`${workflowShape(example).stages} 个编排阶段 · ${workflowShape(example).merges} 处交付汇合`, `${workflowShape(example).stages} stages · ${workflowShape(example).merges} result merges`) : example.pattern[locale]}</span>}<strong>{t('进入案例', 'Explore')} ↗</strong></div></div>
         </button>
       </article>)}
     </div>
-    {filtered.length === 0 && <div className="official-empty"><h3>{t('没有找到匹配案例', 'No matching examples')}</h3><p>{t('换一个关键词，或清除行业和能力筛选。', 'Try another keyword or clear the industry and capability filters.')}</p><button type="button" onClick={resetFilters}>{t('重新浏览', 'Browse again')}</button></div>}
-    <div className="official-library-note"><Workflow size={17} /><p>{t('每张画布包含真实依赖、输入输出和验收要求。行业旗舰展示完整本地业务闭环；接入生产数据与服务需要独立实施。', 'Every canvas includes real dependencies, contracts and acceptance criteria. Industry systems demonstrate complete local scenarios; production data and service integrations require separate implementation.')}</p></div>
+    {showLibrary && filtered.length === 0 && <div className="official-empty"><h3>{t('没有找到匹配案例', 'No matching examples')}</h3><p>{t('换一个关键词，或清除行业和能力筛选。', 'Try another keyword or clear the industry and capability filters.')}</p><button type="button" onClick={resetFilters}>{t('重新浏览', 'Browse again')}</button></div>}
+    </div>
+    {!compact && <div className="official-library-note"><Workflow size={17} /><p>{t('每张画布包含真实依赖、输入输出和验收要求。行业旗舰展示完整本地业务闭环；接入生产数据与服务需要独立实施。', 'Every canvas includes real dependencies, contracts and acceptance criteria. Industry systems demonstrate complete local scenarios; production data and service integrations require separate implementation.')}</p></div>}
   </section>;
 }
 

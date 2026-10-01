@@ -18,6 +18,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Changed
 
+- Keep the home page focused on starting work: offer editable prompt starters next to the composer and three interactive examples before expanding the complete library. Keep model search visible and model rows compact, preserving every runtime and capability label.
 - Support bounded catalogs of up to 256 models per runtime or personal connection, rejecting overflow instead of silently hiding models. Existing workspace model permissions remain unchanged.
 - Keep workspace navigation focused on the active workspace and account; move language, theme, guidance and maintenance actions into an accessible overflow menu.
 - Show one short automatic introduction per account and device, with detailed guidance available on demand. Preserve the model library on the left and Bot list on the right.
@@ -26,6 +27,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Preserve canvas-list search and expansion for each account and workspace when returning from a canvas; expose pagination during a search and clearly identify its current-page scope.
 - Preserve confirmed model-run admission errors, including exhausted workspace quotas, without misreporting them as interrupted pages; uncertain or already accepted runs still recover by their original operation ID.
 - Keep workspace dialogs scrollable within the viewport when long model catalogs or member lists exceed the screen height.
 - Keep menu and run-history keyboard focus inside the open layer, prevent canvas shortcuts from acting behind it, and restore trigger focus on Escape.

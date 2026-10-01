@@ -231,7 +231,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
     </form>}
     {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
-    </div>}<OfficialExamples initialId={new URLSearchParams(window.location.search).get('official') || undefined} /></main>;
+    </div>}<OfficialExamples compact initialId={new URLSearchParams(window.location.search).get('official') || undefined} /></main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
   const { t } = useSaaSPreferences();
