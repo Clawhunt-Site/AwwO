@@ -16,14 +16,16 @@ function transcript(text: string, { autoScroll = true, thread = 'first', locale 
 function viewport() {
   const el = screen.getByTestId('transcript-scroll');
   let height = 1000;
+  let visibleHeight = 300;
   Object.defineProperties(el, {
-    clientHeight: { configurable: true, get: () => 300 },
+    clientHeight: { configurable: true, get: () => visibleHeight },
     scrollHeight: { configurable: true, get: () => height },
-    scrollTo: { configurable: true, value: vi.fn(({ top }: ScrollToOptions) => { el.scrollTop = Math.max(0, Math.min(top ?? 0, height - 300)); }) },
+    scrollTo: { configurable: true, value: vi.fn(({ top }: ScrollToOptions) => { el.scrollTop = Math.max(0, Math.min(top ?? 0, height - visibleHeight)); }) },
   });
   return {
     el,
     grow: (next: number) => { height = next; },
+    resize: (next: number) => { visibleHeight = next; },
     scroll: (top: number) => { el.scrollTop = top; fireEvent.scroll(el); },
   };
 }
@@ -38,6 +40,37 @@ describe('conversation reading position', () => {
     view.rerender(transcript('One two three'));
     expect(port.el.scrollTop).toBe(1000);
     expect(screen.queryByRole('button', { name: '回到最新' })).toBeNull();
+  });
+
+  it.each(['larger viewport', 'shorter content'])('keeps following when %s clamps the position at the bottom', change => {
+    const view = render(transcript('One'));
+    const port = viewport();
+    view.rerender(transcript('One two'));
+    expect(port.el.scrollTop).toBe(700);
+    if (change === 'larger viewport') port.resize(500);
+    else port.grow(800);
+    port.scroll(500); // The browser clamps to the new end without a user gesture.
+    expect(screen.queryByRole('button', { name: '回到最新' })).toBeNull();
+    port.grow(1300);
+    view.rerender(transcript('One two three'));
+    expect(port.el.scrollTop).toBe(change === 'larger viewport' ? 800 : 1000);
+  });
+
+  it.each(['wheel', 'keyboard', 'touch'])('keeps an explicit upward %s gesture paused even within the bottom threshold', gesture => {
+    const view = render(transcript('One'));
+    const port = viewport();
+    view.rerender(transcript('One two'));
+    if (gesture === 'wheel') fireEvent.wheel(port.el, { deltaY: -20 });
+    else if (gesture === 'keyboard') fireEvent.keyDown(port.el, { key: 'ArrowUp' });
+    else {
+      fireEvent.touchStart(port.el, { touches: [{ clientY: 100 }] });
+      fireEvent.touchMove(port.el, { touches: [{ clientY: 120 }] });
+    }
+    port.scroll(680);
+    expect(screen.getByRole('button', { name: '回到最新' })).toBeTruthy();
+    port.grow(1300);
+    view.rerender(transcript('One two three'));
+    expect(port.el.scrollTop).toBe(680);
   });
 
   it('pauses on an upward wheel before the browser dispatches its scroll event', () => {

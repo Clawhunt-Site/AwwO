@@ -84,12 +84,18 @@ describe('HTML in the conversation', () => {
   it.each([
     '<html><head></head><body>Still streaming',
     '<h1>An HTML fragment</h1>',
-    '## Plain Markdown\n\nUse **bold** here.',
     'Discuss the literal <html> tag here.',
-  ])('leaves ordinary text, Markdown and incomplete HTML unchanged: %s', text => {
+  ])('leaves literal HTML text and incomplete HTML unchanged: %s', text => {
     const { container } = transcript(reply(text, { presentation: undefined }));
     expect(container.querySelector('.canvas-transcript-turn')!.textContent).toBe(text);
     expect(container.querySelector('details')).toBeNull();
+  });
+
+  it('renders ordinary agent Markdown without treating it as an HTML document', () => {
+    const { container } = transcript(reply('## Plain Markdown\n\nUse **bold** here.', { presentation: undefined }));
+    expect(screen.getByRole('heading', { name: 'Plain Markdown' })).toBeInTheDocument();
+    expect(screen.getByText('bold').tagName).toBe('STRONG');
+    expect(container.querySelector('details, iframe')).toBeNull();
   });
 
   it('leaves a user-authored complete HTML message unchanged', () => {

@@ -90,12 +90,12 @@ describe('readable node transcript', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
-  it('preserves plain text allowed by a single-field contract without inventing a format error', () => {
+  it('renders Markdown allowed by a single-field contract without inventing a format error', () => {
     const outputContract: NodeContract = { ...contract, outputs: [contract.outputs[0]] };
     const text = '## 合法纯文本\n这段不需要 JSON 包装。';
     const { container } = transcript([finalTurn(text, { presentation: { outputState: 'final', outputContract } })]);
-    expect(container.querySelector('.canvas-transcript-turn')!.textContent).toBe(text);
-    expect(screen.queryByRole('heading')).toBeNull();
+    expect(screen.getByRole('heading', { name: '合法纯文本' })).toBeTruthy();
+    expect(container.querySelector('.canvas-transcript-turn')!.textContent).toContain('这段不需要 JSON 包装。');
     expect(screen.queryByRole('status')).toBeNull();
   });
 

@@ -212,7 +212,8 @@ it('associates identical live replies and restored replies with their own durabl
   view.unmount(); resetConversationMemory();
   view = renderCanvas(); openChat();
   await waitFor(() => expect(getSnapshot(key).turns.filter(turn => turn.role === 'agent').map(turn => turn.runId)).toEqual(runs.map(run => run.id)));
-  const replies = screen.getAllByText(runs[0].output, { selector: '.canvas-transcript-turn--agent' });
+  const replies = screen.getAllByText((_content, element) =>
+    element?.matches('.canvas-transcript-turn--agent') === true && element.textContent === runs[0].output);
   expect(replies).toHaveLength(2);
   for (const [index, reply] of replies.entries()) {
     const slot = reply.nextElementSibling as HTMLElement;

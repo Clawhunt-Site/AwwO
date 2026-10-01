@@ -98,10 +98,20 @@ function TurnContent({ turn, streaming }: { turn: Turn; streaming: boolean }) {
       <RawDetails label={t('transcript.rawResponse')} text={turn.text} />
     </>;
   }
+  // Ordinary agent prose uses the same safe Markdown surface as published fields. Raw
+  // transport envelopes and failure evidence remain verbatim rather than being prettified.
+  let rawEnvelope = /^\s*(?:\{|\[\s*(?:\{|\[)|```(?:json)?\s*[\[{])/i.test(turn.text);
+  if (!rawEnvelope && turn.text.trimStart().startsWith('[')) {
+    try { rawEnvelope = Array.isArray(JSON.parse(turn.text)); } catch { /* A Markdown link is ordinary prose. */ }
+  }
+  const prose = turn.role === 'agent' && Boolean(turn.text) && !output.invalid && !rawEnvelope
+    && turn.tone !== 'error' && turn.tone !== 'warn' && turn.presentation?.outputState !== 'failed';
   return <>
     {output.invalid ? <div className="canvas-transcript-format-notice" role="status">{t('transcript.invalidOutput')}</div> : null}
     {/* Only an actual empty in-flight agent turn receives the waiting placeholder. */}
-    {turn.text || (turn.role === 'agent' && streaming ? t('transcript.thinking') : '')}
+    {prose
+      ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{turn.text}</ReactMarkdown></div>
+      : turn.text || (turn.role === 'agent' && streaming ? t('transcript.thinking') : '')}
   </>;
 }
 
@@ -209,10 +219,14 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
           const el = event.currentTarget;
           const top = el.scrollTop;
           if (autoScroll) {
-            if (top < previousScrollTop.current) follow(false);
+            const nearBottom = el.scrollHeight - top - el.clientHeight <= 40;
+            // Resizing the node or collapsing content can clamp scrollTop down while the
+            // reader is still at the end. Only a move away from the end pauses here;
+            // explicit upward wheel, keyboard and touch gestures already pause immediately.
+            if (top < previousScrollTop.current && !nearBottom) follow(false);
             // Only a downward scroll re-arms following. A layout or streaming update near
             // the bottom must not cancel the user's explicit upward gesture.
-            else if (top > previousScrollTop.current && el.scrollHeight - top - el.clientHeight <= 40) follow(true);
+            else if (top > previousScrollTop.current && nearBottom) follow(true);
           }
           previousScrollTop.current = top;
         }}>
