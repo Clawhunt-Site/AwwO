@@ -29,8 +29,27 @@ test('workspace authorization is configured, bounded and bound to an exact callb
   assert.throws(() => validateWorkspaceRequest({ ...spec, inputs: [{ name: '../secret', encoding: 'base64', content: '', sha256: checksum('') }] }));
   assert.throws(() => validateWorkspaceRequest({ ...spec, inputs: [{ name: 'a', encoding: 'base64', content: 'YQ==', sha256: checksum('different') }] }));
   assert.throws(() => validateWorkspaceRequest({ ...spec, outputFields: [{ id: '__workspace_snapshot', type: 'file', required: true }] }));
-  assert.throws(() => validateWorkspaceRequest({ ...spec, maxModelCalls: 17 }));
+  assert.throws(() => validateWorkspaceRequest({ ...spec, maxModelCalls: 65 }));
   assert.throws(() => validateWorkspaceRequest({ ...spec, callbackURL: 'http://127.0.0.1/api/internal/workspace-calls' }));
+});
+
+test('workspace defaults to 32 model calls, permits explicit 2..64, and preserves frozen 16-call runs', () => {
+  const spec = workspace();
+  const env = { AWWO_OPENAI_AGENTS_WORKSPACE_IMAGE: 'awwo-workspace:test', AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER: '/usr/bin/docker', AWWO_OPENAI_AGENTS_WORKSPACE_CALLBACK_URL: spec.callbackURL };
+  const defaults = loadWorkspaceConfig(env);
+  assert.equal(defaults?.maxModelCalls, 32);
+  for (const maxModelCalls of [2, 16, 32, 64]) {
+    validateWorkspaceRequest({ ...spec, maxModelCalls });
+    const configured = loadWorkspaceConfig({ ...env, AWWO_OPENAI_AGENTS_WORKSPACE_MAX_CALLS: String(maxModelCalls) });
+    assert.equal(configured?.maxModelCalls, maxModelCalls);
+    authorizeWorkspace(configured, { workspace: { ...spec, maxModelCalls } });
+  }
+  authorizeWorkspace(defaults, { workspace: { ...spec, maxModelCalls: 16 } });
+  assert.throws(() => authorizeWorkspace(defaults, { workspace: { ...spec, maxModelCalls: 33 } }));
+  for (const maxModelCalls of [0, 1, 2.5, 65, Infinity, -1]) {
+    assert.throws(() => validateWorkspaceRequest({ ...spec, maxModelCalls }));
+    assert.throws(() => loadWorkspaceConfig({ ...env, AWWO_OPENAI_AGENTS_WORKSPACE_MAX_CALLS: String(maxModelCalls) }));
+  }
 });
 
 test('delivery binds actual published bytes and rejects invented files or mismatched receipt', () => {

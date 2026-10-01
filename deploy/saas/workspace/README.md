@@ -10,6 +10,8 @@ Cancellation, command timeout, helper transport failure and completion cleanup r
 
 The worker must call `close()` from its `finally` path. Treat a failed cleanup as a worker error and quarantine that worker from new runs until the operator resolves the Docker daemon failure. The labelled containers (`awwo.workspace-sandbox=true`) allow an operator to audit remnants after a worker or host crash; do not indiscriminately delete active containers. The daemon may be stopped or the image absent, in which case sandbox startup fails rather than falling back to host execution.
 
+`AWWO_OPENAI_AGENTS_WORKSPACE_MAX_CALLS` defaults to 32 and accepts only 2–64. The server freezes each run's selected limit; existing 16-call runs remain bounded at 16. Every model invocation, including final delivery repair, still requires its own admission and settlement. Exceeding the frozen budget makes no extra provider request or admission, and the existing total run timeout is unchanged.
+
 Run the broker tests with the repository-supported Node runtime:
 
 ```sh

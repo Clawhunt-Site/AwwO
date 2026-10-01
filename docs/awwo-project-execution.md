@@ -16,9 +16,9 @@ A canvas node can use a project execution runtime to inspect supplied files, wri
 | --- | --- |
 | Project files | List, read and write relative files in a per-run isolated workspace. |
 | Commands | Node.js, Python and Git in a bounded Linux container; command exit codes and actual output return to the agent for correction. |
-| Model loop | At most 16 model calls. Every call is admitted and settled independently; permission, personal connection and quota changes can stop the next call. |
+| Model loop | Defaults to 32 model calls; operators may configure 2–64, with a hard cap of 64 per run. Existing runs retain their frozen limit, including 16. Every call is admitted and settled independently; permission, personal connection and quota changes can stop the next call. The overall run deadline still applies. |
 | Context | Completed tool interactions may become explicit context checkpoints. Large reads and command logs become clearly marked previews with instructions for bounded re-reading. Actual files remain in the workspace and the SDK retains the unabridged history during the current run; persisted operation records contain start events only. The original user task is retained. Context that still exceeds the hard budget fails rather than silently truncating the task. |
-| Delivery | File fields are populated from broker-verified bytes, not model-supplied paths. A final format correction may use remaining calls in the same 16-call budget. |
+| Delivery | File fields are populated from broker-verified bytes, not model-supplied paths. A final format correction uses only remaining calls in the same frozen per-run budget. |
 | Continuation | A completed, validated run saves a private source ZIP. The next turn in that same session restores it. Failed or cancelled runs do not replace the last successful snapshot. |
 | Preview | Static HTML by default; explicit interactive HTML in an opaque-origin sandbox. Raster image previews and file downloads are supported. |
 | History | Per-call usage, operation starts, delivery format and artifacts remain distinct evidence. Stored files and their transcript references are published atomically. Historical transport bytes are projected into verified references or explicitly unavailable metadata rather than copied into the next model request. Completion does not mean human acceptance. |

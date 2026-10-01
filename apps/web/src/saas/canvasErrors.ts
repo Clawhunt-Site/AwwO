@@ -26,6 +26,7 @@ const runErrors: Record<string, [string, string]> = {
   'API restarted before completion': ['服务重启中断了运行，请核对历史后重试。', 'A service restart interrupted the run. Check its history before retrying.'],
   runtime_failed: ['模型执行失败，请检查运行配置后重试。', 'Model execution failed. Check the runtime configuration and try again.'],
   workspace_context_limit: ['项目运行上下文已满，请拆分任务或减少本次输入后重试。', 'The project execution context is full. Split the task or reduce its inputs and retry.'],
+  workspace_step_limit: ['本次项目执行已达到调用步数上限。请拆分任务，或联系管理员调整执行预算后重试。', 'This project run reached its model-call limit. Split the task or contact an administrator to adjust the execution budget, then retry.'],
   workspace_admission_failed: ['项目执行权限或调用额度不可用，请检查个人模型连接和工作区额度。', 'Project execution permission or quota is unavailable. Check your model connection and workspace quota.'],
   workspace_file_invalid: ['交付文件无效，请检查实际生成的文件后重新执行。', 'The deliverable file is invalid. Check the generated file and run again.'],
   workspace_unavailable: ['项目执行沙箱暂不可用，请稍后重试。', 'The project execution sandbox is unavailable. Please try again later.'],

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { canvasErrorMessage } from '../src/saas/canvasErrors';
+import { canvasErrorMessage, runErrorText } from '../src/saas/canvasErrors';
 import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { canvasFetch, configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from '../src/saas/canvasBridge';
 import { fetchConversationIndex } from '../src/canvasAgentChat';
@@ -63,6 +63,7 @@ it('names the worker failures the API maps instead of showing the generic runtim
     output_limit: ['超过限制', 'exceeds the limit'],
     run_timeout: ['超时', 'timed out'],
     workspace_context_limit: ['上下文已满', 'context is full'],
+    workspace_step_limit: ['调用步数上限', 'model-call limit'],
     workspace_admission_failed: ['额度不可用', 'quota is unavailable'],
     workspace_file_invalid: ['交付文件无效', 'deliverable file is invalid'],
     workspace_unavailable: ['沙箱暂不可用', 'sandbox is unavailable'],
@@ -78,6 +79,18 @@ it('names the worker failures the API maps instead of showing the generic runtim
   }
   // The raw worker codes themselves are never run codes; they still show as their own text.
   expect(canvasErrorMessage('diagnostic 456', 'MODEL_REFUSAL')).toBe('diagnostic 456');
+});
+it('explains the project step budget in current and historical failures without promising to resume failed files', () => {
+  const error = new SaaSApiError(500, 'workspace_step_limit', 'MaxTurnsExceededError');
+  for (const locale of ['zh', 'en'] as const) {
+    document.documentElement.lang = locale;
+    const message = canvasErrorMessage(error);
+    expect(runErrorText(error.code, locale)).toBe(message);
+    expect(message).toContain(locale === 'zh' ? '拆分任务' : 'Split the task');
+    expect(message).toContain(locale === 'zh' ? '联系管理员调整执行预算后重试' : 'contact an administrator to adjust the execution budget, then retry');
+    expect(message).not.toMatch(/续跑|继续执行|恢复文件|resume|restored files/i);
+  }
+  expect(error.code).toBe('workspace_step_limit');
 });
 it('keeps HTTP status and code when displaying a localized quota rejection', async () => {
   document.documentElement.lang = 'en'; configureSaaSCanvas({ tenant, canvasId: 'canvas-a' }); configureSaaSCanvasSave(async () => {});
@@ -95,14 +108,17 @@ it('uses an exact session query for restore and follows complete legacy indexes 
   expect(await fetchConversationIndex('/gateway-api', 'tenant-a', undefined, 'session-250')).toMatchObject([{ issueId: 'session-250' }]); expect(fetch).toHaveBeenCalledTimes(1);
   expect(await fetchConversationIndex('/gateway-api', 'tenant-a')).toMatchObject([{ issueId: 'page-one' }, { issueId: 'page-two' }]);
 });
-it('localizes failed streamed events while keeping the terminal failure visible', async () => {
+it.each([
+  ['runtime_failed', 'Pi execution failed', 'Model execution failed'],
+  ['workspace_step_limit', 'Model call limit reached.', 'model-call limit'],
+])('localizes failed streamed events for %s while keeping the terminal failure visible', async (code, message, expected) => {
   document.documentElement.lang = 'en'; configureSaaSCanvas({ tenant, canvasId: 'canvas-a' }); configureSaaSCanvasSave(async () => {});
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.includes('operationId=')) return new Response(JSON.stringify({ items: [] }));
     if (url.endsWith('/runs')) return new Response(JSON.stringify({ id: 'run-a', sessionId: 'session-a', status: 'queued' }));
-    if (url.endsWith('/events')) return new Response('data: {"type":"failed","code":"runtime_failed","message":"Pi execution failed"}\n\n');
+    if (url.endsWith('/events')) return new Response(`data: ${JSON.stringify({ type: 'failed', code, message })}\n\n`);
     throw new Error(url);
   }));
   const r = await canvasFetch('/gateway-api/conversations/tenant-a/agents/a/messages', { method: 'POST', body: JSON.stringify({ message: 'hello', issueId: 'session-a' }) });
-  const text = await r.text(); expect(text).toContain('Model execution failed'); expect(text).toContain('"status":"failed"');
+  const text = await r.text(); expect(text).toContain(expected); expect(text).toContain('"status":"failed"');
 });

@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import test, { type TestContext } from 'node:test';
 import { compileWorkspaceDelivery, executeWorkspaceAgent } from './workspace-runtime.ts';
+import { classifyError } from './errors.mjs';
 import type { OutputField } from './workspace-protocol.ts';
 
 const checksum = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -130,4 +131,26 @@ test('denied repair admission never makes an unpaid extra provider request', asy
   assert.equal(state.provider.length, 1);
   assert.deepEqual(state.ledger.map(value => [value.operation, value.index]), [['admit', 1], ['settle', 1], ['admit', 2]]);
   assert.deepEqual(state.operations, []); assert.equal(state.events.some(event => event.type === 'completed'), false);
+});
+
+test('a 32-call project loop completes with one admission and settlement per model call', { timeout: 15_000 }, async t => {
+  const steps: Step[] = [...Array.from({ length: 31 }, () => ({ name: 'workspace_list', args: { path: '.' } })), { text: '{"count":32}' }];
+  const state = await fixture(t, steps, countFields, { maxCalls: 32 });
+  await state.run(); assertPaidCalls(state, 32);
+  assert.equal(state.events.at(-1)?.type, 'completed');
+  assert.equal(JSON.parse(String(state.events.at(-1)?.text)).count, 32);
+  assert.equal(state.operations.filter(name => name === 'workspace_list').length, 31);
+  assert.equal(state.operations.at(-1), 'snapshot');
+});
+
+for (const maxCalls of [32, 64]) test(`call ${maxCalls + 1} is refused without provider traffic or admission after a ${maxCalls}-call budget`, { timeout: 15_000 }, async t => {
+  const steps: Step[] = Array.from({ length: maxCalls }, () => ({ name: 'workspace_list', args: { path: '.' } }));
+  const state = await fixture(t, steps, countFields, { maxCalls });
+  await assert.rejects(state.run(), (error: unknown) => {
+    assert.equal(classifyError(error).code, 'MODEL_CALL_LIMIT'); return true;
+  });
+  assertPaidCalls(state, maxCalls);
+  assert.equal(state.operations.length, maxCalls);
+  assert.equal(state.events.some(event => event.type === 'completed'), false);
+  assert.equal(state.ledger.some(event => Number(event.index) > maxCalls), false);
 });

@@ -37,7 +37,7 @@ func TestRuntimeFailureCodeTable(t *testing.T) {
 	if got := runtimeFailureCode("OUTPUT_CONTRACT_INVALID", false); got != "runtime_failed" {
 		t.Fatal("contract refusal on a run without a contract must stay generic", got)
 	}
-	for _, worker := range []string{"", "MODEL_ERROR", "MODEL_PROTOCOL_ERROR", "MODEL_REQUEST_REJECTED", "TOOL_DENIED", "WORKER_LOST", "SOMETHING_NEW", "model_refusal", "output_limit"} {
+	for _, worker := range []string{"", "MODEL_ERROR", "MODEL_PROTOCOL_ERROR", "MODEL_REQUEST_REJECTED", "MODEL_CALL_LIMIT", "MaxTurnsExceeded", "MaxTurnsExceededError", "TOOL_DENIED", "WORKER_LOST", "SOMETHING_NEW", "model_refusal", "output_limit"} {
 		if got := runtimeFailureCode(worker, true); got != "runtime_failed" {
 			t.Fatal("unmapped worker code was named", worker, got)
 		}
@@ -82,6 +82,8 @@ func TestPostgresRunFailureCodesAreNamedFromWorkerCodes(t *testing.T) {
 		{"MODEL_RATE_LIMIT", "provider_rate_limited"},
 		{"MODEL_UNAVAILABLE", "provider_unavailable"},
 		{"MODEL_CONNECTION_ERROR", "provider_unavailable"},
+		{"MODEL_CALL_LIMIT", "runtime_failed"},
+		{"MaxTurnsExceededError", "runtime_failed"},
 		{"DEADLINE_EXCEEDED", "run_timeout"},
 		{"MODEL_ERROR", "runtime_failed"},
 		{"NOT_A_KNOWN_CODE", "runtime_failed"},

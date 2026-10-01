@@ -177,7 +177,7 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 		// The picker treats the levels as a closed enum ("select"), never free text.
 		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": result.err == nil && h.supportsEffortSelection(), "effortInputMode": "select", "tools": enabledRuntimeTools(h, id)}
 		if id == runtimeOpenAIAgents && a.cfg.WorkspaceCallbackURL != "" {
-			descriptor["workspace"] = &workspaceCapability{Version: 1, Available: false, MaxModelCalls: 16}
+			descriptor["workspace"] = &workspaceCapability{Version: 1, Available: false, MaxModelCalls: defaultWorkspaceModelCalls}
 		}
 		if result.err != nil {
 			descriptor["reason"] = result.err.Error()

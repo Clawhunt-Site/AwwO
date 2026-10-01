@@ -27,6 +27,8 @@ const workspaceSnapshotField = "__workspace_snapshot"
 const maxWorkspaceFileBytes = 2 << 20
 const maxWorkspaceInputBytes = 8 << 20
 const maxWorkspaceWireBytes = 16 << 20
+const defaultWorkspaceModelCalls = 32
+const maxWorkspaceModelCalls = 64
 
 type workspaceCapability struct {
 	Version       int  `json:"version"`
@@ -64,7 +66,7 @@ type workspaceActivity struct {
 }
 
 func validWorkspaceActivity(step int, tool string) bool {
-	if step < 1 || step > 16 {
+	if step < 1 || step > maxWorkspaceModelCalls {
 		return false
 	}
 	switch tool {
@@ -132,8 +134,20 @@ func validWorkspaceCallbackURL(raw string) bool {
 	return err == nil && port > 0 && port <= 65535 && (u.Hostname() == "127.0.0.1" || u.Hostname() == "::1")
 }
 func validWorkspaceCapability(runtime string, c *workspaceCapability) bool {
-	return runtime == runtimeOpenAIAgents && c != nil && c.Version == 1 && c.Available && c.MaxModelCalls >= 2 && c.MaxModelCalls <= 16
+	return runtime == runtimeOpenAIAgents && c != nil && c.Version == 1 && c.Available && c.MaxModelCalls >= 2 && c.MaxModelCalls <= maxWorkspaceModelCalls
 }
+
+// The generic runtime also has turn limits, but only project execution carries
+// this workspace budget. Do not give ordinary runs or teams a project-only error.
+func workspaceRuntimeFailureCode(workerCode string, contract bool) string {
+	switch workerCode {
+	case "MODEL_CALL_LIMIT", "MaxTurnsExceeded", "MaxTurnsExceededError":
+		return "workspace_step_limit"
+	default:
+		return runtimeFailureCode(workerCode, contract)
+	}
+}
+
 func (a *App) requireWorkspaceSnapshot(s executionSnapshot) error {
 	if a.cfg.WorkspaceCallbackURL != "" && s.Runtime == runtimeOpenAIAgents && s.Team == nil && s.Workspace == nil {
 		return setupError{"workspace_unavailable", "The project sandbox is unavailable; restore it before running this node"}
@@ -633,7 +647,7 @@ func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instr
 		a.finish(tid, rid, status, "", code)
 	}
 	p := snap.Workspace
-	if kind == "planner" || snap.Team != nil || snap.Runtime != runtimeOpenAIAgents || p == nil || p.Version != 1 || p.MaxModelCalls < 2 || p.MaxModelCalls > 16 || snap.OutputContract != nil || !validWorkspaceCallbackURL(a.cfg.WorkspaceCallbackURL) || !validWorkspaceCapability(snap.Runtime, snap.Health.Workspace) || p.MaxModelCalls > snap.Health.Workspace.MaxModelCalls {
+	if kind == "planner" || snap.Team != nil || snap.Runtime != runtimeOpenAIAgents || p == nil || p.Version != 1 || p.MaxModelCalls < 2 || p.MaxModelCalls > maxWorkspaceModelCalls || snap.OutputContract != nil || !validWorkspaceCallbackURL(a.cfg.WorkspaceCallbackURL) || !validWorkspaceCapability(snap.Runtime, snap.Health.Workspace) || p.MaxModelCalls > snap.Health.Workspace.MaxModelCalls {
 		failRun("workspace_unavailable")
 		return
 	}
@@ -792,7 +806,7 @@ func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instr
 			a.finishWithFacts(tid, rid, "completed", answer, "", facts)
 			return
 		case "failed":
-			failRun(runtimeFailureCode(ev.Code, len(fields) > 0))
+			failRun(workspaceRuntimeFailureCode(ev.Code, len(fields) > 0))
 			return
 		case "cancelled":
 			closeWorkspace()

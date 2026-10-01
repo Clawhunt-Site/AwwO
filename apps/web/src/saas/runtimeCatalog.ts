@@ -46,7 +46,7 @@ export function runtimeDefinitions(status: SaaSRuntimeStatus): SaaSRuntimeDefini
     const workspace = runtime.workspace;
     const workspaceValid = runtime.id === 'openai-agents'
       && workspace?.version === 1 && typeof workspace.available === 'boolean' && Number.isInteger(workspace.maxModelCalls)
-      && workspace.maxModelCalls >= 2 && workspace.maxModelCalls <= 16;
+      && workspace.maxModelCalls >= 2 && workspace.maxModelCalls <= 64;
     return { id: runtime.id, name: runtime.name || nodeTeamRuntimeLabel(runtime.id),
       available: runtime.available === true, configured: runtime.configured === true,
       // Trust the flag only when a model of this runtime really advertises levels, so a stale or

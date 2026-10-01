@@ -28,8 +28,18 @@ func TestWorkspaceCallbackAndCapabilityFailClosed(t *testing.T) {
 		}
 	}
 	good := &workspaceCapability{Version: 1, Available: true, MaxModelCalls: 16}
-	if !validWorkspaceCapability(runtimeOpenAIAgents, good) || validWorkspaceCapability(runtimePI, good) || validWorkspaceCapability(runtimeOpenAIAgents, &workspaceCapability{Version: 1, Available: true, MaxModelCalls: 17}) || validWorkspaceCapability(runtimeOpenAIAgents, &workspaceCapability{Version: 1, Available: true, MaxModelCalls: 1}) {
+	if !validWorkspaceCapability(runtimeOpenAIAgents, good) || validWorkspaceCapability(runtimePI, good) || validWorkspaceCapability(runtimeOpenAIAgents, &workspaceCapability{Version: 1, Available: true, MaxModelCalls: 65}) || validWorkspaceCapability(runtimeOpenAIAgents, &workspaceCapability{Version: 1, Available: true, MaxModelCalls: 1}) {
 		t.Fatal("workspace capability boundary")
+	}
+	for _, limit := range []int{2, 16, 32, 64} {
+		if !validWorkspaceCapability(runtimeOpenAIAgents, &workspaceCapability{Version: 1, Available: true, MaxModelCalls: limit}) || !validWorkspaceActivity(limit, "workspace_exec") {
+			t.Fatal("valid workspace limit rejected", limit)
+		}
+	}
+	for _, step := range []int{0, 65} {
+		if validWorkspaceActivity(step, "workspace_exec") {
+			t.Fatal("invalid workspace activity accepted", step)
+		}
 	}
 	a := New(nil, testConfig())
 	w := httptest.NewRecorder()
@@ -65,6 +75,44 @@ func TestWorkspaceCallbackAndCapabilityFailClosed(t *testing.T) {
 	a.workspaceCallback(w, r)
 	if w.Code != 401 {
 		t.Fatal("closed token accepted")
+	}
+}
+
+func TestWorkspaceFrozenCallLimitIsNotRaisedByNewServerMaximum(t *testing.T) {
+	a := New(nil, testConfig())
+	snap := executionSnapshot{Workspace: &workspacePlan{Version: 1, MaxModelCalls: 16}}
+	l, token, closeLease := a.registerWorkspaceLease(context.Background(), "tenant", "run", "session", snap)
+	defer closeLease()
+	for i := 0; i < 16; i++ {
+		l.calls = append(l.calls, &workspaceCall{status: "completed"})
+	}
+	r := httptest.NewRequest("POST", "/api/internal/workspace-calls", strings.NewReader(`{"operation":"admit","index":17}`))
+	r.Header.Set("Authorization", "Bearer "+token)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	a.workspaceCallback(w, r)
+	if w.Code != 429 || len(l.calls) != 16 || l.snapshot.Workspace.MaxModelCalls != 16 || l.sealSuccess() {
+		t.Fatal("old frozen limit permitted an extra call or completion")
+	}
+}
+
+func TestWorkspaceStepLimitMappingDoesNotChangeOrdinaryRuntimeFailures(t *testing.T) {
+	for _, code := range []string{"MODEL_CALL_LIMIT", "MaxTurnsExceeded", "MaxTurnsExceededError"} {
+		for _, contract := range []bool{false, true} {
+			if got := workspaceRuntimeFailureCode(code, contract); got != "workspace_step_limit" {
+				t.Fatal("project step budget was not named", code, contract, got)
+			}
+			if got := runtimeFailureCode(code, contract); got != "runtime_failed" {
+				t.Fatal("ordinary or team run received a project-only error", code, contract, got)
+			}
+		}
+	}
+	for _, code := range []string{"MODEL_CONNECTION_ERROR", "OUTPUT_CONTRACT_INVALID", "WORKSPACE_CONTEXT_LIMIT", "unknown"} {
+		for _, contract := range []bool{false, true} {
+			if workspaceRuntimeFailureCode(code, contract) != runtimeFailureCode(code, contract) {
+				t.Fatal("project-specific mapping changed an unrelated error", code, contract)
+			}
+		}
 	}
 }
 
@@ -169,7 +217,90 @@ func callbackRequest(t *testing.T, work workspaceRequest, body any, want int) {
 	}
 }
 func workspaceHealth(w http.ResponseWriter) {
-	writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "fixture", "workspace": workspaceCapability{Version: 1, Available: true, MaxModelCalls: 2}, "models": []map[string]any{{"id": "test-model", "runtime": runtimeOpenAIAgents, "maxContextTextBytes": 262144, "messageOverheadBytes": 32}}})
+	workspaceHealthWithLimit(w, 2)
+}
+func workspaceHealthWithLimit(w http.ResponseWriter, limit int) {
+	writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "fixture", "workspace": workspaceCapability{Version: 1, Available: true, MaxModelCalls: limit}, "models": []map[string]any{{"id": "test-model", "runtime": runtimeOpenAIAgents, "maxContextTextBytes": 262144, "messageOverheadBytes": 32}}})
+}
+
+func TestPostgresWorkspaceModelCallLimitsFreezeAndAccountEveryStep(t *testing.T) {
+	for _, limit := range []int{16, 32, 64, 65} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			snapshot := workspaceFixtureSnapshot(t)
+			var calls atomic.Int32
+			worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					workspaceHealthWithLimit(w, limit)
+					return
+				}
+				if r.Method == "DELETE" {
+					w.WriteHeader(202)
+					return
+				}
+				var request struct {
+					Workspace workspaceRequest `json:"workspace"`
+				}
+				if e := json.NewDecoder(r.Body).Decode(&request); e != nil {
+					t.Error(e)
+					return
+				}
+				work := request.Workspace
+				if work.MaxModelCalls != limit {
+					t.Error("worker did not receive the frozen budget", work.MaxModelCalls, limit)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(200)
+				w.(http.Flusher).Flush()
+				for i := 1; i <= limit; i++ {
+					callbackRequest(t, work, map[string]any{"operation": "admit", "index": i}, 200)
+					calls.Add(1)
+					callbackRequest(t, work, map[string]any{"operation": "settle", "index": i, "status": "completed", "observability": json.RawMessage(observationFixture(4, 5))}, 200)
+				}
+				fmt.Fprintf(w, "data: {\"type\":\"workspace_activity\",\"step\":%d,\"tool\":\"workspace_publish\"}\n\n", limit)
+				raw, _ := json.Marshal(map[string]any{"type": "completed", "text": "Built and tested.", "workspaceSnapshot": snapshot})
+				fmt.Fprintf(w, "data: %s\n\n", raw)
+			}))
+			defer worker.Close()
+			h := newHarness(t, worker.URL)
+			h.a.cfg.OpenAIAgentsURL = worker.URL
+			h.a.cfg.OpenAIAgentsToken = strings.Repeat("o", 32)
+			h.a.cfg.WorkspaceCallbackURL = h.server.URL + "/api/internal/workspace-calls"
+			c, tid, _ := h.register(t, "workspace-limit@example.test")
+			cid, aid, sid := h.fixture(t, c, tid)
+			if _, e := h.db.Exec(context.Background(), `UPDATE canvases SET document=jsonb_set(document,'{nodes,0,runtime}','"openai-agents"') WHERE id=$1`, cid); e != nil {
+				t.Fatal(e)
+			}
+			if _, e := h.db.Exec(context.Background(), "UPDATE agents SET runtime='openai-agents' WHERE id=$1", aid); e != nil {
+				t.Fatal(e)
+			}
+			wantStatus := 202
+			if limit == 65 {
+				wantStatus = 400
+			}
+			run := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]any{"sessionId": sid, "prompt": "build", "operationId": "workspace-limit"}, wantStatus)
+			if limit == 65 {
+				requireCode(t, run, "workspace_unavailable")
+				var count int
+				if e := h.db.QueryRow(context.Background(), "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid).Scan(&count); e != nil || count != 0 || calls.Load() != 0 {
+					t.Fatal("out-of-range budget reached a paid call", e, count, calls.Load())
+				}
+				return
+			}
+			done := h.awaitRun(t, c, tid, run["id"].(string), "completed")
+			var count, tokens, frozen int
+			if e := h.db.QueryRow(context.Background(), "SELECT count(*),COALESCE(sum(input_tokens),0) FROM model_invocations WHERE tenant_id=$1 AND status='completed'", tid).Scan(&count, &tokens); e != nil || count != limit || tokens != 4*limit || calls.Load() != int32(limit) {
+				t.Fatal("expanded budget bypassed per-call accounting", e, count, tokens, calls.Load())
+			}
+			if e := h.db.QueryRow(context.Background(), "SELECT (execution_snapshot->'workspace'->>'maxModelCalls')::int FROM runs WHERE tenant_id=$1 AND id=$2", tid, run["id"]).Scan(&frozen); e != nil || frozen != limit {
+				t.Fatal("frozen budget was rewritten", e, frozen)
+			}
+			items := done["workspaceActivity"].(map[string]any)["items"].([]any)
+			if len(items) != 1 || items[0].(map[string]any)["step"] != float64(limit) {
+				t.Fatal("high-step activity was lost", items)
+			}
+		})
+	}
 }
 func TestPostgresWorkspaceEachCallAccountedSnapshotRestoredAndLeaseRevoked(t *testing.T) {
 	snapshot := workspaceFixtureSnapshot(t)
@@ -218,6 +349,10 @@ func TestPostgresWorkspaceEachCallAccountedSnapshotRestoredAndLeaseRevoked(t *te
 			calls.Add(1)
 			callbackRequest(t, work, map[string]any{"operation": "settle", "index": i, "status": "completed", "observability": json.RawMessage(observationFixture(4, 5))}, 200)
 		}
+		if request.Prompt == "limit" {
+			fmt.Fprint(w, "data: {\"type\":\"failed\",\"code\":\"MODEL_CALL_LIMIT\"}\n\n")
+			return
+		}
 		deliverySnapshot := snapshot
 		if request.Prompt == "corrupt" {
 			deliverySnapshot = encodedWorkspaceFile("workspace.zip", []byte("PK\x03\x04"))
@@ -239,17 +374,20 @@ func TestPostgresWorkspaceEachCallAccountedSnapshotRestoredAndLeaseRevoked(t *te
 		t.Fatal(e)
 	}
 	var lastID string
-	for _, prompt := range []string{"build", "corrupt", "continue"} {
+	for _, prompt := range []string{"build", "corrupt", "limit", "continue"} {
 		v := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]any{"sessionId": sid, "prompt": prompt, "operationId": "workspace-" + prompt}, 202)
 		lastID = v["id"].(string)
 		status := "completed"
-		if prompt == "corrupt" {
+		if prompt == "corrupt" || prompt == "limit" {
 			status = "failed"
 		}
-		h.awaitRun(t, c, tid, lastID, status)
+		done := h.awaitRun(t, c, tid, lastID, status)
+		if prompt == "limit" && done["error"] != "workspace_step_limit" {
+			t.Fatal("project execution did not retain its step limit failure", done["error"])
+		}
 	}
 	var count, input int
-	if e := h.db.QueryRow(context.Background(), "SELECT count(*),COALESCE(sum(input_tokens),0) FROM model_invocations WHERE tenant_id=$1 AND status='completed'", tid).Scan(&count, &input); e != nil || count != 6 || input != 24 || calls.Load() != 6 || !second.Load() {
+	if e := h.db.QueryRow(context.Background(), "SELECT count(*),COALESCE(sum(input_tokens),0) FROM model_invocations WHERE tenant_id=$1 AND status='completed'", tid).Scan(&count, &input); e != nil || count != 8 || input != 32 || calls.Load() != 8 || !second.Load() {
 		t.Fatal("per-call accounting", e, count, input, calls.Load())
 	}
 	out := h.request(t, c, "GET", "/tenants/"+tid+"/canvases/"+cid+"/artifacts", nil, 200)

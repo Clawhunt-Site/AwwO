@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { groupModels, readModelPalette } from '../src/canvas/modelPalette';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
-import type { SaaSRuntimeStatus, SaaSRuntimeModel } from '../src/saas/runtimeCatalog';
+import { runtimeDefinitions, type SaaSRuntimeStatus, type SaaSRuntimeModel } from '../src/saas/runtimeCatalog';
 
 const status = (models: SaaSRuntimeModel[]): SaaSRuntimeStatus => ({ configured: true, available: true, models,
   runtimes: ['pi', 'openai-agents'].map(id => ({ id: id as 'pi' | 'openai-agents', name: id, available: true, configured: true, supportsEffortSelection: false, tools: [] })) });
@@ -20,7 +20,14 @@ it('distinguishes actual workspace execution from text models using the runtime 
   expect(groupModels(catalog).flatMap(group => group.models)[1]).toMatchObject({ available: false, execution: 'workspace-unavailable' });
 });
 
-it.each([{ version: 2, available: true, maxModelCalls: 16 }, { version: 1, available: 'true', maxModelCalls: 16 }, { version: 1, available: true, maxModelCalls: 1 }, { version: 1, available: true, maxModelCalls: 99 }])('does not invent project execution from malformed workspace capability %j', workspace => {
+it.each([2, 16, 32, 64])('preserves the actual advertised project budget of %i calls', maxModelCalls => {
+  const catalog = status([model('qwen')]);
+  catalog.runtimes![1].workspace = { version: 1, available: true, maxModelCalls };
+  expect(runtimeDefinitions(catalog)[1].workspace?.maxModelCalls).toBe(maxModelCalls);
+  expect(groupModels(catalog).flatMap(group => group.models)[0].execution).toBe('workspace');
+});
+
+it.each([{ version: 2, available: true, maxModelCalls: 16 }, { version: 1, available: 'true', maxModelCalls: 16 }, { version: 1, available: true, maxModelCalls: 1 }, { version: 1, available: true, maxModelCalls: 65 }, { version: 1, available: true, maxModelCalls: 99 }])('does not invent project execution from malformed workspace capability %j', workspace => {
   const catalog = status([model('codex')]);
   catalog.runtimes![1].workspace = workspace as unknown as NonNullable<SaaSRuntimeStatus['runtimes']>[number]['workspace'];
   expect(groupModels(catalog).flatMap(group => group.models)[0].execution).toBe('text');

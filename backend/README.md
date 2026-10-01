@@ -133,7 +133,7 @@ Stored file outputs preserve JSON number and boolean types of other contract fie
 ## Optional coding workspaces
 
 The OpenAI Agents worker can advertise `workspace: {version: 1, available: true,
-maxModelCalls: 16}` after its isolated Docker execution environment is ready.
+maxModelCalls: 32}` after its isolated Docker execution environment is ready.
 Setting `AWWO_WORKSPACE_CALLBACK_URL` opts this API into coding workspaces. The
 value is a literal loopback HTTP URL ending in `/api/internal/workspace-calls`,
 for example `http://127.0.0.1:8087/api/internal/workspace-calls` for workers running
@@ -143,6 +143,10 @@ do not substitute a public origin or expose the internal worker token.
 
 With both capabilities configured, each new non-planner, single-agent OpenAI
 Agents admission freezes a coding workspace capability and its call budget.
+The worker defaults to 32 model calls, configurable from 2 through 64. Existing
+frozen budgets (including 16-call runs) keep their original limit. Exhaustion
+reports `workspace_step_limit`; every call still requires separate admission
+and settlement against the workspace's current permissions and quota.
 If coding is configured but its sandbox is unavailable, these admissions fail
 before a paid call; they never silently fall back to text generation. Pi,
 planner requests, node teams, and older frozen text snapshots keep their existing

@@ -3,6 +3,8 @@ import { isAbsolute } from 'node:path';
 
 export const WORKSPACE_BODY_BYTES = 16 * 1024 * 1024;
 export const WORKSPACE_FILE_BYTES = 2 * 1024 * 1024;
+export const WORKSPACE_DEFAULT_MODEL_CALLS = 32;
+export const WORKSPACE_MAX_MODEL_CALLS = 64;
 export const WORKSPACE_TOOL_NAMES = ['workspace_list', 'workspace_read', 'workspace_write', 'workspace_exec', 'workspace_publish', 'workspace_archive'] as const;
 export type WorkspaceToolName = typeof WORKSPACE_TOOL_NAMES[number];
 export type OutputField = { id: string; type: 'text' | 'markdown' | 'html' | 'file' | 'number' | 'boolean'; required: boolean };
@@ -29,10 +31,10 @@ export function loadWorkspaceConfig(env: Record<string, string | undefined>): Wo
   if (!image) return undefined;
   const dockerExecutable = env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER || '/usr/bin/docker';
   const callbackURL = env.AWWO_OPENAI_AGENTS_WORKSPACE_CALLBACK_URL || '';
-  const rawCalls = env.AWWO_OPENAI_AGENTS_WORKSPACE_MAX_CALLS || '16';
+  const rawCalls = env.AWWO_OPENAI_AGENTS_WORKSPACE_MAX_CALLS || String(WORKSPACE_DEFAULT_MODEL_CALLS);
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:/@-]{0,255}$/.test(image) || !isAbsolute(dockerExecutable)
     || /[\u0000-\u001f]/.test(dockerExecutable) || !validCallbackURL(callbackURL)
-    || !/^\d+$/.test(rawCalls) || Number(rawCalls) < 2 || Number(rawCalls) > 16) throw new Error('Invalid workspace execution configuration');
+    || !/^\d+$/.test(rawCalls) || Number(rawCalls) < 2 || Number(rawCalls) > WORKSPACE_MAX_MODEL_CALLS) throw new Error('Invalid workspace execution configuration');
   return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls) });
 }
 function validFile(value: unknown): value is WorkspaceFile {
@@ -46,7 +48,7 @@ function validFile(value: unknown): value is WorkspaceFile {
 }
 export function validateWorkspaceRequest(value: unknown): asserts value is WorkspaceRequest {
   if (!object(value) || value.version !== 1 || typeof value.id !== 'string' || !/^[a-f0-9]{64}$/.test(value.id)
-    || !Number.isInteger(value.maxModelCalls) || Number(value.maxModelCalls) < 2 || Number(value.maxModelCalls) > 16
+    || !Number.isInteger(value.maxModelCalls) || Number(value.maxModelCalls) < 2 || Number(value.maxModelCalls) > WORKSPACE_MAX_MODEL_CALLS
     || typeof value.callbackURL !== 'string' || !validCallbackURL(value.callbackURL)
     || typeof value.callbackToken !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(value.callbackToken)
     || !Array.isArray(value.inputs) || value.inputs.length > 32 || !value.inputs.every(validFile)
