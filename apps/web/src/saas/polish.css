@@ -62,6 +62,8 @@
 .saas-runtime-note.saas-personal-notice a:hover, .saas-runtime-note.saas-personal-notice button:hover { background: color-mix(in srgb, var(--saas-warning) 12%, transparent); }
 .saas-runtime-note:not(.saas-personal-notice) { border-radius: var(--saas-radius); border: 1px solid color-mix(in srgb, var(--saas-warning) 22%, transparent); font-size: 13px; line-height: 1.55; }
 .saas-canvas-shell > .saas-runtime-note { border-radius: 0; border-width: 0 0 1px; justify-content: center; }
+.saas-canvas-shell > .saas-runtime-note { flex-wrap: wrap; }
+.saas-canvas-shell > .saas-runtime-note > button { flex-shrink: 0; min-height: 36px; }
 
 /* ── Dashboard intro + library toolbar ────────────────────────────── */
 .saas-page-intro { margin: 48px 0 28px; }

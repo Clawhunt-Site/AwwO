@@ -328,12 +328,26 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   </div>;
 }
 
+type CloudRuntimeStatus = { configured: boolean; available: boolean; reason?: string; models?: unknown[] };
+const unavailableRuntimeStatus = (): CloudRuntimeStatus => ({ configured: false, available: false, reason: 'Runtime status unavailable' });
+function readCloudRuntimeStatus(value: unknown): CloudRuntimeStatus {
+  if (!value || typeof value !== 'object') return unavailableRuntimeStatus();
+  const status = value as Record<string, unknown>;
+  if (typeof status.configured !== 'boolean' || typeof status.available !== 'boolean'
+    || (status.reason !== undefined && typeof status.reason !== 'string')
+    || (status.models !== undefined && !Array.isArray(status.models))) return unavailableRuntimeStatus();
+  return { configured: status.configured, available: status.available && status.configured,
+    reason: status.reason as string | undefined, models: status.models as unknown[] | undefined };
+}
+
 function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
   const { locale, t } = useSaaSPreferences();
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
   const [saveState, setSaveState] = useState('正在加载…');
-  const [runtime, setRuntime] = useState<{ configured: boolean; available: boolean; reason?: string; models?: unknown[] } | null>(null);
+  const [runtime, setRuntime] = useState<CloudRuntimeStatus | null>(null);
+  const [runtimeChecking, setRuntimeChecking] = useState(false);
+  const runtimeRequest = useRef<AbortController | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [recovery, setRecovery] = useState<SavedCanvasDraft[] | null>(null);
   const [localDraftCount, setLocalDraftCount] = useState(0);
@@ -350,6 +364,31 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const failed = useRef(false);
   const runtimeReader = useRef(createCanvasRuntimeReader()).current;
   useEffect(() => {
+    setRuntime(null); setRuntimeChecking(false);
+    return () => {
+      const request = runtimeRequest.current;
+      runtimeRequest.current = null;
+      request?.abort();
+    };
+  }, [identity.user.id, tenant.id, canvasId]);
+  const recheckRuntime = useCallback(async () => {
+    if (runtimeRequest.current) return;
+    const controller = new AbortController();
+    runtimeRequest.current = controller;
+    setRuntimeChecking(true);
+    try {
+      const health = await api<unknown>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal });
+      if (!controller.signal.aborted && runtimeRequest.current === controller) setRuntime(readCloudRuntimeStatus(health));
+    } catch {
+      if (!controller.signal.aborted && runtimeRequest.current === controller) setRuntime(unavailableRuntimeStatus());
+    } finally {
+      if (runtimeRequest.current === controller) {
+        runtimeRequest.current = null;
+        if (!controller.signal.aborted) setRuntimeChecking(false);
+      }
+    }
+  }, [identity.user.id, tenant.id, canvasId]);
+  useEffect(() => {
     const controller = new AbortController();
     configureCanvasStorage(identity.user.id, tenant.id, canvasId);
     const storage = canvasStorage(); scopedStorage.current = storage;
@@ -360,10 +399,10 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     }
     catch (error) { setError(`无法读取本机草稿：${message(error)}`); return () => controller.abort(); }
     // Canvas data stays available when the separate runtime-status request fails.
-    // Its failure still disables execution until a later reload confirms readiness.
+    // Its failure disables execution until an explicit status check confirms readiness.
     Promise.all([api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }),
-      api<{ configured: boolean; available: boolean; reason?: string; models?: unknown[] }>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal })
-        .catch(() => ({ configured: false, available: false, reason: 'Runtime status unavailable' }))])
+      api<unknown>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal })
+        .then(readCloudRuntimeStatus).catch(unavailableRuntimeStatus)])
       .then(async ([value, health]) => {
         if (controller.signal.aborted) return;
         configureSaaSCanvas({ tenant, canvasId });
@@ -624,7 +663,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   };
   const executionUnavailableReason = runtime === null
     ? t('正在检查执行引擎…', 'Checking the execution engine…')
-    : runtime.available && !runtime.reason && Array.isArray(runtime.models) && runtime.models.length > 0
+    : runtime.available === true && !runtime.reason && Array.isArray(runtime.models) && runtime.models.length > 0
       ? undefined
       : runtime.reason
         ? saasErrorMessage(runtime.reason, locale)
@@ -632,7 +671,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const syncTone = saveState === '已同步' ? 'synced' : saveState === '未同步' || saveState === '存在未同步草稿' ? 'warning' : 'pending';
   return <div className="saas-canvas-shell">
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
-    {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status">{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
+    {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}

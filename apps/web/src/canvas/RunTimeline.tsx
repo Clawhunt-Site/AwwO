@@ -78,6 +78,7 @@ export function RunTimeline({
   runStartedAt,
   now,
   onClose,
+  onOpenNode,
   modelCatalogue,
   style,
 }: {
@@ -88,6 +89,8 @@ export function RunTimeline({
   /** The surface's clock. Ticks only while a run is in flight. */
   now: number;
   onClose: () => void;
+  /** Inspect a recorded node without retrying or changing its execution. */
+  onOpenNode?: (nodeId: string) => void;
   /** A scope-checked catalogue lets cloud model selectors render as their public labels. */
   modelCatalogue?: readonly ModelPaletteSelection[];
   style?: CSSProperties;
@@ -144,7 +147,8 @@ export function RunTimeline({
             <div key={node.id} className="canvas-runline-row" data-testid={`runline-${node.id}`}>
               <span className="canvas-runline-name">
                 <i className="canvas-runline-dot" style={{ background: color }} />
-                {node.title}
+                {onOpenNode ? <button type="button" className="canvas-runline-node" aria-label={t('timeline.openNode', { title: node.title })}
+                  onClick={() => onOpenNode(node.id)}>{node.title}</button> : node.title}
               </span>
               <span
                 className={`canvas-runline-state canvas-runline-state--${state}`}
@@ -164,6 +168,7 @@ export function RunTimeline({
               <span className="canvas-runline-runtime" title={runtime}>
                 {runtime}
               </span>
+              {state === 'failed' && detail && <p className="canvas-runline-error">{detail}</p>}
             </div>
           );
         })}

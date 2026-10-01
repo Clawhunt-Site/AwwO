@@ -27,6 +27,9 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Retry an unavailable execution-engine status without reloading the canvas, losing input, or starting work automatically.
+- Show failed-node reasons in the execution timeline and open the relevant node directly. Completed runs link to their actual terminal deliveries, with a choice when several outputs are available.
+- Announce the latest planning failure once, clarify quota recovery, and translate expired account sessions while preserving retry behavior.
 - Preserve canvas-list search and expansion for each account and workspace when returning from a canvas; expose pagination during a search and clearly identify its current-page scope.
 - Preserve confirmed model-run admission errors, including exhausted workspace quotas, without misreporting them as interrupted pages; uncertain or already accepted runs still recover by their original operation ID.
 - Keep workspace dialogs scrollable within the viewport when long model catalogs or member lists exceed the screen height.

@@ -1907,6 +1907,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           setSelection([result.reviewerId]); setFocusedId(null);
         }} />}
       <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
+        onViewOutput={id => { toggleDeliverables(id, true); focusNode(id); setTimelineOpen(false); }}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
@@ -2027,6 +2028,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           runStartedAt={runStartedAt}
           now={now}
           onClose={() => setTimelineOpen(false)}
+          onOpenNode={id => { focusNode(id); setTimelineOpen(false); }}
         />
       ) : null}
 

@@ -41,6 +41,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     email_unavailable: ['邮件找回服务尚未配置，请联系管理员。','Password recovery email is not configured. Contact the administrator.'],
     reset_invalid: ['重设链接已失效，请重新申请。','The reset link is invalid or expired. Request another.'],
     unauthenticated: ['请重新登录。', 'Please sign in again.'], forbidden: ['你没有执行此操作的权限。', 'You do not have permission for this action.'],
+    unauthorized: ['登录已失效，请重新登录；本机草稿仍保留。', 'Your session expired. Sign in again; local drafts are preserved.'],
     invalid_credentials: ['邮箱或密码不正确。', 'The email or password is incorrect.'], invalid_input: ['输入无效，请检查后重试。', 'Check the entered values and try again.'],
     sso_expired: ['账号关联请求已过期，请重新使用 ClawHunt 账号继续。', 'The account-linking request expired. Continue with ClawHunt again.'],
     sso_link_failed: ['原 AwwO 密码验证失败；本次关联请求已用尽，请从 ClawHunt 重新开始。', 'The original AwwO password could not be verified. This linking request has been used; start again from ClawHunt.'],
@@ -58,7 +59,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     session_busy: ['此会话正在运行，请稍后重试。', 'This session is running. Try again when it finishes.'],
     context_limit: ['输入超出模型上下文限制，请缩短输入或减少历史内容。', 'The input exceeds the model context limit. Shorten it or reduce the history.'],
     rate_limited: ['请求过于频繁，请稍后重试。', 'Too many requests. Please try again later.'],
-    quota_exceeded: ['工作区运行额度已满，请等待任务结束或额度恢复后重试。', 'The workspace run quota has been reached. Retry after active tasks finish or the daily quota resets.'],
+    quota_exceeded: ['工作区运行额度已满（并发或每日调用上限）。请在运行记录中检查进行中的任务；若已用完当日额度，请联系平台管理员或等待 UTC 次日重置。', 'The workspace run quota has been reached (concurrent or daily calls). Check active tasks in Run history. If the daily limit is used up, contact a platform administrator or wait for the next UTC day.'],
     personal_engine_required: ['请先到「我的引擎」添加并验证你自己的 API Key。', 'Add and verify your API key in My engines before running.'],
     model_unavailable: ['所选模型不可用，请重新选择服务端提供的模型。', 'The selected model is unavailable. Choose a model offered by the server.'],
     runtime_unavailable: runtimeUnavailableMessages,
@@ -85,7 +86,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     'No model is available to this workspace': ['本工作区当前没有可用模型，请联系管理员开放模型。', 'No model is available to this workspace. Ask an administrator to grant one.'],
     'No configured runtime is available': ['当前没有可用的执行引擎。', 'No execution engine is currently available.'],
     'Runtime is not configured': runtimeUnavailableMessages,
-    'Runtime status unavailable': ['暂时无法确认执行引擎状态。画布仍可编辑，请稍后刷新后再运行。', 'Could not check the execution engine. You can still edit this canvas; refresh before running.'],
+    'Runtime status unavailable': ['暂时无法确认执行引擎状态，请重新检查。', 'Could not check the execution engine. Please check again.'],
   };
   if (known[raw]) return known[raw][locale === 'zh' ? 0 : 1];
   if (locale === 'en') {
