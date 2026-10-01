@@ -16,6 +16,8 @@ export interface ModelPaletteSelection {
   available: boolean;
   effort?: string;
   reason?: string;
+  /** A runtime capability, never inferred from the model's brand or persona. */
+  execution?: 'workspace' | 'workspace-unavailable' | 'text';
 }
 export interface ModelPaletteGroup {
   id: ModelProviderGroup;
@@ -71,11 +73,14 @@ export function groupModels(status: SaaSRuntimeStatus | null, locale: UiLocale =
       }
       seen.set(key, signature);
       const group = providerGroup(model);
-      const available = runtime.available && runtime.configured;
+      const available = runtime.available && runtime.configured && runtime.workspace?.available !== false;
       groups.find(item => item.id === group)!.models.push({ key, label: clean(model.label) || clean(model.name) || model.id,
         displayName: clean(model.name) || clean(model.label) || model.id,
         providerGroup: group, runtime: runtime.id, model: model.id, available,
-        ...(available ? {} : { reason: runtime.reason || text(locale, '此模型的执行服务尚未就绪。', 'This model’s runtime is not ready.') }) });
+        execution: runtime.workspace ? (runtime.workspace.available ? 'workspace' : 'workspace-unavailable') : 'text',
+        ...(available ? {} : { reason: runtime.workspace?.available === false
+          ? text(locale, '项目执行环境尚未就绪。', 'The project execution environment is not ready.')
+          : runtime.reason || text(locale, '此模型的执行服务尚未就绪。', 'This model’s runtime is not ready.') }) });
     }
   }
   return groups.map(group => {

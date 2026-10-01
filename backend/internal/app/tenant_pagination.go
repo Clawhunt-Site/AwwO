@@ -139,6 +139,14 @@ func (a *App) tenantList(w http.ResponseWriter, r *http.Request, kind string) {
 		a.dbError(w, err)
 		return
 	}
+	rows.Close()
+	if kind == "runs" {
+		items, err = projectDeliveryRecords(r.Context(), a.db, tid, items, "id", "output", false)
+		if err != nil {
+			a.dbError(w, err)
+			return
+		}
+	}
 	var next any
 	if more {
 		next = a.encodeCursor(c)

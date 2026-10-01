@@ -139,10 +139,11 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	}
 	if a.cfg.UserCredentials {
 		var capability struct {
-			Ready                bool            `json:"ready"`
-			UserCredentials      bool            `json:"userCredentials"`
-			LLMGateOnly          bool            `json:"llmgateOnly"`
-			UserStructuredOutput json.RawMessage `json:"userStructuredOutput"`
+			Ready                bool                 `json:"ready"`
+			UserCredentials      bool                 `json:"userCredentials"`
+			LLMGateOnly          bool                 `json:"llmgateOnly"`
+			UserStructuredOutput json.RawMessage      `json:"userStructuredOutput"`
+			Workspace            *workspaceCapability `json:"workspace"`
 		}
 		if resp.StatusCode != 200 || json.Unmarshal(body, &capability) != nil || !capability.Ready || !capability.UserCredentials || (a.cfg.LLMGateOnly && !capability.LLMGateOnly) {
 			return piHealth{}, errors.New("Personal-credential worker is unavailable")
@@ -155,10 +156,17 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		if len(raw) > 0 && !structured && !bytes.Equal(raw, []byte("false")) && !bytes.Equal(raw, []byte("null")) {
 			a.recordCapabilityCleared(runtime, "user-credentials", "malformed")
 		}
-		return a.personalRuntime(ctx, runtime, structured)
+		personal, err := a.personalRuntime(ctx, runtime, structured)
+		if err == nil && validWorkspaceCapability(runtime, capability.Workspace) {
+			personal.Workspace = capability.Workspace
+		}
+		return personal, err
 	}
 	if resp.StatusCode != 200 || json.Unmarshal(body, &h) != nil || !h.Ready || h.Model == "" {
 		return piHealth{}, errors.New("Runtime provider is not ready")
+	}
+	if !validWorkspaceCapability(runtime, h.Workspace) {
+		h.Workspace = nil
 	}
 	if a.cfg.LLMGateOnly {
 		var policy struct {
@@ -285,7 +293,11 @@ func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement,
 			used[m.Runtime] = catalog[m.Runtime]
 		}
 	}
-	return executionSnapshot{Runtime: runtime, Instructions: instructions, Model: model, Effort: effort, Budget: budget, Overhead: overhead, Team: resolved, Health: h, RuntimeHealth: used}, nil
+	snapshot := executionSnapshot{Runtime: runtime, Instructions: instructions, Model: model, Effort: effort, Budget: budget, Overhead: overhead, Team: resolved, Health: h, RuntimeHealth: used}
+	if resolved == nil && a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(runtime, h.Workspace) {
+		snapshot.Workspace = &workspacePlan{Version: 1, MaxModelCalls: h.Workspace.MaxModelCalls, OutputFields: []outputContractField{}}
+	}
+	return snapshot, nil
 }
 
 // validEffortLevel accepts the empty string ("no explicit setting") and short

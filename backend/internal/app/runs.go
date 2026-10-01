@@ -19,6 +19,8 @@ import (
 )
 
 type piHealth struct {
+	Workspace *workspaceCapability `json:"workspace,omitempty"`
+
 	Ready    bool           `json:"ready"`
 	Provider string         `json:"provider"`
 	Model    string         `json:"model"`
@@ -174,10 +176,16 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 		// the same runtime can advertise it for one profile and refuse it for another.
 		// The picker treats the levels as a closed enum ("select"), never free text.
 		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": result.err == nil && h.supportsEffortSelection(), "effortInputMode": "select", "tools": enabledRuntimeTools(h, id)}
+		if id == runtimeOpenAIAgents && a.cfg.WorkspaceCallbackURL != "" {
+			descriptor["workspace"] = &workspaceCapability{Version: 1, Available: false, MaxModelCalls: 16}
+		}
 		if result.err != nil {
 			descriptor["reason"] = result.err.Error()
 		} else {
 			descriptor["defaultModel"] = h.defaultModel()
+			if a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(id, h.Workspace) {
+				descriptor["workspace"] = h.Workspace
+			}
 			seen := map[string]bool{}
 			for _, m := range h.Models {
 				efforts := []string{}
@@ -228,7 +236,14 @@ func (a *App) listRuns(w http.ResponseWriter, r *http.Request) {
 	a.tenantList(w, r, "runs")
 }
 func (a *App) getRun(w http.ResponseWriter, r *http.Request) {
-	v, e := oneJSON(r.Context(), a.db, "SELECT "+runJSON+" FROM runs WHERE tenant_id=$1 AND id=$2", r.PathValue("tenantId"), r.PathValue("id"))
+	tid, rid := r.PathValue("tenantId"), r.PathValue("id")
+	v, e := oneJSON(r.Context(), a.db, "SELECT "+runJSON+" FROM runs WHERE tenant_id=$1 AND id=$2", tid, rid)
+	if e == nil {
+		v, e = a.projectRunExecution(r.Context(), tid, rid, v)
+	}
+	if e == nil {
+		v, e = projectDeliveryRecord(r.Context(), a.db, tid, rid, v, "output")
+	}
 	a.replyOne(w, v, e, 200)
 }
 
@@ -284,6 +299,9 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v, e := oneJSON(r.Context(), tx, "SELECT "+runJSON+" FROM runs WHERE tenant_id=$1 AND operation_id=$2", tid, b.OperationID)
+		if e == nil {
+			v, e = projectDeliveryRecord(r.Context(), tx, tid, "", v, "output")
+		}
 		a.replyOne(w, v, e, 200)
 		return
 	}
@@ -371,6 +389,12 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshot, e := a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
 	if e != nil {
+		a.runtimeAdmissionError(w, e)
+		return
+	}
+	if kind == "planner" {
+		snapshot.Workspace = nil
+	} else if e = a.requireWorkspaceSnapshot(snapshot); e != nil {
 		a.runtimeAdmissionError(w, e)
 		return
 	}
@@ -510,6 +534,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	if snapshot.Team != nil {
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
+		return
+	}
+	if snapshot.Workspace != nil {
+		a.executeWorkspace(ctx, tid, id, sid, prompt, instructions, kind, snapshot)
 		return
 	}
 	instructions = taskFrameSystemPrompt(instructions, snapshot.TaskFrame)
@@ -753,10 +781,18 @@ func runtimeFailureCode(workerCode string, contract bool) string {
 		return "provider_auth_failed"
 	case "MODEL_RATE_LIMIT":
 		return "provider_rate_limited"
-	case "MODEL_UNAVAILABLE":
+	case "MODEL_UNAVAILABLE", "MODEL_CONNECTION_ERROR":
 		return "provider_unavailable"
 	case "DEADLINE_EXCEEDED":
 		return "run_timeout"
+	case "WORKSPACE_CONTEXT_LIMIT":
+		return "workspace_context_limit"
+	case "WORKSPACE_ADMISSION_FAILED":
+		return "workspace_admission_failed"
+	case "WORKSPACE_FILE_INVALID":
+		return "workspace_file_invalid"
+	case "WORKSPACE_UNAVAILABLE":
+		return "workspace_unavailable"
 	}
 	return "runtime_failed"
 }
@@ -809,8 +845,15 @@ func (a *App) finishWithFacts(tid, id, status, output, code string, facts *invoc
 // Shutdown or loss of our single-worker lease stops retrying. Start recovers the
 // remaining uncertain records before allowing another invocation.
 func (a *App) persistExecution(write func(context.Context) error) error {
+	return a.persistExecutionContext(context.Background(), write)
+}
+
+func (a *App) persistExecutionContext(parent context.Context, write func(context.Context) error) error {
 	for attempt := 0; ; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := parent.Err(); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 		traceCtx, endCommit := a.startLedgerTrace(ctx, "invocation_terminal_commit")
 		started := time.Now()
 		err := write(traceCtx)
@@ -836,7 +879,11 @@ func (a *App) persistExecution(write func(context.Context) error) error {
 		if closed || attempt >= 4 {
 			return err
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-parent.Done():
+			return parent.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
 
@@ -927,6 +974,11 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 	event := map[string]string{"type": status}
 	if status == "completed" {
 		event["text"] = output
+		if facts != nil && facts.WorkspaceSnapshot != nil {
+			if e = storeWorkspaceSnapshot(ctx, tx, tid, id, sid, *facts.WorkspaceSnapshot); e != nil {
+				return e
+			}
+		}
 		if _, e = tx.Exec(ctx, "INSERT INTO messages(id,tenant_id,session_id,run_id,role,content) VALUES($1,$2,$3,$4,'assistant',$5)", randomID(), tid, sid, id, output); e != nil {
 			return e
 		}
@@ -1121,6 +1173,15 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			cursor = event.id
+			var header struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(event.data, &header) == nil && header.Type == "completed" {
+				event.data, e = projectDeliveryRecord(r.Context(), a.db, tid, id, event.data, "text")
+				if e != nil {
+					return
+				}
+			}
 			_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
 			if _, e = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", cursor, event.data); e != nil {
 				return
@@ -1179,6 +1240,29 @@ func boundedHistory(history []json.RawMessage, currentBytes int) []json.RawMessa
 	return boundedHistoryWithLimits(history, currentBytes, 262144, 0)
 }
 func boundedHistoryWithLimits(history []json.RawMessage, currentBytes, budget, overhead int) []json.RawMessage {
+	// Historical/frozen snapshots can predate artifact publication. Never send
+	// embedded file bytes to another model, even when no durable reference exists.
+	var clean []json.RawMessage
+	if history != nil {
+		clean = make([]json.RawMessage, len(history))
+		copy(clean, history)
+	}
+	for i, raw := range clean {
+		var message map[string]json.RawMessage
+		if json.Unmarshal(raw, &message) != nil {
+			continue
+		}
+		var role, content string
+		_ = json.Unmarshal(message["role"], &role)
+		_ = json.Unmarshal(message["content"], &content)
+		if role == "assistant" {
+			if projected := projectHistoryDelivery(content); projected != content {
+				message["content"], _ = json.Marshal(projected)
+				clean[i], _ = json.Marshal(message)
+			}
+		}
+	}
+	history = clean
 	if budget > 262144 {
 		budget = 262144
 	}

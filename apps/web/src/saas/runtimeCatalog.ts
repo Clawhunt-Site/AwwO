@@ -9,6 +9,8 @@ export type SaaSRuntimeDefinition = {
   id: NodeTeamRuntime; name: string; available: boolean; configured: boolean;
   /** True when at least one model of this runtime advertises effort levels. Per-model levels still rule. */
   supportsEffortSelection: boolean; tools: NodeTeamTool[]; reason?: string;
+  /** Present only when both the server and isolated worker advertise project execution. */
+  workspace?: { version: 1; available: boolean; maxModelCalls: number };
 };
 
 const EFFORT_LEVEL = /^[a-z][a-z0-9_-]{0,31}$/;
@@ -41,12 +43,17 @@ export function runtimeDefinitions(status: SaaSRuntimeStatus): SaaSRuntimeDefini
   return status.runtimes.filter(runtime => NODE_TEAM_RUNTIMES.includes(runtime?.id)).map(runtime => {
     if (seen.has(runtime.id) || !Array.isArray(runtime.tools)) throw new Error('Invalid runtime inventory.');
     seen.add(runtime.id);
+    const workspace = runtime.workspace;
+    const workspaceValid = runtime.id === 'openai-agents'
+      && workspace?.version === 1 && typeof workspace.available === 'boolean' && Number.isInteger(workspace.maxModelCalls)
+      && workspace.maxModelCalls >= 2 && workspace.maxModelCalls <= 16;
     return { id: runtime.id, name: runtime.name || nodeTeamRuntimeLabel(runtime.id),
       available: runtime.available === true, configured: runtime.configured === true,
       // Trust the flag only when a model of this runtime really advertises levels, so a stale or
       // over-eager flag cannot surface an effort control that every model would refuse.
       supportsEffortSelection: runtime.supportsEffortSelection === true && runtimeModels(status, runtime.id).some(model => modelEffortCapability(model).effort_levels.length > 0),
       reason: runtime.reason,
+      ...(workspaceValid ? { workspace: { version: 1 as const, available: workspace.available && runtime.available === true && runtime.configured === true, maxModelCalls: workspace.maxModelCalls } } : {}),
       tools: runtime.id === 'openai-agents' ? [...new Set(runtime.tools.filter(tool => NODE_TEAM_TOOLS.includes(tool)))] : [] };
   });
 }

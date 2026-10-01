@@ -22,8 +22,10 @@ describe('planner host capability boundary after online integration', () => {
     const protocol = context.split('\n\n')[0];
     expect(protocol).toContain('add_field:');
     expect(protocol).toContain('connect:');
-    expect(protocol).not.toMatch(/set_execution|set_edge_kind|kind\?:|"html"|reviewerNodeId/);
-    expect(context).toContain('Do not create review policies, feedback connections or HTML fields');
+    expect(protocol).not.toMatch(/set_execution|set_edge_kind|kind\?:|reviewerNodeId/);
+    expect(protocol).toContain('"html"');
+    expect(context).toContain('Do not create review policies or feedback connections');
+    expect(context).toContain('actual deliverable for each role');
     const doc = { ...emptyDocument(), nodes: AGENT_TEMPLATES.map((template, index) => createAgentTemplate(template.id, { x: index * 400, y: 0 })) };
     expect(new TextEncoder().encode(buildPlanningContext(doc, [])).length).toBeLessThan(16_000);
   });
@@ -33,9 +35,17 @@ describe('planner host capability boundary after online integration', () => {
     { type: 'set_edge_kind', edgeId: 'edge', kind: 'feedback' },
     { type: 'connect', fromNode: 'a', fromField: 'result', toNode: 'b', toField: 'context', kind: 'feedback' },
     { type: 'connect', fromNode: 'a', fromField: 'result', toNode: 'b', toField: 'context', kind: 'data' },
+  ];
+  it.each<CanvasPlanOperation>([
     { type: 'add_field', nodeId: 'a', side: 'output', field: { id: 'page', label: 'Page', type: 'html', required: true, value: '' } },
     { type: 'update_field', nodeId: 'a', side: 'output', fieldId: 'page', changes: { type: 'html' } },
-  ];
+  ])('accepts SaaS HTML delivery requirements without manufacturing an output ($type)', async operation => {
+    activate(); reply(operation);
+    const doc = emptyDocument(); const original = structuredClone(doc);
+    await expect(requestCanvasPlan('Create a webpage', doc, [], new AbortController().signal)).resolves.toEqual(proposal(operation));
+    expect(doc).toEqual(original);
+    expect(vi.mocked(canvasFetch)).toHaveBeenCalledOnce();
+  });
   it.each(unsupported)('rejects unsupported SaaS output $type without changing the canvas, while native preserves it', async operation => {
     const doc = emptyDocument(); const original = structuredClone(doc);
     activate(); reply(operation);

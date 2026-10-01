@@ -175,9 +175,29 @@ describe('contract execution', () => {
     expect(validateNodeOutput(node, '{"summary":"# Result","count":0,"approved":false}')).toEqual([]);
     expect(parseContractOutput(node.contract!, '{"summary":"# Result","count":0,"approved":false}').values).toEqual({ summary: '# Result', count: '0', approved: 'false' });
     expect(validateNodeOutput(node, '{"summary":"ok","count":"0","approved":"false"}')).toHaveLength(2);
-    expect(validateNodeOutput(node, '{"summary":"ok","count":0,"approved":false,"asset":null}')).not.toEqual([]);
+    expect(validateNodeOutput(node, '{"summary":"ok","count":0,"approved":false,"asset":null}')).toEqual([]);
     expect(validateNodeOutput(agent('text', [], [field('result', 'markdown')]), '# Plain result\n\n**Ready**')).toEqual([]);
     expect(validateNodeOutput(node, 'prose without a JSON object').join(' ')).toContain('JSON');
+  });
+
+  it.each([undefined, null, ''])('treats an absent optional file as omitted in parsed output and downstream execution (%s)', async asset => {
+    const source = agent('source', [], [field('result', 'markdown'), field('asset', 'file', '', false)]);
+    const sink = agent('sink');
+    const output = JSON.stringify({ result: '# Actual report', asset });
+    expect(parseContractOutput(source.contract!, output)).toEqual({ values: { result: '# Actual report' }, errors: [] });
+    const execute = vi.fn(async (node: SessionNode) => ({ ok: true, output: node.id === 'source' ? output : 'Accepted report' }));
+    const summary = await runGraph({ nodes: [source, sink], edges: [wire('source', 'sink')], execAgent: execute, onStatus: () => {} });
+    expect(summary.ok).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('still rejects empty required files and null values of every other optional type', () => {
+    const required = agent('required', [], [field('asset', 'file')]);
+    for (const asset of [undefined, null, '']) expect(validateNodeOutput(required, JSON.stringify({ asset }))).toHaveLength(1);
+    for (const type of ['text', 'markdown', 'html', 'number', 'boolean'] as const) {
+      const optional = agent('optional', [], [field('result'), field('other', type, '', false)]);
+      expect(validateNodeOutput(optional, JSON.stringify({ result: 'Actual result', other: null }))).toHaveLength(1);
+    }
   });
 
   it('accepts JSON code samples as the plain content of a single Markdown output', () => {

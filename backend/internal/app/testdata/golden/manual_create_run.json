@@ -70,6 +70,7 @@
       "body": {
         "createdAt": "<timestamp>",
         "error": "",
+        "executionKind": "text",
         "id": "<run:manual-pi-run>",
         "operationId": "manual-pi-run",
         "output": "pi reply 1 from test-model",
@@ -86,6 +87,7 @@
       "body": {
         "createdAt": "<timestamp>",
         "error": "",
+        "executionKind": "text",
         "id": "<run:manual-oa-run-one>",
         "operationId": "manual-oa-run-one",
         "output": "openai-agents reply 2 from oa-default",
@@ -102,6 +104,7 @@
       "body": {
         "createdAt": "<timestamp>",
         "error": "",
+        "executionKind": "text",
         "id": "<run:manual-oa-run-two>",
         "operationId": "manual-oa-run-two",
         "output": "openai-agents reply 3 from oa-default",
@@ -118,6 +121,7 @@
       "body": {
         "createdAt": "<timestamp>",
         "error": "",
+        "executionKind": "text",
         "id": "<run:manual-oa-effort-run>",
         "operationId": "manual-oa-effort-run",
         "output": "openai-agents reply 4 from oa-default",

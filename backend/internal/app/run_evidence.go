@@ -148,7 +148,7 @@ func (a *App) getRunEvidence(w http.ResponseWriter, r *http.Request) {
 	var snapshot []byte
 	var artifacts int
 	err := a.db.QueryRow(r.Context(), `SELECT status,output,execution_snapshot,
-		(SELECT count(*) FROM artifacts WHERE tenant_id=$1 AND run_id=$2)
+		(SELECT count(*) FROM artifacts WHERE tenant_id=$1 AND run_id=$2 AND field_id<>'__workspace_snapshot')
 		FROM runs WHERE tenant_id=$1 AND id=$2`, tid, id).Scan(&status, &output, &snapshot, &artifacts)
 	if noRows(err) {
 		fail(w, 404, "not_found", "Run not found")
@@ -158,5 +158,15 @@ func (a *App) getRunEvidence(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
-	writeJSON(w, 200, observeRun(id, status, output, snapshot, artifacts, a.runArchiveSecrets()))
+	v := observeRun(id, status, output, snapshot, artifacts, a.runArchiveSecrets())
+	projected, err := projectStoredDelivery(r.Context(), a.db, tid, id, output)
+	if err != nil {
+		a.dbError(w, err)
+		return
+	}
+	if projected != output {
+		preview := observeRun(id, status, projected, snapshot, artifacts, a.runArchiveSecrets())
+		v.Preview, v.PreviewTruncated = preview.Preview, preview.PreviewTruncated
+	}
+	writeJSON(w, 200, v)
 }

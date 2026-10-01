@@ -23,6 +23,15 @@ function transcript(turns: Turn[], streaming = false) {
 }
 
 describe('readable node transcript', () => {
+  it.each([undefined, null, ''])('keeps final report readable when its optional file is absent (%s)', file => {
+    const text = JSON.stringify({ result: '## Actual report', file });
+    transcript([finalTurn(text)]);
+    expect(screen.getByRole('heading', { name: 'Actual report' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '文件位置' })).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByText('查看原始回复').closest('details')?.querySelector('pre')?.textContent).toBe(text);
+  });
+
   it.each([false, true])('renders a validated final JSON reply as fields and keeps the exact raw reply (fenced=%s)', fenced => {
     const json = JSON.stringify({ result: '## 会员页面\n\n**已完成**页面和键盘交互。', count: 3, passed: true, file: '/workspace/member.tsx', extra: '未声明内容' });
     const text = fenced ? `\`\`\`json\n${json}\n\`\`\`` : json;

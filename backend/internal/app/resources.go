@@ -618,7 +618,12 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) {
 		}
 		v = append(v, raw)
 	}
-	a.replyList(w, v, rows.Err())
+	e = rows.Err()
+	rows.Close()
+	if e == nil {
+		v, e = projectDeliveryRecords(r.Context(), a.db, r.PathValue("tenantId"), v, "runId", "content", true)
+	}
+	a.replyList(w, v, e)
 }
 
 // Child-run completion precedes graph-node output validation and artifact

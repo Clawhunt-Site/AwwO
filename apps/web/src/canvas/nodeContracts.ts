@@ -116,6 +116,9 @@ export function parseContractOutput(contract: NodeContract, output: string): Con
   const errors: string[] = [];
   for (const field of contract.outputs) {
     const value = Object.hasOwn(object, field.id) ? object[field.id] : undefined;
+    // Optional files may be absent in older/Pi responses; match server materialization
+    // without weakening required files or the declared types of other fields.
+    if (!field.required && field.type === 'file' && (value === null || value === '')) continue;
     if (value === undefined) {
       if (field.required) errors.push(`输出「${field.label || field.id}」为必填项。`);
       continue;

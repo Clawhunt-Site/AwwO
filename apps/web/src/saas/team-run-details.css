@@ -17,3 +17,10 @@
 .saas-team-error { color: var(--saas-danger, var(--err)); }
 .saas-team-error button { padding: 4px 7px; border: 1px solid currentColor; border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .saas-team-error button:disabled { opacity: .5; cursor: default; }
+.saas-workspace-latest > span { color: var(--saas-muted, var(--muted)); }
+.saas-workspace-operations { margin-block: 10px; }
+.saas-workspace-operations summary { cursor: pointer; color: var(--saas-muted, var(--muted)); }
+.saas-workspace-operations p { color: var(--saas-muted, var(--muted)); }
+.saas-workspace-operations ol { display: grid; gap: 7px; max-height: 240px; overflow: auto; margin: 10px 0 0; padding: 0; list-style: none; }
+.saas-workspace-operations li { display: flex; gap: 12px; }
+.saas-workspace-operations li > span:first-child { min-width: 42px; color: var(--saas-muted, var(--muted)); font-variant-numeric: tabular-nums; }

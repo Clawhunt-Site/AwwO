@@ -160,6 +160,47 @@ it('keeps explicit node execution behind task validation and retains the unsent 
   expect(screen.getByTestId('composer-input')).toHaveValue('An unsent follow-up');
 });
 
+it('replaces a failed historical run observer with the newly admitted graph run on retry', async () => {
+  seed('Build the current project');
+  runs.push({ id: 'old-failed-run', tenantId: tenant.id, sessionId: 'session-conversation-node', status: 'failed', terminal: true,
+    prompt: 'The earlier task', output: 'Earlier attempt output', operationId: 'old-operation' });
+  const fallback = fetcher.getMockImplementation()!;
+  let acceptGraph!: (response: Response) => void;
+  let graph: Record<string, unknown> | undefined;
+  fetcher.mockImplementation(async (input: unknown, init: RequestInit = {}) => {
+    const url = String(input);
+    if (url === `${base}/runs/old-failed-run`) return response({ ...runs[0], executionKind: 'workspace', error: 'runtime_failed',
+      workspaceActivity: { items: [{ step: 3, tool: 'workspace_exec' }], truncated: false } });
+    if (url.endsWith('/graph-runs') && init.method === 'POST') {
+      graph = { id: 'retry-graph', operationId: loadRunJournal()!.id, canvasId: 'conversation-canvas', documentVersion: 9,
+        scope: ['conversation-node'], status: 'running', createdAt: '2026-10-01T00:00:00Z',
+        nodes: [{ nodeId: 'conversation-node', state: 'running', runId: 'new-current-run', sessionId: 'session-conversation-node' }] };
+      return new Promise<Response>(resolve => { acceptGraph = resolve; });
+    }
+    if (url.endsWith('/graph-runs/retry-graph')) return response(graph);
+    if (url === `${base}/runs/new-current-run`) return response({ id: 'new-current-run', tenantId: tenant.id, status: 'running', executionKind: 'workspace',
+      workspaceActivity: { items: [{ step: 1, tool: 'workspace_write' }], truncated: false } });
+    return fallback(input, init);
+  });
+  renderCanvas(); openChat();
+  await screen.findByText('Model execution failed. Check the runtime configuration and try again.');
+  expect(screen.getByText('Earlier attempt output')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Execute node task', exact: true }));
+  await waitFor(() => expect(acceptGraph).toBeTypeOf('function'));
+  expect(screen.getByText('Submitting the node task…')).toBeVisible();
+  expect(screen.queryByText('Model execution failed. Check the runtime configuration and try again.')).toBeNull();
+  expect(screen.queryByText('Run a terminal command')).toBeNull();
+  const oldReads = fetcher.mock.calls.filter(([url]) => String(url) === `${base}/runs/old-failed-run`).length;
+  await act(async () => { acceptGraph(response(graph, 202)); });
+  expect(await screen.findByText('Write a file')).toBeVisible();
+  const current = within(screen.getByRole('region', { name: 'Current node task' }));
+  expect(screen.getByRole('region', { name: 'Current node task' }).closest('[data-testid="transcript-scroll"]')).not.toBeNull();
+  expect(current.getByRole('status')).toHaveTextContent('Run status: Running');
+  expect(screen.queryByText('Run a terminal command')).toBeNull();
+  expect(fetcher.mock.calls.filter(([url]) => String(url) === `${base}/runs/old-failed-run`)).toHaveLength(oldReads);
+  expect(fetcher.mock.calls.some(([url]) => String(url) === `${base}/runs/new-current-run`)).toBe(true);
+});
+
 it('keeps a cloud canvas editable but blocks manual conversation before initialization when the engine is unavailable', async () => {
   const original = seed();
   const reason = 'Connect your execution engine before running this canvas.';

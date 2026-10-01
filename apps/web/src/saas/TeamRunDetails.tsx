@@ -4,6 +4,7 @@ import type { TeamRunRecord, TeamTurn } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
 import { runErrorText } from './canvasErrors';
 import { RunEvidence } from './RunEvidence';
+import { readRunExecutionMetadata, workspaceToolLabel, type WorkspaceActivity } from './workspaceActivity';
 import './team-run-details.css';
 
 export interface TeamRunDetailsProps {
@@ -70,11 +71,17 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
         const path = tenantPath(tenantId, `/runs/${encodeURIComponent(runId)}`);
         const next = await api<TeamRunRecord>(path, { signal: controller.signal });
         if (controller.signal.aborted) return;
-        if (!next || next.id !== runId || next.tenantId !== tenantId || !Object.hasOwn(statuses, next.status)) {
+        const execution = readRunExecutionMetadata(next);
+        if (!next || next.id !== runId || next.tenantId !== tenantId || !Object.hasOwn(statuses, next.status) || !execution) {
           throw new Error(locale === 'zh' ? '运行记录响应无效。' : 'Invalid run record response.');
         }
         receivedRun = true;
-        setRecord(next); setRunReadFailed(false);
+        setRecord({ ...next, ...execution }); setRunReadFailed(false);
+        if (execution.executionKind === 'workspace' || execution.executionKind === 'text') {
+          setTurns([]); setObservedTurns(true); setError(null);
+          if (isActive(next.status)) timer = setTimeout(() => void poll(), 2000);
+          return;
+        }
         // Read turns after status: a terminal run already committed its final member output.
         const result = await api<unknown>(`${path}/turns`, { signal: controller.signal });
         if (controller.signal.aborted) return;
@@ -95,10 +102,13 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
   // A successful single-Agent call has no member process to automatically disclose.
   // Keep its status/history available on demand, and never hide errors or real team turns.
   const expanded = open && !(!manuallyOpened && observedTurns && record?.status === 'completed' && !turns.length && error === null);
+  const project = record?.executionKind === 'workspace';
+  const activity = record?.workspaceActivity;
+  const latestOperation = activity?.items.at(-1);
   return <section className="saas-team-run-details" aria-label={t('运行过程', 'Run process')}>
     <button type="button" className="saas-team-run-toggle" aria-expanded={expanded} onClick={() => { setManuallyOpened(!expanded); setOpen(!expanded); }}>
       <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
-      <strong>{turns.length ? t('团队协作过程', 'Team collaboration') : t('运行过程', 'Run process')}</strong>
+      <strong>{project ? t('项目执行', 'Project execution') : turns.length || record?.executionKind === 'team' ? t('团队协作过程', 'Team collaboration') : t('运行过程', 'Run process')}</strong>
       {record && <span>{runReadFailed ? t('上次确认：', 'Last confirmed: ') : ''}{status(record.status)}{turns.length ? ` · ${turns.length} ${t('次成员调用', 'member calls')}` : ''}{error !== null ? t(' · 读取已暂停', ' · Reading paused') : ''}</span>}
     </button>
     {expanded && <div className="saas-team-run-content">
@@ -109,13 +119,28 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
         : isActive(record.status) ? t(' · 自动更新中', ' · Updating automatically') : ''}</p>}
       {record?.error && <p className="saas-team-error" role="alert">{runErrorText(record.error, locale) ?? record.error}</p>}
       {error !== null && turns.length > 0 && <p>{t('成员记录未能刷新，下方为上次成功读取的旧记录。', 'Member records could not be refreshed. The records below are from the last successful read.')}</p>}
-      {record && !turns.length && error === null && !loading && <p>{isActive(record.status)
-        ? t('暂未收到成员协作记录；运行结束前会继续查询。', 'No member records yet. Observation continues while the run is active.')
-        : t('本次运行没有成员协作记录。', 'This run has no member collaboration records.')}</p>}
+      {project && latestOperation && <p className="saas-workspace-latest">{runReadFailed ? t('上次记录：', 'Last observed: ') : t('最近开始：', 'Last started: ')}<strong>{workspaceToolLabel(latestOperation.tool, locale)}</strong><span> · {t('第', 'Step ')}{latestOperation.step}{t('步', '')}</span></p>}
+      {project && activity && activity.items.length > 0 && <WorkspaceOperationHistory activity={activity} />}
+      {record && !turns.length && !latestOperation && error === null && !loading && <p>{isActive(record.status)
+        ? project ? t('正在执行，等待首条项目操作记录。', 'Execution is active; waiting for the first project operation.')
+          : record.executionKind === 'team' ? t('等待首条成员协作记录。', 'Waiting for the first member record.') : t('正在执行，等待输出。', 'Execution is active; waiting for output.')
+        : t('本次运行没有额外操作记录。', 'This run has no additional operation records.')}</p>}
       {record && <RunEvidence tenantId={tenantId} runId={runId} runStatus={record.status} />}
       {turns.map(turn => <MemberTurn key={turn.id} turn={turn} />)}
     </div>}
   </section>;
+}
+
+function WorkspaceOperationHistory({ activity }: { activity: WorkspaceActivity }) {
+  const { locale, t } = useSaaSPreferences();
+  return <details className="saas-workspace-operations">
+    <summary>{t('操作记录', 'Operation history')} · {activity.items.length}</summary>
+    <p>{t('记录表示操作已开始，不代表成功；请结合交付物和检查结果核对。', 'These records show operations starting, not success. Check the deliverables and actual check results.')}</p>
+    {activity.truncated && <p>{t('仅展示最近 64 条操作。', 'Only the latest 64 operations are shown.')}</p>}
+    <ol>{activity.items.map((operation, index) => <li key={`${index}:${operation.step}:${operation.tool}`}>
+      <span>{t('第', 'Step ')}{operation.step}{t('步', '')}</span><span>{t('开始：', 'Started: ')}{workspaceToolLabel(operation.tool, locale)}</span>
+    </li>)}</ol>
+  </details>;
 }
 
 function MemberTurn({ turn }: { turn: TeamTurn }) {

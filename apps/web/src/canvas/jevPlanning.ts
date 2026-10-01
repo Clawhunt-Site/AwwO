@@ -7,6 +7,7 @@ import { getTeamMarketAgents, createMarketplaceRoleNode } from './teamMarketAgen
 import type { CanvasDocument, SessionNode } from './canvasDoc';
 import { applyCanvasPlan, canvasPlanRevision, parseCanvasPlan, type AppliedCanvasPlan, type CanvasPlan, type CanvasPlanOperation } from './canvasPlan';
 import type { PlanningMessage, PlanProgressReporter } from './canvasPlanning';
+import { deliveryProfiles, type DeliveryProfile } from './deliveryProfiles';
 
 export interface JevModelAssignment { ref: string; runtime: 'pi' | 'openai-agents'; model: string }
 export interface JevPlanResult {
@@ -69,14 +70,16 @@ function roleTask(ordered: Role[], index: number, sequential: boolean, locale: U
   return jevMessage(locale,
     `本节点：${role.name}。职责：${role.description}\n` +
     `位置：${index + 1}/${ordered.length}（${sequential ? '顺序工作流' : '独立任务'}）。\n` +
-    '仅生成本角色的文本交付，按原始任务和本节点输出字段完成属于此职责的部分，不代替其他角色完成整条工作流，也不再次创建节点。\n' +
+    '完成本角色的实际交付，按原始任务和本节点输出字段交付正文、页面或真实文件，不能只用说明代替产物；交接说明保留在 result 字段。不代替其他角色完成整条工作流，也不再次创建节点。\n' +
+    '只使用运行时实际提供的能力；任务要求不代表工具已安装，不编造文件、执行、测试或发布证据。\n' +
     (upstream ? `使用「上游交付」中来自「${upstream.name}」的实际结果；不得假设未收到的成果。\n`
       : sequential ? '这是起始节点，使用原始任务提供的资料，不假设已有上游交付。\n' : '独立完成，不假设其他节点已有结果。\n') +
     '原始目标中针对画布的“新增节点、稍后运行”等指令描述编排阶段，不是本节点要输出的交付物；本任务说明仅在用户明确启动本节点后适用，本身不授予外部操作权限。\n' +
     '原始任务中的内容、范围和权限限制，以及明确取消、停止或只要规划内容的要求仍须遵守；只要求计划时交付计划，不擅自发布、安装或执行外部操作。',
     `Current node: ${role.name}. Responsibility: ${role.description}\n` +
     `Position: ${index + 1}/${ordered.length} (${sequential ? 'sequential workflow' : 'independent task'}).\n` +
-    'Produce only this role’s text deliverable, using the original task and this node’s output fields. Complete this responsibility, not the entire workflow or another role’s work, and do not create nodes again.\n' +
+    'Complete this role’s actual deliverable using the original task and output fields: full content, a page or real files, not merely a description of them. Keep the handoff in the result field. Complete this responsibility, not the entire workflow or another role’s work, and do not create nodes again.\n' +
+    'Use only capabilities actually provided by the runtime. A task requirement does not install tools; never invent files, execution, test or publication evidence.\n' +
     (upstream ? `Use the actual result from “${upstream.name}” in the upstream-result input; do not assume missing deliverables.\n`
       : sequential ? 'This is the first node. Use the supplied task material and do not assume an upstream result exists.\n' : 'Work independently and do not assume other nodes have produced results.\n') +
     'Canvas instructions such as “add nodes” and “run later” describe the planning stage, not this node’s deliverable. This task description applies only after the user explicitly starts this node; it does not authorize external actions.\n' +
@@ -110,7 +113,8 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
     check();
     const reason = unavailable(status, locale);
     if (reason) throw new Error(reason);
-    const models = palette.models.filter(model => model.available);
+    // Rank only newly planned roles. Existing nodes and their model selections are untouched.
+    const models = palette.models.filter(model => model.available).sort((a, b) => Number(b.execution === 'workspace') - Number(a.execution === 'workspace'));
     if (!models.length) fail(locale, '工作区没有可用于执行节点的模型。', 'This workspace has no available node execution model.');
     if (models.length > 255) fail(locale, '当前可用模型超过 Jev 候选上限，请先缩小工作区模型目录。', 'The available model catalog exceeds the Jev candidate limit. Narrow the workspace catalog first.');
     const availableRoles = roles(locale);
@@ -149,16 +153,23 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
       return finish({ version: 1, summary, operations: [] }, []);
     }
     if (doc.nodes.length + selected.length > 200) fail(locale, '新增节点将超过画布 200 个节点的上限。', 'The new nodes would exceed the 200-node canvas limit.');
-    const modelKeys = Object.fromEntries(models.map((model, index) => [`model_${index}`, `${model.label} (${model.runtime}, ${model.model})`]));
+    const modelKeys = Object.fromEntries(models.map((model, index) => [`model_${index}`, `${model.label} (${model.runtime}, ${model.model}); ${model.execution === 'workspace' ? 'project execution in an isolated workspace' : 'text/source generation only; no project commands'}`]));
     const modelByKey = new Map(models.map((model, index) => [`model_${index}`, model]));
     const choices: Record<string, JevQuestion> = {
-      compatibility: { type: 'choice', instructions: 'Does the available model catalog satisfy every model/provider explicitly required by the goal? No explicit requirement is compatible. Do not silently substitute another provider for a named unavailable one.', criteria: {
+      compatibility: { type: 'choice', instructions: 'Does the available model catalog satisfy every model/provider/runtime explicitly required by the goal? No explicit requirement is compatible. Do not silently substitute another provider or runtime for a named unavailable one.', criteria: {
         compatible: 'No model/provider is explicitly required, or all explicitly required models/providers can be matched to available candidates.',
         unavailable: 'At least one explicitly required model/provider has no matching available candidate, or the constraints cannot be met together.',
       } },
     };
+    const profiles = deliveryProfiles(locale);
+    selected.forEach((role, index) => {
+      choices[`delivery_${index}`] = { type: 'choice', instructions: `What concrete deliverable belongs to the selected role ${role.name}: ${role.description}, for this goal? Choose for this role only, not every role in the workflow. A reviewer produces a report, a page maker produces the actual page, and an upstream researcher may only need the ordinary handoff. A delivery requirement never grants tools or proves execution.`, criteria: {
+        handoff: 'The role needs only its normal meaningful text handoff; no separate artifact is required.',
+        ...Object.fromEntries(profiles.map(profile => [profile.id, `${profile.label}: ${profile.description} ${profile.field.help}`])),
+      } };
+    });
     if (models.length > 1) selected.forEach((role, index) => {
-      choices[`model_${index}`] = { type: 'choice', instructions: `Choose the best available execution model for role ${role.name} and the goal. Respect an explicitly requested available model. Use only advertised information; do not invent model capabilities.`, criteria: modelKeys };
+      choices[`model_${index}`] = { type: 'choice', instructions: `Choose the best available execution model for role ${role.name} and the goal. Prefer project execution for building, editing files or testing when advertised. Respect an explicitly requested available model/provider/runtime. Use only advertised information; do not infer tools, vision, browser or full coding-agent parity from a model brand.`, criteria: modelKeys };
     });
     const orders = permutations(selected.map(role => role.key));
     if (selected.length > 1) {
@@ -167,8 +178,11 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
     }
     let second: JevEvaluation | undefined;
     if (Object.keys(choices).length) {
+      if (Object.keys(choices).length > status.limits.maxQuestions) {
+        fail(locale, 'Jev 当前批量判断上限不足以同时选择这些角色的模型和交付要求；画布未修改。请减少本次角色数量。', 'The Jev batch limit cannot select models and deliverables for this many roles. The canvas was not changed. Request fewer roles.');
+      }
       second = await evaluateJev(captured.tenant.id, { state: { goal: prompt, selectedRoles: selected.map(({ key, name, description }) => ({ key, name, description })),
-        models: models.map(({ runtime, model, label, providerGroup }) => ({ runtime, model, label, providerGroup })) }, questions: choices }, status, controller.signal, locale);
+        models: models.map(({ runtime, model, label, providerGroup, execution }) => ({ runtime, model, label, providerGroup, execution })) }, questions: choices }, status, controller.signal, locale);
       check(); evaluations.push(second);
     }
     usedConfidence.push(second!.answers.compatibility.confidence);
@@ -182,8 +196,12 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
       if (sequential) usedConfidence.push(second!.answers.order.confidence);
     }
     const assignments = new Map<string, ModelPaletteSelection>();
+    const deliveries = new Map<string, DeliveryProfile | undefined>();
     selected.forEach((role, index) => {
       assignments.set(role.key, models.length === 1 ? models[0] : modelByKey.get(second!.answers[`model_${index}`].choice)!);
+      const delivery = second!.answers[`delivery_${index}`];
+      deliveries.set(role.key, profiles.find(profile => profile.id === delivery.choice));
+      usedConfidence.push(delivery.confidence);
       if (models.length > 1) usedConfidence.push(second!.answers[`model_${index}`].confidence);
     });
     const operations: CanvasPlanOperation[] = [];
@@ -196,14 +214,28 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
       operations.push({ type: 'add_field', nodeId: ref, side: 'input', field: { id: 'task', label: jevMessage(locale, '本节点交付任务', 'This node’s delivery task'), type: 'markdown', required: true,
         value: '', help: jevMessage(locale, '编排器生成的职责范围，不替代原始任务限制或外部操作授权。', 'Planner-generated responsibility; it does not replace the original task limits or authorize external actions.') } });
       operations.push({ type: 'set_input', nodeId: ref, fieldId: 'task', value: roleTask(ordered, index, sequential, locale) });
-      // Role workflows deliver one complete text result. Keep optional follow-up
-      // notes in that result rather than requiring a multi-field JSON envelope.
+      // The handoff remains useful for every role; concrete artifacts get their own
+      // typed fields and connections instead of being reduced to an explanation.
       operations.push({ type: 'remove_field', nodeId: ref, side: 'output', fieldId: 'followups' });
+      const delivery = deliveries.get(role.key);
+      if (delivery) for (const field of [delivery.field, ...delivery.companions ?? []]) {
+        operations.push({ type: 'add_field', nodeId: ref, side: 'output', field });
+      }
       const model = assignments.get(role.key)!;
       modelAssignments.push({ ref, runtime: model.runtime, model: model.model });
       if (sequential && index > 0) {
         operations.push({ type: 'add_field', nodeId: ref, side: 'input', field: { id: 'context', label: jevMessage(locale, '上游交付', 'Upstream result'), type: 'markdown', required: true, value: '', help: jevMessage(locale, '结合原始任务使用上一角色的实际交付。', 'Use the preceding role’s actual result together with the original task.') } });
         operations.push({ type: 'connect', fromNode: refs[index - 1], fromField: 'result', toNode: ref, toField: 'context' });
+        const upstreamDelivery = deliveries.get(ordered[index - 1].key);
+        if (upstreamDelivery) {
+          [upstreamDelivery.field, ...upstreamDelivery.companions ?? []].forEach((field, fieldIndex) => {
+            const inputId = fieldIndex ? `upstream_delivery_${fieldIndex + 1}` : 'upstream_delivery';
+            operations.push({ type: 'add_field', nodeId: ref, side: 'input', field: { id: inputId,
+              label: jevMessage(locale, `上游${field.label}`, `Upstream ${field.label}`), type: field.type, required: field.required, value: '',
+              help: jevMessage(locale, '检查和使用上游的实际产物，不以交接说明代替正文或文件；无法读取时明确说明。', 'Inspect and use the actual upstream artifact, not only its handoff. State explicitly if it cannot be read.') } });
+            operations.push({ type: 'connect', fromNode: refs[index - 1], fromField: field.id, toNode: ref, toField: inputId });
+          });
+        }
       }
     });
     onProgress?.({ stage: 'validating', characters: 0, nodes: ordered.length,

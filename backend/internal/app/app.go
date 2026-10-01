@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -15,10 +16,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type App struct {
+	workspaceLeases sync.Map // hashed ephemeral bearer -> one admitted coding run
+
 	obs         *observability
 	pricing     *ModelPricing
 	db          *pgxpool.Pool
@@ -181,6 +186,7 @@ func (a *App) Close() {
 }
 func (a *App) Handler() http.Handler {
 	m := http.NewServeMux()
+	m.HandleFunc("POST /api/internal/workspace-calls", a.workspaceCallback)
 	m.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -454,8 +460,39 @@ func fail(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{"error": map[string]any{"code": code, "message": message, "requestId": w.Header().Get("X-Request-ID"), "details": map[string]any{}}})
 }
 func (a *App) dbError(w http.ResponseWriter, e error) {
-	a.log.Error("database operation failed", "error_class", "database_error")
+	// Database messages, details and scan causes can contain user data or keys.
+	// Log type metadata and closed identifiers only, never Error() or SQL values.
+	fields := []any{"error_class", "database_error", "error_type", fmt.Sprintf("%T", e)}
+	var pgError *pgconn.PgError
+	if errors.As(e, &pgError) && len(pgError.Code) == 5 && strings.Trim(pgError.Code, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") == "" {
+		fields = append(fields, "sql_state", pgError.Code)
+	}
+	var scanError pgx.ScanArgError
+	if errors.As(e, &scanError) {
+		fields = append(fields, "scan_column_index", scanError.ColumnIndex, "scan_cause_type", fmt.Sprintf("%T", scanError.Err))
+		if safeDatabaseIdentifier(scanError.FieldName) {
+			fields = append(fields, "scan_column", scanError.FieldName)
+		}
+	}
+	if errors.Is(e, context.Canceled) {
+		fields = append(fields, "context_state", "cancelled")
+	} else if errors.Is(e, context.DeadlineExceeded) {
+		fields = append(fields, "context_state", "deadline_exceeded")
+	}
+	a.log.Error("database operation failed", fields...)
 	fail(w, 500, "internal_error", "Could not complete the request")
+}
+
+func safeDatabaseIdentifier(value string) bool {
+	if len(value) == 0 || len(value) > 63 {
+		return false
+	}
+	for i, c := range value {
+		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }
 func (a *App) replyOne(w http.ResponseWriter, v json.RawMessage, e error, status int) {
 	if noRows(e) {

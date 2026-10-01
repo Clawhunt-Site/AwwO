@@ -4,6 +4,7 @@
       "body": {
         "createdAt": "<timestamp>",
         "error": "",
+        "executionKind": "team",
         "id": "<run:team-run-one>",
         "operationId": "team-run-one",
         "output": "openai-agents reply 3 from oa-default",
@@ -20,6 +21,7 @@
       "body": {
         "createdAt": "<timestamp>",
         "error": "",
+        "executionKind": "team",
         "id": "<run:team-run-two>",
         "operationId": "team-run-two",
         "output": "openai-agents reply 6 from oa-default",

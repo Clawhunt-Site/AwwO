@@ -202,9 +202,9 @@ describe('durable team run details', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === path ? record('completed', phase === 'foreign' ? 'foreign-run' : 'run-a') : phase === 'malformed' ? { items: [{ id: 'broken' }] } : { items: [] })));
     const rendered = render(view({ defaultOpen: true }));
     await waitFor(() => expect(screen.getByRole('button', { name: /Run process/ })).toHaveAttribute('aria-expanded', 'false'));
-    expect(screen.queryByText('This run has no member collaboration records.')).toBeNull();
+    expect(screen.queryByText('This run has no additional operation records.')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Run process/ }));
-    await screen.findByText('This run has no member collaboration records.');
+    await screen.findByText('This run has no additional operation records.');
     expect(screen.getByRole('button', { name: /Run process/ })).toBeVisible(); expect(screen.queryByText('Team collaboration')).toBeNull();
     phase = 'malformed'; rendered.rerender(view({ defaultOpen: true, runStatus: 'new' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid member turn response.');
@@ -216,16 +216,81 @@ describe('durable team run details', () => {
     vi.useFakeTimers(); let completed = false;
     const fetcher = vi.fn(async (url: string) => json(url === path ? record(completed ? 'completed' : 'running') : { items: [] }));
     vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true })); await flushTimers();
-    expect(screen.getByText(/No member records yet/)).toBeVisible();
+    expect(screen.getByText('Execution is active; waiting for output.')).toBeVisible();
     completed = true; await flushTimers(2000);
     const toggle = screen.getByRole('button', { name: /Run process/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).toHaveTextContent('Completed');
-    expect(screen.queryByText('This run has no member collaboration records.')).toBeNull();
+    expect(screen.queryByText('This run has no additional operation records.')).toBeNull();
     fireEvent.click(toggle); await flushTimers();
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('status')).toHaveTextContent('Run status: Completed');
-    expect(screen.getByText('This run has no member collaboration records.')).toBeVisible();
+    expect(screen.getByText('This run has no additional operation records.')).toBeVisible();
     const calls = fetcher.mock.calls.length; await flushTimers(6000); expect(fetcher).toHaveBeenCalledTimes(calls);
+  });
+});
+
+describe('project operation observations', () => {
+  const project = (status = 'running', items: unknown[] = [], truncated = false) => ({ ...record(status), executionKind: 'workspace', workspaceActivity: { items, truncated } });
+  it('polls actual operation starts without querying team turns or inventing success', async () => {
+    vi.useFakeTimers(); let phase = 0;
+    const fetcher = vi.fn(async () => json(project(phase === 2 ? 'completed' : 'running', phase ? [
+      { step: 1, tool: 'workspace_list' }, { step: 2, tool: 'workspace_exec', command: 'PRIVATE COMMAND', args: { key: 'PRIVATE KEY' } },
+    ] : [])));
+    vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true })); await flushTimers();
+    expect(screen.getByText('Execution is active; waiting for the first project operation.')).toBeVisible();
+    expect(screen.queryByText(/member records/i)).toBeNull();
+    phase = 1; await flushTimers(2000);
+    expect(screen.getByText('Last started:', { exact: false })).toHaveTextContent('Run a terminal command · Step 2');
+    const history = screen.getByText('Operation history · 2').closest('details')!;
+    expect(history).not.toHaveAttribute('open');
+    fireEvent.click(within(history).getByText('Operation history · 2'));
+    expect(within(history).getByText('Started: Inspect project files')).toBeVisible();
+    expect(within(history).getByText('Started: Run a terminal command')).toBeVisible();
+    expect(within(history).getByText(/not success/)).toBeVisible();
+    expect(screen.queryByText(/PRIVATE|checks passed|published successfully/i)).toBeNull();
+    expect(fetcher.mock.calls.every(([url]) => url === path)).toBe(true);
+    phase = 2; await flushTimers(2000);
+    fireEvent.click(screen.getByRole('button', { name: /Project execution/ })); await flushTimers();
+    expect(screen.getByRole('status')).toHaveTextContent('Run status: Completed');
+    expect(screen.queryByText(/Updating automatically/)).toBeNull();
+    const count = fetcher.mock.calls.length; await flushTimers(6000); expect(fetcher).toHaveBeenCalledTimes(count);
+  });
+
+  it.each(['failed', 'cancelled', 'interrupted'])('keeps operation-start semantics after the run is %s', async terminal => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(project(terminal, [{ step: 3, tool: 'workspace_publish' }], true))));
+    render(view({ defaultOpen: true }));
+    const disclosure = await screen.findByText('Operation history · 1'); fireEvent.click(disclosure);
+    expect(screen.getByText('Started: Publish a deliverable')).toBeVisible();
+    expect(screen.getByText('Only the latest 64 operations are shown.')).toBeVisible();
+    expect(screen.queryByText(/Publish succeeded|Successfully published|Running/)).toBeNull();
+  });
+
+  it('uses Chinese labels and clears recorded operations when access is lost', async () => {
+    localStorage.setItem('superclaw_locale', 'zh'); vi.useFakeTimers(); let denied = false;
+    vi.stubGlobal('fetch', vi.fn(async () => denied ? json({ error: { code: 'forbidden' } }, 403) : json(project('running', [{ step: 1, tool: 'workspace_read' }]))));
+    render(view({ defaultOpen: true })); await flushTimers();
+    expect(screen.getByText('读取文件')).toBeVisible();
+    denied = true; await flushTimers(2000);
+    expect(screen.getByRole('alert')).toBeVisible(); expect(screen.queryByText('读取文件')).toBeNull();
+    expect(screen.queryByText(/操作记录/)).toBeNull();
+  });
+
+  it.each([
+    [{ step: 0, tool: 'workspace_exec' }], [{ step: 17, tool: 'workspace_exec' }], [{ step: 1, tool: 'PRIVATE COMMAND' }],
+    [{ step: 2, tool: 'workspace_read' }, { step: 1, tool: 'workspace_write' }],
+    Array.from({ length: 65 }, () => ({ step: 1, tool: 'workspace_read' })),
+  ])('rejects malformed operation records without rendering their payload', async items => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(project('running', items))));
+    render(view({ defaultOpen: true }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid run record response.');
+    expect(screen.queryByText(/PRIVATE COMMAND|Operation history|Last started/)).toBeNull();
+  });
+
+  it('does not fetch member records for explicitly identified text runs', async () => {
+    const fetcher = vi.fn(async () => json({ ...record('running'), executionKind: 'text' }));
+    vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true }));
+    await screen.findByText('Execution is active; waiting for output.');
+    expect(fetcher).toHaveBeenCalledTimes(1); expect(screen.queryByText(/member record/i)).toBeNull();
   });
 });

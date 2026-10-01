@@ -134,6 +134,13 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
                 onModelDragStart(event, model, personaId);
               }}>
               <span className="model-persona-shelf-model-title">{modelName}</span>
+              <span className="model-persona-shelf-model-meta" title={model.execution === 'workspace'
+                ? (en ? 'An isolated workspace can read and write files and run project commands.' : '可在隔离工作区读写文件、执行项目命令。')
+                : model.execution === 'workspace-unavailable' ? (en ? 'The project execution environment is not ready.' : '项目执行环境尚未就绪。')
+                  : (en ? 'This runtime generates text and source; project execution is not enabled.' : '当前服务生成文本与源码，未启用项目执行。')}>
+                {model.execution === 'workspace' ? (en ? 'Project execution' : '项目执行')
+                  : model.execution === 'workspace-unavailable' ? (en ? 'Project unavailable' : '项目执行未就绪') : (en ? 'Text generation' : '文本生成')}
+              </span>
               {sameNameModels.length > 1 && (connection.length > 0 || showRuntime)
                 && <span className="model-persona-shelf-model-connection">{[...connection, ...(showRuntime ? [runtimeLabel] : [])].join(' · ')}</span>}
               {(!group.available || !model.available) && <span className="model-persona-shelf-model-meta">{reason}</span>}

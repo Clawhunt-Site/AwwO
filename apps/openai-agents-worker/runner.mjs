@@ -1,10 +1,13 @@
+import { authorizeWorkspace, WORKSPACE_BODY_BYTES } from './workspace-protocol.ts';
+import { createWorkspaceSandbox } from './workspace-sandbox.ts';
+import { dispatchWorkspaceTool, validWorkspaceCall } from './workspace-rpc.ts';
 import { parentObservability } from './usage.mjs';
 import { fork } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { authorizeEffort, authorizeOutputContract, authorizeTools, fitsContextBudget, resolveModelConfig, validateRequest } from './config.mjs';
-import { failureEvent } from './errors.mjs';
+import { failureEvent, sanitizeErrorDiagnostic } from './errors.mjs';
 
 export const TASK_URL = new URL('./agent-task.mjs', import.meta.url);
 
@@ -22,9 +25,10 @@ export function workerEnvironment(directory, executable = process.execPath) {
   };
 }
 
-export async function startIsolatedRun({ config, request, onEvent, onExit }, { taskURL = TASK_URL } = {}) {
+export async function startIsolatedRun({ config, request, onEvent, onExit, onDiagnostic = (_diagnostic) => {} }, { taskURL = TASK_URL } = {}) {
   validateRequest(request);
   authorizeTools(config, request);
+  authorizeWorkspace(config.workspace, request);
   const acceptedAt = performance.now();
   const acceptedAtNs = process.hrtime.bigint().toString();
   let firstDeltaMs;
@@ -35,7 +39,11 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
   if (!config.ready || !fitsContextBudget(request, modelConfig)) throw new Error('Invalid runtime admission');
   const directory = await mkdtemp(join(tmpdir(), 'awwo-openai-agents-'));
   let child;
+  let sandbox;
+  const sandboxAbort = new AbortController();
+  const maxOutput = request.workspace ? WORKSPACE_BODY_BYTES : config.maxOutputBytes;
   try {
+    if (request.workspace) sandbox = await createWorkspaceSandbox(config.workspace, { workspaceId: request.workspace.id, runId: request.runId, inputs: request.workspace.inputs, snapshot: request.workspace.snapshot }, sandboxAbort.signal);
     const provenance = `# Temporary OpenAI Agents execution directory\n\nCreated by AWWO OpenAI Agents worker on ${new Date().toISOString()}.\nScope: one isolated agent run; deleted after the child exits.\n`;
     await writeFile(join(directory, 'creator.md'), provenance, { mode: 0o600 });
     child = fork(taskURL, [], {
@@ -46,11 +54,13 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       serialization: 'json',
     });
   } catch (error) {
+    if (sandbox) await sandbox.close();
     await rm(directory, { recursive: true, force: true });
     throw error;
   }
 
   let terminalEvent;
+  let terminalDiagnostic;
   let cancellation;
   let forceTimer;
   let exited = false;
@@ -59,7 +69,10 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
   const done = new Promise((resolve) => { resolveDone = resolve; });
   const forceExitAfterGrace = () => {
     if (forceTimer) return;
-    forceTimer = setTimeout(() => { if (!exited) child.kill('SIGKILL'); }, config.cancelGraceMs);
+    // A cancelled provider stream still has to settle its observed usage through
+    // the bounded 10s callback before the trusted child can exit.
+    const grace = request.workspace && cancellation ? Math.max(config.cancelGraceMs, 12_000) : config.cancelGraceMs;
+    forceTimer = setTimeout(() => { if (!exited) child.kill('SIGKILL'); }, grace);
     forceTimer.unref();
   };
   const rememberTerminal = (event) => {
@@ -73,6 +86,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
   const stop = (reason = 'cancelled') => {
     if (exited || cancellation || terminalEvent) return;
     cancellation = reason;
+    sandboxAbort.abort();
     if (child.connected) child.send({ type: 'cancel' }, () => {});
     forceExitAfterGrace();
   };
@@ -84,12 +98,29 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       ? { type: 'failed', code: 'OUTPUT_LIMIT', message: 'The model output exceeded the configured limit.' }
       : { type: 'cancelled' };
 
+  let toolPending = false;
+  let toolSequence = 0;
   child.on('message', (event) => {
+    if (event?.type === 'workspace_call') {
+      if (!sandbox || cancellation || terminalEvent || !validWorkspaceCall(event) || toolPending || event.sequence !== toolSequence + 1) { stop('cancelled'); return; }
+      toolSequence = event.sequence;
+      toolPending = true;
+      dispatchWorkspaceTool(sandbox, event.name, event.args).then(result => {
+        if (!cancellation && !terminalEvent && child.connected) child.send({ type: 'workspace_result', sequence: event.sequence, ok: true, result }, () => {});
+      }, () => {
+        if (!cancellation && !terminalEvent && child.connected) child.send({ type: 'workspace_result', sequence: event.sequence, ok: false }, () => {});
+      }).finally(() => { toolPending = false; });
+      return;
+    }
+    if (event?.type === 'workspace_activity' && sandbox && !cancellation && !terminalEvent) {
+      if (Number.isSafeInteger(event.step) && event.step > 0 && event.step <= request.workspace.maxModelCalls && /^workspace_(list|read|write|exec|publish|archive)$/.test(event.tool)) onEvent({ type: 'workspace_activity', step: event.step, tool: event.tool });
+      return;
+    }
     if (terminalEvent || !event || typeof event !== 'object') return;
     if (event.type === 'text_delta' && typeof event.delta === 'string') {
       if (cancellation) return;
       outputBytes += Buffer.byteLength(event.delta);
-      if (outputBytes > config.maxOutputBytes) stop('output_limit');
+      if (outputBytes > maxOutput) stop('output_limit');
       else { firstDeltaMs ??= performance.now() - acceptedAt; onEvent({ type: 'text_delta', delta: event.delta }); }
     } else if (event.type === 'reasoning') {
       // Only a well-formed count is relayed, rebuilt rather than passed through, so
@@ -100,12 +131,15 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
     } else if (['completed', 'failed', 'cancelled'].includes(event.type)) {
       childObservability = event.observability;
       if (cancellation) rememberTerminal(cancelledEvent());
-      else if (event.type === 'completed' && typeof event.text === 'string' && Buffer.byteLength(event.text) <= config.maxOutputBytes) {
-        rememberTerminal({ type: 'completed', text: event.text });
+      else if (event.type === 'completed' && typeof event.text === 'string' && Buffer.byteLength(event.text) <= maxOutput) {
+        rememberTerminal({ type: 'completed', text: event.text, ...(sandbox ? { workspaceSnapshot: event.workspaceSnapshot } : {}) });
       } else if (event.type === 'completed' && typeof event.text === 'string') {
         rememberTerminal(failureEvent('OUTPUT_LIMIT'));
       } else if (event.type === 'cancelled') rememberTerminal({ type: 'cancelled' });
-      else rememberTerminal(failureEvent(event.code));
+      else {
+        terminalDiagnostic = sanitizeErrorDiagnostic(event.diagnostic);
+        rememberTerminal(failureEvent(event.code));
+      }
     }
   });
   child.on('error', () => {
@@ -116,15 +150,25 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
     clearTimeout(timeout);
     clearTimeout(forceTimer);
     terminalEvent ??= cancellation ? cancelledEvent() : { type: 'failed', code: 'WORKER_LOST', message: 'The model worker exited before completing.' };
-    try { await rm(directory, { recursive: true, force: true }); } catch {
+    let cleanupFailed = false;
+    try {
+      if (sandbox) await sandbox.close();
+    } catch {
+      cleanupFailed = true;
+      terminalDiagnostic = undefined;
+      if (sandbox) terminalEvent = failureEvent('WORKSPACE_UNAVAILABLE');
       // Never include run contents or credentials in cleanup diagnostics.
       console.error('AWWO OpenAI Agents temporary directory cleanup failed.');
     } finally {
+      await rm(directory, { recursive: true, force: true }).catch(() => {
+        console.error('AWWO OpenAI Agents temporary directory cleanup failed.');
+      });
       // Release the session and capacity before publishing the terminal event.
       // Its recipient may immediately submit the next turn on this session.
       try {
-        onExit?.();
+        onExit?.({ workspaceCleanupFailed: Boolean(sandbox && cleanupFailed) });
         terminalEvent.observability = parentObservability(childObservability, { totalMs: performance.now() - acceptedAt, firstDeltaMs, outcome: terminalEvent.type });
+        if (terminalEvent.type === 'failed' && terminalDiagnostic) onDiagnostic(terminalDiagnostic);
         onEvent(terminalEvent);
       } finally { resolveDone(); }
     }

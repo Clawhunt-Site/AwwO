@@ -1,10 +1,12 @@
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArtifactPreview } from '../canvas/ArtifactPreview';
+import { ArtifactPreview, StoredArtifactPreview } from '../canvas/ArtifactPreview';
 import { normalizeContract, parseContractOutput } from '../canvas/nodeContracts';
 import { readableOutput, type ReadableOutput } from '../canvas/readableTranscript';
 import type { GraphNodeResult, GraphRunSnapshot } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
+import { fileSafeDisplaySource } from '../canvas/fileDeliveryPresentation';
+import { PendingFileDelivery } from '../canvas/PendingFileDelivery';
 
 // Match the delivery reader: Markdown stays inert, image URLs never trigger a request,
 // and only an explicit link click can navigate to an external reference.
@@ -46,20 +48,23 @@ export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node
   const output = readableOutput({ id: 0, role: 'agent', text: node.output,
     presentation: { outputState: final ? 'final' : 'failed', outputContract: historicalContract } });
   const fields = output.fields.length || !final || output.invalid ? output.fields : plainHistoricalFields(node.output, historicalContract);
+  const displaySource = fileSafeDisplaySource(node.output);
   return <details className="saas-graph-node-output" open>
     <summary>{label}</summary>
     {output.invalid && <p className="saas-graph-output-notice" role="status">{t('输出未通过历史交付格式校验，保留原始响应。', 'Output does not match the historical delivery format. The original response is preserved.')}</p>}
     {fields.length ? <>
       <div className="saas-graph-output-fields">
-        {fields.map(({ field, value }) => <section className="saas-graph-output-field" key={field.id} aria-label={field.label || field.id}>
+        {fields.map(({ field, value, pendingFile }) => <section className="saas-graph-output-field" key={field.id} aria-label={field.label || field.id}>
           <h3>{field.label || field.id}</h3>
-          {field.type === 'html' || field.type === 'markdown'
+          {pendingFile ? <PendingFileDelivery file={pendingFile} /> : field.type === 'html' || field.type === 'markdown'
             ? <ArtifactPreview source={value} type={field.type} title={field.label || field.id} renderMarkdown={renderMarkdown} />
-            : field.type === 'file' ? <code className="saas-graph-output-value">{value}</code>
+            : field.type === 'file' ? <StoredArtifactPreview reference={value} title={field.label || field.id}
+                identity={`${graph.id}:${node.nodeId}:${field.id}`} renderMarkdown={renderMarkdown} />
               : <div className="saas-graph-output-value">{value}</div>}
         </section>)}
       </div>
-      <details className="saas-graph-output-raw"><summary>{t('原始响应', 'Original response')}</summary><pre>{node.output}</pre></details>
-    </> : <pre>{node.output}</pre>}
+      <details className="saas-graph-output-raw"><summary>{displaySource === node.output ? t('原始响应', 'Original response')
+        : t('回复内容（文件内容已隐藏）', 'Response (attachment content omitted)')}</summary><pre>{displaySource}</pre></details>
+    </> : <pre>{displaySource}</pre>}
   </details>;
 }

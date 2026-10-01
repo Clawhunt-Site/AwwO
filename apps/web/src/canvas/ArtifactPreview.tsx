@@ -4,6 +4,7 @@ import { Download, File, Maximize2, X } from 'lucide-react';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
 import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
+import { artifactImageType } from './artifactImage';
 import './artifactPreview.css';
 
 // Kept together so the same preview can be used in both the native and cloud workbench.
@@ -14,6 +15,8 @@ const messages = {
     unsupported: '此文件格式暂不支持预览，可以下载查看。',
     tooLarge: '文件超过 2 MiB 预览上限，请下载查看。', retry: '重试预览',
     static: '静态预览 · 脚本和外部资源已停用', expand: '放大预览', close: '关闭预览',
+    run: '运行交互', stop: '停止交互', reset: '重新开始',
+    interactive: '独立沙盒 · 不授予 AwwO 账号或存储访问；外部资源受限，但不等同于网络隔离。',
   },
   en: {
     preview: 'Preview', source: 'Source', html: 'HTML preview', markdown: 'Markdown source', plain: 'File source',
@@ -21,6 +24,8 @@ const messages = {
     unsupported: 'Preview is not available for this file format. Download it to view.',
     tooLarge: 'This file exceeds the 2 MiB preview limit. Download it to view.', retry: 'Retry preview',
     static: 'Static preview · scripts and external resources are disabled', expand: 'Expand preview', close: 'Close preview',
+    run: 'Run interaction', stop: 'Stop interaction', reset: 'Restart',
+    interactive: 'Isolated sandbox · no AwwO account or storage access is granted. External resources are restricted; this is not complete network isolation.',
   },
 };
 
@@ -100,9 +105,11 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   const [mode, setMode] = useState<'preview' | 'source'>('preview');
   const [downloadError, setDownloadError] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [execution, setExecution] = useState<{ source: string; epoch: number } | null>(null);
   const documentSource = type === 'html' ? htmlDocumentSource(source) : source;
   const tooLarge = new TextEncoder().encode(documentSource).byteLength > MAX_ARTIFACT_PREVIEW_BYTES;
-  const html = useMemo(() => type === 'html' && !tooLarge ? htmlPreviewDocument(documentSource) : '', [documentSource, type, tooLarge]);
+  const running = type === 'html' && mode === 'preview' && execution?.source === documentSource;
+  const html = useMemo(() => type === 'html' && !tooLarge ? htmlPreviewDocument(documentSource, running) : '', [documentSource, type, tooLarge, running]);
   const downloadLabel = downloadUrl ? t('deliverable.downloadFile') : t('deliverable.downloadFormat', { format: type === 'html' ? 'html' : 'md' });
   const download = () => {
     // Plain source previews are stored artifacts and use their original download
@@ -115,10 +122,16 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     <div className="awwo-artifact-toolbar" role="group" aria-label={title}>
       <div className="awwo-artifact-modes">
         {type !== 'text' && <button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}>{text.preview}</button>}
-        <button type="button" aria-pressed={type === 'text' || mode === 'source'} onClick={() => setMode('source')}>{text.source}</button>
+        <button type="button" aria-pressed={type === 'text' || mode === 'source'} onClick={() => { setExecution(null); setMode('source'); }}>{text.source}</button>
       </div>
+      {type === 'html' && !tooLarge && <div className="awwo-artifact-execution">
+        <button type="button" aria-pressed={running} onClick={() => {
+          setMode('preview'); setExecution(running ? null : { source: documentSource, epoch: Date.now() });
+        }}>{running ? text.stop : text.run}</button>
+        {running && <button type="button" onClick={() => setExecution(current => current ? { ...current, epoch: current.epoch + 1 } : null)}>{text.reset}</button>}
+      </div>}
       <div className="awwo-artifact-actions">
-        {allowExpand && !tooLarge && <button type="button" aria-label={text.expand} title={text.expand} onClick={() => setExpanded(true)}><Maximize2 size={15} aria-hidden="true" /></button>}
+        {allowExpand && !tooLarge && <button type="button" aria-label={text.expand} title={text.expand} onClick={() => { setExecution(null); setExpanded(true); }}><Maximize2 size={15} aria-hidden="true" /></button>}
         {canDownload && (downloadUrl
           ? <a className="awwo-artifact-download" href={downloadUrl} download rel="noreferrer" aria-label={downloadLabel} title={downloadLabel} onClick={onStoredDownload}><Download size={15} aria-hidden="true" /></a>
           : type !== 'text' && <button className="awwo-artifact-download" type="button" aria-label={downloadLabel} title={downloadLabel} onClick={download}><Download size={15} aria-hidden="true" /></button>)}
@@ -127,8 +140,9 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     {tooLarge ? <p className="awwo-artifact-status" role="status">{text.tooLarge}</p>
       : type === 'text' || mode === 'source' ? <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code>{documentSource}</code></pre>
         : type === 'html' ? <>
-          <iframe className="awwo-artifact-frame" title={`${title} · ${text.html}`} sandbox="" referrerPolicy="no-referrer" srcDoc={html} />
-          <p className="awwo-artifact-note">{text.static}</p>
+          <iframe key={`${running ? 'run' : 'static'}:${running ? execution?.epoch : ''}`} className="awwo-artifact-frame" title={`${title} · ${text.html}`}
+            sandbox={running ? 'allow-scripts' : ''} referrerPolicy="no-referrer" srcDoc={html} />
+          <p className="awwo-artifact-note">{running ? text.interactive : text.static}</p>
         </> : <div className="awwo-artifact-markdown awwo-markdown-preview">{renderMarkdown(previewSource ?? source)}</div>}
     {downloadError && <p className="awwo-artifact-status" role="alert">{t('deliverable.downloadFailed')}</p>}
     {expanded && <ExpandedPreview title={title} closeLabel={text.close} onClose={() => setExpanded(false)}>
@@ -138,7 +152,34 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   </div>;
 }
 
-type StoredContent = { type: PreviewType; source: string; name: string };
+type StoredContent = { type: PreviewType; source: string; name: string } | { type: 'image'; blob: Blob; name: string };
+
+function StoredImagePreview({ content, downloadUrl, title, onStoredDownload }: { content: Extract<StoredContent, { type: 'image' }>; title: string; downloadUrl: string; onStoredDownload: (event: MouseEvent<HTMLAnchorElement>) => void }) {
+  const { locale, t } = useCanvasI18n();
+  const text = messages[locale];
+  const [source, setSource] = useState<{ blob: Blob; url: string } | null>(null);
+  const [failed, setFailed] = useState<Blob | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    try {
+      const url = URL.createObjectURL(content.blob);
+      setSource({ blob: content.blob, url });
+      return () => URL.revokeObjectURL(url);
+    } catch { setFailed(content.blob); }
+  }, [content.blob]);
+  const ready = source?.blob === content.blob && failed !== content.blob;
+  const image = ready ? <img className="awwo-artifact-image" src={source.url} alt={title} onError={() => setFailed(content.blob)} /> : null;
+  return <div className="awwo-artifact-preview">
+    <div className="awwo-artifact-toolbar"><File size={15} aria-hidden="true" /><span>{content.name}</span>
+      <div className="awwo-artifact-actions">
+        {ready && <button type="button" aria-label={text.expand} onClick={() => setExpanded(true)}><Maximize2 size={15} aria-hidden="true" /></button>}
+        <a className="awwo-artifact-download" href={downloadUrl} download rel="noreferrer" onClick={onStoredDownload} aria-label={t('deliverable.downloadFile')}><Download size={15} aria-hidden="true" /></a>
+      </div>
+    </div>
+    {image || <p className="awwo-artifact-status" role={failed === content.blob ? 'alert' : 'status'}>{failed === content.blob ? text.unavailable : text.loading}</p>}
+    {expanded && <ExpandedPreview title={title} closeLabel={text.close} onClose={() => setExpanded(false)}>{image}</ExpandedPreview>}
+  </div>;
+}
 
 /** RFC 5987 takes precedence over the ASCII fallback used by the artifact endpoint. */
 export function artifactFilename(disposition: string): string | null {
@@ -155,7 +196,8 @@ export function artifactFilename(disposition: string): string | null {
 export async function readArtifactPreview(response: Response, signal: AbortSignal): Promise<StoredContent | 'unsupported'> {
   const name = artifactFilename(response.headers.get('Content-Disposition') || '');
   if (!name) { await response.body?.cancel(); throw new Error('preview_unavailable'); }
-  const type = /\.html?$/i.test(name) ? 'html' : /\.(?:md|markdown)$/i.test(name) ? 'markdown' : TEXT_SOURCE_EXTENSION.test(name) ? 'text' : null;
+  const type = /\.html?$/i.test(name) ? 'html' : /\.(?:md|markdown)$/i.test(name) ? 'markdown'
+    : /\.(?:png|jpe?g|webp|gif)$/i.test(name) ? 'image' : TEXT_SOURCE_EXTENSION.test(name) ? 'text' : null;
   if (!type) { await response.body?.cancel(); return 'unsupported'; }
   const length = response.headers.get('Content-Length');
   if (length && (!/^\d+$/.test(length) || Number(length) > MAX_ARTIFACT_PREVIEW_BYTES)) {
@@ -166,6 +208,7 @@ export async function readArtifactPreview(response: Response, signal: AbortSigna
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let size = 0;
   let source = '';
+  const imageChunks: Uint8Array[] = [];
   const abort = () => { void reader.cancel().catch(() => undefined); };
   signal.addEventListener('abort', abort, { once: true });
   try {
@@ -176,7 +219,16 @@ export async function readArtifactPreview(response: Response, signal: AbortSigna
       if (chunk.done) break;
       size += chunk.value.byteLength;
       if (size > MAX_ARTIFACT_PREVIEW_BYTES) throw new Error('preview_too_large');
-      source += decoder.decode(chunk.value, { stream: true });
+      if (type === 'image') imageChunks.push(chunk.value);
+      else source += decoder.decode(chunk.value, { stream: true });
+    }
+    if (type === 'image') {
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of imageChunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      const mime = artifactImageType(name, bytes);
+      if (!mime) throw new Error('preview_unavailable');
+      return { type, name, blob: new Blob([bytes.buffer], { type: mime }) };
     }
     source += decoder.decode();
     if (source.includes('\u0000') || (type === 'text' && /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(source))) throw new Error('preview_unavailable');
@@ -236,6 +288,7 @@ export function StoredArtifactPreview({ reference, title, identity, renderMarkdo
   const onStoredDownload = (event: MouseEvent<HTMLAnchorElement>) => {
     if (currentSaaSCanvas() !== scope || storedArtifactUrl(reference) !== url) event.preventDefault();
   };
+  if (current?.content?.type === 'image') return <StoredImagePreview key={`${identity}:${url}`} content={current.content} title={title} downloadUrl={url} onStoredDownload={onStoredDownload} />;
   if (current?.content) return <ArtifactPreview key={`${identity}:${url}`} source={current.content.source} type={current.content.type}
     title={current.content.type === 'text' ? current.content.name : title} renderMarkdown={renderMarkdown} downloadUrl={url} onStoredDownload={onStoredDownload} />;
   return <div className="awwo-artifact-preview">

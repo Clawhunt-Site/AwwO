@@ -77,6 +77,7 @@ import { preflightGraphIssue, runGraph, validateNodeOutput, type RunNodeStatus }
 import { createGatewayExecutor, cancelConversationRunViaGateway } from './runTransport';
 import { settleExecutionResult, settleRecoveredJournal } from './runSettlement';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal, clearRunJournal, patchRunJournalNode, reconcileRunJournal, journalSummary, type CanvasRunJournal } from './runJournal';
+import { currentGraphRunEntry } from './currentGraphRun';
 import { applyRecoveredDocument, prepareRunDocument, runInputFingerprint, recoveryJournalForDocument, mergeRecoveredManualConversation } from './runRecoveryDocument';
 import { prepareManualHistoryCapacity, persistManualHistoryWithNativeProof } from './manualHistoryRetention';
 import { withCanvasRunOwnership } from './runOwnership';
@@ -938,6 +939,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         saveRunJournal(recovered, submissionStorage);
         if (currentSaaSCanvas() !== cloud) return;
         journal.current = recovered;
+        setRuns(recovered.nodes);
         if (ac.signal.aborted) await cancelCloudGraph(journal.current);
       } catch (error) {
         if (!admitted && graphAdmissionRejected(error)) {
@@ -1418,13 +1420,31 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // render would defeat it — every keystroke in one tile's composer would re-render the
   // rest of the canvas.
   const tileRenderTurnDetails = useCallback(
-    (node: CanvasNode, turn: { runId?: string }, latest: boolean) =>
-      turn.runId ? (
+    (node: CanvasNode, turn: { runId?: string }, latest: boolean) => {
+      // Graph retries have not yet appeared in transcript history. Do not combine a
+      // historical message's run ID with the current graph's status or duplicate it.
+      if (currentGraphRunEntry(node, journal.current)) return null;
+      return turn.runId ? (
         <TeamRunDetails key={turn.runId} tenantId={cloudScope!.tenant.id} runId={turn.runId} defaultOpen={latest}
           runStatus={latest ? runs[node.id]?.state : undefined} />
-      ) : null,
+      ) : null;
+    },
     [cloudScope, runs],
   );
+  const tileCurrentRunDetails = useCallback((node: CanvasNode) => {
+    const active = journal.current;
+    const entry = currentGraphRunEntry(node, active);
+    if (!cloudScope || !entry) return undefined;
+    const pendingText = entry.state === 'blocked' ? (locale === 'zh' ? '本次任务未执行此节点。' : 'This node was not executed in the current task.')
+      : entry.state === 'cancelled' ? (locale === 'zh' ? '节点任务已停止，未开始执行。' : 'The node task was stopped before execution.')
+        : entry.state === 'failed' ? (locale === 'zh' ? '节点任务未能开始。' : 'The node task could not start.')
+          : !active?.serverGraph?.id ? (locale === 'zh' ? '正在提交节点任务…' : 'Submitting the node task…')
+            : (locale === 'zh' ? '等待节点执行…' : 'Waiting for node execution…');
+    return <section aria-label={locale === 'zh' ? '本次节点任务' : 'Current node task'}>
+      {entry.runId ? <TeamRunDetails key={entry.runId} tenantId={cloudScope.tenant.id} runId={entry.runId} runStatus={entry.state} defaultOpen />
+        : <p role="status">{pendingText}</p>}
+    </section>;
+  }, [cloudScope, runs, running, locale]);
   const tileOnSend = useCallback(
     (node: CanvasNode, message: string, onAccepted?: () => void, displayText?: string) => { void startRun([node.id], message, onAccepted, displayText); },
     [startRun],
@@ -1931,6 +1951,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             initializeOnSend={canInitialize}
             freeConversation={Boolean(cloudScope)}
             renderTurnDetails={cloudScope ? tileRenderTurnDetails : undefined}
+            renderCurrentRunDetails={cloudScope ? tileCurrentRunDetails : undefined}
             geometry={renderNodeById.get(node.id)}
             compact={node.kind === 'session' && focusedId !== node.id}
             scale={view.scale}

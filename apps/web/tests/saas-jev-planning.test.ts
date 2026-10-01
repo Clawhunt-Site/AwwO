@@ -57,7 +57,7 @@ it('uses two real Choice batches, preserves existing nodes and assigns exact run
   expect(fake.requests).toHaveLength(2);
   expect(Object.keys(fake.requests[0].questions)).toHaveLength(4);
   expect(Object.keys(fake.requests[0].questions.role_1.criteria)).toHaveLength(16); // 15 roles + omit
-  expect(Object.keys(fake.requests[1].questions)).toHaveLength(5); // deduplicated to two roles
+  expect(Object.keys(fake.requests[1].questions)).toHaveLength(7); // two roles: model and delivery decisions
   expect(result).toMatchObject({ evaluations: 2, model: 'jev-1.13.0', usage: { input_tokens: 20, output_tokens: 4 } });
   expect(result.modelAssignments).toEqual([
     { ref: 'jev_role_1', runtime: 'pi', model: 'shared-model' },
@@ -101,7 +101,7 @@ it.each(['zh', 'en'] as const)('keeps the original goal while giving each new ro
     expect(node.contract!.inputs.find(field => field.id === 'brief')?.value).toBe(goal);
     expect(tasks[index]!.value).toContain(node.title);
     expect(tasks[index]!.value).toContain(`${index + 1}/3`);
-    expect(tasks[index]!.value).toContain(locale === 'zh' ? '仅生成本角色的文本交付' : 'Produce only this role’s text deliverable');
+    expect(tasks[index]!.value).toContain(locale === 'zh' ? '完成本角色的实际交付' : 'Complete this role’s actual deliverable');
     expect(tasks[index]!.value).toContain(locale === 'zh' ? '不授予外部操作权限' : 'does not authorize external actions');
     expect(tasks[index]!.value).toContain(locale === 'zh' ? '明确取消、停止或只要规划内容的要求仍须遵守' : 'Explicit cancellation, stop instructions, or requests for planning content only still apply');
     if (index > 0) {
@@ -137,20 +137,73 @@ it('uses the sole real candidate without asking a one-option Choice and creates 
   const fake = mock({ runtime: { ...runtime, models: runtime.models.slice(0, 1) }, second: { topology: 'parallel' } });
   const doc = emptyDocument();
   const result = await requestJevPlan('安排独立角色', doc, [], signal());
-  expect(Object.keys(fake.requests[1].questions).sort()).toEqual(['compatibility', 'order', 'topology']);
+  expect(Object.keys(fake.requests[1].questions).sort()).toEqual(['compatibility', 'delivery_0', 'delivery_1', 'order', 'topology']);
   expect(result.modelAssignments.every(model => model.runtime === 'pi' && model.model === 'shared-model')).toBe(true);
   const applied = applyJevPlan(doc, result);
   expect(applied.doc.edges).toEqual([]);
   expect(applied.doc.nodes.every(node => node.kind === 'session' && node.contract!.inputs.find(field => field.id === 'task')?.value.includes('独立完成，不假设其他节点已有结果'))).toBe(true);
 });
 
-it('supports one role and one model with only the required compatibility judgment in the second batch', async () => {
+it('selects one role delivery and checks model compatibility in the same second batch', async () => {
   const fake = mock({ runtime: { ...runtime, models: runtime.models.slice(0, 1) }, first: { role_1: 'template_0', role_2: 'omit', role_3: 'omit' } });
   const doc = emptyDocument();
   const result = await requestJevPlan('只安排一个执行角色', doc, [], signal());
-  expect(Object.keys(fake.requests[1].questions)).toEqual(['compatibility']);
+  expect(Object.keys(fake.requests[1].questions)).toEqual(['compatibility', 'delivery_0']);
   expect(result.modelAssignments).toHaveLength(1);
   expect(applyJevPlan(doc, result).addedNodeIds).toHaveLength(1);
+});
+
+it('connects the actual game output as well as its handoff to the reviewer', async () => {
+  const fake = mock({ first: { role_1: 'template_1', role_2: 'template_6', role_3: 'omit' },
+    second: { order: 'order_0', delivery_0: 'game', delivery_1: 'report' } });
+  const doc = emptyDocument();
+  const result = await requestJevPlan('制作可玩的小游戏，交给下一角色验收', doc, [], signal());
+  const applied = applyJevPlan(doc, result);
+  const [maker, reviewer] = applied.doc.nodes as SessionNode[];
+  expect(maker.contract!.outputs).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'result', type: 'markdown' }),
+    expect.objectContaining({ id: 'delivery_game', type: 'html', required: true }),
+  ]));
+  expect(reviewer.contract!.outputs).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'delivery_report', type: 'markdown' })]));
+  expect(reviewer.contract!.inputs).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'upstream_delivery', type: 'html', required: true })]));
+  expect(applied.doc.edges).toEqual(expect.arrayContaining([
+    expect.objectContaining({ fromNode: maker.id, fromPort: 'out:result', toNode: reviewer.id, toPort: 'in:context' }),
+    expect.objectContaining({ fromNode: maker.id, fromPort: 'out:delivery_game', toNode: reviewer.id, toPort: 'in:upstream_delivery' }),
+  ]));
+  expect(fake.requests).toHaveLength(2);
+  expect(maker.lastOutput).toBeUndefined();
+});
+
+it.each(['model3d', 'agent', 'project'] as const)('requires actual %s files without inventing output during planning', async delivery => {
+  const fake = mock({ first: { role_1: 'template_0', role_2: 'omit', role_3: 'omit' }, second: { delivery_0: delivery } });
+  const doc = emptyDocument();
+  const result = await requestJevPlan('创建实际产物', doc, [], signal());
+  const [created] = applyJevPlan(doc, result).doc.nodes as SessionNode[];
+  expect(created.contract!.outputs.find(field => field.id === `delivery_${delivery}`)).toMatchObject({ type: 'file', required: true, value: '' });
+  expect(created.lastOutput).toBeUndefined();
+  expect(fake.requests).toHaveLength(2);
+});
+
+it('stops safely before an oversized second batch and leaves the canvas unchanged', async () => {
+  const fake = mock({ status: { ...status, limits: { ...status.limits, maxQuestions: 6 } } });
+  const doc = emptyDocument(); const original = structuredClone(doc);
+  await expect(requestJevPlan('安排两个角色', doc, [], signal())).rejects.toThrow('批量判断上限');
+  expect(fake.requests).toHaveLength(1);
+  expect(doc).toEqual(original);
+});
+
+it('ranks real workspace models first for new roles and supplies honest execution capabilities to Jev', async () => {
+  const codingRuntime = { ...runtime, runtimes: runtime.runtimes.map(item => item.id === 'openai-agents'
+    ? { ...item, workspace: { version: 1, available: true, maxModelCalls: 16 } } : item) };
+  const fake = mock({ runtime: codingRuntime, second: { model_0: 'model_0', model_1: 'model_0' } });
+  const old = { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'existing-pi', runtime: 'pi', model: 'shared-model' };
+  const doc = { ...emptyDocument(), nodes: [old] };
+  const result = await requestJevPlan('构建并测试一个项目', doc, [], signal());
+  expect(fake.requests[1].questions.model_0.criteria.model_0).toContain('project execution');
+  expect(fake.requests[1].questions.model_0.criteria.model_1).toContain('text/source generation only');
+  expect(fake.requests[1].questions.model_0.instructions).toContain('Prefer project execution');
+  expect(result.modelAssignments.every(assignment => assignment.runtime === 'openai-agents')).toBe(true);
+  expect(applyJevPlan(doc, result).doc.nodes[0]).toEqual(old);
 });
 
 it('fails closed for stale, copied or tampered proposals and never assigns an existing node', async () => {

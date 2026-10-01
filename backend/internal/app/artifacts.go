@@ -90,6 +90,22 @@ func storeArtifactsTx(ctx context.Context, tx pgx.Tx, tid, canvasID, runID, node
 	if e != nil {
 		return "", e
 	}
+	// Publish the stable references atomically with the bytes. Raw file transport
+	// objects must not remain in reloaded transcripts or subsequent model history.
+	tag, e := tx.Exec(ctx, `UPDATE runs r SET output=$3 FROM node_sessions s
+		WHERE r.tenant_id=$1 AND r.id=$2 AND r.status='completed' AND s.tenant_id=r.tenant_id AND s.id=r.session_id
+		AND s.canvas_id=$4 AND s.node_id=$5`, tid, runID, string(encoded), canvasID, nodeID)
+	if e != nil {
+		return "", e
+	}
+	if tag.RowsAffected() > 0 {
+		if _, e = tx.Exec(ctx, "UPDATE messages SET content=$3 WHERE tenant_id=$1 AND run_id=$2 AND role='assistant'", tid, runID, string(encoded)); e != nil {
+			return "", e
+		}
+		if _, e = tx.Exec(ctx, "UPDATE run_events SET data=jsonb_set(data,'{text}',to_jsonb($3::text)) WHERE tenant_id=$1 AND run_id=$2 AND data->>'type'='completed'", tid, runID, string(encoded)); e != nil {
+			return "", e
+		}
+	}
 	return string(encoded), nil
 }
 
@@ -143,7 +159,7 @@ func (a *App) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
 	var name string
 	var content []byte
-	e := a.db.QueryRow(r.Context(), "SELECT name,content FROM artifacts WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&name, &content)
+	e := a.db.QueryRow(r.Context(), "SELECT name,content FROM artifacts WHERE tenant_id=$1 AND id=$2 AND field_id<>'__workspace_snapshot'", tid, id).Scan(&name, &content)
 	if noRows(e) {
 		fail(w, 404, "not_found", "File not found")
 		return
@@ -168,7 +184,7 @@ const artifactListLimit = 500
 func (a *App) listArtifacts(w http.ResponseWriter, r *http.Request) {
 	tid, canvasID := r.PathValue("tenantId"), r.PathValue("id")
 	rows, e := rowsJSON(r.Context(), a.db,
-		"SELECT jsonb_build_object('id',id,'name',name,'size',size,'sha256',sha256,'runId',run_id,'nodeId',node_id,'fieldId',field_id,'createdAt',created_at) FROM artifacts WHERE tenant_id=$1 AND canvas_id=$2 ORDER BY created_at DESC, id LIMIT $3",
+		"SELECT jsonb_build_object('id',id,'name',name,'size',size,'sha256',sha256,'runId',run_id,'nodeId',node_id,'fieldId',field_id,'createdAt',created_at) FROM artifacts WHERE tenant_id=$1 AND canvas_id=$2 AND field_id<>'__workspace_snapshot' ORDER BY created_at DESC, id LIMIT $3",
 		tid, canvasID, artifactListLimit+1)
 	if e != nil {
 		a.dbError(w, e)

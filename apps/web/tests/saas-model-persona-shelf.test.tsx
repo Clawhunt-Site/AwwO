@@ -168,6 +168,17 @@ it('distinguishes identical model names offered by different runtimes', () => {
   expect(screen.getByText('Agents')).toBeVisible();
 });
 
+it('labels project execution separately from text generation without claiming full Codex capabilities', () => {
+  const group: ModelPaletteGroup = { id: 'clawhunt', label: 'ClawHunt', available: true, models: [
+    { ...model, key: 'text', execution: 'text' },
+    { ...model, key: 'project', runtime: 'openai-agents', execution: 'workspace' },
+  ] };
+  render(<ModelPersonaShelf {...props({ groups: [group] })} />);
+  expect(screen.getByText('项目执行')).toHaveAttribute('title', '可在隔离工作区读写文件、执行项目命令。');
+  expect(screen.getByText('文本生成')).toBeVisible();
+  expect(screen.queryByText(/完整 Codex/)).toBeNull();
+});
+
 it('offers model configuration without enabling unavailable models', () => {
   render(<ModelPersonaShelf {...props({ groups: groups.slice(0, 4), modelsOnly: true, configureModelsHref: '/?tenant=t&canvas=c&account=engines' })} />);
   expect(screen.getByText('当前没有可用模型。请检查个人连接或联系工作区管理员。')).toBeVisible();

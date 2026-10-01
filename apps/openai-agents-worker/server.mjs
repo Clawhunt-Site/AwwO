@@ -1,3 +1,5 @@
+import { authorizeWorkspace, WORKSPACE_BODY_BYTES } from './workspace-protocol.ts';
+import { createWorkspaceSandbox } from './workspace-sandbox.ts';
 import { bindUserModel } from '../user-models.ts';
 import { createWorkerObservability } from './observability.mjs';
 import { parentObservability } from './usage.mjs';
@@ -6,6 +8,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { authorizeEffort, authorizeOutputContract, authorizeTools, fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { startIsolatedRun } from './runner.mjs';
+import { failureEvent, sanitizeErrorDiagnostic } from './errors.mjs';
 
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -19,22 +22,35 @@ function authorized(request, token) {
   return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
-async function readBody(request) {
+async function readBody(request, limit = INPUT_LIMITS.bodyBytes) {
   const chunks = [];
   let bytes = 0;
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes > INPUT_LIMITS.bodyBytes) throw new Error('Request body is too large');
+    if (bytes > limit) throw new Error('Request body is too large');
     chunks.push(chunk);
   }
   return validateRequest(JSON.parse(Buffer.concat(chunks).toString('utf8')));
 }
 
-export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun } = {}) {
+export async function probeWorkspace(config, signal) {
+  const sandbox = await createWorkspaceSandbox(config, { workspaceId: 'health', runId: 'startup' }, signal);
+  try {
+    const result = await sandbox.exec('node --version && python3 --version', { timeoutMs: 5000 });
+    if (result.exitCode !== 0) throw new Error('Workspace probe failed');
+  } finally { await sandbox.close(); }
+}
+
+export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun, workspaceProbe = probeWorkspace } = {}) {
   const active = new Map();
   const sessions = new Set();
   const observability = createWorkerObservability(config, () => active.size);
   let shuttingDown = false;
+  let workspaceAvailable = false;
+  const probeAbort = new AbortController();
+  const workspaceReady = config.workspace
+    ? workspaceProbe(config.workspace, probeAbort.signal).then(() => { workspaceAvailable = true; }, () => { workspaceAvailable = false; })
+    : Promise.resolve();
   const server = createServer(async (request, response) => {
     let pathname;
     try {
@@ -43,7 +59,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
       return json(response, 400, { error: { code: 'INVALID_REQUEST_TARGET', message: 'Invalid HTTP request target.' } });
     }
     if (request.method === 'GET' && pathname === '/health') {
-      const health = publicHealth(config, active.size);
+      const health = publicHealth(config, active.size, workspaceAvailable);
       if (shuttingDown) { health.ready = false; health.status = 'stopping'; }
       return json(response, health.ready ? 200 : 503, health);
     }
@@ -61,7 +77,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
       return json(response, 415, { error: { code: 'INVALID_CONTENT_TYPE', message: 'Content-Type must be application/json.' } });
     }
     let body;
-    try { body = await readBody(request); } catch {
+    try { body = await readBody(request, config.workspace ? WORKSPACE_BODY_BYTES : INPUT_LIMITS.bodyBytes); } catch {
       if (!response.destroyed) json(response, 400, { error: { code: 'INVALID_INPUT', message: 'Invalid or oversized run request.' } });
       return;
     }
@@ -70,6 +86,12 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
     try { authorizeTools(config, body); } catch {
       return json(response, 400, { error: { code: 'TOOL_DENIED', message: 'Select only tools enabled by the service.' } });
     }
+    try { authorizeWorkspace(config.workspace, body); } catch {
+      return json(response, 400, { error: { code: 'WORKSPACE_UNAVAILABLE', message: 'Project workspace execution is not configured.' } });
+    }
+    if (body.workspace && !workspaceAvailable) return json(response, 503, { error: {
+      code: 'WORKSPACE_UNAVAILABLE', message: 'The project sandbox is not ready. Restore the configured container service before retrying.',
+    } });
     let runConfig;
     try { runConfig = bindUserModel(config, body, 'openai-agents'); } catch {
       return json(response, 400, { error: { code: 'PERSONAL_CREDENTIAL_REQUIRED', message: 'A verified personal model connection is required.' } });
@@ -109,15 +131,28 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
     // Reasoning activity is a count the caller opts in to with a header. A caller that
     // predates it never asks, so it keeps receiving exactly the stream it always did.
     const reasoningActivity = request.headers['x-awwo-run-activity'] === 'reasoning';
-    const release = () => { active.delete(body.runId); sessions.delete(sessionKey); clearInterval(heartbeat); resolveReleased(); };
+    const release = (result) => {
+      if (result?.workspaceCleanupFailed) workspaceAvailable = false;
+      active.delete(body.runId); sessions.delete(sessionKey); clearInterval(heartbeat); resolveReleased();
+    };
+    let runDiagnostic;
+    const diagnose = (value) => { runDiagnostic = sanitizeErrorDiagnostic(value); };
     const emit = (event) => {
+      // Diagnostics are for the trusted service log only. Revalidate after IPC
+      // and strip them before metrics/SSE; never log an Error or arbitrary child data.
+      if (event.type === 'failed') {
+        const diagnostic = sanitizeErrorDiagnostic(runDiagnostic);
+        const failure = failureEvent(event.code);
+        console.error(JSON.stringify({ service: 'awwo-openai-agents-worker', runId: body.runId, code: failure.code, ...(diagnostic ? { diagnostic } : {}) }));
+        event = { ...failure, ...(event.observability ? { observability: event.observability } : {}) };
+      }
       observed(event);
       if (event.type === 'reasoning' && !reasoningActivity) return;
       if (response.destroyed || response.writableEnded) return;
       response.write(`data: ${JSON.stringify(event)}\n\n`);
       // A slow client must not create an unbounded process-memory queue.
-      if (response.writableLength > 1_048_576) { entry.cancelRequested = true; entry.handle?.cancel(); response.destroy(); }
-      if (event.type !== 'text_delta' && event.type !== 'reasoning') response.end();
+      if (response.writableLength > (body.workspace ? WORKSPACE_BODY_BYTES : 1_048_576)) { entry.cancelRequested = true; entry.handle?.cancel(); response.destroy(); }
+      if (['completed', 'failed', 'cancelled'].includes(event.type)) response.end();
     };
     const heartbeat = setInterval(() => {
       if (!response.destroyed && !response.writableEnded) response.write(': heartbeat\n\n');
@@ -128,9 +163,10 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
       if (!response.writableEnded) { entry.cancelRequested = true; entry.handle?.cancel(); }
     });
     try {
-      entry.handle = await startRun({ config: runConfig, request: body, onEvent: emit, onExit: release });
+      entry.handle = await startRun({ config: runConfig, request: body, onEvent: emit, onExit: release, onDiagnostic: diagnose });
       if (entry.cancelRequested || response.destroyed) entry.handle.cancel();
     } catch {
+      if (body.workspace) workspaceAvailable = false;
       release();
       emit({ type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.', observability: parentObservability(undefined, { totalMs: 0, outcome: 'failed' }) });
     }
@@ -140,9 +176,10 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
   server.keepAliveTimeout = 5_000;
   server.maxRequestsPerSocket = 100;
   return {
-    server, observability,
+    server, observability, workspaceReady,
     async close() {
       shuttingDown = true;
+      probeAbort.abort();
       const stopped = new Promise((resolve) => server.close(resolve));
       const waits = [];
       for (const entry of active.values()) {
@@ -153,6 +190,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun }
         waits.push(entry.released);
       }
       await Promise.allSettled(waits);
+      await workspaceReady;
       server.closeAllConnections();
       await stopped;
       await observability.close();

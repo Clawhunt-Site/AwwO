@@ -1,12 +1,13 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { createSessionNode, emptyDocument } from '../src/canvas/canvasDoc';
 import type { NodeContract } from '../src/canvas/nodeContracts';
 import { GraphNodeOutput } from '../src/saas/GraphNodeOutput';
 import type { GraphNodeResult, GraphRunSnapshot } from '../src/saas/graphRuns';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
-const contract = (type: 'markdown' | 'html' | 'number' = 'markdown'): NodeContract => ({ version: 1, inputs: [], outputs: [
+const contract = (type: 'markdown' | 'html' | 'number' | 'file' = 'markdown'): NodeContract => ({ version: 1, inputs: [], outputs: [
   { id: 'result', label: 'Saved deliverable', type, required: true, value: '' },
 ] });
 const graph = (savedContract: NodeContract | undefined = contract()): GraphRunSnapshot => ({
@@ -19,7 +20,29 @@ const result = (patch: Partial<GraphNodeResult> = {}): GraphNodeResult => ({
 });
 const view = (snapshot = graph(), node = result()) => <SaaSPreferencesProvider><GraphNodeOutput graph={snapshot} node={node} /></SaaSPreferencesProvider>;
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'en'); });
-afterEach(() => { cleanup(); localStorage.clear(); });
+afterEach(() => { cleanup(); localStorage.clear(); clearSaaSCanvas(); vi.unstubAllGlobals(); });
+
+it.each([undefined, null, ''])('renders historical report with an omitted optional file without invalidating all fields (%s)', file => {
+  const saved = contract();
+  saved.outputs.push({ id: 'file', label: 'Optional PDF', type: 'file', required: false, value: '' });
+  const output = JSON.stringify({ result: '# Actual report', file });
+  render(view(graph(saved), result({ output })));
+  expect(screen.getByRole('heading', { name: 'Actual report' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Optional PDF' })).toBeNull();
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByText('Original response').closest('details')?.querySelector('pre')?.textContent).toBe(output);
+});
+
+it('opens a historical file through the scoped artifact reader rather than showing only its handle', async () => {
+  configureSaaSCanvas({ tenant: { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 }, canvasId: 'canvas-a' });
+  const id = `a${'B'.repeat(32)}`;
+  const fetch = vi.fn().mockResolvedValue(new Response('# Actual report', { headers: { 'Content-Disposition': 'attachment; filename="report.md"' } }));
+  vi.stubGlobal('fetch', fetch);
+  render(view(graph(contract('file')), result({ output: JSON.stringify({ result: `awwo-file:${id}` }) })));
+  expect(await screen.findByRole('heading', { name: 'Actual report' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Download file' })).toHaveAttribute('href', `/api/v1/tenants/tenant-a/artifacts/${id}`);
+  expect(fetch).toHaveBeenCalledOnce();
+});
 
 it('projects only the historical contract and retains the original response byte for byte', () => {
   const original = '  {"result":"# Saved result\\n\\nExact **source**.","extra":"unmapped evidence"}\n';

@@ -12,7 +12,7 @@ const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'ow
 const reader = async (path: string) => path === '/api/agents' ? { agents: [{ name: 'pi', supports_model_selection: true, supports_node_teams: true }] } : { models: ['profile-main'] };
 let journalAtSubmission: ReturnType<typeof loadRunJournal>;
 const completedGraph = () => ({ id: 'graph', operationId: journalAtSubmission?.id, status: 'completed', canvasId: 'canvas', documentVersion: 9,
-  nodes: [{ nodeId: 'Draft node', status: 'completed', output: 'Done', threadId: 'default', agentId: 'new-agent', sessionId: 'new-session' }] });
+  nodes: [{ nodeId: 'Draft node', state: 'done', output: 'Done', threadId: 'default', agentId: 'new-agent', sessionId: 'new-session' }] });
 beforeEach(() => {
   localStorage.clear(); configureCanvasStorage('user', 'workspace', 'canvas'); resetAllSessions(); journalAtSubmission = null;
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });

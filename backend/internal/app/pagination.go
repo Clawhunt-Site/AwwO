@@ -140,6 +140,14 @@ func (a *App) adminList(kind string) http.HandlerFunc {
 			a.dbError(w, e)
 			return
 		}
+		rows.Close()
+		if kind == "runs" {
+			items, e = projectDeliveryRecords(r.Context(), a.db, "", items, "id", "output", false)
+			if e != nil {
+				a.dbError(w, e)
+				return
+			}
+		}
 		var next any
 		if more {
 			next = a.encodeCursor(c)

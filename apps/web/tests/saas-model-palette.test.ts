@@ -9,6 +9,23 @@ const model = (id: string, runtime: 'pi' | 'openai-agents' = 'openai-agents', pr
 const scope = (id = 'workspace', canvasId = 'canvas') => ({ tenant: { id, name: 'Workspace', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 100 }, canvasId });
 afterEach(() => { clearSaaSCanvas(); vi.unstubAllGlobals(); });
 
+it('distinguishes actual workspace execution from text models using the runtime capability only', () => {
+  const catalog = status([model('qwen', 'pi'), model('qwen', 'openai-agents')]);
+  catalog.runtimes![1].workspace = { version: 1, available: true, maxModelCalls: 16 };
+  const entries = groupModels(catalog).flatMap(group => group.models);
+  expect(entries.map(entry => [entry.runtime, entry.execution, entry.available])).toEqual([
+    ['pi', 'text', true], ['openai-agents', 'workspace', true],
+  ]);
+  catalog.runtimes![1].workspace.available = false;
+  expect(groupModels(catalog).flatMap(group => group.models)[1]).toMatchObject({ available: false, execution: 'workspace-unavailable' });
+});
+
+it.each([{ version: 2, available: true, maxModelCalls: 16 }, { version: 1, available: 'true', maxModelCalls: 16 }, { version: 1, available: true, maxModelCalls: 1 }, { version: 1, available: true, maxModelCalls: 99 }])('does not invent project execution from malformed workspace capability %j', workspace => {
+  const catalog = status([model('codex')]);
+  catalog.runtimes![1].workspace = workspace as unknown as NonNullable<SaaSRuntimeStatus['runtimes']>[number]['workspace'];
+  expect(groupModels(catalog).flatMap(group => group.models)[0].execution).toBe('text');
+});
+
 it('shows all five groups but enables only actual published models, without treating compatible Qwen as Codex', () => {
   const groups = groupModels(status([model('qwen3.8-27b-p6'), model('qwen3.8-27b', 'pi')]));
   expect(groups.map(group => group.id)).toEqual(['codex', 'claude', 'grok', 'gemini', 'clawhunt']);

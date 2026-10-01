@@ -229,6 +229,8 @@ export interface SessionTileProps {
   /** SaaS chat sends the current message; task execution uses the separate contract action. */
   freeConversation?: boolean;
   renderTurnDetails?: (node: CanvasNode, turn: Turn, latest: boolean) => ReactNode;
+  /** A currently admitted graph run has its own identity, independent of historical messages. */
+  renderCurrentRunDetails?: (node: CanvasNode) => ReactNode;
   node: CanvasNode;
   /** View geometry stays separate from persisted workspace dimensions. */
   geometry?: { x: number; y: number; w: number; h: number };
@@ -314,6 +316,7 @@ export const SessionTile = memo(function SessionTile({
   conversationContext,
   freeConversation = false,
   renderTurnDetails,
+  renderCurrentRunDetails,
   onMove,
   onResizeNode,
   onSelect,
@@ -458,6 +461,7 @@ export const SessionTile = memo(function SessionTile({
   // this canvas is not allowed to do. Guarded on the STORE's history state, not component state,
   // so panning a tile out of view and back does not refetch, and two tiles never race.
   const sessionNode = node.kind === 'session' ? node : null;
+  const currentRunDetails = renderCurrentRunDetails?.(node);
   const boundAgentId = sessionNode?.binding?.agentId ?? null;
   const threadId = sessionNode?.issueId ?? null;
   const sessionRef = useRef(sessionNode);
@@ -736,13 +740,14 @@ export const SessionTile = memo(function SessionTile({
                   {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
                     <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
                     <AgentTemplateDetails template={template} contract={contract} />
-                  </section> : session.turns.length === 0 && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming ?
+                  </section> : session.turns.length === 0 && !currentRunDetails && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming ?
                     <div className="awwo-node-empty" data-template={template?.id}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
                       <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound')}</span>
                       {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
                     : <TileTranscript key={storeKey} turns={session.turns} history={session.history} streaming={session.streaming}
+                      currentRunDetails={currentRunDetails}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}

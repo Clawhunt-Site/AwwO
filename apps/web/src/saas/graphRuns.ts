@@ -5,6 +5,7 @@ import { runInputFingerprint } from '../canvas/runRecoveryDocument';
 import { activeThreadId } from '../canvas/nodeThreads';
 import type { CanvasRunJournal, CanvasRunJournalNode } from '../canvas/runJournal';
 import type { RunNodeState } from '../canvas/runGraph';
+import type { RunExecutionMetadata } from './workspaceActivity';
 
 export interface GraphNodeResult {
   nodeId: string;
@@ -110,7 +111,7 @@ export interface TeamTurnContext {
   upstreamTruncated: boolean;
   purpose: 'work' | 'aggregate' | 'review' | 'revise';
 }
-export interface TeamRunRecord {
+export interface TeamRunRecord extends RunExecutionMetadata {
   id: string;
   tenantId: string;
   status: GraphRunSnapshot['status'];

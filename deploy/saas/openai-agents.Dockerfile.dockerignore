@@ -2,5 +2,8 @@
 !apps/
 !apps/openai-agents-worker/
 !apps/openai-agents-worker/*.mjs
+!apps/openai-agents-worker/workspace-*.ts
+apps/openai-agents-worker/*.test.ts
+!apps/user-models.ts
 !apps/openai-agents-worker/package.json
 !apps/openai-agents-worker/package-lock.json

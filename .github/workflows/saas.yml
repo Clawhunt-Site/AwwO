@@ -59,7 +59,12 @@ jobs:
           go test -race -count=1 ./...
           go vet ./...
       - name: Worker isolation and startup regressions
+        env:
+          AWWO_TEST_WORKSPACE_IMAGE: awwo-workspace:ci
+          AWWO_TEST_DOCKER_EXECUTABLE: /usr/bin/docker
         run: |
+          docker build -f deploy/saas/workspace/Dockerfile -t awwo-workspace:ci .
+          npm run typecheck:workspace --prefix apps/openai-agents-worker
           npm run test:user-models
           npm run test:saas:pi
           npm run test:saas:openai-agents
@@ -78,4 +83,5 @@ jobs:
           docker build -f deploy/saas/api.Dockerfile -t awwo-api:ci .
           docker build -f deploy/saas/pi.Dockerfile -t awwo-pi:ci .
           docker build -f deploy/saas/openai-agents.Dockerfile -t awwo-openai-agents:ci .
+          docker run --rm --network none awwo-openai-agents:ci node --input-type=module -e 'await import("./runner.mjs"); await import("./workspace-runtime.ts"); await import("./workspace-context.ts"); console.log("Agents runtime imports passed")'
           docker build -f deploy/saas/web.Dockerfile -t awwo-web:ci .

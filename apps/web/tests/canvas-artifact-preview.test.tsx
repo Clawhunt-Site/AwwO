@@ -7,6 +7,7 @@ import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { createSessionNode } from '../src/canvas/canvasDoc';
 import { LocaleProvider } from '../src/canvas/i18n';
 import { useCanvasKeys } from '../src/canvas/useCanvasKeys';
+import { artifactImageType } from '../src/canvas/artifactImage';
 
 const tenant = { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const reference = `${ARTIFACT_REF_PREFIX}a${'B'.repeat(32)}`;
@@ -22,6 +23,77 @@ function stored(identity = 'node:session:1') {
 afterEach(() => { cleanup(); clearSaaSCanvas(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('isolated HTML rendition', () => {
+  it('runs inline interactions only after explicit opt-in, resets with a new frame, and stops on source view', () => {
+    const game = '<html><head></head><body><canvas id="board"></canvas><button id="score" onclick="this.textContent=Number(this.textContent)+1">0</button><script>document.body.dataset.ready="yes"</script></body></html>';
+    const { rerender } = render(<ArtifactPreview source={game} type="html" title="游戏" renderMarkdown={markdown} />);
+    const initial = screen.getByTitle('游戏 · HTML 预览');
+    expect(initial).toHaveAttribute('sandbox', '');
+    expect(initial.getAttribute('srcdoc')).not.toContain('dataset.ready');
+    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+    const running = screen.getByTitle('游戏 · HTML 预览');
+    expect(running).not.toBe(initial);
+    expect(running).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(running.getAttribute('srcdoc')).toContain('dataset.ready');
+    expect(running.getAttribute('srcdoc')).toContain('<canvas id="board">');
+    expect(running.getAttribute('srcdoc')).toContain('onclick=');
+    expect(screen.getByText(/不等同于网络隔离/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
+    expect(screen.getByTitle('游戏 · HTML 预览')).not.toBe(running);
+    fireEvent.click(screen.getByRole('button', { name: '停止交互' }));
+    expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', '');
+    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+    fireEvent.click(screen.getByRole('button', { name: '源码', exact: true }));
+    expect(screen.queryByTitle('游戏 · HTML 预览')).toBeNull();
+    expect(screen.getByLabelText('HTML 源码').textContent).toBe(game);
+    fireEvent.click(screen.getByRole('button', { name: '预览', exact: true }));
+    expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', '');
+    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+    rerender(<ArtifactPreview source={html} type="html" title="游戏" renderMarkdown={markdown} />);
+    expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', '');
+  });
+
+  it('retains inline scripts and data attributes but strips external scripts, navigation and embeds in interactive mode', () => {
+    const source = `<html><head><base href="https://evil.test"><meta http-equiv="refresh" content="0;url=https://evil.test"><script src="https://evil.test/remote.js"></script></head><body>
+      <canvas data-level="2"></canvas><button data-action="play" onclick="play()">play</button><script>function play(){document.querySelector('canvas').dataset.played='1'}</script>
+      <iframe srcdoc="nested"></iframe><object data="https://evil.test"></object><a href="https://evil.test" target="_top" ping="https://evil.test">go</a>
+      <form action="/api/private"><input formaction="/api/private"><button formaction="/api/private">submit</button></form><img src="/api/private">
+      <svg><script href="https://evil.test/remote.js"></script></svg></body></html>`;
+    const doc = new DOMParser().parseFromString(htmlPreviewDocument(source, true), 'text/html');
+    expect(doc.querySelectorAll('script')).toHaveLength(1);
+    expect(doc.querySelector('script')!.textContent).toContain('function play()');
+    expect(doc.querySelector('canvas')!.getAttribute('data-level')).toBe('2');
+    expect(doc.querySelector('button')!.getAttribute('onclick')).toBe('play()');
+    expect(doc.querySelector('base,iframe,object,embed,meta[http-equiv="refresh"],a[href],[src],[action],[formaction],[target],[ping]')).toBeNull();
+    const csp = doc.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute('content')!;
+    for (const rule of ["default-src 'none'", "script-src 'unsafe-inline'", "connect-src 'none'", "frame-src 'none'", "worker-src 'none'", "form-action 'none'", "base-uri 'none'"]) expect(csp).toContain(rule);
+    expect(csp).not.toContain('unsafe-eval');
+    expect(doc.head.firstElementChild?.tagName).toBe('META');
+  });
+
+  it('stops the compact interactive frame when opening a separately opted-in expanded preview', () => {
+    render(<ArtifactPreview source={html} type="html" title="作品" renderMarkdown={markdown} />);
+    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+    fireEvent.click(screen.getByRole('button', { name: '放大预览' }));
+    const frames = screen.getAllByTitle('作品 · HTML 预览');
+    expect(frames).toHaveLength(2);
+    expect(frames.every(frame => frame.getAttribute('sandbox') === '')).toBe(true);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '运行交互' }));
+    expect(within(screen.getByRole('dialog')).getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', '');
+  });
+
+  it('retains body initialization and keyboard handlers only after interactive opt-in', () => {
+    const source = '<html onmouseover="early()"><body onload="startGame()" onkeydown="move(event)" data-level="3" tabindex="0"><canvas></canvas><script>function startGame(){document.body.dataset.ready="yes"}</script></body></html>';
+    const enabled = new DOMParser().parseFromString(htmlPreviewDocument(source, true), 'text/html');
+    expect(enabled.body.getAttribute('onload')).toBe('startGame()');
+    expect(enabled.body.getAttribute('onkeydown')).toBe('move(event)');
+    expect(enabled.body.getAttribute('data-level')).toBe('3');
+    expect(enabled.body.getAttribute('tabindex')).toBe('0');
+    expect(enabled.documentElement.hasAttribute('onmouseover')).toBe(false);
+    const staticPreview = new DOMParser().parseFromString(htmlPreviewDocument(source), 'text/html');
+    expect(staticPreview.querySelector('[onload],[onkeydown],[data-level],[tabindex],script')).toBeNull();
+  });
   it('preserves embedded CSS, inline styling and SVG while adding independent isolation controls', () => {
     const source = html.replace('</body>', '<svg viewBox="0 0 20 20"><path d="M1 1L10 10" stroke="red" /></svg></body>');
     render(<ArtifactPreview source={source} type="html" title="作品" renderMarkdown={markdown} />);
@@ -201,6 +273,51 @@ describe('isolated HTML rendition', () => {
 });
 
 describe('stored byte preview', () => {
+  const png = () => {
+    const bytes = new Uint8Array(24);
+    bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0); bytes.set(new TextEncoder().encode('IHDR'), 12);
+    const view = new DataView(bytes.buffer); view.setUint32(16, 2); view.setUint32(20, 2);
+    return bytes;
+  };
+  it('previews only authenticated raster bytes through a revocable blob and preserves the download endpoint', async () => {
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    const create = vi.fn(() => 'blob:awwo-image'); const revoke = vi.fn();
+    const NativeURL = URL;
+    vi.stubGlobal('URL', class extends NativeURL { static createObjectURL = create; static revokeObjectURL = revoke; });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(png(), { headers: { 'Content-Disposition': 'attachment; filename="render.png"' } })));
+    const { unmount } = render(stored());
+    const image = await screen.findByRole('img', { name: '网页' });
+    expect(image).toHaveAttribute('src', 'blob:awwo-image');
+    expect(create.mock.calls[0][0].type).toBe('image/png');
+    expect(screen.getByRole('link', { name: '下载文件' })).toHaveAttribute('href', artifactUrl);
+    fireEvent.click(screen.getByRole('button', { name: '放大预览' }));
+    expect(within(screen.getByRole('dialog')).getByRole('img')).toHaveAttribute('src', 'blob:awwo-image');
+    unmount();
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:awwo-image');
+  });
+
+  it('rejects HTML disguised as an image, extension mismatches and oversized raster dimensions', async () => {
+    await expect(readArtifactPreview(response('<svg onload="bad()"></svg>', 'render.png'), new AbortController().signal)).rejects.toThrow('preview_unavailable');
+    expect(artifactImageType('render.jpg', png())).toBeNull();
+    const huge = png(); new DataView(huge.buffer).setUint32(16, 20000);
+    expect(artifactImageType('render.png', huge)).toBeNull();
+    expect(artifactImageType('render.png', png())).toBe('image/png');
+  });
+
+  it('does not leave an image from the previous Session visible or retain its blob URL', async () => {
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    const revoke = vi.fn(); const NativeURL = URL;
+    vi.stubGlobal('URL', class extends NativeURL { static createObjectURL = vi.fn(() => 'blob:previous'); static revokeObjectURL = revoke; });
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(png(), { headers: { 'Content-Disposition': 'attachment; filename=render.png' } }))
+      .mockResolvedValueOnce(response('# Next delivery', 'report.md'));
+    vi.stubGlobal('fetch', fetch);
+    const { rerender } = render(stored('first'));
+    expect(await screen.findByRole('img')).toBeTruthy();
+    rerender(stored('second'));
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:previous');
+    expect(await screen.findByText('# Next delivery')).toBeTruthy();
+  });
   it('uses only the scoped artifact endpoint and previews the actual returned HTML bytes', async () => {
     configureSaaSCanvas({ tenant, canvasId: 'canvas' });
     const fetch = vi.fn().mockResolvedValue(response(html, 'fallback.html', { 'Content-Disposition': "attachment; filename=_.html; filename*=UTF-8''%E4%BD%9C%E5%93%81.html" }));

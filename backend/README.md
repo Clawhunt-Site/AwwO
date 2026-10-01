@@ -129,3 +129,58 @@ multiple outputs use a field-keyed JSON object. Validation executes no HTML or n
 requests. HTML and Markdown ports both transport text. Generated file content is stored
 only for the final collaboration synthesis; candidate file bodies remain in turn history.
 Stored file outputs preserve JSON number and boolean types of other contract fields.
+
+## Optional coding workspaces
+
+The OpenAI Agents worker can advertise `workspace: {version: 1, available: true,
+maxModelCalls: 16}` after its isolated Docker execution environment is ready.
+Setting `AWWO_WORKSPACE_CALLBACK_URL` opts this API into coding workspaces. The
+value is a literal loopback HTTP URL ending in `/api/internal/workspace-calls`,
+for example `http://127.0.0.1:8087/api/internal/workspace-calls` for workers running
+on the same host. The worker must independently allow that exact callback URL.
+Container-to-container callbacks are not enabled by this first configuration;
+do not substitute a public origin or expose the internal worker token.
+
+With both capabilities configured, each new non-planner, single-agent OpenAI
+Agents admission freezes a coding workspace capability and its call budget.
+If coding is configured but its sandbox is unavailable, these admissions fail
+before a paid call; they never silently fall back to text generation. Pi,
+planner requests, node teams, and older frozen text snapshots keep their existing
+execution behavior. The authenticated runtime catalog reports the workspace
+capability separately from model identity. No callback token or URL enters a
+public catalog or a durable execution snapshot.
+
+The trusted worker receives an ephemeral bearer bound to one exact tenant, run,
+session, model and frozen call limit. Before every provider call it POSTs
+`{"operation":"admit","index":1}` to the configured callback. Admission locks
+the tenant, rechecks the current actor membership, tenant state, model entitlement
+and quotas, and reserves one durable invocation row. Its permission is consumable
+once; a lost response does not permit replay. After the provider call it POSTs
+`{"operation":"settle","index":1,"status":"completed","observability":...}`
+using the existing bounded numeric observability schema. Sequential calls cannot
+advance until their predecessor settles. Repeated identical settlements are
+idempotent, while an admission/settlement refusal fences completion. The lease
+blocks new calls as soon as a run stops. Already admitted calls have up to 12 seconds
+to settle independently of cancellation; then the lease expires. Unknown calls
+remain unknown in accounting. An API process restart invalidates every lease.
+
+Each completed run must return a bounded `workspace.zip` snapshot with SHA-256.
+It commits in the same transaction as run completion, under a reserved artifact
+field, and is restored only for the same tenant and node session's next completed
+conversation. Internal snapshots are excluded from public artifact lists,
+download routes and deliverable counts. Failed/cancelled runs do not publish a
+snapshot. The worker validates extraction paths and executes code inside its
+sandbox; the API never extracts archives or executes generated commands.
+
+Graph file inputs are materialized only from incoming file edges in the frozen
+graph document. Tenant, canvas, producer node, field and content hash must all
+match the stored artifact. The worker receives actual bytes and a safe filename
+rather than an unresolvable `awwo-file:` string. File outputs may now carry
+`{name,content,encoding:"base64"}` with at most 2 MiB decoded per file, 8 files and
+8 MiB total. Legacy text files retain their 256 KiB limit. Workspace HTTP/SSE
+transport is bounded to 16 MiB. Project archives and binary model assets remain
+untrusted attachments; their content type is never guessed into the app origin.
+
+This path uses the existing run, graph and artifact tables; it requires no new
+migration. It does not enable host shell access, arbitrary MCP servers, runtime
+plugin installation, uncontrolled network access or autonomous publishing.

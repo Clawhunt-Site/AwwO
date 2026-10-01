@@ -1,3 +1,4 @@
+import { loadWorkspaceConfig, validateWorkspaceRequest } from './workspace-protocol.ts';
 import { loadObservabilityConfig } from './observability.mjs';
 import { toolMetadata, toolDefinitionBytes, validateToolNames } from './tools.mjs';
 import { deliverySchemaBytes, validateOutputContract } from './delivery-contract.mjs';
@@ -169,6 +170,7 @@ export function loadConfig(env = process.env) {
     }
   }
   return Object.freeze({
+    workspace: loadWorkspaceConfig(env),
     observability: loadObservabilityConfig(env, 'openai-agents', environment),
     host: env.AWWO_OPENAI_AGENTS_HOST ?? '127.0.0.1',
     port: integer(env.AWWO_OPENAI_AGENTS_PORT, 8098, 0, 65535, 'AWWO_OPENAI_AGENTS_PORT'),
@@ -186,7 +188,7 @@ export function loadConfig(env = process.env) {
   });
 }
 
-export function publicHealth(config, activeRuns = 0) {
+export function publicHealth(config, activeRuns = 0, workspaceAvailable = false) {
   return {
     status: config.ready ? 'ready' : 'unconfigured',
     ready: config.ready,
@@ -202,6 +204,7 @@ export function publicHealth(config, activeRuns = 0) {
     runtime: 'openai-agents',
     tracingEnabled: false,
     maxModelCallsPerRun: 1,
+    ...(config.workspace ? { workspace: { version: 1, available: workspaceAvailable, maxModelCalls: config.workspace.maxModelCalls } } : {}),
     // True when at least one profile advertises levels. The control plane still
     // decides per model: a request naming a level its profile lacks is refused.
     supportsEffortSelection: config.models.some((profile) => profile.reasoningEfforts.length > 0),
@@ -241,7 +244,7 @@ export function publicHealth(config, activeRuns = 0) {
 }
 
 export function validateRequest(value) {
-  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime', 'tools', 'effort', 'outputContract']);
+  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime', 'tools', 'effort', 'outputContract', 'workspace']);
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error('Invalid request fields');
   }
@@ -249,6 +252,7 @@ export function validateRequest(value) {
   if (value.effort !== undefined && (typeof value.effort !== 'string' || !EFFORT_LEVELS.includes(value.effort))) throw new Error('Invalid effort selector');
   if (value.runtime !== undefined && value.runtime !== 'openai-agents') throw new Error('Invalid runtime selector');
   validateToolNames(value.tools ?? []);
+  if (value.workspace !== undefined) validateWorkspaceRequest(value.workspace);
   if (value.outputContract !== undefined) {
     validateOutputContract(value.outputContract);
     // A selected tool's result would be the final output and bypass the contract.
@@ -291,7 +295,7 @@ export function fitsContextBudget(request, config) {
     + Buffer.byteLength(request.systemPrompt ?? '')
     + request.messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0);
   const schemaBytes = request.outputContract === undefined ? 0 : deliverySchemaBytes(request.outputContract);
-  return textBytes + toolDefinitionBytes(request.tools ?? []) + schemaBytes + 32 * (request.messages.length + 1) <= config.contextWindow - config.maxTokens - 256;
+  return textBytes + (request.workspace ? 8192 : 0) + toolDefinitionBytes(request.tools ?? []) + schemaBytes + 32 * (request.messages.length + 1) <= config.contextWindow - config.maxTokens - 256;
 }
 
 export function authorizeTools(config, request) {

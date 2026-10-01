@@ -62,6 +62,10 @@ it('names the worker failures the API maps instead of showing the generic runtim
     provider_unavailable: ['不可用', 'unavailable'],
     output_limit: ['超过限制', 'exceeds the limit'],
     run_timeout: ['超时', 'timed out'],
+    workspace_context_limit: ['上下文已满', 'context is full'],
+    workspace_admission_failed: ['额度不可用', 'quota is unavailable'],
+    workspace_file_invalid: ['交付文件无效', 'deliverable file is invalid'],
+    workspace_unavailable: ['沙箱暂不可用', 'sandbox is unavailable'],
   };
   for (const [code, [zh, en]] of Object.entries(named)) {
     document.documentElement.lang = 'en';

@@ -1,6 +1,7 @@
-import { normalizeContract, parseContractOutput, type ContractField } from './nodeContracts';
+import { normalizeContract, type ContractField } from './nodeContracts';
 import type { CollaborationMessageContext, Turn } from './sessions';
 import { isCompleteHtmlDocument } from './htmlDeliverable';
+import { deliveryPresentation, type PendingFileDelivery } from './fileDeliveryPresentation';
 
 /** Match explicit transport metadata to this exact stored message and Session. */
 export function collaborationMessageContext(value: unknown, runId: string | undefined, sessionId: string): CollaborationMessageContext | undefined {
@@ -26,7 +27,7 @@ export function htmlPreviewSummary(text: string, locale: 'zh' | 'en'): string | 
 }
 
 export interface ReadableOutput {
-  fields: Array<{ field: ContractField; value: string }>;
+  fields: Array<{ field: ContractField; value: string; pendingFile?: PendingFileDelivery }>;
   invalid: boolean;
 }
 
@@ -38,7 +39,7 @@ export function readableOutput(turn: Turn): ReadableOutput {
   const contract = normalizeContract(turn.presentation.outputContract);
   if (!contract?.outputs.length) return raw;
 
-  const result = parseContractOutput(contract, turn.text);
+  const result = deliveryPresentation(contract, turn.text);
   if (result.errors.length) return { fields: [], invalid: true };
   // A one-field text contract also accepts ordinary prose. Keep that text as it is;
   // only a complete keyed JSON object is a structured response worth projecting.
@@ -48,8 +49,8 @@ export function readableOutput(turn: Turn): ReadableOutput {
   try { object = JSON.parse(fenced ? fenced[1] : trimmed); } catch { return raw; }
   if (!object || typeof object !== 'object' || Array.isArray(object)) return raw;
   const fields = contract.outputs
-    .filter(field => Object.hasOwn(object, field.id) && Object.hasOwn(result.values, field.id))
-    .map(field => ({ field, value: result.values[field.id] }));
+    .filter(field => Object.hasOwn(object, field.id) && (Object.hasOwn(result.values, field.id) || result.pendingFiles.has(field.id)))
+    .map(field => ({ field, value: result.values[field.id] ?? '', ...(result.pendingFiles.has(field.id) ? { pendingFile: result.pendingFiles.get(field.id) } : {}) }));
   return { fields, invalid: false };
 }
 

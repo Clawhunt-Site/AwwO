@@ -1,7 +1,9 @@
 import { createProviderObserver } from './usage.mjs';
 // One trusted task per child, credentials only over IPC. No file-backed sessions.
+import { executeWorkspaceAgent } from './workspace-runtime.ts';
+import { childWorkspaceBroker } from './workspace-rpc.ts';
 import { executeAgent } from './agent-runtime.mjs';
-import { classifyError } from './errors.mjs';
+import { classifyError, errorDiagnostic } from './errors.mjs';
 const controller = new AbortController();
 let started = false;
 function emit(event) {
@@ -18,9 +20,13 @@ process.on('message', async message => {
   const terminal = event => emit({ ...event, observability: observer.snapshot(event.type) });
   try {
     if (controller.signal.aborted) return await terminal({ type: 'cancelled' });
-    await executeAgent({ request: message.request, modelConfig: message.modelConfig, signal: controller.signal, emit, observer });
+    if (message.request.workspace) {
+      const broker = childWorkspaceBroker(controller.signal);
+      try { await executeWorkspaceAgent({ request: message.request, modelConfig: message.modelConfig, signal: controller.signal, emit, broker: broker.call }); }
+      finally { broker.close(); }
+    } else await executeAgent({ request: message.request, modelConfig: message.modelConfig, signal: controller.signal, emit, observer });
   } catch (error) {
-    await terminal(controller.signal.aborted ? { type: 'cancelled' } : classifyError(error));
+    await terminal(controller.signal.aborted ? { type: 'cancelled' } : { ...classifyError(error), diagnostic: errorDiagnostic(error) });
   } finally {
     process.disconnect?.();
   }

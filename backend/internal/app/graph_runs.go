@@ -216,6 +216,10 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				a.runtimeAdmissionError(w, e)
 				return
 			}
+			if e = a.requireWorkspaceSnapshot(snap); e != nil {
+				a.runtimeAdmissionError(w, e)
+				return
+			}
 			if e = validateWorkspaceAgentSession(r.Context(), tx, tid, n.IssueID, n.ID, raw, snap); e != nil {
 				a.workspaceAgentAdmissionError(w, e)
 				return
@@ -223,6 +227,10 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			// Freeze the output policy separately from persona instructions. Team members
 			// retain their own personas without overriding this server-owned format.
 			snap.OutputPolicy = graphOutputPolicy(n)
+			if snap.Workspace != nil {
+				snap.Workspace.OutputFields = workspaceOutputFields(n)
+				snap.OutputPolicy = graphWorkspaceOutputPolicy(n)
+			}
 			snap.TaskFrame, e = savedNodeTaskFrame(raw, n.ID)
 			if e != nil {
 				fail(w, 400, "invalid_task_frame", e.Error())
@@ -235,7 +243,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			// advertised it keeps the textual policy alone. The decision is frozen with the
 			// rest of the snapshot, so a capability or switch that changes later cannot
 			// change what this run was admitted to do.
-			if a.cfg.StructuredContracts && team == nil && snap.Runtime == runtimeOpenAIAgents && snap.Health.supportsStructuredOutput(snap.Model) {
+			if a.cfg.StructuredContracts && snap.Workspace == nil && team == nil && snap.Runtime == runtimeOpenAIAgents && snap.Health.supportsStructuredOutput(snap.Model) {
 				contract, outcome := graphOutputContract(n)
 				snap.OutputContract = contract
 				if outcome != "none" {
@@ -633,6 +641,13 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if e = snap.restamp(entitlement); e != nil {
 		return e
 	}
+	if snap.Workspace != nil {
+		inputs, err := materializeWorkspaceInputs(ctx, tx, tid, gid, nid)
+		if err != nil {
+			return err
+		}
+		snap.Workspace.Inputs = inputs
+	}
 	if turn != nil {
 		if snap.Team != nil {
 			return errors.New("collaboration_nested_team_unsupported")
@@ -645,10 +660,16 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 			// forced into it. Telling the model to write Markdown while the provider still
 			// enforced a JSON schema would fail every review turn.
 			snap.OutputContract = nil
+			if snap.Workspace != nil {
+				snap.Workspace.OutputFields = nil
+			}
 		}
 		if e = appendCollaborationHistory(ctx, tx, tid, gid, nid, &snap); e != nil {
 			return e
 		}
+	}
+	if snap.Workspace != nil {
+		prompt = workspaceGraphPrompt(prompt, snap.OutputPolicy)
 	}
 	if snap.OutputContract != nil {
 		// The node prompt repeats the textual policy, and so does a proposal or synthesis

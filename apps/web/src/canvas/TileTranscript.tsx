@@ -20,6 +20,9 @@ import type { HistoryState, Turn } from './sessions';
 import { useCanvasI18n } from './i18n';
 import { collapseHistoricalInput, collaborationInputSummary, htmlPreviewSummary, readableOutput } from './readableTranscript';
 import './readable-transcript.css';
+import { fileSafeDisplaySource } from './fileDeliveryPresentation';
+import { PendingFileDelivery } from './PendingFileDelivery';
+import { storedArtifactUrl } from '../saas/canvasBridge';
 
 const markdownComponents: Components = {
   table: ({ node: _node, ...props }) => <div className="canvas-transcript-table"><table {...props} /></div>,
@@ -31,9 +34,11 @@ const markdownComponents: Components = {
 };
 
 function RawDetails({ label, text }: { label: string; text: string }) {
+  const { locale } = useCanvasI18n();
+  const display = fileSafeDisplaySource(text);
   return <details className="canvas-transcript-details">
-    <summary>{label}</summary>
-    <pre className="canvas-transcript-raw">{text}</pre>
+    <summary>{label}{display === text ? '' : locale === 'zh' ? '（文件内容已隐藏）' : ' (attachment content omitted)'}</summary>
+    <pre className="canvas-transcript-raw">{display}</pre>
   </details>;
 }
 
@@ -84,15 +89,16 @@ function TurnContent({ turn, streaming }: { turn: Turn; streaming: boolean }) {
   if (output.fields.length) {
     return <>
       <div className="canvas-transcript-fields">
-        {output.fields.map(({ field, value }) => <section className="canvas-transcript-field" key={field.id}>
+        {output.fields.map(({ field, value, pendingFile }) => <section className="canvas-transcript-field" key={field.id}>
           <h3>{field.label || field.id}</h3>
-          {field.type === 'html' && htmlPreviewSummary(value, locale)
+          {pendingFile ? <PendingFileDelivery file={pendingFile} /> : field.type === 'html' && htmlPreviewSummary(value, locale)
             ? <div>{htmlSummary}</div>
             : field.type === 'markdown'
-            ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{value}</ReactMarkdown></div>
+            ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{fileSafeDisplaySource(value)}</ReactMarkdown></div>
             : field.type === 'file'
-              ? <code className="canvas-transcript-field-value">{value}</code>
-              : <div className="canvas-transcript-field-value">{value}</div>}
+              ? storedArtifactUrl(value) ? <a href={storedArtifactUrl(value)!} download rel="noreferrer">{t('deliverable.downloadFile')}</a>
+                : <code className="canvas-transcript-field-value">{value}</code>
+              : <div className="canvas-transcript-field-value">{fileSafeDisplaySource(value)}</div>}
         </section>)}
       </div>
       <RawDetails label={t('transcript.rawResponse')} text={turn.text} />
@@ -110,8 +116,8 @@ function TurnContent({ turn, streaming }: { turn: Turn; streaming: boolean }) {
     {output.invalid ? <div className="canvas-transcript-format-notice" role="status">{t('transcript.invalidOutput')}</div> : null}
     {/* Only an actual empty in-flight agent turn receives the waiting placeholder. */}
     {prose
-      ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{turn.text}</ReactMarkdown></div>
-      : turn.text || (turn.role === 'agent' && streaming ? t('transcript.thinking') : '')}
+      ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{fileSafeDisplaySource(turn.text)}</ReactMarkdown></div>
+      : fileSafeDisplaySource(turn.text) || (turn.role === 'agent' && streaming ? t('transcript.thinking') : '')}
   </>;
 }
 
@@ -134,9 +140,11 @@ export interface TileTranscriptProps {
   /** Auto-scroll to the newest turn. Off for the tiers that render a fixed tail. */
   autoScroll?: boolean;
   renderTurnDetails?: (turn: Turn, latest: boolean) => ReactNode;
+  /** Admitted graph execution observed independently from the historical messages. */
+  currentRunDetails?: ReactNode;
 }
 
-export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false, renderTurnDetails }: TileTranscriptProps) {
+export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false, renderTurnDetails, currentRunDetails }: TileTranscriptProps) {
   const { locale, t } = useCanvasI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
@@ -230,7 +238,7 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
           }
           previousScrollTop.current = top;
         }}>
-        {shown.length === 0 ? (
+        {shown.length === 0 ? currentRunDetails ? null : (
           history === 'loading' ? (
             <div className="canvas-transcript-loading">{t('transcript.loading')}</div>
           ) : history === 'unreadable' ? null : (
@@ -252,6 +260,7 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
             </Fragment>
           ))
         )}
+        {currentRunDetails}
       </div>
       {autoScroll && !following && <button className="canvas-transcript-jump" type="button" onClick={() => {
         follow(true);

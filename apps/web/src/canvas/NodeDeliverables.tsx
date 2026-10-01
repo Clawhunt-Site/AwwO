@@ -10,6 +10,9 @@ import { getAgentTemplateForNode } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
 import { ArtifactPreview, StoredArtifactPreview } from './ArtifactPreview';
 import { storedArtifactUrl } from '../saas/canvasBridge';
+import { appendDeliveryProfile, deliveryCapabilityNotice, deliveryProfiles, type DeliveryProfileId } from './deliveryProfiles';
+import { deliveryPresentation } from './fileDeliveryPresentation';
+import { PendingFileDelivery } from './PendingFileDelivery';
 
 /** A display/copy reference only; recognizing a path never reads or opens a file. */
 function localFilePath(value: string, plainFile = false): string | null {
@@ -86,6 +89,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
   const { locale, t } = useCanvasI18n();
   const [publishErrors, setPublishErrors] = useState<string[]>([]);
   const [selection, setSelection] = useState<{ identity: string; fieldId: string } | null>(null);
+  const [deliveryProfile, setDeliveryProfile] = useState<DeliveryProfileId>('web');
   const selectedPanelId = useId();
   const deliverableTitle = getAgentTemplateForNode(node, locale)?.deliverableTitle;
   const contract = node.contract ?? emptyContract();
@@ -93,8 +97,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
   // Looking at an earlier Session must not publish its historical result downstream.
   const historical = !node.lastOutput && Boolean(output);
   const locked = readOnly || !onUpdateNode;
-  const parsed = output ? parseContractOutput(contract, output.text) : null;
-  const publishedFields = parsed ? contract.outputs.filter(field => Object.hasOwn(parsed.values, field.id)) : [];
+  const parsed = output ? deliveryPresentation(contract, output.text) : null;
+  const publishedFields = parsed ? contract.outputs.filter(field => Object.hasOwn(parsed.values, field.id) || parsed.pendingFiles.has(field.id)) : [];
   const outputIdentity = `${node.id}:${activeNodeThread(node).id}:${output?.at ?? ''}`;
   // A selection belongs to one publication. New Sessions/results and removed fields fall
   // back synchronously, so no render exposes a previous file while effects catch up.
@@ -124,6 +128,22 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
 
   return <div className="awwo-deliverables">
     {deliverableTitle ? <h3 className="awwo-deliverables-title">{deliverableTitle}</h3> : null}
+    {!locked && <details className="awwo-deliverables-editor">
+      <summary>{locale === 'zh' ? '添加交付要求' : 'Add a deliverable'}</summary>
+      <label>{locale === 'zh' ? '交付形式' : 'Deliverable type'}
+        <select value={deliveryProfile} onChange={event => setDeliveryProfile(event.target.value as DeliveryProfileId)}>
+          {deliveryProfiles(locale).map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
+        </select>
+      </label>
+      <p className="awwo-field-hint">{deliveryProfiles(locale).find(profile => profile.id === deliveryProfile)!.description}</p>
+      <button type="button" onClick={() => {
+        try {
+          const next = appendDeliveryProfile(contract, deliveryProfile, locale);
+          if (next !== contract) updateFields(next.outputs);
+        } catch (error) { setPublishErrors([error instanceof Error ? error.message : String(error)]); }
+      }}>{locale === 'zh' ? '添加到交付' : 'Add requirement'}</button>
+      <p className="awwo-field-hint">{deliveryCapabilityNotice(locale)}</p>
+    </details>}
     {!output ? <>
       <p className="awwo-deliverables-empty">{t('deliverable.empty', { title: deliverableTitle || t('deliverable.defaultTitle') })}</p>
       {contract.outputs.length ? <ul className="awwo-expected-deliverables" aria-label={t('deliverable.expected')}>
@@ -139,7 +159,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
       {showRawOutput ? <article className="awwo-deliverable" data-testid={`canvas-tile-output-${node.id}`}>
         <h3 className="awwo-deliverable-title">{t(parsed?.errors.length ? 'deliverable.raw' : 'deliverable.runOutput')}</h3>
         <div className="awwo-deliverable-body awwo-markdown-preview">
-          <DeliverableMarkdown>{output.text}</DeliverableMarkdown>
+          <DeliverableMarkdown>{parsed!.displaySource}</DeliverableMarkdown>
         </div>
       </article> : <div data-testid={`canvas-tile-output-${node.id}`}>
         {publishedFields.length > 1 && <div className="awwo-deliverable-files" role="group" aria-label={t('deliverable.defaultTitle')}>
@@ -150,7 +170,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
           </button>)}
         </div>}
         {selectedField && [selectedField].map(field => {
-          const value = parsed!.values[field.id];
+          const value = parsed!.values[field.id] ?? '';
+          const pendingFile = parsed!.pendingFiles.get(field.id);
           // A stored deliverable is bytes the server holds, so it offers a real download; a local
           // reference stays a path, and neither is presented as the other.
           const artifactUrl = field.type === 'file' ? storedArtifactUrl(value) : null;
@@ -158,7 +179,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
           return <article className="awwo-deliverable" key={field.id} id={selectedPanelId} aria-label={field.label || field.id}>
           {publishedFields.length === 1 && <h3 className="awwo-deliverable-title">{field.label || field.id}</h3>}
           <div className={`awwo-deliverable-body${field.type === 'html' || field.type === 'markdown' || artifactUrl ? ' awwo-deliverable-with-preview' : ''}`}>
-            {field.type === 'html' || field.type === 'markdown'
+            {pendingFile ? <PendingFileDelivery file={pendingFile} /> : field.type === 'html' || field.type === 'markdown'
               ? <ArtifactPreview key={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
                   previewSource={field.type === 'markdown' ? legacyWrappedPreview(value, field.id) : undefined}
                   title={field.label || field.id} canDownload={Boolean(value.trim()) && !output.partial}

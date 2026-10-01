@@ -36,6 +36,9 @@ type InvocationTiming struct {
 	WorkerFirstDeltaMs *int64 `json:"workerFirstDeltaMs"`
 }
 type invocationFacts struct {
+	WorkspaceSnapshot         *workspaceFile // only a completed coding run; never provider telemetry
+	RequirePersonalConnection bool           // live admission check for each workbench model call
+
 	Runtime, Model, Provider, ProviderModel, Protocol, TurnID, AgentID string
 	Admission                                                          string
 	Version                                                            *int

@@ -16,12 +16,13 @@ import (
 // run: without a frozen contract it describes nothing this run sent.
 func TestRuntimeFailureCodeTable(t *testing.T) {
 	named := map[string]string{
-		"MODEL_OUTPUT_LIMIT":   "output_limit",
-		"MODEL_REFUSAL":        "model_refused",
-		"MODEL_AUTHENTICATION": "provider_auth_failed",
-		"MODEL_RATE_LIMIT":     "provider_rate_limited",
-		"MODEL_UNAVAILABLE":    "provider_unavailable",
-		"DEADLINE_EXCEEDED":    "run_timeout",
+		"MODEL_OUTPUT_LIMIT":     "output_limit",
+		"MODEL_REFUSAL":          "model_refused",
+		"MODEL_AUTHENTICATION":   "provider_auth_failed",
+		"MODEL_RATE_LIMIT":       "provider_rate_limited",
+		"MODEL_UNAVAILABLE":      "provider_unavailable",
+		"MODEL_CONNECTION_ERROR": "provider_unavailable",
+		"DEADLINE_EXCEEDED":      "run_timeout",
 	}
 	for worker, want := range named {
 		for _, contract := range []bool{false, true} {
@@ -80,6 +81,7 @@ func TestPostgresRunFailureCodesAreNamedFromWorkerCodes(t *testing.T) {
 		{"MODEL_AUTHENTICATION", "provider_auth_failed"},
 		{"MODEL_RATE_LIMIT", "provider_rate_limited"},
 		{"MODEL_UNAVAILABLE", "provider_unavailable"},
+		{"MODEL_CONNECTION_ERROR", "provider_unavailable"},
 		{"DEADLINE_EXCEEDED", "run_timeout"},
 		{"MODEL_ERROR", "runtime_failed"},
 		{"NOT_A_KNOWN_CODE", "runtime_failed"},

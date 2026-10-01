@@ -20,6 +20,29 @@ const node = (over: Partial<SessionNode> = {}): SessionNode => ({
 describe('node deliverables', () => {
   const html = '<!doctype html><html><head><title>页面</title></head><body><script>window.__unsafe = true</script><img src="https://example.com/private.png"><h1>交付页面</h1></body></html>';
 
+  it('adds a game requirement to any persona without replacing its contract or creating output', () => {
+    const current = createAgentTemplate('review', { x: 0, y: 0 });
+    const update = vi.fn();
+    const { rerender } = render(<NodeDeliverables node={current} readOnly={false} onUpdateNode={update} />);
+    fireEvent.click(screen.getByText('添加交付要求'));
+    fireEvent.change(screen.getByRole('combobox', { name: '交付形式' }), { target: { value: 'game' } });
+    fireEvent.click(screen.getByRole('button', { name: '添加到交付' }));
+    const changed = update.mock.calls[0][0] as SessionNode;
+    expect(changed.persona).toBe(current.persona);
+    expect(changed.contract!.inputs).toEqual(current.contract!.inputs);
+    expect(changed.contract!.outputs.slice(0, -1)).toEqual(current.contract!.outputs);
+    expect(changed.contract!.outputs.at(-1)).toMatchObject({ id: 'delivery_game', type: 'html', required: true, value: '' });
+    expect(changed.lastOutput).toBeUndefined();
+    rerender(<NodeDeliverables node={changed} readOnly={false} onUpdateNode={update} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加到交付' }));
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('keeps delivery selection unavailable to read-only members', () => {
+    render(<NodeDeliverables node={node()} readOnly onUpdateNode={vi.fn()} />);
+    expect(screen.queryByText('添加交付要求')).toBeNull();
+  });
+
   it('previews a malformed legacy single-field result without changing its source', () => {
     const original = '{"result":"完成内容：\\n回答"可见顺序"。\\n第二步"}';
     render(<NodeDeliverables node={node({

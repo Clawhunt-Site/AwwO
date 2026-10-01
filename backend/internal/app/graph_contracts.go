@@ -196,7 +196,7 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 			for _, fields := range [][]graphField{n.Contract.Inputs, n.Contract.Outputs} {
 				ids := map[string]bool{}
 				for _, f := range fields {
-					if f.ID == "" || ids[f.ID] {
+					if f.ID == "" || f.ID == workspaceSnapshotField || ids[f.ID] {
 						return d, nil, errors.New("Invalid contract field identity")
 					}
 					ids[f.ID] = true
@@ -350,7 +350,7 @@ const (
 )
 
 // Ids that plain-object handling in the worker can silently drop or confuse.
-var outputContractReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "constructor": true}
+var outputContractReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "constructor": true, workspaceSnapshotField: true}
 
 // The closed type vocabulary, identical to the worker's FIELD_TYPES.
 var outputContractTypes = map[string]bool{"text": true, "markdown": true, "html": true, "number": true, "boolean": true, "file": true}
@@ -501,6 +501,11 @@ func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingA
 		return vals, files, nil
 	}
 	fields := n.Contract.Outputs
+	for _, f := range fields {
+		if f.ID == workspaceSnapshotField {
+			return vals, files, errors.New("Reserved output field")
+		}
+	}
 	single := allowsPlainTextOutput(fields)
 	// Output stored before the runtime boundary stripped reasoning is healed here
 	// rather than rejected, so re-reading a node that already delivered cannot turn
@@ -545,6 +550,9 @@ func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingA
 			}
 			vals[f.ID] = strconv.FormatBool(b)
 		case "file":
+			if v == nil && !f.Required {
+				continue
+			}
 			// Either a reference string the caller already owns, or real content to store.
 			if s, isText := v.(string); isText {
 				vals[f.ID] = s
@@ -555,8 +563,8 @@ func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingA
 				return vals, files, fmt.Errorf("Output %s requires a string or {name, content}", f.ID)
 			}
 			for key := range object {
-				if key != "name" && key != "content" {
-					return vals, files, fmt.Errorf("Output %s allows only name and content", f.ID)
+				if key != "name" && key != "content" && key != "encoding" {
+					return vals, files, fmt.Errorf("Output %s allows only name, content and encoding", f.ID)
 				}
 			}
 			rawName, hasName := object["name"].(string)
@@ -568,14 +576,23 @@ func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingA
 			if nameErr != nil {
 				return vals, files, fmt.Errorf("Output %s: %w", f.ID, nameErr)
 			}
-			if len(content) > maxArtifactBytes {
-				return vals, files, fmt.Errorf("Output %s exceeds the %d KiB file limit", f.ID, maxArtifactBytes/1024)
+			decoded, decodeErr := decodeArtifactContent(object, content)
+			if decodeErr != nil {
+				return vals, files, fmt.Errorf("Output %s: %w", f.ID, decodeErr)
 			}
-			if !utf8.ValidString(content) {
+			content = decoded
+			if _, binary := object["encoding"]; !binary && !utf8.ValidString(content) {
 				return vals, files, fmt.Errorf("Output %s must be valid UTF-8 text", f.ID)
 			}
 			if len(files) >= maxArtifactsPerNode {
 				return vals, files, fmt.Errorf("A node may deliver at most %d files", maxArtifactsPerNode)
+			}
+			total := len(content)
+			for _, prior := range files {
+				total += len(prior.Content)
+			}
+			if total > maxWorkspaceInputBytes {
+				return vals, files, errors.New("Combined file output exceeds size limit")
 			}
 			files = append(files, pendingArtifact{FieldID: f.ID, Name: name, Content: content})
 			// The name keeps this field non-empty for validation; the storing caller replaces it

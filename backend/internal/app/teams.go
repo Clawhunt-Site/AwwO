@@ -36,6 +36,8 @@ type nodeTeam struct {
 	Members        []teamMember `json:"members"`
 }
 type executionSnapshot struct {
+	Workspace *workspacePlan `json:"workspace,omitempty"`
+
 	Runtime          string             `json:"runtime,omitempty"`
 	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`
 	Instructions     string             `json:"instructions"`
@@ -286,6 +288,9 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 			if entitlementErr != nil || !entitlement.permits(model) {
 				e = errModelNotAllowed
 			}
+		}
+		if e == nil && facts != nil && facts.RequirePersonalConnection {
+			e = a.requireWorkspacePersonalConnection(ctx, tx, actor, facts.Runtime, model)
 		}
 		var active, today int
 		if e == nil {
