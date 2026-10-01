@@ -1,5 +1,10 @@
 # AwwO SaaS deployment — awwo.clawhunt.store
 
+For the knowledge workbench and managed OpenMaus upgrade, use the additional
+[managed execution rollout](awwo-managed-execution-deploy.md). The historical
+API-and-HTML-only package below is insufficient for that upgrade. Re-read live
+environment and service state before using this historical deployment record.
+
 Recorded on 2026-09-12 from an executed and verified deployment of `e05d2af`, and re-verified on
 2026-09-14 by deploying `24fcb43` over `edb7f3a` (18 commits, including three unshipped migrations).
 This documents the deployment that actually exists; `docs/deploy-aws.md` describes a **different**
