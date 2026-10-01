@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Added
 
+- Let users copy an official workflow as an unconfigured draft or apply one available workspace model to all its session nodes, with a fresh availability check before creation. Add a permission-scoped graph evidence download containing run records, summaries and invocation pages with explicit completeness limits. Copying does not start model execution.
 - Expand the official collection into twelve industry systems plus six starter studies: connected simulation and operations models for games, buildings, media, hospitality, research, machine learning, education, delivery review, logistics, retail, manufacturing and energy. Add industry/capability discovery and explorable 12–13-node review/repair workflows with clean reusable canvas contracts.
 - Refresh a personal model connection using its encrypted saved credential, preserving the connection ID and existing canvas selections; failed discovery leaves the saved catalog intact.
 - Six official, interactive examples on the AwwO home and public gallery: a pricing configurator, playable path game, projected 3D product, editable knowledge retrieval, real in-browser logistic-regression training, and budget approvals. Each includes a bilingual dependency canvas, node instructions and acceptance criteria, downloadable canvas JSON, and a permission-aware copy action that creates an unexecuted draft. Curated selections survive unified sign-in without changing OAuth redirect rules.

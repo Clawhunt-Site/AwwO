@@ -1,0 +1,20 @@
+.official-copy-setup { width:min(540px,calc(100vw - 32px)); max-height:calc(100dvh - 40px); box-sizing:border-box; border:1px solid var(--saas-border,#dce3df); border-radius:20px; padding:0; color:var(--saas-text,#203c2e); background:var(--saas-card,#fff); box-shadow:0 24px 90px #10291e33; }
+.official-copy-setup::backdrop { background:#13251d66; backdrop-filter:blur(3px); }
+.official-copy-setup form { padding:28px; display:flex; flex-direction:column; gap:18px; }
+.official-copy-setup header { display:flex; flex-direction:column; gap:8px; }
+.official-copy-setup header>span { font-size:11px; letter-spacing:.12em; color:var(--saas-muted,#667a6d); font-weight:700; }
+.official-copy-setup h2 { margin:0; font-size:23px; line-height:1.3; }
+.official-copy-setup p { margin:0; line-height:1.65; font-size:13px; overflow-wrap:anywhere; }
+.official-copy-setup header p { font-weight:650; }
+.official-copy-model { display:flex; flex-direction:column; gap:9px; font-size:13px; font-weight:650; }
+.official-copy-model select { width:100%; min-width:0; min-height:44px; box-sizing:border-box; border:1px solid var(--saas-border,#dce3df); border-radius:10px; padding:10px; color:inherit; background:var(--saas-bg,#f5f8f6); font:inherit; }
+.official-copy-model select:focus-visible,.official-copy-setup button:focus-visible { outline:2px solid var(--saas-accent,#347457); outline-offset:3px; }
+.official-copy-selection { display:flex; flex-direction:column; gap:5px; border-left:3px solid var(--saas-accent,#347457); padding:3px 12px; font-size:12px; }
+.official-copy-selection span { overflow-wrap:anywhere; color:var(--saas-muted,#667a6d); }
+.official-copy-catalog { display:flex; align-items:start; gap:12px; justify-content:space-between; color:var(--saas-muted,#667a6d); }
+.official-copy-catalog p { font-size:12px; }
+.official-copy-catalog button { flex-shrink:0; }
+.official-copy-note { padding:12px 14px; background:var(--saas-bg,#f5f8f6); border-radius:10px; color:var(--saas-muted,#667a6d); }
+.official-copy-setup footer { display:flex; justify-content:flex-end; gap:10px; }
+.official-copy-setup footer button { min-height:40px; padding:9px 15px; border-radius:10px; }
+@media(max-width:480px) { .official-copy-setup form { padding:21px;gap:16px; } .official-copy-setup h2 { font-size:20px; } .official-copy-catalog { flex-wrap:wrap; } }

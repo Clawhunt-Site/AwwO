@@ -5,6 +5,7 @@ import { graphPath, graphIsActive, validGraphCollaboration, type GraphRunSnapsho
 import { TeamRunDetails } from './TeamRunDetails';
 import { RunEvidence } from './RunEvidence';
 import { GraphNodeOutput } from './GraphNodeOutput';
+import { GraphEvidenceDownload } from './GraphEvidenceDownload';
 import { useSaaSPreferences } from './preferences';
 import { containDialogTab } from '../ui/Popover';
 import './graph-runs.css';
@@ -72,6 +73,7 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
             catch (error) { setError(error); } finally { setBusy(false); }
           }}>{t('停止整个任务', 'Stop entire task')}</button>}
         </div>
+        <GraphEvidenceDownload tenantId={tenantId} canvasId={canvasId} graphId={current.id} />
         {current.error && <p role="alert">{status(current.error)}</p>}
         {current.collaboration && <section aria-label={t('选中节点互审过程', 'Selected-node collaboration')}>
           <h3>{t('互审与汇总', 'Peer review and synthesis')}</h3>
@@ -94,7 +96,7 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
         <nav aria-label={t('运行节点', 'Run nodes')}>{current.nodes.map(item => <button key={item.nodeId} aria-pressed={node?.nodeId === item.nodeId} onClick={() => setNodeId(item.nodeId)}>
           {current.document?.nodes.find(n => n.id === item.nodeId)?.title || item.nodeId} · {status(item.state)}
         </button>)}</nav>
-        {node && <><p>{node.detail && status(node.detail)}</p><GraphNodeOutput key={`${current.id}:${node.nodeId}`} graph={current} node={node} /></>}
+        {node && <>{node.runId && <p>{t('节点运行 ID：', 'Node run ID: ')}<code style={{ overflowWrap: 'anywhere' }}>{node.runId}</code></p>}<p>{node.detail && status(node.detail)}</p><GraphNodeOutput key={`${current.id}:${node.nodeId}`} graph={current} node={node} /></>}
         {!current.collaboration && (node?.runId ? <TeamRunDetails tenantId={tenantId} runId={node.runId} runStatus={node.state} defaultOpen />
           : <p>{t('此节点还没有实际调用记录。', 'This node has no model call record yet.')}</p>)}
       </>}

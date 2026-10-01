@@ -11,7 +11,8 @@ import { HOME_PROMPT_MAX_CHARACTERS, canvasNameFromPrompt, clearHomeDraft, readH
 import { savePlanHandoff } from './planHandoff';
 import { STARTER_CASES, type StarterCase } from './starterCases';
 import { OfficialExamples } from './examples/OfficialExamples';
-import { createOfficialDocument, type OfficialWorkflow } from './examples/officialWorkflows';
+import { type OfficialWorkflow } from './examples/officialWorkflows';
+import { OfficialCopySetup, createOfficialCopyDocument, type OfficialCopyModel } from './examples/OfficialCopySetup';
 import { readOfficialSelection, clearOfficialSelection } from './examples/officialSelection';
 
 /** Recent canvases shown before the operator expands the full list. */
@@ -57,6 +58,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const [officialCopy, setOfficialCopy] = useState<OfficialWorkflow | null>(null);
   // The operator's own text, set aside when an example replaced it.
   const [replaced, setReplaced] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
@@ -119,8 +121,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     setNotice(null);
     setReplaced(null);
   };
-  const create = async (prompt: string | null, official?: OfficialWorkflow) => {
-    if (sending.current) return;
+  const create = async (prompt: string | null, official?: OfficialWorkflow, model: OfficialCopyModel | null = null) => {
+    if (sending.current || tenant.role === 'reader' || tenant.status !== 'active') return;
     sending.current = true;
     setBusy(true);
     setError(null);
@@ -128,7 +130,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     const untitled = t('未命名', 'Untitled');
     const name = official ? official.title[locale] : prompt === null ? untitled : exampleTitle(prompt) ?? canvasNameFromPrompt(prompt, untitled);
     try {
-      const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document: official ? createOfficialDocument(official, locale) : emptyDocument() }) });
+      const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document: official ? createOfficialCopyDocument(official, locale, model) : emptyDocument() }) });
       if (!mounted.current) return;
       if (prompt !== null) {
         // Leaving now would lose the request: the canvas could only open with an empty prompt box.
@@ -212,9 +214,12 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {plannerIssue && <p id={noteId} className="saas-home-planner-note">{t(`规划暂不可用：${plannerIssue}。仍会新建画布，需求会保留在画布输入框中。`, `Planning is not available yet: ${plannerIssue}. A canvas will still be created, and your request will stay in its prompt box.`)}</p>}
     </section>
     <CanvasList tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <OfficialExamples onReuse={item => void create(null, item)} disabled={busy}
+    <OfficialExamples onReuse={item => { if (!sending.current) { setError(null); setOfficialCopy(item); } }} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}
       error={error !== null ? saasErrorMessage(error, locale) : undefined} />
+    {officialCopy && <OfficialCopySetup key={`${tenant.id}:${officialCopy.id}`} item={officialCopy} tenantId={tenant.id} locale={locale} busy={busy}
+      error={error !== null ? saasErrorMessage(error, locale) : undefined} onClose={() => setOfficialCopy(null)}
+      onConfirm={model => create(null, officialCopy, model)} />}
     <section className="saas-home-examples" aria-label={t('案例灵感', 'Example ideas')}>
       <button type="button" className="saas-home-examples-toggle" aria-expanded={examplesOpen} aria-controls={examplesId}
         onClick={() => setExamplesOpen(value => !value)}>

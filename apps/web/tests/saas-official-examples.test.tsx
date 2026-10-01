@@ -66,6 +66,9 @@ it('copies a complete draft once, preserves the user prompt, and never starts pl
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
   const copy = screen.getByRole('button', { name: '复制到我的画布' });
   fireEvent.click(copy); fireEvent.click(copy);
+  expect(posts).toHaveLength(0);
+  const createDraft = within(screen.getByRole('dialog')).getByRole('button', { name: '创建草稿' });
+  fireEvent.click(createDraft); fireEvent.click(createDraft);
   expect(posts).toHaveLength(1);
   expect(posts[0].url).toBe('/api/v1/tenants/official-workspace/canvases');
   expect(posts[0].body.name).toBe(first.title.zh);
@@ -87,6 +90,7 @@ it('keeps the selected workflow visible and reports a rejected create without op
   const onOpen = vi.fn(); history.replaceState({}, '', `/?official=${first.id}`);
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
   fireEvent.click(screen.getByRole('button', { name: '复制到我的画布' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '创建草稿' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '复制到我的画布' })).toBeEnabled());
   expect(screen.getAllByRole('alert').some(element => element.textContent?.includes('你没有执行此操作的权限'))).toBe(true);
   expect(onOpen).not.toHaveBeenCalled();
