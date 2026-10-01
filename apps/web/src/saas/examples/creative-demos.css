@@ -1,0 +1,180 @@
+.official-demo { width: 100%; overflow: hidden; box-sizing: border-box; border: 1px solid #dedbd2; border-radius: 20px; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; text-align: left; isolation: isolate; }
+.official-demo *, .official-demo *::before, .official-demo *::after { box-sizing: border-box; }
+.official-demo button, .official-demo input { font: inherit; }
+.official-demo button { cursor: pointer; min-height: 38px; border: 0; letter-spacing: 0; }
+.official-demo button:disabled { cursor: default; opacity: .55; }
+.official-demo button:focus-visible, .official-demo input:focus-visible, .official-demo [tabindex]:focus-visible { outline: 3px solid #9c6cdd; outline-offset: 4px; }
+.official-demo h3, .official-demo h4, .official-demo p { margin: 0; }
+.official-demo output { font-variant-numeric: tabular-nums; }
+.official-demo .official-demo-eyebrow { font-size: 9px; font-weight: 650; letter-spacing: 1.8px; }
+.official-demo .official-demo-range { display: block; width: 100%; height: 20px; margin: 9px 0 0; padding: 0; accent-color: #b56a4d; cursor: pointer; border: 0; background: transparent; }
+.official-demo .official-demo-range-limits { display: flex; justify-content: space-between; font-size: 10px; color: #7c786e; }
+.official-demo-orbit { color: #292c25; background: #f6f5ed; }
+.official-demo .official-demo-orbit-nav { min-height: 59px; border-bottom: 1px solid #dfdfd3; display: flex; align-items: center; gap: 25px; padding: 12px 28px; }
+.official-demo .official-demo-orbit-wordmark { font-size: 23px; font-weight: 700; letter-spacing: -.8px; display: flex; align-items: center; gap: 7px; }
+.official-demo .official-demo-orbit-wordmark > span { font-size: 27px; color: #b46343; }
+.official-demo .official-demo-sample { margin-left: auto; color: #767969; font-size: 9px; }
+.official-demo .official-demo-orbit-layout { display: grid; grid-template-columns: 1fr .82fr; padding: 30px; gap: 35px; align-items: center; }
+.official-demo .official-demo-orbit-config > .official-demo-eyebrow { color: #9b5f46; margin-bottom: 13px; }
+.official-demo .official-demo-orbit-config h3 { font-size: clamp(26px, 3vw, 38px); line-height: 1.25; letter-spacing: -1.7px; font-weight: 550; }
+.official-demo .official-demo-orbit-config h3 em { font-family: Georgia, "Songti SC", serif; font-style: italic; font-weight: 400; color: #9b624b; }
+.official-demo .official-demo-orbit-config > p { color: #767869; font-size: 11px; max-width: 330px; margin: 14px 0 23px; line-height: 1.8; }
+.official-demo .official-demo-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-bottom: 22px; }
+.official-demo .official-demo-plans > button { padding: 11px 10px; background: #f9f8f1; border: 1px solid #deded0; color: #4d5145; border-radius: 9px; text-align: left; transition: background .15s, border-color .15s; }
+.official-demo .official-demo-plans > button[aria-pressed="true"] { background: #e8ecdf; border-color: #616d50; box-shadow: inset 0 0 0 1px #616d50; }
+.official-demo .official-demo-plans > button > span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+.official-demo .official-demo-plans small { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.official-demo .official-demo-plans small span { font-size: 8px; font-weight: 400; color: #7a7c70; }
+.official-demo .official-demo-team-label, .official-demo .official-demo-finish-label, .official-demo .official-demo-zoom-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; }
+.official-demo .official-demo-team-label strong { font-size: 17px; font-weight: 500; }
+.official-demo .official-demo-team-label > span { color: #747667; }
+.official-demo .official-demo-billing { display: flex; background: #e9e9df; padding: 4px; border-radius: 8px; margin-top: 18px; width: fit-content; }
+.official-demo .official-demo-billing > button { background: transparent; color: #77796a; font-size: 10px; border-radius: 5px; padding: 8px 13px; min-height: 34px; }
+.official-demo .official-demo-billing > button[aria-pressed="true"] { background: #fffef8; color: #30362a; box-shadow: 0 2px 5px #30382810; }
+.official-demo .official-demo-billing button span { color: #6d7759; margin-left: 8px; font-size: 9px; }
+.official-demo .official-demo-orbit-summary { align-self: stretch; border: 1px solid #deded0; border-radius: 14px; background: #fffef7; padding: 18px 23px 14px; }
+.official-demo .official-demo-orbit-art { position: relative; overflow: hidden; height: 88px; margin: -5px 0 10px; }
+.official-demo .official-demo-orbit-ball { position: absolute; top: 5px; left: calc(50% - 37px); width: 76px; height: 76px; border-radius: 50%; background: radial-gradient(circle at 32% 22%, #eab695, #b8724c 60%, #835233); color: #ffe0ba; display: grid; place-items: center; font-family: Georgia, serif; font-size: 43px; box-shadow: 11px 15px 22px #9e816524; }
+.official-demo .official-demo-orbit-ring { position: absolute; width: 160px; height: 50px; border: 1px solid #bdbba8; transform: rotate(-22deg); left: calc(50% - 80px); top: 18px; border-radius: 50%; }
+.official-demo .official-demo-orbit-satellite { position: absolute; left: calc(50% - 83px); top: 28px; font-size: 22px; color: #797e63; }
+.official-demo .official-demo-orbit-smallball { position: absolute; left: calc(50% + 58px); top: 0; width: 17px; height: 17px; border-radius: 50%; background: radial-gradient(circle at 30% 20%, #dee1c6, #8f9a6b); }
+.official-demo .official-demo-quote-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 600; }
+.official-demo .official-demo-quote-top > span + span { color: #8b8b79; font-size: 8px; font-weight: 400; letter-spacing: 1px; }
+.official-demo .official-demo-price { display: flex; align-items: baseline; gap: 5px; margin-top: 5px; }
+.official-demo .official-demo-price output { font-size: clamp(30px, 4vw, 42px); font-weight: 500; letter-spacing: -2px; line-height: 1.3; }
+.official-demo .official-demo-price > span { font-size: 11px; color: #8a8b7b; }
+.official-demo .official-demo-quote-desc { color: #7c7e70; font-size: 10px; margin-top: 4px; }
+.official-demo .official-demo-inclusions { padding: 12px 0; margin: 14px 0 10px; list-style: none; border-top: 1px solid #e8e7db; border-bottom: 1px solid #e8e7db; display: grid; gap: 7px; }
+.official-demo .official-demo-inclusions li { font-size: 10px; color: #565e49; }
+.official-demo .official-demo-inclusions li > span { margin-right: 9px; color: #8f9d76; }
+.official-demo .official-demo-invoice { display: flex; justify-content: space-between; font-size: 10px; color: #838675; margin: 10px 0 13px; }
+.official-demo .official-demo-invoice output { color: #3f4936; font-size: 12px; font-weight: 600; }
+.official-demo .official-demo-quote-cta { display: flex; justify-content: space-between; align-items: center; width: 100%; color: #fffced; background: #45503b; padding: 11px 14px; border-radius: 7px; font-size: 11px; }
+.official-demo .official-demo-quote-cta:hover { background: #59664a; }
+.official-demo .official-demo-quote-note { min-height: 27px; text-align: center; color: #888b79; font-size: 8px; margin-top: 9px; overflow-wrap: anywhere; }
+.official-demo-game { background: #121b22; border-color: #283740; color: #eef4e7; }
+.official-demo .official-demo-game-header { display: flex; align-items: center; justify-content: space-between; padding: 26px 32px 0; }
+.official-demo .official-demo-game-header .official-demo-eyebrow { color: #839d9a; display: flex; align-items: center; gap: 7px; font-size: 8px; letter-spacing: 1.7px; }
+.official-demo .official-demo-signal-dot { display: inline-block; width: 5px; height: 5px; background: #cff98d; border-radius: 50%; box-shadow: 0 0 9px #cff98d50; }
+.official-demo .official-demo-game-header h3 { margin-top: 4px; font-size: 33px; font-weight: 700; letter-spacing: -1.8px; }
+.official-demo .official-demo-game-header h3 > span { color: #a9beb9; font-weight: 400; }
+.official-demo .official-demo-game-header h3 > .official-demo-title-dot { color: #c9f489; }
+.official-demo .official-demo-game-badge { color: #c3d79f; border: 1px solid #354539; padding: 5px 9px; border-radius: 4px; font-size: 8px; letter-spacing: 1px; }
+.official-demo .official-demo-game-layout { display: grid; grid-template-columns: 1fr .8fr; gap: 28px; padding: 22px 32px 27px; align-items: center; }
+.official-demo .official-demo-game-arena { background: #17242c; border: 1px solid #33434a; padding: 14px 14px 8px; border-radius: 10px; outline-offset: 4px; cursor: pointer; }
+.official-demo .official-demo-game-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; width: 100%; aspect-ratio: 1; }
+.official-demo .official-demo-game-cell { min-width: 0; display: grid; place-items: center; position: relative; aspect-ratio: 1; background: #1d2d35; border: 1px solid #263942; border-radius: 5px; color: #68838a; font-size: 24px; }
+.official-demo .official-demo-game-cell.official-demo-cell-wall { border-color: #3b4c51; background: repeating-linear-gradient(135deg, #3b4a4e 0 1px, #2e3d43 1px 5px); box-shadow: inset 0 2px 0 #53616550, 0 3px 0 #101c22; }
+.official-demo .official-demo-game-cell.official-demo-cell-exit { border: 1px dashed #96b493; color: #9fb897; background: #263b36; }
+.official-demo .official-demo-game-cell.official-demo-cell-collected { background: #253837; }
+.official-demo .official-demo-game-cell .official-demo-exit-open { color: #d9ffb6; text-shadow: 0 0 8px #d9ffb660; }
+.official-demo .official-demo-player { width: 75%; height: 75%; display: grid; place-items: center; border-radius: 7px; color: #193028; font-size: 26px; line-height: 1; background: #d2f695; box-shadow: 0 0 15px #d2f69535, inset 0 1px 0 #f3ffc9; }
+.official-demo .official-demo-player-lost { background: #d79878; box-shadow: none; }
+.official-demo .official-demo-charge { color: #91decb; font-size: 20px; text-shadow: 0 0 14px #87e0c570; }
+.official-demo .official-demo-grid-coordinates { display: flex; justify-content: space-between; color: #6e8991; font-family: monospace; font-size: 8px; margin-top: 7px; }
+.official-demo .official-demo-mission-title { color: #c4d69d; font-size: 10px; font-weight: 600; letter-spacing: 1.5px; }
+.official-demo .official-demo-game-console > p { color: #8da3a7; font-size: 11px; margin-top: 13px; line-height: 1.8; max-width: 270px; }
+.official-demo .official-demo-game-stats { display: grid; grid-template-columns: 1.25fr 1fr .8fr; gap: 15px; margin-top: 25px; }
+.official-demo .official-demo-game-stats > div { display: flex; flex-direction: column; }
+.official-demo .official-demo-game-stats > div > span { color: #7e9598; font-size: 8px; letter-spacing: 1.2px; }
+.official-demo .official-demo-game-stats output { font-size: 29px; font-weight: 400; letter-spacing: -1px; margin-top: 4px; line-height: 1.3; }
+.official-demo .official-demo-game-stats small { color: #718d8c; font-size: 14px; }
+.official-demo .official-demo-energy-track { margin-top: 7px; width: 63px; height: 3px; background: #354849; }
+.official-demo .official-demo-energy-track > span { height: 3px; background: #d0ec99; display: block; transition: width .15s; }
+.official-demo .official-demo-game-status { font-size: 10px; color: #9aafb0; margin-top: 22px; min-height: 46px; line-height: 1.7; padding-left: 10px; border-left: 2px solid #3a5157; }
+.official-demo .official-demo-game-status-won { color: #d4f6a8; border-color: #d4f6a8; }
+.official-demo .official-demo-game-status-lost { color: #e9ae8f; border-color: #e9ae8f; }
+.official-demo .official-demo-game-actions { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 14px; }
+.official-demo .official-demo-dpad { display: grid; grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(2, 34px); gap: 4px; }
+.official-demo .official-demo-dpad > button { min-height: 34px; border: 1px solid #3b5057; border-radius: 5px; background: #24343c; color: #bad1cf; font-size: 16px; padding: 0; }
+.official-demo .official-demo-dpad > button:hover:not(:disabled) { background: #344b51; }
+.official-demo .official-demo-direction-up { grid-area: 1 / 2; }
+.official-demo .official-demo-direction-left { grid-area: 2 / 1; }
+.official-demo .official-demo-direction-down { grid-area: 2 / 2; }
+.official-demo .official-demo-direction-right { grid-area: 2 / 3; }
+.official-demo .official-demo-game-reset { background: transparent; color: #a9bcb5; border-radius: 5px; padding: 5px 0 5px 8px; font-size: 10px; }
+.official-demo .official-demo-game-reset > span { font-size: 16px; padding-left: 4px; }
+.official-demo .official-demo-game-legend { display: flex; flex-wrap: wrap; gap: 13px; color: #6f898b; margin-top: 22px; font-size: 8px; }
+.official-demo .official-demo-game-legend i { font-style: normal; color: #a5c5b4; margin-right: 4px; }
+.official-demo-scene { background: #f0eee7; color: #454c45; border-color: #dbd8ce; }
+.official-demo .official-demo-scene-header { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 27px 30px 0; }
+.official-demo .official-demo-scene-header .official-demo-eyebrow { color: #8d8d7f; font-size: 8px; }
+.official-demo .official-demo-scene-header h3 { font-size: 24px; letter-spacing: 2px; font-weight: 550; margin-top: 3px; }
+.official-demo .official-demo-scene-header h3 > span { color: #99988d; font-size: 20px; font-weight: 350; }
+.official-demo .official-demo-scene-tag { border: 1px solid #cfcfc2; border-radius: 25px; padding: 6px 11px; color: #888c7c; font-size: 8px; letter-spacing: 1px; }
+.official-demo .official-demo-scene-layout { display: grid; grid-template-columns: 1.65fr 1fr; align-items: center; gap: 10px; padding: 0 30px 24px 4px; }
+.official-demo .official-demo-scene-stage { min-width: 0; }
+.official-demo .official-demo-scene-stage > svg { width: 100%; display: block; overflow: visible; cursor: grab; touch-action: none; border-radius: 15px; outline-offset: -3px; }
+.official-demo .official-demo-scene-stage > svg:active { cursor: grabbing; }
+.official-demo .official-demo-scene-help { text-align: center; font-size: 8px; color: #8e9284; margin-top: -5px; }
+.official-demo .official-demo-scene-controls { padding-top: 25px; }
+.official-demo .official-demo-scene-controls > .official-demo-eyebrow { color: #918670; font-size: 8px; }
+.official-demo .official-demo-scene-controls h4 { font-family: Georgia, "Songti SC", serif; font-size: 30px; line-height: 1.3; font-weight: 400; letter-spacing: -.5px; margin: 10px 0; }
+.official-demo .official-demo-scene-controls > p { font-size: 10px; color: #8b8d7e; line-height: 1.8; max-width: 235px; }
+.official-demo .official-demo-finish-label { font-size: 8px; color: #858777; letter-spacing: .8px; margin-top: 24px; }
+.official-demo .official-demo-finish-label output { color: #4d5947; font-size: 10px; letter-spacing: 0; }
+.official-demo .official-demo-swatches { display: flex; gap: 11px; margin-top: 10px; }
+.official-demo .official-demo-swatches > button { min-height: 31px; width: 31px; height: 31px; padding: 4px; border-radius: 50%; background: transparent; border: 1px solid transparent; }
+.official-demo .official-demo-swatches > button[aria-pressed="true"] { border-color: var(--official-demo-swatch); }
+.official-demo .official-demo-swatches span { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--official-demo-swatch); box-shadow: inset 0 1px 2px #ffffff35; }
+.official-demo .official-demo-zoom-label { margin-top: 22px; font-size: 8px; color: #858777; letter-spacing: .8px; }
+.official-demo .official-demo-zoom-label output { color: #4d5947; font-size: 10px; letter-spacing: 0; }
+.official-demo .official-demo-scene-controls .official-demo-range { accent-color: #77806c; margin-top: 5px; }
+.official-demo .official-demo-views { display: flex; margin-top: 14px; border: 1px solid #cfcec3; border-radius: 6px; overflow: hidden; }
+.official-demo .official-demo-views > button { flex: 1; min-height: 32px; padding: 6px 5px; color: #717b64; font-size: 9px; background: transparent; }
+.official-demo .official-demo-views > button + button { border-left: 1px solid #cfcec3; }
+.official-demo .official-demo-views > button:hover { background: #e3e4d8; }
+.official-demo .official-demo-spin { display: block; width: 100%; margin-top: 12px; color: #f4f2e8; background: #68705b; border-radius: 6px; padding: 8px; font-size: 10px; min-height: 35px; }
+.official-demo .official-demo-spin[aria-pressed="true"] { background: #464f3d; }
+.official-demo .official-demo-scene-controls > .official-demo-scene-footnote { text-align: center; font-size: 8px; margin-top: 8px; max-width: none; }
+@media (min-width: 1000px) {
+  .official-demo .official-demo-orbit-layout { padding: 35px 50px; gap: 60px; }
+  .official-demo .official-demo-game-layout { grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 40px; }
+  .official-demo .official-demo-scene-layout { grid-template-columns: minmax(0, 1.8fr) minmax(210px, 1fr); padding-right: 45px; }
+}
+@media (max-width: 700px) {
+  .official-demo .official-demo-orbit-nav { padding: 12px 18px; gap: 15px; }
+  .official-demo .official-demo-orbit-nav > .official-demo-eyebrow { display: none; }
+  .official-demo .official-demo-orbit-layout { padding: 22px; gap: 20px; }
+  .official-demo .official-demo-orbit-summary { padding: 14px; }
+  .official-demo .official-demo-orbit-config h3 { font-size: 27px; }
+  .official-demo .official-demo-plans > button { padding: 8px 6px; }
+  .official-demo .official-demo-game-header { padding: 22px 22px 0; }
+  .official-demo .official-demo-game-layout { padding: 18px 22px 24px; gap: 20px; }
+  .official-demo .official-demo-game-arena { padding: 9px 9px 6px; }
+  .official-demo .official-demo-game-grid { gap: 4px; }
+  .official-demo .official-demo-game-cell { font-size: 19px; }
+  .official-demo .official-demo-player { font-size: 21px; border-radius: 4px; }
+  .official-demo .official-demo-charge { font-size: 16px; }
+  .official-demo .official-demo-scene-layout { padding-right: 20px; }
+  .official-demo .official-demo-scene-header { padding: 22px 22px 0; }
+  .official-demo .official-demo-scene-controls h4 { font-size: 26px; }
+}
+@media (max-width: 540px) {
+  .official-demo { border-radius: 14px; }
+  .official-demo .official-demo-orbit-layout { grid-template-columns: 1fr; padding: 22px; }
+  .official-demo .official-demo-orbit-config > p { max-width: none; }
+  .official-demo .official-demo-orbit-summary { padding: 18px 20px; }
+  .official-demo .official-demo-orbit-art { height: 80px; }
+  .official-demo .official-demo-orbit-config h3 { font-size: 32px; }
+  .official-demo .official-demo-plans > button { padding: 11px 12px; }
+  .official-demo .official-demo-game-layout { grid-template-columns: 1fr; gap: 20px; }
+  .official-demo .official-demo-game-arena { max-width: 380px; width: 100%; margin: 0 auto; }
+  .official-demo .official-demo-game-console > p { max-width: none; }
+  .official-demo .official-demo-game-stats { margin-top: 18px; }
+  .official-demo .official-demo-game-actions { justify-content: flex-start; gap: 30px; }
+  .official-demo .official-demo-game-status { margin-top: 15px; min-height: 30px; }
+  .official-demo .official-demo-game-legend { margin-top: 16px; }
+  .official-demo .official-demo-dpad { grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(2, 40px); gap: 5px; }
+  .official-demo .official-demo-scene-layout { grid-template-columns: 1fr; padding: 0 20px 24px; }
+  .official-demo .official-demo-scene-header { align-items: flex-start; }
+  .official-demo .official-demo-scene-tag { padding: 6px 8px; font-size: 7px; letter-spacing: 0; }
+  .official-demo .official-demo-scene-controls { padding-top: 16px; }
+  .official-demo .official-demo-scene-controls > p { max-width: none; }
+  .official-demo .official-demo-scene-controls h4 br { display: none; }
+  .official-demo .official-demo-finish-label { margin-top: 17px; }
+  .official-demo .official-demo-views > button { min-height: 38px; font-size: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .official-demo *, .official-demo *::before, .official-demo *::after { transition: none !important; animation: none !important; }
+}

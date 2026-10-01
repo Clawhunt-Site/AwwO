@@ -10,6 +10,9 @@ import { CaseGallery } from './CaseGallery';
 import { HOME_PROMPT_MAX_CHARACTERS, canvasNameFromPrompt, clearHomeDraft, readHomeDraft, saveHomeDraft } from './homePrompt';
 import { savePlanHandoff } from './planHandoff';
 import { STARTER_CASES, type StarterCase } from './starterCases';
+import { OfficialExamples } from './examples/OfficialExamples';
+import { createOfficialDocument, type OfficialWorkflow } from './examples/officialWorkflows';
+import { readOfficialSelection, clearOfficialSelection } from './examples/officialSelection';
 
 /** Recent canvases shown before the operator expands the full list. */
 export const RECENT_CANVAS_COUNT = 4;
@@ -39,6 +42,7 @@ function ReaderHome({ tenant, onOpen }: HomeProps) {
   return <>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
     <CanvasList tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    <OfficialExamples readOnly />
   </>;
 }
 
@@ -115,16 +119,16 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     setNotice(null);
     setReplaced(null);
   };
-  const create = async (prompt: string | null) => {
+  const create = async (prompt: string | null, official?: OfficialWorkflow) => {
     if (sending.current) return;
     sending.current = true;
     setBusy(true);
     setError(null);
     setStranded(null);
     const untitled = t('未命名', 'Untitled');
-    const name = prompt === null ? untitled : exampleTitle(prompt) ?? canvasNameFromPrompt(prompt, untitled);
+    const name = official ? official.title[locale] : prompt === null ? untitled : exampleTitle(prompt) ?? canvasNameFromPrompt(prompt, untitled);
     try {
-      const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document: emptyDocument() }) });
+      const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document: official ? createOfficialDocument(official, locale) : emptyDocument() }) });
       if (!mounted.current) return;
       if (prompt !== null) {
         // Leaving now would lose the request: the canvas could only open with an empty prompt box.
@@ -137,6 +141,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
         }
         clearHomeDraft(scope);
       }
+      if (official) clearOfficialSelection();
       // The page is leaving now; the box keeps its text until then.
       onOpen(canvas.id);
     } catch (cause) {
@@ -207,6 +212,9 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {plannerIssue && <p id={noteId} className="saas-home-planner-note">{t(`规划暂不可用：${plannerIssue}。仍会新建画布，需求会保留在画布输入框中。`, `Planning is not available yet: ${plannerIssue}. A canvas will still be created, and your request will stay in its prompt box.`)}</p>}
     </section>
     <CanvasList tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    <OfficialExamples onReuse={item => void create(null, item)} disabled={busy}
+      initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}
+      error={error !== null ? saasErrorMessage(error, locale) : undefined} />
     <section className="saas-home-examples" aria-label={t('案例灵感', 'Example ideas')}>
       <button type="button" className="saas-home-examples-toggle" aria-expanded={examplesOpen} aria-controls={examplesId}
         onClick={() => setExamplesOpen(value => !value)}>

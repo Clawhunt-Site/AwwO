@@ -9,6 +9,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 ### Added
 
 - Refresh a personal model connection using its encrypted saved credential, preserving the connection ID and existing canvas selections; failed discovery leaves the saved catalog intact.
+- Six official, interactive examples on the AwwO home and public gallery: a pricing configurator, playable path game, projected 3D product, editable knowledge retrieval, real in-browser logistic-regression training, and budget approvals. Each includes a bilingual dependency canvas, node instructions and acceptance criteria, downloadable canvas JSON, and a permission-aware copy action that creates an unexecuted draft. Curated selections survive unified sign-in without changing OAuth redirect rules.
 - Optional API settings for new workspaces: `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` and `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY` set the model list and daily quota of every workspace created afterwards, and `AWWO_MAX_OWNED_WORKSPACES` makes `POST /tenants` answer `403 workspace_limit` to an account that is not a platform admin and already owns at least that many. Unset keeps the previous behaviour; existing workspaces are not changed.
 
 ### Changed
