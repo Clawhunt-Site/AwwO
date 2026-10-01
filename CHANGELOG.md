@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Added
 
+- Redraw generated training charts when an embedded result becomes visible or changes width, preserving trained weights and experiment state across canvas/result tab switches.
 - Show official workflows and interactive results side by side, with dependency-stage tours, node handoffs, persistent result state, reset/focus controls and embedded-width layouts. Curated model outputs include sanitized run snapshots, explicit incomplete steps, checksum provenance and isolated interactive previews.
 - Let users copy an official workflow as an unconfigured draft or apply one available workspace model to all its session nodes, with a fresh availability check before creation. Add a permission-scoped graph evidence download containing run records, summaries and invocation pages with explicit completeness limits. Copying does not start model execution.
 - Expand the official collection into twelve industry systems plus six starter studies: connected simulation and operations models for games, buildings, media, hospitality, research, machine learning, education, delivery review, logistics, retail, manufacturing and energy. Add industry/capability discovery and explorable 12–13-node review/repair workflows with clean reusable canvas contracts.

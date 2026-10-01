@@ -32,10 +32,10 @@ export const OFFICIAL_GENERATED_RECORDS: Readonly<Partial<Record<string, Officia
   },
   'model-lab': {
     model: 'claude-sonnet-5', capturedOn: '2026-10-01', completed: 4, total: 6, artifactNodeId: 'build',
-    sourceSHA256: 'ac7c7b312a454a51f5509845e4442185e15b2c51c89516cfa6a46e2d5fe404a7',
+    sourceSHA256: '7b5705060ae51cfb55bdc4b80346a692a25abb2cf734e1b24bf89c2221e7dedf',
     originalSHA256: 'ad4f67cd27232d900e4fd983a896e404dbb06d04ae2392f7775632ff193d3fdb',
     nodes: { dataset: 'done', trainer: 'done', metrics: 'done', build: 'done', check: 'failed', card: 'blocked' },
-    note: { zh: '训练台已生成；模型数值复核因额度不足失败，模型卡被阻断。官方验收修订了零噪声参数、预测输入校验、重置清理与重训定时器，保留原始模型运行状态。', en: 'The trainer was generated; model numerical review failed due to quota, blocking the model card. Official QA fixed zero-noise handling, prediction input checks, reset cleanup and retraining timers. Original run statuses are preserved.' },
+    note: { zh: '训练台已生成；模型数值复核因额度不足失败，模型卡被阻断。官方验收修订了零噪声参数、预测输入校验、重置清理、重训定时器与画布尺寸同步，保留原始模型运行状态。', en: 'The trainer was generated; model numerical review failed due to quota, blocking the model card. Official QA fixed zero-noise handling, prediction input checks, reset cleanup, retraining timers and chart sizing. Original run statuses are preserved.' },
     verification: { zh: '已实测训练、重训、中断、预测与重置；零噪声 200 轮的训练/验证损失 0.4602/0.4479，与独立数值重算一致。', en: 'Browser checked training, repeated runs, interruption, prediction and reset. The zero-noise 200-epoch train/validation losses, 0.4602/0.4479, match an independent numerical calculation.' },
   },
   'interaction-page': {
