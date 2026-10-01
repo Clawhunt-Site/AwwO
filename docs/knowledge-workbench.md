@@ -6,7 +6,7 @@
 
 ## 启动与入口
 
-使用仓库根目录的 SaaS 入口。要求 Node `^22.19.0 || >=24.0.0`、npm、可用的 Go toolchain，以及 PostgreSQL 的 `initdb`、`pg_ctl`、`psql`、`createdb`。
+使用仓库根目录的 SaaS 入口。包含内置执行助手的完整开发环境要求 Node 24 或更新版本、npm、Git、可用的 Go toolchain，以及 PostgreSQL 的 `initdb`、`pg_ctl`、`psql`、`createdb`。执行工作区命令还需要可用的 Docker daemon 和 workspace 镜像；部署准备见下文，最终用户只使用 AwwO。
 
 ```sh
 # 首次安装 SaaS 所需依赖
@@ -21,11 +21,11 @@ npm run dev:saas
 登录后进入工作区并打开画布，在画布预览区可以使用：
 
 - **知识地图**：浏览资料、页面、决策及其关系，导入资料，创建或审核提案，查看修订历史。
-- **OpenMaus**：查看可选外部执行连接，选择已有 Bot 与任务，明确发送任务或读取消息。
+- **执行助手**：使用 AwwO「我的引擎」中的模型创建工作区任务，查看历史、审批工具调用、回复问题、停止任务并保存真实产物。
 - **聚焦预览**：扩大四个预览窗口所在区域；每个窗口还可单独放大。
 - **文件选择／上传／示例**：读取当前画布产物、选择本地文件，或生成明确标记的本地演示文件。
 
-reader 可以查看知识和产物，不能导入、审核、恢复、发起整理、带入新任务或发送外部任务。写权限同时由 Go API 校验。
+reader 可以查看知识、执行历史和产物，不能导入、审核、恢复、发起整理、带入新任务或创建执行任务。审批、回答问题和停止任务还要求当前用户是该运行的发起人。权限由 Go API 再次校验。
 
 ## 使用流程
 
@@ -80,30 +80,51 @@ PDF.js 使用随构建分发的 worker、CMap 与标准字体资源，逐页渲�
 
 预览切换和组件卸载会取消读取、撤销对象 URL，并销毁 PDF worker、WebGL 资源和控制器。上传成功或扩展名正确并不保证文件可渲染，内容校验和渲染错误会在对应窗口显示。
 
-## OpenMaus 可选连接
+## 内置执行助手
 
-该连接是由 AwwO 服务端代理的外部 Bot 接口。默认关闭，AwwO 不会自动安装、启动或配置 OpenMaus，也不会把其电脑控制、浏览器、MCP 或技能执行能力复制进 AwwO 后端。
+默认入口使用 AwwO 托管的真实 OpenMaus 开源核心，固定提交为 `104fd17b8f7767e71ba3cf40f27f9c6279b507bd`。每个运行自动建立独立核心进程、Bot 会话和 Docker 工作区；用户不需要在另一个 OpenMaus 界面创建 Bot、配对服务或再次录入模型密钥。
 
-管理员在当前部署的服务端环境配置以下形状，值仅为占位示例：
+模型直接来自 AwwO「我的引擎」的实际可用目录。用户选择模型、填写本次角色与任务即可开始；当前画布已选中的知识修订可以随任务冻结。提供商凭证仍由 AwwO 的模型连接管理，核心只获得本次运行的代理凭证。没有可用模型时，界面引导回「我的引擎」；执行服务或 Docker 不可用时，显示真实未就绪状态。
 
-```dotenv
-AWWO_OPENMAUS_CONNECTIONS_JSON=[{"tenantId":"YOUR_AWWO_TENANT_ID","url":"https://maus.example.test","token":"REPLACE_WITH_PAIRED_SERVICE_TOKEN"}]
-```
+### 从任务到知识归档
 
-配置项为 `tenantId`、`url`、`token`；token 留在服务端，不返回给浏览器。URL 必须是明确的 HTTPS origin，或 loopback HTTP origin，不接受路径、查询、内嵌凭据或浏览器传入的新地址。远程部署还需保证 AwwO API 实际可达该 origin，loopback 指 API 所在网络环境。
+1. 在画布打开“执行助手”，选择现有模型并提交任务。任务历史可以重新打开，关闭面板不会自动取消已经受理的运行。
+2. 遇到工具审批时，核对动作说明与完整 JSON 参数，明确选择本次允许或拒绝；遇到问题时填写回答。服务端只接受原发起人且具有写权限的响应，不提供自动批准入口。
+3. 需要中止时点击“停止任务”，继续读取服务端状态直到确认终态；取消请求被受理不等于资源已经清理。拒绝、执行失败或超限不会被最终回复伪装成成功。
+4. 查看真实消息和已发布文件。新产物会刷新当前画布的 HTML、3D、PDF、源码四窗候选列表；各窗口按文件格式和预算实际加载，发布成功不保证所有文件都能渲染。
+5. 对支持的 UTF-8 文本产物选择“存为原始资料”。服务端读取 artifact 的实际字节并保留运行来源，再进入知识地图整理、审核和发布。PDF、3D、ZIP 仍不自动进行语义入库。
 
-**一个 OpenMaus 实例必须独占对应一个 AwwO 租户。** 服务端拒绝重复租户或重复规范 origin；运营方还必须保证不同域名、端口、反向代理别名没有指向同一个共享实例。此约束来自 OpenMaus 的共享实例信任模型，AwwO 的 `tenantId` 参数不会使上游自动具备租户隔离。不要把含其他租户 Bot 或个人会话的服务接入当前工作区。
+创建任务和审批响应都带持久操作身份。不确定的回执显示为“待核对”，界面不自动重发；用户核对时复用原操作身份，不创建第二个任务或换一个身份重试工具批准。运行历史、消息及产物来自服务端，页面刷新不会把本地状态当成执行结果。消息、结果或列表被容量限制截断时会明确提示。
 
-连接成功后，操作顺序为：
+### 当前执行范围
 
-1. 在 OpenMaus 自身完成服务配对、Bot、执行凭证和工具配置。
-2. 在 AwwO 打开 OpenMaus 面板，刷新状态，选择实际存在的 Bot 与其所属任务。
-3. 明确填写任务并点击“发送任务”。发送可能触发外部执行；上游需要的审批、输入或执行策略变更仍在 OpenMaus 处理。
-4. 读取任务消息并核对结果。选择某条完整消息“存为原始资料”，再回知识地图创建和审核知识提案。
+固定工具为工作区 `list/read/write/exec/publish/archive`，另有核心原生问题询问。文件操作和命令在真实 Docker 容器中执行：无网络、只读根文件系统、非 root、无宿主目录挂载，具有资源和时间限制。模型与任务容器不能访问 Docker socket 或提供商密钥。
 
-桥接会先持久记录发送操作，再调用上游；相同操作身份可查询结果。`sent` 只说明请求获得响应，不代表 Bot 已完成任务。断连、超时或回执保存失败可能标记 `unknown`，此时先查消息，不会自动重新发送。桥接不开放自动批准权限、修改审批策略或任意上游 URL 的入口。
+**当前能力是工作区命令与文件执行，不包含宿主桌面、鼠标键盘、浏览器 GUI 或任意主机 shell 控制。** 构建时关闭上游 computer use，仅挂载固定的 `awwo_workspace` MCP，禁用额外 Agent 和连接器能力。本实现不引入上游 `enterprise/`。
 
-单次上游请求限制 12 秒、响应限制 2 MiB。面板只投影 Bot、任务及文本消息；图片、被截断的内容与完整历史须到 OpenMaus 查看。入库时服务端再次读取对应消息，保存上游身份和实际文本，不信任浏览器自行提交的消息正文。
+用户任务上限 32 KiB UTF-8，问题回答上限 8 KiB UTF-8，每次最多带入 8 个知识修订。完整审批参数最多 512 KiB；消息与最终输出各有独立容量限制。worker 单文件或 ZIP 最多 2 MiB，产物总计最多 8 MiB、16 个；默认运行期限 5 分钟、模型请求 16 次，具体部署可在受限范围内调整。详情见 [托管 worker 契约与限制](../apps/openmaus-worker/README.md)。
+
+### 部署人员：服务与 Docker 准备
+
+这些是 AwwO 部署要求，不是产品用户的第二套配置。`npm run setup:saas` 安装并构建固定提交的开源核心，并尝试构建 `awwo-workspace:20261001`；`npm run dev:saas` 启动托管 worker，生成本地内部令牌，并连接现有 API 模型代理。Docker 或镜像缺失时，其他 AwwO 页面仍可运行，但执行助手不能报告可执行。
+
+容器部署使用 `deploy/saas/openmaus.Dockerfile` 和 `deploy/saas/compose.yml`。部署人员需要预先构建 workspace 镜像、给受信任 worker 配置 Docker socket 及其组权限，设置专用 `AWWO_OPENMAUS_TOKEN`，并确保 API 与 worker 的内部地址互通。不要把 worker 端口公开给浏览器或公网，也不要把 Docker socket 挂入任务容器。
+
+| 服务设置 | 用途 |
+| --- | --- |
+| `AWWO_OPENMAUS_URL` / `AWWO_OPENMAUS_TOKEN` | API 到内部 worker 的地址与专用鉴权；令牌至少 32 字符 |
+| `AWWO_COMPUTER_MODEL_PROXY_URL` | worker 访问 AwwO 模型代理的地址 |
+| `AWWO_OPENMAUS_MODEL_PROXY_ORIGINS` | worker 允许的代理 origin；Compose 配为内部 API origin |
+| `AWWO_OPENMAUS_DOCKER` / `AWWO_OPENMAUS_DOCKER_CONTEXT` | 受信任 Docker CLI 的绝对路径及可选 context |
+| `AWWO_OPENMAUS_WORKSPACE_IMAGE` | 已有 workspace 镜像，建议固定 digest 或 image ID；运行时不会自动拉取 |
+
+带内部鉴权的 `/health` 在核心或工作区不可用时返回 HTTP 503。启动器识别这一状态，但不会把它当成任务执行成功。正常结束等待核心进程和容器清理；机器掉电或 SIGKILL 后，应由部署监督器核查孤立任务容器，不能假定已经回收。
+
+### 旧外部桥接的兼容范围
+
+旧 `/openmaus` 路由和 `OpenMausBridgePanel.tsx` 保留为高级 API 兼容，不再是默认用户入口，也不参与内置助手模型连接。只有维护既有外部部署时，运营方才使用 `AWWO_OPENMAUS_CONNECTIONS_JSON` 配置 `tenantId`、HTTPS/loopback origin 和服务 token。
+
+外部实例必须独占一个 AwwO 租户，不能通过不同域名或代理别名将同一共享实例绑定给多个租户。旧桥接只支持显式发送、回执查询、读取消息和复制实际消息入库；`sent` 不代表完成，`unknown` 不自动重发，上游审批策略仍归外部实例处理。其单次上游请求 12 秒、响应 2 MiB 的限制只适用于此兼容桥接。
 
 ## 实现位置与数据契约
 
@@ -114,7 +135,7 @@ flowchart LR
   C --> P[待审核页面与决策提案]
   P --> R[人工接受或拒绝]
   R --> V[已发布修订与知识关系]
-  V --> T[规划 / 节点 / 团队 / 图运行]
+  V --> T[规划 / 节点 / 团队 / 图运行 / 执行助手]
   T --> A[实际交付物]
   A --> S
   A --> D[HTML / 3D / PDF / 源码预览]
@@ -127,9 +148,12 @@ flowchart LR
 | 预览 | `apps/web/src/canvas/CanvasPreviewDesk.tsx`、`ArtifactPreview.tsx`、各 `*Preview.tsx`、`previewData.ts` | 实际字节读取、格式分流、资源预算、渲染和清理；节点交付物复用同类渲染器 |
 | 知识持久化 | `backend/internal/app/knowledge.go`、`migrations/019_knowledge.sql`、`migrations/021_knowledge_source_origins.sql` | 租户隔离、原件、不可变修订、追加来源、当前关系、提案、幂等操作和审计 |
 | 执行证据 | `knowledge_context.go`、`wiki_compiler.go`、`runs.go`、`team_context.go`、`graph_runs.go` | 固定版本上下文、编译输出校验、配额和预算、各运行路径的证据传递 |
-| 外部连接 | `openmaus_bridge.go`、`migrations/020_openmaus_dispatch.sql`、前端 `OpenMausBridgePanel.tsx` | 服务端配置、归属校验、显式发送、回执查询、消息入库 |
+| 内置执行界面 | `ManagedExecutionPanel.tsx`、`managedExecutionApi.ts` | 同一模型目录、任务历史、审批和问题、停止、产物归档与刷新 |
+| 内置执行后端 | `computer_execution.go`、`computer_model_proxy.go`、`migrations/022_computer_execution.sql` | 运行授权、持久审批、幂等回执、个人模型代理、产物与配额 |
+| 托管核心与沙箱 | `apps/openmaus-worker/`、`apps/computer-model.ts`、`workspace-sandbox.ts` | 固定上游核心、原生工具审批、隔离工作区、模型协议转换和资源清理 |
+| 外部兼容 API | `openmaus_bridge.go`、`migrations/020_openmaus_dispatch.sql`、`OpenMausBridgePanel.tsx` | 旧外部实例的租户绑定、显式发送、回执查询、消息入库 |
 
-知识存于 PostgreSQL，不依赖本地 Obsidian vault。知识路由位于 `/api/v1/tenants/{tenantId}/knowledge`，画布整理位于 `/canvases/{canvasId}/knowledge-compile`，桥接位于同租户下 `/openmaus`。所有写入遵循工作区权限；复合外键及查询条件保留租户边界。
+知识存于 PostgreSQL，不依赖本地 Obsidian vault。知识路由位于 `/api/v1/tenants/{tenantId}/knowledge`；同租户内的画布整理使用 `/canvases/{canvasId}/knowledge-compile`，执行助手通过 `/computer-runtime` 获取实际能力和模型，通过 `/canvases/{canvasId}/computer-runs` 创建或列出运行，通过 `/computer-runs/{runId}` 读取详情，审批使用其 `/respond`，停止复用 `/runs/{runId}/cancel`。旧桥接保留在 `/openmaus`。所有写入遵循工作区权限；复合外键及查询条件保留租户边界。
 
 知识写入的操作身份、请求哈希、发布变更和审计记录在同一事务内处理。重放同一请求返回先前结果；同身份不同参数返回冲突。接受与恢复还检查文档版本。知识原件及修订不采用“最后写入者覆盖”的更新方式。
 
@@ -141,7 +165,7 @@ flowchart LR
 # 预览格式、安全边界与基础交互
 npm run test:previews --prefix apps/web
 
-# SaaS 前端（包含知识、OpenMaus 面板、画布集成与预览测试）
+# SaaS 前端（包含知识、执行助手、旧桥接、画布集成与预览测试）
 npm run test:saas --prefix apps/web
 npm run typecheck:saas --prefix apps/web
 npm run build:saas
@@ -152,21 +176,25 @@ npm run test:saas:backend
 # 启动脚本与协议服务链路
 npm run test:saas:scripts
 npm run test:saas:stack
+
+# 内置执行核心与模型代理；真实 Docker 测试的显式开关见 worker README
+npm run test:saas:openmaus
+npm run test:saas:computer-model
 ```
 
-后端测试覆盖租户隔离、原件保留、CAS、幂等、恢复、上下文冻结、整理和 OpenMaus 消息协议。前端测试覆盖作用域切换、文件读取、源码选择、错误恢复和只读边界。WebGL/PDF 的浏览器真实渲染、模型实际输出及真实 OpenMaus Bot 执行，需要分别做交互验收。
+后端测试覆盖租户隔离、原件保留、CAS、幂等、恢复、上下文冻结、整理，以及内置执行的授权、审批、模型代理和产物记录。前端测试覆盖作用域切换、文件读取、错误恢复、原操作核对和只读边界。WebGL/PDF 的浏览器真实渲染、真实核心与 Docker 执行、实际提供商模型输出，需要分别验收；定向检查通过不代表全后端竞态测试完成。
 
-可以使用现有本地模型协议 fixture 启动独立验收实例，命令和生命周期见 [浏览器协议 fixture](awwo-saas-development.md#原画布浏览器协议-fixture)。确定性模型响应和模拟 OpenMaus HTTP 服务可验证请求、状态、幂等和 UI 流程，但不能证明上游模型推理、电脑操作或外部任务完成。
+可以使用现有本地模型协议 fixture 启动独立验收实例，命令和生命周期见 [浏览器协议 fixture](awwo-saas-development.md#原画布浏览器协议-fixture)。托管 worker 的真实集成测试启动固定提交的核心与真实 Docker，仅模型 HTTP 响应使用确定性 fixture；它能够验证实际工作区命令、文件和审批协议，但不证明真实提供商的推理质量。旧桥接的模拟 HTTP 测试只覆盖桥接协议。
 
 四窗“示例”只用于验证浏览器渲染，文件明确标为本地演示。即使没有任何模型或 OpenMaus 凭证，这些演示和本地预览也可以工作。
 
-模型未配置、凭证无效或模型不在允许目录时，整理与执行应显示真实不可用原因；不能从按钮可见推断任务可执行。OpenMaus 未配置时状态为 disabled，不展示虚构 Bot。配置齐备或健康检查通过之后，仍须明确发起一次范围有限的真实任务并核对结果，才算对应连接验收通过。
+模型未配置、凭证无效或模型不在允许目录时，整理与执行应显示真实不可用原因；不能从按钮可见推断任务可执行。执行助手在无模型时仅引导用户连接 AwwO「我的引擎」，核心或 Docker 不可用时显示服务未就绪。配置齐备或健康检查通过之后，仍须明确发起一次范围有限的任务并核对实际结果，才算对应连接验收通过。
 
 ## 参考设计快照
 
-本实现参考了以下固定版本的产品思路，沿用 AwwO 的认证、PostgreSQL、画布、执行配额和 worker 架构；没有整体移植这两个仓库，也不把 AwwO 描述为它们的 fork。
+本实现沿用 AwwO 的认证、PostgreSQL、画布、执行配额和 worker 架构。知识工作流参考 claude-obsidian，执行助手构建并运行固定提交的 OpenMaus 开源核心；没有整体移植它们的用户界面，也不把 AwwO 描述为它们的 fork。
 
 - [claude-obsidian，`32ac5a02c4e082e4a5628ca810776375e134708e`](https://github.com/AgriciDaniel/claude-obsidian/tree/32ac5a02c4e082e4a5628ca810776375e134708e)：参考原始资料保留、带来源的知识整理、提案检查与再次利用的循环。本实现没有安装其 Claude 插件或同步 Obsidian 文件夹。[该版本 README](https://github.com/AgriciDaniel/claude-obsidian/blob/32ac5a02c4e082e4a5628ca810776375e134708e/README.md)
-- [OpenMausBot，`104fd17b8f7767e71ba3cf40f27f9c6279b507bd`](https://github.com/milind-soni/OpenMausBot/tree/104fd17b8f7767e71ba3cf40f27f9c6279b507bd)：参考外部 Bot、任务与消息协议，采用可选 HTTP 桥接。上游核心与 `enterprise/` 有不同许可范围，部署上游应核对所使用版本的[许可说明](https://github.com/milind-soni/OpenMausBot/blob/104fd17b8f7767e71ba3cf40f27f9c6279b507bd/LICENSING.md)；本功能没有引入其 enterprise 实现。
+- [OpenMausBot，`104fd17b8f7767e71ba3cf40f27f9c6279b507bd`](https://github.com/milind-soni/OpenMausBot/tree/104fd17b8f7767e71ba3cf40f27f9c6279b507bd)：内置使用固定提交的 Apache-2.0 开源核心，构建保留 LICENSE、NOTICE 与第三方许可，并记录 AwwO 的限制性修改。上游核心与 `enterprise/` 有不同许可范围，详见该版本[许可说明](https://github.com/milind-soni/OpenMausBot/blob/104fd17b8f7767e71ba3cf40f27f9c6279b507bd/LICENSING.md)及仓库 `third_party/openmaus-core/`；本功能没有引入 enterprise 实现。
 
 预览使用锁定版本的 Three.js、PDF.js 与 fflate；依赖和各自许可证以 `apps/web/package-lock.json`、包内容及 PDF 窗口中的授权链接为准。

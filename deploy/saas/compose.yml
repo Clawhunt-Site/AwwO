@@ -125,6 +125,34 @@ services:
     init: true
     restart: unless-stopped
     networks: [private, egress]
+  openmaus:
+    stop_grace_period: 30s
+    build:
+      context: ../..
+      dockerfile: deploy/saas/openmaus.Dockerfile
+    environment:
+      AWWO_OPENMAUS_HOST: 0.0.0.0
+      AWWO_OPENMAUS_PORT: 8099
+      AWWO_OPENMAUS_TOKEN: ${AWWO_OPENMAUS_TOKEN:?Set a dedicated managed execution internal token}
+      AWWO_OPENMAUS_MODEL_PROXY_ORIGINS: http://api:8087
+      AWWO_OPENMAUS_WORKSPACE_IMAGE: ${AWWO_OPENMAUS_WORKSPACE_IMAGE:-awwo-workspace:20261001}
+      AWWO_OPENMAUS_MAX_CONCURRENT: ${AWWO_OPENMAUS_MAX_CONCURRENT:-2}
+    # Only the trusted broker can reach Docker. The model sees a fixed, approved
+    # workspace MCP; the per-run containers receive no socket, host mounts or keys.
+    volumes:
+      - ${AWWO_WORKSPACE_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    group_add:
+      - ${AWWO_WORKSPACE_DOCKER_GID:-999}
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 2g
+    init: true
+    restart: unless-stopped
+    networks: [private]
   api:
     build:
       context: ../..
@@ -149,6 +177,9 @@ services:
       AWWO_TYPESAFE_ENABLED_TENANT_IDS: ${AWWO_TYPESAFE_ENABLED_TENANT_IDS:-}
       AWWO_TYPESAFE_TIMEOUT: ${AWWO_TYPESAFE_TIMEOUT:-10s}
       AWWO_TYPESAFE_MAX_EVALUATIONS_PER_DAY: ${AWWO_TYPESAFE_MAX_EVALUATIONS_PER_DAY:-20}
+      AWWO_OPENMAUS_URL: http://openmaus:8099
+      AWWO_OPENMAUS_TOKEN: ${AWWO_OPENMAUS_TOKEN:?Set a dedicated managed execution internal token}
+      AWWO_COMPUTER_MODEL_PROXY_URL: http://api:8087/api/internal/computer-model/v1
       AWWO_OPENMAUS_CONNECTIONS_JSON: ${AWWO_OPENMAUS_CONNECTIONS_JSON:-[]}
       AWWO_METRICS_LISTEN_ADDR: ${AWWO_METRICS_LISTEN_ADDR:-127.0.0.1:9101}
       AWWO_MODEL_PRICING_JSON: ${AWWO_MODEL_PRICING_JSON:-}
@@ -180,6 +211,7 @@ services:
       database: { condition: service_healthy }
       pi: { condition: service_started }
       openai-agents: { condition: service_started }
+      openmaus: { condition: service_started }
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

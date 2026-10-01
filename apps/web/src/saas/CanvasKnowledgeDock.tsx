@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { BookOpen, Maximize2, Minimize2, RefreshCw, X } from 'lucide-react';
+import { BookOpen, Maximize2, Minimize2, RefreshCw, TerminalSquare, X } from 'lucide-react';
 import { CanvasPreviewDesk } from '../canvas/CanvasPreviewDesk';
 import { api, saasErrorMessage, tenantPath } from './api';
 import { configureCanvasKnowledge } from './canvasBridge';
 import { KnowledgeWorkbench, type KnowledgeArtifactCandidate } from './KnowledgeWorkbench';
-import { OpenMausBridgePanel } from './OpenMausBridgePanel';
+import { ManagedExecutionPanel } from './ManagedExecutionPanel';
 import { createKnowledgeProposal, type KnowledgeContextItem } from './knowledgeApi';
 import { useSaaSPreferences } from './preferences';
 import './canvas-knowledge-dock.css';
@@ -46,7 +46,7 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft }: Props) {
   const { t, locale } = useSaaSPreferences();
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [open, setOpen] = useState(false);
-  const [externalOpen, setExternalOpen] = useState(false);
+  const [executionOpen, setExecutionOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   const [selected, setSelected] = useState<KnowledgeContextItem[]>([]);
   const [error, setError] = useState('');
@@ -146,7 +146,7 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft }: Props) {
   const candidates: KnowledgeArtifactCandidate[] = artifacts.map(item => ({ id: item.id, title: item.name, runId: item.runId, nodeId: item.nodeId, canvasId }));
   return <div className={`awwo-knowledge-dock${focused ? ' is-focused' : ''}`}>
     <div className="awwo-knowledge-dock-bar"><button type="button" onClick={() => setOpen(true)}><BookOpen size={15} />{t('知识地图', 'Knowledge map')}</button>
-      <button type="button" onClick={() => setExternalOpen(true)} aria-label={t('OpenMaus 外部执行连接', 'OpenMaus external execution')}>OpenMaus</button>
+      <button type="button" onClick={() => setExecutionOpen(true)}><TerminalSquare size={15} />{t('执行助手', 'Execution assistant')}</button>
       <span>{selected.length ? t(`已引用 ${selected.length} 份知识`, `${selected.length} references selected`) : t('知识 → 协作 → 产物', 'Knowledge → Work → Artifacts')}</span>
       {selected.length > 0 && !readOnly && <button type="button" aria-label={t('清除任务知识引用', 'Clear task knowledge references')} onClick={() => { configureCanvasKnowledge([]); setSelected([]); }}><X size={14} /></button>}
       <button type="button" disabled={refreshing} aria-label={t('刷新画布产物', 'Refresh canvas artifacts')} onClick={() => { const next = new AbortController(); void refresh(next.signal); }}><RefreshCw size={14} /></button>
@@ -155,7 +155,9 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft }: Props) {
     {error && <p className="awwo-knowledge-dock-error" role="alert">{saasErrorMessage(error, locale)}</p>}
     {notice && <p className="awwo-knowledge-dock-notice" role="status">{notice}</p>}
     <CanvasPreviewDesk scopeKey={`${tenantId}/${canvasId}`} artifacts={artifacts.map(item => ({ reference: `awwo-file:${item.id}`, title: item.name, name: item.name, identity: item.id }))} />
-    {externalOpen && <WorkbenchOverlay label={t('OpenMaus 外部执行', 'OpenMaus execution')} onClose={() => setExternalOpen(false)}><OpenMausBridgePanel tenantId={tenantId} readOnly={readOnly} onClose={() => setExternalOpen(false)} onImported={() => { setNotice(t('外部结果已保存为知识资料，可在知识地图中核对。', 'External result saved as evidence. Review it in the knowledge map.')); }} /></WorkbenchOverlay>}
+    {executionOpen && <WorkbenchOverlay label={t('执行助手', 'Execution assistant')} onClose={() => setExecutionOpen(false)}><ManagedExecutionPanel tenantId={tenantId} canvasId={canvasId} knowledgeReferences={selected} readOnly={readOnly}
+      onClose={() => setExecutionOpen(false)} onArtifactsChanged={() => { void refresh(new AbortController().signal); }}
+      onImported={() => { setWorkbenchVersion(value => value + 1); setNotice(t('任务产物已保存为知识资料，可在知识地图中核对。', 'Task artifact saved as evidence. Review it in the knowledge map.')); }} /></WorkbenchOverlay>}
     {open && <WorkbenchOverlay label={t('知识地图工作台', 'Knowledge workbench')} onClose={() => setOpen(false)}>
       {error && <p className="awwo-knowledge-dock-error" role="alert">{saasErrorMessage(error, locale)}</p>}
       {!readOnly && recent.length > 0 && <div className="awwo-knowledge-resume"><label>{t('历史整理任务', 'Previous compilations')}<select value={recentId} disabled={compiling} onChange={event => setRecentId(event.target.value)}>{recent.map(item => <option key={item.id} value={item.id}>{item.id.slice(0, 8)} · {item.status}</option>)}</select></label><button type="button" disabled={compiling || !recentId} onClick={() => {

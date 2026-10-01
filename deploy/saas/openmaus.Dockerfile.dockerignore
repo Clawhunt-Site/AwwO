@@ -1,0 +1,10 @@
+**
+!apps/
+!apps/openmaus-worker/
+!apps/openmaus-worker/*.ts
+!apps/openmaus-worker/package.json
+!apps/openai-agents-worker/
+!apps/openai-agents-worker/workspace-sandbox.ts
+!third_party/
+!third_party/openmaus-core/
+!third_party/openmaus-core/**

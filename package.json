@@ -9,7 +9,7 @@
   "type": "module",
   "packageManager": "pnpm@9.15.4",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "setup:saas": "node scripts/awwo-saas-setup.mjs",
@@ -31,6 +31,9 @@
     "start:user": "node scripts/awwo-user-start.ts",
     "test:user-models": "node --test apps/user-models.test.ts",
     "build:windows": "node apps/windows/build.ts",
-    "test:windows": "node --test apps/windows/config.test.ts"
+    "test:windows": "node --test apps/windows/config.test.ts",
+    "test:saas:computer-model": "node --test apps/computer-model.test.ts",
+    "test:saas:openmaus": "npm test --prefix apps/openmaus-worker",
+    "check:saas:computer-model": "node apps/openmaus-worker/node_modules/typescript/bin/tsc -p apps/tsconfig.computer-model.json"
   }
 }

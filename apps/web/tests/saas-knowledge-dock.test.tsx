@@ -5,6 +5,7 @@ import { CanvasKnowledgeDock } from '../src/saas/CanvasKnowledgeDock';
 import { canvasKnowledgeRevisionIds, clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import type { KnowledgeContextItem } from '../src/saas/knowledgeApi';
 import type { KnowledgeWorkbenchProps } from '../src/saas/KnowledgeWorkbench';
+import type { ManagedExecutionPanelProps } from '../src/saas/ManagedExecutionPanel';
 
 const fixture = vi.hoisted(() => ({
   api: vi.fn(), proposal: vi.fn(), failed: vi.fn(),
@@ -14,6 +15,10 @@ vi.mock('../src/saas/api', async original => ({ ...await original<typeof import(
 vi.mock('../src/saas/knowledgeApi', async original => ({ ...await original<typeof import('../src/saas/knowledgeApi')>(), createKnowledgeProposal: fixture.proposal }));
 vi.mock('../src/saas/preferences', () => ({ useSaaSPreferences: () => ({ locale: 'zh', t: (zh: string) => zh }) }));
 vi.mock('../src/canvas/CanvasPreviewDesk', () => ({ CanvasPreviewDesk: ({ artifacts }: { artifacts: { identity: string; title: string }[] }) => <div>Preview panes{artifacts.map(item => <span key={item.identity}>{item.title}</span>)}</div> }));
+vi.mock('../src/saas/ManagedExecutionPanel', () => ({ ManagedExecutionPanel: (props: ManagedExecutionPanelProps) => <div>
+  <p>Managed execution · {props.canvasId}</p><p>Execution references: {props.knowledgeReferences?.map(item => item.revisionId).join(', ')}</p>
+  <button onClick={props.onArtifactsChanged}>Produced artifact</button><button onClick={props.onClose}>Close execution</button>
+</div> }));
 vi.mock('../src/saas/KnowledgeWorkbench', () => ({ KnowledgeWorkbench: (props: KnowledgeWorkbenchProps) => <div>
   <button onClick={() => { void props.onTaskContext('quoted content', [fixture.ref as KnowledgeContextItem]); }}>Select evidence</button>
   <button onClick={() => { Promise.resolve(props.onCompile?.('ignored generated prompt', [fixture.ref as KnowledgeContextItem])).catch(fixture.failed); }}>Compile evidence</button>
@@ -60,6 +65,19 @@ it('pins revision identities before handing evidence to the task composer', asyn
   expect(screen.queryByRole('dialog')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '清除任务知识引用' }));
   expect(canvasKnowledgeRevisionIds()).toEqual([]);
+});
+it('opens the integrated assistant with selected knowledge and refreshes real canvas artifacts', async () => {
+  render(<CanvasKnowledgeDock tenantId="tenant-a" canvasId="canvas-a" />);
+  await waitFor(() => expect((screen.getByRole('button', { name: '刷新画布产物' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '知识地图' })); fireEvent.click(screen.getByText('Select evidence'));
+  fireEvent.click(screen.getByRole('button', { name: '执行助手' }));
+  expect(screen.getByText('Managed execution · canvas-a')).toBeTruthy();
+  expect(screen.getByText('Execution references: rev-a')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /OpenMaus/ })).toBeNull();
+  const reads = fixture.api.mock.calls.filter(([path]) => path.endsWith('/artifacts')).length;
+  fireEvent.click(screen.getByText('Produced artifact'));
+  await waitFor(() => expect(fixture.api.mock.calls.filter(([path]) => path.endsWith('/artifacts'))).toHaveLength(reads + 1));
+  fireEvent.click(screen.getByText('Close execution')); expect(screen.queryByRole('dialog')).toBeNull();
 });
 it('creates only review proposals with frozen sources and stable per-run operation IDs', async () => {
   render(<CanvasKnowledgeDock tenantId="tenant-a" canvasId="canvas-a" />);

@@ -1,0 +1,10 @@
+OpenMausBot core, Copyright Milind Soni and OpenMausBot contributors.
+Source: https://github.com/milind-soni/OpenMausBot
+Revision: 104fd17b8f7767e71ba3cf40f27f9c6279b507bd
+License: Apache-2.0 (see LICENSE).
+
+AwwO builds this pinned open-source core on demand; enterprise/ is excluded.
+The upstream runtime is modified at build time by apps/openmaus-worker/setup.ts:
+the OpenAI-compatible driver has computer use disabled; tool mounting is
+restricted to the fixed awwo_workspace MCP; agents and connector capabilities
+are disabled. The original source is not represented as AwwO-authored code.

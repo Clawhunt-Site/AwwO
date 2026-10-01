@@ -338,7 +338,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var model, instructions, kind, runtime, effort, agentID string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind IN ('planner','knowledge') OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID)
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind IN ('planner','knowledge','computer') OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -362,7 +362,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if kind == "planner" || kind == "knowledge" {
+	if kind == "planner" || kind == "knowledge" || kind == "computer" {
 		// Internal service sessions cannot inherit a user-authored node that happens
 		// to reuse the reserved node id, persona, team, or task frame.
 		document, nodeID = []byte(`{}`), ""
@@ -401,7 +401,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.runtimeAdmissionError(w, e)
 		return
 	}
-	if kind == "planner" || kind == "knowledge" {
+	if kind == "planner" || kind == "knowledge" || kind == "computer" {
 		snapshot.Workspace = nil
 	} else if e = a.requireWorkspaceSnapshot(snapshot); e != nil {
 		a.runtimeAdmissionError(w, e)
@@ -415,6 +415,16 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		fail(w, 400, "invalid_task_frame", e.Error())
 		return
+	}
+	if kind == "computer" {
+		var owner string
+		if e = tx.QueryRow(r.Context(), "SELECT actor_id FROM computer_sessions WHERE tenant_id=$1 AND session_id=$2", tid, b.SessionID).Scan(&owner); e != nil || owner != currentUser(r).ID {
+			fail(w, 403, "computer_owner_required", "Only the task owner can execute this session")
+			return
+		}
+		snapshot.Computer = &computerPlan{Version: 1, MaxModelCalls: 16}
+		history := []json.RawMessage{}
+		snapshot.History = &history
 	}
 	budget, overhead := snapshot.Budget, snapshot.Overhead
 	snapshot.Knowledge, e = freezeKnowledgeContext(r.Context(), tx, tid, b.KnowledgeRevisionIDs)
@@ -553,6 +563,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	instructions = knowledgeSystemPrompt(instructions, snapshot.Knowledge)
 	prompt = knowledgeUserPrompt(prompt, snapshot.Knowledge)
+	if kind == "computer" {
+		a.executeComputer(ctx, tid, id, sid, prompt, instructions, snapshot)
+		return
+	}
 	if snapshot.Workspace != nil {
 		a.executeWorkspace(ctx, tid, id, sid, prompt, instructions, kind, snapshot)
 		return
@@ -579,7 +593,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		finish("failed", "", "history_unavailable")
 		return
 	}
-	if kind == "planner" || kind == "knowledge" {
+	if kind == "planner" || kind == "knowledge" || kind == "computer" {
 		history = []json.RawMessage{}
 	} else {
 		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions)+outputContractReserve(snapshot), budget, overhead)
@@ -1048,6 +1062,15 @@ func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if !exists {
 		fail(w, 404, "not_found", "Run not found")
+		return
+	}
+	var computerOtherOwner bool
+	if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND r.id=$2 AND s.kind='computer' AND r.actor_id<>$3)", tid, id, currentUser(r).ID).Scan(&computerOtherOwner); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if computerOtherOwner {
+		fail(w, 403, "computer_owner_required", "Only the task owner can cancel this execution")
 		return
 	}
 	tag, e := tx.Exec(r.Context(), "UPDATE runs SET status='cancelled',error='',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status IN ('queued','running')", tid, id)

@@ -13,8 +13,9 @@ import (
 )
 
 type Config struct {
-	WorkspaceCallbackURL string
-	OpenMausConnections  []openMausConnection
+	WorkspaceCallbackURL                              string
+	OpenMausConnections                               []openMausConnection
+	OpenMausURL, OpenMausToken, ComputerModelProxyURL string
 
 	TypeSafeAPIKey, TypeSafeModel                       string
 	TypeSafeEnabledTenantIDs                            []string
@@ -61,6 +62,7 @@ type Config struct {
 func ConfigFromEnv() (Config, error) {
 	c := Config{Env: env("APP_ENV", "development"), DatabaseURL: os.Getenv("AWWO_DATABASE_URL"), ListenAddr: env("AWWO_LISTEN_ADDR", "127.0.0.1:8087"), PublicOrigin: env("AWWO_PUBLIC_ORIGIN", "http://127.0.0.1:5189"), PIURL: env("AWWO_PI_URL", "http://127.0.0.1:8097"), PIToken: os.Getenv("AWWO_PI_TOKEN"), AdminEmail: os.Getenv("AWWO_BOOTSTRAP_ADMIN_EMAIL"), AdminPassword: os.Getenv("AWWO_BOOTSTRAP_ADMIN_PASSWORD"), SessionTTL: 24 * time.Hour, RunTimeout: 180 * time.Second, MaxBodyBytes: 2 << 20, AuthRequestsPerMinute: 10}
 	c.WorkspaceCallbackURL = os.Getenv("AWWO_WORKSPACE_CALLBACK_URL")
+	c.OpenMausURL, c.OpenMausToken, c.ComputerModelProxyURL = os.Getenv("AWWO_OPENMAUS_URL"), os.Getenv("AWWO_OPENMAUS_TOKEN"), os.Getenv("AWWO_COMPUTER_MODEL_PROXY_URL")
 	if err := c.openMausFromEnv(); err != nil {
 		return c, err
 	}
@@ -153,6 +155,9 @@ func env(k, d string) string {
 	return d
 }
 func (c Config) Validate() error {
+	if err := validateComputerConfiguration(c); err != nil {
+		return err
+	}
 	if err := validateOpenMausConnections(c.OpenMausConnections); err != nil {
 		return err
 	}

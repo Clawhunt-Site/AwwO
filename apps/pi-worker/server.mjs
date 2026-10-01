@@ -1,6 +1,7 @@
 import { bindUserModel } from '../user-models.ts';
 import { createWorkerObservability } from './observability.mjs';
-import { parentObservability } from './usage.mjs';
+import { parentObservability, normalizeUsage } from './usage.mjs';
+import { handleComputerModel } from '../computer-model.ts';
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -48,6 +49,10 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
       return json(response, health.ready ? 200 : 503, health);
     }
     if (!authorized(request, config.token)) return json(response, 401, { error: { code: 'UNAUTHORIZED', message: 'Internal service authentication required.' } });
+    if (request.method === 'POST' && pathname === '/internal/computer-model') return handleComputerModel(request, response, {
+      config, runtime: 'pi', active, sessions, stopping: () => shuttingDown,
+      resolveModel: resolveModelConfig, normalizeUsage, parentObservability, observe: (model, trace) => observability.begin(model, trace),
+    });
     if (request.method === 'DELETE' && /^\/internal\/runs\/[A-Za-z0-9_-]+$/.test(pathname)) {
       const entry = active.get(pathname.slice('/internal/runs/'.length));
       if (!entry) return json(response, 404, { error: { code: 'RUN_NOT_FOUND', message: 'Run not found.' } });

@@ -6,6 +6,7 @@ import { root, stateDir, loadLocalEnv, startDatabase, run, assertPortFree, waitF
 // Both runtimes import their SDK only when the first run starts. Their HTTP
 // health checks can therefore succeed even when setup:saas was never run.
 export async function assertWorkerDependencies(executable = process.execPath, runCommand = run, systemEnvironment = process.env) {
+  if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('AwwO managed execution requires Node.js 24 or newer.');
   const environment = { PATH: path.dirname(executable) };
   for (const name of ['SystemRoot', 'WINDIR']) {
     if (typeof systemEnvironment[name] === 'string' && systemEnvironment[name]) environment[name] = systemEnvironment[name];
@@ -46,7 +47,7 @@ export async function runDevelopment({
     cleanup = cleanup.then(async () => {
       for (const child of children.toReversed()) if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
       await Promise.all(children.map(child => child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise(resolve => {
-        const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 8000);
+        const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 30000);
         child.once('exit', () => { clearTimeout(timer); resolve(); });
       })));
       if (database?.owned) {
@@ -67,7 +68,7 @@ export async function runDevelopment({
   try {
     const { env, envFile, managedDatabase } = await loadEnv();
     if (await finishIfStopping()) return;
-    await Promise.all([Number(env.AWWO_API_PORT), Number(env.AWWO_PI_PORT), Number(env.AWWO_OPENAI_AGENTS_PORT), Number(env.VITE_AWWO_WEB_PORT)].map(assertFree));
+    await Promise.all([Number(env.AWWO_API_PORT), Number(env.AWWO_PI_PORT), Number(env.AWWO_OPENAI_AGENTS_PORT), Number(env.AWWO_OPENMAUS_PORT), Number(env.VITE_AWWO_WEB_PORT)].map(assertFree));
     if (await finishIfStopping()) return;
     if (!runtime.argv.includes('--database-only')) {
       await checkDependencies(runtime.execPath, runCommand);
@@ -94,6 +95,9 @@ export async function runDevelopment({
       if (await finishIfStopping()) return;
       const openAIAgents = launch(runtime.execPath, ['apps/openai-agents-worker/server.mjs'], 'OpenAI Agents worker', serviceEnv.openAIAgents);
       await waitHttp(`${env.AWWO_OPENAI_AGENTS_URL}/health`, openAIAgents, 30000, { allowUnconfiguredRuntime: 'openai-agents' });
+      if (await finishIfStopping()) return;
+      const openMaus = launch(runtime.execPath, ['apps/openmaus-worker/server.ts'], 'Managed execution worker', serviceEnv.openMaus);
+      await waitHttp(`${env.AWWO_OPENMAUS_URL}/health`, openMaus, 45000, { allowManagedOpenMaus: true, authorizationToken: env.AWWO_OPENMAUS_TOKEN });
       if (await finishIfStopping()) return;
       const api = launch(path.join(stateDir, 'bin', 'awwo-api'), [], 'Go API', serviceEnv.api);
       await waitHttp(`${env.AWWO_API_TARGET}/api/v1/health`, api);

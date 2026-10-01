@@ -4,3 +4,6 @@
 !apps/pi-worker/*.mjs
 !apps/pi-worker/package.json
 !apps/pi-worker/package-lock.json
+
+!apps/user-models.ts
+!apps/computer-model.ts
