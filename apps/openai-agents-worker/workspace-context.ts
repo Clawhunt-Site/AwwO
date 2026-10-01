@@ -9,17 +9,28 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const PAGED_READ = 'The complete file remains in the workspace. Do not repeat an unbounded workspace_read for this file. Use workspace_exec with Python to open the relative path, seek to an explicit byte offset, and read at most 4096 bytes per call (decode text as UTF-8 with replacement if a page splits a character). For binary files inspect metadata or selected bytes, not the entire base64 payload. Never claim that an omitted region was read.';
 
 /** Counts only: never return model text, commands, paths, field IDs or hashes. */
-export function workspaceContextSize(request: Request, budget: number, projectedBytes?: number): Record<string, number> {
+export function workspaceContextSize(request: Request, budget: number, projected: Request = request): Record<string, number> {
   try {
     const items = Array.isArray(request.input) ? request.input : [];
     const calls = items.filter(item => item.type === 'function_call');
     const latest = calls.at(-1);
     const latestResult = latest && items.find(item => item.type === 'function_call_result' && item.callId === latest.callId && item.name === latest.name);
     const sum = (accept: (item: Item) => boolean) => items.filter(accept).reduce((count, item) => count + size(item), 0);
-    return { budgetBytes: Math.max(0, Math.floor(budget)), requestBytes: size(request), projectedBytes: projectedBytes ?? size(request),
-      systemBytes: size(request.systemInstructions ?? ''), toolDefinitionsBytes: size(request.tools), inputBytes: size(request.input),
+    const projectedItems = Array.isArray(projected.input) ? projected.input : [];
+    const otherItem = (item: Item) => !['message', 'reasoning', 'function_call', 'function_call_result'].includes(item.type ?? '');
+    return { budgetBytes: Math.max(0, Math.floor(budget)), requestBytes: size(request), projectedBytes: size(projected),
+      systemBytes: size(request.systemInstructions), toolDefinitionsBytes: size(request.tools), inputBytes: size(request.input),
+      requestOtherBytes: size(request) - size(request.systemInstructions) - size(request.tools) - size(request.input),
+      inputFramingBytes: size(request.input) - sum(() => true),
       userMessageBytes: sum(item => item.type === 'message' && item.role === 'user'),
       assistantMessageBytes: sum(item => item.type === 'message' && item.role === 'assistant'),
+      otherMessageBytes: sum(item => item.type === 'message' && item.role !== 'user' && item.role !== 'assistant'),
+      reasoningBytes: sum(item => item.type === 'reasoning'), reasoningItemCount: items.filter(item => item.type === 'reasoning').length,
+      otherItemBytes: sum(otherItem), otherItemCount: items.filter(otherItem).length,
+      providerDataBytes: items.reduce((count, item) => count + size(item.providerData), 0),
+      projectedInputBytes: size(projected.input),
+      projectedReasoningBytes: projectedItems.filter(item => item.type === 'reasoning').reduce((count, item) => count + size(item), 0),
+      projectedOtherItemBytes: projectedItems.filter(otherItem).reduce((count, item) => count + size(item), 0),
       toolCallBytes: sum(item => item.type === 'function_call'), toolResultBytes: sum(item => item.type === 'function_call_result'),
       toolArgumentsBytes: calls.reduce((count, item) => count + Buffer.byteLength(item.arguments), 0),
       latestToolCallBytes: latest ? size(latest) : 0, latestArgumentsBytes: latest ? Buffer.byteLength(latest.arguments) : 0,
@@ -31,10 +42,53 @@ export function workspaceContextSize(request: Request, budget: number, projected
   }
 }
 
-function contextLimit(request: Request, budget: number, projectedBytes?: number): never {
+function contextLimit(request: Request, budget: number, projected?: Request): never {
   const error = new RuntimeError('WORKSPACE_CONTEXT_LIMIT');
-  Object.assign(error, { contextSize: workspaceContextSize(request, budget, projectedBytes) });
+  Object.assign(error, { contextSize: workspaceContextSize(request, budget, projected) });
   throw error;
+}
+
+/** Reasoning belongs to the following assistant/tool group. Never detach it
+ * from a retained tool call: Responses providers may require the opaque item.
+ * Chat SDK reasoning has no status, so completed matching tool results (already
+ * selected for checkpointing) or a completed assistant message prove its turn
+ * ended. Unknown/incomplete groups remain untouched. */
+function reasoningGroups(items: Item[]): { reasoning: number[]; calls: number[]; results: number[]; complete: boolean }[] {
+  const groups: ReturnType<typeof reasoningGroups> = [];
+  for (let index = 0; index < items.length; index++) {
+    if (items[index].type !== 'reasoning') continue;
+    const group = { reasoning: [] as number[], calls: [] as number[], results: [] as number[], complete: true };
+    let next = index;
+    // Providers can emit several opaque reasoning items in the same turn.
+    // Their completion/omission decision must be atomic, including tool pairs.
+    while (items[next]?.type === 'reasoning') {
+      const item = items[next];
+      const status = (item as Record<string, unknown>).status ?? item.providerData?.status;
+      if (status !== undefined && status !== null && status !== 'completed') group.complete = false;
+      group.reasoning.push(next++);
+    }
+    index = next - 1;
+    let completedMessage = false;
+    for (; next < items.length; next++) {
+      const entry = items[next];
+      if (entry.type === 'function_call') { group.calls.push(next); continue; }
+      if (entry.type === 'message' && entry.role === 'assistant') {
+        if (entry.status !== 'completed') group.complete = false;
+        completedMessage = true; continue;
+      }
+      if (entry.type === 'function_call_result' || entry.type === 'reasoning' || entry.type === 'message') break;
+      group.complete = false; break; // Unknown items cannot establish completion.
+    }
+    while (items[next]?.type === 'function_call_result') group.results.push(next++);
+    group.complete = group.complete && (group.calls.length ? group.calls.every(callIndex => {
+      const call = items[callIndex];
+      return call.type === 'function_call' && /^workspace_(list|read|write|exec|publish|archive)$/.test(call.name)
+        && group.results.some(resultIndex => { const result = items[resultIndex]; return result.type === 'function_call_result'
+          && result.callId === call.callId && result.name === call.name && result.status === 'completed'; });
+    }) : completedMessage);
+    groups.push(group);
+  }
+  return groups;
 }
 
 function prefix(value: string, maxBytes: number): string {
@@ -50,6 +104,17 @@ function parsedOutput(item: Item): unknown {
   if (item.type !== 'function_call_result') return undefined;
   const raw = typeof item.output === 'string' ? item.output : record(item.output) && item.output.type === 'text' ? String(item.output.text) : '';
   try { return JSON.parse(raw); } catch { return undefined; }
+}
+
+function completedResultIndex(items: Item[], callIndex: number, call: Extract<Item, { type: 'function_call' }>, removed: ReadonlySet<number>): number {
+  for (let index = callIndex + 1; index < items.length; index++) {
+    const result = items[index];
+    // A reused call ID in a later human/system turn cannot complete this call.
+    if (result.type === 'message' && result.role !== 'assistant') return -1;
+    if (!removed.has(index) && result.type === 'function_call_result' && result.callId === call.callId
+      && result.name === call.name && result.status === 'completed') return index;
+  }
+  return -1;
 }
 
 function receiptSummary(item: Extract<Item, { type: 'function_call' }>, result: Item, excerptBytes = 1200): Record<string, unknown> {
@@ -113,27 +178,36 @@ function boundedLatestResult(item: Extract<Item, { type: 'function_call' }>, res
 export function fitWorkspaceContext(request: Request, budget: number): Request {
   if (size(request) <= budget) return request;
   if (!Array.isArray(request.input)) return contextLimit(request, budget);
-  let smallestProjection = size(request);
+  let smallestProjection = request;
   const fits = (projection: Request): boolean => {
-    const bytes = size(projection); smallestProjection = Math.min(smallestProjection, bytes); return bytes <= budget;
+    const bytes = size(projection); if (bytes < size(smallestProjection)) smallestProjection = projection; return bytes <= budget;
   };
   const items = request.input;
+  const groups = reasoningGroups(items);
   const calls = items.flatMap((item, index) => item.type === 'function_call' ? [{ item, index }] : []);
   const removed = new Set<number>();
   const summaries: { item: Extract<Item, { type: 'function_call' }>; result: Item; latestInteraction?: true }[] = [];
   const project = (excerptBytes = 1200): Request => {
-    if (!removed.size) return request;
+    const omitted = new Set(removed);
+    const reasoning: number[] = [];
+    for (const group of groups) {
+      if (group.complete && group.calls.every(index => removed.has(index))) reasoning.push(...group.reasoning);
+      else for (const index of [...group.calls, ...group.results]) omitted.delete(index);
+    }
+    for (const index of reasoning) omitted.add(index);
+    if (!omitted.size) return request;
+    const reasoningNotice = reasoning.length ? `\nReasoning omitted from ${groups.filter(group => group.reasoning.every(index => omitted.has(index))).length} completed assistant turns (${reasoning.length} reasoning items; ${reasoning.reduce((count, index) => count + size(items[index]), 0)} serialized bytes). Its contents are not summarized and are not execution evidence. Retained tool groups keep their associated reasoning. Original SDK history is unchanged.\n` : '';
     const checkpoint = {
       type: 'message' as const, role: 'assistant' as const, status: 'completed' as const,
-      content: [{ type: 'output_text' as const, text: 'Host context checkpoint: completed tool interactions are summarized below. Source text and directory listings were omitted to fit the context budget; the actual files remain in the workspace. Re-read a file in bounded pages before editing it. A tool completion is not a claim that tests passed.\n' + PAGED_READ + `\nExcerpt budget per command/log: ${excerptBytes} bytes. Original command hashes, lengths and actual exit codes are retained even when excerpts are omitted.\n` + summaries.map(({ item, result, latestInteraction }) => JSON.stringify({ ...receiptSummary(item, result, excerptBytes), ...(latestInteraction ? { latestInteraction } : {}) })).join('\n') }],
+      content: [{ type: 'output_text' as const, text: 'Host context checkpoint: completed tool interactions are summarized below. Source text and directory listings were omitted to fit the context budget; the actual files remain in the workspace. Re-read a file in bounded pages before editing it. A tool completion is not a claim that tests passed.\n' + PAGED_READ + reasoningNotice + `\nExcerpt budget per command/log: ${excerptBytes} bytes. Original command hashes, lengths and actual exit codes are retained even when excerpts are omitted.\n` + summaries.filter(({ item }) => omitted.has(items.indexOf(item))).map(({ item, result, latestInteraction }) => JSON.stringify({ ...receiptSummary(item, result, excerptBytes), ...(latestInteraction ? { latestInteraction } : {}) })).join('\n') }],
     };
-    const first = Math.min(...removed);
-    return { ...request, input: items.flatMap((entry, i) => i === first ? [checkpoint] : removed.has(i) ? [] : [entry]) };
+    const first = Math.min(...omitted);
+    return { ...request, input: items.flatMap((entry, i) => i === first ? [checkpoint] : omitted.has(i) ? [] : [entry]) };
   };
+  if (fits(project())) return project();
   for (const { item, index } of calls.slice(0, -1)) {
     if (!/^workspace_(list|read|write|exec|publish|archive)$/.test(item.name)) continue;
-    const resultIndex = items.findIndex((result, i) => i > index && !removed.has(i) && result.type === 'function_call_result'
-      && result.callId === item.callId && result.name === item.name && result.status === 'completed');
+    const resultIndex = completedResultIndex(items, index, item, removed);
     if (resultIndex < 0) continue;
     const result = items[resultIndex];
     if (result.type !== 'function_call_result') continue;
@@ -151,9 +225,8 @@ export function fitWorkspaceContext(request: Request, budget: number): Request {
   // A single read can be 2 MiB and terminal output can be 64 KiB. Preserve the
   // latest pair, but explicitly project oversized output into a bounded preview.
   const latest = calls.at(-1);
-  if (latest) {
-    const resultIndex = items.findIndex((result, i) => i > latest.index && result.type === 'function_call_result'
-      && result.callId === latest.item.callId && result.name === latest.item.name && result.status === 'completed');
+  if (latest && !groups.some(group => !group.complete && group.calls.includes(latest.index))) {
+    const resultIndex = completedResultIndex(items, latest.index, latest.item, removed);
     if (resultIndex >= 0) {
       const originalResult = items[resultIndex];
       for (const excerptBytes of [1200, 512, 128, 0]) {
@@ -166,10 +239,10 @@ export function fitWorkspaceContext(request: Request, budget: number): Request {
           if (fits(projected)) return projected;
         }
       }
-      // A completed write or batch execution can contain a whole project's
-      // source in its arguments. Preserve its actual receipt/exit status and
-      // command identity without replaying that source or changing SDK history.
-      if (latest.item.name === 'workspace_write' || latest.item.name === 'workspace_exec') {
+      // The latest completed group may contain source arguments or a large
+      // reasoning item. Replace the entire known group together, preserving
+      // verified receipts/exit status without orphaning provider reasoning.
+      if (/^workspace_(list|read|write|exec|publish|archive)$/.test(latest.item.name)) {
         summaries.push({ item: latest.item, result: originalResult, latestInteraction: true });
         removed.add(latest.index); removed.add(resultIndex);
         for (const excerptBytes of [1200, 512, 128, 0]) {

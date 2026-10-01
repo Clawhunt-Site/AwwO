@@ -26,7 +26,7 @@ const ERROR_CLASSES = new Set(['UnknownError', 'RuntimeError', 'Error', 'TypeErr
 const CATEGORIES = new Set(['unknown', 'connection', 'timeout', 'authentication', 'rate_limit', 'unavailable', 'request', 'protocol', 'refusal', 'tool', 'budget', 'delivery', 'workspace', 'worker']);
 const TIMEOUT_CODES = new Set(['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']);
 const CONNECTION_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_SOCKET']);
-const CONTEXT_SIZE_KEYS = ['budgetBytes', 'requestBytes', 'projectedBytes', 'systemBytes', 'toolDefinitionsBytes', 'inputBytes', 'userMessageBytes', 'assistantMessageBytes', 'toolCallBytes', 'toolResultBytes', 'toolArgumentsBytes', 'latestToolCallBytes', 'latestArgumentsBytes', 'latestToolResultBytes', 'inputItemCount'];
+const CONTEXT_SIZE_KEYS = ['budgetBytes', 'requestBytes', 'projectedBytes', 'systemBytes', 'toolDefinitionsBytes', 'inputBytes', 'requestOtherBytes', 'inputFramingBytes', 'userMessageBytes', 'assistantMessageBytes', 'otherMessageBytes', 'reasoningBytes', 'reasoningItemCount', 'otherItemBytes', 'otherItemCount', 'providerDataBytes', 'projectedInputBytes', 'projectedReasoningBytes', 'projectedOtherItemBytes', 'toolCallBytes', 'toolResultBytes', 'toolArgumentsBytes', 'latestToolCallBytes', 'latestArgumentsBytes', 'latestToolResultBytes', 'inputItemCount'];
 function read(value, key) { try { return value && (typeof value === 'object' || typeof value === 'function') ? value[key] : undefined; } catch { return undefined; } }
 function chain(error) {
   const result = [];

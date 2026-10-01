@@ -15,6 +15,7 @@ const checksum = (value: string) => createHash('sha256').update(value).digest('h
 const user: Item = { type: 'message', role: 'user', content: 'Build the authorized game. Preserve the original requirements and do not invent successful tests.' };
 const call = (id: string, name: string, args: Record<string, unknown>): Item => ({ type: 'function_call', callId: id, name, arguments: JSON.stringify(args) });
 const output = (id: string, name: string, result: unknown): Item => ({ type: 'function_call_result', callId: id, name, output: JSON.stringify(result), status: 'completed' });
+const reasoning = (id: string, length = 1200): Item => ({ type: 'reasoning', id, content: [], rawContent: [{ type: 'reasoning_text', text: 'private-reasoning-' + id + '-'.repeat(length) }] });
 const request = (input: Item[]): Request => ({ systemInstructions: 'Original developer requirements must remain byte-for-byte.', input, modelSettings: { maxTokens: 4096 }, tools: [], outputType: 'text', handoffs: [], tracing: false });
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === 'object') { Object.freeze(value); for (const child of Object.values(value)) deepFreeze(child); }
@@ -195,7 +196,131 @@ test('aggregate completed receipts tighten their excerpts to fit while preservin
   assert.ok(minimal.includes('"commandOmitted":true') && minimal.includes('"stdoutOmitted":true') && minimal.includes('"exitCode":1'));
 });
 
-for (const protocol of ['chat_completions', 'responses'] as const) test(`SDK ${protocol} source editing crosses the old byte ceiling while preserving task and tool pairs`, { timeout: 15_000 }, async t => {
+test('accumulated completed reasoning is omitted with its checkpointed tools while the latest group stays intact', () => {
+  const task: Item = { type: 'message', role: 'user', content: 'U'.repeat(6702) };
+  const groups = Array.from({ length: 9 }, (_, index) => [reasoning('thinking-' + index),
+    call('step-' + index, 'workspace_exec', { command: 'python3 - <<\'PY\'\n' + '# generated source\n'.repeat(100) + '\nPY' }),
+    output('step-' + index, 'workspace_exec', { exitCode: index === 3 ? 1 : 0, stdout: 'actual output\n' + 'x'.repeat(1100), stderr: index === 3 ? 'assertion failed' : '', truncated: false })]);
+  const original = deepFreeze({ ...request([task, ...groups.flat()]), systemInstructions: 'D'.repeat(10_047) });
+  const before = JSON.stringify(original); const compact = fitWorkspaceContext(original, 28_416);
+  assert.ok(bytes(compact) <= 28_416); assert.equal(JSON.stringify(original), before);
+  assertPairs(compact.input); assert.ok(Array.isArray(compact.input));
+  assert.deepEqual(compact.input.slice(-3), groups.at(-1)); assert.deepEqual(compact.input[0], task);
+  assert.equal(compact.systemInstructions, original.systemInstructions);
+  const text = checkpoint(compact); assert.match(text, /Reasoning omitted from [1-8] completed assistant turns/);
+  assert.ok(!text.includes('private-reasoning-')); assert.ok(text.includes('"exitCode":1'));
+  const counts = workspaceContextSize(original, 28_416, compact);
+  assert.equal(counts.reasoningItemCount, 9); assert.equal(counts.otherItemBytes, 0);
+  assert.ok(counts.reasoningBytes > 10_000 && counts.projectedReasoningBytes < counts.reasoningBytes);
+  assert.equal(counts.inputBytes, counts.userMessageBytes + counts.assistantMessageBytes + counts.otherMessageBytes
+    + counts.reasoningBytes + counts.toolCallBytes + counts.toolResultBytes + counts.otherItemBytes + counts.inputFramingBytes);
+  assert.equal(counts.requestBytes, counts.systemBytes + counts.toolDefinitionsBytes + counts.inputBytes + counts.requestOtherBytes);
+});
+
+test('completed text-only reasoning can be omitted explicitly without losing the actual assistant message', () => {
+  const assistant: Item = { type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'The previous result is incomplete; the files still need testing.' }] };
+  const source = deepFreeze(request([user, reasoning('previous', 20_000), assistant]));
+  const before = JSON.stringify(source), compact = fitWorkspaceContext(source, 2500);
+  assert.equal(JSON.stringify(source), before); assert.ok(Array.isArray(compact.input));
+  assert.deepEqual(compact.input[0], user); assert.deepEqual(compact.input.at(-1), assistant);
+  assert.ok(checkpoint(compact).includes('Reasoning omitted from 1 completed assistant turns'));
+  assert.ok(!JSON.stringify(compact).includes('private-reasoning-previous'));
+});
+
+test('a latest read with large completed reasoning becomes an honest receipt with bounded reread guidance', () => {
+  const content = 'The actual small file still exists; this is not a placeholder.';
+  const original = deepFreeze(request([user, reasoning('large-read-reasoning', 20_000),
+    call('read', 'workspace_read', { path: 'report.md' }),
+    output('read', 'workspace_read', { path: 'report.md', content, encoding: 'utf8', byteLength: Buffer.byteLength(content), sha256: checksum(content) })]));
+  const before = JSON.stringify(original), compact = fitWorkspaceContext(original, 2500);
+  assert.ok(bytes(compact) <= 2500); assert.equal(JSON.stringify(original), before); assertPairs(compact.input);
+  const text = checkpoint(compact);
+  assert.ok(text.includes('"latestInteraction":true') && text.includes('"sourceOmitted":true'));
+  assert.ok(text.includes('report.md') && text.includes(checksum(content)) && text.includes('"byteLength":' + Buffer.byteLength(content)));
+  assert.ok(text.includes('Reasoning omitted from') && !text.includes(content));
+  assert.ok(text.includes('Do not repeat an unbounded workspace_read') && text.includes('at most 4096 bytes'));
+});
+
+test('reasoning for incomplete, unknown, or partly retained parallel tool groups is not dropped', () => {
+  const largeReasoning = reasoning('must-retain', 20_000);
+  for (const tail of [
+    [call('pending', 'workspace_exec', { command: 'node check.mjs' })],
+    [call('unknown', 'external_action', {}), output('unknown', 'external_action', { ok: true })],
+    [call('first', 'workspace_exec', { command: 'node check.mjs' }), call('pending', 'workspace_exec', { command: 'node check2.mjs' }), output('first', 'workspace_exec', { exitCode: 0 })],
+    [{ type: 'message', role: 'assistant', status: 'in_progress', content: [{ type: 'output_text', text: 'Working.' }] } as Item],
+  ]) {
+    const source = deepFreeze(request([user, largeReasoning, ...tail]));
+    assert.throws(() => fitWorkspaceContext(source, 2500), { code: 'WORKSPACE_CONTEXT_LIMIT' });
+  }
+  const stillStreaming: Item = { ...largeReasoning, providerData: { status: 'in_progress' } };
+  assert.throws(() => fitWorkspaceContext(request([user, stillStreaming, call('done', 'workspace_list', {}), output('done', 'workspace_list', [])]), 2500), { code: 'WORKSPACE_CONTEXT_LIMIT' });
+  const latestReasoning = reasoning('latest', 20_000);
+  const completed = request([user, latestReasoning, call('done', 'workspace_list', { path: '.' }), output('done', 'workspace_list', [])]);
+  const compact = fitWorkspaceContext(completed, 2500);
+  assertPairs(compact.input); assert.ok(checkpoint(compact).includes('"latestInteraction":true'));
+  assert.ok(!JSON.stringify(compact).includes('private-reasoning-latest'));
+});
+
+test('adjacent reasoning items and their completed tool group are checkpointed atomically', () => {
+  const group = [reasoning('first', 12_000), reasoning('second', 12_000),
+    call('done', 'workspace_exec', { command: 'node check.mjs' }), output('done', 'workspace_exec', { exitCode: 1, stdout: 'test failed', stderr: '', truncated: false })];
+  const source = deepFreeze(request([user, ...group]));
+  const before = JSON.stringify(source), compact = fitWorkspaceContext(source, 2500);
+  assert.equal(JSON.stringify(source), before); assertPairs(compact.input); assert.ok(Array.isArray(compact.input));
+  assert.ok(compact.input.every(item => item.type !== 'reasoning' && item.type !== 'function_call' && item.type !== 'function_call_result'));
+  assert.ok(checkpoint(compact).includes('1 completed assistant turns (2 reasoning items;'));
+  assert.ok(checkpoint(compact).includes('"exitCode":1') && checkpoint(compact).includes('test failed'));
+});
+
+test('any incomplete adjacent reasoning item protects the whole group and tool pair even when partial compaction could fit', () => {
+  for (const incompleteIndex of [0, 1]) {
+    const thoughts = [reasoning('first', 50), reasoning('second', 50)];
+    thoughts[incompleteIndex] = { ...thoughts[incompleteIndex], providerData: { status: 'in_progress' } };
+    const group = [...thoughts, call('protected', 'workspace_write', { path: 'large.txt', content: 'x'.repeat(20_000) }),
+      output('protected', 'workspace_write', { written: 'large.txt', bytes: 20_000, sha256: 'a'.repeat(64) })];
+    const source = deepFreeze(request([user, ...group]));
+    assert.throws(() => fitWorkspaceContext(source, 3500), { code: 'WORKSPACE_CONTEXT_LIMIT' });
+    // Another eligible group can still shrink, but the protected group must
+    // remain byte-for-byte, including both reasoning items and the full source.
+    const other = [call('other', 'workspace_write', { path: 'other.txt', content: 'y'.repeat(30_000) }), output('other', 'workspace_write', { written: 'other.txt', bytes: 30_000 })];
+    const combined = deepFreeze(request([user, ...other, ...group]));
+    const compact = fitWorkspaceContext(combined, 25_000); assert.ok(Array.isArray(compact.input));
+    assert.deepEqual(compact.input.slice(-group.length), group); assertPairs(compact.input);
+  }
+});
+
+test('reasoning and tool completion matching cannot cross human or system boundaries', () => {
+  for (const boundary of [user, { type: 'message', role: 'system', content: 'New system instruction.' } as Item]) {
+    const source = deepFreeze(request([user, reasoning('before-boundary', 100),
+      call('reused', 'workspace_write', { path: 'large.txt', content: 'x'.repeat(20_000) }), boundary,
+      output('reused', 'workspace_write', { written: 'large.txt', bytes: 20_000 })]));
+    assert.throws(() => fitWorkspaceContext(source, 3500), { code: 'WORKSPACE_CONTEXT_LIMIT' });
+  }
+  for (const boundary of [user, { type: 'message', role: 'system', content: 'Boundary.' } as Item, { type: 'unknown', providerData: {} } as Item]) {
+    const source = request([user, reasoning('first', 20_000), boundary, reasoning('second', 100),
+      call('done', 'workspace_list', { path: '.' }), output('done', 'workspace_list', [])]);
+    assert.throws(() => fitWorkspaceContext(source, 3500), { code: 'WORKSPACE_CONTEXT_LIMIT' });
+  }
+});
+
+test('safe diagnostics partition reasoning, other message and unknown SDK items without returning their content', () => {
+  const secret = 'private-fixture-opaque-reasoning';
+  const source = request([user, { type: 'message', role: 'system', content: secret.repeat(200) },
+    { type: 'reasoning', content: [], providerData: { status: 'in_progress', encrypted_content: secret.repeat(500) } },
+    { type: 'unknown', providerData: { opaque: secret.repeat(100) } }]);
+  assert.throws(() => fitWorkspaceContext(source, 3000), (error: unknown) => {
+    const diagnostic = errorDiagnostic(error); assert.ok('contextSize' in diagnostic);
+    const counts = diagnostic.contextSize as Record<string, number>;
+    assert.ok(counts.reasoningBytes > 10_000 && counts.otherMessageBytes > 5000 && counts.otherItemBytes > 2000);
+    assert.equal(counts.reasoningItemCount, 1); assert.equal(counts.otherItemCount, 1);
+    assert.equal(counts.projectedOtherItemBytes, counts.otherItemBytes); assert.equal(counts.projectedReasoningBytes, counts.reasoningBytes);
+    assert.ok(counts.providerDataBytes > 15_000);
+    assert.equal(counts.inputBytes, counts.userMessageBytes + counts.assistantMessageBytes + counts.otherMessageBytes + counts.reasoningBytes + counts.toolCallBytes + counts.toolResultBytes + counts.otherItemBytes + counts.inputFramingBytes);
+    assert.ok(!JSON.stringify(diagnostic).includes(secret)); return true;
+  });
+});
+
+for (const protocol of ['chat_completions', 'responses'] as const) for (const withReasoning of [false, true]) test(`SDK ${protocol} source editing with reasoning=${withReasoning} crosses the old byte ceiling while preserving task and tool pairs`, { timeout: 15_000 }, async t => {
   const requests: Record<string, unknown>[] = [], ledger: Record<string, unknown>[] = [];
   const first = '<!doctype html><title>Game</title><script>/*' + 'source-A'.repeat(6000) + '*/</script>';
   const second = first.replace('source-A', 'source-B');
@@ -221,29 +346,37 @@ for (const protocol of ['chat_completions', 'responses'] as const) test(`SDK ${p
     }
     requests.push(value);
     const step = steps[requests.length - 1];
+    const thought = `private-reasoning-${requests.length}:` + 'R'.repeat(1500);
     res.setHeader('content-type', 'text/event-stream');
     if (protocol === 'responses') {
       const id = `item_${requests.length}`;
       const item = step ? { type: 'function_call', id, call_id: 'tool_' + requests.length, name: step.name, arguments: JSON.stringify(step.args), status: 'completed' }
         : { type: 'message', id, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: '{"game":""}', annotations: [] }] };
-      const response = { id: `response_${requests.length}`, object: 'response', created_at: 1, status: 'completed', model: 'fixture', output: [item], usage: { input_tokens: 9, output_tokens: 4, total_tokens: 13 } };
+      const reasoningItem = { type: 'reasoning', id: `reasoning_${requests.length}`, status: 'completed', summary: [{ type: 'summary_text', text: thought }], encrypted_content: 'opaque-fixture-' + 'E'.repeat(600) };
+      const reasoningItems = withReasoning && step ? [reasoningItem, { ...reasoningItem, id: `reasoning_extra_${requests.length}`, summary: [{ type: 'summary_text', text: 'Second opaque item.' }], encrypted_content: 'opaque-second-item' }] : [];
+      const outputIndex = reasoningItems.length;
+      const response = { id: `response_${requests.length}`, object: 'response', created_at: 1, status: 'completed', model: 'fixture', output: [...reasoningItems, item], usage: { input_tokens: 9, output_tokens: 4, total_tokens: 13 } };
       const event = (type: string, data: Record<string, unknown>) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
       event('response.created', { response: { ...response, status: 'in_progress', output: [] } });
-      event('response.output_item.added', { output_index: 0, item: { ...item, status: 'in_progress', ...(step ? { arguments: '' } : { content: [] }) } });
+      for (const [index, thoughtItem] of reasoningItems.entries()) {
+        event('response.output_item.added', { output_index: index, item: { ...thoughtItem, status: 'in_progress', summary: [] } });
+        event('response.output_item.done', { output_index: index, item: thoughtItem });
+      }
+      event('response.output_item.added', { output_index: outputIndex, item: { ...item, status: 'in_progress', ...(step ? { arguments: '' } : { content: [] }) } });
       if (step) {
-        event('response.function_call_arguments.delta', { item_id: id, output_index: 0, delta: JSON.stringify(step.args) });
-        event('response.function_call_arguments.done', { item_id: id, output_index: 0, arguments: JSON.stringify(step.args) });
+        event('response.function_call_arguments.delta', { item_id: id, output_index: outputIndex, delta: JSON.stringify(step.args) });
+        event('response.function_call_arguments.done', { item_id: id, output_index: outputIndex, arguments: JSON.stringify(step.args) });
       } else {
         event('response.content_part.added', { item_id: id, output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } });
         event('response.output_text.delta', { item_id: id, output_index: 0, content_index: 0, delta: '{"game":""}' });
         event('response.output_text.done', { item_id: id, output_index: 0, content_index: 0, text: '{"game":""}' });
         event('response.content_part.done', { item_id: id, output_index: 0, content_index: 0, part: item.content![0] });
       }
-      event('response.output_item.done', { output_index: 0, item });
+      event('response.output_item.done', { output_index: outputIndex, item });
       event('response.completed', { response }); res.end(); return;
     }
     const send = (delta: unknown, finish: string | null) => res.write(`data: ${JSON.stringify({ id: 'context_' + requests.length, object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
-    send({ role: 'assistant', ...(step ? { tool_calls: [{ index: 0, id: 'tool_' + requests.length, type: 'function', function: { name: step.name, arguments: JSON.stringify(step.args) } }] } : { content: '{"game":""}' }) }, null);
+    send({ role: 'assistant', ...(withReasoning && step ? { reasoning: thought } : {}), ...(step ? { tool_calls: [{ index: 0, id: 'tool_' + requests.length, type: 'function', function: { name: step.name, arguments: JSON.stringify(step.args) } }] } : { content: '{"game":""}' }) }, null);
     send({}, step ? 'tool_calls' : 'stop'); res.end('data: [DONE]\n\n');
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -271,6 +404,10 @@ for (const protocol of ['chat_completions', 'responses'] as const) test(`SDK ${p
   assert.equal(JSON.stringify(task), untouched); assert.equal(requests.length, 14);
   assert.equal(events.at(-1)?.type, 'completed'); assert.equal(JSON.parse(String(events.at(-1)?.text)).game, second);
   assert.equal(ledger.length, 28);
+  if (withReasoning) {
+    assert.ok(requests.some(value => JSON.stringify(value).includes('Reasoning omitted from')), 'real SDK history must exercise completed reasoning omission');
+    assert.ok(requests.some(value => JSON.stringify(value).includes('private-reasoning-')), 'reasoning attached to retained tools must really reach the provider');
+  }
   assert.ok(requests.some(value => JSON.stringify(value).includes('Host context checkpoint:')), 'the fixture must really exercise compaction');
   assert.ok(requests.some(value => /Excerpt budget per command\/log: (512|128|0) bytes/.test(JSON.stringify(value))), 'aggregate receipts must really exercise a smaller excerpt tier');
   assert.ok(JSON.stringify(requests[2]).includes(checksum(batchCommand)), 'completed batch source arguments must become an identified checkpoint');
@@ -281,17 +418,24 @@ for (const protocol of ['chat_completions', 'responses'] as const) test(`SDK ${p
     const text = JSON.stringify(value);
     assert.ok(text.includes(task.prompt) && text.includes(task.systemPrompt));
     if (protocol === 'responses') {
-      const items = value.input as { type?: string; call_id?: string }[];
+      const items = value.input as { type?: string; id?: string; call_id?: string }[];
       for (const [index, item] of items.entries()) {
         if (item.type === 'function_call_output') assert.ok(items.slice(0, index).some(previous => previous.type === 'function_call' && previous.call_id === item.call_id), 'orphan Responses tool result');
-        if (item.type === 'function_call') assert.ok(items.slice(index + 1).some(next => next.type === 'function_call_output' && next.call_id === item.call_id), 'orphan Responses tool call');
+        if (item.type === 'function_call') {
+          assert.ok(items.slice(index + 1).some(next => next.type === 'function_call_output' && next.call_id === item.call_id), 'orphan Responses tool call');
+          if (withReasoning) for (const prefix of ['reasoning_', 'reasoning_extra_']) assert.ok(items.slice(0, index).some(previous => previous.type === 'reasoning' && previous.id === item.call_id?.replace('tool_', prefix)), 'retained Responses call lost part of its opaque reasoning group');
+        }
+        if (withReasoning && item.type === 'reasoning') assert.ok(items.slice(index + 1).some(next => next.type === 'function_call' && next.call_id === item.id?.replace(/^reasoning_(extra_)?/, 'tool_')), 'orphan Responses reasoning');
       }
       continue;
     }
-    const messages = value.messages as { role: string; tool_calls?: { id: string }[]; tool_call_id?: string }[];
+    const messages = value.messages as { role: string; reasoning?: string; tool_calls?: { id: string }[]; tool_call_id?: string }[];
     for (const [index, message] of messages.entries()) {
       if (message.role === 'tool') assert.ok(messages.slice(0, index).some(previous => previous.tool_calls?.some(call => call.id === message.tool_call_id)), 'orphan tool result');
-      for (const call of message.tool_calls ?? []) assert.ok(messages.slice(index + 1).some(next => next.role === 'tool' && next.tool_call_id === call.id), 'orphan tool call');
+      for (const call of message.tool_calls ?? []) {
+        assert.ok(messages.slice(index + 1).some(next => next.role === 'tool' && next.tool_call_id === call.id), 'orphan tool call');
+        if (withReasoning) assert.ok(message.reasoning?.includes(call.id.replace('tool_', 'private-reasoning-') + ':'), 'retained Chat call lost its reasoning');
+      }
     }
   }
   assert.ok(JSON.stringify(requests[4]).includes('f.read(4096)'), 'bounded pagination remains a real recorded tool invocation');

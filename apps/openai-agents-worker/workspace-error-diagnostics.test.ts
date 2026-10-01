@@ -43,8 +43,8 @@ test('untrusted child diagnostics are rebuilt and arbitrary fields or enum strin
   for (const value of [null, [], SECRET, { ...dirty, errorClass: SECRET }, { ...dirty, category: SECRET }]) assert.equal(sanitizeErrorDiagnostic(value), undefined);
   assert.deepEqual(sanitizeErrorDiagnostic({ ...dirty, causeClass: SECRET, httpStatus: SECRET }), { errorClass: 'APIError', category: 'request' });
   assert.equal(failureEvent({ toString() { throw new Error('untrusted failure code must not be coerced'); } }).code, 'MODEL_ERROR');
-  assert.deepEqual(sanitizeErrorDiagnostic({ errorClass: 'RuntimeError', category: 'budget', contextSize: { requestBytes: 9000, projectedBytes: 4000, latestArgumentsBytes: 7000, inputItemCount: SECRET, budgetBytes: Infinity, userMessageBytes: -1, source: SECRET, command: SECRET } }),
-    { errorClass: 'RuntimeError', category: 'budget', contextSize: { requestBytes: 9000, projectedBytes: 4000, latestArgumentsBytes: 7000 } });
+  assert.deepEqual(sanitizeErrorDiagnostic({ errorClass: 'RuntimeError', category: 'budget', contextSize: { requestBytes: 9000, projectedBytes: 4000, reasoningBytes: 2000, projectedReasoningBytes: 300, otherItemBytes: 0, providerDataBytes: 500, latestArgumentsBytes: 7000, inputItemCount: SECRET, budgetBytes: Infinity, userMessageBytes: -1, source: SECRET, command: SECRET, rawReasoning: SECRET } }),
+    { errorClass: 'RuntimeError', category: 'budget', contextSize: { requestBytes: 9000, projectedBytes: 4000, reasoningBytes: 2000, projectedReasoningBytes: 300, otherItemBytes: 0, providerDataBytes: 500, latestArgumentsBytes: 7000 } });
 });
 
 test('real child IPC strips malicious diagnostic fields and replaces an unknown failure code', { timeout: 5000 }, async t => {
