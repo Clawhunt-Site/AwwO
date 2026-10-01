@@ -12,7 +12,8 @@
 // visually distinct from the empty state ("还没有对话"). Collapsing the two would tell the
 // operator that nothing was ever said when the truth is that we could not find out.
 
-import { Fragment, useEffect, useRef, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowDown } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { HistoryState, Turn } from './sessions';
@@ -126,8 +127,25 @@ export interface TileTranscriptProps {
 }
 
 export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false, renderTurnDetails }: TileTranscriptProps) {
-  const { t } = useCanvasI18n();
+  const { locale, t } = useCanvasI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followingRef = useRef(true);
+  const previousScrollTop = useRef(0);
+  const previousAutoScroll = useRef(autoScroll);
+  const [following, setFollowing] = useState(true);
+  const follow = (value: boolean) => {
+    followingRef.current = value;
+    setFollowing(value);
+  };
+  const scrollToLatest = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // Keep this instant: an animated jump can race the next streaming update or an upward
+    // gesture. The browser clamps the value to its current scrollable extent.
+    if (typeof el.scrollTo === 'function') el.scrollTo({ top: el.scrollHeight });
+    else el.scrollTop = el.scrollHeight;
+    previousScrollTop.current = el.scrollTop;
+  };
   const shown = Number.isFinite(limit) ? turns.slice(Math.max(0, turns.length - limit)) : turns;
   // Failed restored runs may have only their accepted user message. Keep one details slot per
   // run, preferring its agent reply when present; message text is not a durable identity.
@@ -140,15 +158,37 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
     }
   });
 
+  useLayoutEffect(() => {
+    if (autoScroll && !previousAutoScroll.current) follow(true);
+    previousAutoScroll.current = autoScroll;
+    if (autoScroll && followingRef.current) scrollToLatest();
+  }, [turns, autoScroll, history]);
+
   useEffect(() => {
-    if (!autoScroll) return;
     const el = scrollRef.current;
-    if (!el) return;
-    // jsdom implements neither scrollTo nor real layout; guard both so a test environment (and any
-    // engine without smooth scrolling) degrades to a plain assignment instead of throwing.
-    if (typeof el.scrollTo === 'function') el.scrollTo({ top: el.scrollHeight });
-    else el.scrollTop = el.scrollHeight;
-  }, [turns, autoScroll]);
+    if (!el || !autoScroll) return;
+    const pause = () => {
+      if (el.scrollHeight > el.clientHeight) follow(false);
+    };
+    // Listen at the scroller itself: the canvas tile claims wheel events before they reach
+    // React's delegated listener. Pause before the next token can steal the user's gesture.
+    const wheel = (event: WheelEvent) => { if (event.deltaY < 0) pause(); };
+    let touchY: number | null = null;
+    const touchStart = (event: TouchEvent) => { touchY = event.touches[0]?.clientY ?? null; };
+    const touchMove = (event: TouchEvent) => {
+      const next = event.touches[0]?.clientY;
+      if (touchY !== null && next !== undefined && next > touchY + 4) pause();
+      if (next !== undefined) touchY = next;
+    };
+    el.addEventListener('wheel', wheel, { passive: true });
+    el.addEventListener('touchstart', touchStart, { passive: true });
+    el.addEventListener('touchmove', touchMove, { passive: true });
+    return () => {
+      el.removeEventListener('wheel', wheel);
+      el.removeEventListener('touchstart', touchStart);
+      el.removeEventListener('touchmove', touchMove);
+    };
+  }, [autoScroll]);
 
   return (
     <div className="canvas-transcript">
@@ -157,7 +197,25 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
           {t('transcript.unreadable')}
         </div>
       ) : null}
-      <div className="canvas-transcript-scroll" ref={scrollRef} data-testid="transcript-scroll">
+      <div className="canvas-transcript-viewport">
+      <div className="canvas-transcript-scroll" ref={scrollRef} data-testid="transcript-scroll" tabIndex={autoScroll ? 0 : undefined}
+        onKeyDownCapture={event => {
+          const target = event.target as HTMLElement;
+          if (target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+          if (autoScroll && ['PageUp', 'Home', 'ArrowUp'].includes(event.key)
+            && event.currentTarget.scrollHeight > event.currentTarget.clientHeight) follow(false);
+        }}
+        onScroll={event => {
+          const el = event.currentTarget;
+          const top = el.scrollTop;
+          if (autoScroll) {
+            if (top < previousScrollTop.current) follow(false);
+            // Only a downward scroll re-arms following. A layout or streaming update near
+            // the bottom must not cancel the user's explicit upward gesture.
+            else if (top > previousScrollTop.current && el.scrollHeight - top - el.clientHeight <= 40) follow(true);
+          }
+          previousScrollTop.current = top;
+        }}>
         {shown.length === 0 ? (
           history === 'loading' ? (
             <div className="canvas-transcript-loading">{t('transcript.loading')}</div>
@@ -180,6 +238,15 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
             </Fragment>
           ))
         )}
+      </div>
+      {autoScroll && !following && <button className="canvas-transcript-jump" type="button" onClick={() => {
+        follow(true);
+        scrollToLatest();
+        // The pill disappears after jumping; keep keyboard focus in the reading surface.
+        scrollRef.current?.focus({ preventScroll: true });
+      }}>
+        <ArrowDown size={13} aria-hidden="true" />{locale === 'zh' ? '回到最新' : 'Jump to latest'}
+      </button>}
       </div>
       {streaming && status ? <div className="canvas-transcript-status">{status}</div> : null}
     </div>

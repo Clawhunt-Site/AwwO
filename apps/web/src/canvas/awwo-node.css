@@ -176,6 +176,13 @@
 .canvas-root .awwo-deliverables-empty { color: var(--awwo-muted); text-align: center; padding: 45px 8px; }
 .canvas-root .awwo-deliverable { border: 1px solid var(--awwo-line); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
 .canvas-root .awwo-deliverable-title { margin: 0; padding: 9px 12px; background: var(--awwo-soft); font-size: 12px; font-weight: 600; }
+.canvas-root .awwo-deliverable-files { display: flex; gap: 4px; overflow-x: auto; padding: 2px 2px 8px; margin-bottom: 2px; }
+.canvas-root .awwo-deliverable-files button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: 180px; min-height: 32px; padding: 6px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--awwo-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.canvas-root .awwo-deliverable-files button span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.canvas-root .awwo-deliverable-files button svg { flex-shrink: 0; }
+.canvas-root .awwo-deliverable-files button[aria-pressed="true"] { border-color: var(--awwo-line); background: var(--awwo-soft); color: var(--awwo-ink); }
+.canvas-root .awwo-deliverable-files button:hover { color: var(--awwo-ink); background: var(--awwo-soft); }
+.canvas-root .awwo-deliverable-files button:focus-visible { outline: 2px solid var(--awwo-teal); outline-offset: -2px; }
 /* A stored file deliverable: the body is a download action, not previewable text. */
 .canvas-root .awwo-deliverable-file { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--awwo-accent, #286454); text-decoration: underline; text-underline-offset: 3px; }
 .canvas-root .awwo-deliverable-body { padding: 10px 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -231,6 +238,15 @@
 .canvas-root .awwo-node:not(.canvas-tile--selected):not(.canvas-tile--focus) { z-index: 0; }
 
 .canvas-root[data-narrow-focus='true'] .awwo-node.canvas-tile--focus .awwo-node-delivery-drawer { position: absolute; inset: 0; z-index: 8; width: 100%; border-left: 0; }
+
+/* Read-only and running nodes can open a delivery locally without resizing the saved
+ * document. Fit the drawer to the actual workstation, even on a wide desktop. */
+.canvas-root .awwo-node-workbench { container: awwo-workbench / inline-size; }
+@container awwo-workbench (max-width: 739px) {
+  .canvas-root .awwo-node-delivery-drawer { position: absolute; inset: 0; z-index: 8; width: 100%; border-left: 0; }
+}
+.canvas-root .awwo-chat-heading { flex-wrap: wrap; }
+.canvas-root .awwo-chat-heading > button { flex-shrink: 0; white-space: nowrap; }
 
 @media (max-width: 600px) {
   .canvas-root .awwo-node.canvas-tile--focus .canvas-tile-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

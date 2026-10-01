@@ -34,7 +34,8 @@ export function createModelNode(model: ModelPaletteSelection, personaId: AgentTe
   const node = createAgentTemplate('general', world, locale);
   const persona = personaId ? getAgentTemplates(locale).find(template => template.id === personaId) : undefined;
   if (personaId && !persona) throw new Error('Unknown persona');
-  return { ...node, title: persona ? `${model.label} · ${persona.title}` : model.label,
+  const title = model.displayName || model.label;
+  return { ...node, title: persona ? `${title} · ${persona.title}` : title,
     contract: { ...node.contract!, outputs: node.contract!.outputs.filter(field => field.id === 'result') },
     runtime: model.runtime, model: model.model, effort: '', persona: persona?.persona ?? node.persona };
 }

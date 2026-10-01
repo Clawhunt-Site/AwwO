@@ -135,6 +135,69 @@ describe('node deliverables', () => {
     expect(screen.getByText('手动采用')).toBeTruthy();
   });
 
+  it('reads one published file at a time and keeps source and expanded views scoped to that file', () => {
+    render(<NodeDeliverables node={node({
+      contract: { version: 1, inputs: [], outputs: [field(), field({ id: 'checks', label: '验收记录' })] },
+      lastOutput: { text: JSON.stringify({ summary: '# 实现内容', checks: '# 验证通过\n\n保留 **原文**。' }), at: 1 },
+    })} readOnly />);
+    const files = within(screen.getByRole('group', { name: '交付物', exact: true }));
+    expect(files.getByRole('button', { name: '交付说明' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('heading', { name: '实现内容' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '验证通过' })).toBeNull();
+    fireEvent.click(files.getByRole('button', { name: '验收记录' }));
+    expect(files.getByRole('button', { name: '验收记录' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('heading', { name: '实现内容' })).toBeNull();
+    expect(screen.getByRole('heading', { name: '验证通过' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '源码', exact: true }));
+    expect(screen.getByLabelText('Markdown 源码').textContent).toBe('# 验证通过\n\n保留 **原文**。');
+    fireEvent.click(screen.getByRole('button', { name: '放大预览' }));
+    expect(screen.getByRole('dialog', { name: '验收记录' })).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(files.getByRole('button', { name: '交付说明' }));
+    expect(screen.getByRole('heading', { name: '实现内容' })).toBeTruthy();
+    expect(screen.queryByLabelText('Markdown 源码')).toBeNull();
+  });
+
+  it('falls back immediately when a selected file disappears, a new output arrives, or the Session changes', () => {
+    const current = node({
+      contract: { version: 1, inputs: [], outputs: [field(), field({ id: 'checks', label: '验收记录' })] },
+      lastOutput: { text: JSON.stringify({ summary: '# 本次实现', checks: '# 本次验证' }), at: 1 },
+    });
+    const { rerender } = render(<NodeDeliverables node={current} readOnly />);
+    fireEvent.click(screen.getByRole('button', { name: '验收记录' }));
+    rerender(<NodeDeliverables node={{ ...current, contract: { ...current.contract!, outputs: [field()] } }} readOnly />);
+    expect(screen.queryByRole('group', { name: '交付物', exact: true })).toBeNull();
+    expect(screen.getByRole('heading', { name: '本次实现' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '本次验证' })).toBeNull();
+
+    rerender(<NodeDeliverables node={current} readOnly />);
+    fireEvent.click(screen.getByRole('button', { name: '验收记录' }));
+    const next = { ...current, lastOutput: { text: JSON.stringify({ summary: '# 新实现', checks: '# 新验证' }), at: 2 } };
+    rerender(<NodeDeliverables node={next} readOnly />);
+    expect(screen.getByRole('heading', { name: '新实现' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '本次验证' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '验收记录' }));
+    expect(screen.getByRole('heading', { name: '新验证' })).toBeTruthy();
+    rerender(<NodeDeliverables node={{ ...next, activeThreadId: 'other', lastOutput: null, threads: [{
+      id: 'other', title: 'Session 2', issueId: null, preview: '', draft: '', createdAt: 1,
+      lastOutput: { text: JSON.stringify({ summary: '# 历史实现', checks: '# 历史验证' }), at: 2 },
+    }] }} readOnly />);
+    expect(screen.getByRole('heading', { name: '历史实现' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '新验证' })).toBeNull();
+    expect(screen.getByText('历史交付 · 未传递给下游')).toBeTruthy();
+  });
+
+  it('keeps invalid multi-field output visible instead of hiding evidence in the file picker', () => {
+    const original = '{"summary":"可读部分","count":"不是数字"}';
+    render(<NodeDeliverables node={node({
+      contract: { version: 1, inputs: [], outputs: [field(), field({ id: 'count', label: '数量', type: 'number' })] },
+      lastOutput: { text: original, at: 1 },
+    })} readOnly />);
+    expect(screen.getByText('输出未通过表单校验')).toHaveAttribute('role', 'alert');
+    expect(screen.getByText(original)).toBeTruthy();
+    expect(screen.queryByRole('group', { name: '交付物', exact: true })).toBeNull();
+  });
+
   it('shows the selected Session history without publishing it downstream', () => {
     const update = vi.fn();
     const selected = node({

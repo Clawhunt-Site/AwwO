@@ -178,7 +178,15 @@ function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<Con
 /** The overview shows a published result before any newer chat snippet. */
 function firstMeaningfulLine(value: string): string {
   const lines = value.split(/\\n|\r?\n/).map(line => line.trim()).filter(Boolean);
-  return lines[0]?.endsWith(':') || lines[0]?.endsWith('：') ? (lines[1] || lines[0]) : (lines[0] || '');
+  // Section labels are useful in the full delivery, but the overview should lead with its
+  // content. Keep a readable title as the fallback when no body has arrived yet.
+  const body = lines.filter(line => !/^#{1,6}(?:\s|$)/.test(line) && !/^\*\*[^*]+\*\*[:：]?$/.test(line));
+  const candidates = body.length ? body : lines;
+  const first = candidates[0] || '';
+  const selected = /[:：]$/.test(first) ? (candidates[1] || first) : first;
+  const text = /^#{1,6}(?:\s|$)/.test(selected)
+    ? selected.replace(/^#{1,6}(?:\s+|$)/, '').replace(/\s+#+\s*$/, '') : selected;
+  return text.replace(/\*\*([^*]+)\*\*/g, '$1').trim();
 }
 
 function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField, 'id'>>, locale: UiLocale): string {
@@ -734,7 +742,7 @@ export const SessionTile = memo(function SessionTile({
                       <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound')}</span>
                       {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
-                    : <TileTranscript turns={session.turns} history={session.history} streaming={session.streaming}
+                    : <TileTranscript key={storeKey} turns={session.turns} history={session.history} streaming={session.streaming}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}

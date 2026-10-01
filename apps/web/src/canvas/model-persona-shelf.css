@@ -27,7 +27,10 @@
 .model-persona-shelf h2, .model-persona-shelf h3, .model-persona-shelf h4, .model-persona-shelf p { margin: 0; }
 .model-persona-shelf h2 { font-size: 13px; font-weight: 650; }
 .model-persona-shelf h3, .model-persona-shelf legend { font-size: 12px; font-weight: 650; }
-.model-persona-shelf h4 { font-size: 11px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.model-persona-shelf h4 { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.model-persona-shelf-provider { display: grid; place-items: center; flex: 0 0 25px; height: 25px; border-radius: 7px; background: var(--shelf-selected); }
+.model-persona-shelf-provider.is-claude { color: #bc8569; }
+.model-persona-shelf-provider.is-gemini { color: #7489cf; }
 .model-persona-shelf button { font: inherit; color: inherit; cursor: pointer; }
 .model-persona-shelf button:disabled { cursor: not-allowed; }
 .model-persona-shelf button:focus-visible, .model-persona-shelf input:focus-visible, .model-persona-shelf select:focus-visible { outline: 2px solid var(--strong, #667861); outline-offset: 3px; }

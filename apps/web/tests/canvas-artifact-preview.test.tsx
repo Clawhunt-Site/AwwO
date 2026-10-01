@@ -77,6 +77,20 @@ describe('isolated HTML rendition', () => {
     expect(screen.getByTitle('作品 · HTML 预览')).toBeTruthy();
   });
 
+  it('keeps compact expand and download controls named for keyboard and screen-reader access', () => {
+    render(<ArtifactPreview source={html} type="html" title="作品" renderMarkdown={markdown} />);
+    const expand = screen.getByRole('button', { name: '放大预览' });
+    const download = screen.getByRole('button', { name: '下载 .html' });
+    expect(expand).toHaveAttribute('title', '放大预览');
+    expect(download).toHaveAttribute('title', '下载 .html');
+    expect(expand.textContent).toBe('');
+    expect(download.textContent).toBe('');
+    expect(screen.getByRole('button', { name: '预览', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '源码', exact: true }));
+    expect(screen.getByRole('button', { name: '源码', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('HTML 源码').textContent).toBe(html);
+  });
+
   it('keeps partial historical HTML visible without publishing it or offering a final download', () => {
     const node = { ...createSessionNode('coding', { x: 0, y: 0 }), id: 'owner', lastOutput: null,
       contract: { version: 1 as const, inputs: [], outputs: [{ id: 'result', label: '作品', type: 'html' as const, required: true, value: '' }] },

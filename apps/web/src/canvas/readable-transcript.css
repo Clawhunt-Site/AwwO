@@ -1,3 +1,40 @@
+.canvas-root .canvas-transcript-viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.canvas-root .canvas-transcript-scroll:focus-visible {
+  outline: 2px solid var(--awwo-teal, var(--accent));
+  outline-offset: -2px;
+}
+.canvas-root .canvas-transcript-jump {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--awwo-line, var(--line));
+  border-radius: 999px;
+  background: var(--awwo-card, var(--panel));
+  color: var(--awwo-ink, var(--text));
+  box-shadow: 0 3px 12px #0001;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.canvas-root .canvas-transcript-jump:hover { background: var(--awwo-soft, var(--soft)); }
+.canvas-root .canvas-transcript-jump:focus-visible {
+  outline: 2px solid var(--awwo-teal, var(--accent));
+  outline-offset: 2px;
+}
 .canvas-root .canvas-transcript-details {
   margin-top: 8px;
   white-space: normal;

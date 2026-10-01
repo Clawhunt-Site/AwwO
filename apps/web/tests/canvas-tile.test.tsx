@@ -46,6 +46,24 @@ describe('SessionTile compact header actions', () => {
     expect(screen.getByRole('button', { name: '打开 LLM 会话' })).toHaveTextContent('产出（未完成，仅部分）');
   });
 
+  it.each([
+    ['# 一句定位\nAwwO 让**多个 Agent**按图协作。', 'AwwO 让多个 Agent按图协作。'],
+    ['**短版文案**\n**AwwO**，让工作可编排。', 'AwwO，让工作可编排。'],
+    ['# 产品介绍\n## 一句定位\n**价值**\n把目标拆成看得见的执行步骤。', '把目标拆成看得见的执行步骤。'],
+    ['### 只有标题 ###', '只有标题'],
+    ['**只有标题**', '只有标题'],
+    ['**AwwO** 把协作过程放在画布上。', 'AwwO 把协作过程放在画布上。'],
+  ])('uses readable delivery content in the compact card: %s', (markdown, expected) => {
+    const raw = JSON.stringify({ result: markdown });
+    const output = Object.freeze({ text: raw, source: 'run' as const, at: 1 });
+    const delivered = node({ lastOutput: output });
+    render(<SessionTile node={delivered} compact scale={1} focused={false} onToggleFocus={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '打开 LLM 会话' })).toHaveTextContent(expected);
+    expect(screen.getByRole('button', { name: '打开 LLM 会话' })).not.toHaveTextContent('**');
+    expect(delivered.lastOutput).toBe(output);
+    expect(output.text).toBe(raw);
+  });
+
   it('summarizes a saved JSON preview when no published output field is present', () => {
     render(<SessionTile node={node({ preview: '{"result":"完成内容：\\n核对任务顺序"}' })}
       compact scale={1} focused={false} onToggleFocus={vi.fn()} />);

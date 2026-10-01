@@ -7,6 +7,12 @@ const model: ModelPaletteSelection = { key: '["pi","qwen-test"]', label: 'Qwen',
   runtime: 'pi', model: 'qwen-test', available: true, effort: 'high' };
 
 describe('canvas model drops', () => {
+  it('uses a concise published name while preserving the exact connected model selector', () => {
+    const connected = { ...model, model: 'opaque-connection-selector', label: 'Qwen P6 · LLM Gate · primary / abc123', displayName: 'Qwen P6' };
+    expect(createModelNode(connected, null, { x: 0, y: 0 }, 'zh')).toMatchObject({ title: 'Qwen P6', model: connected.model });
+    expect(createModelNode(connected, 'frontend', { x: 0, y: 0 }, 'zh').title).toBe(`Qwen P6 · ${getAgentTemplates('zh').find(item => item.id === 'frontend')!.title}`);
+    expect(createModelNode({ ...model, label: 'Custom · Model' }, null, { x: 0, y: 0 }, 'zh').title).toBe('Custom · Model');
+  });
   it('resolves only the current workspace catalogue identity', () => {
     const raw = modelDragPayload('workspace-a', model, 'frontend');
     expect(resolveModelDrop(raw, 'workspace-a', [model])).toEqual({ model, personaId: 'frontend' });

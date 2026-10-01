@@ -8,6 +8,8 @@ export type ModelProviderGroup = 'codex' | 'claude' | 'grok' | 'gemini' | 'clawh
 export interface ModelPaletteSelection {
   key: string;
   label: string;
+  /** Published model name without connection metadata; never used as a runtime selector. */
+  displayName?: string;
   providerGroup: ModelProviderGroup;
   runtime: NodeTeamRuntime;
   model: string;
@@ -71,6 +73,7 @@ export function groupModels(status: SaaSRuntimeStatus | null, locale: UiLocale =
       const group = providerGroup(model);
       const available = runtime.available && runtime.configured;
       groups.find(item => item.id === group)!.models.push({ key, label: clean(model.label) || clean(model.name) || model.id,
+        displayName: clean(model.name) || clean(model.label) || model.id,
         providerGroup: group, runtime: runtime.id, model: model.id, available,
         ...(available ? {} : { reason: runtime.reason || text(locale, '此模型的执行服务尚未就绪。', 'This model’s runtime is not ready.') }) });
     }

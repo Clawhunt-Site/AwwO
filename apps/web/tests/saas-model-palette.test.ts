@@ -53,6 +53,11 @@ it('uses a GPT selector only when the published model name is absent', () => {
   expect(groups[0].models[0]).toMatchObject({ label: 'gpt-5.6-sol', model: 'gpt-5.6-sol' });
 });
 
+it('separates the published display name from connection labels without changing identity', () => {
+  const groups = groupModels(status([{ ...model('private-selector'), name: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6 · LLM Gate · primary' }]));
+  expect(groups[4].models[0]).toMatchObject({ displayName: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6 · LLM Gate · primary', model: 'private-selector' });
+});
+
 it.each(['codex', 'claude', 'grok', 'gemini'])('does not let a %s alias override the published model identity', alias => {
   const groups = groupModels(status([
     { ...model(`${alias}-selection`), name: 'gpt-5.6-sol', label: `${alias} display alias` },

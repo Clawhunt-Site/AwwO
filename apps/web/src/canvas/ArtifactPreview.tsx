@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Code2, Download, Eye, File, Maximize2, X } from 'lucide-react';
+import { Download, File, Maximize2, X } from 'lucide-react';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
 import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
@@ -103,6 +103,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   const documentSource = type === 'html' ? htmlDocumentSource(source) : source;
   const tooLarge = new TextEncoder().encode(documentSource).byteLength > MAX_ARTIFACT_PREVIEW_BYTES;
   const html = useMemo(() => type === 'html' && !tooLarge ? htmlPreviewDocument(documentSource) : '', [documentSource, type, tooLarge]);
+  const downloadLabel = downloadUrl ? t('deliverable.downloadFile') : t('deliverable.downloadFormat', { format: type === 'html' ? 'html' : 'md' });
   const download = () => {
     // Plain source previews are stored artifacts and use their original download
     // endpoint; never re-export them as a different HTML/Markdown file type.
@@ -112,12 +113,16 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   };
   return <div className="awwo-artifact-preview">
     <div className="awwo-artifact-toolbar" role="group" aria-label={title}>
-      {type !== 'text' && <button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}><Eye size={13} aria-hidden="true" />{text.preview}</button>}
-      <button type="button" aria-pressed={type === 'text' || mode === 'source'} onClick={() => setMode('source')}><Code2 size={13} aria-hidden="true" />{text.source}</button>
-      {allowExpand && !tooLarge && <button type="button" aria-label={text.expand} title={text.expand} onClick={() => setExpanded(true)}><Maximize2 size={13} aria-hidden="true" /><span>{text.expand}</span></button>}
-      {canDownload && (downloadUrl
-        ? <a className="awwo-artifact-download" href={downloadUrl} download rel="noreferrer" onClick={onStoredDownload}><Download size={13} aria-hidden="true" />{t('deliverable.downloadFile')}</a>
-        : type !== 'text' && <button className="awwo-artifact-download" type="button" onClick={download}><Download size={13} aria-hidden="true" />{t('deliverable.downloadFormat', { format: type === 'html' ? 'html' : 'md' })}</button>)}
+      <div className="awwo-artifact-modes">
+        {type !== 'text' && <button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}>{text.preview}</button>}
+        <button type="button" aria-pressed={type === 'text' || mode === 'source'} onClick={() => setMode('source')}>{text.source}</button>
+      </div>
+      <div className="awwo-artifact-actions">
+        {allowExpand && !tooLarge && <button type="button" aria-label={text.expand} title={text.expand} onClick={() => setExpanded(true)}><Maximize2 size={15} aria-hidden="true" /></button>}
+        {canDownload && (downloadUrl
+          ? <a className="awwo-artifact-download" href={downloadUrl} download rel="noreferrer" aria-label={downloadLabel} title={downloadLabel} onClick={onStoredDownload}><Download size={15} aria-hidden="true" /></a>
+          : type !== 'text' && <button className="awwo-artifact-download" type="button" aria-label={downloadLabel} title={downloadLabel} onClick={download}><Download size={15} aria-hidden="true" /></button>)}
+      </div>
     </div>
     {tooLarge ? <p className="awwo-artifact-status" role="status">{text.tooLarge}</p>
       : type === 'text' || mode === 'source' ? <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code>{documentSource}</code></pre>

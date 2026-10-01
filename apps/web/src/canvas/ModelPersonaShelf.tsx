@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { Search, X } from 'lucide-react';
+import { Asterisk, Boxes, Code2, Search, Sparkles, Slash, X } from 'lucide-react';
 import { getAgentTemplates, type AgentTemplateId } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
 import type { ModelPaletteGroup, ModelPaletteSelection } from './modelPalette';
 import './model-persona-shelf.css';
+
+const providerGlyphs = { codex: Code2, claude: Asterisk, grok: Slash, gemini: Sparkles, clawhunt: Boxes };
 
 export interface ModelPersonaShelfProps {
   groups: readonly ModelPaletteGroup[];
@@ -110,7 +112,7 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
         </div>}
         {visibleGroups.map(group => <section key={group.id} className="model-persona-shelf-group" aria-labelledby={`${id}-${group.id}`}>
           <div className="model-persona-shelf-group-head">
-            <h4 id={`${id}-${group.id}`}>{group.label}</h4>
+            <h4 id={`${id}-${group.id}`}><span className={`model-persona-shelf-provider is-${group.id}`} aria-hidden="true">{(() => { const Icon = providerGlyphs[group.id]; return <Icon size={15} />; })()}</span>{group.label}</h4>
             {!group.available && <span className="model-persona-shelf-badge" title={group.reason}>
               {loading ? (en ? 'Loading' : '读取中') : error ? (en ? 'Not loaded' : '未读取') : group.models.length ? (en ? 'Not ready' : '未就绪') : (en ? 'Not configured' : '未配置')}
             </span>}
