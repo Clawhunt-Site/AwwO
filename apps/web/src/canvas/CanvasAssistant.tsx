@@ -29,6 +29,8 @@ export interface CanvasAssistantProps {
   runtimeControls?: ReactNode;
   submitLabel?: string;
   submitDisabled?: boolean;
+  /** An accepted cloud request is awaiting observation; it must not become a new submission. */
+  recovery?: { prompt: string; canResume: boolean; busy: boolean; onResume: () => void; onStop: () => void };
   /** Last progress the host observed for the in-flight plan; absent until the run reports. */
   progress?: PlanProgress;
   /** Seconds the last successful plan took, measured on this device; shown as an expectation. */
@@ -112,7 +114,7 @@ function progressSignature(progress: PlanProgress | undefined): string {
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
 export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
-  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false }: CanvasAssistantProps) {
+  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery }: CanvasAssistantProps) {
   const { locale, t } = useCanvasI18n();
   const examples = [t('assistant.exampleSaas'), t('assistant.exampleData'), t('assistant.exampleContent')];
   const welcome = mode === 'welcome';
@@ -120,7 +122,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const errorId = useId();
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
-  const canSend = !busy && !submitDisabled && Boolean(draft.trim());
+  const canSend = !busy && !recovery && !submitDisabled && Boolean(draft.trim());
   const lastMessage = messages.at(-1);
   const duplicateLastError = lastMessage?.role === 'assistant' && lastMessage.status === 'error' && lastMessage.content === error;
   useEffect(() => {
@@ -209,6 +211,15 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
 
     <div className="awwo-assistant-composer-block">
       {error ? <p className="awwo-assistant-error" role="alert" id={errorId}>{error}</p> : null}
+      {recovery ? <div className="awwo-assistant-recovery" role="group" aria-label={t('assistant.recoveryTitle')}>
+        <p>{t('assistant.recoveryTitle')}</p>
+        <p className="awwo-assistant-recovery-prompt">{recovery.prompt}</p>
+        <p>{t(recovery.canResume ? 'assistant.recoveryHint' : 'assistant.recoveryChanged')}</p>
+        <div className="awwo-assistant-composer-actions">
+          <button type="button" className="awwo-assistant-cancel" disabled={busy || recovery.busy} onClick={recovery.onStop}>{t('assistant.recoveryStop')}</button>
+          <button type="button" className="awwo-assistant-send" disabled={busy || recovery.busy || !recovery.canResume} onClick={recovery.onResume}>{t('assistant.recoveryResume')}</button>
+        </div>
+      </div> : null}
       {runtimeControls ? <div className="awwo-assistant-runtime">{runtimeControls}</div> : null}
       <form className="awwo-assistant-composer" aria-label={t('assistant.form')} onSubmit={event => { event.preventDefault(); send(); }}>
         <textarea ref={input} aria-label={t('assistant.input')} aria-describedby={error ? errorId : undefined}
@@ -226,7 +237,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       </button> : null}
     </div>
 
-    {welcome ? <div className="awwo-assistant-examples" role="group" aria-label={t('assistant.examples')}>
+    {welcome && !recovery ? <div className="awwo-assistant-examples" role="group" aria-label={t('assistant.examples')}>
       {examples.map(example => <button type="button" key={example} disabled={busy}
         onClick={() => { onDraftChange(example); input.current?.focus(); }}>{example}</button>)}
     </div> : null}

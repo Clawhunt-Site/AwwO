@@ -1,5 +1,5 @@
 import { api, tenantPath, SaaSApiError } from './api';
-import { currentSaaSCanvas, flushSaaSCanvas } from './canvasBridge';
+import { currentSaaSCanvas, flushSaaSCanvas, canvasKnowledgeRevisionIds } from './canvasBridge';
 import type { CanvasDocument } from '../canvas/canvasDoc';
 import { runInputFingerprint } from '../canvas/runRecoveryDocument';
 import { activeThreadId } from '../canvas/nodeThreads';
@@ -131,6 +131,7 @@ export async function submitCloudGraph(operationId: string, scope: readonly stri
   const captured = currentSaaSCanvas();
   if (!captured) throw new GraphNotSubmittedError('Cloud canvas is unavailable');
   const requestedScope = [...scope];
+  const knowledgeRevisionIds = canvasKnowledgeRevisionIds();
   const requestedCollaboration = collaboration ? { ...collaboration } : undefined;
   if (requestedCollaboration && !validGraphCollaboration({ ...requestedCollaboration, maxModelCalls: 2 * requestedScope.length * requestedCollaboration.rounds + 1,
     phase: 'proposal', round: 0, turns: [] }, requestedScope)) throw new GraphNotSubmittedError('Invalid collaboration policy or selection');
@@ -140,7 +141,7 @@ export async function submitCloudGraph(operationId: string, scope: readonly stri
   if (captured !== currentSaaSCanvas()) throw new GraphNotSubmittedError('The active workspace changed before submission');
   if (!Number.isInteger(documentVersion) || Number(documentVersion) < 1) throw new GraphNotSubmittedError('The saved canvas version is unavailable');
   return api<GraphRunSnapshot>(graphPath(captured.tenant.id, captured.canvasId), {
-    method: 'POST', body: JSON.stringify({ operationId, scope: requestedScope, documentVersion, ...(requestedCollaboration ? { collaboration: requestedCollaboration } : {}) }),
+    method: 'POST', body: JSON.stringify({ operationId, scope: requestedScope, documentVersion, ...(knowledgeRevisionIds.length ? { knowledgeRevisionIds } : {}), ...(requestedCollaboration ? { collaboration: requestedCollaboration } : {}) }),
   });
 }
 

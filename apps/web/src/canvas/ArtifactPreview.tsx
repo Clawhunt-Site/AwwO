@@ -6,6 +6,8 @@ import { sessionFetch } from '../saas/api';
 import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
 import { artifactImageType } from './artifactImage';
+import { BinaryArtifactPreview } from './BinaryArtifactPreview';
+import { PREVIEW_LIMITS, previewKind, type PreviewFile } from './previewData';
 import './artifactPreview.css';
 
 // Kept together so the same preview can be used in both the native and cloud workbench.
@@ -14,7 +16,7 @@ const messages = {
     preview: '预览', source: '源码', html: 'HTML 预览', markdown: 'Markdown 源码', plain: '文件源码',
     loading: '正在读取交付物…', unavailable: '暂时无法预览，请重试或下载文件。',
     unsupported: '此文件格式暂不支持预览，可以下载查看。',
-    tooLarge: '文件超过 2 MiB 预览上限，请下载查看。', retry: '重试预览',
+    tooLarge: '文件超过 2 MiB 预览上限，请下载查看。', storedTooLarge: '文件超过对应格式的预览上限，请下载查看。', retry: '重试预览',
     static: '静态预览 · 脚本和外部资源已停用', expand: '放大预览', close: '关闭预览',
     run: '运行交互', stop: '停止交互', reset: '重新开始',
     interactive: '独立沙盒 · 不授予 AwwO 账号或存储访问；外部资源受限，但不等同于网络隔离。',
@@ -23,7 +25,7 @@ const messages = {
     preview: 'Preview', source: 'Source', html: 'HTML preview', markdown: 'Markdown source', plain: 'File source',
     loading: 'Loading deliverable…', unavailable: 'Preview unavailable. Retry or download the file.',
     unsupported: 'Preview is not available for this file format. Download it to view.',
-    tooLarge: 'This file exceeds the 2 MiB preview limit. Download it to view.', retry: 'Retry preview',
+    tooLarge: 'This file exceeds the 2 MiB preview limit. Download it to view.', storedTooLarge: 'This file exceeds the preview limit for its format. Download it to view.', retry: 'Retry preview',
     static: 'Static preview · scripts and external resources are disabled', expand: 'Expand preview', close: 'Close preview',
     run: 'Run interaction', stop: 'Stop interaction', reset: 'Restart',
     interactive: 'Isolated sandbox · no AwwO account or storage access is granted. External resources are restricted; this is not complete network isolation.',
@@ -49,7 +51,7 @@ export interface ArtifactPreviewProps extends DownloadProps {
 
 /** Native modal isolation also contains focus inside an opaque-origin preview iframe. The
  * explicit key/focus handlers cover environments with incomplete dialog support. */
-function ExpandedPreview({ title, closeLabel, onClose, children }: { title: string; closeLabel: string; onClose: () => void; children: ReactNode }) {
+export function ExpandedPreview({ title, closeLabel, onClose, children }: { title: string; closeLabel: string; onClose: () => void; children: ReactNode }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const dismiss = useRef(onClose);
@@ -153,7 +155,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   </div>;
 }
 
-type StoredContent = { type: PreviewType; source: string; name: string } | { type: 'image'; blob: Blob; name: string };
+export type StoredContent = { type: PreviewType; source: string; name: string } | { type: 'image'; blob: Blob; name: string } | { type: 'model' | 'pdf' | 'ide'; name: string; file: PreviewFile };
 
 function StoredImagePreview({ content, downloadUrl, title, onStoredDownload }: { content: Extract<StoredContent, { type: 'image' }>; title: string; downloadUrl: string; onStoredDownload: (event: MouseEvent<HTMLAnchorElement>) => void }) {
   const { locale, t } = useCanvasI18n();
@@ -198,10 +200,12 @@ export async function readArtifactPreview(response: Response, signal: AbortSigna
   const name = artifactFilename(response.headers.get('Content-Disposition') || '');
   if (!name) { await response.body?.cancel(); throw new Error('preview_unavailable'); }
   const type = /\.html?$/i.test(name) ? 'html' : /\.(?:md|markdown)$/i.test(name) ? 'markdown'
-    : /\.(?:png|jpe?g|webp|gif)$/i.test(name) ? 'image' : TEXT_SOURCE_EXTENSION.test(name) ? 'text' : null;
+    : /\.(?:png|jpe?g|webp|gif)$/i.test(name) ? 'image' : TEXT_SOURCE_EXTENSION.test(name) ? 'text' : previewKind(name);
   if (!type) { await response.body?.cancel(); return 'unsupported'; }
+  const binary = type === 'model' || type === 'pdf' || type === 'ide';
+  const limit = binary ? PREVIEW_LIMITS[type] : MAX_ARTIFACT_PREVIEW_BYTES;
   const length = response.headers.get('Content-Length');
-  if (length && (!/^\d+$/.test(length) || Number(length) > MAX_ARTIFACT_PREVIEW_BYTES)) {
+  if (length && (!/^\d+$/.test(length) || Number(length) > limit)) {
     await response.body?.cancel(); throw new Error('preview_too_large');
   }
   const reader = response.body?.getReader();
@@ -219,14 +223,15 @@ export async function readArtifactPreview(response: Response, signal: AbortSigna
       if (signal.aborted) throw new Error('preview_aborted');
       if (chunk.done) break;
       size += chunk.value.byteLength;
-      if (size > MAX_ARTIFACT_PREVIEW_BYTES) throw new Error('preview_too_large');
-      if (type === 'image') imageChunks.push(chunk.value);
+      if (size > limit) throw new Error('preview_too_large');
+      if (type === 'image' || binary) imageChunks.push(chunk.value);
       else source += decoder.decode(chunk.value, { stream: true });
     }
-    if (type === 'image') {
+    if (type === 'image' || binary) {
       const bytes = new Uint8Array(size);
       let offset = 0;
       for (const chunk of imageChunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      if (type === 'model' || type === 'pdf' || type === 'ide') return { type, name, file: { name, bytes } };
       const mime = artifactImageType(name, bytes);
       if (!mime) throw new Error('preview_unavailable');
       return { type, name, blob: new Blob([bytes.buffer], { type: mime }) };
@@ -290,13 +295,17 @@ export function StoredArtifactPreview({ reference, title, identity, renderMarkdo
     if (currentSaaSCanvas() !== scope || storedArtifactUrl(reference) !== url) event.preventDefault();
   };
   if (current?.content?.type === 'image') return <StoredImagePreview key={`${identity}:${url}`} content={current.content} title={title} downloadUrl={url} onStoredDownload={onStoredDownload} />;
-  if (current?.content) return <ArtifactPreview key={`${identity}:${url}`} source={current.content.source} type={current.content.type}
+  if (current?.content && 'file' in current.content) return <div className="awwo-artifact-preview">
+    <div className="awwo-artifact-toolbar"><File size={15} aria-hidden="true" /><span>{current.content.name}</span><div className="awwo-artifact-actions"><a href={url} download rel="noreferrer" onClick={onStoredDownload} aria-label={t('deliverable.downloadFile')}><Download size={15} aria-hidden="true" /></a></div></div>
+    <BinaryArtifactPreview key={`${identity}:${url}`} file={current.content.file} type={current.content.type} />
+  </div>;
+  if (current?.content && 'source' in current.content) return <ArtifactPreview key={`${identity}:${url}`} source={current.content.source} type={current.content.type}
     title={current.content.type === 'text' ? current.content.name : title} renderMarkdown={renderMarkdown} downloadUrl={url} onStoredDownload={onStoredDownload} />;
   return <div className="awwo-artifact-preview">
     <div className="awwo-artifact-toolbar"><File size={15} aria-hidden="true" />
       <a className="awwo-artifact-download" href={url} download rel="noreferrer" onClick={onStoredDownload}><Download size={13} aria-hidden="true" />{t('deliverable.downloadFile')}</a>
     </div>
-    <p className="awwo-artifact-status" role={current?.state === 'unavailable' ? 'alert' : 'status'}>{text[current?.state === 'unavailable' ? 'unavailable' : current?.state === 'tooLarge' ? 'tooLarge' : current?.state === 'unsupported' ? 'unsupported' : 'loading']}</p>
+    <p className="awwo-artifact-status" role={current?.state === 'unavailable' ? 'alert' : 'status'}>{text[current?.state === 'unavailable' ? 'unavailable' : current?.state === 'tooLarge' ? 'storedTooLarge' : current?.state === 'unsupported' ? 'unsupported' : 'loading']}</p>
     {current?.state === 'unavailable' && <button type="button" onClick={() => setAttempt(previous => previous + 1)}>{text.retry}</button>}
   </div>;
 }

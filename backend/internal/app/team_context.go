@@ -104,7 +104,7 @@ func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput,
 				"This review envelope takes precedence over persona format directions and the graph contract's outer-envelope instruction."
 		}
 	}
-	system = taskFrameSystemPrompt(system, snap.TaskFrame)
+	system = knowledgeSystemPrompt(taskFrameSystemPrompt(system, snap.TaskFrame), snap.Knowledge)
 	upstream := input.Upstream
 	if m.Context == "task" && !input.Required {
 		upstream = nil
@@ -116,13 +116,13 @@ func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput,
 	fits := func(prompt string) bool {
 		return len(prompt)+len(system)+overhead <= budget && len(utf16.Encode([]rune(prompt))) <= 128000
 	}
-	prompt := renderTeamPrompt(input, nil)
+	prompt := knowledgeUserPrompt(renderTeamPrompt(input, nil), snap.Knowledge)
 	if !fits(prompt) || len(utf16.Encode([]rune(system))) > 32768 {
 		return "", "", nil, audit, errors.New("context_limit")
 	}
 	start := len(upstream)
 	for i := len(upstream) - 1; i >= 0; i-- {
-		candidate := renderTeamPrompt(input, upstream[i:])
+		candidate := knowledgeUserPrompt(renderTeamPrompt(input, upstream[i:]), snap.Knowledge)
 		if !fits(candidate) {
 			break
 		}

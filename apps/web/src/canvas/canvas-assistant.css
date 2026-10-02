@@ -13,7 +13,10 @@
 .awwo-canvas-assistant button:disabled { cursor: not-allowed; opacity: .45; }
 .awwo-canvas-assistant button:focus-visible, .awwo-canvas-assistant textarea:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 3px; }
 .awwo-canvas-assistant svg { flex: 0 0 auto; }
-.awwo-canvas-assistant--welcome { width: 100%; height: 100%; align-items: center; justify-content: center; padding: 32px 24px; overflow-y: auto; }
+.awwo-canvas-assistant--welcome { width: 100%; height: 100%; align-items: center; justify-content: flex-start; padding: 32px 24px; overflow-y: auto; }
+/* Auto margins center short content but collapse for a tall recovery/history view, keeping its top reachable. */
+.awwo-canvas-assistant--welcome > :first-child { margin-top: auto; }
+.awwo-canvas-assistant--welcome > :last-child { margin-bottom: auto; }
 .awwo-assistant-header { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; }
 .awwo-canvas-assistant .awwo-assistant-header :is(h1,h2) { width: auto; max-width: none; margin: 0; color: inherit; line-height: 1.4; }
 .awwo-canvas-assistant--welcome .awwo-assistant-header { margin-bottom: 25px; text-align: center; }
@@ -72,6 +75,10 @@
 .awwo-assistant-empty { margin: 4px 0 0; color: var(--awwo-muted, #68736d); font-size: 13px; }
 .awwo-assistant-error, .awwo-assistant-message p[role='alert'] { color: #a33f35; }
 .awwo-assistant-error { margin: 0 0 10px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.awwo-assistant-recovery { margin-bottom: 12px; padding: 12px; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 12px; background: var(--awwo-accent-soft, #edf4ee); font-size: 12px; text-align: left; }
+.awwo-canvas-assistant .awwo-assistant-recovery p { margin: 0 0 6px; overflow-wrap: anywhere; }
+.awwo-assistant-recovery-prompt { max-height: 100px; overflow-y: auto; white-space: pre-wrap; font-weight: 550; }
+.awwo-assistant-recovery .awwo-assistant-composer-actions { flex-wrap: wrap; }
 .awwo-canvas-assistant--panel .awwo-assistant-composer-block { padding: 0 16px 16px; }
 .awwo-canvas-assistant--panel .awwo-assistant-composer { padding: 10px; border-radius: 12px; box-shadow: none; }
 .awwo-canvas-assistant--panel .awwo-assistant-composer textarea { font-size: 13px; max-height: 160px; }
@@ -84,7 +91,7 @@
 @keyframes awwo-assistant-pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes awwo-assistant-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 @media (max-width: 600px) {
-  .awwo-canvas-assistant--welcome { padding: 24px 18px; justify-content: safe center; }
+  .awwo-canvas-assistant--welcome { padding: 24px 18px; }
   .awwo-canvas-assistant--welcome .awwo-assistant-header { margin-bottom: 20px; }
   .awwo-assistant-examples { margin-top: 16px; }
   .awwo-canvas-assistant--panel .awwo-assistant-header { min-height: 56px; }

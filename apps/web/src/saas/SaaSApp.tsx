@@ -27,6 +27,7 @@ import { ProductionCases } from './ProductionCases';
 import { rememberOfficialSelection } from './examples/officialSelection';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
+import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
 import { AppearanceScope } from './SaaSAppearance';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink } from './SaaSOnboarding';
 import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
@@ -339,6 +340,7 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
   return <div className="saas-canvas-shell">
     <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)}
+      previewDesk={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} readOnly />}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone="readonly" status={<><Eye size={12} aria-hidden="true" /><span title={t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}>{t('只读', 'Read-only')}</span><span className="saas-visually-hidden">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span></>} />}
       headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
@@ -374,6 +376,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const [manualRecovery, setManualRecovery] = useState(false);
   // A request typed on the workspace home for this canvas, handed to the surface to plan once.
   const [initialPlan, setInitialPlan] = useState<InitialPlanRequest | null>(null);
+  const [knowledgeTaskDraft, setKnowledgeTaskDraft] = useState<CanvasTaskDraft | null>(null);
   const current = useRef<CanvasRecord | null>(null);
   const pending = useRef<CanvasDocument | null>(null);
   const writerId = useRef(crypto.randomUUID()).current;
@@ -711,6 +714,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
+      taskDraft={knowledgeTaskDraft} previewDesk={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} />}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
       headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {

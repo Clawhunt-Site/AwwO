@@ -378,7 +378,7 @@ describe('stored byte preview', () => {
     configureSaaSCanvas({ tenant, canvasId: 'canvas' });
     const cancel = vi.fn();
     const body = new ReadableStream<Uint8Array>({ cancel });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { headers: { 'Content-Disposition': 'attachment; filename=report.pdf' } })));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { headers: { 'Content-Disposition': 'attachment; filename=report.xlsx' } })));
     render(stored());
     expect(await screen.findByText('此文件格式暂不支持预览，可以下载查看。')).toBeTruthy();
     expect(cancel).toHaveBeenCalledOnce();

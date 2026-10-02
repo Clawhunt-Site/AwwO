@@ -4,7 +4,7 @@ import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStora
 import { clearRunJournal, journalSummary, loadRunJournal, reconcileRunJournal, saveRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
 import { applyRecoveredDocument, recoveryJournalForDocument, runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 import { SaaSApiError, type Tenant } from '../src/saas/api';
-import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
+import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave, configureCanvasKnowledge, canvasKnowledgeRevisionIds } from '../src/saas/canvasBridge';
 import { GraphNotSubmittedError, graphAdmissionRejected, graphRecoveryJournal, mergeGraphSnapshot, observeCloudGraph, submitCloudGraph, type GraphRunSnapshot } from '../src/saas/graphRuns';
 
 const tenant: Tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
@@ -211,6 +211,16 @@ describe('durable cloud graph identity and recovery', () => {
 });
 
 describe('cloud graph admission', () => {
+  it('captures knowledge revisions before a save wait and clears references when scope changes', async () => {
+    configureSaaSCanvas({ tenant, canvasId: 'canvas-a' }); configureCanvasKnowledge(['revision-first']);
+    let saved!: (version: number) => void;
+    configureSaaSCanvasSave(() => new Promise<number>(resolve => { saved = resolve; }));
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit = {}) => json(snapshot())); vi.stubGlobal('fetch', fetcher);
+    const result = submitCloudGraph('operation-a', ['a']);
+    configureCanvasKnowledge(['revision-later']); saved(17); await result;
+    expect(JSON.parse(fetcher.mock.calls[0]![1].body as string).knowledgeRevisionIds).toEqual(['revision-first']);
+    configureSaaSCanvas({ tenant, canvasId: 'canvas-b' }); expect(canvasKnowledgeRevisionIds()).toEqual([]);
+  });
   it('waits for the exact save callback version and posts it once with the requested scope', async () => {
     configureSaaSCanvas({ tenant, canvasId: 'canvas-a' });
     let saved!: (version: number) => void;

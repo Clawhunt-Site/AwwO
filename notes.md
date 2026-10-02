@@ -1,0 +1,30 @@
+# Implementation notes
+
+Current reference snapshots: claude-obsidian 32ac5a02c4e082e4a5628ca810776375e134708e; OpenMausBot 104fd17b8f7767e71ba3cf40f27f9c6279b507bd.
+
+The knowledge design adopts source preservation, traceable claims, reviewed atomic updates and scoped memory. The default execution assistant now builds and runs the real pinned OpenMaus OSS core, with Apache-2.0 notices preserved and enterprise/ excluded. It does not import the upstream product UI.
+
+AwwO already provides team sequential/parallel/debate/review modes, tenant-scoped artifacts, isolated workspace execution and context budgeting. Artifact records have a canvas lifetime; knowledge storage must not inherit that lifetime.
+
+Default Homebrew Node is broken (missing llhttp); use the bundled runtime after checking its version. Do not change host package configuration.
+
+## Native execution integration
+
+- One user entry: CanvasKnowledgeDock → 执行助手 → the actual AwwO My Engines model catalogue. No external OpenMaus login, Bot setup, second model key, URL or token is required from product users. Each accepted run gets its own core process, Bot session and Docker workspace.
+- Real capabilities are workspace list/read/write/exec/publish/archive plus native ask_user. Build restrictions disable computer use, additional MCP mounts, agents and connectors. This does not control the host desktop, mouse/keyboard or browser GUI.
+- Tenant and actor ownership are rechecked by the backend. Task submission, approval/question response and cancellation are explicit; unknown receipts retain the same operation identity and never automatically resend. Read-only users cannot mutate, and only the original actor can respond or cancel an active run.
+- Selected immutable knowledge revisions enter the task as cited data. Published files use actual sandbox bytes and hashes, refresh the four preview candidates, and supported UTF-8 artifacts can be copied into independent knowledge sources for later review. Preview success and artifact publication remain separate checks.
+- Docker daemon, workspace image, internal service token, proxy origin and Docker socket permissions are deployment concerns. setup:saas/dev:saas include the managed worker. The model and per-run workspace never receive the Docker socket or provider credentials; missing Docker gives real 503 readiness.
+- The previous external /openmaus bridge remains advanced API compatibility, separate from the default managed flow. Its shared-instance tenant binding and uncertain-send semantics still apply when explicitly deployed.
+
+## Verification snapshot, 2026-10-01
+
+- Final SaaS web: 74 files / 948 tests pass with maxWorkers=2; both TypeScript configs, SaaS build, static-ui and diff-check pass. Logs: /tmp/awwo-native-web-*.log. The legacy default web suite cannot load its config because server/ui lacks @mdxeditor/editor/style.css; do not report it as passed.
+- Managed backend: Computer-targeted race tests 4/4 pass, plus the blank question answer regression. Current full backend race reaches its 20-minute timeout (1200.302s) and is NOT a full pass; log: .local/knowledge-evidence/backend-native-race.log. go vet passes. Earlier 342-test knowledge-phase evidence belongs to an older snapshot.
+- Managed worker: ordinary suite 11 pass / 5 explicitly skipped real scenarios, typecheck passes; shared model proxy 8/8 with strict TypeScript and setup scripts 24/24 pass. The final proxy regression verifies Google personal-profile wire compatibility after binding; log /tmp/awwo-native-computer-model-google.log. Explicit real pinned-core + Docker scenarios pass for execution/publish/SHA/question, refusal, cancellation, SSE disconnect and model budget; model HTTP is deterministic fixture data. Concurrent identical approval replay and full write arguments also pass a later positive regression. Real provider reasoning quality remains unverified.
+- Final Linux arm64 managed-worker image awwo-openmaus:managed-qa (sha256:36f810bcc25868f0c90989d0ba95b8dcfa78c02b5bcb56c61fafee77e2bf16dd) builds with the final approval-title correction. Pinned core, licensing, non-root user, approval title/full-argument separation, original questions and missing-Docker 503 are read back. Evidence: /tmp/awwo-native-openmaus-image.log, .id and -smoke.json. This is a local image check, not deployment.
+- Existing OpenAI worker deadline/UTF-8 regression remains failed after DEADLINE_EXCEEDED because expected provider call count 1 was 0 before the 2s startup deadline; later UTF-8 assertions did not run. Log: /tmp/awwo-native-openai-retry.log. Do not conflate this with the passing managed OpenMaus suite.
+- Root completed deterministic local provider → Pi raw gateway → Go model lease → real pinned core → Docker → API artifacts. Run aaszN3tunC_BjA8BxcEDXU9Pn3O8RytU- had 5 approvals explicitly allowed in CUA; actual bytes/SHA verified for index.html 731B, model.obj 148B, report.pdf 807B and workspace.zip 1542B. Evidence: .local/knowledge-evidence/native-full-stack-result.json, native-provider-calls.jsonl and /tmp/awwo-native-full-stack.log.
+- Real-artifact browser loop passes: auto-selection of all four formats, HTML interaction readback, OBJ WebGL drag, PDF canvas 1/1, ZIP app.ts/index.html switching, confirmed HTML knowledge import and empty console error list. Screenshot .local/knowledge-evidence/native-four-previews.png uses default 1280x720 without viewport override. Normal personal credential mode is restored and fixture stopped: runtime honestly reports ready=false/models=[], and UI shows 先选择执行模型 / 管理我的引擎. Restart persistence passes: completed task history and four artifacts remain, all previews render after refresh, and the knowledge library retains three sources including the complete 731-byte index.html v1. Evidence: .local/knowledge-evidence/native-knowledge-persisted.png and native-four-previews.png. Earlier four-window screenshots used explicitly labelled local examples.
+
+Detailed scope and evidence live in docs/knowledge-workbench.md and docs/knowledge-workbench-acceptance.md. No remote push, merge or production deployment is implied by these local results.

@@ -50,12 +50,13 @@ export function serviceEnvironments(env) {
   if (env.AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR) openAIAgents.AWWO_METRICS_LISTEN_ADDR = env.AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR;
   for (const key of piCredentials) if (Object.hasOwn(env, key)) pi[key] = env[key];
   for (const key of openAIAgentsCredentials) if (Object.hasOwn(env, key)) openAIAgents[key] = env[key];
+  const openMaus = { ...base, ...select(key => key.startsWith('AWWO_OPENMAUS_') && !['AWWO_OPENMAUS_CONNECTIONS_JSON', 'AWWO_OPENMAUS_URL'].includes(key)) };
   const api = { ...base, ...telemetry, OTEL_SERVICE_NAME: 'awwo-api', ...select(key => key.startsWith('AWWO_')
-    && !key.startsWith('AWWO_PI_') && !key.startsWith('AWWO_OPENAI_AGENTS_')
+    && !key.startsWith('AWWO_PI_') && !key.startsWith('AWWO_OPENAI_AGENTS_') && !key.startsWith('AWWO_OPENMAUS_')
     && key !== 'AWWO_LOCAL_DB_PASSWORD'),
-    ...select(key => ['AWWO_PI_URL', 'AWWO_PI_TOKEN', 'AWWO_PI_SESSION_WAIT', 'AWWO_OPENAI_AGENTS_URL', 'AWWO_OPENAI_AGENTS_TOKEN'].includes(key)) };
+    ...select(key => ['AWWO_PI_URL', 'AWWO_PI_TOKEN', 'AWWO_PI_SESSION_WAIT', 'AWWO_OPENAI_AGENTS_URL', 'AWWO_OPENAI_AGENTS_TOKEN', 'AWWO_OPENMAUS_URL', 'AWWO_OPENMAUS_TOKEN', 'AWWO_OPENMAUS_CONNECTIONS_JSON'].includes(key)) };
   const web = { ...base, ...select(key => key.startsWith('VITE_AWWO_') || key === 'AWWO_API_TARGET') };
-  return { build: base, pi, openAIAgents, api, web };
+  return { build: base, pi, openAIAgents, openMaus, api, web };
 }
 export async function exists(file) { try { await access(file); return true; } catch { return false; } }
 export async function loadLocalEnv(environment = process.env) {
@@ -65,7 +66,7 @@ export async function loadLocalEnv(environment = process.env) {
   if (await exists(envFile)) saved = parseEnv(await readFile(envFile, 'utf8'));
   if ((environment.APP_ENV || saved.APP_ENV || 'development') !== 'development') throw new Error('This launcher is for local development. Use the SaaS deployment configuration for staging/production.');
   const fresh = {};
-  for (const name of ['AWWO_LOCAL_DB_PASSWORD', 'AWWO_PI_TOKEN', 'AWWO_OPENAI_AGENTS_TOKEN', 'AWWO_BOOTSTRAP_ADMIN_PASSWORD']) {
+  for (const name of ['AWWO_LOCAL_DB_PASSWORD', 'AWWO_PI_TOKEN', 'AWWO_OPENAI_AGENTS_TOKEN', 'AWWO_OPENMAUS_TOKEN', 'AWWO_BOOTSTRAP_ADMIN_PASSWORD']) {
     if (!environment[name] && !saved[name]) fresh[name] = randomBytes(32).toString('base64url');
   }
   if (!environment.AWWO_CREDENTIAL_ENCRYPTION_KEY && !saved.AWWO_CREDENTIAL_ENCRYPTION_KEY) fresh.AWWO_CREDENTIAL_ENCRYPTION_KEY = randomBytes(32).toString('base64');
@@ -80,10 +81,15 @@ export async function loadLocalEnv(environment = process.env) {
   const apiPort = port(env.AWWO_API_PORT || '8087', 'AWWO_API_PORT');
   const piPort = port(env.AWWO_PI_PORT || '8097', 'AWWO_PI_PORT');
   const openAIAgentsPort = port(env.AWWO_OPENAI_AGENTS_PORT || '8098', 'AWWO_OPENAI_AGENTS_PORT');
+  const openMausPort = port(env.AWWO_OPENMAUS_PORT || '8099', 'AWWO_OPENMAUS_PORT');
   const webPort = port(env.VITE_AWWO_WEB_PORT || '5189', 'VITE_AWWO_WEB_PORT');
-  if (new Set([dbPort, apiPort, piPort, openAIAgentsPort, webPort]).size !== 5) throw new Error('Local service ports must be distinct');
+  if (new Set([dbPort, apiPort, piPort, openAIAgentsPort, openMausPort, webPort]).size !== 6) throw new Error('Local service ports must be distinct');
+  const dockerCandidates = (env.PATH || process.env.PATH || '').split(path.delimiter).map(dir => path.join(dir, process.platform === 'win32' ? 'docker.exe' : 'docker'));
   const defaults = {
     AWWO_LOCAL_DB_PORT: String(dbPort), AWWO_API_PORT: String(apiPort), AWWO_PI_PORT: String(piPort), AWWO_OPENAI_AGENTS_PORT: String(openAIAgentsPort),
+    AWWO_OPENMAUS_PORT: String(openMausPort), AWWO_OPENMAUS_HOST: '127.0.0.1', AWWO_OPENMAUS_URL: `http://127.0.0.1:${openMausPort}`,
+    AWWO_OPENMAUS_DOCKER: dockerCandidates.find(existsSync) || '/usr/bin/docker',
+    AWWO_COMPUTER_MODEL_PROXY_URL: `http://127.0.0.1:${apiPort}/api/internal/computer-model/v1`,
     VITE_AWWO_WEB_PORT: String(webPort), VITE_AWWO_WEB_HOST: '127.0.0.1',
     AWWO_LISTEN_ADDR: `127.0.0.1:${apiPort}`, AWWO_PUBLIC_ORIGIN: `http://127.0.0.1:${webPort}`,
     AWWO_API_TARGET: `http://127.0.0.1:${apiPort}`, AWWO_PI_URL: `http://127.0.0.1:${piPort}`, AWWO_PI_HOST: '127.0.0.1',
@@ -91,11 +97,11 @@ export async function loadLocalEnv(environment = process.env) {
     AWWO_DATABASE_URL: `postgres://awwo:${encodeURIComponent(env.AWWO_LOCAL_DB_PASSWORD)}@127.0.0.1:${dbPort}/awwo?sslmode=disable`,
   };
   const resolved = { ...defaults, ...env };
-  for (const key of ['AWWO_PUBLIC_ORIGIN','AWWO_API_TARGET','AWWO_PI_URL','AWWO_OPENAI_AGENTS_URL','AWWO_DATABASE_URL']) {
+  for (const key of ['AWWO_PUBLIC_ORIGIN','AWWO_API_TARGET','AWWO_PI_URL','AWWO_OPENAI_AGENTS_URL','AWWO_OPENMAUS_URL','AWWO_COMPUTER_MODEL_PROXY_URL','AWWO_DATABASE_URL']) {
     const url = new URL(resolved[key]);
     if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error(`${key} must be loopback for local development`);
   }
-  if (!/^127\.0\.0\.1:\d+$/.test(resolved.AWWO_LISTEN_ADDR) || resolved.AWWO_PI_HOST !== '127.0.0.1' || resolved.AWWO_OPENAI_AGENTS_HOST !== '127.0.0.1' || resolved.VITE_AWWO_WEB_HOST !== '127.0.0.1') throw new Error('Local services must listen on 127.0.0.1');
+  if (!/^127\.0\.0\.1:\d+$/.test(resolved.AWWO_LISTEN_ADDR) || resolved.AWWO_OPENMAUS_HOST !== '127.0.0.1' || resolved.AWWO_PI_HOST !== '127.0.0.1' || resolved.AWWO_OPENAI_AGENTS_HOST !== '127.0.0.1' || resolved.VITE_AWWO_WEB_HOST !== '127.0.0.1') throw new Error('Local services must listen on 127.0.0.1');
   return { env: resolved, envFile, managedDatabase: !environment.AWWO_DATABASE_URL && !saved.AWWO_DATABASE_URL };
 }
 // Windows ships npm as npm.cmd, and since the fix for CVE-2024-27980 Node refuses to spawn a .cmd
@@ -164,13 +170,17 @@ export async function startDatabase(env) {
   }
   return { owned: true, data };
 }
-export async function waitForHttp(url, child, timeout = 30000, { allowUnconfiguredPi = false, allowUnconfiguredRuntime = '' } = {}) {
+export async function waitForHttp(url, child, timeout = 30000, { allowUnconfiguredPi = false, allowUnconfiguredRuntime = '', allowManagedOpenMaus = false, authorizationToken = '' } = {}) {
   const until = Date.now() + timeout;
   while (Date.now() < until) {
     if (child.exitCode !== null) throw new Error('Service exited before readiness');
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
+      const response = await fetch(url, { signal: AbortSignal.timeout(6000), ...(authorizationToken ? { headers: { authorization: `Bearer ${authorizationToken}` } } : {}) });
       if (response.ok) return;
+      if (allowManagedOpenMaus && response.status === 503) {
+        const health = await response.json();
+        if (health.service === 'awwo-openmaus-worker' && health.status === 'unconfigured' && health.ready === false && health.configured === false) return;
+      }
       if (allowUnconfiguredPi && response.status === 503) {
         const health = await response.json();
         if (health.status === 'unconfigured' && health.ready === false && health.configured === false && typeof health.piVersion === 'string') return;

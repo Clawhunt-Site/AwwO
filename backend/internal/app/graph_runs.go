@@ -23,10 +23,11 @@ func (a *App) getGraphRun(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		OperationID     string               `json:"operationId"`
-		Scope           []string             `json:"scope"`
-		DocumentVersion *int64               `json:"documentVersion"`
-		Collaboration   *collaborationPolicy `json:"collaboration,omitempty"`
+		OperationID          string               `json:"operationId"`
+		Scope                []string             `json:"scope"`
+		DocumentVersion      *int64               `json:"documentVersion"`
+		Collaboration        *collaborationPolicy `json:"collaboration,omitempty"`
+		KnowledgeRevisionIDs []string             `json:"knowledgeRevisionIds,omitempty"`
 	}
 	if !a.decode(w, r, &b) {
 		return
@@ -37,10 +38,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	}
 	tid, cid := r.PathValue("tenantId"), r.PathValue("canvasId")
 	request, _ := json.Marshal(struct {
-		Scope         []string
-		Version       *int64
-		Collaboration *collaborationPolicy `json:",omitempty"`
-	}{b.Scope, b.DocumentVersion, b.Collaboration})
+		Scope                []string
+		Version              *int64
+		Collaboration        *collaborationPolicy `json:",omitempty"`
+		KnowledgeRevisionIDs []string             `json:",omitempty"`
+	}{b.Scope, b.DocumentVersion, b.Collaboration, b.KnowledgeRevisionIDs})
 	hash := tokenHash(string(request))
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
@@ -121,6 +123,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	catalog := runtimeCatalog{}
+	knowledge, e := freezeKnowledgeContext(r.Context(), tx, tid, b.KnowledgeRevisionIDs)
+	if e != nil {
+		a.knowledgeFailure(w, e)
+		return
+	}
 	in := map[string]bool{}
 	needed := map[string]bool{}
 	for _, id := range scope {
@@ -216,6 +223,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				a.runtimeAdmissionError(w, e)
 				return
 			}
+			snap.Knowledge = knowledge
 			if e = a.requireWorkspaceSnapshot(snap); e != nil {
 				a.runtimeAdmissionError(w, e)
 				return
@@ -297,7 +305,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				// The response-format envelope occupies context too, so history is trimmed
 				// against the instructions this run will actually send plus that reserve.
 				// Both terms are unchanged when no contract is frozen.
-				history = boundedHistoryWithLimits(history, len(taskFrameSystemPrompt(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)), snap.TaskFrame))+outputContractReserve(snap), snap.Budget, snap.Overhead)
+				history = boundedHistoryWithLimits(history, len(knowledgeSystemPrompt(taskFrameSystemPrompt(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)), snap.TaskFrame), snap.Knowledge))+len(knowledgeUserPrompt("", snap.Knowledge))+outputContractReserve(snap), snap.Budget, snap.Overhead)
 				snap.History = &history
 			}
 		}
@@ -677,8 +685,9 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		prompt = withdrawPromptAllowance(prompt)
 	}
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
-	framedInstructions := taskFrameSystemPrompt(instructions, snap.TaskFrame)
-	if len(prompt) > 128000 || (snap.Team == nil && (len(prompt)+len(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
+	framedInstructions := knowledgeSystemPrompt(taskFrameSystemPrompt(instructions, snap.TaskFrame), snap.Knowledge)
+	framedPrompt := knowledgeUserPrompt(prompt, snap.Knowledge)
+	if len(framedPrompt) > 128000 || (snap.Team == nil && (len(framedPrompt)+len(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		return errors.New("context_limit")
 	}
 	var busy bool

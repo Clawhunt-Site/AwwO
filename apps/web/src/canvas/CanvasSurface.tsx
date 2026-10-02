@@ -7,7 +7,7 @@ import { createWorkspaceAgentNode, type WorkspaceAgent } from './workspaceAgents
 import { saasErrorMessage } from '../saas/api';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
-import { currentSaaSCanvas, initializeSaaSCanvas } from '../saas/canvasBridge';
+import { currentSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
 import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, type GraphCollaborationPolicy } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
@@ -37,7 +37,8 @@ import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
 import { applyCanvasPlan, canvasPlanRevision } from './canvasPlan';
-import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus, type PlanProgress } from './canvasPlanning';
+import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
+  readCanvasPlanRecovery, cancelCanvasPlanRecovery, type PlanProgress } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
@@ -145,6 +146,9 @@ export interface CanvasSurfaceProps {
   accountControl?: ReactNode;
   headerTitle?: ReactNode;
   headerActions?: ReactNode;
+  previewDesk?: ReactNode;
+  /** A new external draft, never sent without the normal planning action. */
+  taskDraft?: { id: string; prompt: string } | null;
   onOpenSettings?: () => void;
   /** Hosted accounts either supply their own model credential or use a platform-managed one. */
   personalCredentialsRequired?: boolean;
@@ -214,7 +218,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, previewDesk, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   const readOnlyRef = useRef(readOnly);
@@ -1622,9 +1626,23 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   // The planning conversation is local UI history, separate from node execution Sessions.
   const [planning, setPlanning] = useState(() => readOnly ? { draft: '', messages: [] } as ReturnType<typeof loadPlanningConversation> : loadPlanningConversation());
+  const appliedTaskDraft = useRef('');
+  useEffect(() => {
+    if (!taskDraft || readOnly || appliedTaskDraft.current === taskDraft.id) return;
+    appliedTaskDraft.current = taskDraft.id;
+    setPlanning(previous => ({ ...previous, draft: [previous.draft.trim(), taskDraft.prompt].filter(Boolean).join('\n\n') }));
+    setAssistantOpen(true);
+  }, [taskDraft, readOnly]);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState('');
+  const [planningRecovery, setPlanningRecovery] = useState<Awaited<ReturnType<typeof readCanvasPlanRecovery>> | null>(null);
+  const [recoveryLoaded, setRecoveryLoaded] = useState(!canInitialize);
+  const [recoveryChecking, setRecoveryChecking] = useState(false);
+  const [recoveryStopping, setRecoveryStopping] = useState(false);
+  const recoveryCheckSequence = useRef(0);
+  const recoveryReadError = useRef('');
+  const recoveryStopInFlight = useRef(false);
   // Progress observed for the in-flight plan only; cleared with every new request so a finished
   // run never leaves stale counts next to the next one.
   const [planningProgress, setPlanningProgress] = useState<PlanProgress | undefined>(undefined);
@@ -1641,6 +1659,39 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [modelFocusId, setModelFocusId] = useState<string | null>(null);
   const planningRequest = useRef<{ id: string; controller: AbortController; prompt: string } | null>(null);
   const planningSequence = useRef(0);
+  const planRevision = canvasPlanRevision(doc);
+  const refreshPlanningRecovery = useCallback(async (signal?: AbortSignal) => {
+    if (!canInitialize || !mounted.current || readOnlyRef.current || currentSaaSCanvas() !== cloudScope) return;
+    const sequence = ++recoveryCheckSequence.current;
+    const stillCurrent = () => mounted.current && !signal?.aborted && !readOnlyRef.current
+      && currentSaaSCanvas() === cloudScope && sequence === recoveryCheckSequence.current;
+    setRecoveryChecking(true);
+    try {
+      const recovery = await readCanvasPlanRecovery(docRef.current, signal);
+      if (!stillCurrent()) return;
+      setPlanningRecovery(recovery);
+      setRecoveryLoaded(true);
+      if (recoveryReadError.current) {
+        const recoveredError = recoveryReadError.current;
+        setPlanningError(previous => previous === recoveredError ? '' : previous);
+        recoveryReadError.current = '';
+      }
+      if (recovery.pending) setAssistantOpen(true);
+    } catch (error) {
+      if (!stillCurrent()) return;
+      setRecoveryLoaded(false);
+      recoveryReadError.current = planFailureMessage(t, error);
+      setPlanningError(recoveryReadError.current);
+    } finally { if (stillCurrent()) setRecoveryChecking(false); }
+  }, [canInitialize, cloudScope, t]);
+  useEffect(() => {
+    if (!canInitialize || readOnly || planningBusy) return;
+    const controller = new AbortController();
+    const refresh = () => { void refreshPlanningRecovery(controller.signal); };
+    const unsubscribe = subscribeCanvasKnowledge(refresh);
+    refresh();
+    return () => { controller.abort(); unsubscribe(); };
+  }, [canInitialize, readOnly, planningBusy, planRevision, refreshPlanningRecovery]);
   // Measure after the welcome screen becomes a canvas with an assistant sidebar.
   // The previous ResizeObserver size still describes the full-width welcome at this point.
   useLayoutEffect(() => {
@@ -1685,10 +1736,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       ? plannerStatus.error || (locale === 'zh' ? '画布助手暂不可用，请重试。' : 'The canvas assistant is unavailable. Please retry.')
       : '');
   // `request` plans a prompt the host handed over rather than the box's own draft.
-  const sendPlanningMessage = async (request?: string) => {
+  const sendPlanningMessage = async (request?: string, resume = false) => {
     if (readOnlyRef.current) return;
     // Keep the draft untouched and refuse before allocating a request or calling either planner.
-    if (planningUnavailableReason) { setPlanningError(planningUnavailableReason); return; }
+    if (!resume && planningUnavailableReason) { setPlanningError(planningUnavailableReason); return; }
+    if (recoveryStopInFlight.current || (canInitialize && (!recoveryLoaded || recoveryChecking))) return;
+    if (resume && !planningRecovery?.operationId) return;
+    if (planningRecovery?.pending && (!resume || !planningRecovery.matches)) return;
     const prompt = (request ?? planning.draft).trim();
     if (!prompt || planningRequest.current) return;
     if (journal.current || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
@@ -1704,16 +1758,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setPlanningBusy(true);
     setPlanningError('');
     setPlanningProgress(undefined);
-    setPlanning(previous => ({ draft: '', messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt }].slice(-60) }));
+    setPlanning(previous => resume
+      ? { ...previous, draft: previous.draft.trim() === prompt ? '' : previous.draft }
+      : { draft: '', messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt }].slice(-60) });
     try {
       const reportProgress = (progress: PlanProgress) => {
         // A superseded or cancelled request must not repaint the current one's progress.
         if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
         setPlanningProgress(progress);
       };
-      const jev = plannerProvider === 'jev'
+      const jev = !resume && plannerProvider === 'jev'
         ? await requestJevPlan(prompt, snapshot, planning.messages, controller.signal, locale, reportProgress) : null;
-      const plan = jev?.plan ?? await planRequest(prompt, snapshot, planning.messages, controller.signal, locale, reportProgress);
+      const plan = jev?.plan ?? await planRequest(prompt, snapshot, planning.messages, controller.signal, locale, reportProgress,
+        resume ? { recoveryOperationId: planningRecovery!.operationId } : undefined);
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (canvasPlanRevision(docRef.current) !== revision || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale');
@@ -1736,7 +1793,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // Only a plan that arrived and was accepted is a measurement worth setting expectations with,
       // and only for the same planner: Jev decides differently and takes a different time.
       const seconds = Math.round((Date.now() - startedAt) / 1000);
-      if (!jev && seconds > 0) { saveLastPlanDuration(seconds); setLastPlanSeconds(seconds); }
+      if (!jev && !resume && seconds > 0) { saveLastPlanDuration(seconds); setLastPlanSeconds(seconds); }
     } catch (error) {
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       const message = planFailureMessage(t, error);
@@ -1744,20 +1801,50 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       appendPlanningMessage(`${id}-assistant`, message, 'error');
       setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
     } finally {
-      if (planningRequest.current?.id === id) { planningRequest.current = null; setPlanningBusy(false); setPlanningProgress(undefined); }
+      if (planningRequest.current?.id === id) {
+        planningRequest.current = null;
+        if (canInitialize) { setRecoveryLoaded(false); void refreshPlanningRecovery(); }
+        setPlanningBusy(false); setPlanningProgress(undefined);
+      }
     }
   };
-  const cancelPlanning = () => {
-    if (readOnlyRef.current) return;
+  const cancelPlanning = async () => {
+    if (readOnlyRef.current || recoveryStopInFlight.current) return;
     const request = planningRequest.current;
-    if (!request) return;
+    const prompt = request?.prompt ?? planningRecovery?.prompt;
+    if (!request && !planningRecovery?.pending) return;
     planningRequest.current = null;
-    request.controller.abort();
+    request?.controller.abort();
     setPlanningBusy(false);
     setPlanningProgress(undefined);
-    setPlanningError('');
-    appendPlanningMessage(`${request.id}-cancelled`, surfaceNotice(t, 'plan_cancelled'));
-    setPlanning(previous => ({ ...previous, draft: previous.draft || request.prompt }));
+    if (prompt) setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
+    recoveryStopInFlight.current = true;
+    setRecoveryStopping(true);
+    try {
+      if (canInitialize) {
+        if (request) {
+          // The abort handler owns this request's captured entry. Never issue a second, generic
+          // cancel that could target a different operation another page has since started.
+          if (!await confirmSaaSPlanningCancellation(request.controller.signal)) {
+            const recovery = await readCanvasPlanRecovery(docRef.current);
+            if (recovery.pending) throw new Error(locale === 'zh'
+              ? '停止尚未确认，请核对本次规划状态后再操作。'
+              : 'Stopping is not confirmed. Check this planning run before continuing.');
+          }
+        } else await cancelCanvasPlanRecovery(planningRecovery?.operationId ?? '');
+      }
+      if (!mounted.current || readOnlyRef.current || currentSaaSCanvas() !== cloudScope) return;
+      setPlanningError('');
+      appendPlanningMessage(`${request?.id ?? `plan-${Date.now()}`}-cancelled`, surfaceNotice(t, 'plan_cancelled'));
+    } catch (error) {
+      if (mounted.current && !readOnlyRef.current && currentSaaSCanvas() === cloudScope) setPlanningError(planFailureMessage(t, error));
+    } finally {
+      recoveryStopInFlight.current = false;
+      if (mounted.current && currentSaaSCanvas() === cloudScope) {
+        setRecoveryStopping(false);
+        await refreshPlanningRecovery();
+      }
+    }
   };
   // A request carried over from the workspace home. The canvas opens with it in the prompt box, so
   // the operator sees what is being planned, and plans it exactly once: only on an empty canvas,
@@ -1770,7 +1857,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   useEffect(() => {
     const request = initialPlan;
     if (!request || readOnly || initialPlanSettled.current) return;
+    if (canInitialize && (!recoveryLoaded || recoveryChecking)) return;
     const settle = () => { initialPlanSettled.current = true; request.done(); };
+    if (planningRecovery?.pending) { settle(); return; }
     // Content already on the canvas came from an earlier plan or from the operator: never plan over it.
     if (docRef.current.nodes.length) { settle(); return; }
     if (planning.draft !== request.prompt) {
@@ -1797,17 +1886,24 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       void sendPlanningMessage(request.prompt).finally(() => { if (mounted.current) request.done(); });
     }, 0);
     return () => clearTimeout(timer);
-  }, [initialPlan, readOnly, planning.draft, plannerStatusKnown, planningUnavailableReason, runUnavailableReason]);
+  }, [initialPlan, readOnly, planning.draft, plannerStatusKnown, planningUnavailableReason, runUnavailableReason,
+    canInitialize, recoveryLoaded, recoveryChecking, planningRecovery?.pending]);
   const canUndoPlan = !readOnly && !planningBusy && !running && !bindingLocked && history.undo > 0
     && lastPlanRevision !== null && canvasPlanRevision(doc) === lastPlanRevision
     && Boolean(lastCommit.current?.label.startsWith('ai:'));
   const assistantProps = {
     messages: planning.messages, draft: planning.draft, busy: planningBusy, error: planningError,
     ...(plannerProvider === 'jev' ? { submitLabel: locale === 'zh' ? '新增工作流' : 'Add workflow' } : {}),
-    submitDisabled: Boolean(planningUnavailableReason),
+    submitDisabled: Boolean(planningUnavailableReason) || (canInitialize && (!recoveryLoaded || recoveryChecking)) || recoveryStopping,
+    ...(planningRecovery?.pending && !planningBusy ? { recovery: {
+      prompt: planningRecovery.prompt || '', canResume: planningRecovery.matches === true && Boolean(planningRecovery.operationId),
+      busy: !recoveryLoaded || recoveryChecking || recoveryStopping,
+      onResume: () => { void sendPlanningMessage(planningRecovery.prompt, true); },
+      onStop: () => { void cancelPlanning(); },
+    } } : {}),
     progress: planningProgress, expectedSeconds: plannerProvider === 'jev' ? undefined : lastPlanSeconds,
     onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
-    onSend: () => { void sendPlanningMessage(); }, onCancel: cancelPlanning,
+    onSend: () => { void sendPlanningMessage(); }, onCancel: () => { void cancelPlanning(); },
     onUndo: () => {
       if (!canUndoPlan) return;
       undo(); setLastPlanRevision(null);
@@ -1816,6 +1912,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     runtimeControls: <div className="awwo-planner-connection"><span className={(plannerProvider === 'jev' ? jevStatus?.available : plannerStatus?.available) ? 'is-ready' : ''} />
       {plannerProvider === 'jev' ? jevStatus?.error || (locale === 'zh' ? 'Jev · 选择人设与模型，新增工作流' : 'Jev · Select personas and models for a new workflow') : plannerConnectionMessage(t, plannerStatus)}
       {plannerProvider === 'pi' && plannerStatus && !plannerStatus.available ? <button type="button" title={plannerStatus.error} onClick={() => { void readPlannerStatus(undefined, locale).then(setPlannerStatus); }}>{t('surface.retryPlanner')}</button> : null}
+      {canInitialize && !recoveryLoaded ? <button type="button" disabled={recoveryChecking || recoveryStopping} onClick={() => { void refreshPlanningRecovery(); }}>{locale === 'zh' ? '检查上次规划' : 'Check earlier plan'}</button> : null}
     </div>,
   };
 
@@ -1903,7 +2000,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       onToggleAssistant={readOnly ? undefined : () => setAssistantOpen(value => !value)}
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
-      headerTitle={headerTitle} headerActions={headerActions}
+      headerTitle={headerTitle} headerActions={headerActions} previewDesk={previewDesk}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked || initializing}>{accountControl}</div>}
       toolbar={<>{!cloudScope && <GraphSettings doc={doc} selectedNodeId={selection[0]} selectedEdgeId={selectedEdgeId}
         disabled={readOnly || running || initializing || bindingLocked} onChange={next => { if (canEditStructure()) patchDoc(() => next, { label: 'graph-settings' }); }}

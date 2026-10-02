@@ -46,6 +46,7 @@ it('hydrates an equal legacy cache and ignores cache-write events that only reor
   canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(local)); canvasStorage().setItem('awwo.cloud.version', '7');
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') puts++;
@@ -65,6 +66,7 @@ it('does not re-submit a document echoed by the canvas while its first save is i
   let acknowledgeFirst!: (value: Response) => void;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (url.endsWith('/graph-runs')) return response({ items: [] });
@@ -92,6 +94,7 @@ it('keeps the echoed draft and releases the save queue if local acknowledgement 
   let acknowledgeFirst!: (value: Response) => void;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (url.endsWith('/graph-runs')) return response({ items: [] });
@@ -135,6 +138,7 @@ it('keeps a distinct edit made during the first save and sends it with the ackno
   let acknowledgeFirst!: (value: Response) => void;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (url.endsWith('/graph-runs')) return response({ items: [] });
@@ -162,6 +166,7 @@ it('restores a same-version draft once and stays synced after a reordered server
   canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(local)); canvasStorage().setItem('awwo.cloud.version', '7');
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (init.method === 'PUT') { const body = JSON.parse(init.body as string); puts++; cloud = record(reordered(body.document), body.version + 1); }
@@ -182,6 +187,7 @@ it('frees the acknowledged draft before storing the server baseline under quota 
   let cloud = record(original); let puts = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (url.endsWith('/graph-runs')) return response({ items: [] });
@@ -214,6 +220,7 @@ it('retains another writer draft even when a fresh server document matches it ex
   const raw = canvasStorage().getItem(`${CANVAS_DRAFT_PREFIX}must-remain`);
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     return response(record(local));
@@ -229,6 +236,7 @@ it('continues saving an edit when only the optional baseline fits instead of a t
   let cloud = record(original); const writes: CanvasDocument[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (url.endsWith('/graph-runs')) return response({ items: [] });
@@ -258,6 +266,7 @@ it('explains local storage exhaustion without exposing storage keys and exports 
   const writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (url.endsWith('/graph-runs')) return response({ items: [] });
@@ -294,6 +303,7 @@ it('warns when the canvas cache itself cannot save and exports the current in-me
   const original = documentWithThreads(); const writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (url.endsWith('/graph-runs')) return response({ items: [] });
@@ -335,6 +345,7 @@ it.each([200, 503])('keeps the latest in-memory edit and warning when an older c
   let resolve!: (value: Response) => void; let puts = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });
     if (url.endsWith('/graph-runs')) return response({ items: [] });
@@ -389,6 +400,7 @@ it('does not archive a second equal cache when opening the cloud to reconcile a 
   const calls: Array<{ url: string; method: string }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
+    if (url.endsWith('/artifacts')) return response({ items: [] });
     calls.push({ url, method: init.method || 'GET' });
     if (url.endsWith('/auth/me')) return response(identity);
     if (url.endsWith('/runtime')) return response({ available: false, models: [] });

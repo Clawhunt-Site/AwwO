@@ -23,6 +23,7 @@ import (
 
 type App struct {
 	workspaceLeases sync.Map // hashed ephemeral bearer -> one admitted coding run
+	computerLeases  sync.Map // hashed task token; never a provider credential
 
 	obs         *observability
 	pricing     *ModelPricing
@@ -189,6 +190,7 @@ func (a *App) Close() {
 func (a *App) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("POST /api/internal/workspace-calls", a.workspaceCallback)
+	m.HandleFunc("POST /api/internal/computer-model/v1/chat/completions", a.computerModelProxy)
 	m.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -232,6 +234,10 @@ func (a *App) Handler() http.Handler {
 	// handler cannot apply that workspace's model entitlement, and a stale client
 	// asking for one must get a visible 404 rather than the whole catalogue.
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runtime", a.tenant(a.runtime, 1))
+	a.registerKnowledgeRoutes(m)
+	a.registerWikiCompilerRoutes(m)
+	a.registerOpenMausRoutes(m)
+	a.registerComputerRoutes(m)
 	if a.cfg.UserCredentials && !a.cfg.TypeSafeSponsoredPlanning {
 		// Hosted ingress must route both TypeSafe endpoints through this guard in
 		// personal mode. Its separate service still uses operator credentials.

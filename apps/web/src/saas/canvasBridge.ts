@@ -5,9 +5,32 @@ import { canvasErrorMessage, canvasText } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
 import { AGENT_TEMPLATE_IDS } from '../canvas/agentTemplates';
 import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES } from '../canvas/canvasPlan';
+import { plannerRecovery, planningRecoveryRequired, type PlannerRun } from './plannerRecovery';
 
 type CanvasScope = { tenant: Tenant; canvasId: string };
 let active: CanvasScope | null = null;
+let knowledgeSelection: { scope: CanvasScope; revisionIds: string[] } | null = null;
+const knowledgeListeners = new Set<{ scope: CanvasScope; listener: () => void }>();
+/** A mounted canvas observes only its own knowledge changes; old views cannot follow a switch. */
+export function subscribeCanvasKnowledge(listener: () => void): () => void {
+  if (!active) return () => {};
+  const subscription = { scope: active, listener };
+  knowledgeListeners.add(subscription);
+  return () => { knowledgeListeners.delete(subscription); };
+}
+/** A selection belongs to the exact mounted canvas. The API resolves immutable revisions again. */
+export function configureCanvasKnowledge(revisionIds: readonly string[]): void {
+  if (!active) throw new Error('Canvas is not ready');
+  if (revisionIds.length > 8 || revisionIds.some(id => typeof id !== 'string' || !id || id.length > 200)) throw new Error('Select up to eight knowledge revisions');
+  const previous = canvasKnowledgeRevisionIds().sort();
+  knowledgeSelection = { scope: active, revisionIds: [...new Set(revisionIds)] };
+  if (JSON.stringify(previous) !== JSON.stringify([...knowledgeSelection.revisionIds].sort())) {
+    for (const subscription of knowledgeListeners) if (subscription.scope === active) subscription.listener();
+  }
+}
+export function canvasKnowledgeRevisionIds(): string[] {
+  return knowledgeSelection?.scope === active ? [...knowledgeSelection.revisionIds] : [];
+}
 let initializeCanvas: ((scope?: readonly string[], signal?: AbortSignal) => Promise<CanvasDocument>) | null = null;
 export function configureSaaSCanvasInitialize(initialize: typeof initializeCanvas): void { initializeCanvas = initialize; }
 export async function initializeSaaSCanvas(scope?: readonly string[], signal?: AbortSignal): Promise<CanvasDocument> {
@@ -18,9 +41,17 @@ export async function initializeSaaSCanvas(scope?: readonly string[], signal?: A
   return document;
 }
 let saveCanvas: (() => Promise<number | void>) | null = null;
+const planningCancellations = new WeakMap<AbortSignal, Promise<void>>();
+/** Wait only for the cancellation owned by this exact request, never the canvas's newer run. */
+export async function confirmSaaSPlanningCancellation(signal: AbortSignal): Promise<boolean> {
+  const pending = planningCancellations.get(signal);
+  if (!pending) return false;
+  await pending;
+  return true;
+}
 export function configureSaaSCanvas(scope: CanvasScope): void { active = scope; }
 export function configureSaaSCanvasSave(save: (() => Promise<number | void>) | null): void { saveCanvas = save; }
-export function clearSaaSCanvas(): void { active = null; saveCanvas = null; initializeCanvas = null; }
+export function clearSaaSCanvas(): void { active = null; knowledgeSelection = null; saveCanvas = null; initializeCanvas = null; }
 /** Capture a tenant/canvas scope once; an in-flight operation must not follow a workspace switch. */
 export function currentSaaSCanvas(): CanvasScope | null { return active; }
 export async function flushSaaSCanvas(): Promise<number | void> {
@@ -79,6 +110,7 @@ const normalizeStatus = (status: string) => status === 'completed' ? 'succeeded'
 /** Explicit adapter for the existing canvas protocols; never replaces global fetch. */
 export async function canvasFetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
   const scope = active;
+  const knowledgeRevisionIds = canvasKnowledgeRevisionIds();
   if (!scope) return fetch(input, init);
   const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   const url = new URL(raw, window.location.origin);
@@ -114,47 +146,54 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       return json({ available, provider: runtime.plannerRuntime || 'pi',
         ...(!available ? { error: (runtime.reason ? canvasErrorMessage(runtime.reason) : '') || canvasText('请先连接你的执行引擎。', 'Connect your personal engine first.') } : {}) });
     }
+    if (path === '/canvas/plan/recovery' && method === 'GET') {
+      const recovery = plannerRecovery(scope, knowledgeRevisionIds);
+      const entry = recovery.read();
+      return json(entry ? { pending: true, operationId: entry.operationId, prompt: entry.prompt, matches: recovery.matches(entry, url.searchParams.get('revision') ?? '') } : { pending: false });
+    }
+    if (path === '/canvas/plan/recovery/cancel' && method === 'POST') {
+      await plannerRecovery(scope, knowledgeRevisionIds).cancelMatching(typeof body.operationId === 'string' ? body.operationId : '', init.signal ?? undefined);
+      return json({ confirmed: true });
+    }
     if (path === '/canvas/plan' && method === 'POST') {
       if (!saveCanvas) return json({ error: canvasText('画布保存尚未就绪', 'Canvas saving is not ready.') }, 409);
       await saveCanvas();
       if (active !== scope || init.signal?.aborted) throw new Error(canvasText('工作区已切换或操作已取消。', 'The workspace changed or the operation was cancelled.'));
-      const operationId = crypto.randomUUID();
-      const run = await post(`/canvases/${encodeURIComponent(scope.canvasId)}/plan`, { prompt: body.prompt, context: body.context, operationId });
+      const recovery = plannerRecovery(scope, knowledgeRevisionIds);
+      const { entry, run } = await recovery.begin(body.prompt, body.revision ?? body.context ?? '', body.context, init.signal ?? undefined,
+        typeof body.recoveryOperationId === 'string' ? body.recoveryOperationId : undefined);
       // A user cancel and the stall backstop can land together; cancelling once keeps that race
       // from issuing a second request the server would only have to discard.
-      let cancelRequested = false;
+      let cancelRequest: Promise<void> | undefined;
       const cancel = () => {
-        if (cancelRequested) return;
-        cancelRequested = true;
-        void api(`${base}/runs/${encodeURIComponent(run.id)}/cancel`, { method: 'POST', body: '{}' }).catch(() => {});
+        cancelRequest ??= recovery.cancel(entry);
+        if (init.signal) planningCancellations.set(init.signal, cancelRequest);
+        // Abort handlers cannot await; failed confirmation deliberately keeps the durable journal.
+        void cancelRequest.catch(() => {});
+        return cancelRequest;
       };
       init.signal?.addEventListener('abort', cancel, { once: true });
       // The stall watchdog aborts only this event read, so a caller cancel and a lost stream stay
       // distinguishable; the caller's own signal is relayed rather than reused.
-      const reader = new AbortController();
+      let reader = new AbortController();
       const relay = () => reader.abort();
       init.signal?.addEventListener('abort', relay, { once: true });
       const release = () => {
         init.signal?.removeEventListener('abort', cancel);
         init.signal?.removeEventListener('abort', relay);
       };
-      let response: Response;
       // Opening the event stream is bounded too: a proxy that accepts the connection and never
       // answers must not leave the caller waiting without limit either.
-      const opening = setTimeout(() => reader.abort(), PLAN_OPEN_TIMEOUT_MS);
-      try {
-        if (init.signal?.aborted) { cancel(); throw new Error(canvasText('已取消规划', 'Planning was cancelled.')); }
-        response = await sessionFetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: reader.signal });
-        if (!response.ok || !response.body) throw new Error(canvasText('无法读取规划运行，请稍后重试。', 'The planning run could not be read. Please try again.'));
-      } catch (error) {
-        release();
-        // Only the watchdog firing (not a caller cancel) leaves an unobservable run to stop.
-        if (reader.signal.aborted && !init.signal?.aborted) cancel();
-        throw error instanceof Error && error.message
-          ? error
-          : new Error(canvasText('无法读取规划运行，请稍后重试。', 'The planning run could not be read. Please try again.'));
-      } finally { clearTimeout(opening); }
-      const upstream = response.body;
+      const openEvents = async () => {
+        reader = new AbortController();
+        const opening = setTimeout(() => reader.abort(), PLAN_OPEN_TIMEOUT_MS);
+        try {
+          if (init.signal?.aborted) { cancel(); throw new Error(canvasText('已取消规划', 'Planning was cancelled.')); }
+          const response = await sessionFetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: reader.signal });
+          if (!response.ok || !response.body) throw new Error(canvasText('无法读取规划运行，请稍后重试。', 'The planning run could not be read. Please try again.'));
+          return response.body;
+        } finally { clearTimeout(opening); }
+      };
       const encoder = new TextEncoder();
       // Progress is reported as a stream so the caller can show what the run is really doing.
       // The terminal frame is the proposal itself, or an explicit error — never an empty plan.
@@ -165,6 +204,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
         let lastEmit = 0;
         let lastKey = '';
         let completed = false;
+        let terminalObserved = false;
         let failure = '';
         // The code is kept beside the message because the caller decides whether to retry, and a
         // localized sentence is not something to match on. Only a malformed plan is worth retrying.
@@ -191,10 +231,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
         const count = (value: unknown, fallback: number) =>
           typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
         const watch = () => { clearTimeout(timer); timer = setTimeout(() => { stalled = true; reader.abort(); }, PLAN_STALL_TIMEOUT_MS); };
-        try {
-          watch();
-          progress(true); // The run is accepted: say so before the model produces anything.
-          await readSseFrames(upstream, (_event, event: any) => {
+        const observe = (event: any) => {
             if (completed || failure) return;
             watch(); // Any frame proves the run is still observably alive.
             if (event.type === 'progress') {
@@ -228,25 +265,64 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
               observed = { ...counts, characters: [...output].length, nodes, edges: countPlannedEdges(output),
                 ...(template && nodes === observed.nodes ? { template } : {}) };
               completed = true;
+              terminalObserved = true;
+              reader.abort();
             } else if (['failed', 'interrupted', 'cancelled'].includes(event.type)) {
+              terminalObserved = true;
               failure = canvasErrorMessage(event.message, event.code) || canvasText('规划未完成，请重试。', 'Planning did not complete. Please try again.');
               failureCode = typeof event.code === 'string' ? event.code : '';
+              reader.abort();
             }
-          });
-        } catch {
-          // An aborted read is only a failure of observation; the branches below report which one.
+        };
+        const settle = (snapshot: PlannerRun) => {
+          if (recovery.terminal(snapshot)) observe({ type: snapshot.status, text: snapshot.output, code: snapshot.error });
+        };
+        try {
+          progress(true);
+          settle(run);
+          // Reconnect at most once per explicit request, always to the already admitted run.
+          // A transport failure never allocates a new operation or makes another model request.
+          for (let attempt = 0; attempt < 2 && !completed && !failure; attempt++) {
+            if (active !== scope || init.signal?.aborted) break;
+            try {
+              const upstream = await openEvents();
+              watch();
+              await readSseFrames(upstream, (_event, event: any) => observe(event));
+            } catch { /* The authoritative GET below distinguishes a lost observer from a failed run. */ }
+            finally { clearTimeout(timer); }
+            if (completed || failure || stalled || init.signal?.aborted || active !== scope) break;
+            try { settle(await recovery.lookup(entry, init.signal ?? undefined)); }
+            catch (error) {
+              failure = error instanceof SaaSApiError ? canvasErrorMessage(error) : planningRecoveryRequired().message;
+              failureCode = error instanceof SaaSApiError ? error.code : 'planning_recovery_required';
+              break;
+            }
+          }
         } finally { clearTimeout(timer); }
         try {
           if (stalled) {
-            // Do not leave a run the caller can no longer observe: it would also block the next plan.
-            cancel();
-            emit({ type: 'error', error: canvasText(
+            // Only an acknowledged stop can be described as stopped. Failed acknowledgement
+            // keeps the original identity available to the explicit recovery/stop controls.
+            try {
+              await cancel();
+              emit({ type: 'error', error: canvasText(
               `规划已超过 ${Math.round(PLAN_STALL_TIMEOUT_MS / 1000)} 秒没有任何进展，已停止本次运行；当前画布保持原样。`,
               `Planning reported no progress for ${Math.round(PLAN_STALL_TIMEOUT_MS / 1000)} seconds and the run was stopped. The canvas has not changed.`) });
-          } else if (failure) emit({ type: 'error', error: failure, ...(failureCode ? { code: failureCode } : {}) });
+            } catch (error) {
+              emit({ type: 'error', code: error instanceof SaaSApiError ? error.code : 'planning_recovery_required', error: canvasErrorMessage(error) || planningRecoveryRequired().message });
+            }
+          } else if (failure) {
+            // Only server terminal events release the journal; read/auth/transport failures do not.
+            if (terminalObserved) await recovery.clear(entry);
+            emit({ type: 'error', error: failure, ...(failureCode ? { code: failureCode } : {}) });
+          }
           else if (!completed) {
-            emit({ type: 'error', error: canvasText('规划连接中断；当前画布保持原样。', 'The planning connection was interrupted. The canvas has not changed.') });
+            const error = planningRecoveryRequired();
+            emit({ type: 'error', code: error.code, error: error.message });
           } else {
+            if (active !== scope || init.signal?.aborted) return;
+            await recovery.clear(entry);
+            if (active !== scope || init.signal?.aborted) return;
             progress(true); // Report the true final totals, which coalescing may have withheld.
             // The caller still applies its existing strict protocol and graph validation.
             let plan: unknown;
@@ -257,6 +333,8 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             // it carries the same code and the caller may retry it on the same terms.
             else emit({ type: 'error', code: 'invalid_canvas_plan', error: canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.') });
           }
+        } catch (error) {
+          emit({ type: 'error', code: error instanceof SaaSApiError ? error.code : 'planning_recovery_required', error: canvasErrorMessage(error) });
         } finally {
           release();
           if (!closed) { closed = true; try { controller.close(); } catch { /* already cancelled by the caller */ } }
@@ -330,7 +408,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       }
       let run: { id: string };
       try {
-        run = await post('/runs', { sessionId, prompt: body.message, operationId });
+        run = await post('/runs', { sessionId, prompt: body.message, operationId, ...(knowledgeRevisionIds.length ? { knowledgeRevisionIds } : {}) });
       } catch (error) {
         // Only a definite rejection of this new operation proves no run was admitted.
         // An existing/conflicting identity, lost response or 5xx still needs recovery.

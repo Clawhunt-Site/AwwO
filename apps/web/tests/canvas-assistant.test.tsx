@@ -17,6 +17,35 @@ function Harness(props: Partial<CanvasAssistantProps> = {}) {
 }
 
 describe('canvas assistant UI', () => {
+  it('keeps an unobserved accepted plan separate from a new draft and requires explicit recovery', () => {
+    const send = vi.fn();
+    const resume = vi.fn();
+    const stop = vi.fn();
+    render(<Harness draft="另一个还未发送的需求" onSend={send} recovery={{ prompt: '原来的销售周报任务', canResume: true,
+      busy: false, onResume: resume, onStop: stop }} />);
+    expect(screen.getByText('原来的销售周报任务')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveValue('另一个还未发送的需求');
+    expect(screen.queryByRole('group', { name: '需求示例' })).toBeNull();
+    expect(screen.getByRole('button', { name: '生成画布' })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '画布需求' }), { key: 'Enter' });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '继续接收这次规划' }));
+    expect(resume).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '停止这次规划' }));
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it('blocks recovery against a changed canvas while still allowing the original run to be stopped', () => {
+    const resume = vi.fn();
+    const stop = vi.fn();
+    render(<Harness recovery={{ prompt: '原来的任务', canResume: false, busy: false, onResume: resume, onStop: stop }} />);
+    expect(screen.getByRole('button', { name: '继续接收这次规划' })).toBeDisabled();
+    expect(screen.getByText('画布已有改动。请先停止原规划，再根据当前画布重新生成。')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '停止这次规划' }));
+    expect(stop).toHaveBeenCalledOnce();
+    expect(resume).not.toHaveBeenCalled();
+  });
+
   it('announces the latest failure once beside the preserved input, keeping older history', () => {
     const message = '工作区运行额度已满';
     const messages = [{ id: 'old', role: 'assistant' as const, status: 'error' as const, content: '较早的错误' },

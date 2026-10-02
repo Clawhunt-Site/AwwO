@@ -3,7 +3,7 @@ import { canvasFetch, currentSaaSCanvas } from '../saas/canvasBridge';
 import { gatewayApiBase } from '../chatAutomations';
 import { AGENT_TEMPLATE_IDS, getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import type { CanvasDocument } from './canvasDoc';
-import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, parseCanvasPlan, type CanvasPlan,
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, canvasPlanRevision, parseCanvasPlan, type CanvasPlan,
   type CanvasPlanOperationType } from './canvasPlan';
 import type { UiLocale } from '../locale';
 import { canvasText } from './i18n';
@@ -218,11 +218,12 @@ async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale
 /** One planning attempt: its own run on the host, its own progress stream. A rejected plan is
  * reported as a PlanFailure carrying the reason so the caller can decide about another attempt. */
 async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
-  locale: UiLocale, saas: boolean, observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<CanvasPlan> {
+  locale: UiLocale, saas: boolean, observed: { last: PlanProgress }, onProgress?: PlanProgressReporter, options?: PlanRequestOptions): Promise<CanvasPlan> {
   const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan`, {
     method: 'POST', credentials: 'include', signal,
     headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' },
-    body: JSON.stringify({ prompt, context: buildPlanningContext(doc, messages, locale) }),
+    body: JSON.stringify({ prompt, context: buildPlanningContext(doc, messages, locale), ...(saas ? { revision: canvasPlanRevision(doc),
+      ...(options?.recoveryOperationId !== undefined ? { recoveryOperationId: options.recoveryOperationId } : {}) } : {}) }),
   });
   // A progress stream carries its own terminal frames, so its transport status is already 200.
   // Probed defensively: a non-streaming planner (and a minimal test double) may expose neither
@@ -234,7 +235,7 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
     raw = await readPlanStream(response.body!, locale, observed, onProgress);
   } else {
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(typeof payload?.error === 'string' ? payload.error : canvasText(locale, 'planning.unavailable'));
+    if (!response.ok) throw new PlanFailure(typeof payload?.error === 'string' ? payload.error : canvasText(locale, 'planning.unavailable'), typeof payload?.code === 'string' ? payload.code : '');
     if (!payload || !Object.hasOwn(payload, 'plan')) throw new Error(canvasText(locale, 'planning.invalidResponse'));
     raw = payload.plan;
   }
@@ -255,9 +256,26 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
   return plan;
 }
 
+export type CanvasPlanRecovery = { pending: boolean; operationId?: string; prompt?: string; matches?: boolean };
+export async function readCanvasPlanRecovery(doc: CanvasDocument, signal?: AbortSignal): Promise<CanvasPlanRecovery> {
+  if (!currentSaaSCanvas()) return { pending: false };
+  const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan/recovery?revision=${encodeURIComponent(canvasPlanRevision(doc))}`, { signal });
+  const payload = await response.json();
+  if (!response.ok) throw new PlanFailure(payload.error, payload.code);
+  if (payload?.pending === true && (typeof payload.operationId !== 'string' || !payload.operationId)) throw new PlanFailure('Planning recovery identity is unavailable.', 'planning_recovery_required');
+  return payload as CanvasPlanRecovery;
+}
+export async function cancelCanvasPlanRecovery(operationId: string, signal?: AbortSignal): Promise<void> {
+  const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan/recovery/cancel`, { method: 'POST', signal, body: JSON.stringify({ operationId }) });
+  const payload = await response.json();
+  if (!response.ok) throw new PlanFailure(payload.error, payload.code);
+}
+
+export type PlanRequestOptions = { recoveryOperationId?: string };
 export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
-  locale: UiLocale = 'zh', onProgress?: PlanProgressReporter): Promise<CanvasPlan> {
-  const saas = currentSaaSCanvas() !== null;
+  locale: UiLocale = 'zh', onProgress?: PlanProgressReporter, options?: PlanRequestOptions): Promise<CanvasPlan> {
+  const scope = currentSaaSCanvas();
+  const saas = scope !== null;
   const observed = { last: { stage: 'queued', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 } as PlanProgress };
   // Exactly one more attempt, and only for a malformed plan. A second retry would let a persistently
   // broken model spend the workspace's run quota in a loop, and retrying a runtime fault, a quota
@@ -266,14 +284,20 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
   let diagnosis: unknown;
   for (let attempt = 0; ; attempt++) {
     try {
-      return await planOnce(prompt, doc, messages, signal, locale, saas, observed, onProgress);
+      const plan = await planOnce(prompt, doc, messages, signal, locale, saas, observed, onProgress, options);
+      if (signal.aborted || currentSaaSCanvas() !== scope) throw new PlanFailure(canvasText(locale, 'planning.interrupted'), 'planning_scope_changed');
+      return plan;
     } catch (error) {
+      // A late old-workspace failure must never turn the malformed-plan retry into an admission
+      // under whichever tenant happens to be active now.
+      if (currentSaaSCanvas() !== scope) throw new PlanFailure(error instanceof Error ? error.message : canvasText(locale, 'planning.interrupted'), 'planning_scope_changed');
+      if (error instanceof PlanFailure && ['planning_recovery_required', 'planning_recovery_storage', 'unauthorized'].includes(error.code)) throw error;
       // The first failure describes what the model actually produced. The retry is our own
       // mitigation, so if it fails too its reason must not replace that diagnosis — reporting
       // "no plan was returned" for what was really an unsupported operation tells the reader
       // nothing they can act on.
       if (attempt > 0) throw diagnosis;
-      if (signal.aborted || !malformedPlan(error)) throw error;
+      if (signal.aborted || options?.recoveryOperationId !== undefined || !malformedPlan(error)) throw error;
       diagnosis = error;
       // The next attempt starts from nothing, so the counts restart with it; keeping the previous
       // ones would report work that no longer exists. The attempt number stays on every report

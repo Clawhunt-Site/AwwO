@@ -29,6 +29,37 @@ test('ports reject command fragments, privileged and out of range values', () =>
   assert.equal(port('8087','port'),8087);
   for (const value of ['80','0','65536','8087 -h 0.0.0.0','NaN','1.5']) assert.throws(() => port(value,'port'));
 });
+
+test('managed execution reuses AwwO setup without inheriting provider, vault or external bridge credentials', () => {
+  const scoped = serviceEnvironments({ PATH: '/usr/bin', HOME: '/home/operator', AWWO_OPENMAUS_TOKEN: 'internal-managed-token',
+    AWWO_OPENMAUS_URL: 'http://127.0.0.1:8099', AWWO_OPENMAUS_DOCKER: '/usr/bin/docker', AWWO_OPENMAUS_WORKSPACE_IMAGE: 'sha256:fixture',
+    AWWO_OPENMAUS_CONNECTIONS_JSON: '[{"token":"external-secret"}]', AWWO_COMPUTER_MODEL_PROXY_URL: 'http://127.0.0.1:8087/api/internal/computer-model/v1',
+    AWWO_PI_TOKEN: 'pi-internal-token', AWWO_PI_API_KEY: 'provider-secret', AWWO_DATABASE_URL: 'database-secret', AWWO_CREDENTIAL_ENCRYPTION_KEY: 'vault-secret' });
+  assert.equal(scoped.openMaus.AWWO_OPENMAUS_TOKEN, 'internal-managed-token');
+  assert.equal(scoped.openMaus.AWWO_OPENMAUS_WORKSPACE_IMAGE, 'sha256:fixture');
+  assert.equal(scoped.api.AWWO_OPENMAUS_TOKEN, 'internal-managed-token');
+  assert.match(scoped.api.AWWO_COMPUTER_MODEL_PROXY_URL, /computer-model\/v1$/);
+  for (const secret of ['provider-secret', 'vault-secret', 'database-secret', 'pi-internal-token', '[{"token":"external-secret"}]']) assert.equal(Object.values(scoped.openMaus).includes(secret), false);
+  assert.equal(scoped.web.AWWO_OPENMAUS_TOKEN, undefined);
+  assert.equal(scoped.api.AWWO_OPENMAUS_DOCKER, undefined);
+});
+
+test('managed readiness is authenticated and only an identified unavailable worker may leave SaaS running', async () => {
+  let known = true;
+  const server = createServer((req, res) => {
+    assert.equal(req.headers.authorization, 'Bearer fixture-internal-token');
+    res.writeHead(503, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ service: known ? 'awwo-openmaus-worker' : 'other', status: 'unconfigured', ready: false, configured: false }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/health`;
+    const options = { allowManagedOpenMaus: true, authorizationToken: 'fixture-internal-token' };
+    await waitForHttp(url, { exitCode: null }, 300, options);
+    known = false;
+    await assert.rejects(waitForHttp(url, { exitCode: null }, 200, options), /timed out/);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});
 test('local services receive only their own provider credentials', () => {
   const env = {
     PATH: '/test/bin', APP_ENV: 'development', AWWO_API_TARGET: 'http://127.0.0.1:8087', VITE_AWWO_WEB_PORT: '5189',
@@ -91,7 +122,7 @@ function launcherFixture() {
   Object.defineProperty(runtime, 'exitCode', { get: () => exitCode, set: value => { exitCode = value; stopped.resolve(); } });
   const commands = [], children = [], messages = [], waits = [];
   const env = {
-    AWWO_API_PORT:'18087', AWWO_PI_PORT:'18097', AWWO_OPENAI_AGENTS_PORT:'18098', VITE_AWWO_WEB_PORT:'15189',
+    AWWO_API_PORT:'18087', AWWO_PI_PORT:'18097', AWWO_OPENAI_AGENTS_PORT:'18098', AWWO_OPENMAUS_PORT:'18099', AWWO_OPENMAUS_URL:'http://127.0.0.1:18099', VITE_AWWO_WEB_PORT:'15189',
     AWWO_PI_URL:'http://127.0.0.1:18097', AWWO_OPENAI_AGENTS_URL:'http://127.0.0.1:18098', AWWO_API_TARGET:'http://127.0.0.1:18087', AWWO_PUBLIC_ORIGIN:'http://127.0.0.1:15189',
   };
   const options = {
@@ -259,9 +290,9 @@ test('normal startup launches every service and shutdown leaves a reused databas
   fixture.options.loadEnv = async () => ({env: fixture.env, envFile: '/test-only/env', managedDatabase: true});
   fixture.options.startDb = async () => ({owned: false, data: '/test-only/existing-postgres'});
   await runDevelopment(fixture.options);
-  assert.equal(fixture.children.length, 4);
+  assert.equal(fixture.children.length, 5);
   assert.deepEqual(fixture.waits.map(wait => wait.url), [
-    `${fixture.env.AWWO_PI_URL}/health`, `${fixture.env.AWWO_OPENAI_AGENTS_URL}/health`, `${fixture.env.AWWO_API_TARGET}/api/v1/health`, fixture.env.AWWO_PUBLIC_ORIGIN,
+    `${fixture.env.AWWO_PI_URL}/health`, `${fixture.env.AWWO_OPENAI_AGENTS_URL}/health`, `${fixture.env.AWWO_OPENMAUS_URL}/health`, `${fixture.env.AWWO_API_TARGET}/api/v1/health`, fixture.env.AWWO_PUBLIC_ORIGIN,
   ]);
   assert.deepEqual(fixture.waits[0].options, {allowUnconfiguredPi: true});
   assert.deepEqual(fixture.waits[1].options, {allowUnconfiguredRuntime: 'openai-agents'});
