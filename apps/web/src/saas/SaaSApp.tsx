@@ -19,6 +19,7 @@ import { CanvasAccountControl } from '../CanvasAccountControl';
 import { createSaaSAccountApi } from './accountApi';
 import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls } from './preferences';
 import { InviteAcceptance } from './InviteAcceptance';
+import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
 import { AdminPanel } from './AdminPanel';
 import { RuntimeSettings } from './RuntimeSettings';
 import { WorkspaceHome } from './WorkspaceHome';
@@ -56,6 +57,10 @@ function AuthenticatedApp() {
   const { locale, t } = useSaaSPreferences();
   useEffect(() => { const id = new URLSearchParams(window.location.search).get('official'); if (id) rememberOfficialSelection(id); }, []);
   const [ssoReturn, setSSOReturn] = useState<SSOReturn | null>(() => readSSOReturn(location.search));
+  // A sign-in error, an account link or a password reset holds its own screen, so a stored
+  // invitation waits: a completed link or login restores it through onAuthenticated instead.
+  const deferInviteRestore = useRef(ssoReturn !== null || new URLSearchParams(window.location.search).has('reset'));
+  useEffect(() => { rememberPendingInvite(new URLSearchParams(window.location.search).get('invite')); }, []);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [loading, setLoading] = useState(true);
   const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('reset'));
@@ -72,6 +77,7 @@ function AuthenticatedApp() {
     // A completed login/link supersedes the initial session lookup, even if
     // that older request later returns another account or a service error.
     sessionRequestGeneration.current += 1;
+    restorePendingInvite();
     trackSignedInSession(true);
     setSessionEnded(false);
     setIdentity(value);
@@ -85,7 +91,7 @@ function AuthenticatedApp() {
     const generation = ++sessionRequestGeneration.current;
     const controller = new AbortController();
     const current = () => live && generation === sessionRequestGeneration.current;
-    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) { trackSignedInSession(true); setIdentity(value); } })
+    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) { if (!deferInviteRestore.current) restorePendingInvite(); trackSignedInSession(true); setIdentity(value); } })
       .catch(error => { if (current() && !(error instanceof SaaSApiError && error.status === 401)) setFailure(message(error)); })
       .finally(() => { if (current()) setLoading(false); });
     return () => { live = false; controller.abort(); };
@@ -284,6 +290,7 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
       <a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
       {identity.user.platformRole === 'admin' && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => {
+      forgetPendingInvite();
       try {
         const result = await api<null | { logoutURL: string }>('/auth/logout', { method: 'POST' });
         if (identity.authentication === 'clawhunt') {

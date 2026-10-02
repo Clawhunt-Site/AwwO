@@ -12,10 +12,11 @@ export type SSOReturn =
   | { kind: 'error'; reason: 'waitlisted' | 'expired' | 'unavailable' | 'conflict' | 'invalid_identity' };
 export type SSOFailureReason = Exclude<SSOReturn, { kind: 'link' }>['reason'];
 
-const inviteToken = (value: string | null): value is string => Boolean(value && /^[A-Za-z0-9_-]{32,256}$/.test(value));
+/** A workspace invitation token as the API accepts it (`identityInvitePattern`). */
+export const isInviteToken = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{32,256}$/.test(value);
 export function clawHuntStartURL(search: string): string {
   const invite = new URLSearchParams(search).get('invite');
-  return inviteToken(invite) ? `/api/v1/auth/clawhunt/start?invite=${encodeURIComponent(invite)}` : '/api/v1/auth/clawhunt/start';
+  return isInviteToken(invite) ? `/api/v1/auth/clawhunt/start?invite=${encodeURIComponent(invite)}` : '/api/v1/auth/clawhunt/start';
 }
 
 /** A successful link can restore only the existing first-party invitation route. */
@@ -25,7 +26,7 @@ export function trustedAwwORedirectURL(value: unknown): string | null {
     const url = new URL(value, window.location.origin);
     if (url.origin !== window.location.origin || url.pathname !== '/' || url.hash) return null;
     const keys = [...url.searchParams.keys()];
-    if (keys.length !== 1 || keys[0] !== 'invite' || !inviteToken(url.searchParams.get('invite'))) return null;
+    if (keys.length !== 1 || keys[0] !== 'invite' || !isInviteToken(url.searchParams.get('invite'))) return null;
     return url.pathname + url.search;
   } catch { return null; }
 }

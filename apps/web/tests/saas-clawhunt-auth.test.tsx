@@ -3,17 +3,18 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { SaaSApp } from '../src/saas/SaaSApp';
 import { clearSSOReturnURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL } from '../src/saas/clawhuntAuth';
 import { appearanceFixture } from './saas-appearance-fixture';
+import { PENDING_INVITE_KEY } from '../src/saas/pendingInvite';
 
 const identity = { user: { id: 'legacy-user', name: 'Ada', email: 'ada@example.test', platformRole: 'user' }, tenants: [], authentication: 'clawhunt', clawhuntSiteURL: 'https://clawhunt.example/' };
 const invite = 'fixture_invite_token_0123456789abcdef';
 const response = (body: unknown, status = 200) => new Response(status === 204 ? null : JSON.stringify(body), { status });
 const unauthorized = () => response({ error: { code: 'unauthorized', message: 'Sign in required' } }, 401);
 beforeEach(() => {
-  localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); history.replaceState(null, '', '/');
+  localStorage.clear(); sessionStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); history.replaceState(null, '', '/');
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); history.replaceState(null, '', '/'); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); history.replaceState(null, '', '/'); localStorage.clear(); sessionStorage.clear(); });
 
 it('offers only ClawHunt SSO when local auth is disabled and carries a bounded invite', async () => {
   history.replaceState(null, '', `/?invite=${invite}`);
@@ -186,6 +187,93 @@ it('does not claim unified sign-out when the server fails to return the main-sit
   fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('无法确认 ClawHunt 主站退出');
   expect(fetch.mock.calls.filter(([url]) => url.endsWith('/auth/logout'))).toHaveLength(1);
+});
+
+const invitePreview = { tenantId: 'invited', tenantName: 'Invited', role: 'member', status: 'active', expiresAt: '2099-01-01T00:00:00Z' };
+
+it('keeps a workspace invitation through the invite-code detour and offers it after the next sign-in', async () => {
+  history.replaceState(null, '', `/?invite=${invite}`);
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? unauthorized() : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' })));
+  render(<SaaSApp />);
+  expect(await screen.findByRole('link', { name: '使用 ClawHunt 账号继续' })).toHaveAttribute('href', `/api/v1/auth/clawhunt/start?invite=${invite}`);
+  expect(JSON.parse(sessionStorage.getItem(PENDING_INVITE_KEY) || 'null')).toMatchObject({ v: 1, token: invite });
+  cleanup(); vi.unstubAllGlobals();
+
+  // Redemption on ClawHunt returns through a fresh sign-in that lands on the plain root.
+  history.replaceState(null, '', '/');
+  const fetch = vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(identity) : url.endsWith('/appearance')
+    ? response(appearanceFixture) : url.includes('/invites/') ? response(invitePreview) : response({ items: [] }));
+  vi.stubGlobal('fetch', fetch);
+  render(<SaaSApp />);
+  expect(await screen.findByText(/Invited/)).toBeVisible();
+  expect(location.search).toBe(`?invite=${invite}`);
+  expect(sessionStorage.getItem(PENDING_INVITE_KEY)).toBeNull();
+  // Joining still takes the explicit confirmation.
+  expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/accept'))).toBe(false);
+});
+
+it('never restores a stored invitation onto a failed sign-in', async () => {
+  sessionStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ v: 1, token: invite, savedAt: Date.now() }));
+  history.replaceState(null, '', '/?sso=error&reason=expired');
+  const fetch = vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(identity) : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' }));
+  vi.stubGlobal('fetch', fetch);
+  render(<SaaSApp />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('登录请求已过期');
+  await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/auth/me'))).toBe(true));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(location.search).toBe('');
+  expect(sessionStorage.getItem(PENDING_INVITE_KEY)).not.toBeNull();
+});
+
+it('restores a stored invitation once an existing AwwO account has been linked', async () => {
+  sessionStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ v: 1, token: invite, savedAt: Date.now() }));
+  history.replaceState(null, '', '/?sso=link');
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/auth/me')) return unauthorized();
+    if (url.endsWith('/auth/clawhunt/pending')) return response({ email: 'ada@example.test', expiresAt: '2099-01-01T00:00:00Z' });
+    // The detour's fresh flow carried no invitation, so the server returns the plain root.
+    if (url.endsWith('/auth/clawhunt/link')) return response({ ...identity, redirectURL: '/' });
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
+    return url.includes('/invites/') ? response(invitePreview) : response({ items: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<SaaSApp />);
+  // The link screen holds the stored invitation untouched until linking succeeds.
+  expect(await screen.findByRole('heading', { name: '验证原 AwwO 密码' })).toBeVisible();
+  expect(sessionStorage.getItem(PENDING_INVITE_KEY)).not.toBeNull();
+  fireEvent.change(screen.getByLabelText('原 AwwO 密码'), { target: { value: 'synthetic-old-password' } });
+  fireEvent.click(screen.getByRole('button', { name: '验证并保留工作区' }));
+  expect(await screen.findByText(/Invited/)).toBeVisible();
+  expect(location.search).toBe(`?invite=${invite}`);
+  expect(sessionStorage.getItem(PENDING_INVITE_KEY)).toBeNull();
+});
+
+it('keeps a stored invitation through a password-reset screen opened with a live session', async () => {
+  sessionStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ v: 1, token: invite, savedAt: Date.now() }));
+  history.replaceState(null, '', '/?reset=synthetic-legacy-reset-token');
+  const fetch = vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(identity)
+    : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' }));
+  vi.stubGlobal('fetch', fetch);
+  render(<SaaSApp />);
+  expect(await screen.findByRole('heading', { name: '到 ClawHunt 管理账号' })).toBeVisible();
+  await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/auth/me'))).toBe(true));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(location.search).not.toContain('invite');
+  expect(sessionStorage.getItem(PENDING_INVITE_KEY)).not.toBeNull();
+});
+
+it('leaves a stored invitation alone on a chosen address and forgets it at sign-out', async () => {
+  sessionStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ v: 1, token: invite, savedAt: Date.now() }));
+  history.replaceState(null, '', '/?tenant=team-a');
+  const owner = { ...identity, tenants: [{ id: 'team-a', name: 'Team A', status: 'active', role: 'owner' }] };
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? response(owner) : url.endsWith('/appearance')
+    ? response(appearanceFixture) : url.endsWith('/auth/logout') ? response(null, 204) : response({ items: [] })));
+  render(<SaaSApp />);
+  fireEvent.click(await screen.findByRole('button', { name: '更多选项' }));
+  expect(location.search).toBe('?tenant=team-a');
+  expect(sessionStorage.getItem(PENDING_INVITE_KEY)).not.toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
+  await waitFor(() => expect(sessionStorage.getItem(PENDING_INVITE_KEY)).toBeNull());
 });
 
 it('accepts only bounded first-party invite redirects and the configured main-site logout route', () => {
