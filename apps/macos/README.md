@@ -1,6 +1,6 @@
 # AwwO for Mac
 
-Source candidate **0.9.1, build 9** is the Apple Silicon desktop client for the hosted
+Source candidate **0.9.1, build 10** is the Apple Silicon desktop client for the hosted
 AwwO service. It requires macOS 14 or later and an internet connection. The
 Swift/AppKit/WebKit shell uses the hosted account, workspaces and history;
 the website and server deploy separately. No local database, Node runtime,
@@ -15,6 +15,15 @@ it does not resolve an SSO block or change access controls. It retains build 8's
 support for the main site's exact `/awwo` invite-code redemption page inside the
 client; **0.9.0, build 7** lacks that native rule. A Git push or hosted website
 deployment does not update the installed native client.
+
+Build 10 adds a recovery option when the approved main-site AwwO
+authorization page returns HTTP 403: **登录主站** opens the fixed main-site login
+page in the same application. After signing in normally, choose **显示 → 工作区首页**
+and start AwwO sign-in again. **返回 AwwO 首页** and the existing reload action also
+remain available on that error screen. This does not transfer browser cookies,
+reuse the failed authorization URL, change access controls, or confirm successful
+sign-in. Build 10 installation, visual acceptance, and end-to-end native sign-in
+are pending; the recovery path must be checked in the installed client before release.
 
 The bundle identifier remains `store.clawhunt.awwo.local` and the app remains
 `AwwO Local.app` with the display name **AwwO**. Existing WebKit session data
@@ -60,7 +69,7 @@ APP_ENV=production VITE_APP_ENV=production \
 
 The script reads `latest.json`, requires its revision and app metadata to match
 `HEAD`, rejects builds with modified inputs, and runs `verify-bundle.ts`.
-It creates `.local/releases/macos-0.9.1-build9-<sha7>/` and refuses to overwrite
+It creates `.local/releases/macos-0.9.1-build10-<sha7>/` and refuses to overwrite
 an existing release directory. Earlier build 8 artifacts remain separate.
 The output contains stable release names for the DMG, ZIP, `INSTALL.txt`,
 `SHA256SUMS`, a Fold brand kit ZIP (MIT license, SVG/PNG, vector source and

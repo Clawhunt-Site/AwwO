@@ -11,7 +11,7 @@ const exec = promisify(execFile);
 const source = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(source, '../..');
 const version = '0.9.1';
-const build = '9';
+const build = '10';
 const appName = 'AwwO Local.app';
 
 async function run(command: string, args: string[], env = process.env): Promise<string> {

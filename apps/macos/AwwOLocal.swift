@@ -185,6 +185,7 @@ private enum NavigationPolicy {
     }()
     static let accessHost = "lively-grass-61f6.cloudflareaccess.com"
     static let mainSiteHost = "clawhunt.store"
+    static let mainSiteLoginURL = URL(string: "https://\(mainSiteHost)/login")!
     private static let mainSiteAuthPaths: Set<String> = [
         "/api/awwo/sso/authorize", "/api/awwo/sso/logout", "/login", "/register", "/account", "/awwo"
     ]
@@ -221,6 +222,10 @@ private enum NavigationPolicy {
     static func isCloudNavigationURL(_ url: URL?) -> Bool {
         sameOrigin(url, cloudURL, allowBlob: true) || isAuthenticationURL(url) || isClawHuntSSOURL(url)
     }
+    static func isClawHuntAuthorizationURL(_ url: URL?) -> Bool {
+        guard isClawHuntSSOURL(url), let url, url.fragment == nil else { return false }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath == "/api/awwo/sso/authorize"
+    }
     static func frameMatches(protocol scheme: String, host: String, port framePort: Int, origin: URL?) -> Bool {
         guard let origin, !host.isEmpty, ["http", "https"].contains(scheme.lowercased()) else { return false }
         let actualPort = framePort == 0 ? (scheme.lowercased() == "https" ? 443 : 80) : framePort
@@ -234,6 +239,10 @@ private enum NavigationPolicy {
 }
 
 private enum NavigationHTTPFailure {
+    static func offersMainSiteLogin(_ response: HTTPURLResponse, cloud: Bool) -> Bool {
+        cloud && response.statusCode == 403 && NavigationPolicy.isClawHuntAuthorizationURL(response.url)
+    }
+
     // A Ray is diagnostic context, not proof that Cloudflare caused the denial.
     // Never reflect arbitrary response text, cookies, or authorization URLs.
     private static func cloudflareRayID(_ response: HTTPURLResponse) -> String? {
@@ -365,6 +374,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var statusHeading: NSTextField!
     private var statusDetail: NSTextField!
     private var spinner: NSProgressIndicator!
+    private var loginRecoveryActions: NSStackView!
+    private var mainSiteLoginAvailable = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let existing = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
@@ -449,7 +460,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         spinner.style = .spinning
         spinner.startAnimation(nil)
         let retryButton = NSButton(title: "重新载入", target: self, action: #selector(reloadPage))
-        let stack = NSStackView(views: [spinner, statusHeading, statusDetail, retryButton])
+        loginRecoveryActions = NSStackView(views: [
+            NSButton(title: "登录主站", target: self, action: #selector(openMainSiteLogin)),
+            NSButton(title: "返回 AwwO 首页", target: self, action: #selector(openWorkspaceHome))
+        ])
+        loginRecoveryActions.spacing = 12
+        loginRecoveryActions.isHidden = true
+        let stack = NSStackView(views: [spinner, statusHeading, statusDetail, loginRecoveryActions, retryButton])
         stack.orientation = .vertical
         stack.spacing = 20
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -575,6 +592,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func loadPage(_ url: URL) {
+        clearLoginRecovery()
         pageLoadFailed = false
         pageLoad.prepareForNavigation()
         webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 45))
@@ -722,8 +740,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         NSApp.reply(toApplicationShouldTerminate: true)
     }
 
-    private func fail(_ title: String, detail: String) {
+    private func clearLoginRecovery() {
+        mainSiteLoginAvailable = false
+        loginRecoveryActions?.isHidden = true
+    }
+
+    private func fail(_ title: String, detail: String, offerMainSiteLogin: Bool = false) {
         guard window != nil else { return }
+        clearLoginRecovery()
+        mainSiteLoginAvailable = offerMainSiteLogin && mode == .cloud
+        loginRecoveryActions.isHidden = !mainSiteLoginAvailable
         pageLoadFailed = true
         pageLoad.reset()
         // Online authentication URLs may carry tokens. Never record their errors
@@ -734,7 +760,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         statusView.isHidden = false
         spinner.stopAnimation(nil)
         statusHeading.stringValue = title
-        statusDetail.stringValue = String(detail.prefix(1500))
+        let guidance = mainSiteLoginAvailable
+            ? "\n\n可先在此应用内登录主站。登录后选择“显示 → 工作区首页”，再点击“使用 ClawHunt 账号继续”重新开始。若仍被拒绝，请联系支持，并附上请求编号（如有）。"
+            : ""
+        statusDetail.stringValue = String(detail.prefix(1500)) + guidance
     }
 
     private func log(_ message: String) {
@@ -813,7 +842,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         guard isAllowedNavigation(navigationResponse.response.url) else { decisionHandler(.cancel); return }
         if navigationResponse.isForMainFrame, let response = navigationResponse.response as? HTTPURLResponse, response.statusCode >= 400 {
             fail(mode == .cloud ? "线上页面暂时无法访问" : "本机页面暂时无法访问",
-                detail: NavigationHTTPFailure.detail(response, cloud: mode == .cloud))
+                detail: NavigationHTTPFailure.detail(response, cloud: mode == .cloud),
+                offerMainSiteLogin: NavigationHTTPFailure.offersMainSiteLogin(response, cloud: mode == .cloud))
             decisionHandler(.cancel)
             return
         }
@@ -839,6 +869,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard webView === self.webView, let navigation, !switching, !terminating else { return }
+        clearLoginRecovery()
         pageLoadFailed = false
         let pageGeneration = generation
         pageLoad.start(navigation, timeout: 60) { [weak self, weak webView] hasDocument in
@@ -1041,8 +1072,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         guard !switching, !terminating, webView?.canGoForward == true else { return }
         webView.goForward()
     }
+    @objc private func openMainSiteLogin() {
+        guard mode == .cloud, mainSiteLoginAvailable, !switching, !terminating else { return }
+        statusHeading.stringValue = "正在打开主站登录"
+        statusDetail.stringValue = "请在此应用内正常登录。完成后选择“显示 → 工作区首页”，重新开始 AwwO 登录。"
+        spinner.startAnimation(nil)
+        // Use the existing WebView and its normal cookie store. Never replay the
+        // denied authorization URL, transfer cookies, or change OAuth parameters.
+        loadPage(NavigationPolicy.mainSiteLoginURL)
+    }
     @objc private func openWorkspaceHome() {
         guard !switching, !terminating else { return }
+        if mainSiteLoginAvailable {
+            statusHeading.stringValue = "正在返回 AwwO"
+            statusDetail.stringValue = "返回后，点击“使用 ClawHunt 账号继续”重新开始登录。"
+            spinner.startAnimation(nil)
+        }
         loadPage(cloudURL)
     }
     @objc private func openInBrowser() {
@@ -1384,6 +1429,49 @@ private func testNavigationPolicy() throws {
     try check(NavigationPolicy.frameMatches(protocol: "http", host: "127.0.0.1", port: 5189, origin: cloud), false, "local frame cannot enter cloud authority")
     print("Navigation policy: \(checks) checks passed")
     try testNavigationHTTPFailures()
+    try testMainSiteLoginRecovery()
+}
+
+private func testMainSiteLoginRecovery() throws {
+    var checks = 0
+    func check(_ value: Bool, _ name: String) throws {
+        guard value else { throw LaunchError("Login recovery self-test failed: \(name)") }
+        checks += 1
+    }
+    func response(_ value: String, status: Int = 403, headers: [String: String] = [:]) -> HTTPURLResponse {
+        HTTPURLResponse(url: URL(string: value)!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+    }
+    let authorize = "https://clawhunt.store/api/awwo/sso/authorize"
+    for url in [authorize, authorize + "?state=private-test-state&code_challenge=private-test-challenge",
+        "https://CLAWHUNT.STORE:443/api/awwo/sso/authorize"] {
+        try check(NavigationHTTPFailure.offersMainSiteLogin(response(url), cloud: true), "approved authorization denial")
+        try check(!NavigationHTTPFailure.offersMainSiteLogin(response(url), cloud: false), "local mode excluded")
+    }
+    for status in [200, 302, 400, 401, 404, 429, 500, 503] {
+        try check(!NavigationHTTPFailure.offersMainSiteLogin(response(authorize, status: status), cloud: true), "only HTTP 403")
+    }
+    for url in [
+        "http://clawhunt.store/api/awwo/sso/authorize", "https://clawhunt.store:444/api/awwo/sso/authorize",
+        "https://user@clawhunt.store/api/awwo/sso/authorize", "https://user:pass@clawhunt.store/api/awwo/sso/authorize",
+        "https://clawhunt.store.evil.test/api/awwo/sso/authorize", "https://www.clawhunt.store/api/awwo/sso/authorize",
+        "https://clawhunt.store./api/awwo/sso/authorize", "https://awwo.clawhunt.store/api/awwo/sso/authorize",
+        "https://\(NavigationPolicy.accessHost)/cdn-cgi/access/login", "https://clawhunt.store/login",
+        "https://clawhunt.store/account", "https://clawhunt.store/awwo", "https://clawhunt.store/api/awwo/sso/logout",
+        authorize + "/", authorize + "/extra", authorize + "#fragment", authorize + "#",
+        "https://clawhunt.store/api/awwo/sso/Authorize", "https://clawhunt.store/api/awwo/sso/%61uthorize",
+        "https://clawhunt.store/api%2Fawwo/sso/authorize", "https://clawhunt.store/api/awwo/sso/../sso/authorize",
+        "https://clawhunt.store/api/awwo/sso/%2e/authorize", "https://clawhunt.store//api/awwo/sso/authorize"
+    ] {
+        try check(!NavigationHTTPFailure.offersMainSiteLogin(response(url), cloud: true), "unapproved URL: \(url)")
+    }
+    try check(!NavigationPolicy.isClawHuntAuthorizationURL(nil), "missing URL excluded")
+    try check(!NavigationHTTPFailure.offersMainSiteLogin(response("https://clawhunt.store/login", headers: [
+        "Location": authorize, "CF-Ray": "0123456789abcdef-HKG"
+    ]), cloud: true), "headers cannot select the recovery route")
+    try check(NavigationPolicy.mainSiteLoginURL.absoluteString == "https://clawhunt.store/login", "fixed clean login destination")
+    try check(NavigationPolicy.isClawHuntSSOURL(NavigationPolicy.mainSiteLoginURL), "login already belongs to approved navigation")
+    try check(!NavigationPolicy.sameOrigin(NavigationPolicy.mainSiteLoginURL, NavigationPolicy.cloudURL), "login gains no application origin authority")
+    print("Login recovery: \(checks) checks passed (synthetic responses only)")
 }
 
 private func testNavigationHTTPFailures() throws {

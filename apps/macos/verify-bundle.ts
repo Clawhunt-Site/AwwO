@@ -19,7 +19,7 @@ const metadata = JSON.parse(await readFile(path.join(resources, 'metadata.json')
 assert.equal(plist.CFBundleIdentifier, 'store.clawhunt.awwo.local');
 assert.equal(plist.CFBundleDisplayName, 'AwwO');
 assert.equal(plist.CFBundleShortVersionString, '0.9.1');
-assert.equal(plist.CFBundleVersion, '9');
+assert.equal(plist.CFBundleVersion, '10');
 assert.equal(plist.CFBundleIconFile, 'AwwOFold');
 assert.equal(plist.AwwOEnvironment, expected.environment);
 assert.equal(plist.AwwOCloudURL, expected.cloudURL);
