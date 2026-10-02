@@ -9,11 +9,29 @@ import { forgetNode, markLocalSend } from '../src/canvas/sessionTransport';
 
 afterEach(() => { cleanup(); localStorage.clear(); resetAllSessions(); forgetNode('foreign'); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-function foreignCompletionFixture() {
+function foreignCompletionFixture(holdRecoveryTimers = false) {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const timeout = globalThis.setTimeout;
-  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: TimerHandler, ms?: number, ...args: unknown[]) =>
-    timeout(callback, ms === 2500 ? 30 : ms, ...args)) as typeof setTimeout);
+  const clear = globalThis.clearTimeout;
+  const queued = new Map<ReturnType<typeof setTimeout>, { delay: number; callback: () => void }>();
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: TimerHandler, ms?: number, ...args: unknown[]) => {
+    if (holdRecoveryTimers && (ms === 400 || ms === 2500)) {
+      const id = timeout(() => {}, 60000);
+      queued.set(id, { delay: ms, callback: () => (callback as (...values: unknown[]) => void)(...args) });
+      return id;
+    }
+    return timeout(callback, ms === 2500 ? 30 : ms, ...args);
+  }) as typeof setTimeout);
+  if (holdRecoveryTimers) vi.spyOn(globalThis, 'clearTimeout').mockImplementation(id => {
+    queued.delete(id as ReturnType<typeof setTimeout>);
+    clear(id);
+  });
+  const flushRecoveryTimer = (delay: 400 | 2500) => {
+    const entry = [...queued].find(([, task]) => task.delay === delay);
+    expect(entry).toBeDefined();
+    const [id, task] = entry!;
+    queued.delete(id); clear(id); task.callback();
+  };
   const node = {
     ...createSessionNode('llm', { x: 0, y: 0 }), id: 'foreign', title: 'Foreign', runtime: 'codex_local',
     binding: { companyId: 'company', agentId: 'agent', agentName: 'Agent' }, issueId: 'issue', preview: 'old prompt',
@@ -47,7 +65,7 @@ function foreignCompletionFixture() {
     localStorage.removeItem(CANVAS_RUN_JOURNAL_KEY);
     finishRead({ ok: true, json: async () => ({ runId: 'run', status: 'running', terminal: false, output: '' }) });
   };
-  return { node, doc, journal, fetchMock, completeElsewhere, setHistoryReply: (reply: typeof historyReply) => { historyReply = reply; } };
+  return { node, doc, journal, fetchMock, completeElsewhere, flushRecoveryTimer, setHistoryReply: (reply: typeof historyReply) => { historyReply = reply; } };
 }
 
 it('refreshes a loaded local transcript once when another tab completes and removes the journal', async () => {
@@ -71,6 +89,33 @@ it('refreshes a loaded local transcript once when another tab completes and remo
   expect(f.fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   expect(localStorage.getItem(CANVAS_RUN_JOURNAL_KEY)).toBeNull();
   expect(JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!).nodes[0].preview).toBe('AWWO-TURN-RECHECKED');
+});
+
+it.each(['same event loop turn', 'after a React commit'] as const)(
+  'preserves another tab’s completed document when a queued viewport save precedes recovery %s', async schedule => {
+  const f = foreignCompletionFixture(true);
+  render(<CanvasSurface />);
+  await waitFor(() => expect(f.fetchMock.mock.calls.some(([url]) => String(url).endsWith('/runs/run'))).toBe(true));
+  fireEvent.click(screen.getByRole('button', { name: '打开 Foreign', exact: true }));
+  const completed = { ...f.doc, nodes: [{ ...f.node, title: 'Foreign final', preview: 'AWWO-TURN-RECHECKED' }] };
+  await act(async () => { f.completeElsewhere(completed); });
+  // A busy event loop can deliver both due timers before React commits, or allow the
+  // viewport update's ordinary autosave first. Neither may mutate the owner's result.
+  if (schedule === 'same event loop turn') {
+    await act(async () => { f.flushRecoveryTimer(400); f.flushRecoveryTimer(2500); });
+  } else {
+    await act(async () => { f.flushRecoveryTimer(400); });
+    expect(localStorage.getItem(CANVAS_STORAGE_KEY)).toBe(JSON.stringify(completed));
+    await act(async () => { f.flushRecoveryTimer(2500); });
+  }
+  await waitFor(() => expect(getSnapshot('foreign').turns.filter(turn => turn.role === 'agent' && turn.text === 'AWWO-TURN-RECHECKED')).toHaveLength(1));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /停止/ })).toBeNull());
+  expect(f.fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/messages'))).toHaveLength(1);
+  expect(f.fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  expect(localStorage.getItem(CANVAS_RUN_JOURNAL_KEY)).toBeNull();
+  expect(JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!).nodes[0].preview).toBe('AWWO-TURN-RECHECKED');
+  expect(JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!).nodes[0].title).toBe('Foreign final');
+  expect(screen.queryByText(/当前页面的画布已过期/)).not.toBeInTheDocument();
 });
 
 it('keeps foreign completion locked and the saved preview intact until history becomes readable', async () => {

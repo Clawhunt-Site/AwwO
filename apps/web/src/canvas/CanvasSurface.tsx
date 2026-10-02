@@ -344,7 +344,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
    */
   const patchDoc = useCallback(
     (mut: (prev: CanvasDocument) => CanvasDocument, opts?: { label?: string; silent?: boolean; serverIdentity?: boolean }) => {
-      if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || (!runAbort.current && loadRunJournal())) return;
+      if (readOnlyRef.current || outdatedObserver.current || setupRequest.current
+          || (!runAbort.current && (journal.current || recoveringRef.current || loadRunJournal()))) return;
       const prev = docRef.current;
       const proposed = mut(prev);
       const next = opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed);
@@ -411,7 +412,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [canEditStructure, restoreDoc, syncHistory]);
 
   useEffect(() => {
-    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || (!runAbort.current && loadRunJournal())) return;
+    // Another tab can clear the durable journal before this observer adopts its final
+    // document. Keep queued ordinary saves from publishing our previous canvas in that gap.
+    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current
+        || (!runAbort.current && (journal.current || recoveringRef.current || loadRunJournal()))) return;
     saveLocalDocument({ ...doc, edges });
   }, [doc, edges, readOnly, saveLocalDocument]);
 
