@@ -7,37 +7,67 @@ environment and service state before using this historical deployment record.
 
 Recorded on 2026-09-12 from an executed and verified deployment of `e05d2af`, and re-verified on
 2026-09-14 by deploying `24fcb43` over `edb7f3a` (18 commits, including three unshipped migrations).
-This documents the deployment that actually exists; `docs/deploy-aws.md` describes a **different**
-application (`canvas.clawhunt.store`) and does not apply here.
+The host inventory below was refreshed during deployment preparation on 2026-10-02; the later
+sections retain the historical deployment lessons. This update does not claim the managed-execution
+candidate has been deployed. `docs/deploy-aws.md` describes a **different** application
+(`canvas.clawhunt.store`) and does not apply here.
 
 ## Where it runs
 
 | Fact | Value |
 | --- | --- |
 | Host | EC2 `awwo-acceptance`, `i-0eda5599cbd603c8b` |
-| Account / region | `563688183799` / `us-east-2`, CLI profile `clawhunt` |
+| Account / region | `563688183799` / `us-east-2`, CLI profile `clawhunt-deploy` |
 | Exposure | `cloudflared-awwo.service` tunnel → Cloudflare Access application on `awwo.clawhunt.store` |
-| Access to the host | AWS SSM (`aws ssm send-command`). There is no Docker and no AWS CLI on the box. |
+| Access to the host | AWS SSM (`aws ssm send-command`); do not assume an AWS CLI is available on the host. |
+| OS / architecture | Ubuntu 24.04 / x86_64 |
+| Managed runtime preparation | `/usr/local/bin/node` 24.20.0 and Docker 29.8.2 amd64 verified on 2026-10-02 |
+| Existing credential mode | `AWWO_CREDENTIAL_MODE=operator`; preserve configured engines, personal connections and the existing vault key |
 
-`deploy/saas/compose.yml` is **not** the live path. Services run natively under systemd as
-`awwo-saas:awwo`:
+`deploy/saas/compose.yml` is **not** the live path. The API, web and model workers run natively
+under systemd as `awwo-saas:awwo`. The managed broker uses its own identity:
 
-| Unit | Role | Listener |
-| --- | --- | --- |
-| `awwo-saas-web` | nginx serving the built bundle, proxying `/api` | `127.0.0.1:5188` |
-| `awwo-saas-api` | Go API | `127.0.0.1:8087` |
-| `awwo-saas-pi` | Pi worker (text-only runtime) | `127.0.0.1:8097` |
-| `awwo-saas-database` | PostgreSQL for the SaaS | `127.0.0.1:54329` |
+| Unit | Role | Listener | Status verified 2026-10-02 |
+| --- | --- | --- | --- |
+| `awwo-saas-web` | nginx serving the built bundle, proxying `/api` | `127.0.0.1:5188` | Existing |
+| `awwo-saas-api` | Go API | `127.0.0.1:8087` | Existing |
+| `awwo-saas-pi` | Pi model worker | `127.0.0.1:8097` | Existing |
+| `awwo-saas-openai-agents` | OpenAI Agents model worker | `127.0.0.1:8098` | Existing |
+| `awwo-saas-database` | PostgreSQL for the SaaS | `127.0.0.1:55483` | Existing |
+| `awwo-saas-openmaus` | Managed execution broker | `127.0.0.1:8109` | Active; public and browser acceptance passed |
+
+The broker account is `awwo-openmaus:awwo-openmaus`, with supplementary group `docker` and no
+membership in the `awwo` credential group. Its state belongs under `/var/lib/awwo-openmaus`
+(`0700`), with root-owned private configuration under `/etc/awwo-openmaus`. Grant only the required
+release-parent traversal and release read access; the broker must not read the API environment or
+database files. The API account must not receive Docker group membership.
+
+Pi, OpenAI Agents and OpenMaus services use the verified Node 24 path above, matching
+the Linux release dependency installation and CI runtime. Record each current worker's executable
+before switching: the previous Node 26 paths remain rollback targets, not candidate runtimes.
+Retain the API's `api.env` and `api-typesafe.env`, each model worker's existing environment files and
+the model-catalog drop-in. Add only the three managed-execution settings to the API's new private
+environment file; do not change `AWWO_CREDENTIAL_MODE` or regenerate the encryption key.
 
 Releases are immutable directories `/srv/awwo/releases/saas-<short-sha>/` containing `awwo-api`,
 `html/`, `SOURCE_SHA`, `SHA256SUMS`. Mutable state and configuration stay in
 `/srv/awwo/saas-staging/{config,postgres,logs,run,backups,evidence}` and are never part of a release.
+The managed-execution release also carries all three worker trees, shared TypeScript modules,
+pinned core and licenses, `release.json`, and `images/workspace.tar`; the API/HTML-only package
+described below is not sufficient for that upgrade.
 
-The `STAGING · 测试环境` badge is injected by `sub_filter` in
-`/srv/awwo/saas-staging/config/nginx-web.conf`. It is not in the repository — do not look for it in
-the bundle, and remove it there when this host stops being a staging host.
+The historical `STAGING · 测试环境` badge was injected by `sub_filter` in
+`/srv/awwo/saas-staging/config/nginx-web.conf`. The directory name `saas-staging` and a historical
+badge do not establish the current environment: the API process was verified as
+`APP_ENV=production` on 2026-10-02. Preserve the existing domain, routing and separate TypeSafe
+root when promoting the candidate; inspect the current nginx configuration before any UI change.
 
-## Build
+## Historical API/HTML build
+
+For the managed upgrade, use the complete Linux CI package and verification steps in the
+[managed rollout](awwo-managed-execution-deploy.md#2-构建一份完整的不可变发布包). Its manifest must
+record `publicClawHuntURL=https://clawhunt.store/`. An artifact with an empty URL is rejected even
+when the packaging job exits successfully; download and verify the replacement attempt before use.
 
 The API must be built with its source commit injected, or `/api/v1/health` reports
 `revision: "unknown"`:
@@ -60,12 +90,21 @@ release's `html/` into the new release on the host and prove it is unchanged wit
 directory. A rebuild would produce a bundle nobody reviewed, and the release still owns its own copy so
 both pointers can move together and old releases stay deletable. `f9b1155` shipped this way.
 
-## Switch
+## Historical API/HTML switch
 
-1. **Back up first.** `aws ec2 create-snapshot --volume-id <root volume>` for a rollback point, and
-   copy `awwo-saas-api.service` plus `nginx-web.conf` into `/srv/awwo/saas-staging/backups/`. The
-   host's PostgreSQL build ships only `initdb`/`pg_ctl`/`postgres`, so there is **no `pg_dump`** —
-   the EBS snapshot is the database backup.
+The following is the earlier two-component procedure. It does not replace the managed upgrade's
+maintenance, worker, migration-proof and rollback gates. On 2026-10-02 the operator explicitly
+authorized the built-in migrator for this release; that authorization remains conditional on a
+validated cold backup and isolated candidate/old-API restore rehearsal before candidate production
+startup. It does not authorize unrelated direct SQL or future migrations.
+
+1. **Back up first.** Save effective units, drop-ins and nginx configuration under
+   `/srv/awwo/saas-staging/backups/`. The host's PostgreSQL runtime has
+   `initdb`/`pg_ctl`/`postgres` but no `pg_dump`/`pg_restore`. A submitted EBS snapshot request is
+   not a validated backup: confirm completion and recoverability before relying on it. The current
+   managed rollout instead prepares a consistent physical cold copy with the API and database
+   stopped, retains vault recovery material, restores the original service promptly and validates
+   the copy in isolation.
 2. Extract the release, then match what the live releases actually carry — `root:root`, dirs `755`,
    files `644`, `awwo-api` `755` — and verify `sha256sum -c SHA256SUMS`. The release directory being
    world-readable is not a leak: its parent `/srv/awwo/releases` is `drwxr-x---  awwo awwo`, which is
@@ -78,8 +117,10 @@ both pointers can move together and old releases stay deletable. `f9b1155` shipp
 4. Point `ExecStart=` **and** `Description=` in `awwo-saas-api.service` at the new release —
    `sed -i 's|saas-<old>|saas-<new>|g'` catches `ExecStart` but not a `Description` that names the sha
    without the `saas-` prefix, which is how a stale description survives a correct deploy. Then
-   `systemctl daemon-reload`, `systemctl restart awwo-saas-api`. Migrations are embedded and applied
-   by `Migrate()` before the API listens, so a listening API means they succeeded.
+   `systemctl daemon-reload`, `systemctl restart awwo-saas-api` only after the applicable migration
+   and recovery gates. Migrations are embedded and applied by `Migrate()` before the API listens;
+   verify its full revision and health, not merely an open TCP port. The managed rollout uses
+   reversible drop-ins with full-revision descriptions for API, Pi and OpenAI Agents.
 5. Point `root` in `nginx-web.conf` at the new `html/`, test the config **as `awwo-saas`**, then
    `systemctl restart awwo-saas-web` — read "The nginx switch is not the API switch" below first, because
    the obvious way to do both of those took the site down on 2026-09-16. `nginx-preview.conf` is a
@@ -154,8 +195,10 @@ one is downtime and a locking one is an outage. Measure first: on 2026-09-14 the
 and two non-concurrent `CREATE INDEX`es on `model_invocations` — applied in under two seconds. That
 was checked, not assumed; on a large table the same migrations would need a different plan.
 
-Leave `awwo-saas-pi` and `awwo-saas-database` alone unless the Pi worker or the PostgreSQL runtime
-actually changed; they may legitimately reference an older release directory.
+For an API-only change, leave model workers and the PostgreSQL runtime alone when they did not
+change; they may legitimately reference older releases. The managed upgrade includes both model
+workers, so it promotes their code and runtime alongside the API while preserving the database
+runtime and each component's individual rollback target.
 
 ## Verify — the deployment must be checkable, not assumed
 
@@ -164,7 +207,7 @@ actually serving:
 
 ```bash
 curl -s https://awwo.clawhunt.store/api/v1/health     # in a browser session that passed Access
-# {"environment":"staging","revision":"<the deployed commit>","status":"ok"}
+# {"environment":"production","revision":"<the complete deployed commit>","status":"ok"}
 ```
 
 `revision` is the commit the running binary was built from, so it cannot disagree with reality. On
@@ -288,10 +331,15 @@ and report `readyConnections=4` afterwards.
 
 ## Roll back
 
-Point `ExecStart=` and the nginx `root` back at the previous release directory, `daemon-reload`,
-restart `awwo-saas-api` and `awwo-saas-web`. Additive migrations (a new table) leave the previous
-binary working against the newer schema, so a schema rollback is not required; restore the EBS
-snapshot only if data itself is wrong.
+For a historical API/HTML-only rollback, restore the recorded effective executable and nginx root,
+then reload units and restart the affected services. For the managed upgrade, follow its
+[maintenance and rollback procedure](awwo-managed-execution-deploy.md#5-验收和回滚): drain all
+affected workers, restore the original model worker runtimes and descriptions as well, and stop the
+new broker. Do not assume old-code compatibility solely because a migration adds tables; require
+the isolated compatibility evidence and retain the migrated database. Restoring database bytes is
+a separate operation that must account for any data written after the backup. After an automatic
+rollback, `disable-maintenance --after-rollback` must verify the original full API revision before
+removing only the admission gate.
 
 Rolling back across migration 016 (reasoning effort) is schema-compatible but not behaviour-neutral. A
 pre-016 API binary ignores `agents.effort`, so runs of an Agent with an explicit effort silently use the
@@ -299,3 +347,5 @@ provider default, and it rejects a stored canvas whose team members carry an `ef
 `400 invalid_team`. Before such a binary serves traffic, list the affected Agents with
 `SELECT tenant_id,id,model,effort FROM agents WHERE effort<>''` and either accept the downgrade
 explicitly or clear those levels first.
+
+The managed application release is live at `a16098b365c78f63e4a87c4d6e64db4772ec8bac`; see the [2026-10-02 release record](awwo-managed-execution-release-20261002.md) for verified artifact hashes, the native PDF worker MIME fix, shared configuration, backup proof and rollback scope. Existing Python execution on 8099 is retained; the new broker listens only on 8109.

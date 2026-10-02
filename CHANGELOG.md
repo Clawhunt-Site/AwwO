@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Added
 
+- Add tenant knowledge sources, immutable revisions, provenance, reviewable proposals and restoration, with selected knowledge revisions frozen into planning and execution context.
+- Add a managed OpenMaus execution assistant that reuses AwwO model connections, runs the pinned open-source core in restricted Docker workspaces, and returns approvals, questions, cancellable runs and published artifacts to the canvas. End users do not configure a second OpenMaus account or provider key.
+- Add canvas previews for HTML, WebGL 3D, paged PDF and a read-only IDE file tree/source window, with artifact provenance and knowledge archival.
+- Add Linux amd64 release packaging for the API, SaaS web, model workers, pinned execution core and immutable workspace image, with checksums, runtime smoke checks and separate CI jobs. Production promotion still requires validated backup/restore evidence, runtime configuration checks and explicit migration authorization; building an artifact does not announce deployment.
 - Redraw generated training charts when an embedded result becomes visible or changes width, preserving trained weights and experiment state across canvas/result tab switches.
 - Show official workflows and interactive results side by side, with dependency-stage tours, node handoffs, persistent result state, reset/focus controls and embedded-width layouts. Curated model outputs include sanitized run snapshots, explicit incomplete steps, checksum provenance and isolated interactive previews.
 - Let users copy an official workflow as an unconfigured draft or apply one available workspace model to all its session nodes, with a fresh availability check before creation. Add a permission-scoped graph evidence download containing run records, summaries and invocation pages with explicit completeness limits. Copying does not start model execution.

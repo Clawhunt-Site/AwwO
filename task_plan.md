@@ -65,16 +65,22 @@ The user requested native OpenMaus integration and completion of the remaining w
 
 ## 2026-10-02 authorized production release
 
-The user explicitly requested completion, push and production deployment. The deployment target and live SHA are re-read before cutover; the Bytebase database-operation rule still applies unless the user authorizes a specific exception.
+The user explicitly requested completion, push and production deployment. The deployment target and live SHA are re-read before cutover. The user explicitly authorized this release to use the built-in migrator after a consistent backup, isolated recovery and transactional migration validation; other production SQL remains outside that exception.
 
 - [x] Re-query GitHub/Forgejo main and actual production API/web/worker paths.
 - [x] Integrate current public main without losing canvas previews, knowledge or managed execution.
-- [ ] Complete merged frontend/backend/worker regressions and Linux amd64 runtime checks.
-- [ ] Build a complete immutable Linux release, push public main and preserve private-only history on Forgejo.
-- [ ] Prepare Docker broker account, workspace image, internal configuration and recoverable backup.
-- [ ] Resolve the production migration execution gate, cut over all relevant services with rollback.
-- [ ] Verify final SHA, authenticated public endpoint, runtime readiness and real browser preview evidence.
+- [x] Complete merged frontend/backend/worker regressions and Linux amd64 runtime checks.
+- [x] Build a complete immutable Linux release, push public main and preserve private-only history on Forgejo.
+- [x] Prepare Docker broker account, workspace image, internal configuration and recoverable backup.
+- [x] Resolve the production migration execution gate, cut over all relevant services with rollback.
+- [x] Verify final SHA, authenticated public endpoint, runtime readiness and real browser preview evidence.
 
 Fresh inventory: production API and Web are d278b7628c5d; the Pi/OpenAI workers still use the older saas-03b72b2e9190 sources. Target is awwo-acceptance i-0eda5599cbd603c8b in us-east-2; its historical staging directory name does not imply staging. No Bytebase connector was found in tools or installed-plugin discovery.
 
 Merged release checks: 100 frontend test files / 1380 cases passed, generic and SaaS TypeScript passed. Pi 53 passed; OpenAI Agents 177 passed / 9 explicitly skipped. The host configuration and existing vault key have private on-host backups; the EBS baseline snapshot was requested but DescribeSnapshots is not permitted, so it is not a verified recovery point and cannot replace the pending consistent backup/recovery check.
+
+Release candidate `a16098b365c78f63e4a87c4d6e64db4772ec8bac` is pushed to GitHub main; Forgejo main `af1bc4967e00ebc1775b7cf5c8813619cb8ce9dc` preserves private-only history and files. The full merged backend race suite and vet passed; SaaS CI validation jobs passed. The native archive is being rebuilt with the verified ClawHunt public URL before promotion. Production PG is on loopback port 55483; the recovery clone uses 55439.
+
+Consistent cold backup and isolated built-in migration rehearsal passed. The same migrated clone passed old-API startup and authenticated business/artifact reads. One real default-provider task completed with three model invocations, approved HTML/ZIP publication and knowledge ingestion; cleanup reported no errors. Production first promotion automatically rolled back at broker readiness because the existing Python worker owns 8099; task admission was restored. Broker 8109 is verified free, and the second promotion is in progress.
+
+Production completed: API/web/Pi/OpenAI and managed execution now serve `a16098b365c78f63e4a87c4d6e64db4772ec8bac`; existing Python worker on 8099 remains intact, broker uses 8109. Authenticated public and origin health, HTML/JS/CSS bytes and worker readiness passed. Maintenance is removed and operator mode/vault key remain unchanged. SaaS six-job CI and general Linux/Windows CI are green for the released application. Production browser verified knowledge reads, shared model selection, HTML interaction, real 3D rotation, PDF rendering/zoom and IDE file switching. A native nginx `.mjs` MIME issue found during browser acceptance was fixed without changing application bytes; the corresponding container nginx configuration passed a real Docker HTTP smoke. Final evidence and rollback scope are documented in `docs/awwo-managed-execution-release-20261002.md`.

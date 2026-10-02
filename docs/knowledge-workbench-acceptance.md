@@ -141,3 +141,14 @@
 产品仅承诺工作区命令、文件与发布工具，不包含宿主桌面、浏览器 GUI 或鼠标键盘控制。旧外部实例桥接的真实连接不是默认内置助手的前置条件，仍只作为高级 API 兼容保留。
 
 预览中的 IDE 是只读文件树与源码窗口，不是完整终端 IDE。PDF/3D 预览不自动做 OCR、语义提取或资料入库。上述能力与界面中的实际支持范围一致。
+
+
+## 2026-10-02 merged release and isolated provider acceptance
+
+The final application source is `a16098b365c78f63e4a87c4d6e64db4772ec8bac`. The merged frontend passed 100 files / 1380 tests and both strict TypeScript configurations. The complete backend race suite passed 354 top-level tests and 342 subtests, with no skips or reported races; `go vet` passed. Pi passed 53 tests; OpenAI Agents passed 177 with 9 explicit baseline skips. These new results resolve the earlier timeout/worker deadline evidence gaps without changing their historical record.
+
+[SaaS CI 36963830059](https://github.com/Clawhunt-Site/AwwO/actions/runs/36963830059) passed all six jobs, including actual Linux amd64 OpenMaus/Docker execution and a complete native archive. Use second-attempt artifact ID `11208339294`; the first same-name artifact lacked the intended public navigation URL and was rejected. Archive SHA256 is `cbbc4d7e93a13575e21f813fc7ffc0c7a38dcdd967f6dddbfbe6ce289f6a397a`, with `publicClawHuntURL=https://clawhunt.store/`.
+
+The explicitly authorized built-in migrator was rehearsed against a stopped, consistent production backup restored on a separate PostgreSQL port. Candidate initialization and old-API startup passed. One isolated real-provider task then reused the existing default operator model through the AwwO model lease: three model invocations completed the approved write, publication and archive flow. The resulting HTML (203 bytes) and ZIP (263 bytes) matched their download hashes, the ZIP contained the expected HTML, and knowledge ingestion preserved its content. No provider credentials were given to OpenMaus or its workspace. The old API subsequently read the new synthetic session, canvas and both exact artifact bytes with the existing synthetic login cookie. Owned child processes and workspaces were cleaned up without errors. This test used the restored copy and did not create production test data.
+
+Production promotion and browser readback are complete; see the [release record](awwo-managed-execution-release-20261002.md). The production browser used existing deterministic real-core output files locally for the four-format preview check, while the separate restored-copy test proved actual paid-provider execution. No synthetic task or knowledge data was written to the production tenant.
