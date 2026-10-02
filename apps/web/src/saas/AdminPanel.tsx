@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, saasErrorMessage, type Identity } from './api';
 import { adminPage, collectAdminExport, downloadJSON, type AdminKind, type AdminRow } from './adminData';
 import { useSaaSPreferences } from './preferences';
+import { AdminRunSummary } from './AdminRunSummary';
 import './admin.css';
 
 export function AdminPanel({ identity, controls }: { identity: Identity; controls?: ReactNode }) {
@@ -52,7 +53,8 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
   const date = (value: string) => value ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : '—';
   return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a><a href="/">{t('返回工作区', 'Back to workspace')}</a>{controls}</header>
     <section className="saas-page-intro"><span className="saas-eyebrow">ADMINISTRATION</span><h1>{t('平台管理', 'Platform administration')}</h1><p>{t('管理工作区状态与执行额度，查询用户、运行及审计记录。', 'Manage workspace status and run limits; inspect users, runs and audit records.')}</p></section>
-    <nav className="saas-tabs" aria-label={t('管理分类', 'Administration sections')}>{Object.entries(labels).map(([key, label]) => <button key={key} disabled={pending || exportCount !== null} aria-pressed={tab === key} onClick={() => { setCursors([null]); setTab(key as AdminKind); }}>{label}</button>)}<button disabled={pending} onClick={refresh}>{t('刷新数据', 'Refresh')}</button></nav>
+    <AdminRunSummary key={identity.user.id} identity={identity} />
+    <nav className="saas-tabs saas-admin-tabs" aria-label={t('管理分类', 'Administration sections')}>{Object.entries(labels).map(([key, label]) => <button key={key} disabled={pending || exportCount !== null} aria-pressed={tab === key} onClick={() => { setCursors([null]); setTab(key as AdminKind); }}>{label}</button>)}<button disabled={pending} onClick={refresh}>{t('刷新数据', 'Refresh')}</button></nav>
     <div className="saas-admin-tools"><p>{t('每页 50 条；导出会读取当前分类的全部分页，范围以首次查询时间限定。记录内容以各页读取时为准。', '50 records per page. Export reads all pages in this section, bounded by the first query time. Record values reflect when each page is read.')}</p>
       {exportCount === null ? <button onClick={exportAll}>{t('导出全部 JSON', 'Export all JSON')}</button> : <><span role="status">{t(`已读取 ${exportCount} 条`, `Read ${exportCount} records`)}</span><button onClick={() => exporting.current?.abort()}>{t('取消导出', 'Cancel export')}</button></>}
     </div>

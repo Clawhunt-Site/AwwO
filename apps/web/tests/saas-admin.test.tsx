@@ -6,6 +6,7 @@ import { SaaSPreferencesProvider } from '../src/saas/preferences';
 const identity = { user: { id: 'admin-a', name: 'Admin', email: 'a@example.invalid', platformRole: 'admin' as const }, tenants: [] };
 const tenant = { id: 't-a', name: 'Tenant A', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+const stubFetch = (handler: (url: string, init?: RequestInit) => Promise<Response>) => vi.stubGlobal('fetch', (url: string, init?: RequestInit) => url.endsWith('/admin/summary') ? Promise.resolve(response({ tenantCount: 1, userCount: 1, activeRuns: 0, completedRuns: 0, failedRuns: 0 })) : handler(url, init));
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -16,7 +17,7 @@ it('edits quota through Go without changing tenant status and reloads the first 
     if (init.method === 'PATCH') return response({ ...tenant, ...JSON.parse(String(init.body)) });
     return response({ items: [tenant], nextCursor: null });
   });
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   render(<SaaSPreferencesProvider><AdminPanel identity={identity}/></SaaSPreferencesProvider>);
   fireEvent.click(await screen.findByRole('button', { name: '编辑配额' }));
   fireEvent.change(screen.getByLabelText('最大并发运行数'), { target: { value: '5' } });
@@ -34,7 +35,7 @@ it('edits quota through Go without changing tenant status and reloads the first 
 // operator believe a blocked workspace is unrestricted.
 it('distinguishes an unrestricted workspace from one blocked from every model', async () => {
   const rows = [tenant, { ...tenant, id: 't-blocked', name: 'Blocked', allowedModels: [] }, { ...tenant, id: 't-limited', name: 'Limited', allowedModels: ['granted-a', 'granted-b'] }];
-  vi.stubGlobal('fetch', vi.fn(async () => response({ items: rows, nextCursor: null })));
+  stubFetch(vi.fn(async () => response({ items: rows, nextCursor: null })));
   render(<SaaSPreferencesProvider><AdminPanel identity={identity}/></SaaSPreferencesProvider>);
   await screen.findByText('Limited');
   expect(screen.getByText('全部可用')).toBeVisible();
@@ -45,7 +46,7 @@ it('distinguishes an unrestricted workspace from one blocked from every model', 
 it('sends the model entitlement only when the operator edits it, and can both restrict and clear it', async () => {
   const bodies: unknown[] = [];
   const limited = { ...tenant, allowedModels: ['granted-a', 'granted-b'] };
-  vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit = {}) => {
+  stubFetch(vi.fn(async (_url: string, init: RequestInit = {}) => {
     if (init.method === 'PATCH') { bodies.push(JSON.parse(String(init.body))); return response(limited); }
     return response({ items: [limited], nextCursor: null });
   }));
@@ -75,7 +76,7 @@ it('sends the model entitlement only when the operator edits it, and can both re
 
 it('refuses an oversized allowlist locally instead of sending one the server will reject', async () => {
   const bodies: unknown[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit = {}) => {
+  stubFetch(vi.fn(async (_url: string, init: RequestInit = {}) => {
     if (init.method === 'PATCH') { bodies.push(JSON.parse(String(init.body))); return response(tenant); }
     return response({ items: [tenant], nextCursor: null });
   }));
@@ -90,7 +91,7 @@ it('refuses an oversized allowlist locally instead of sending one the server wil
 
 it('follows opaque cursors, restores the previous page and resets on a new section', async () => {
   const fetch = vi.fn(async (url: string) => response({ items: [{ ...tenant, name: url.includes('cursor=') ? 'Tenant B' : 'Tenant A' }], nextCursor: url.includes('cursor=') ? null : 'opaque:token' }));
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   render(<SaaSPreferencesProvider><AdminPanel identity={identity}/></SaaSPreferencesProvider>);
   await screen.findByText('Tenant A');
   fireEvent.click(screen.getByRole('button', { name: '下一页' }));
@@ -106,7 +107,7 @@ it('exports beyond 200 records and does not return a partial result after a late
   const first = Array.from({ length: 200 }, (_, id) => ({ id: String(id) }));
   const fetch = vi.fn().mockResolvedValueOnce(response({ items: first, nextCursor: 'page2', snapshot: 'fixed' }))
     .mockResolvedValueOnce(response({ items: [{ id: '200' }], nextCursor: null, snapshot: 'fixed' }));
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   const progress = vi.fn();
   const result = await collectAdminExport('users', new AbortController().signal, progress);
   expect(result.count).toBe(201); expect(result.insertionBoundary).toBe('fixed');
@@ -117,7 +118,7 @@ it('exports beyond 200 records and does not return a partial result after a late
 
 it('cancels before another page and rejects repeated cursors instead of looping', async () => {
   const fetch = vi.fn(async () => response({ items: [tenant], nextCursor: 'same', snapshot: 'fixed' }));
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   const controller = new AbortController();
   await expect(collectAdminExport('tenants', controller.signal, () => controller.abort())).rejects.toThrow();
   expect(fetch).toHaveBeenCalledTimes(1);
