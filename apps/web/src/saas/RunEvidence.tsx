@@ -53,7 +53,7 @@ function RunEvidenceView({ tenantId, runId, runStatus }: Props) {
           <dt>{t('输出', 'Output')}</dt><dd>{summary.outputPresent ? `${summary.outputBytes} ${t('字节', 'bytes')}` : t('未记录输出', 'No output recorded')}</dd>
           <dt>{t('附件', 'Artifacts')}</dt><dd>{summary.artifactCount}</dd>
         </dl>
-        <p>{summary.contract.declared ? summary.contract.validated ? t('交付格式：已通过检查', 'Delivery format: validated') : t('交付格式：尚未通过检查', 'Delivery format: not validated') : t('交付格式：未声明', 'Delivery format: not declared')}</p>
+        <p>{summary.contract.declared ? summary.contract.validated ? t('交付格式：已通过检查', 'Delivery format: validated') : t('交付格式：未确认校验通过', 'Delivery format: validation not confirmed') : t('交付格式：未声明', 'Delivery format: not declared')}</p>
         <p>{t('证据来源：', 'Evidence sources: ')}{summary.evidenceSources.length ? summary.evidenceSources.map(sourceName).join(' · ') : t('暂无已记录来源', 'No sources recorded')}</p>
         {frame && <div className="saas-evidence-task-frame"><strong>{t('本次任务要求（人工填写）', 'Requirements for this run (human-authored)')}</strong>
           {(['constraints', 'acceptanceCriteria'] as const).map(field => <div key={field}><p>{field === 'constraints' ? t('约束', 'Constraints') : t('验收标准', 'Acceptance criteria')}</p>
