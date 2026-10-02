@@ -186,7 +186,7 @@ private enum NavigationPolicy {
     static let accessHost = "lively-grass-61f6.cloudflareaccess.com"
     static let mainSiteHost = "clawhunt.store"
     private static let mainSiteAuthPaths: Set<String> = [
-        "/api/awwo/sso/authorize", "/api/awwo/sso/logout", "/login", "/register", "/account"
+        "/api/awwo/sso/authorize", "/api/awwo/sso/logout", "/login", "/register", "/account", "/awwo"
     ]
 
     static func port(_ url: URL) -> Int? {
@@ -1305,7 +1305,29 @@ private func testNavigationPolicy() throws {
         ("https://clawhunt.store/login?redirect=%2Fapi%2Fawwo%2Fsso%2Fauthorize", true),
         ("https://clawhunt.store/register", true),
         ("https://clawhunt.store/account#profile", true),
-        ("https://clawhunt.store/awwo", false),
+        ("https://clawhunt.store/awwo", true),
+        ("https://clawhunt.store/awwo?from=signin", true),
+        ("https://clawhunt.store/awwo?from=signin&return=%2Fapi%2Fawwo%2Fsso%2Fauthorize#redeem", true),
+        ("https://CLAWHUNT.STORE:443/awwo?from=signin", true),
+        ("https://clawhunt.store/awwo/", false),
+        ("https://clawhunt.store/awwo/redeem", false),
+        ("https://clawhunt.store/awwo-evil?from=signin", false),
+        ("https://clawhunt.store/AwwO", false),
+        ("https://clawhunt.store//awwo", false),
+        ("https://clawhunt.store/%61wwo", false),
+        ("https://clawhunt.store/%2Fawwo", false),
+        ("https://clawhunt.store/awwo%2F", false),
+        ("https://clawhunt.store/login/../awwo", false),
+        ("https://clawhunt.store/login/%2e%2e/awwo", false),
+        ("https://clawhunt.store/awwo/../account", false),
+        ("https://clawhunt.store/?next=%2Fawwo", false),
+        ("https://clawhunt.store.evil.example/awwo?from=signin", false),
+        ("https://clawhunt.store@evil.example/awwo", false),
+        ("https://user@clawhunt.store/awwo", false),
+        ("http://clawhunt.store/awwo", false),
+        ("https://clawhunt.store:444/awwo", false),
+        ("https://www.clawhunt.store/awwo", false),
+        ("blob:https://clawhunt.store/awwo", false),
         ("https://clawhunt.store/api/awwo/sso/token", false),
         ("https://clawhunt.store/api/awwo/sso/logout-evil?ticket=test", false),
         ("https://clawhunt.store/api/awwo/sso/%2e%2e/logout", false),
@@ -1332,6 +1354,7 @@ private func testNavigationPolicy() throws {
     try check(NavigationPolicy.frameMatches(protocol: "https", host: "awwo.clawhunt.store", port: 443, origin: cloud), true, "cloud frame")
     try check(NavigationPolicy.frameMatches(protocol: "https", host: "awwo.clawhunt.store", port: 0, origin: cloud), true, "cloud implicit port")
     try check(NavigationPolicy.frameMatches(protocol: "https", host: NavigationPolicy.accessHost, port: 443, origin: cloud), false, "authentication has no native authority")
+    try check(NavigationPolicy.frameMatches(protocol: "https", host: NavigationPolicy.mainSiteHost, port: 443, origin: cloud), false, "main-site redemption has no native authority")
     try check(NavigationPolicy.frameMatches(protocol: "", host: "", port: 0, origin: cloud), false, "opaque preview has no native authority")
     try check(NavigationPolicy.frameMatches(protocol: "http", host: "127.0.0.1", port: 5189, origin: local), true, "local frame")
     try check(NavigationPolicy.frameMatches(protocol: "http", host: "127.0.0.1", port: 5190, origin: local), false, "wrong local frame port")

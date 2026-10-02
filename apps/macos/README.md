@@ -1,14 +1,18 @@
 # AwwO for Mac
 
-Source version **0.9.0, build 7** is the Apple Silicon desktop client for the hosted
+Source candidate **0.9.1, build 8** is the Apple Silicon desktop client for the hosted
 AwwO service. It requires macOS 14 or later and an internet connection. The
 Swift/AppKit/WebKit shell uses the hosted account, workspaces and history;
 the website and server deploy separately. No local database, Node runtime,
 worker, model runtime or provider API key is bundled.
 
-The latest published download remains **0.8.1, build 6** until a separate native
-release is built and verified. The 0.9.0 source adds the exact ClawHunt identity
-handoff routes; a Git push does not update installed binaries.
+Published downloads and their verification status are listed on the
+[latest release](https://github.com/Clawhunt-Site/AwwO/releases/latest).
+The source candidate version above does not mean its installer has been published.
+This candidate keeps the main site's exact `/awwo` invite-code redemption page
+inside the client. The previously published **0.9.0, build 7** lacks that native
+rule; it requires the separately built and verified build 8 update. A Git push or
+hosted website deployment does not update installed native navigation rules.
 
 The bundle identifier remains `store.clawhunt.awwo.local` and the app remains
 `AwwO Local.app` with the display name **AwwO**. Existing WebKit session data
@@ -54,7 +58,7 @@ APP_ENV=production VITE_APP_ENV=production \
 
 The script reads `latest.json`, requires its revision and app metadata to match
 `HEAD`, rejects builds with modified inputs, and runs `verify-bundle.ts`.
-It refuses to overwrite `.local/releases/macos-0.9.0-build7-<sha7>/`.
+It refuses to overwrite `.local/releases/macos-0.9.1-build8-<sha7>/`.
 The output contains stable release names for the DMG, ZIP, `INSTALL.txt`,
 `SHA256SUMS`, a Fold brand kit ZIP (MIT license, SVG/PNG, vector source and
 ICNS), and `release.json` with verification evidence. The DMG includes the app,
@@ -99,6 +103,13 @@ close/reopen behavior in the installed copy. Do not infer server deployment
 or authenticated UI acceptance from successful compilation alone.
 
 ## Signing
+
+This directory documents the current AwwO Swift cloud client and its packaging
+scripts. [`docs/macos-dmg-release-standard.md`](../../docs/macos-dmg-release-standard.md)
+describes the legacy SuperClaw/Tauri DMG workflow and its Developer ID,
+notarization and Gatekeeper release gates. Those gates are not evidence that
+the AwwO package below has been signed or notarized; the two workflows have
+different bundle names and build entrypoints.
 
 This build uses **ad-hoc signing**. It is **not signed with Apple Developer ID
 and is not notarized**. Signature-integrity verification does not mean Gatekeeper
