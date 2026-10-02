@@ -35,6 +35,13 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.calls = []
         self.mode = "text"
+        self.finish_reason = "stop"
+        self.usage = None
+        self.response_status = "completed"
+        self.incomplete_reason = "max_output_tokens"
+        self.answer = "Hello"
+        self.same_chunk = False
+        self.send_done = True
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
         app = web.Application()
@@ -68,23 +75,33 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             return web.Response()
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
         await response.prepare(request)
-        delta = {"role": "assistant", "content": "Hello"}
-        finish = "stop"
+        delta = {"role": "assistant", "content": self.answer}
+        finish = self.finish_reason
         chunks = [(delta, None), ({}, finish)]
         if self.mode == "tool":
             delta = {"role": "assistant", "tool_calls": [{"index": 0, "id": "call_1", "type": "function",
                 "function": {"name": "calculator", "arguments": '{"expression":"2+3"}'}}]}
-            chunks = [(delta, None), ({}, "tool_calls")]
+            chunks = [(delta, None), ({}, "tool_calls" if self.finish_reason == "stop" else self.finish_reason)]
         elif self.mode == "reasoning":
             # A provider that streams its reasoning in a separate field before answering.
             chunks = [({"role": "assistant", "reasoning_content": REASONING_TEXT[:12]}, None),
                       ({"reasoning_content": REASONING_TEXT[12:]}, None),
                       ({"content": "Hello"}, None), ({}, "stop")]
+        if self.same_chunk and self.mode == "text":
+            chunks = [(delta, finish)]
+        if self.mode == "wait_after_text" and self.usage is not None:
+            await response.write(f"data: {json.dumps({'choices': [], 'usage': self.usage})}\n\n".encode())
         for content, reason in chunks:
             payload = {"id": "chatcmpl_1", "object": "chat.completion.chunk", "created": 1,
                 "model": "mock-model", "choices": [{"index": 0, "delta": content, "finish_reason": reason}]}
             await response.write(f"data: {json.dumps(payload)}\n\n".encode())
-        await response.write(b"data: [DONE]\n\n")
+            if self.mode == "wait_after_text":
+                await self.release.wait()
+                return response
+        if self.usage is not None:
+            await response.write(f"data: {json.dumps({'choices': [], 'usage': self.usage})}\n\n".encode())
+        if self.send_done:
+            await response.write(b"data: [DONE]\n\n")
         return response
 
     async def responses_provider(self, request):
@@ -115,6 +132,13 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 {"type": "response.output_item.done", "sequence_number": 5, "output_index": 1, "item": item},
                 {"type": "response.completed", "sequence_number": 6, "response": payload},
             ]
+        if self.response_status != "completed":
+            payload["status"] = self.response_status
+            payload["incomplete_details"] = {"reason": self.incomplete_reason}
+            item["status"] = "incomplete"
+            events[-1]["type"] = "response." + self.response_status
+        if self.usage is not None:
+            payload["usage"] = self.usage
         for event in events:
             await response.write(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode())
         return response
@@ -145,6 +169,128 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.calls[0].get("max_tokens", self.calls[0].get("max_completion_tokens")), self.config.max_tokens)
         self.assertEqual(self.traces.events, [])
 
+    async def test_chat_length_preserves_partial_text_but_never_completes(self):
+        self.finish_reason = "length"
+        self.usage = {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+        events = await self.collect()
+        self.assertEqual("".join(e["delta"] for e in events if e["type"] == "text_delta"), "Hello")
+        self.assertEqual(events[-1]["type"], "failed", events)
+        self.assertEqual(events[-1]["code"], "MODEL_OUTPUT_LIMIT")
+        self.assertEqual(events[-1]["observability"]["usage"]["providerTotalTokens"], 18)
+        self.assertEqual(len([e for e in events if e["type"] in ("completed", "failed", "cancelled")]), 1)
+        self.assertEqual(len(self.calls), 1)
+
+    async def test_chat_truncated_tool_is_rejected_before_execution(self):
+        self.mode = "tool"
+        self.finish_reason = "length"
+        with patch("runner.execute_tool") as execute:
+            events = await self.collect(self.request(tools=["calculator"]))
+        execute.assert_not_called()
+        self.assertEqual(events[-1]["code"], "MODEL_OUTPUT_LIMIT", events)
+        self.assertEqual(len(self.calls), 1)
+
+    async def test_responses_incomplete_preserves_partial_and_provider_usage(self):
+        self.response_status = "incomplete"
+        self.usage = {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18,
+                      "input_tokens_details": {"cached_tokens": 3}, "output_tokens_details": {"reasoning_tokens": 2}}
+        config = replace(self.config, models=(replace(self.config.models[0], protocol="responses"),))
+        events = await self.collect(config=config)
+        self.assertEqual("".join(e["delta"] for e in events if e["type"] == "text_delta"), "Hello")
+        self.assertEqual(events[-1]["code"], "MODEL_OUTPUT_LIMIT", events)
+        self.assertEqual(events[-1]["observability"]["usage"]["status"], "reported")
+        self.assertEqual(events[-1]["observability"]["usage"]["reasoningTokens"], 2)
+        self.assertEqual(len(self.calls), 1)
+
+    async def test_chat_terminal_failures_cover_same_chunk_empty_and_missing_finish(self):
+        for text, finish, done, code in [
+            ("Hello", "length", True, "MODEL_OUTPUT_LIMIT"),
+            ("", "length", True, "MODEL_OUTPUT_LIMIT"),
+            ("Hello", "content_filter", True, "MODEL_REFUSAL"),
+            ("Hello", None, True, "MODEL_PROTOCOL_ERROR"),
+            ("Hello", "unknown", True, "MODEL_PROTOCOL_ERROR"),
+            ("Hello", "stop", False, "MODEL_PROTOCOL_ERROR"),
+        ]:
+            with self.subTest(text=text, finish=finish, done=done):
+                self.answer, self.finish_reason, self.send_done, self.same_chunk = text, finish, done, True
+                before = len(self.calls)
+                events = await self.collect()
+                self.assertEqual(events[-1]["type"], "failed", events)
+                self.assertEqual(events[-1]["code"], code, events)
+                self.assertEqual("".join(e["delta"] for e in events if e["type"] == "text_delta"), text)
+                self.assertEqual(len(self.calls), before + 1)
+                self.assertEqual(len([e for e in events if e["type"] in ("completed", "failed", "cancelled")]), 1)
+
+    async def test_responses_non_success_terminal_reasons_are_fail_closed(self):
+        config = replace(self.config, models=(replace(self.config.models[0], protocol="responses"),))
+        for status, reason, code in [
+            ("incomplete", "content_filter", "MODEL_REFUSAL"),
+            ("incomplete", "unknown", "MODEL_PROTOCOL_ERROR"),
+            ("failed", "unknown", "MODEL_PROTOCOL_ERROR"),
+            ("cancelled", "unknown", "MODEL_PROTOCOL_ERROR"),
+        ]:
+            with self.subTest(status=status, reason=reason):
+                self.response_status, self.incomplete_reason = status, reason
+                before = len(self.calls)
+                events = await self.collect(config=config)
+                self.assertEqual(events[-1]["type"], "failed", events)
+                self.assertEqual(events[-1]["code"], code, events)
+                self.assertEqual("".join(e["delta"] for e in events if e["type"] == "text_delta"), "Hello")
+                self.assertEqual(len(self.calls), before + 1)
+
+    async def test_raw_usage_reports_zero_and_missing_fields_without_sdk_defaults(self):
+        for raw, status, expected in [
+            (None, "unavailable", None),
+            ({"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, "reported", 0),
+            ({"prompt_tokens": 9}, "partial", 9),
+            ({"prompt_tokens": 9, "completion_tokens": 2, "total_tokens": 99}, "invalid", None),
+            ({"prompt_tokens": 9, "completion_tokens": 2, "total_tokens": 11,
+              "prompt_tokens_details": {"cached_tokens": 3}, "completion_tokens_details": {"reasoning_tokens": 1},
+              "private": REASONING_TEXT}, "reported", 9),
+        ]:
+            with self.subTest(raw=raw):
+                self.usage = raw
+                events = await self.collect()
+                self.assertEqual(events[-1]["type"], "completed", events)
+                obs = events[-1]["observability"]
+                self.assertEqual(set(obs), {"version", "usage", "timing"})
+                self.assertEqual(obs["version"], 1)
+                self.assertEqual(obs["usage"]["status"], status)
+                self.assertEqual(obs["usage"]["inputTokens"], expected)
+                self.assertIsNone(obs["usage"]["cacheWriteTokens"])
+                if raw is None:
+                    self.assertTrue(all(obs["usage"][k] is None for k in ("outputTokens", "cachedInputTokens", "reasoningTokens")))
+                self.assertNotIn(REASONING_TEXT, json.dumps(obs))
+                self.assertEqual(set(obs["timing"]), {"setupMs", "providerMs", "providerTtftMs", "workerTotalMs", "workerFirstDeltaMs"})
+                self.assertLessEqual(obs["timing"]["providerMs"], obs["timing"]["workerTotalMs"])
+                self.assertLessEqual(obs["timing"]["providerTtftMs"], obs["timing"]["providerMs"])
+
+    async def test_partial_text_and_observed_usage_survive_timeout_and_cancel(self):
+        for cancelled in (False, True):
+            with self.subTest(cancelled=cancelled):
+                self.mode = "wait_after_text"
+                self.usage = {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}
+                cancel = asyncio.Event()
+                events = []
+                before = len(self.calls)
+                async for event in stream_run(self.request(), replace(self.config, timeout_ms=150), cancel):
+                    events.append(event)
+                    if cancelled and event["type"] == "text_delta":
+                        cancel.set()
+                self.assertEqual("".join(e["delta"] for e in events if e["type"] == "text_delta"), "Hello")
+                self.assertEqual(events[-1]["type"], "cancelled" if cancelled else "failed", events)
+                if not cancelled:
+                    self.assertEqual(events[-1]["code"], "DEADLINE_EXCEEDED")
+                self.assertEqual(events[-1]["observability"]["usage"]["status"], "partial")
+                self.assertEqual(events[-1]["observability"]["usage"]["providerTotalTokens"], 6)
+                self.assertEqual(len(self.calls), before + 1)
+                self.assertEqual(len([e for e in events if e["type"] in ("completed", "failed", "cancelled")]), 1)
+
+    async def test_chat_requests_final_provider_usage_in_its_single_call(self):
+        events = await self.collect()
+        self.assertEqual(events[-1]["type"], "completed", events)
+        self.assertEqual(self.calls[0].get("stream_options"), {"include_usage": True})
+        self.assertEqual(len(self.calls), 1)
+
     async def test_text_round_trip_has_no_trace_or_span(self):
         events = await self.collect()
         self.assertEqual(events[-1]["text"], "Hello")
@@ -171,7 +317,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.calls, [])
 
     async def test_sdk_setup_failures_close_client_and_emit_terminal_event(self):
-        for constructor in ["Agent", "ModelSettings", "OpenAIChatCompletionsModel"]:
+        for constructor in ["Agent", "ModelSettings", "_CheckedChatModel"]:
             client = SimpleNamespace(close=AsyncMock())
             with patch("runner.AsyncOpenAI", return_value=client), patch("runner." + constructor, side_effect=ValueError("synthetic")):
                 events = await self.collect()

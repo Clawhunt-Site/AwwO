@@ -3,15 +3,16 @@
 import asyncio
 import json
 import time
-from contextlib import suppress
+from contextlib import aclosing, suppress
 from dataclasses import dataclass
 from typing import AsyncIterator
 
 from agents import Agent, FunctionTool, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, RunConfig, Runner
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
 from config import PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
 from errors import RuntimeError, classify_error
+from provider_observation import ProviderObservation
 from tools import TOOL_SCHEMAS, ToolInputError, execute_tool, tool_definition_bytes, validate_tool_names
 
 
@@ -151,13 +152,39 @@ def _prepare(request: RunRequest, config: Config) -> tuple[ModelProfile, str]:
     return profile, effort
 
 
+class _CheckedCompletion:
+    """Prevent SDK-normalized success (and tool execution) after provider truncation."""
+    def __init__(self, *args, observation, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.observation = observation
+
+    async def stream_response(self, *args, **kwargs):
+        async with aclosing(super().stream_response(*args, **kwargs)) as events:
+            async for event in events:
+                if event.type == "response.completed":
+                    self.observation.require_complete()
+                yield event
+            self.observation.require_complete()
+
+
+class _CheckedChatModel(_CheckedCompletion, OpenAIChatCompletionsModel):
+    pass
+
+
+class _CheckedResponsesModel(_CheckedCompletion, OpenAIResponsesModel):
+    pass
+
+
 async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.Event) -> AsyncIterator[dict]:
     """Yield wire events: {"type":"text_delta","delta":...} then a terminal event."""
+    observation = ProviderObservation(config.protocol)
     try:
         profile, effort = _prepare(request, config)
     except ValueError as e:
-        yield classify_error(RuntimeError("OUTPUT_LIMIT" if "too large" in str(e) else "MODEL_REQUEST_REJECTED"))
+        yield {**classify_error(RuntimeError("OUTPUT_LIMIT" if "too large" in str(e) else "MODEL_REQUEST_REJECTED")),
+               "observability": observation.snapshot("failed")}
         return
+    observation.protocol = profile.protocol
 
     input_messages = [{"role": m["role"], "content": m["content"]} for m in request.messages]
     if input_messages:
@@ -166,6 +193,10 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         input_messages = [{"role": "user", "content": request.prompt}]
 
     settings = {"max_tokens": profile.max_tokens, "parallel_tool_calls": False}
+    if profile.protocol == "chat_completions":
+        # Third-party endpoints do not get this SDK opt-in by default. Omitted provider
+        # usage still remains unknown, never synthesized from SDK token defaults.
+        settings["include_usage"] = True
     # Gemini rejects OpenAI's optional storage field, including store=false.
     # Keep explicit no-storage requests for providers which accept that field.
     if profile.base_url.rstrip("/") != PERSONAL_ENDPOINTS["google"]:
@@ -174,19 +205,23 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         settings["reasoning"] = {"effort": effort}
 
     client = None
+    http_client = None
 
     async def _run() -> AsyncIterator[dict]:
-        nonlocal client
+        nonlocal client, http_client
         if cancel_event.is_set():
             yield {"type": "cancelled"}
             return
-        client = AsyncOpenAI(base_url=profile.base_url, api_key=profile.api_key, max_retries=0)
+        http_client = DefaultAsyncHttpxClient(event_hooks={
+            "request": [observation.on_request], "response": [observation.on_response],
+        })
+        client = AsyncOpenAI(base_url=profile.base_url, api_key=profile.api_key, max_retries=0, http_client=http_client)
         tools = _build_tools(request, config)
         agent = Agent(
             name="awwo",
             instructions=request.system_prompt or "",
-            model=(OpenAIResponsesModel if profile.protocol == "responses" else OpenAIChatCompletionsModel)(
-                model=profile.model, openai_client=client,
+            model=(_CheckedResponsesModel if profile.protocol == "responses" else _CheckedChatModel)(
+                model=profile.model, openai_client=client, observation=observation,
             ),
             tools=tools,
             # Match the existing JS worker and its advertised single-call contract.
@@ -238,6 +273,7 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
             if cancel_event.is_set():
                 yield {"type": "cancelled"}
                 return
+            observation.require_complete()
             final = result.final_output_as(str)
             if not isinstance(final, str) or not final.strip() or not final.startswith(streamed):
                 raise RuntimeError("MODEL_PROTOCOL_ERROR")
@@ -255,15 +291,23 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
     try:
         async with asyncio.timeout(config.timeout_ms / 1000):
             async for event in _run():
+                if event["type"] == "text_delta" and observation.first_delta is None:
+                    observation.first_delta = observation.clock()
+                if event["type"] in ("completed", "failed", "cancelled"):
+                    event = {**event, "observability": observation.snapshot(event["type"])}
                 yield event
     except TimeoutError:
-        yield classify_error(RuntimeError("DEADLINE_EXCEEDED"))
+        event = {"type": "cancelled"} if cancel_event.is_set() else classify_error(RuntimeError("DEADLINE_EXCEEDED"))
+        yield {**event, "observability": observation.snapshot(event["type"])}
         return
     except asyncio.CancelledError:
-        yield {"type": "cancelled"}
+        yield {"type": "cancelled", "observability": observation.snapshot("cancelled")}
         return
     except Exception as e:  # noqa: BLE001 - boundary: map everything to a wire failure
-        yield classify_error(e)
+        event = {"type": "cancelled"} if cancel_event.is_set() else classify_error(RuntimeError(observation.failure) if observation.failure else e)
+        yield {**event, "observability": observation.snapshot(event["type"])}
     finally:
         if client is not None:
             await client.close()
+        if http_client is not None and not http_client.is_closed:
+            await http_client.aclose()

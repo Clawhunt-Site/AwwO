@@ -14,4 +14,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["config", "errors", "runner", "server", "tools"]
+py-modules = ["config", "errors", "runner", "server", "tools", "provider_observation"]
