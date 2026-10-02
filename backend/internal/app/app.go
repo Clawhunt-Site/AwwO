@@ -46,6 +46,8 @@ type App struct {
 	sendReset   func(context.Context, string, string) error
 	mailSlots   chan struct{}
 	runEvents   runEventNotifier
+	// clawHuntSessions holds recent issuer verifications of signed-in sessions.
+	clawHuntSessions *clawHuntSessionCache
 	// capabilityNotes remembers which cleared worker capabilities were already logged,
 	// bounded by capabilityNoteLimit; capabilityNotesCapped marks the one-time notice.
 	capabilityNotes       sync.Map
@@ -61,7 +63,7 @@ func New(db *pgxpool.Pool, c Config) *App {
 	if c.PIAdmissionWait == 0 {
 		c.PIAdmissionWait = 5 * time.Second
 	}
-	a := &App{db: db, cfg: c, log: slog.Default(), client: &http.Client{Timeout: c.RunTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, dummyHash: hashPassword(randomID()), cursorKey: []byte(randomID() + randomID()), running: map[string]context.CancelFunc{}, limits: map[string]rateEntry{}, authSlots: make(chan struct{}, 4), reauthEvery: 15 * time.Second, runEvents: runEventNotifier{subscribers: map[string]map[chan struct{}]struct{}{}}}
+	a := &App{db: db, cfg: c, log: slog.Default(), client: &http.Client{Timeout: c.RunTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, dummyHash: hashPassword(randomID()), cursorKey: []byte(randomID() + randomID()), running: map[string]context.CancelFunc{}, limits: map[string]rateEntry{}, authSlots: make(chan struct{}, 4), reauthEvery: 15 * time.Second, clawHuntSessions: newClawHuntSessionCache(), runEvents: runEventNotifier{subscribers: map[string]map[chan struct{}]struct{}{}}}
 	if a.cfg.UsageRetentionDays == 0 {
 		a.cfg.UsageRetentionDays = 180
 	}

@@ -1,4 +1,4 @@
-import { api, API_BASE, SaaSApiError, tenantPath, type Tenant, type SaaSAgent } from './api';
+import { api, API_BASE, SaaSApiError, sessionFetch, tenantPath, type Tenant, type SaaSAgent } from './api';
 import { modelEffortCapability, runtimeDefinitions, runtimeModels, type SaaSRuntimeStatus } from './runtimeCatalog';
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText } from './canvasErrors';
@@ -144,7 +144,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       const opening = setTimeout(() => reader.abort(), PLAN_OPEN_TIMEOUT_MS);
       try {
         if (init.signal?.aborted) { cancel(); throw new Error(canvasText('已取消规划', 'Planning was cancelled.')); }
-        response = await fetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: reader.signal });
+        response = await sessionFetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: reader.signal });
         if (!response.ok || !response.body) throw new Error(canvasText('无法读取规划运行，请稍后重试。', 'The planning run could not be read. Please try again.'));
       } catch (error) {
         release();
@@ -341,7 +341,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
         }
         throw error;
       }
-      const upstream = await fetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: init.signal });
+      const upstream = await sessionFetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: init.signal });
       if (!upstream.ok || !upstream.body) return json({ error: canvasText('无法连接运行事件，请刷新后恢复。', 'Run events could not be reached. Reload to restore the run.') }, upstream.status || 502);
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({ async start(controller) {

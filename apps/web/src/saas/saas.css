@@ -11,6 +11,8 @@ body:has(.saas-canvas-shell) { overflow: hidden; }
 .saas-sso-action { display:inline-flex; min-height:44px; box-sizing:border-box; align-items:center; justify-content:center; padding:11px 18px; border-radius:8px; background:var(--saas-accent); color:var(--saas-accent-text); font-size:14px; font-weight:700; text-align:center; text-decoration:none; }
 .saas-sso-action:hover { filter:brightness(1.08); }
 .saas-sso-action:focus-visible { outline:2px solid var(--saas-accent); outline-offset:3px; }
+.saas-session-ended { position:fixed; z-index:600; top:12px; left:50%; transform:translateX(-50%); display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:10px 16px; box-sizing:border-box; width:max-content; max-width:calc(100vw - 24px); padding:10px 12px 10px 18px; border:1px solid var(--saas-border); border-radius:14px; background:var(--saas-card); color:var(--saas-text); box-shadow:0 16px 48px #0002; font-size:14px; line-height:1.5; }
+.saas-session-ended p { margin:0; }
 .saas-sso-layout .saas-card strong { overflow-wrap:anywhere; }
 .saas-login-brand>span,.saas-logo { font-size:28px; font-weight:760; letter-spacing:-1px; text-decoration:none; color:inherit; }
 .saas-login h1 { max-width:600px; font-size:clamp(30px,4vw,52px); letter-spacing:-1.5px; line-height:1.25; }

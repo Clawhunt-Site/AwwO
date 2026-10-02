@@ -3,7 +3,7 @@ import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye } from 'lucide-react';
-import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
+import { api, onSessionEnded, tenantPath, trackSignedInSession, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, isCanvasStorageQuotaError, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
@@ -61,11 +61,18 @@ function AuthenticatedApp() {
   useEffect(() => { if (resetToken) { const url = new URL(location.href); url.searchParams.delete('reset'); history.replaceState(null, '', url.pathname + url.search); } }, [resetToken]);
   useEffect(() => { if (ssoReturn) clearSSOReturnURL(); }, [ssoReturn]);
   const [failure, setFailure] = useState('');
+  const [sessionEnded, setSessionEnded] = useState(false);
+  useEffect(() => {
+    const stop = onSessionEnded(() => setSessionEnded(true));
+    return () => { stop(); trackSignedInSession(false); };
+  }, []);
   const sessionRequestGeneration = useRef(0);
   const onAuthenticated = useCallback((value: Identity) => {
     // A completed login/link supersedes the initial session lookup, even if
     // that older request later returns another account or a service error.
     sessionRequestGeneration.current += 1;
+    trackSignedInSession(true);
+    setSessionEnded(false);
     setIdentity(value);
     setFailure('');
     setLoading(false);
@@ -77,7 +84,7 @@ function AuthenticatedApp() {
     const generation = ++sessionRequestGeneration.current;
     const controller = new AbortController();
     const current = () => live && generation === sessionRequestGeneration.current;
-    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) setIdentity(value); })
+    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) { trackSignedInSession(true); setIdentity(value); } })
       .catch(error => { if (current() && !(error instanceof SaaSApiError && error.status === 401)) setFailure(message(error)); })
       .finally(() => { if (current()) setLoading(false); });
     return () => { live = false; controller.abort(); };
@@ -93,7 +100,16 @@ function AuthenticatedApp() {
   const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
     : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
     : <Workspace identity={identity} onProfile={onProfile} />;
-  return <AppearanceScope key={identity.user.id} userId={identity.user.id}><SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity}>{content}</PersonalEngineGate></SaaSOnboarding></AppearanceScope>;
+  return <AppearanceScope key={identity.user.id} userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity}>{content}</PersonalEngineGate></SaaSOnboarding></AppearanceScope>;
+}
+/** The page stays as it is, so nothing typed is lost; leaving through sign-in keeps the unsaved-canvas warning. */
+function SessionEndedNotice({ identity }: { identity: Identity }) {
+  const { t } = useSaaSPreferences();
+  const clawhunt = identity.authentication === 'clawhunt';
+  return <div className="saas-session-ended" role="alert">
+    <p>{t('登录已失效，页面已停止自动更新。本机草稿仍保留，重新登录后即可继续。', 'Your session has ended, so this page stopped updating. Local drafts are kept; sign in again to continue.')}</p>
+    <a className="saas-sso-action" href={clawhunt ? clawHuntStartURL(location.search) : '/'}>{clawhunt ? t('使用 ClawHunt 账号继续', 'Continue with ClawHunt') : t('重新登录', 'Sign in again')}</a>
+  </div>;
 }
 function useAuthOptions() {
   const [options, setOptions] = useState<AuthOptions | null>(null);

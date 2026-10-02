@@ -252,6 +252,7 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, e)
 			return
 		}
+		a.clawHuntSessions.forget(tokenHash(c.Value))
 	}
 	a.sessionCookie(w, "", -1)
 	if logoutURL != "" {

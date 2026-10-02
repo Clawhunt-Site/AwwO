@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,12 +53,17 @@ func TestClawHuntConfigurationAndNavigationBoundaries(t *testing.T) {
 }
 
 type identityFixture struct {
-	server      *httptest.Server
-	active      atomic.Bool
-	unavailable atomic.Bool
-	exchanges   atomic.Int32
-	id          clawHuntIdentity
-	challenge   string
+	server         *httptest.Server
+	active         atomic.Bool
+	unavailable    atomic.Bool
+	rejecting      atomic.Bool // introspection answers 403
+	exchanges      atomic.Int32
+	introspections atomic.Int32
+	grantSeconds   atomic.Int64  // token expires_in; 0 means 3600
+	grantExpiry    atomic.Int64  // introspect expires_at (Unix); 0 means an hour from now
+	hold           chan struct{} // when set before requests, introspection waits until it is closed
+	id             clawHuntIdentity
+	challenge      string
 }
 
 func newIdentityFixture(t *testing.T, h *harness, email, subject string) *identityFixture {
@@ -68,6 +75,16 @@ func newIdentityFixture(t *testing.T, h *harness, email, subject string) *identi
 		if !ok || client != "awwo-test" || secret != strings.Repeat("s", 32) {
 			w.WriteHeader(401)
 			return
+		}
+		if r.URL.Path == "/api/awwo/sso/introspect" {
+			f.introspections.Add(1)
+			if f.rejecting.Load() {
+				w.WriteHeader(403)
+				return
+			}
+			if f.hold != nil {
+				<-f.hold
+			}
 		}
 		if f.unavailable.Load() {
 			w.WriteHeader(503)
@@ -83,9 +100,17 @@ func newIdentityFixture(t *testing.T, h *harness, email, subject string) *identi
 				return
 			}
 			f.exchanges.Add(1)
-			writeJSON(w, 200, clawHuntGrant{strings.Repeat("g", 43), 3600, f.id})
+			seconds := f.grantSeconds.Load()
+			if seconds == 0 {
+				seconds = 3600
+			}
+			writeJSON(w, 200, clawHuntGrant{strings.Repeat("g", 43), seconds, f.id})
 		case "/api/awwo/sso/introspect":
-			writeJSON(w, 200, map[string]any{"active": f.active.Load(), "expires_at": time.Now().Add(time.Hour).Unix(), "identity": f.id})
+			expires := f.grantExpiry.Load()
+			if expires == 0 {
+				expires = time.Now().Add(time.Hour).Unix()
+			}
+			writeJSON(w, 200, map[string]any{"active": f.active.Load(), "expires_at": expires, "identity": f.id})
 		case "/api/awwo/sso/revoke":
 			if !f.active.Load() {
 				writeJSON(w, 200, map[string]string{"logout_url": h.cfg.PublicOrigin + "/"})
@@ -187,7 +212,11 @@ func TestPostgresClawHuntIdentitySessionRevocationAndStableWorkspace(t *testing.
 	}
 	h.request(t, c, "POST", "/auth/password", map[string]any{}, 403)
 	h.request(t, c, "PATCH", "/auth/profile", map[string]any{}, 403)
+	// A recent verification rides out a brief issuer outage; past the outage
+	// window the session fails closed, and an inactive answer ends it.
 	f.unavailable.Store(true)
+	h.request(t, c, "GET", "/auth/me", nil, 200)
+	h.a.clawHuntSessions.outage = 0
 	h.request(t, c, "GET", "/auth/me", nil, 503)
 	f.unavailable.Store(false)
 	f.active.Store(false)
@@ -342,6 +371,8 @@ func TestPostgresClawHuntLiveProfileDoesNotReassignEmailOwnership(t *testing.T) 
 	}
 	f.id.Name = "Current main-site profile"
 	f.id.Email = "existing-other@example.invalid"
+	// The provider profile is refreshed whenever the session is verified again.
+	h.a.clawHuntSessions.reuse = 0
 	after := h.request(t, session, "GET", "/auth/me", nil, 200)
 	user := after["user"].(map[string]any)
 	if user["name"] != f.id.Name || user["email"] != f.id.Email || user["id"] != uid || user["platformRole"] != role {
@@ -371,4 +402,208 @@ func TestPostgresClawHuntLiveProfileDoesNotReassignEmailOwnership(t *testing.T) 
 	if stable["user"].(map[string]any)["id"] != uid || stable["tenants"].([]any)[0].(map[string]any)["id"] != tid {
 		t.Fatal("repeated login remapped the identity by email", stable)
 	}
+}
+
+func TestPostgresClawHuntVerificationIsReusedWithinBounds(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	f := newIdentityFixture(t, h, "reuse@example.invalid", "reuse-subject")
+	base := time.Now()
+	var elapsed atomic.Int64
+	h.a.clawHuntSessions.now = func() time.Time { return base.Add(time.Duration(elapsed.Load())) }
+	at := func(d time.Duration) { elapsed.Store(int64(d)) }
+	calls := func(want int32) {
+		t.Helper()
+		if got := f.introspections.Load(); got != want {
+			t.Fatalf("issuer introspected %d times, want %d", got, want)
+		}
+	}
+
+	// One verification serves a session for a minute.
+	session := responseCookie(t, completeIdentity(t, h, f, ""), "awwo_session")
+	h.request(t, session, "GET", "/auth/me", nil, 200)
+	h.request(t, session, "GET", "/auth/me", nil, 200)
+	at(59 * time.Second)
+	h.request(t, session, "GET", "/auth/me", nil, 200)
+	calls(1)
+	at(61 * time.Second)
+	h.request(t, session, "GET", "/auth/me", nil, 200)
+	calls(2)
+	// A revocation is seen once that minute is up, and it ends the session.
+	f.active.Store(false)
+	h.request(t, session, "GET", "/auth/me", nil, 200)
+	at(122 * time.Second)
+	h.request(t, session, "GET", "/auth/me", nil, 401)
+	calls(3)
+	f.active.Store(true)
+
+	// While the issuer is unreachable, a verification younger than five minutes
+	// keeps the session, and the issuer is retried at most every 15 seconds.
+	t0 := 200 * time.Second
+	at(t0)
+	outage := responseCookie(t, completeIdentity(t, h, f, ""), "awwo_session")
+	h.request(t, outage, "GET", "/auth/me", nil, 200)
+	calls(4)
+	f.unavailable.Store(true)
+	at(t0 + 2*time.Minute)
+	h.request(t, outage, "GET", "/auth/me", nil, 200)
+	calls(5)
+	at(t0 + 2*time.Minute + time.Second)
+	h.request(t, outage, "GET", "/auth/me", nil, 200)
+	calls(5)
+	at(t0 + 2*time.Minute + 16*time.Second)
+	h.request(t, outage, "GET", "/auth/me", nil, 200)
+	calls(6)
+	at(t0 + 5*time.Minute)
+	h.request(t, outage, "GET", "/auth/me", nil, 503)
+	f.unavailable.Store(false)
+	h.request(t, outage, "GET", "/auth/me", nil, 200)
+	calls(8)
+
+	// Sponsored work asks the issuer every time and fails closed without an answer.
+	var user, issuer, subject string
+	var sealed []byte
+	if err := h.db.QueryRow(context.Background(), "SELECT user_id,sso_issuer,sso_subject,sso_grant FROM auth_sessions WHERE token_hash=$1", tokenHash(outage.Value)).Scan(&user, &issuer, &subject, &sealed); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := h.a.verifyClawHuntSessionNow(context.Background(), tokenHash(outage.Value), user, issuer, subject, sealed); err != nil || !ok {
+		t.Fatal("strict verification refused an active grant", ok, err)
+	}
+	calls(9)
+	f.unavailable.Store(true)
+	if ok, err := h.a.verifyClawHuntSessionNow(context.Background(), tokenHash(outage.Value), user, issuer, subject, sealed); err == nil || ok {
+		t.Fatal("strict verification relied on an earlier answer", ok, err)
+	}
+	f.unavailable.Store(false)
+
+	// Signing out drops the session's verification with the session.
+	h.request(t, outage, "POST", "/auth/logout", nil, 200)
+	h.a.clawHuntSessions.mu.Lock()
+	_, kept := h.a.clawHuntSessions.entries[tokenHash(outage.Value)]
+	h.a.clawHuntSessions.mu.Unlock()
+	if kept {
+		t.Fatal("sign-out left a reusable verification")
+	}
+	h.request(t, outage, "GET", "/auth/me", nil, 401)
+	f.active.Store(true)
+
+	// A verification never stands in for a grant that has expired, even during an outage.
+	t1 := 10 * time.Minute
+	at(t1)
+	f.grantExpiry.Store(base.Add(t1 + 90*time.Second).Unix())
+	expiring := responseCookie(t, completeIdentity(t, h, f, ""), "awwo_session")
+	h.request(t, expiring, "GET", "/auth/me", nil, 200)
+	f.unavailable.Store(true)
+	at(t1 + 100*time.Second)
+	h.request(t, expiring, "GET", "/auth/me", nil, 503)
+}
+
+func TestPostgresClawHuntAcceptsGrantsUpToTwelveHours(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	f := newIdentityFixture(t, h, "long-grant@example.invalid", "long-grant-subject")
+	h.a.cfg.SessionTTL = 24 * time.Hour
+	f.grantSeconds.Store(12 * 3600)
+	session := responseCookie(t, completeIdentity(t, h, f, ""), "awwo_session")
+	if session.MaxAge < 12*3600-60 || session.MaxAge > 12*3600 {
+		t.Fatal("session cookie does not last the grant", session.MaxAge)
+	}
+	var lifetime float64
+	if err := h.db.QueryRow(context.Background(), "SELECT extract(epoch FROM expires_at-created_at)::float8 FROM auth_sessions WHERE token_hash=$1", tokenHash(session.Value)).Scan(&lifetime); err != nil || lifetime < 12*3600-60 || lifetime > 12*3600+60 {
+		t.Fatal("session does not last the grant", lifetime, err)
+	}
+	h.request(t, session, "GET", "/auth/me", nil, 200)
+	f.grantSeconds.Store(12*3600 + 1)
+	refused := completeIdentity(t, h, f, "")
+	if !strings.Contains(refused.Header.Get("Location"), "reason=invalid_identity") {
+		t.Fatal("grant longer than twelve hours accepted", refused.Header.Get("Location"))
+	}
+}
+
+func TestPostgresClawHuntConcurrentRequestsShareOneVerification(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	f := newIdentityFixture(t, h, "burst@example.invalid", "burst-subject")
+	session := responseCookie(t, completeIdentity(t, h, f, ""), "awwo_session")
+	f.hold = make(chan struct{})
+	var wg sync.WaitGroup
+	codes := make(chan int, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, err := http.NewRequest("GET", h.server.URL+"/api/v1/auth/me", nil)
+			if err != nil {
+				codes <- 0
+				return
+			}
+			r.AddCookie(session)
+			resp, err := http.DefaultClient.Do(r)
+			if err != nil {
+				codes <- 0
+				return
+			}
+			resp.Body.Close()
+			codes <- resp.StatusCode
+		}()
+	}
+	// Let the burst queue behind the first check before the issuer answers.
+	for deadline := time.Now().Add(5 * time.Second); f.introspections.Load() == 0 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	close(f.hold)
+	wg.Wait()
+	close(codes)
+	for code := range codes {
+		if code != 200 {
+			t.Fatal("a request of the burst was refused", code)
+		}
+	}
+	if got := f.introspections.Load(); got != 1 {
+		t.Fatalf("a burst of one session asked the issuer %d times, want 1", got)
+	}
+}
+
+func TestClawHuntOnlyAnUnansweredRequestIsAnOutage(t *testing.T) {
+	var status atomic.Int32
+	var body atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(int(status.Load()))
+		_, _ = w.Write([]byte(body.Load().(string)))
+	}))
+	c := testConfig()
+	c.ClawHuntURL = server.URL
+	a := New(nil, c)
+	var out map[string]any
+	for _, tc := range []struct {
+		status int32
+		body   string
+		outage bool
+	}{{503, "", true}, {502, "", true}, {500, "", true}, {429, "", true}, {408, "", true},
+		{400, "", false}, {401, "", false}, {403, "", false}, {404, "", false}, {200, "<html>", false}} {
+		status.Store(tc.status)
+		body.Store(tc.body)
+		err := a.clawHuntRequest(context.Background(), "introspect", map[string]string{}, &out)
+		if err == nil || errors.Is(err, errClawHuntUnreachable) != tc.outage {
+			t.Fatalf("status %d body %q: err=%v, want outage=%v", tc.status, tc.body, err, tc.outage)
+		}
+	}
+	server.Close()
+	if err := a.clawHuntRequest(context.Background(), "introspect", map[string]string{}, &out); !errors.Is(err, errClawHuntUnreachable) {
+		t.Fatal("a refused connection must count as an outage", err)
+	}
+}
+
+func TestPostgresClawHuntRefusalIsNotWaitedOut(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	f := newIdentityFixture(t, h, "refused@example.invalid", "refused-subject")
+	base := time.Now()
+	var elapsed atomic.Int64
+	h.a.clawHuntSessions.now = func() time.Time { return base.Add(time.Duration(elapsed.Load())) }
+	session := responseCookie(t, completeIdentity(t, h, f, ""), "awwo_session")
+	h.request(t, session, "GET", "/auth/me", nil, 200)
+	// An issuer that answers with a refusal is not an outage: the session fails closed.
+	f.rejecting.Store(true)
+	elapsed.Store(int64(2 * time.Minute))
+	h.request(t, session, "GET", "/auth/me", nil, 503)
+	f.rejecting.Store(false)
+	h.request(t, session, "GET", "/auth/me", nil, 200)
 }

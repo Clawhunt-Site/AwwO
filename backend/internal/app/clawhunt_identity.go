@@ -131,6 +131,10 @@ func (a *App) clawHuntStart(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, a.cfg.ClawHuntURL+"/api/awwo/sso/authorize?"+params.Encode(), http.StatusSeeOther)
 }
 
+// errClawHuntUnreachable means the issuer gave no answer: no connection, a timeout, a 5xx,
+// 408 or 429. Only then may a recent session verification stand in for a new one.
+var errClawHuntUnreachable = errors.New("identity unavailable")
+
 // The provider is an explicit deployment origin. Never follow a redirect with
 // client credentials, and never expose upstream response bodies in diagnostics.
 func (a *App) clawHuntRequest(ctx context.Context, endpoint string, body any, result any) error {
@@ -150,9 +154,12 @@ func (a *App) clawHuntRequest(ctx context.Context, endpoint string, body any, re
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
-		return errors.New("identity unavailable")
+		return errClawHuntUnreachable
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
+		return errClawHuntUnreachable
+	}
 	if resp.StatusCode != http.StatusOK {
 		return errors.New("identity rejected")
 	}
@@ -219,7 +226,7 @@ func (a *App) clawHuntCallback(w http.ResponseWriter, r *http.Request) {
 		a.identityRedirect(w, r, "unavailable", invite)
 		return
 	}
-	if !a.validClawHuntIdentity(grant.Identity) || len(grant.Token) < 32 || len(grant.Token) > 4096 || grant.ExpiresIn <= 0 || grant.ExpiresIn > 3600 {
+	if !a.validClawHuntIdentity(grant.Identity) || len(grant.Token) < 32 || len(grant.Token) > 4096 || grant.ExpiresIn <= 0 || grant.ExpiresIn > int64(clawHuntGrantMax/time.Second) {
 		a.identityRedirect(w, r, "invalid_identity", invite)
 		return
 	}
@@ -409,11 +416,24 @@ func (a *App) clawHuntLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) validateClawHuntSession(ctx context.Context, hash, user, issuer, subject string, sealed []byte) (bool, error) {
-	_, valid, err := a.validateClawHuntSessionIdentity(ctx, hash, user, issuer, subject, sealed)
+	_, valid, err := a.checkClawHuntSession(ctx, hash, user, issuer, subject, sealed, true)
+	return valid, err
+}
+
+// verifyClawHuntSessionNow always asks the issuer and fails closed when it cannot,
+// for sponsored provider work that must stop as soon as access is revoked.
+func (a *App) verifyClawHuntSessionNow(ctx context.Context, hash, user, issuer, subject string, sealed []byte) (bool, error) {
+	_, valid, err := a.checkClawHuntSession(ctx, hash, user, issuer, subject, sealed, false)
 	return valid, err
 }
 
 func (a *App) validateClawHuntSessionIdentity(ctx context.Context, hash, user, issuer, subject string, sealed []byte) (clawHuntIdentity, bool, error) {
+	return a.checkClawHuntSession(ctx, hash, user, issuer, subject, sealed, true)
+}
+
+// checkClawHuntSession runs after the caller confirmed the AwwO session row, so a
+// reused verification never outlives a sign-out, an expiry or a deleted session.
+func (a *App) checkClawHuntSession(ctx context.Context, hash, user, issuer, subject string, sealed []byte, reuse bool) (clawHuntIdentity, bool, error) {
 	var empty clawHuntIdentity
 	if len(sealed) == 0 {
 		return empty, !a.clawHuntEnabled(), nil
@@ -421,15 +441,66 @@ func (a *App) validateClawHuntSessionIdentity(ctx context.Context, hash, user, i
 	if !a.clawHuntEnabled() || issuer != a.cfg.ClawHuntURL {
 		return empty, false, nil
 	}
+	if !reuse {
+		return a.askClawHunt(ctx, hash, user, issuer, subject, sealed, false)
+	}
+	cache := a.clawHuntSessions
+	now := cache.now()
+	if recent, found := cache.lookup(hash, user, issuer, subject, now); found && cache.usable(recent, now) {
+		return recent.identity, true, nil
+	}
+	// Concurrent requests of one session share a single issuer check.
+	check, run := cache.begin(hash)
+	if !run {
+		select {
+		case <-check.done:
+			return check.identity, check.valid, check.err
+		case <-ctx.Done():
+			return empty, false, ctx.Err()
+		}
+	}
+	// Followers of a check that never completes see an unavailable issuer, not a revocation.
+	check.err = errors.New("identity unavailable")
+	defer cache.end(hash, check)
+	// The shared check must not end with whichever caller happens to run it.
+	check.identity, check.valid, check.err = a.askClawHunt(context.WithoutCancel(ctx), hash, user, issuer, subject, sealed, true)
+	return check.identity, check.valid, check.err
+}
+
+// askClawHunt asks the issuer about the session's grant. With reuse, an issuer that
+// does not answer leaves a verification inside the outage window standing.
+func (a *App) askClawHunt(ctx context.Context, hash, user, issuer, subject string, sealed []byte, reuse bool) (clawHuntIdentity, bool, error) {
+	var empty clawHuntIdentity
+	cache := a.clawHuntSessions
+	now := cache.now()
+	recent, found := cache.lookup(hash, user, issuer, subject, now)
+	if reuse && found && cache.usable(recent, now) {
+		return recent.identity, true, nil // Another check finished just before this one began.
+	}
 	grant, err := a.openCredential(user, "clawhunt-session:"+hash, sealed)
 	if err != nil {
 		return empty, false, err
 	}
-	id, _, active, err := a.introspectClawHunt(ctx, grant)
+	id, expires, active, err := a.introspectClawHunt(ctx, grant)
 	if err != nil {
-		return empty, false, err
+		if !reuse {
+			return empty, false, err
+		}
+		// A refusal or a malformed answer fails closed; only silence is waited out.
+		keep := found && errors.Is(err, errClawHuntUnreachable)
+		cache.unreachable(a.log, now, keep)
+		if !keep {
+			return empty, false, err
+		}
+		cache.deferRetry(hash, now)
+		return recent.identity, true, nil
 	}
-	return id, active && subtle.ConstantTimeCompare([]byte(id.Subject), []byte(subject)) == 1 && id.Issuer == issuer, nil
+	if !active || subtle.ConstantTimeCompare([]byte(id.Subject), []byte(subject)) != 1 || id.Issuer != issuer {
+		cache.forget(hash)
+		return empty, false, nil
+	}
+	cache.remember(hash, verifiedClawHuntSession{user: user, issuer: issuer, subject: subject, identity: id, checked: now, expires: expires})
+	return id, true, nil
 }
 func (a *App) validClawHuntLogoutURL(raw string) bool {
 	if raw == a.cfg.PublicOrigin+"/" {

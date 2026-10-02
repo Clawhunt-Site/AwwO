@@ -274,15 +274,20 @@ func (a *App) downloadRunArchive(w http.ResponseWriter, r *http.Request) {
 		fail(w, 401, "unauthorized", "Sign in required")
 		return
 	}
-	var authorized bool
-	err = a.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM memberships m JOIN auth_sessions s ON s.user_id=m.user_id
-		WHERE m.tenant_id=$1 AND m.user_id=$2 AND m.role IN ('reader','member','admin','owner') AND s.token_hash=$3 AND s.expires_at>now())`, tid, currentUser(r).ID, tokenHash(cookie.Value)).Scan(&authorized)
+	// 401 means the session ended; a removed membership is answered like any other non-member.
+	var signedIn, member bool
+	err = a.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM auth_sessions WHERE token_hash=$3 AND user_id=$2 AND expires_at>now()),
+		EXISTS(SELECT 1 FROM memberships WHERE tenant_id=$1 AND user_id=$2 AND role IN ('reader','member','admin','owner'))`, tid, currentUser(r).ID, tokenHash(cookie.Value)).Scan(&signedIn, &member)
 	if err != nil {
 		a.dbError(w, err)
 		return
 	}
-	if !authorized {
-		fail(w, 401, "unauthorized", "Workspace access changed; sign in again")
+	if !signedIn {
+		fail(w, 401, "unauthorized", "Session expired")
+		return
+	}
+	if !member {
+		fail(w, 404, "not_found", "Workspace not found")
 		return
 	}
 	sum := sha256.Sum256(body.Bytes())

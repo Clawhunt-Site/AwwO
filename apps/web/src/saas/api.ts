@@ -2,17 +2,50 @@ export const API_BASE = '/api/v1';
 export class SaaSApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
+// Once the API reports that the signed-in session has ended, nothing but the sign-in routes is
+// sent again: pollers stop reaching the server, and the page offers a new sign-in instead.
+let signedIn = false;
+let sessionEnded = false;
+const sessionEndListeners = new Set<() => void>();
+/** Marks whether the page currently holds a signed-in session; either way an earlier ended one is cleared. */
+export function trackSignedInSession(active: boolean): void {
+  signedIn = active;
+  sessionEnded = false;
+}
+export function onSessionEnded(listener: () => void): () => void {
+  sessionEndListeners.add(listener);
+  return () => { sessionEndListeners.delete(listener); };
+}
+function endSession(): void {
+  if (!signedIn || sessionEnded) return;
+  sessionEnded = true;
+  for (const listener of [...sessionEndListeners]) listener();
+}
+const ENDED_MESSAGE = 'Your session expired. Sign in again.';
 export async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  if (sessionEnded && !path.startsWith('/auth/')) throw new SaaSApiError(401, 'unauthorized', ENDED_MESSAGE);
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body) headers.set('Content-Type', 'application/json');
   const response = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include', headers });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
-    throw new SaaSApiError(response.status, payload?.error?.code || 'request_failed',
+    const error = new SaaSApiError(response.status, payload?.error?.code || 'request_failed',
       payload?.error?.message || (typeof payload?.error === 'string' ? payload.error : `请求失败（${response.status}）`));
+    if (error.status === 401 && error.code === 'unauthorized') endSession();
+    throw error;
   }
   return payload as T;
+}
+/** fetch for API responses read raw (event streams, downloads), under the same session-ended rule as api(). */
+export async function sessionFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  if (sessionEnded) return new Response(JSON.stringify({ error: { code: 'unauthorized', message: ENDED_MESSAGE } }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  const response = await fetch(url, init);
+  if (response.status === 401 && signedIn && !sessionEnded) {
+    const code = await response.clone().json().then((payload: any) => payload?.error?.code, () => undefined);
+    if (code === 'unauthorized') endSession();
+  }
+  return response;
 }
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number };
 export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string };
