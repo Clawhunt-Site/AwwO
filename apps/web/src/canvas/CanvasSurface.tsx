@@ -5,6 +5,7 @@ import { workspaceAgentCatalog } from '../saas/workspaceAgentCatalog';
 import { createMarketplaceRoleNode, type TeamMarketAgent } from './teamMarketAgents';
 import { createWorkspaceAgentNode, type WorkspaceAgent } from './workspaceAgents';
 import { saasErrorMessage } from '../saas/api';
+import { canonicalCanvasDocumentJSON } from '../saas/canvasDraft';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
 import { currentSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
@@ -300,6 +301,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   //    node starts a new one.
   const docRef = useRef(doc);
   docRef.current = doc;
+  const outdatedObserver = useRef(false);
+  const lastSavedDocument = useRef<string | null>(null);
+  const pendingRecoveryDocument = useRef<{ storageKey: string; journalId: string; document: string } | null>(null);
+  if (lastSavedDocument.current === null) lastSavedDocument.current = canonicalCanvasDocumentJSON(doc);
   // Compare revisions in the same normalized shape the loader returns. The last successful
   // local save is also the base of an edit whose autosave effect has not committed yet.
   const lastSavedRevision = useRef<string | null>(null);
@@ -307,11 +312,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   localSaveFailure.current = onLocalDocumentSaveFailed;
   if (lastSavedRevision.current === null) lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(doc));
   const saveLocalDocument = useCallback((next: CanvasDocument): boolean => {
+    if (outdatedObserver.current) return false;
     if (!saveDocument(next)) {
       localSaveFailure.current?.(next);
       return false;
     }
     lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(next));
+    lastSavedDocument.current = canonicalCanvasDocumentJSON(next);
+    pendingRecoveryDocument.current = null;
     return true;
   }, []);
   const undoStack = useRef<CanvasDocument[]>([]);
@@ -336,7 +344,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
    */
   const patchDoc = useCallback(
     (mut: (prev: CanvasDocument) => CanvasDocument, opts?: { label?: string; silent?: boolean; serverIdentity?: boolean }) => {
-      if (readOnlyRef.current || setupRequest.current || (!runAbort.current && loadRunJournal())) return;
+      if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || (!runAbort.current && loadRunJournal())) return;
       const prev = docRef.current;
       const proposed = mut(prev);
       const next = opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed);
@@ -364,13 +372,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // User callbacks can outlive their idle render. The journal/ref checks also cover
   // acceptance before React commits `running`, waiting nodes, and terminal settlement.
   const canEditStructure = useCallback((allowBindingSave = false) => !(
-    readOnlyRef.current || setupRequest.current || runAbort.current || journal.current || loadRunJournal() || recoveringRef.current
+    readOnlyRef.current || outdatedObserver.current || setupRequest.current || runAbort.current || journal.current || loadRunJournal() || recoveringRef.current
     || (inspectorCloseLocked.current && !allowBindingSave) || hasStreamingConversation(docRef.current.nodes)
   ), []);
 
   /** Step to a stored document without recording it as a new edit. */
   const restoreDoc = useCallback((target: CanvasDocument) => {
-    if (readOnlyRef.current || setupRequest.current || loadRunJournal()) return;
+    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || loadRunJournal()) return;
     lastCommit.current = null;
     const live = docRef.current;
     const restored = invalidateOutputs(live, { ...target, nodes: target.nodes.map(node => {
@@ -403,7 +411,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [canEditStructure, restoreDoc, syncHistory]);
 
   useEffect(() => {
-    if (readOnlyRef.current || setupRequest.current || (!runAbort.current && loadRunJournal())) return;
+    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || (!runAbort.current && loadRunJournal())) return;
     saveLocalDocument({ ...doc, edges });
   }, [doc, edges, readOnly, saveLocalDocument]);
 
@@ -619,7 +627,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   useEffect(() => {
     if (readOnly) return;
     const observeOtherTab = (event: StorageEvent) => {
-      if (readOnlyRef.current) return;
+      if (readOnlyRef.current || outdatedObserver.current) return;
       if (event.key !== canvasStorageKey(CANVAS_RUN_JOURNAL_KEY) || runAbort.current) return;
       const active = loadRunJournal();
       if (active) {
@@ -631,20 +639,47 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [readOnly]);
   // A page reload detaches observation; only an explicit Stop cancels native execution.
   const updateJournal = useCallback((nodeId: string, patch: Parameters<typeof patchRunJournalNode>[2]) => {
-    if (readOnlyRef.current || !journal.current) return;
+    if (readOnlyRef.current || outdatedObserver.current || !journal.current) return;
     journal.current = patchRunJournalNode(journal.current, nodeId, patch);
     if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
   }, []);
   useEffect(() => {
-    if (readOnly || !recovering) return;
+    if (readOnly || !recovering || outdatedObserver.current) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    const capturedDocumentKey = canvasStorageKey(CANVAS_STORAGE_KEY);
+    const observerIsActive = () => !controller.signal.aborted && !outdatedObserver.current && mounted.current
+      && currentSaaSCanvas() === cloudScope && canvasStorageKey(CANVAS_STORAGE_KEY) === capturedDocumentKey;
+    const pauseOutdatedObserver = () => {
+      outdatedObserver.current = true;
+      setRecovering(false);
+      setHandoffNote(locale === 'zh'
+        ? '当前页面的画布已过期，已暂停恢复。请先保留本页未保存内容，再重新加载；原运行记录未更改。'
+        : 'This page has an older canvas, so recovery is paused. Preserve any unsaved work before reloading. The original run record is unchanged.');
+      return false;
+    };
+    const hasNoUnsavedSourceEdits = () => {
+      const live = canonicalCanvasDocumentJSON(docRef.current);
+      const pending = pendingRecoveryDocument.current;
+      return live === lastSavedDocument.current || Boolean(pending && pending.document === live
+        && pending.storageKey === capturedDocumentKey && pending.journalId === (loadRunJournal()?.id ?? journal.current?.id));
+    };
+    const canWriteRecovery = () => {
+      if (!observerIsActive()) return false;
+      const cached = loadDocumentWithStatus({ readOnly: true });
+      // Scoped fingerprints omit unrelated nodes, drafts and history. Protect the complete
+      // durable base AND any unsaved source edits in this page before rewriting the cache.
+      // Only an exact recovery result that this observer failed to save may be retried.
+      return cached.status === 'ok' && canonicalCanvasDocumentJSON(cached.doc) === lastSavedDocument.current
+        && hasNoUnsavedSourceEdits() ? true : pauseOutdatedObserver();
+    };
     const refreshedHistories = new Set<string>();
     setHandoffNote(surfaceNotice(t, 'recovering_run'));
     const poll = () => withCanvasRunOwnership(async () => {
-      if (controller.signal.aborted) return;
+      if (!observerIsActive()) return;
       const durable = loadRunJournal();
       if (!durable) {
+        if (!hasNoUnsavedSourceEdits()) { pauseOutdatedObserver(); return; }
         // The tab that owned execution already persisted its final document and cleared the
         // journal. Its transcript store is not shared with this tab: even a loaded history
         // here may have been fetched before the final reply. Refresh only the observed
@@ -654,7 +689,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           setHandoffNote(surfaceNotice(t, 'recovery_pending'));
           timer = setTimeout(() => void poll(), 2500);
         };
-        const current = loadDocumentWithStatus();
+        const current = loadDocumentWithStatus({ readOnly: true });
         if (current.status !== 'ok') { retry(); return; }
         for (const node of current.doc.nodes) {
           const entry = observed?.nodes[node.id];
@@ -678,32 +713,40 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         // Do not publish our pre-fetch document over those edits or unlock a newer run.
         if (journal.current !== observed || loadRunJournal()
             || JSON.stringify(loadDocumentWithStatus().doc) !== JSON.stringify(current.doc)) { retry(); return; }
+        if (!observerIsActive()) return;
+        if (!hasNoUnsavedSourceEdits()) { pauseOutdatedObserver(); return; }
         docRef.current = current.doc; setDoc(current.doc);
+        lastSavedDocument.current = canonicalCanvasDocumentJSON(current.doc);
+        lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(current.doc));
+        pendingRecoveryDocument.current = null;
         journal.current = null; setRecovering(false); setRunning(false); setRuns({}); setReviewRound(0);
         setHandoffNote(surfaceNotice(t, 'recovery_complete'));
         return;
       }
+      if (!canWriteRecovery()) return;
       journal.current = durable;
       setReviewRound(durable.review?.round ?? 0);
       if (!journal.current) return;
       const observed = journal.current;
       const reconciled = await reconcileRunJournal(observed, docRef.current.nodes, gatewayApiBase(), controller.signal);
-      if (controller.signal.aborted) return;
+      if (!observerIsActive()) return;
       // A Stop confirmation may have landed while this read was in flight. Never overwrite it
       // with a response based on the old snapshot; reconcile the new journal in the next pass.
       if (journal.current !== observed || JSON.stringify(loadRunJournal()) !== JSON.stringify(observed)) {
         timer = setTimeout(() => void poll(), 2500);
         return;
       }
+      if (!canWriteRecovery()) return;
       const recoveredJournal = recoveryJournalForDocument(docRef.current, reconciled);
       // SaaS runs are settled durably by Go; only native gateway runs own a native hold.
       const next = cloudScope || recoveredJournal.serverGraph ? recoveredJournal
         : await settleRecoveredJournal(gatewayApiBase(), recoveredJournal, controller.signal);
-      if (controller.signal.aborted) return;
+      if (!observerIsActive()) return;
       if (journal.current !== observed || JSON.stringify(loadRunJournal()) !== JSON.stringify(observed)) {
         timer = setTimeout(() => void poll(), 2500);
         return;
       }
+      if (!canWriteRecovery()) return;
       journal.current = next;
       saveRunJournal(next);
       setRuns(next.nodes);
@@ -714,6 +757,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       docRef.current = recovered; setDoc(recovered);
       // Persist the complete batch before deleting its recovery journal.
       const persisted = saveLocalDocument(recovered);
+      pendingRecoveryDocument.current = persisted ? null
+        : { storageKey: capturedDocumentKey, journalId: next.id, document: canonicalCanvasDocumentJSON(recovered) };
       const unresolved = Object.values(next.nodes).some(node => node.state === 'running' || (next.serverGraph && node.state === 'waiting'));
       if (unresolved) {
         const missing = Object.values(next.nodes).some(node => node.detail === 'recovery_identity_missing');
@@ -723,6 +768,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
         timer = setTimeout(() => void poll(), 2500);
       } else {
+        const stillCurrent = () => {
+          if (!canWriteRecovery()) return false;
+          if (journal.current === next && storage.getItem(CANVAS_RUN_JOURNAL_KEY) === JSON.stringify(next)) return true;
+          timer = setTimeout(() => void poll(), 2500);
+          return false;
+        };
         for (const node of docRef.current.nodes) {
           const entry = next.nodes[node.id];
           if (node.kind === 'session' && entry?.threadId === activeThreadId(node) && node.issueId
@@ -737,15 +788,17 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
               timer = setTimeout(() => void poll(), 2500);
               return;
             }
+            if (!stillCurrent()) return;
             const storeKey = sessionStoreKey(node);
             forgetNode(storeKey);
             await restoreHistory({ gatewayBase: gatewayApiBase(), node,
               signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
-            if (controller.signal.aborted) return;
+            if (!stillCurrent()) return;
             if (next.manual) replaceTurns(storeKey, projectConversationTurns(node,
               mergeRecoveredManualConversation(getSessionSnapshot(storeKey).turns, next, node.id), storage));
           }
         }
+        if (!stillCurrent()) return;
         clearRunJournal(next.id); journal.current = null;
         setRecovering(false); setRunning(false);
         setRunSummary(journalSummary(next));
@@ -767,7 +820,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     });
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [readOnly, recovering, patchDoc, saveLocalDocument, t, focusNode]);
+  }, [readOnly, recovering, patchDoc, saveLocalDocument, t, locale, focusNode]);
   useEffect(() => {
     if (!running) return undefined;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -797,6 +850,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (!mounted.current || controller.signal.aborted || readOnlyRef.current) throw new Error(locale === 'zh' ? '节点准备已取消。' : 'Node setup was cancelled.');
       docRef.current = document; setDoc(document);
       lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(document));
+      lastSavedDocument.current = canonicalCanvasDocumentJSON(document);
       return document;
     } finally {
       if (setupRequest.current === controller) setupRequest.current = null;
@@ -805,7 +859,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [locale, t, saveLocalDocument, runUnavailableReason]);
 
   const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
-    if (readOnlyRef.current) return Promise.resolve();
+    if (readOnlyRef.current || outdatedObserver.current) return Promise.resolve();
     if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
     const collaborationRevision = collaboration ? canvasPlanRevision(docRef.current) : undefined;
     // Ownership can arrive after another edit. A manual send belongs to the exact Session
@@ -819,7 +873,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return withCanvasRunOwnership(async () => {
     // Synchronous re-entrancy guard on the REF: React state commits asynchronously, so a double
     // click could otherwise start two overlapping runs whose callbacks interleave into one map.
-    if (!mounted.current || currentSaaSCanvas() !== cloudScope || readOnlyRef.current || setupRequest.current || runAbort.current || journal.current) return;
+    if (!mounted.current || currentSaaSCanvas() !== cloudScope || readOnlyRef.current || outdatedObserver.current || setupRequest.current || runAbort.current || journal.current) return;
     if (collaboration && (!cloudScope || manualMessage || !scope || scope.length < 2 || scope.length > 6
       || !scope.includes(collaboration.synthesizerNodeId)
       || collaborationRevision !== canvasPlanRevision(docRef.current)
@@ -849,6 +903,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         && persistedRevision !== lastSavedRevision.current) {
       docRef.current = persistedCanvas.doc; setDoc(persistedCanvas.doc);
       lastSavedRevision.current = persistedRevision;
+      lastSavedDocument.current = canonicalCanvasDocumentJSON(persistedCanvas.doc);
       setHandoffNote(surfaceNotice(t, 'canvas_changed_elsewhere'));
       return;
     }
@@ -1109,7 +1164,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [patchDoc, saveLocalDocument, updateJournal, prepareNodes, locale, t, runUnavailableReason]);
 
   const stopRun = useCallback(() => {
-    if (readOnlyRef.current) return;
+    if (readOnlyRef.current || outdatedObserver.current) return;
     if (journal.current?.serverGraph) {
       journal.current = { ...journal.current, serverGraph: { ...journal.current.serverGraph, cancelRequested: true } };
       if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));

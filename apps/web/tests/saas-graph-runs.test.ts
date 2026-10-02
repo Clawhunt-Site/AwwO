@@ -82,6 +82,22 @@ describe('durable cloud graph identity and recovery', () => {
     expect(graphRecoveryJournal(accepted, tenant.id, document()).inputFingerprint).toBe('unverified-server-document');
   });
 
+  it('replaces a stale observer diagnostic while retaining fresh server errors and genuine input mismatches', () => {
+    const accepted = snapshot({ status: 'completed', nodes: [{ nodeId: 'a', state: 'done', output: 'Accepted A' }, { nodeId: 'b', state: 'done', output: 'Accepted B' }] });
+    const original = accepted.document!;
+    const changed = structuredClone(original); (changed.nodes[0] as SessionNode).persona = 'Different actual task';
+    const stale = recoveryJournalForDocument(changed, graphRecoveryJournal(accepted, tenant.id, original));
+    expect(stale.nodes.a.detail).toBe('recovery_input_changed');
+    const fresh = mergeGraphSnapshot(stale, accepted);
+    expect(fresh.nodes.a).toMatchObject({ state: 'done', output: 'Accepted A' });
+    expect(fresh.nodes.a.detail).toBeUndefined();
+    expect(recoveryJournalForDocument(original, fresh).nodes.a.state).toBe('done');
+    expect(recoveryJournalForDocument(changed, fresh).nodes.a).toMatchObject({ state: 'failed', detail: 'recovery_input_changed' });
+    const rejected = mergeGraphSnapshot(stale, { ...accepted, status: 'failed', nodes: [{ nodeId: 'a', state: 'failed', detail: 'model_unavailable' }] });
+    expect(rejected.nodes.a.detail).toBe('model_unavailable');
+    expect(rejected.nodes.b.detail).toBe('recovery_input_changed'); // An omitted node was not refreshed.
+  });
+
   it('never re-POSTs an absent pending operation, including after a reload', async () => {
     const fetcher = vi.fn(async (_url: string, _init: RequestInit = {}) => json({ items: [] }));
     vi.stubGlobal('fetch', fetcher);

@@ -213,7 +213,10 @@ export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRun
     }
     if (!previous) continue;
     if (collaboration && previous.issueId && result.sessionId && previous.issueId !== result.sessionId) throw new Error('Collaboration node Session changed');
-    nodes[result.nodeId] = { ...previous, state: result.state,
+    // A fresh authoritative node snapshot replaces its previous diagnostic too. In particular,
+    // a local observer's input-mismatch warning must not survive a later matching server result.
+    const { detail: _previousDetail, ...previousState } = previous;
+    nodes[result.nodeId] = { ...previousState, state: result.state,
       ...(typeof result.output === 'string' ? { output: result.output } : {}),
       ...(result.detail ? { detail: result.detail } : {}),
       ...(result.runId ? { runId: result.runId } : {}),
