@@ -16,6 +16,119 @@ Public API paths begin `/api/v1`. Authentication uses an HttpOnly, SameSite=Lax 
 
 A registration creates a normal user and a tenant owner membership. The owner role does not confer platform administration. Only explicit bootstrap configuration can create an initial platform admin, and bootstrap refuses to promote an existing customer account. Bootstrap does not rotate an existing administrator password. Owners cannot be removed or demoted through the basic membership API. `PATCH /auth/profile` accepts only `{name}` (trimmed, 1–120 Unicode characters), updates the current account, and returns `{id,email,name,isPlatformAdmin}` with an audit record.
 
+### Operator account recovery and deployment status
+
+`cmd/control` is a separate OS-operator command for an explicitly authorized
+recovery of an existing account. It does not start a second API, run migrations,
+take the API worker lease, recover/cancel runs, change passwords or sessions, or
+start workers. It uses the existing `AWWO_DATABASE_URL` through pgx; never put the
+DSN in command arguments or diagnostic output. A production invocation remains
+subject to the deployment's database-access policy: packaging this tool does not
+automatically exempt it from a Bytebase-only requirement.
+
+Build a reviewed immutable binary, with its exact source revision, from `backend`:
+
+```sh
+go build -trimpath -ldflags "-X awwo/backend/internal/operator.buildRevision=$(git rev-parse HEAD)" -o awwo-control ./cmd/control
+./awwo-control status --nonce deployment-check-0001
+./awwo-control inspect --user-id EXISTING_IMMUTABLE_USER_ID
+# Alternatively, inspect exactly one canonical stored email; there is no list/export mode.
+./awwo-control inspect --email operator@example.invalid
+```
+
+Use the protected service environment through the approved OS deployment runner;
+the tool never prints environment contents or raw database errors. `status` and
+`inspect` use read-only Repeatable Read transactions. Inspection returns only
+ID, stored email, name, platform role, and existing issuer/subject identity links.
+These links are identifiers, not cookies, provider grants, passwords, or tokens.
+The normal signed-in `/auth/me` user ID must match the target. A main-site profile
+email can differ from the stored AwwO email, so obtain the expected stored email
+from inspection and verify the issuer/subject belongs to the same intended
+account; never select a target from a display name alone.
+
+An operator grant requires the exact existing user ID, email, issuer/subject link,
+and expected previous role `user`. It cannot create an account or take ownership
+of an already privileged account. Omitting `--apply` performs a read-only preview:
+
+```sh
+./awwo-control grant --user-id EXISTING_IMMUTABLE_USER_ID \
+  --expected-email operator@example.invalid \
+  --expected-issuer https://identity.example.invalid --expected-subject VERIFIED_SUBJECT \
+  --expected-role user --operation-id RECOVERY_OPERATION_0001 \
+  --reason 'Owner-authorized account role recovery'
+# The approved OS-root runner repeats those exact arguments with --apply to write.
+```
+
+Applying requires OS effective UID 0, a non-empty reason, and a caller-retained
+operation ID (16–128 ASCII letters, digits, hyphens or underscores). Do not put
+secrets in a reason. An operator-specific transaction lock serializes operation
+IDs across users; it is independent of the running API's lease. The user row and
+identity links are locked and rechecked, and the role change plus
+`admin.operator_grant` audit event commit in one transaction. Audit `actor_id` is
+null rather than a forged browser user; metadata records OS UID/effective UID,
+host, tool revision, reason, exact account binding, before/after role, operation
+ID, request digest, and user-row version. No session is issued or rewritten.
+The existing API reads the stored role on each authenticated request, so a normal
+existing session sees the grant without an API restart.
+
+After a lost result, retry the **same operation ID and identical arguments**.
+The tool returns the original receipt only while that grant still owns the
+account state; changed inputs, a revoked grant, or a later change fail closed.
+Retain the returned audit ID for a narrowly owned rollback:
+
+```sh
+./awwo-control rollback --user-id EXISTING_IMMUTABLE_USER_ID \
+  --grant-id ORIGINAL_AUDIT_ID --operation-id ROLLBACK_OPERATION_0001 \
+  --reason 'Revert this exact operator grant'
+# This is also a preview until the approved OS-root runner adds --apply.
+```
+
+Rollback only restores the grant's previous `user` role when the original grant
+is still the latest admin audit for that user, the current role is `admin`, the
+identity still matches, and the PostgreSQL user-row version (`xmin`) is unchanged.
+Intervening profile updates also cause conservative refusal; the command never
+guesses that a later write was harmless. Rollback is audited and idempotent, and
+cannot demote another account or a later administrator grant. No automatic grant
+or rollback retries are performed after a conflict.
+
+`status` contract version 1 returns `source: "awwo-control"`, `toolRevision`, the
+optional caller `nonce`, database `snapshotAt`, `databaseIdentity`, `schemaName`,
+`schemaVersion`, `schemaDigest`, and these numeric `counts`:
+
+- `activeRuns`, `queuedRuns`, `runningRuns`: all persisted runs, including direct,
+  planner, team, graph children, and computer execution awaiting human approval.
+- `activeComputerRuns`: the active-run subset whose node session kind is computer.
+- `activeGraphRuns`, `waitingGraphNodes`, `runningGraphNodes`: active graph
+  scheduling; node projections of terminal graphs are excluded.
+- `activeTeamTurns`, `activeInvocations`, `openMausDispatchesSending`: unfinished
+  turn, model-ledger, and outgoing managed-dispatch records, including detached
+  records that must not be mistaken for idle.
+
+`databaseIdentity` is SHA-256 of compact UTF-8 JSON `[current_database,current_schema]`.
+`schemaDigest` is SHA-256 of a compact UTF-8 JSON array ordered by migration
+version, with each item's keys in order `version,identity,checksum`; it joins
+`awwo_schema_migrations` to `awwo_schema_migration_identities`, using empty strings
+for older absent identities. Both the manifest and counts use the same read-only
+snapshot. These are observed facts, **not** a claim that the schema matches the
+binary or that this is the running API's database; the deployment runner must
+compare a separately verified expected schema/config identity.
+
+A zero snapshot alone does not drain admissions or prove worker inactivity.
+The deployment runner must gate new admissions first, bind the trusted binary
+hash/revision and protected DB configuration to the actual API PID/start time,
+verify the nonce and snapshot freshness, and collect repeated complete zero
+counts alongside fresh API HTTP in-flight/worker checks. Synchronous TypeSafe
+evaluations remain covered by the API HTTP in-flight check; standalone external
+OpenMaus tasks are not cancelled or controlled by this tool. Never replace these
+checks with a fabricated receipt or an unbounded wait. Missing tables, database
+errors, or lock timeouts fail rather than producing zero counts.
+
+Focused tests use `go test -race -count=1 ./internal/operator ./cmd/control`.
+PostgreSQL cases follow the existing `AWWO_TEST_DATABASE_URL` convention, create
+isolated temporary schemas, and explicitly skip when it is absent. They must
+never point at a production database. The standard SaaS CI `go test ./...` also
+includes these cases.
+
 Member management supports existing registered accounts and single-use invitation links. Workspace admins and owners can list/create/revoke `/tenants/{tenantId}/invites`; only owners can create or revoke an admin invitation. Creation accepts `{role,expiresInHours?}` with role `reader|member|admin`, default 72 hours and an integer range of 1–168 hours. The response includes `{id,role,expiresAt,inviteUrl,token}`. The token is shown once, only its SHA-256 digest is stored, and listing exposes metadata without the token or hash. The browser link uses `/?invite=TOKEN`; the user must sign in, preview `GET /invites/{token}`, and explicitly accept with `POST /invites/{token}/accept`. No invitation email is sent.
 
 Invitation preview returns `{tenantId,tenantName,role,expiresAt,status}`. Status is `active`, `expired`, `revoked`, `accepted`, `unavailable` (issuer lost permission), or `suspended`. Acceptance returns `{tenantId,role}` and preserves an existing member's actual role. Concurrent consumption is serialized by a tenant row lock; only one account can claim a token. A repeat by that same account returns its current membership without granting it again, including after the consumed invitation's expiry. A removed member cannot rejoin using a consumed token. Unconsumed expired/revoked links return 410, consumed links claimed by another account return 409, and suspended workspaces or issuers without current granting permission return 403. Acceptance, issuer membership changes, revocation and suspension share the tenant lock; key changes are audited. Revocation of a consumed token returns 409; repeated revocation of an unused token returns 204.
