@@ -5,8 +5,9 @@ import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { createAgentTemplate, getAgentTemplateForNode } from '../src/canvas/agentTemplates';
 import type { ContractField } from '../src/canvas/nodeContracts';
+import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); clearSaaSCanvas(); });
 const field = (over: Partial<ContractField> = {}): ContractField => ({
   id: 'summary', label: '交付说明', type: 'markdown', required: true, value: '尚未发布的草稿', ...over,
 });
@@ -129,6 +130,19 @@ describe('node deliverables', () => {
     expect(container.querySelector('.awwo-deliverable')).toBeNull();
     expect(screen.getByText('编辑输出表单').closest('details')).not.toHaveAttribute('open');
     expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it('says which deliverable types open in place, only in a cloud workspace and only before a delivery', () => {
+    const note = '交付的网页（HTML）、3D 模型、PDF 文档和源码可以直接在这里预览。';
+    const first = render(<NodeDeliverables node={node()} readOnly />);
+    expect(screen.queryByText(note)).toBeNull();
+    first.unmount();
+    configureSaaSCanvas({ tenant: { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 }, canvasId: 'canvas-a' });
+    const second = render(<NodeDeliverables node={node()} readOnly />);
+    expect(screen.getByText(note)).toBeTruthy();
+    second.unmount();
+    render(<NodeDeliverables node={node({ lastOutput: { text: '已完成的交付说明', at: 1, source: 'run' } })} readOnly />);
+    expect(screen.queryByText(note)).toBeNull();
   });
 
   it('lists the expected delivery fields as pending without inventing an output result', () => {

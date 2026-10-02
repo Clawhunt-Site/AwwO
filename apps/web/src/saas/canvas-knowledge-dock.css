@@ -1,17 +1,38 @@
-.awwo-stage-deliveries{flex:0 0 48%;min-width:390px;max-width:800px;border-left:1px solid var(--awwo-border);overflow:hidden;background:var(--awwo-bg)}
-.awwo-stage-with-deliveries{position:relative}
-.awwo-stage-deliveries:has(.awwo-knowledge-dock.is-focused){position:absolute;inset:0;z-index:40;max-width:none;width:100%;border-left:0}
-.awwo-knowledge-dock{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--awwo-ink)}
-.awwo-knowledge-dock-bar{display:flex;align-items:center;gap:8px;min-height:42px;padding:7px 10px;border-bottom:1px solid var(--awwo-border);font-size:11px}
-.awwo-knowledge-dock-bar>span{flex:1;min-width:0;color:var(--awwo-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.awwo-knowledge-dock-bar button{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;background:var(--awwo-surface);color:inherit;border:1px solid var(--awwo-border);border-radius:7px;padding:5px 7px;cursor:pointer}
+/* Knowledge map and execution assistant sit in the canvas bar beside the assistant toggle, styled like it;
+   the canvas keeps its full width. In a narrow bar the labels give way to icons (is-compact). */
+.awwo-knowledge-tools{position:relative;display:inline-flex;align-items:center;gap:4px;min-width:0}
+.awwo-canvas-bar .awwo-knowledge-tool{position:relative;display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:6px 9px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--awwo-muted);font:inherit;font-size:12px;white-space:nowrap;cursor:pointer}
+.awwo-canvas-bar .awwo-knowledge-tool:hover{background:var(--awwo-accent-soft);color:var(--awwo-accent)}
+.awwo-knowledge-tools.is-compact .awwo-knowledge-tool{padding-inline:8px}
+/* Hidden but still laid out, so the dock can tell when the labels fit again. */
+.awwo-knowledge-tools.is-compact .awwo-knowledge-tool>span,.awwo-knowledge-tools.is-compact .awwo-knowledge-references-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* A compilation outcome waiting in the map: pulsing while it runs, a dot once it is in, red on failure. */
+.awwo-knowledge-tool-mark{position:absolute;top:5px;left:19px;width:7px;height:7px;border-radius:50%;background:var(--awwo-accent);box-shadow:0 0 0 2px var(--awwo-surface)}
+/* Shape as well as colour: a ring while compiling, a dot for a new result, a diamond for a failure. */
+.awwo-knowledge-tool-mark.is-busy{box-sizing:border-box;background:var(--awwo-surface);border:2px solid var(--awwo-accent);animation:awwo-knowledge-mark 1.2s ease-in-out infinite}
+.awwo-knowledge-tool-mark.is-error{border-radius:1px;transform:rotate(45deg);background:var(--saas-danger,#c14040)}
+@keyframes awwo-knowledge-mark{50%{opacity:.3}}
+@media(prefers-reduced-motion:reduce){.awwo-knowledge-tool-mark.is-busy{animation:none}}
+@media(forced-colors:active){.awwo-knowledge-tool-mark{forced-color-adjust:none;background:CanvasText;box-shadow:0 0 0 2px Canvas}.awwo-knowledge-tool-mark.is-busy{background:Canvas;border-color:CanvasText}.awwo-knowledge-tool-mark.is-error{background:CanvasText}}
+.awwo-knowledge-references{display:inline-flex;align-items:center;gap:2px;min-height:28px;padding:0 4px 0 10px;border-radius:999px;background:var(--saas-soft);color:var(--saas-text);font-size:12px;white-space:nowrap}
+.awwo-knowledge-references>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* In icon-only mode the references chip shrinks to a count; the full text stays its title and accessible name. */
+.awwo-knowledge-references-count{display:none}
+.awwo-knowledge-tools.is-compact .awwo-knowledge-references-count{display:inline-flex;align-items:center;gap:3px}
+.awwo-knowledge-references button{display:grid;place-items:center;flex:0 0 auto;width:22px;height:22px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer}
+.awwo-knowledge-references button:hover{background:var(--saas-hairline)}
 .awwo-knowledge-dock-error,.awwo-knowledge-dock-notice{font-size:11px;margin:0;padding:7px 12px;overflow-wrap:anywhere;background:var(--awwo-surface)}
-.awwo-knowledge-dock-error{color:#c14040}
+.awwo-knowledge-dock-error{color:var(--saas-danger,#c14040)}
+.awwo-knowledge-dock-notice{color:var(--awwo-muted)}
 .awwo-knowledge-overlay{position:fixed;inset:52px 20px 20px;margin:0;padding:0;width:calc(100% - 40px);height:calc(100% - 72px);max-width:none;max-height:none;z-index:500;display:flex;flex-direction:column;color:var(--awwo-ink,#25302d);background:var(--awwo-bg,#f7f7f5);border:1px solid var(--awwo-border,#ddd);border-radius:14px;box-shadow:0 24px 100px #0004;overflow:hidden}
 .awwo-knowledge-overlay::backdrop{background:#0005}
 .awwo-knowledge-overlay>*{flex:1;min-width:0;min-height:0}
-.awwo-knowledge-overlay>.awwo-knowledge-dock-error{flex:0 0 auto}
+.awwo-knowledge-overlay>.awwo-knowledge-dock-error,.awwo-knowledge-overlay>.awwo-knowledge-dock-notice{flex:0 0 auto}
 .awwo-knowledge-overlay>.awwo-knowledge-resume{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:8px 14px;font-size:12px;border-bottom:1px solid var(--awwo-border);overflow:auto}
 .awwo-knowledge-resume label{display:flex;gap:8px;align-items:center}
 .awwo-knowledge-resume select,.awwo-knowledge-resume button{font:inherit;color:inherit;background:var(--awwo-surface);border:1px solid var(--awwo-border);border-radius:6px;padding:4px 8px}
-@media(max-width:1100px){.awwo-stage-with-deliveries{flex-direction:column;overflow:auto}.awwo-stage-with-deliveries .awwo-stage-canvas{flex:1 0 300px;min-height:300px}.awwo-stage-deliveries{flex:1 0 540px;min-width:0;max-width:none;width:100%;border-left:0;border-top:1px solid var(--awwo-border)}.awwo-knowledge-overlay{inset:12px;width:calc(100% - 24px);height:calc(100% - 24px)}}
+@media(max-width:1100px){.awwo-knowledge-overlay{inset:12px;width:calc(100% - 24px);height:calc(100% - 24px)}}
+/* Where even icons do not fit beside the run controls (both side panels open in a narrow window), the
+   run controls move to a second row instead of overlapping the tools. Phones already wrap the bar. */
+@media(min-width:761px){.saas-canvas-shell .awwo-workspace .awwo-canvas-bar:has(>.awwo-knowledge-tools){flex-wrap:wrap;row-gap:6px;padding-block:3px}}
+@media(max-width:760px){.awwo-knowledge-references{max-width:140px}}

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SaaSApp } from '../src/saas/SaaSApp';
 import { createSessionNode, emptyDocument, saveDocument } from '../src/canvas/canvasDoc';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
@@ -52,6 +52,18 @@ it.each(['owner', 'reader'])('offers a direct current-workspace return for a loa
   expect(backLink()).toBeVisible(); expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
   expect(backLink().closest('[inert]')).toBeNull();
   expect(fetcher.mock.calls.some(([, init]) => init?.method && init.method !== 'GET')).toBe(false);
+});
+it.each(['owner', 'reader'])('keeps the knowledge tools in the %s canvas bar, out of the header, and the whole stage for the canvas', async role => {
+  server({ role }); render(<SaaSApp />);
+  await waitFor(() => expect(document.querySelector('.awwo-workspace')).not.toBeNull());
+  const bar = within(document.querySelector('.awwo-canvas-bar') as HTMLElement);
+  expect(bar.getByRole('button', { name: '知识地图' })).toBeVisible();
+  expect(bar.getByRole('button', { name: '执行助手' })).toBeVisible();
+  expect(document.querySelector('.awwo-header .awwo-knowledge-tools')).toBeNull();
+  const stage = document.querySelector('.awwo-stage');
+  expect(stage).not.toBeNull();
+  expect(stage?.querySelector('aside')).toBeNull();
+  expect(stage?.querySelector('.awwo-knowledge-tools')).toBeNull();
 });
 
 it('lets a signed-in owner without a personal key inspect, export and edit an existing canvas while execution remains unavailable', async () => {

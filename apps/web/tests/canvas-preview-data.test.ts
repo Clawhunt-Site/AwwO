@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
-import { PREVIEW_LIMITS, previewKind, previewText, readPreviewBlob, safeSourcePath, SOURCE_FILE_LIMIT, unzipPreview, validateModel } from '../src/canvas/previewData';
-import { previewSample } from '../src/canvas/previewSamples';
+import { PREVIEW_LIMITS, previewKind, previewText, safeSourcePath, SOURCE_FILE_LIMIT, unzipPreview, validateModel } from '../src/canvas/previewData';
+import { previewSample } from './fixtures/previewSamples';
 import { readArtifactPreview } from '../src/canvas/ArtifactPreview';
 
 const signal = () => new AbortController().signal;
@@ -35,12 +35,6 @@ describe('bounded preview data', () => {
     expect(() => previewText(new Uint8Array([0xff]))).toThrow();
     expect(() => previewText(strToU8('text\0binary'))).toThrow('UTF-8');
     expect(() => previewText(new Uint8Array(SOURCE_FILE_LIMIT + 1))).toThrow('2 MiB');
-  });
-  it('reads local files and supports cancelled and overbudget reads', async () => {
-    expect(new TextDecoder().decode(await readPreviewBlob(new Blob(['abc']), signal(), 5))).toBe('abc');
-    await expect(readPreviewBlob(new Blob(['abcdef']), signal(), 5)).rejects.toThrow('上限');
-    const controller = new AbortController(); controller.abort();
-    await expect(readPreviewBlob(new Blob(['abc']), controller.signal, 5)).rejects.toThrow('Aborted');
   });
   it('accepts source-only OBJ demo, rejects material links and malformed geometry', () => {
     expect(validateModel(previewSample('model')).format).toBe('obj');

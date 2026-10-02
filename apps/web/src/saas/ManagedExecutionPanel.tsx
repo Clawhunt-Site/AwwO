@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Download, FileText, Play, RefreshCw, Square, TerminalSquare, X } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Check, Download, Eye, EyeOff, FileText, Play, RefreshCw, Square, TerminalSquare, X } from 'lucide-react';
+import { StoredArtifactPreview } from '../canvas/ArtifactPreview';
+import { ARTIFACT_REF_PREFIX } from './canvasBridge';
+import { renderInertMarkdown } from './inertMarkdown';
 import { SaaSApiError, saasErrorMessage } from './api';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
@@ -12,7 +15,7 @@ import './managed-execution.css';
 export interface ManagedExecutionPanelProps {
   tenantId: string; canvasId: string; readOnly?: boolean;
   knowledgeReferences?: Pick<KnowledgeContextItem, 'revisionId' | 'title'>[];
-  onClose?: () => void; onArtifactsChanged?: () => void;
+  onClose?: () => void;
   onImported?: (document: KnowledgeDocument) => void | Promise<void>;
 }
 const modelKey = (runtime: string, model: string) => JSON.stringify([runtime, model]);
@@ -29,7 +32,7 @@ function pause(signal: AbortSignal): Promise<void> {
 export function ManagedExecutionPanel(props: ManagedExecutionPanelProps) {
   return <ExecutionView key={`${props.tenantId}/${props.canvasId}`} {...props} />;
 }
-function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferences = [], onClose, onArtifactsChanged, onImported }: ManagedExecutionPanelProps) {
+function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferences = [], onClose, onImported }: ManagedExecutionPanelProps) {
   const { t, locale } = useSaaSPreferences();
   const [runtime, setRuntime] = useState<ExecutionRuntime | null>(null);
   const [history, setHistory] = useState<ExecutionRuns>({ items: [] });
@@ -39,6 +42,8 @@ function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferenc
   const [effort, setEffort] = useState('');
   const [prompt, setPrompt] = useState('');
   const [selectedId, setSelectedId] = useState('');
+  // The saved artifact opened in place, scoped to its run so switching runs closes it.
+  const [preview, setPreview] = useState<{ run: string; artifact: string } | null>(null);
   const [run, setRun] = useState<ExecutionRun | null>(null);
   const [detailRevision, setDetailRevision] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -57,8 +62,6 @@ function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferenc
   const controllers = useRef(new Set<AbortController>());
   const submissions = useRef(new Map<string, string>());
   const importOperations = useRef(new Map<string, string>());
-  const changed = useRef(onArtifactsChanged);
-  changed.current = onArtifactsChanged;
   const selectedModel = runtime?.models.find(item => modelKey(item.runtime, item.id) === model);
   const needsModel = runtime?.capabilities.workspace === true && runtime.models.length === 0;
   const serviceReason = runtime?.reason === 'Configure an available model in My engines'
@@ -69,7 +72,7 @@ function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferenc
   const handleError = useCallback((cause: unknown) => {
     setError(cause);
     if (cause instanceof SaaSApiError && [401, 403].includes(cause.status)) {
-      setRun(null); setSelectedId(''); setHistory({ items: [] }); setRuntime(null); setPendingImport(null);
+      setRun(null); setSelectedId(''); setHistory({ items: [] }); setRuntime(null); setPendingImport(null); setPreview(null);
     }
   }, []);
 
@@ -96,7 +99,6 @@ function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferenc
   useEffect(() => {
     if (!selectedId) return;
     const controller = new AbortController(); setDetailLoading(true); setPollingPaused(false);
-    let lastArtifacts = '';
     void (async () => {
       try {
         for (let attempt = 0; attempt < 120; attempt++) {
@@ -108,9 +110,6 @@ function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferenc
             const approval = value.approvals.find(item => responseKey(value.id, item.requestId) === key);
             return !approval || !['allowed', 'denied'].includes(approval.status);
           })));
-          const artifacts = JSON.stringify(value.artifacts.map(item => [item.id, item.sha256]));
-          if (artifacts !== lastArtifacts && value.artifacts.length) changed.current?.();
-          lastArtifacts = artifacts;
           if (executionTerminal(value.status)) return;
           await pause(controller.signal);
         }
@@ -139,7 +138,7 @@ function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferenc
     try {
       const created = await createExecutionRun(tenantId, canvasId, input, signal);
       if (signal.aborted) return;
-      setSelectedId(created.id); setRun(null); setPendingImport(null); setDetailRevision(value => value + 1);
+      setSelectedId(created.id); setRun(null); setPendingImport(null); setPreview(null); setDetailRevision(value => value + 1);
       setPendingSubmission(null); setPrompt(''); setNotice(t('任务已提交。关闭面板后仍可从历史任务继续查看。', 'Task submitted. Reopen its history to continue viewing it after closing this panel.'));
       submissions.current.delete(fingerprint);
     } catch (cause) {
@@ -207,7 +206,7 @@ function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferenc
         <button className="managed-primary" type="submit" disabled={busy || loading || !runtime?.ready || !runtime.capabilities.workspace || !selectedModel || !prompt.trim() || !!pendingSubmission}><Play size={15} />{t('创建并执行', 'Create and run')}</button>
       </form>}
       {pendingSubmission && <div className="managed-execution-warning" role="status"><strong>{t('本次提交结果尚未确认', 'Submission outcome is unconfirmed')}</strong><p>{t('核对会使用原提交标识，不创建第二份任务。', 'Reconcile using the original submission identity without creating a second task.')}</p><code>{pendingSubmission.operationId}</code>{!readOnly && <button type="button" disabled={busy} onClick={() => submit(pendingSubmission)}>{t('核对本次提交', 'Reconcile this submission')}</button>}</div>}
-      <nav className="managed-execution-history" aria-label={t('执行任务历史', 'Execution history')}><h3>{t('历史任务', 'Previous tasks')}</h3>{history.items.length === 0 && <p>{t('还没有任务。创建后可随时回来查看。', 'No tasks yet. Return here to view tasks after creating one.')}</p>}{history.items.map(item => <button type="button" key={item.id} aria-pressed={selectedId === item.id} disabled={busy} onClick={() => { setSelectedId(item.id); setDetailRevision(value => value + 1); setError(null); setPendingImport(null); }}><strong>{item.prompt || item.id}</strong><span>{statusLabel(item.status)} · {new Date(item.createdAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</span></button>)}{history.truncated && <p>{t('仅显示最近的任务记录。', 'Only recent task records are shown.')}</p>}</nav>
+      <nav className="managed-execution-history" aria-label={t('执行任务历史', 'Execution history')}><h3>{t('历史任务', 'Previous tasks')}</h3>{history.items.length === 0 && <p>{t('还没有任务。创建后可随时回来查看。', 'No tasks yet. Return here to view tasks after creating one.')}</p>}{history.items.map(item => <button type="button" key={item.id} aria-pressed={selectedId === item.id} disabled={busy} onClick={() => { setSelectedId(item.id); setDetailRevision(value => value + 1); setError(null); setPendingImport(null); setPreview(null); }}><strong>{item.prompt || item.id}</strong><span>{statusLabel(item.status)} · {new Date(item.createdAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</span></button>)}{history.truncated && <p>{t('仅显示最近的任务记录。', 'Only recent task records are shown.')}</p>}</nav>
     </aside><main className="managed-execution-detail">
       {!selectedId && <div className="managed-execution-empty"><TerminalSquare size={36} /><h3>{t('让任务产生可保存的结果', 'Turn a task into a saved result')}</h3><p>{t('描述目标，检查执行过程，再将需要的产物存入知识库。', 'Describe a goal, review the execution, and save useful artifacts to your knowledge base.')}</p></div>}
       {selectedId && <><div className="managed-execution-detail-bar"><h3>{t('任务详情', 'Task details')}</h3><span role="status">{detailLoading ? t('正在读取…', 'Loading…') : currentRun ? statusLabel(currentRun.status) : t('状态未读取', 'Status not loaded')}</span><button type="button" aria-label={t('刷新当前任务', 'Refresh current task')} disabled={detailLoading} onClick={() => { setError(null); setDetailRevision(value => value + 1); }}><RefreshCw size={15} /></button>{!readOnly && currentRun?.canCancel && !executionTerminal(currentRun.status) && <button type="button" disabled={busy} onClick={stop}><Square size={13} />{t('停止任务', 'Stop task')}</button>}</div>
@@ -228,7 +227,7 @@ function ExecutionView({ tenantId, canvasId, readOnly = false, knowledgeReferenc
           })}</section>
           <section className="managed-execution-messages" aria-label={t('执行消息', 'Execution messages')}>{currentRun.messages.map(message => <article key={message.id}><div><strong>{message.role}</strong><time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</time></div><pre>{message.text}</pre>{message.truncated && <p className="managed-execution-warning">{t('此消息内容已截断。', 'This message has been truncated.')}</p>}</article>)}</section>
           {currentRun.output && <section className="managed-execution-output"><h3>{t('任务结果', 'Task result')}</h3><pre>{currentRun.output}</pre>{currentRun.outputTruncated && <p className="managed-execution-warning">{t('此结果内容已截断，请查看已保存产物。', 'This result has been truncated. Check the saved artifacts.')}</p>}</section>}
-          <section className="managed-execution-artifacts"><h3>{t('已保存产物', 'Saved artifacts')}</h3>{currentRun.artifacts.length === 0 && <p>{t('暂无已保存文件。', 'No files have been saved yet.')}</p>}{currentRun.artifacts.map(artifact => <article key={artifact.id}><FileText size={18} /><div><strong>{artifact.name}</strong><small>{artifact.size.toLocaleString()} B</small></div><a href={executionArtifactURL(tenantId, artifact.id)} download={artifact.name}><Download size={14} />{t('下载', 'Download')}</a>{!readOnly && <button type="button" disabled={busy || artifact.size > KNOWLEDGE_CONTENT_BYTES} title={t('保存服务器上的 UTF-8 文本原件，最多 256 KiB', 'Save the server-held UTF-8 text source, up to 256 KiB')} onClick={() => { setPendingImport(artifact); setImportTitle(artifact.name); }}>{t('存入知识库', 'Save to knowledge')}</button>}</article>)}</section>
+          <section className="managed-execution-artifacts"><h3>{t('已保存产物', 'Saved artifacts')}</h3>{currentRun.artifacts.length === 0 && <p>{t('暂无已保存文件。', 'No files have been saved yet.')}</p>}{currentRun.artifacts.map(artifact => { const opened = preview?.run === currentRun.id && preview.artifact === artifact.id; return <Fragment key={artifact.id}><article><FileText size={18} /><div><strong>{artifact.name}</strong><small>{artifact.size.toLocaleString()} B</small></div><button type="button" aria-expanded={opened} onClick={() => setPreview(opened ? null : { run: currentRun.id, artifact: artifact.id })}>{opened ? <EyeOff size={14} /> : <Eye size={14} />}{opened ? t('收起预览', 'Hide preview') : t('预览', 'Preview')}</button><a href={executionArtifactURL(tenantId, artifact.id)} download={artifact.name}><Download size={14} />{t('下载', 'Download')}</a>{!readOnly && <button type="button" disabled={busy || artifact.size > KNOWLEDGE_CONTENT_BYTES} title={t('保存服务器上的 UTF-8 文本原件，最多 256 KiB', 'Save the server-held UTF-8 text source, up to 256 KiB')} onClick={() => { setPendingImport(artifact); setImportTitle(artifact.name); }}>{t('存入知识库', 'Save to knowledge')}</button>}</article>{opened && <div className="managed-execution-preview"><StoredArtifactPreview reference={ARTIFACT_REF_PREFIX + artifact.id} title={artifact.name} identity={`${currentRun.id}:${artifact.id}`} renderMarkdown={renderInertMarkdown} /></div>}</Fragment>; })}</section>
         </>}
       </>}
       {pendingImport && !readOnly && <form className="managed-execution-import" onSubmit={event => { event.preventDefault(); importArtifact(); }}><h3>{t('保存原始产物', 'Save the original artifact')}</h3><p>{pendingImport.name} · {pendingImport.size.toLocaleString()} B</p><p>{t('将服务器保存的 UTF-8 文本原件入库，并保留任务与文件来源。', 'Import the server-held UTF-8 text and preserve its task and file provenance.')}</p><label>{t('资料标题', 'Source title')}<input maxLength={500} value={importTitle} required onChange={event => setImportTitle(event.target.value)} /></label><div className="managed-execution-actions"><button type="button" onClick={() => setPendingImport(null)}>{t('取消', 'Cancel')}</button><button type="submit" className="managed-primary" disabled={busy || !importTitle.trim()}>{t('确认保存原始产物', 'Save original artifact')}</button></div></form>}

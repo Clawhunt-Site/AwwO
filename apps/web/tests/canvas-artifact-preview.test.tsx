@@ -239,6 +239,16 @@ describe('isolated HTML rendition', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('closes only the expanded preview on a cancel request (Escape or a back gesture), not a dialog around it', () => {
+    const outerCancel = vi.fn();
+    render(<div onCancel={outerCancel}><ArtifactPreview source={html} type="html" title="作品" renderMarkdown={markdown} /></div>);
+    fireEvent.click(screen.getByRole('button', { name: '放大预览' }));
+    const dialog = screen.getByRole('dialog', { name: '作品' });
+    fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(outerCancel).not.toHaveBeenCalled();
+  });
+
   it('removes an expanded preview and its event listeners when its owner unmounts', () => {
     const { unmount } = render(<ArtifactPreview source={html} type="html" title="作品" renderMarkdown={markdown} />);
     fireEvent.click(screen.getByRole('button', { name: '放大预览' }));

@@ -147,7 +147,7 @@ export interface CanvasSurfaceProps {
   accountControl?: ReactNode;
   headerTitle?: ReactNode;
   headerActions?: ReactNode;
-  previewDesk?: ReactNode;
+  canvasTools?: ReactNode;
   /** A new external draft, never sent without the normal planning action. */
   taskDraft?: { id: string; prompt: string } | null;
   onOpenSettings?: () => void;
@@ -219,7 +219,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, previewDesk, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   const readOnlyRef = useRef(readOnly);
@@ -2055,7 +2055,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       onToggleAssistant={readOnly ? undefined : () => setAssistantOpen(value => !value)}
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
-      headerTitle={headerTitle} headerActions={headerActions} previewDesk={previewDesk}
+      headerTitle={headerTitle} headerActions={headerActions} canvasTools={canvasTools}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked || initializing}>{accountControl}</div>}
       toolbar={<>{!cloudScope && <GraphSettings doc={doc} selectedNodeId={selection[0]} selectedEdgeId={selectedEdgeId}
         disabled={readOnly || running || initializing || bindingLocked} onChange={next => { if (canEditStructure()) patchDoc(() => next, { label: 'graph-settings' }); }}

@@ -1,0 +1,28 @@
+/* 3D, PDF and source viewers shown inside deliverables. Colours follow the workspace tokens, so they
+   match the hosted theme and the desktop shell instead of carrying a palette of their own. */
+.awwo-preview-controls { display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-bottom: 1px solid var(--awwo-border, #e4e8e2); min-width: 0; font-size: 11px; }
+.awwo-preview-controls button, .awwo-preview-controls select { min-height: 28px; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 5px; padding: 4px 7px; font: inherit; font-size: 11px; color: inherit; background: var(--awwo-surface, #fff); }
+.awwo-preview-controls button:disabled { opacity: .45; cursor: default; }
+.awwo-model-preview { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.awwo-model-stage { flex: 1; min-height: 0; height: 260px; overflow: hidden; touch-action: none; }
+.awwo-model-stage canvas { display: block; max-width: 100%; }
+.awwo-preview-controls > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.awwo-preview-controls > label, .awwo-preview-controls > button:last-child { margin-left: auto; }
+.awwo-preview-overlay { position: absolute; left: 15px; right: 15px; top: 45%; padding: 14px; margin: 0; background: color-mix(in srgb, var(--awwo-surface, #fff) 94%, transparent); color: var(--awwo-muted, #68736d); border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 8px; font-size: 12px; text-align: center; }
+.awwo-pdf-preview { min-height: 180px; height: 100%; display: flex; flex-direction: column; }
+.awwo-pdf-page { flex: 1; min-height: 0; overflow: auto; background: var(--awwo-bg, #f7f8f6); padding: 12px; text-align: center; }
+.awwo-pdf-page canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; background: white; box-shadow: 0 2px 9px #0000001f; }
+.awwo-source-browser { display: flex; min-height: 180px; height: 100%; max-height: 620px; color: var(--awwo-ink, #232c29); }
+.awwo-source-tree { flex: 0 0 145px; max-width: 36%; overflow: auto; border-right: 1px solid var(--awwo-border, #e4e8e2); padding: 9px 0; background: var(--awwo-bg, #f7f8f6); }
+.awwo-source-tree > span { display: block; padding: 0 10px 9px; font-size: 10px; color: var(--awwo-muted, #68736d); }
+.awwo-source-tree button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 0; font-size: 10px; padding: 7px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: inherit; }
+.awwo-source-tree button[aria-current] { background: var(--awwo-accent-soft, #edf4ee); color: var(--awwo-accent, #286454); }
+.awwo-source-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.awwo-source-editor .awwo-preview-controls { flex-wrap: wrap; }
+.awwo-source-editor .awwo-preview-controls > span { max-width: 160px; font-family: monospace; font-size: 10px; }
+.awwo-source-editor input { flex: 1; width: 80px; min-width: 70px; border: 1px solid var(--awwo-border, #e4e8e2); padding: 5px; border-radius: 4px; background: var(--awwo-surface, #fff); color: inherit; font-size: 10px; }
+.awwo-source-lines { flex: 1; min-height: 0; overflow: auto; font: 11px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; padding: 8px 0; user-select: text; }
+.awwo-source-lines > div { display: flex; min-width: max-content; }
+.awwo-source-lines > div > span { flex: 0 0 37px; text-align: right; padding-right: 10px; color: var(--awwo-muted, #68736d); opacity: .75; user-select: none; box-sizing: border-box; }
+.awwo-source-lines code { white-space: pre; font: inherit; padding-right: 15px; }
+.awwo-source-lines [data-match] { background: color-mix(in srgb, #f2c94c 38%, transparent); color: inherit; }

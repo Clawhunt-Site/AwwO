@@ -1,5 +1,3 @@
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { ArtifactPreview, StoredArtifactPreview } from '../canvas/ArtifactPreview';
 import { normalizeContract, parseContractOutput } from '../canvas/nodeContracts';
 import { readableOutput, type ReadableOutput } from '../canvas/readableTranscript';
@@ -7,14 +5,7 @@ import type { GraphNodeResult, GraphRunSnapshot } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
 import { fileSafeDisplaySource } from '../canvas/fileDeliveryPresentation';
 import { PendingFileDelivery } from '../canvas/PendingFileDelivery';
-
-// Match the delivery reader: Markdown stays inert, image URLs never trigger a request,
-// and only an explicit link click can navigate to an external reference.
-const markdownComponents: Components = {
-  img: ({ alt }) => <span>{alt || '🖼'}</span>,
-  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-};
-const renderMarkdown = (source: string) => <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{source}</ReactMarkdown>;
+import { renderInertMarkdown as renderMarkdown } from './inertMarkdown';
 
 /** Plain prose is valid only under an explicit historical single-field text contract. */
 function plainHistoricalFields(source: string, historicalContract: unknown): ReadableOutput['fields'] {

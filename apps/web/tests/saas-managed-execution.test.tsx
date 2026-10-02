@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManagedExecutionPanel, type ManagedExecutionPanelProps } from '../src/saas/ManagedExecutionPanel';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { readExecutionRuntime } from '../src/saas/managedExecutionApi';
+import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
 const base = '/api/v1/tenants/tenant-a';
 const time = '2026-10-01T01:00:00Z';
@@ -19,7 +20,7 @@ const source = { id: 'source-a', kind: 'source', title: '汇总原件', content:
 const view = (props: Partial<ManagedExecutionPanelProps> = {}) => <SaaSPreferencesProvider><ManagedExecutionPanel tenantId="tenant-a" canvasId="canvas-a" {...props} /></SaaSPreferencesProvider>;
 const defaultResponse = (url: string) => url.endsWith('/computer-runtime') ? runtime : url.endsWith('/computer-runs') ? { items: [summary] } : detail;
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearSaaSCanvas(); });
 
 describe('managed execution assistant', () => {
   it('uses the existing engine entry when unavailable and never asks for a second connection', async () => {
@@ -62,8 +63,8 @@ describe('managed execution assistant', () => {
       if (url.endsWith('/knowledge/sources')) return json(source, 201);
       return json(stage === 0 ? detail : stage === 1 ? { ...detail, approvals: [approval] } : { ...detail, status: 'completed', canRespond: false, canCancel: false, approvals: [{ ...approval, status: 'allowed' }], output: '项目汇总已生成', artifacts: [artifact] });
     });
-    const onImported = vi.fn(); const onArtifactsChanged = vi.fn();
-    vi.stubGlobal('fetch', fetcher); render(view({ onImported, onArtifactsChanged, knowledgeReferences: [{ revisionId: 'frozen-revision', title: '需求原文' }] }));
+    const onImported = vi.fn();
+    vi.stubGlobal('fetch', fetcher); render(view({ onImported, knowledgeReferences: [{ revisionId: 'frozen-revision', title: '需求原文' }] }));
     await screen.findByText('工作区执行已就绪');
     expect(screen.getByText('引用 1 份知识版本')).toBeVisible();
     fireEvent.change(screen.getByLabelText('任务目标与角色要求'), { target: { value: '汇总项目文件并输出 Markdown' } });
@@ -80,7 +81,6 @@ describe('managed execution assistant', () => {
     expect(screen.getByText(/"command": "write report.md"/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '仅允许本次' }));
     await screen.findByText('项目汇总已生成');
-    expect(onArtifactsChanged).toHaveBeenCalled();
     expect(screen.getByRole('link', { name: '下载' })).toHaveAttribute('href', `${base}/artifacts/artifact-a`);
     const responses = fetcher.mock.calls.filter(([url]) => url.endsWith('/respond')).map(([, init]) => JSON.parse(String(init.body)));
     expect(responses[0]).toMatchObject({ requestId: 'question-a', behavior: 'allow', message: 'Markdown' });
@@ -108,6 +108,46 @@ describe('managed execution assistant', () => {
     fireEvent.click(screen.getByRole('button', { name: '拒绝本次请求' }));
     await screen.findByText('已拒绝');
     expect(JSON.parse(String(fetcher.mock.calls.find(([url]) => url.endsWith('/respond'))?.[1].body))).toMatchObject({ requestId: 'approval-b', behavior: 'deny' });
+  });
+
+  it('opens a saved file in place with the deliverable viewer and closes it again', async () => {
+    configureSaaSCanvas({ tenant: { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 }, canvasId: 'canvas-a' });
+    const page = { ...artifact, id: `a${'B'.repeat(32)}`, name: 'page.html', contentType: 'text/html' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith(`/artifacts/${page.id}`)
+      ? new Response('<html><body><h1>Saved page bytes</h1></body></html>', { headers: { 'Content-Disposition': 'attachment; filename="page.html"' } })
+      : json(url.endsWith('/run-a') ? { ...detail, status: 'completed', canRespond: false, canCancel: false, approvals: [], artifacts: [page] } : defaultResponse(url))));
+    render(view());
+    fireEvent.click(await screen.findByRole('button', { name: '预览' }));
+    expect(await screen.findByTitle('page.html · HTML 预览')).toHaveAttribute('srcdoc', expect.stringContaining('Saved page bytes'));
+    expect(screen.getByRole('button', { name: '收起预览' })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '收起预览' }));
+    expect(screen.queryByTitle('page.html · HTML 预览')).toBeNull();
+  });
+
+  it('reads a saved file only when asked and closes its preview when another task is shown', async () => {
+    configureSaaSCanvas({ tenant: { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 }, canvasId: 'canvas-a' });
+    const page = { ...artifact, id: `a${'C'.repeat(32)}`, name: 'page.html', contentType: 'text/html' };
+    const other = { ...summary, id: 'run-b', prompt: '另一个任务' };
+    const fetcher = vi.fn(async (url: string) => url.endsWith(`/artifacts/${page.id}`)
+      ? new Response('<html><body><h1>Saved page bytes</h1></body></html>', { headers: { 'Content-Disposition': 'attachment; filename="page.html"' } })
+      : json(url.endsWith('/computer-runs') ? { items: [summary, other] }
+        : url.endsWith('/run-a') ? { ...detail, status: 'completed', canRespond: false, canCancel: false, approvals: [], artifacts: [page] }
+        : url.endsWith('/run-b') ? { ...detail, ...other, status: 'completed', canRespond: false, canCancel: false, approvals: [], artifacts: [] }
+        : defaultResponse(url)));
+    const reads = () => fetcher.mock.calls.filter(([url]) => url.endsWith(`/artifacts/${page.id}`)).length;
+    vi.stubGlobal('fetch', fetcher); render(view());
+    const open = await screen.findByRole('button', { name: '预览' });
+    expect(reads()).toBe(0);
+    fireEvent.click(open);
+    await screen.findByTitle('page.html · HTML 预览');
+    expect(reads()).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: /另一个任务/ }));
+    await screen.findByText('暂无已保存文件。');
+    expect(screen.queryByTitle('page.html · HTML 预览')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /整理项目文件/ }));
+    expect(await screen.findByRole('button', { name: '预览' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTitle('page.html · HTML 预览')).toBeNull();
+    expect(reads()).toBe(1);
   });
 
   it.each([true, false])('blocks approval and stop for readOnly=%s when the viewer lacks control', async readOnly => {

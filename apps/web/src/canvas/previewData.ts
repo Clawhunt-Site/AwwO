@@ -2,7 +2,7 @@ import { Unzip, UnzipInflate } from 'fflate';
 import { artifactImageType } from './artifactImage';
 
 export type PreviewKind = 'html' | 'model' | 'pdf' | 'ide';
-export interface PreviewFile { name: string; bytes: Uint8Array; demo?: boolean }
+export interface PreviewFile { name: string; bytes: Uint8Array }
 export interface SourceFile { path: string; source: string }
 const MiB = 1024 * 1024;
 export const PREVIEW_LIMITS = { html: 2 * MiB, model: 20 * MiB, pdf: 20 * MiB, ide: 8 * MiB } as const;
@@ -24,22 +24,6 @@ export function previewText(bytes: Uint8Array): string {
   const source = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(source)) throw new Error('文件不是有效的 UTF-8 源码');
   return source;
-}
-
-export async function readPreviewBlob(file: Blob, signal: AbortSignal, limit: number): Promise<Uint8Array> {
-  if (file.size > limit) throw new Error(`文件超过 ${limit / MiB} MiB 预览上限`);
-  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-  // FileReader is abortable and is also available on older supported browsers.
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    const abort = () => reader.abort();
-    const cleanup = () => signal.removeEventListener('abort', abort);
-    reader.onload = () => { cleanup(); signal.aborted ? reject(new DOMException('Aborted', 'AbortError')) : resolve(new Uint8Array(reader.result as ArrayBuffer)); };
-    reader.onerror = () => { cleanup(); reject(reader.error ?? new Error('文件读取失败')); };
-    reader.onabort = () => { cleanup(); reject(new DOMException('Aborted', 'AbortError')); };
-    signal.addEventListener('abort', abort, { once: true });
-    reader.readAsArrayBuffer(file);
-  });
 }
 
 export function safeSourcePath(path: string): boolean {

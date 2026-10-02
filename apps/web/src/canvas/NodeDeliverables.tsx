@@ -9,7 +9,7 @@ import { activeNodeThread } from './nodeThreads';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
 import { ArtifactPreview, StoredArtifactPreview } from './ArtifactPreview';
-import { storedArtifactUrl } from '../saas/canvasBridge';
+import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
 import { appendDeliveryProfile, deliveryCapabilityNotice, deliveryProfiles, type DeliveryProfileId } from './deliveryProfiles';
 import { deliveryPresentation } from './fileDeliveryPresentation';
 import { PendingFileDelivery } from './PendingFileDelivery';
@@ -204,6 +204,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
       {contract.outputs.length ? <ul className="awwo-expected-deliverables" aria-label={t('deliverable.expected')}>
         {contract.outputs.map(field => <li key={field.id}><span>{field.label || field.id}</span><span>{t('deliverable.pending')}</span></li>)}
       </ul> : null}
+      {/* Stored files open in their own viewer only in a cloud workspace. */}
+      {currentSaaSCanvas() ? <p className="awwo-field-hint">{t('deliverable.previewTypes')}</p> : null}
     </> : <>
       {/* Where this came from and how complete it is, before the content itself. Caveats
           (history, partial, manual) are amber; plain provenance stays quiet. */}
