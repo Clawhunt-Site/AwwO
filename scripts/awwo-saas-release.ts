@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,43 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourcePaths = ['LICENSE', 'backend', 'apps/web', 'apps/pi-worker', 'apps/openai-agents-worker', 'apps/openmaus-worker', 'apps/user-models.ts', 'apps/computer-model.ts', 'third_party/openmaus-core', 'deploy/saas/workspace'];
 type DockerImage = { Id: string; Os: string; Architecture: string };
 type BuildOptions = { output: string; dockerContext: string; publicClawHuntURL: string };
+
+export function buildEnvironment(scratch: string): NodeJS.ProcessEnv {
+  const home = join(scratch, 'build-home'); mkdirSync(home, { recursive: true });
+  // npm refuses loading the same file for two configuration scopes, even /dev/null.
+  const userConfig = join(home, 'user.npmrc'), globalConfig = join(home, 'global.npmrc');
+  for (const file of [userConfig, globalConfig]) writeFileSync(file, '', { flag: 'wx', mode: 0o600 });
+  return { PATH: dirname(process.execPath) + ':' + (process.env.PATH || ''), HOME: home, TMPDIR: scratch, LANG: 'C.UTF-8', CI: '1',
+    npm_config_userconfig: userConfig, npm_config_globalconfig: globalConfig, npm_config_cache: join(home, '.npm'), GOFLAGS: '-modcacherw' };
+}
+
+export function removeBuildTree(directory: string): void {
+  // Go's module cache can contain 0555 directories. Only make directories within
+  // our own mkdtemp tree writable; never follow a dependency symlink outside it.
+  const writable = (path: string): void => {
+    const info = lstatSync(path);
+    if (!info.isDirectory() || info.isSymbolicLink()) return;
+    chmodSync(path, info.mode | 0o700);
+    for (const name of readdirSync(path)) writable(join(path, name));
+  };
+  if (!existsSync(directory)) return;
+  if (lstatSync(directory).isSymbolicLink()) throw new Error('Refusing to clean a symlink as a build root.');
+  writable(directory);
+  rmSync(directory, { recursive: true, force: true });
+}
+
+export function withBuildCleanup<T>(directory: string, build: () => T, cleanup = removeBuildTree, report: (message: string) => void = console.error): T {
+  let failed = false;
+  try { return build(); }
+  catch (error) { failed = true; throw error; }
+  finally {
+    try { cleanup(directory); }
+    catch (error) {
+      if (!failed) throw error;
+      report(`Build cleanup failed; the original build error is preserved. Remove this private temporary directory after inspection: ${directory}`);
+    }
+  }
+}
 
 function fileHash(file: string): string {
   const hash = createHash('sha256'), fd = openSync(file, 'r'), buffer = Buffer.alloc(1024 * 1024);
@@ -87,14 +124,13 @@ export function buildRelease(options: BuildOptions): string {
   const source = join(scratch, 'source'), release = join(scratch, 'release'), home = join(scratch, 'build-home');
   const archiveName = `awwo-saas-${revision}-linux-amd64.tar.gz`, archive = join(options.output, archiveName);
   if (existsSync(archive) || existsSync(archive + '.sha256')) { rmSync(scratch, { recursive: true }); throw new Error('Release output exists; choose a new output directory.'); }
-  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: home, TMPDIR: scratch, LANG: 'C.UTF-8', CI: '1',
-    npm_config_userconfig: '/dev/null', npm_config_globalconfig: '/dev/null', npm_config_cache: join(home, '.npm') };
+  return withBuildCleanup(scratch, () => {
+  const env = buildEnvironment(scratch);
   const run = (command: string, args: string[], cwd = source, extra: NodeJS.ProcessEnv = {}): void => {
     execFileSync(command, args, { cwd, env: { ...env, ...extra }, stdio: 'inherit', timeout: 1_800_000 });
   };
   const docker = (args: string[], capture = false): string => execFileSync('docker', ['--context', options.dockerContext, ...args],
     { cwd: source, env: { PATH: process.env.PATH, HOME: process.env.HOME }, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit', timeout: 1_800_000 })?.trim() || '';
-  try {
     for (const directory of [source, release, home]) mkdirSync(directory, { recursive: true });
     git(['archive', '--format=tar', `--output=${join(scratch, 'source.tar')}`, revision, '--', ...sourcePaths]);
     run('tar', ['-xf', join(scratch, 'source.tar'), '-C', source]);
@@ -139,6 +175,6 @@ export function buildRelease(options: BuildOptions): string {
     cpSync(join(release, 'release.json'), join(options.output, `release-${revision}.json`), { errorOnExist: true, force: false });
     console.log(`Native release prepared: ${archive}`);
     return archive;
-  } finally { rmSync(scratch, { recursive: true, force: true }); }
+  });
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) buildRelease(parseOptions(process.argv.slice(2)));
