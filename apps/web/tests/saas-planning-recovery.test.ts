@@ -163,7 +163,8 @@ describe('accepted planner run recovery', () => {
 
   it('retains the admission operation if saving its returned run id fails', async () => {
     const set = localStorage.setItem.bind(localStorage);
-    vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => { if (value.includes('"runId"')) throw new DOMException('Full', 'QuotaExceededError'); set(key, value); });
+    let writes = 0;
+    vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => { if (++writes === 2) throw new DOMException('Full', 'QuotaExceededError'); set(key, value); });
     const fetch = vi.fn(async (url: string) => url.endsWith('/plan') ? json(run, 202) : json({ items: [{ ...run, status: 'completed', output: JSON.stringify(proposal) }] }));
     vi.stubGlobal('fetch', fetch);
     await expect(request()).rejects.toMatchObject({ code: 'planning_recovery_storage' });
