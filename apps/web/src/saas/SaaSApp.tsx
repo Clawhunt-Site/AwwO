@@ -92,7 +92,13 @@ function AuthenticatedApp() {
     const controller = new AbortController();
     const current = () => live && generation === sessionRequestGeneration.current;
     api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) { if (!deferInviteRestore.current) restorePendingInvite(); trackSignedInSession(true); setIdentity(value); } })
-      .catch(error => { if (current() && !(error instanceof SaaSApiError && error.status === 401)) setFailure(message(error)); })
+      .catch(error => {
+        if (!current()) return;
+        if (!(error instanceof SaaSApiError && error.status === 401)) { setFailure(message(error)); return; }
+        // Every sign-out path ends on a signed-out landing. A plain one forgets the stored
+        // invitation, so the next person to sign in in this tab is not offered it.
+        if (!deferInviteRestore.current && !new URLSearchParams(window.location.search).has('invite')) forgetPendingInvite();
+      })
       .finally(() => { if (current()) setLoading(false); });
     return () => { live = false; controller.abort(); };
   }, []);

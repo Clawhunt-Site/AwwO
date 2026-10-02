@@ -1,4 +1,6 @@
-import { isInviteToken } from './clawhuntAuth';
+/** A workspace invitation token as the API accepts it: `identityInvitePattern` in
+ * backend/internal/app/clawhunt_identity.go, and the same check in clawhuntAuth.ts. */
+const isInviteToken = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{32,256}$/.test(value);
 
 /** A workspace invitation opened while signed out, carried across a sign-in that leaves AwwO.
  * An account without AwwO access is sent to ClawHunt to redeem an invite code, and the way back is

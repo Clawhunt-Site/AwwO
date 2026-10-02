@@ -5,7 +5,6 @@ import "./personal-account.css";
 import { GuideLauncher, MainSiteLink } from "./SaaSOnboarding";
 import { SecretInput } from "./SecretInput";
 import { clawHuntAccountURL, type AuthOptions } from './clawhuntAuth';
-import { forgetPendingInvite } from './pendingInvite';
 
 type Provider = { id: string; name: string; runtimes: string[] };
 type Connection = {
@@ -217,7 +216,6 @@ export function ConnectionSettings({
         <a href={accountURL("security")}>{t("账号安全", "Account security")}</a>
         <button
           onClick={async () => {
-            forgetPendingInvite();
             try { await api("/auth/logout", { method: "POST" }); location.reload(); }
             catch (cause) { setError(cause); }
           }}
@@ -540,8 +538,6 @@ export function AccountSecurity({ personalCredentialsRequired = true, identity }
                   newPassword: data.newPassword,
                 }),
               });
-              // Changing the password ends every session, this one included.
-              forgetPendingInvite();
               location.assign("/");
             } catch (cause) {
               setError(cause);
@@ -613,7 +609,7 @@ export function AccountSecurity({ personalCredentialsRequired = true, identity }
                   setBusy(true);
                   try {
                     await api("/auth/sessions/" + s.id, { method: "DELETE" });
-                    if (s.current) { forgetPendingInvite(); location.assign("/"); }
+                    if (s.current) location.assign("/");
                     else await refresh();
                   } catch (cause) {
                     setError(cause);

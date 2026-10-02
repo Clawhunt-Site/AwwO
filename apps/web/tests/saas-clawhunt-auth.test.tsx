@@ -262,6 +262,26 @@ it('keeps a stored invitation through a password-reset screen opened with a live
   expect(sessionStorage.getItem(PENDING_INVITE_KEY)).not.toBeNull();
 });
 
+it('forgets a stored invitation on a plain signed-out landing, where every sign-out path ends', async () => {
+  sessionStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ v: 1, token: invite, savedAt: Date.now() }));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? unauthorized() : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' })));
+  render(<SaaSApp />);
+  expect(await screen.findByRole('link', { name: '使用 ClawHunt 账号继续' })).toHaveAttribute('href', '/api/v1/auth/clawhunt/start');
+  expect(sessionStorage.getItem(PENDING_INVITE_KEY)).toBeNull();
+});
+
+it('keeps a stored invitation through a failed sign-in that lands signed out', async () => {
+  sessionStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ v: 1, token: invite, savedAt: Date.now() }));
+  history.replaceState(null, '', '/?sso=error&reason=expired');
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? unauthorized() : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' })));
+  render(<SaaSApp />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('登录请求已过期');
+  await waitFor(() => expect(location.search).toBe(''));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  // Retrying the sign-in from here must still find the invitation.
+  expect(sessionStorage.getItem(PENDING_INVITE_KEY)).not.toBeNull();
+});
+
 it('leaves a stored invitation alone on a chosen address and forgets it at sign-out', async () => {
   sessionStorage.setItem(PENDING_INVITE_KEY, JSON.stringify({ v: 1, token: invite, savedAt: Date.now() }));
   history.replaceState(null, '', '/?tenant=team-a');
