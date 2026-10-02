@@ -1,6 +1,6 @@
 # AwwO for Mac
 
-Source candidate **0.9.1, build 8** is the Apple Silicon desktop client for the hosted
+Source candidate **0.9.1, build 9** is the Apple Silicon desktop client for the hosted
 AwwO service. It requires macOS 14 or later and an internet connection. The
 Swift/AppKit/WebKit shell uses the hosted account, workspaces and history;
 the website and server deploy separately. No local database, Node runtime,
@@ -9,10 +9,12 @@ worker, model runtime or provider API key is bundled.
 Published downloads and their verification status are listed on the
 [latest release](https://github.com/Clawhunt-Site/AwwO/releases/latest).
 The source candidate version above does not mean its installer has been published.
-This candidate keeps the main site's exact `/awwo` invite-code redemption page
-inside the client. The previously published **0.9.0, build 7** lacks that native
-rule; it requires the separately built and verified build 8 update. A Git push or
-hosted website deployment does not update installed native navigation rules.
+Build 9 clarifies HTTP 403 access-denied messages and displays a validated,
+bounded Cloudflare request number when present. This improves support diagnostics;
+it does not resolve an SSO block or change access controls. It retains build 8's
+support for the main site's exact `/awwo` invite-code redemption page inside the
+client; **0.9.0, build 7** lacks that native rule. A Git push or hosted website
+deployment does not update the installed native client.
 
 The bundle identifier remains `store.clawhunt.awwo.local` and the app remains
 `AwwO Local.app` with the display name **AwwO**. Existing WebKit session data
@@ -58,7 +60,8 @@ APP_ENV=production VITE_APP_ENV=production \
 
 The script reads `latest.json`, requires its revision and app metadata to match
 `HEAD`, rejects builds with modified inputs, and runs `verify-bundle.ts`.
-It refuses to overwrite `.local/releases/macos-0.9.1-build8-<sha7>/`.
+It creates `.local/releases/macos-0.9.1-build9-<sha7>/` and refuses to overwrite
+an existing release directory. Earlier build 8 artifacts remain separate.
 The output contains stable release names for the DMG, ZIP, `INSTALL.txt`,
 `SHA256SUMS`, a Fold brand kit ZIP (MIT license, SVG/PNG, vector source and
 ICNS), and `release.json` with verification evidence. The DMG includes the app,

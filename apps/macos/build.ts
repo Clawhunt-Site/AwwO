@@ -12,7 +12,7 @@ const root = path.resolve(source, '../..');
 const local = path.join(root, '.local/macos-production');
 const configuration = readProductionConfiguration(process.env);
 const version = '0.9.1';
-const build = '8';
+const build = '9';
 const brand = path.join(root, 'assets/brand/awwo-fold');
 
 async function run(command: string, args: string[]): Promise<string> {

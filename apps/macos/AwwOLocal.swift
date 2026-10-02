@@ -233,6 +233,28 @@ private enum NavigationPolicy {
     }
 }
 
+private enum NavigationHTTPFailure {
+    // A Ray is diagnostic context, not proof that Cloudflare caused the denial.
+    // Never reflect arbitrary response text, cookies, or authorization URLs.
+    private static func cloudflareRayID(_ response: HTTPURLResponse) -> String? {
+        guard let raw = response.value(forHTTPHeaderField: "cf-ray"),
+            raw.utf8.count == 16 || raw.utf8.count == 20 else { return nil }
+        let bytes = Array(raw.utf8)
+        guard bytes.prefix(16).allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }),
+            bytes.count == 16 || (bytes[16] == 45 && bytes.suffix(3).allSatisfy({ (65...90).contains($0) })) else { return nil }
+        return String(raw.prefix(20))
+    }
+
+    static func detail(_ response: HTTPURLResponse, cloud: Bool) -> String {
+        if response.statusCode == 403 {
+            let denied = "服务器拒绝了此请求（HTTP 403）。请联系支持人员核查账号权限与访问规则。"
+            guard cloud, let ray = cloudflareRayID(response) else { return denied }
+            return denied + "\nCloudflare 请求编号：\(ray)"
+        }
+        return "服务器返回 HTTP \(response.statusCode)。请重新载入；线上访问需完成 Cloudflare Access 和 AwwO 账号登录。"
+    }
+}
+
 // The deadline belongs to one provisional main-document navigation. didFinish
 // also waits for subresources, so it must not be the document-readiness signal.
 private final class NavigationLoadMonitor {
@@ -791,7 +813,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         guard isAllowedNavigation(navigationResponse.response.url) else { decisionHandler(.cancel); return }
         if navigationResponse.isForMainFrame, let response = navigationResponse.response as? HTTPURLResponse, response.statusCode >= 400 {
             fail(mode == .cloud ? "线上页面暂时无法访问" : "本机页面暂时无法访问",
-                detail: "服务器返回 HTTP \(response.statusCode)。请重新载入；线上访问需完成 Cloudflare Access 和 AwwO 账号登录。")
+                detail: NavigationHTTPFailure.detail(response, cloud: mode == .cloud))
             decisionHandler(.cancel)
             return
         }
@@ -1361,6 +1383,41 @@ private func testNavigationPolicy() throws {
     try check(NavigationPolicy.frameMatches(protocol: "http", host: "localhost", port: 5189, origin: local), false, "local host alias not silently trusted")
     try check(NavigationPolicy.frameMatches(protocol: "http", host: "127.0.0.1", port: 5189, origin: cloud), false, "local frame cannot enter cloud authority")
     print("Navigation policy: \(checks) checks passed")
+    try testNavigationHTTPFailures()
+}
+
+private func testNavigationHTTPFailures() throws {
+    var checks = 0
+    func check(_ value: Bool, _ name: String) throws {
+        guard value else { throw LaunchError("HTTP diagnostic self-test failed: \(name)") }
+        checks += 1
+    }
+    func response(_ status: Int, _ headers: [String: String] = [:]) -> HTTPURLResponse {
+        HTTPURLResponse(url: URL(string: "https://clawhunt.store/api/awwo/sso/authorize?state=private-test-state")!,
+            statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+    }
+    let ray = "0123456789abcdef-HKG"
+    let known = NavigationHTTPFailure.detail(response(403, ["CF-Ray": ray,
+        "Set-Cookie": "private-test-cookie", "Location": "https://example.test/?token=private-test-token"]), cloud: true)
+    try check(known.contains("HTTP 403") && known.contains("Cloudflare 请求编号：\(ray)"), "safe response Ray is visible")
+    try check(!known.contains("需完成") && !known.contains("等待批准"), "403 does not claim missing login or approval")
+    try check(!known.contains("private-test") && !known.contains("https://"), "no other headers or URL are disclosed")
+    let plain = NavigationHTTPFailure.detail(response(403), cloud: true)
+    try check(plain.contains("拒绝") && !plain.contains("Cloudflare") && !plain.contains("登录"), "plain access denial remains distinct")
+    for value in ["0123456789abcdef", ray, "0123456789ABCDEF-LAX"] {
+        try check(NavigationHTTPFailure.detail(response(403, ["cf-ray": value]), cloud: true).contains(value), "valid Ray format")
+    }
+    for value in ["", "abc", "0123456789abcde", "0123456789abcdef0", "g123456789abcdef", ray + "-extra",
+        ray + "\n", ray + "\r\nSet-Cookie: private", ray + "\u{202E}", ray + ", " + ray,
+        "\(ray) private-test-token", String(repeating: "a", count: 10_000), "0123456789abcdef-香港", "0123456789abcdef-HK"] {
+        let detail = NavigationHTTPFailure.detail(response(403, ["cf-ray": value]), cloud: true)
+        try check(detail == plain, "invalid or oversized Ray is not reflected")
+    }
+    try check(NavigationHTTPFailure.detail(response(403, ["X-Request-ID": ray]), cloud: true) == plain, "only cf-ray is considered")
+    try check(NavigationHTTPFailure.detail(response(403, ["CF-Ray": ray]), cloud: false) == plain, "local responses do not claim Cloudflare context")
+    let other = NavigationHTTPFailure.detail(response(401, ["CF-Ray": ray]), cloud: true)
+    try check(other.contains("HTTP 401") && !other.contains(ray), "non-403 behavior is unchanged")
+    print("HTTP diagnostics: \(checks) checks passed (synthetic headers only)")
 }
 
 // Isolated WebKit fixture: no application delegate, windows, network, persistent
