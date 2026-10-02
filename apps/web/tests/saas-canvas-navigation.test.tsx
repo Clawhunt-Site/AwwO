@@ -74,7 +74,7 @@ it('keeps the old canvas editable and execution closed when the runtime-status r
   expect(screen.getByRole('button', { name: '打开 Navigation fixture' })).toBeVisible();
   expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
   expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
-  expect(screen.getByRole('button', { name: /运行图/ })).toHaveAttribute('title', '暂时无法确认执行引擎状态。画布仍可编辑，请稍后刷新后再运行。');
+  expect(screen.getByRole('button', { name: /运行图/ })).toHaveAttribute('title', '暂时无法确认执行引擎状态，请重新检查。');
   act(() => saveDocument({ ...cloudDocument, updatedAt: 2 }));
   await waitFor(() => expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith('/canvases/canvas-a') && init?.method === 'PUT')).toBe(true));
   expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith('/initialize') && init?.method === 'POST')).toBe(false);

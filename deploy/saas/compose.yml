@@ -157,6 +157,8 @@ services:
     build:
       context: ../..
       dockerfile: deploy/saas/api.Dockerfile
+      args:
+        AWWO_REVISION: ${AWWO_REVISION:-unknown}
     environment:
       <<: *backend-telemetry
       APP_ENV: ${APP_ENV:-production}

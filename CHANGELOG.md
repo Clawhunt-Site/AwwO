@@ -8,10 +8,18 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Added
 
+- Redraw generated training charts when an embedded result becomes visible or changes width, preserving trained weights and experiment state across canvas/result tab switches.
+- Show official workflows and interactive results side by side, with dependency-stage tours, node handoffs, persistent result state, reset/focus controls and embedded-width layouts. Curated model outputs include sanitized run snapshots, explicit incomplete steps, checksum provenance and isolated interactive previews.
+- Let users copy an official workflow as an unconfigured draft or apply one available workspace model to all its session nodes, with a fresh availability check before creation. Add a permission-scoped graph evidence download containing run records, summaries and invocation pages with explicit completeness limits. Copying does not start model execution.
+- Expand the official collection into twelve industry systems plus six starter studies: connected simulation and operations models for games, buildings, media, hospitality, research, machine learning, education, delivery review, logistics, retail, manufacturing and energy. Add industry/capability discovery and explorable 12–13-node review/repair workflows with clean reusable canvas contracts.
+- Refresh a personal model connection using its encrypted saved credential, preserving the connection ID and existing canvas selections; failed discovery leaves the saved catalog intact.
+- Six official, interactive examples on the AwwO home and public gallery: a pricing configurator, playable path game, projected 3D product, editable knowledge retrieval, real in-browser logistic-regression training, and budget approvals. Each includes a bilingual dependency canvas, node instructions and acceptance criteria, downloadable canvas JSON, and a permission-aware copy action that creates an unexecuted draft. Curated selections survive unified sign-in without changing OAuth redirect rules.
 - Optional API settings for new workspaces: `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` and `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY` set the model list and daily quota of every workspace created afterwards, and `AWWO_MAX_OWNED_WORKSPACES` makes `POST /tenants` answer `403 workspace_limit` to an account that is not a platform admin and already owns at least that many. Unset keeps the previous behaviour; existing workspaces are not changed.
 
 ### Changed
 
+- Keep the home page focused on starting work: offer editable prompt starters next to the composer and three interactive examples before expanding the complete library. Keep model search visible and model rows compact, preserving every runtime and capability label.
+- Support bounded catalogs of up to 256 models per runtime or personal connection, rejecting overflow instead of silently hiding models. Existing workspace model permissions remain unchanged.
 - Keep workspace navigation focused on the active workspace and account; move language, theme, guidance and maintenance actions into an accessible overflow menu.
 - Show one short automatic introduction per account and device, with detailed guidance available on demand. Preserve the model library on the left and Bot list on the right.
 - Put provider and API key first during engine setup, group runtime/name options under advanced settings, and offer a direct return after verified model availability.
@@ -19,6 +27,13 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Recover local draft writes from storage pressure by reclaiming only the current canvas's optional sync-proof cache. Acknowledge confirmed saves before replacing that cache, surface failed working-cache writes, and export the latest in-memory edits without removing other drafts or run history.
+- Retry an unavailable execution-engine status without reloading the canvas, losing input, or starting work automatically.
+- Show failed-node reasons in the execution timeline and open the relevant node directly. Completed runs link to their actual terminal deliveries, with a choice when several outputs are available.
+- Announce the latest planning failure once, clarify quota recovery, and translate expired account sessions while preserving retry behavior.
+- Preserve canvas-list search and expansion for each account and workspace when returning from a canvas; expose pagination during a search and clearly identify its current-page scope.
+- Preserve confirmed model-run admission errors, including exhausted workspace quotas, without misreporting them as interrupted pages; uncertain or already accepted runs still recover by their original operation ID.
+- Keep workspace dialogs scrollable within the viewport when long model catalogs or member lists exceed the screen height.
 - Keep menu and run-history keyboard focus inside the open layer, prevent canvas shortcuts from acting behind it, and restore trigger focus on Escape.
 
 

@@ -85,6 +85,9 @@ it('lets a reader inspect active collaboration but never offers Stop or sends a 
   vi.stubGlobal('fetch', fetcher); renderPanel(true); openPanel();
   await screen.findByText('Review: verify the cost estimate');
   expect(screen.queryByRole('button', { name: 'Stop entire task' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Export this graph’s evidence' })).toBeEnabled();
+  expect(screen.getByText('graph-a')).toBeVisible();
+  expect(screen.getByText('run-a', { selector: 'code' })).toBeVisible();
   expect(screen.getByText('Research consensus from the server')).toBeVisible();
   expect(fetcher.mock.calls.every(([, init]) => !init.method)).toBe(true);
 });
@@ -198,14 +201,15 @@ it('wraps run-history Tab focus through the controls in both directions', async 
   const panel = screen.getByRole('dialog');
   const first = within(panel).getByRole('button', { name: 'Close run history' });
   const selector = await within(panel).findByRole('combobox', { name: 'Select run' });
+  const exportButton = within(panel).getByRole('button', { name: 'Export this graph’s evidence' });
   const nodeA = within(panel).getByRole('button', { name: 'Research team · Completed' });
   const last = within(panel).getByRole('button', { name: 'Delivery team · Completed' });
   expect(panel).toHaveFocus();
-  for (const expected of [first, selector, nodeA, last, first]) {
+  for (const expected of [first, selector, exportButton, nodeA, last, first]) {
     fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
     expect(expected).toHaveFocus();
   }
-  for (const expected of [last, nodeA, selector, first, last]) {
+  for (const expected of [last, nodeA, exportButton, selector, first, last]) {
     fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
     expect(expected).toHaveFocus();
   }

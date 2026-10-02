@@ -16,7 +16,11 @@ export function createSaaSAccountApi(onProfile: (name: string) => void): Account
   // must not search a truncated first page or enumerate the tenant directory.
   const displayedMembers = new Map<string, Member[]>();
   const memberRequests = new Map<string, number>();
-  const identity = () => identityRequest ||= api<Identity>('/auth/me').catch(error => { identityRequest = undefined; throw error; });
+  const identity = () => identityRequest ||= api<Identity>('/auth/me').catch(error => {
+    identityRequest = undefined;
+    if (error instanceof SaaSApiError) throw new AccountApiError(error.status, saasErrorMessage(error, readInitialLocale()));
+    throw error;
+  });
   const request = async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
     try { return await api<T>(path, init); }
     catch (error) { if (error instanceof SaaSApiError) throw new AccountApiError(error.status, saasErrorMessage(error, readInitialLocale())); throw error; }

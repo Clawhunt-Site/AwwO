@@ -15,7 +15,7 @@
 ## 1. 固定发布代码和验收门
 
 1. 在 detached worktree 中整合最新 GitHub `main` 与知识工作台、内置执行助手提交。保留其他已发布功能，不使用强制推送。整合后的 SHA 才是发布版本。
-2. 运行对应前端、后端、两个模型 worker、共享模型代理和 OpenMaus 检查。已有 SaaS CI 尚未包含新增 OpenMaus 服务，需要增加独立的 Linux amd64 发布检查；旧 CI 绿灯不能代替它。
+2. 运行对应前端、后端、两个模型 worker、共享模型代理和 OpenMaus 检查。SaaS CI 已拆分后端、模型 worker、网页、既有容器和独立 Linux amd64 OpenMaus 检查，全部通过后才构建完整原生发布包；旧版本 CI 绿灯不能代替本次发布检查。
 3. 在隔离验收环境验证真实模型连接：执行、审批、拒绝、取消、四格式产物回传、知识归档和重启读回。固定模型 fixture 证明协议和执行链路，不能替代真实提供商的能力验收。
 4. 前次验收中的全后端超时、旧 worker deadline 失败仍需在最终整合版本上解决或明确记录发布判断，不得作为通过项。
 
@@ -63,7 +63,9 @@ mkdir -p .local/managed-release
 npm run build:saas --prefix apps/web
 ```
 
-若采用 Compose，应先修复 API Dockerfile 的 revision 编译注入；目前 `AWWO_REVISION` 环境变量用于遥测，不能让健康接口自动报告正确版本。
+API Dockerfile 已支持 `AWWO_REVISION` build arg，Compose 会传入该值。构建时必须提供完整发布 SHA；只在运行时设置同名环境变量不会改变编译进健康接口的 revision。
+
+Linux CI 调用 `node scripts/awwo-saas-release.ts --output .local/saas-release --docker-context default` 生成 `awwo-saas-<完整SHA>-linux-amd64` artifact。校验归档 `.sha256` 后解压，再在 release 根执行 `sha256sum --quiet -c SHA256SUMS`。加载 `images/workspace.tar`，读回镜像 ID 并与 `WORKSPACE_IMAGE_ID` 完全匹配后，才提供给 broker。打包器从提交导出干净源代码，在 Linux 安装锁定依赖，不带开发机 node_modules、.env 或运行数据。
 
 ## 3. 准备内部运行环境
 

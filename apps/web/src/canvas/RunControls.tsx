@@ -43,6 +43,8 @@ export interface RunControlsProps {
   runUnavailableReason?: string;
   /** Open a node's configuration from the preflight details. */
   onConfigureNode?: (nodeId: string) => void;
+  /** Open an actual completed delivery; never starts or retries a run. */
+  onViewOutput?: (nodeId: string) => void;
   /** Called after local preflight, or directly when initializeOnRun is enabled. */
   onStart: () => void;
   onStop: () => void;
@@ -92,6 +94,7 @@ export function RunControls({
   initializeOnRun = false,
   runUnavailableReason,
   onConfigureNode,
+  onViewOutput,
   onStart,
   onStop,
   onToggleTimeline,
@@ -146,6 +149,16 @@ export function RunControls({
   const hasRuns = Object.keys(runs).length > 0;
   const liveTotal = hasRuns ? Object.values(runs).filter(s => s.state !== 'cached').length : nodes.length;
   const runTotal = running ? liveTotal : summary?.total ?? liveTotal;
+  // Offer only this run's completed terminal outputs. A draft, partial response, cached
+  // upstream, or a previous session's publication must never appear as a new delivery.
+  // A review partner judges the producer's delivery; its verdict is not the delivery.
+  const reviewerId = execution?.mode === 'review' ? execution.reviewerNodeId : undefined;
+  const deliveries = !running && !stopped && summary?.ok && onViewOutput
+    ? nodes.filter(node => node.kind === 'session' && node.id !== reviewerId && runs[node.id]?.state === 'done' && !runs[node.id].unconfirmed
+      && Boolean(runs[node.id].output?.trim()) && node.lastOutput?.source === 'run' && !node.lastOutput.partial
+      && node.lastOutput.text === runs[node.id].output
+      && !edges.some(edge => edge.kind !== 'feedback' && edge.fromNode === node.id && edge.toNode !== reviewerId && Object.hasOwn(runs, edge.toNode)))
+    : [];
 
   return (
     <div
@@ -201,6 +214,12 @@ export function RunControls({
       ) : summary && summaryKey !== dismissedSummary ? (
         <div className="canvas-run-note" role="status"><div className="canvas-run-note-head">
           <span>{summaryNote(summary, stopped, locale)}</span>
+          {deliveries.length === 1 && <button type="button" className="canvas-run-note-action"
+            onClick={() => onViewOutput?.(deliveries[0].id)}>{t('run.viewOutput')}</button>}
+          {deliveries.length > 1 && <details className="canvas-run-deliveries"><summary>{t('run.viewOutputs', { count: deliveries.length })}</summary>
+            <ul>{deliveries.map(node => <li key={node.id}><button type="button" className="canvas-run-note-action"
+              aria-label={t('run.viewNodeOutput', { title: node.title })} onClick={() => onViewOutput?.(node.id)}>{node.title}</button></li>)}</ul>
+          </details>}
           <button type="button" className="canvas-run-note-dismiss" aria-label={t('run.dismissNotice')}
             onClick={() => setDismissedSummary(summaryKey)}>×</button>
         </div></div>

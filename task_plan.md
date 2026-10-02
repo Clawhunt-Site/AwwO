@@ -61,3 +61,20 @@ The user requested native OpenMaus integration and completion of the remaining w
 - Stopped the deterministic model fixture and restored normal user credential mode. This isolated account has no personal model connection; My engines is the sole configuration entry. Real paid-provider planning quality remains untested.
 
 - After restoring user credential mode and restarting, browser readback retained the completed execution, four task artifacts, and imported HTML knowledge source v1; the sole missing-model action is My engines.
+
+
+## 2026-10-02 authorized production release
+
+The user explicitly requested completion, push and production deployment. The deployment target and live SHA are re-read before cutover; the Bytebase database-operation rule still applies unless the user authorizes a specific exception.
+
+- [x] Re-query GitHub/Forgejo main and actual production API/web/worker paths.
+- [x] Integrate current public main without losing canvas previews, knowledge or managed execution.
+- [ ] Complete merged frontend/backend/worker regressions and Linux amd64 runtime checks.
+- [ ] Build a complete immutable Linux release, push public main and preserve private-only history on Forgejo.
+- [ ] Prepare Docker broker account, workspace image, internal configuration and recoverable backup.
+- [ ] Resolve the production migration execution gate, cut over all relevant services with rollback.
+- [ ] Verify final SHA, authenticated public endpoint, runtime readiness and real browser preview evidence.
+
+Fresh inventory: production API and Web are d278b7628c5d; the Pi/OpenAI workers still use the older saas-03b72b2e9190 sources. Target is awwo-acceptance i-0eda5599cbd603c8b in us-east-2; its historical staging directory name does not imply staging. No Bytebase connector was found in tools or installed-plugin discovery.
+
+Merged release checks: 100 frontend test files / 1380 cases passed, generic and SaaS TypeScript passed. Pi 53 passed; OpenAI Agents 177 passed / 9 explicitly skipped. The host configuration and existing vault key have private on-host backups; the EBS baseline snapshot was requested but DescribeSnapshots is not permitted, so it is not a verified recovery point and cannot replace the pending consistent backup/recovery check.

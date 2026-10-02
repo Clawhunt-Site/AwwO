@@ -62,6 +62,8 @@
 .saas-runtime-note.saas-personal-notice a:hover, .saas-runtime-note.saas-personal-notice button:hover { background: color-mix(in srgb, var(--saas-warning) 12%, transparent); }
 .saas-runtime-note:not(.saas-personal-notice) { border-radius: var(--saas-radius); border: 1px solid color-mix(in srgb, var(--saas-warning) 22%, transparent); font-size: 13px; line-height: 1.55; }
 .saas-canvas-shell > .saas-runtime-note { border-radius: 0; border-width: 0 0 1px; justify-content: center; }
+.saas-canvas-shell > .saas-runtime-note { flex-wrap: wrap; }
+.saas-canvas-shell > .saas-runtime-note > button { flex-shrink: 0; min-height: 36px; }
 
 /* ── Dashboard intro + library toolbar ────────────────────────────── */
 .saas-page-intro { margin: 48px 0 28px; }
@@ -351,3 +353,98 @@ a.saas-buy-link:hover { filter: brightness(1.08); }
   .saas-case-chips::-webkit-scrollbar { display: none; }
   .saas-case-grid { grid-template-columns: 1fr; gap: 12px; }
 }
+
+/* ── Node conversation: one quiet line while working, bubbles that read like a chat ── */
+@keyframes awwo-msg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes awwo-dot-hold { 0%, 100% { opacity: .25; } 30% { opacity: 1; } 60% { opacity: .25; } }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-scroll { gap: 10px; padding: 14px 14px 10px; }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-turn { max-width: 88%; padding: 9px 13px; border-radius: 16px; font-size: 13px; line-height: 1.6; animation: awwo-msg-in .18s var(--saas-ease); }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-turn--user { border-bottom-right-radius: 6px; background: color-mix(in srgb, var(--saas-accent) 12%, var(--saas-card)); color: var(--saas-text); }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-turn--agent { border: 1px solid var(--saas-hairline); border-bottom-left-radius: 6px; background: var(--saas-card); }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-turn--system { padding: 2px 0; color: var(--saas-muted); font-size: 11.5px; animation: none; }
+/* The empty reply is the presence row: no bubble chrome around "working". */
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-turn.is-pending { padding: 4px 2px; border-color: transparent; background: transparent; animation: none; }
+.awwo-workspace .canvas-root .canvas-transcript-presence { display: flex; align-items: center; gap: 8px; min-height: 22px; color: var(--saas-muted); font-size: 12.5px; }
+.awwo-workspace .canvas-root .canvas-transcript-presence-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.awwo-working-dots { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; color: var(--saas-accent, currentColor); }
+.awwo-working-dots i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: awwo-dot-hold 1.6s steps(2, jump-none) infinite; }
+.awwo-working-dots i:nth-child(2) { animation-delay: .2s; }
+.awwo-working-dots i:nth-child(3) { animation-delay: .4s; }
+.awwo-working-timer { flex-shrink: 0; color: color-mix(in srgb, var(--saas-muted) 82%, transparent); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-status { padding: 6px 14px; border-top: 0; color: var(--saas-muted); font-size: 11.5px; }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-empty,
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-loading { padding: 18px 4px; color: var(--saas-muted); font-size: 12px; text-align: center; }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-details > summary { color: var(--saas-muted); font-size: 11.5px; text-decoration: none; }
+.awwo-workspace .canvas-root .awwo-node .canvas-transcript-details > summary:hover { color: var(--saas-text); }
+
+/* ── Node composer: one pill, the send control inside it ─────────── */
+.awwo-workspace .canvas-root .awwo-node .canvas-composer { gap: 6px; padding: 6px 12px 12px; }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-row { border: 1px solid var(--saas-hairline); border-radius: 16px; background: var(--saas-input); transition: border-color .15s, box-shadow .15s; }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-row:focus-within { border-color: color-mix(in srgb, var(--saas-accent) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--saas-accent) 14%, transparent); }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-input { min-height: 64px; padding: 10px 44px 10px 13px; border: 0; border-radius: 16px; background: transparent; color: var(--saas-text); font-size: 13px; box-shadow: none; }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-input:focus-visible { outline: none; }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-send { right: 8px; bottom: 8px; width: 28px; height: 28px; min-height: 28px; transition: transform .12s var(--saas-ease), opacity .15s; }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-send:not(:disabled):active { transform: scale(.94); }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-send:disabled { opacity: .35; }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-notice,
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-blocked { padding-inline: 4px; font-size: 11px; line-height: 1.5; }
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-blocked { color: var(--saas-muted); }
+
+/* ── Empty node: what this role delivers, and two ways to begin ──── */
+.awwo-workspace .canvas-root .awwo-node .awwo-node-empty strong { font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
+.awwo-workspace .canvas-root .awwo-node .awwo-node-empty > span:not(.awwo-node-empty-glyph) { font-size: 12px; line-height: 1.65; color: var(--saas-muted); }
+.awwo-workspace .canvas-root .awwo-starter-prompts { gap: 8px; margin-top: 14px; }
+.awwo-workspace .canvas-root .awwo-starter-prompts button { min-height: 32px; padding: 0 12px; border: 1px solid var(--saas-hairline); border-radius: 999px; background: var(--saas-card); color: var(--saas-text); font-size: 12px; transition: border-color .15s, background-color .15s; }
+.awwo-workspace .canvas-root .awwo-starter-prompts button:not(:disabled):hover { border-color: color-mix(in srgb, var(--saas-accent) 45%, transparent); background: var(--saas-soft); color: var(--saas-text); }
+
+/* ── Delivery drawer: a receipt, not a form ──────────────────────── */
+.awwo-workspace .canvas-root .awwo-node-delivery-drawer { background: color-mix(in srgb, var(--saas-bg) 40%, var(--saas-card)); }
+.awwo-workspace .canvas-root .awwo-node-delivery-drawer > header { min-height: 44px; padding: 6px 10px 6px 14px; border-bottom-color: var(--saas-hairline); font-size: 12.5px; font-weight: 600; }
+.awwo-workspace .canvas-root .awwo-deliverables { padding: 14px; font-size: 12.5px; }
+.awwo-workspace .canvas-root .awwo-deliverables-title { margin-bottom: 4px; color: var(--saas-text); font-size: 13px; }
+.awwo-workspace .canvas-root .awwo-deliverables-receipt { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; color: var(--saas-muted); font-size: 11.5px; }
+.awwo-workspace .canvas-root .awwo-deliverables-receipt::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ios-green, #27c77a); flex-shrink: 0; }
+.awwo-workspace .canvas-root .awwo-deliverables-receipt.is-caveat::before { background: var(--saas-warning); }
+.awwo-workspace .canvas-root .awwo-deliverable-head { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--saas-hairline); }
+.awwo-workspace .canvas-root .awwo-deliverable-head .awwo-deliverable-title { flex: 1; min-width: 0; border-bottom: 0; }
+/* Multi-file deliveries name the file in the selector above; the header then only carries copy. */
+.awwo-workspace .canvas-root .awwo-deliverable-head-spacer { flex: 1; min-height: 34px; }
+.awwo-workspace .canvas-root .awwo-deliverable-copy { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; height: 26px; margin-right: 6px; padding: 0 7px; border: 0; border-radius: 7px; background: transparent; color: var(--saas-muted); font: inherit; font-size: 11px; cursor: pointer; transition: background-color .15s, color .15s; }
+.awwo-workspace .canvas-root .awwo-deliverable-copy:hover { background: var(--saas-soft); color: var(--saas-text); }
+.awwo-workspace .canvas-root .awwo-deliverable-copy.is-copied { color: var(--ios-green, #27c77a); }
+.awwo-workspace .canvas-root .awwo-deliverable-copy:focus-visible { outline: 2px solid var(--ios-blue); outline-offset: 1px; }
+.awwo-workspace .canvas-root .awwo-deliverable-copy-text:empty { display: none; }
+.awwo-workspace .canvas-root .awwo-deliverables-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; font-size: 11px; }
+.awwo-workspace .canvas-root .awwo-deliverables-meta > span { padding: 2px 8px; border-radius: 999px; background: var(--saas-warning-bg); color: var(--saas-warning); }
+.awwo-workspace .canvas-root .awwo-deliverable { border-color: var(--saas-hairline); background: var(--saas-card); box-shadow: 0 1px 2px #0f172a08; }
+.awwo-workspace .canvas-root .awwo-deliverable-title { padding: 10px 12px; border-bottom: 1px solid var(--saas-hairline); background: transparent; font-size: 12.5px; }
+.awwo-workspace .canvas-root .awwo-deliverables-empty { padding: 28px 8px 14px; font-size: 12.5px; }
+.awwo-workspace .canvas-root .awwo-expected-deliverables { overflow: hidden; border: 1px solid var(--saas-hairline); border-radius: 12px; background: var(--saas-card); }
+.awwo-workspace .canvas-root .awwo-expected-deliverables li { padding: 10px 12px; border-bottom-color: var(--saas-hairline); font-size: 12.5px; }
+.awwo-workspace .canvas-root .awwo-expected-deliverables li:last-child { border-bottom: 0; }
+.awwo-workspace .canvas-root .awwo-expected-deliverables li span:last-child { border-radius: 999px; padding: 2px 8px; font-size: 11px; }
+.awwo-workspace .canvas-root .awwo-deliverables-editor { margin-top: 4px; border-top: 1px solid var(--saas-hairline); }
+.awwo-workspace .canvas-root .awwo-deliverables-editor > summary { padding: 12px 0 6px; font-size: 12px; }
+
+/* ── Run receipt under a reply: a single quiet row until opened ──── */
+.awwo-workspace .canvas-root .saas-team-run-details { align-self: flex-start; width: min(100%, 520px); margin-block: 0; border-color: var(--saas-hairline); border-radius: 12px; background: transparent; animation: awwo-msg-in .18s var(--saas-ease); }
+.awwo-workspace .canvas-root .saas-team-run-details .saas-team-run-toggle { min-height: 32px; padding: 6px 10px; color: var(--saas-muted); font-size: 12px; border-radius: 12px; }
+.awwo-workspace .canvas-root .saas-team-run-details .saas-team-run-toggle:hover { background: var(--saas-soft); color: var(--saas-text); }
+.awwo-workspace .canvas-root .saas-team-run-details .saas-team-run-toggle strong { color: var(--saas-text); font-weight: 600; }
+.awwo-workspace .canvas-root .saas-team-run-details .saas-team-run-toggle:focus-visible { outline: 2px solid var(--ios-blue); outline-offset: 2px; }
+.saas-team-run-chevron { flex-shrink: 0; transition: transform .16s var(--saas-ease, ease); }
+.saas-team-run-toggle[aria-expanded='true'] .saas-team-run-chevron { transform: rotate(90deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .awwo-working-dots i { animation: none; opacity: .6; }
+  .awwo-workspace .canvas-root .awwo-node .canvas-transcript-turn,
+  .awwo-workspace .canvas-root .saas-team-run-details { animation: none; }
+}
+
+/* Prompt choices stay next to the user's draft; they never submit on selection. */
+.saas-home-quick-starts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+.saas-dashboard .saas-home-quick-starts button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 7px 12px; border: 1px solid var(--saas-hairline); border-radius: 20px; background: var(--saas-card); color: var(--saas-muted); font-size: 12px; line-height: 1.4; }
+.saas-dashboard .saas-home-quick-starts button:hover { color: var(--saas-text); border-color: var(--saas-accent); }
+.saas-home-quick-starts button[aria-expanded='true'] svg { transform: rotate(180deg); }
+.saas-home-prompt-ideas .saas-home-cases { margin-top: 16px; }
+@media (max-width: 600px) { .saas-dashboard .saas-home-quick-starts button { min-height: 44px; } }

@@ -42,9 +42,7 @@
 .model-persona-shelf-orchestration select { max-width: 100%; }
 .model-persona-shelf-hint { margin-top: 5px !important; color: var(--muted, #686e65); font-size: 11px; line-height: 1.5; }
 .model-persona-shelf-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
-.model-persona-shelf-search-toggle { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted, #686e65); }
-.model-persona-shelf-search-toggle:hover, .model-persona-shelf-search-toggle[aria-expanded='true'] { background: var(--shelf-selected); color: var(--text); }
-.model-persona-shelf-search { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px; min-height: 38px; margin-top: 8px; padding: 5px 8px; border: 1px solid var(--line, #dce0d8); border-radius: 10px; background: var(--panel, #f7f8f5); color: var(--muted, #686e65); }
+.model-persona-shelf-search { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px; min-height: 38px; margin-top: 4px; padding: 5px 8px; border: 1px solid var(--line, #dce0d8); border-radius: 10px; background: var(--panel, #f7f8f5); color: var(--muted, #686e65); }
 .model-persona-shelf-search:focus-within { border-color: var(--strong, #667861); }
 .model-persona-shelf-search input { flex: 1; width: 0; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text, #202720); font: inherit; font-size: 11px; }
 .model-persona-shelf-search input::-webkit-search-cancel-button { display: none; }
@@ -55,16 +53,16 @@
 .model-persona-shelf-group { margin-top: 7px; }
 .model-persona-shelf-group-head { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; margin: 0 6px 5px; }
 .model-persona-shelf-badge { color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
-.model-persona-shelf-model { position: relative; display: block; width: 100%; min-height: 38px; padding: 9px 28px 9px 10px; margin-top: 2px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; }
+.model-persona-shelf .model-persona-shelf-model { position: relative; display: block; width: 100%; min-height: 48px; padding: 7px 29px 7px 10px; margin-top: 1px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; }
 .model-persona-shelf-model:not(:disabled):hover, .model-persona-shelf-model:not(:disabled):focus-visible { background: var(--shelf-selected); border-color: var(--line, #dce0d8); }
 .model-persona-shelf-model[draggable=true] { cursor: grab; }
 .model-persona-shelf-model[draggable=true]:active { cursor: grabbing; }
 .model-persona-shelf-model:disabled { opacity: .58; }
-.model-persona-shelf-model-title { display: block; font-size: 12px; font-weight: 580; overflow-wrap: anywhere; }
-.model-persona-shelf-model-connection { display: block; margin-top: 3px; color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
-.model-persona-shelf-model-meta { display: block; margin-top: 3px; color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
-.model-persona-shelf-model-add { position: absolute; right: 10px; top: 8px; color: var(--muted, #686e65); opacity: 0; font-size: 17px; }
-.model-persona-shelf-model:hover .model-persona-shelf-model-add, .model-persona-shelf-model:focus-visible .model-persona-shelf-model-add { opacity: 1; }
+.model-persona-shelf .model-persona-shelf-model-title { display: block; font-size: 12px; line-height: 1.5; font-weight: 580; overflow-wrap: anywhere; }
+.model-persona-shelf-model-details { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 5px; margin-top: 2px; color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; }
+.model-persona-shelf-model-connection, .model-persona-shelf-model-reason { display: block; margin-top: 3px; color: var(--muted, #686e65); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.model-persona-shelf .model-persona-shelf-model-meta { margin: 0; font: inherit; overflow-wrap: anywhere; }
+.model-persona-shelf-model-add { position: absolute; right: 10px; top: 8px; color: var(--muted, #686e65); font-size: 17px; }
 .model-persona-shelf-group-more { width: 100%; margin-top: 3px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted, #686e65); font-size: 11px; text-align: left; }
 .model-persona-shelf-group-more:hover, .model-persona-shelf-group-more:focus-visible { background: var(--shelf-selected); color: var(--text); }
 .model-persona-shelf-all-brands { width: 100%; margin-top: 10px; padding: 8px 10px; border: 0; border-top: 1px solid var(--line, #dce0d8); background: transparent; color: var(--muted, #686e65) !important; text-align: left; }

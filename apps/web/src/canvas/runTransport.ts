@@ -120,7 +120,7 @@ export async function execAgentViaGateway(
   const identity = operationId ? { recoveryOperationId: operationId } : {};
   const userTurnId = sessions.appendTurn(storeKey, { role: 'user', text: message, ...identity, ...(presentation ? { presentation: { displayText: presentation.displayText, inputKind: presentation.inputKind } } : {}) });
   const agentTurnId = sessions.appendTurn(storeKey, { role: 'agent', text: '', ...identity, ...(presentation ? { presentation: { outputContract: presentation.outputContract, outputState: 'streaming' } } : {}) });
-  sessions.setStreaming(storeKey, true);
+  sessions.beginStreaming(storeKey);
   sessions.setStatus(storeKey, 'queued');
 
   let issueId: string | undefined = node.issueId ?? undefined;
@@ -139,7 +139,7 @@ export async function execAgentViaGateway(
   type Terminal =
     | { kind: 'done'; status: string }
     | { kind: 'no_run'; detail: string }
-    | { kind: 'error'; detail: string; code?: string }
+    | { kind: 'error'; detail: string; code?: string; admissionRejected?: true }
     | null;
   let terminal: Terminal = null;
 
@@ -234,7 +234,8 @@ export async function execAgentViaGateway(
         if (mirroring() && !gotText) sessions.patchTurn(storeKey, agentTurnId, COPY.noRun(f.detail), 'warn');
         break;
       case 'error': {
-        if (!terminal) terminal = { kind: 'error', detail: f.detail, ...(f.code ? { code: f.code } : {}) };
+        if (!terminal) terminal = { kind: 'error', detail: f.detail, ...(f.code ? { code: f.code } : {}),
+          ...(f.admissionRejected === true ? { admissionRejected: true } : {}) };
         // Transport loss is not proof of native cancellation. The durable operation remains
         // recoverable, and only the confirmed cancellation path above may say it stopped.
         const aborted = f.detail === 'aborted';
@@ -282,7 +283,7 @@ export async function execAgentViaGateway(
   if (!t) return { ok: false, unconfirmed: true, output: text, detail: '流在完成前中断（未收到终态）' };
   if (t.kind === 'error') return {
     ok: false,
-    ...(t.code !== 'operation_prepare_failed' && (issueId || operationId) ? { unconfirmed: true } : {}),
+    ...(t.code !== 'operation_prepare_failed' && !(t.admissionRejected && !runId) && (issueId || operationId) ? { unconfirmed: true } : {}),
     output: text,
     detail: t.detail,
   };

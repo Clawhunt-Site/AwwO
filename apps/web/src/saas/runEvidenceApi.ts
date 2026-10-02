@@ -1,4 +1,4 @@
-import { API_BASE, api, SaaSApiError, tenantPath } from './api';
+import { API_BASE, api, SaaSApiError, sessionFetch, tenantPath } from './api';
 
 export interface RunEvidenceSummary {
   runId: string;
@@ -89,7 +89,7 @@ export async function readRunInvocations(tenantId: string, runId: string, signal
 
 /** Fetch through the same cookie-authenticated API as the observer before offering a file. */
 export async function downloadRunArchive(tenantId: string, runId: string, signal: AbortSignal): Promise<void> {
-  const response = await fetch(`${API_BASE}${runPath(tenantId, runId)}/archive`, {
+  const response = await sessionFetch(`${API_BASE}${runPath(tenantId, runId)}/archive`, {
     credentials: 'include', signal, headers: { Accept: 'application/x-ndjson' },
   });
   if (!response.ok) {

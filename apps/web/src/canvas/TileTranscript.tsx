@@ -19,6 +19,7 @@ import remarkGfm from 'remark-gfm';
 import type { HistoryState, Turn } from './sessions';
 import { useCanvasI18n } from './i18n';
 import { collapseHistoricalInput, collaborationInputSummary, htmlPreviewSummary, readableOutput } from './readableTranscript';
+import { WorkingDots, WorkingTimer } from './WorkingIndicator';
 import './readable-transcript.css';
 import { fileSafeDisplaySource } from './fileDeliveryPresentation';
 import { PendingFileDelivery } from './PendingFileDelivery';
@@ -42,7 +43,7 @@ function RawDetails({ label, text }: { label: string; text: string }) {
   </details>;
 }
 
-function TurnContent({ turn, streaming }: { turn: Turn; streaming: boolean }) {
+function TurnContent({ turn }: { turn: Turn }) {
   const { locale, t } = useCanvasI18n();
   if (turn.role === 'user') {
     if (turn.nativeSource === 'issue_description') {
@@ -114,11 +115,20 @@ function TurnContent({ turn, streaming }: { turn: Turn; streaming: boolean }) {
     && turn.tone !== 'error' && turn.tone !== 'warn' && turn.presentation?.outputState !== 'failed';
   return <>
     {output.invalid ? <div className="canvas-transcript-format-notice" role="status">{t('transcript.invalidOutput')}</div> : null}
-    {/* Only an actual empty in-flight agent turn receives the waiting placeholder. */}
     {prose
       ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{fileSafeDisplaySource(turn.text)}</ReactMarkdown></div>
-      : fileSafeDisplaySource(turn.text) || (turn.role === 'agent' && streaming ? t('transcript.thinking') : '')}
+      : fileSafeDisplaySource(turn.text)}
   </>;
+}
+
+/** The one live line while a run is in flight: what it is doing, and for how long. A polite live
+ *  region rather than role=status: the tile's composer already owns its status landmark. */
+function TurnPresence({ label, since }: { label: string; since?: number }) {
+  return <div className="canvas-transcript-presence" data-testid="transcript-presence">
+    <WorkingDots />
+    <span className="canvas-transcript-presence-label" aria-live="polite">{label}</span>
+    {since ? <WorkingTimer since={since} /> : null}
+  </div>;
 }
 
 export const TRANSCRIPT_COPY = {
@@ -139,12 +149,14 @@ export interface TileTranscriptProps {
   status?: string | null;
   /** Auto-scroll to the newest turn. Off for the tiers that render a fixed tail. */
   autoScroll?: boolean;
+  /** When the current stream began; drives the presence row's elapsed readout. */
+  streamingSince?: number;
   renderTurnDetails?: (turn: Turn, latest: boolean) => ReactNode;
   /** Admitted graph execution observed independently from the historical messages. */
   currentRunDetails?: ReactNode;
 }
 
-export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false, renderTurnDetails, currentRunDetails }: TileTranscriptProps) {
+export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false, streamingSince, renderTurnDetails, currentRunDetails }: TileTranscriptProps) {
   const { locale, t } = useCanvasI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
@@ -208,6 +220,12 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
     };
   }, [autoScroll]);
 
+  // The reply that is still empty is replaced by one presence row; once text arrives the row goes
+  // and the bubble takes over. A stream without any placeholder turn keeps the row at the tail.
+  const lastTurn = shown.at(-1);
+  const awaitingReply = streaming && (!lastTurn || lastTurn.role !== 'agent' || !lastTurn.text);
+  const presenceLabel = status || t('transcript.thinking');
+
   return (
     <div className="canvas-transcript">
       {history === 'unreadable' ? (
@@ -247,19 +265,22 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
             </div>
           )
         ) : (
-          shown.map((turn, index) => (
-            <Fragment key={turn.id}>
+          shown.map((turn, index) => {
+            // The accepted reply keeps its own element (run details attach to it); until its
+            // first text arrives that element is the presence row, not an empty bubble.
+            const placeholder = streaming && index === shown.length - 1 && turn.role === 'agent' && !turn.text;
+            return <Fragment key={turn.id}>
             <div
-              key={turn.id}
-              className={`canvas-transcript-turn canvas-transcript-turn--${turn.role}${turn.tone ? ` is-${turn.tone}` : ''}`}
+              className={`canvas-transcript-turn canvas-transcript-turn--${turn.role}${turn.tone ? ` is-${turn.tone}` : ''}${placeholder ? ' is-pending' : ''}`}
             >
-              <TurnContent turn={turn} streaming={streaming} />
+              {placeholder ? <TurnPresence label={presenceLabel} since={streamingSince} /> : <TurnContent turn={turn} />}
             </div>
             {(turn.runId ? detailOwners.get(turn.runId) === index : turn.role === 'agent')
               && renderTurnDetails?.(turn, index === shown.length - 1)}
-            </Fragment>
-          ))
+            </Fragment>;
+          })
         )}
+        {awaitingReply && lastTurn?.role !== 'agent' ? <TurnPresence label={presenceLabel} since={streamingSince} /> : null}
         {currentRunDetails}
       </div>
       {autoScroll && !following && <button className="canvas-transcript-jump" type="button" onClick={() => {
@@ -271,7 +292,8 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
         <ArrowDown size={13} aria-hidden="true" />{locale === 'zh' ? '回到最新' : 'Jump to latest'}
       </button>}
       </div>
-      {streaming && status ? <div className="canvas-transcript-status">{status}</div> : null}
+      {/* A reply that is already streaming text keeps its status note as a quiet footer. */}
+      {streaming && status && !awaitingReply ? <div className="canvas-transcript-status">{status}</div> : null}
     </div>
   );
 }

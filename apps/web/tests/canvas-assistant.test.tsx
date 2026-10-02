@@ -17,6 +17,19 @@ function Harness(props: Partial<CanvasAssistantProps> = {}) {
 }
 
 describe('canvas assistant UI', () => {
+  it('announces the latest failure once beside the preserved input, keeping older history', () => {
+    const message = '工作区运行额度已满';
+    const messages = [{ id: 'old', role: 'assistant' as const, status: 'error' as const, content: '较早的错误' },
+      { id: 'last', role: 'assistant' as const, status: 'error' as const, content: message }];
+    const view = render(<Harness draft="保留需求" error={message} messages={messages} />);
+    expect(screen.getAllByText(message)).toHaveLength(1);
+    const input = screen.getByRole('textbox', { name: '画布需求' });
+    expect(input).toHaveValue('保留需求');
+    expect(input).toHaveAttribute('aria-describedby', screen.getByText(message).id);
+    expect(screen.getByText('较早的错误')).toBeVisible();
+    view.rerender(<Harness draft="保留需求" messages={messages} />);
+    expect(screen.getByRole('log')).toHaveTextContent(message);
+  });
   it('offers three requirement examples that only fill the welcome composer', () => {
     const send = vi.fn();
     render(<Harness onSend={send} />);

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -201,6 +202,112 @@ func addPersonalConnection(t *testing.T, h *harness, c *http.Cookie) string {
 		t.Fatal("response exposed key")
 	}
 	return v["id"].(string)
+}
+
+func TestPostgresPersonalConnectionRefresh(t *testing.T) {
+	for _, mode := range []string{"success", "non-owner", "provider-failed", "overflow", "deleted-during-discovery", "gate-policy", "audit-failed"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newHarness(t, "http://127.0.0.1:1")
+			mockPersonalDiscovery(t, h)
+			owner, _, uid := h.register(t, "refresh-owner@example.test")
+			id := addPersonalConnection(t, h, owner)
+			var originalSecret, originalModels []byte
+			if err := h.db.QueryRow(t.Context(), "SELECT secret,models FROM user_connections WHERE id=$1", id).Scan(&originalSecret, &originalModels); err != nil {
+				t.Fatal(err)
+			}
+			caller, status := owner, 200
+			if mode == "non-owner" {
+				caller, _, _ = h.register(t, "refresh-other@example.test")
+				status = 404
+			}
+			if mode == "provider-failed" || mode == "overflow" {
+				status = 422
+			}
+			if mode == "deleted-during-discovery" {
+				status = 404
+			}
+			if mode == "gate-policy" {
+				h.a.cfg.LLMGateOnly = true
+				if _, err := h.db.Exec(t.Context(), "UPDATE user_connections SET provider='openai',runtime='openai-agents' WHERE id=$1", id); err != nil {
+					t.Fatal(err)
+				}
+				status = 400
+			}
+			if mode == "audit-failed" {
+				if _, err := h.db.Exec(t.Context(), "ALTER TABLE audit_events ADD CONSTRAINT refresh_audit_failure CHECK(action <> 'connection.refreshed')"); err != nil {
+					t.Fatal(err)
+				}
+				status = 500
+			}
+			calls := 0
+			h.a.client.Transport = personalTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.URL.Host != "api.clawhunt.site" || r.Header.Get("Authorization") != "Bearer synthetic-personal-secret" {
+					t.Fatal("refresh did not use its owner-bound credential and provider")
+				}
+				body, upstreamStatus := `{"is_active":true}`, 200
+				if mode == "provider-failed" {
+					body, upstreamStatus = `{"error":"synthetic-personal-secret"}`, 403
+				}
+				if r.URL.Path == "/v1/models" {
+					count := 256
+					if mode == "overflow" {
+						count++
+					}
+					models := make([]map[string]string, count)
+					for i := range models {
+						models[i] = map[string]string{"id": fmt.Sprintf("chat-%03d", i)}
+					}
+					raw, _ := json.Marshal(map[string]any{"data": models})
+					body = string(raw)
+					if mode == "deleted-during-discovery" {
+						h.request(t, owner, "DELETE", "/auth/connections/"+id, nil, 204)
+					}
+				}
+				return &http.Response{StatusCode: upstreamStatus, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			})
+			result := h.request(t, caller, "POST", "/auth/connections/"+id+"/refresh", nil, status)
+			raw, _ := json.Marshal(result)
+			if bytes.Contains(raw, []byte("synthetic-personal-secret")) || bytes.Contains(raw, []byte("apiKey")) {
+				t.Fatal("refresh response leaked credential")
+			}
+			if (mode == "non-owner" || mode == "gate-policy") && calls != 0 {
+				t.Fatal("unauthorized refresh reached provider")
+			}
+			var auditCount int
+			if err := h.db.QueryRow(t.Context(), "SELECT count(*) FROM audit_events WHERE action='connection.refreshed' AND actor_id=$1 AND resource_id=$2 AND metadata='{}'::jsonb", uid, id).Scan(&auditCount); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "success" {
+				if auditCount != 1 || result["id"] != id || result["name"] != "Work" || result["runtime"] != runtimePI || len(result["models"].([]any)) != 256 || result["createdAt"] == nil {
+					t.Fatal("refresh lost identity, models or audit")
+				}
+				ctx := context.WithValue(t.Context(), userKey{}, User{ID: uid})
+				catalog, err := h.a.personalRuntime(ctx, runtimePI, false)
+				if err != nil || len(catalog.Models) != 256 {
+					t.Fatal("refreshed runtime catalog truncated", err)
+				}
+			} else if auditCount != 0 {
+				t.Fatal("failed refresh was audited as success")
+			}
+			if mode == "deleted-during-discovery" {
+				if len(h.request(t, owner, "GET", "/auth/connections", nil, 200)["items"].([]any)) != 0 {
+					t.Fatal("late refresh recreated deleted connection")
+				}
+				return
+			}
+			var secret, models []byte
+			if err := h.db.QueryRow(t.Context(), "SELECT secret,models FROM user_connections WHERE id=$1", id).Scan(&secret, &models); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(secret, originalSecret) {
+				t.Fatal("refresh replaced encrypted credentials")
+			}
+			if mode != "success" && !bytes.Equal(models, originalModels) {
+				t.Fatal("failed refresh changed saved model catalog")
+			}
+		})
+	}
 }
 
 func TestPostgresPersonalCredentialsIsolationAndDispatch(t *testing.T) {

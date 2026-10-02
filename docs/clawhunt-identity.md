@@ -6,6 +6,8 @@ AwwO can use ClawHunt as its identity issuer. This integration requires a compat
 
 An active, approved ClawHunt account returns to AwwO with a short-lived authorization code. A first-time user receives a workspace and the existing onboarding guide. Personal execution credentials remain a separate user configuration step.
 
+Approval itself is invite-code redemption on the issuer. A signed-in account without approval is sent by the issuer's authorize endpoint to its hosted redemption page (`/awwo?from=signin`); entering a valid code grants approval there and continues into AwwO through a fresh sign-in. Only ineligible accounts — and every account while that hosted page is disabled — return to AwwO with the `waitlisted` callback error, and AwwO's own screen then links to the same redemption page.
+
 If the main-site email matches an existing AwwO account, the user must prove ownership with the original AwwO password once. The stable issuer/subject then maps to the original user ID, retaining workspaces, canvas history and encrypted connections. Matching contact information alone never merges accounts or grants access. A failed password proof consumes the attempt; the user starts a new sign-in flow.
 
 Unified mode directs profile/password management to ClawHunt and uses invitation links for new workspace members. Direct membership grants by contact email are disabled. The issuer must explicitly approve access; registration or waitlist enrollment alone is insufficient. Existing memberships and workspace roles remain unchanged.
@@ -36,9 +38,9 @@ The issuer must implement `/api/awwo/sso/{authorize,token,introspect,revoke,logo
 
 Supply all three `AWWO_CLAWHUNT_*` values together. HTTPS is required outside explicit loopback development. The issuer also requires `AWWO_SSO_ENABLED=true`, durable private token storage and its own approved user list. Secrets belong in deployment secret storage, never in a browser build or repository.
 
-State, a separate browser binding and S256 PKCE protect the callback. Codes and linking attempts are single-use. Backend requests use the configured origin and do not follow redirects with client credentials. Provider grants are encrypted and bound to the AwwO user and session digest. Every authenticated request revalidates the grant; active event streams recheck it. Provider unavailability fails closed.
+State, a separate browser binding and S256 PKCE protect the callback. Codes and linking attempts are single-use. Backend requests use the configured origin and do not follow redirects with client credentials. Provider grants are encrypted and bound to the AwwO user and session digest. A grant may last at most 12 hours (`expires_in` up to 43200; a longer one is refused at sign-in), and the AwwO session ends with it. AwwO revalidates a session's grant with the issuer at most once a minute, on requests and on active event streams alike; an inactive answer ends the session at once. When the issuer does not answer (no connection, a timeout, a 5xx, 408 or 429), a session verified within the last five minutes keeps working and the issuer is retried at most every 15 seconds; past that window, without an earlier verification, or on any other refusal or malformed answer, requests fail closed with `503 sso_unavailable`. Concurrent requests of one session share a single check. Sponsored TypeSafe evaluations always ask the issuer and fail closed.
 
-Main-site sign-out invalidates the AwwO session. AwwO sign-out revokes the corresponding issuer session and accepts only the configured main-site logout route or the exact AwwO root fallback.
+Main-site sign-out invalidates the AwwO session within a minute. AwwO sign-out revokes the corresponding issuer session and accepts only the configured main-site logout route or the exact AwwO root fallback. `401 unauthorized` always means the AwwO session has ended; lost workspace access answers like any other non-member. When a signed-in page receives it, the page stops sending requests other than sign-in routes and offers a new sign-in in place, keeping the page and its local drafts.
 
 ## Migration and rollback
 

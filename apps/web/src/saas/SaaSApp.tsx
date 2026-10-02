@@ -3,10 +3,10 @@ import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye } from 'lucide-react';
-import { api, tenantPath, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
+import { api, onSessionEnded, tenantPath, trackSignedInSession, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
-import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
+import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, isCanvasStorageQuotaError, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
 import { CanvasSurface, type InitialPlanRequest } from '../canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
@@ -22,12 +22,15 @@ import { InviteAcceptance } from './InviteAcceptance';
 import { AdminPanel } from './AdminPanel';
 import { RuntimeSettings } from './RuntimeSettings';
 import { WorkspaceHome } from './WorkspaceHome';
+import { OfficialExamples, PublicOfficialExamples } from './examples/OfficialExamples';
+import { ProductionCases } from './ProductionCases';
+import { rememberOfficialSelection } from './examples/officialSelection';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
 import { AppearanceScope } from './SaaSAppearance';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink } from './SaaSOnboarding';
-import { clearSSOReturnURL, clawHuntAccountURL, clawHuntStartURL, clawHuntWaitlistURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
+import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
 const workspaceURL = (tenant?: string, canvas?: string) => {
@@ -48,9 +51,10 @@ function CanvasTitle({ tenant, name, status, tone }: { tenant: Tenant; name: str
 function CanvasPageHeader({ tenantId, controls }: { tenantId: string; controls: React.ReactNode }) {
   return <header className="saas-canvas-page-header"><div className="saas-canvas-page-navigation"><a href="/" className="saas-logo">AwwO</a><CanvasBackLink tenantId={tenantId} /></div>{controls}</header>;
 }
-export function SaaSApp() { return <SaaSPreferencesProvider><AuthenticatedApp /></SaaSPreferencesProvider>; }
+export function SaaSApp() { return <SaaSPreferencesProvider>{new URLSearchParams(window.location.search).get('examples') === '1' ? <PublicOfficialExamples /> : <AuthenticatedApp />}</SaaSPreferencesProvider>; }
 function AuthenticatedApp() {
   const { locale, t } = useSaaSPreferences();
+  useEffect(() => { const id = new URLSearchParams(window.location.search).get('official'); if (id) rememberOfficialSelection(id); }, []);
   const [ssoReturn, setSSOReturn] = useState<SSOReturn | null>(() => readSSOReturn(location.search));
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,11 +62,18 @@ function AuthenticatedApp() {
   useEffect(() => { if (resetToken) { const url = new URL(location.href); url.searchParams.delete('reset'); history.replaceState(null, '', url.pathname + url.search); } }, [resetToken]);
   useEffect(() => { if (ssoReturn) clearSSOReturnURL(); }, [ssoReturn]);
   const [failure, setFailure] = useState('');
+  const [sessionEnded, setSessionEnded] = useState(false);
+  useEffect(() => {
+    const stop = onSessionEnded(() => setSessionEnded(true));
+    return () => { stop(); trackSignedInSession(false); };
+  }, []);
   const sessionRequestGeneration = useRef(0);
   const onAuthenticated = useCallback((value: Identity) => {
     // A completed login/link supersedes the initial session lookup, even if
     // that older request later returns another account or a service error.
     sessionRequestGeneration.current += 1;
+    trackSignedInSession(true);
+    setSessionEnded(false);
     setIdentity(value);
     setFailure('');
     setLoading(false);
@@ -74,7 +85,7 @@ function AuthenticatedApp() {
     const generation = ++sessionRequestGeneration.current;
     const controller = new AbortController();
     const current = () => live && generation === sessionRequestGeneration.current;
-    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) setIdentity(value); })
+    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) { trackSignedInSession(true); setIdentity(value); } })
       .catch(error => { if (current() && !(error instanceof SaaSApiError && error.status === 401)) setFailure(message(error)); })
       .finally(() => { if (current()) setLoading(false); });
     return () => { live = false; controller.abort(); };
@@ -90,7 +101,16 @@ function AuthenticatedApp() {
   const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
     : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
     : <Workspace identity={identity} onProfile={onProfile} />;
-  return <AppearanceScope key={identity.user.id} userId={identity.user.id}><SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity}>{content}</PersonalEngineGate></SaaSOnboarding></AppearanceScope>;
+  return <AppearanceScope key={identity.user.id} userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity}>{content}</PersonalEngineGate></SaaSOnboarding></AppearanceScope>;
+}
+/** The page stays as it is, so nothing typed is lost; leaving through sign-in keeps the unsaved-canvas warning. */
+function SessionEndedNotice({ identity }: { identity: Identity }) {
+  const { t } = useSaaSPreferences();
+  const clawhunt = identity.authentication === 'clawhunt';
+  return <div className="saas-session-ended" role="alert">
+    <p>{t('登录已失效，页面已停止自动更新。本机草稿仍保留，重新登录后即可继续。', 'Your session has ended, so this page stopped updating. Local drafts are kept; sign in again to continue.')}</p>
+    <a className="saas-sso-action" href={clawhunt ? clawHuntStartURL(location.search) : '/'}>{clawhunt ? t('使用 ClawHunt 账号继续', 'Continue with ClawHunt') : t('重新登录', 'Sign in again')}</a>
+  </div>;
 }
 function useAuthOptions() {
   const [options, setOptions] = useState<AuthOptions | null>(null);
@@ -107,7 +127,7 @@ function useAuthOptions() {
   return { options, optionsError: error, retryOptions: () => setRevision(value => value + 1) };
 }
 const ssoFailureCopy: Record<SSOFailureReason, [string, string]> = {
-  waitlisted: ['你的 ClawHunt 账号仍在 AwwO 轮候名单中。请返回主站查看申请状态。', 'Your ClawHunt account is still on the AwwO waitlist. Return to the main site to check your application.'],
+  waitlisted: ['这个 ClawHunt 账号还未开通 AwwO。使用邀请码兑换后即可直接进入；没有邀请码也可以在兑换页加入候补名单。', "This ClawHunt account doesn't have AwwO access yet. Redeem an invite code to enter right away, or join the waitlist on the redemption page."],
   expired: ['登录请求已过期。请重新使用 ClawHunt 账号继续。', 'The sign-in request expired. Continue with ClawHunt again.'],
   unavailable: ['暂时无法完成统一登录。请稍后重试。', 'Unified sign-in is temporarily unavailable. Please try again.'],
   conflict: ['此账号关联存在冲突，尚未访问任何 AwwO 工作区。请联系管理员处理。', 'This account has a linking conflict. No AwwO workspace was opened. Contact an administrator.'],
@@ -116,10 +136,10 @@ const ssoFailureCopy: Record<SSOFailureReason, [string, string]> = {
 function SSOFailure({ reason, signedIn = false }: { reason: SSOFailureReason; signedIn?: boolean }) {
   const { t, locale } = useSaaSPreferences();
   const { options } = useAuthOptions();
-  const waitlistURL = clawHuntWaitlistURL(options?.clawhuntSiteURL);
+  const redeemURL = clawHuntRedeemURL(options?.clawhuntSiteURL);
   return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('账号连接未完成', 'Account connection not completed')}</h1></div>
-    <section className="saas-card"><h2>{t('请检查登录状态', 'Check your sign-in')}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
-      {reason === 'waitlisted' && waitlistURL && <a className="saas-primary saas-sso-action" href={waitlistURL}>{t('查看 AwwO 轮候', 'View the AwwO waitlist')}</a>}
+    <section className="saas-card"><h2>{reason === 'waitlisted' ? t('用邀请码开通 AwwO', 'Unlock AwwO with an invite code') : t('请检查登录状态', 'Check your sign-in')}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
+      {reason === 'waitlisted' && redeemURL && <a className="saas-primary saas-sso-action" href={redeemURL}>{t('输入邀请码进入 AwwO', 'Enter your invite code')}</a>}
       {reason !== 'waitlisted' && <a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('重新使用 ClawHunt 账号继续', 'Continue with ClawHunt again')}</a>}
       <a href="/">{signedIn ? t('返回工作区', 'Back to workspace') : t('返回登录', 'Back to sign in')}</a>
     </section></main>;
@@ -210,7 +230,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
     : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
-    : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a></section>}
+    : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a><small>{t('还没开通 AwwO？登录后输入邀请码即可进入。', 'No access yet? Redeem your invite code right after signing in.')}</small></section>}
     {options.localAuth === true && <form className="saas-card" onSubmit={async event => {
       event.preventDefault(); if (busy) return; setBusy(true); setError(null);
       const values = Object.fromEntries(new FormData(event.currentTarget));
@@ -229,7 +249,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
     </form>}
     {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
-    </div>}</main>;
+    </div>}<ProductionCases /><OfficialExamples compact initialId={new URLSearchParams(window.location.search).get('official') || undefined} /></main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
   const { t } = useSaaSPreferences();
@@ -327,12 +347,29 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   </div>;
 }
 
+type CloudRuntimeStatus = { configured: boolean; available: boolean; reason?: string; models?: unknown[] };
+const unavailableRuntimeStatus = (): CloudRuntimeStatus => ({ configured: false, available: false, reason: 'Runtime status unavailable' });
+function readCloudRuntimeStatus(value: unknown): CloudRuntimeStatus {
+  if (!value || typeof value !== 'object') return unavailableRuntimeStatus();
+  const status = value as Record<string, unknown>;
+  if (typeof status.configured !== 'boolean' || typeof status.available !== 'boolean'
+    || (status.reason !== undefined && typeof status.reason !== 'string')
+    || (status.models !== undefined && !Array.isArray(status.models))) return unavailableRuntimeStatus();
+  return { configured: status.configured, available: status.available && status.configured,
+    reason: status.reason as string | undefined, models: status.models as unknown[] | undefined };
+}
+
 function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
   const { locale, t } = useSaaSPreferences();
+  const localDraftFailure = (error: unknown) => isCanvasStorageQuotaError(error)
+    ? t('本机存储空间已满，自动保存已暂停。请先导出本地副本保留最新编辑。', 'Local browser storage is full. Autosave is paused. Export a local copy to preserve your latest edits.')
+    : `本机草稿保存失败：${message(error)}。请立即导出本地副本。`;
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
   const [saveState, setSaveState] = useState('正在加载…');
-  const [runtime, setRuntime] = useState<{ configured: boolean; available: boolean; reason?: string; models?: unknown[] } | null>(null);
+  const [runtime, setRuntime] = useState<CloudRuntimeStatus | null>(null);
+  const [runtimeChecking, setRuntimeChecking] = useState(false);
+  const runtimeRequest = useRef<AbortController | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [recovery, setRecovery] = useState<SavedCanvasDraft[] | null>(null);
   const [localDraftCount, setLocalDraftCount] = useState(0);
@@ -349,6 +386,38 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const saving = useRef(false);
   const failed = useRef(false);
   const runtimeReader = useRef(createCanvasRuntimeReader()).current;
+  const localDocumentSaveFailed = useCallback((document: CanvasDocument) => {
+    pending.current = document;
+    failed.current = true;
+    setSaveState('未同步');
+    setError(t('本机无法保存最新编辑，自动保存已暂停。请先导出本地副本，保留当前页面中的修改。',
+      'Your latest edits could not be saved on this device. Autosave is paused. Export a local copy to preserve the changes in this page.'));
+  }, [t]);
+  useEffect(() => {
+    setRuntime(null); setRuntimeChecking(false);
+    return () => {
+      const request = runtimeRequest.current;
+      runtimeRequest.current = null;
+      request?.abort();
+    };
+  }, [identity.user.id, tenant.id, canvasId]);
+  const recheckRuntime = useCallback(async () => {
+    if (runtimeRequest.current) return;
+    const controller = new AbortController();
+    runtimeRequest.current = controller;
+    setRuntimeChecking(true);
+    try {
+      const health = await api<unknown>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal });
+      if (!controller.signal.aborted && runtimeRequest.current === controller) setRuntime(readCloudRuntimeStatus(health));
+    } catch {
+      if (!controller.signal.aborted && runtimeRequest.current === controller) setRuntime(unavailableRuntimeStatus());
+    } finally {
+      if (runtimeRequest.current === controller) {
+        runtimeRequest.current = null;
+        if (!controller.signal.aborted) setRuntimeChecking(false);
+      }
+    }
+  }, [identity.user.id, tenant.id, canvasId]);
   useEffect(() => {
     const controller = new AbortController();
     configureCanvasStorage(identity.user.id, tenant.id, canvasId);
@@ -360,10 +429,10 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     }
     catch (error) { setError(`无法读取本机草稿：${message(error)}`); return () => controller.abort(); }
     // Canvas data stays available when the separate runtime-status request fails.
-    // Its failure still disables execution until a later reload confirms readiness.
+    // Its failure disables execution until an explicit status check confirms readiness.
     Promise.all([api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }),
-      api<{ configured: boolean; available: boolean; reason?: string; models?: unknown[] }>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal })
-        .catch(() => ({ configured: false, available: false, reason: 'Runtime status unavailable' }))])
+      api<unknown>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal })
+        .then(readCloudRuntimeStatus).catch(unavailableRuntimeStatus)])
       .then(async ([value, health]) => {
         if (controller.signal.aborted) return;
         configureSaaSCanvas({ tenant, canvasId });
@@ -447,29 +516,37 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
               if (!disposed) setSaveState('已同步');
             } catch (error) {
               failed.current = true;
-              if (!disposed) { setSaveState('未同步'); setError(`本机草稿保存失败：${message(error)}。请立即导出本地副本。`); }
+              if (!disposed) { setSaveState('未同步'); setError(localDraftFailure(error)); }
             }
             break;
           }
           const sent: CanvasDraft = draft.current || persistCanvasDraft(storage, writerId, current.current!.version, pending.current);
           const document: CanvasDocument = sent.document; pending.current = null;
           setSaveState('正在保存…');
+          let serverConfirmed = false;
           try {
             const saved: CanvasRecord = await api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { method: 'PUT', body: JSON.stringify({ name: current.current!.name, document, version: current.current!.version }) });
-            rememberCanvasBaseline(storage, saved.version, saved.document);
+            serverConfirmed = true;
+            // Release this page's confirmed revision before writing a full baseline.
+            // Other writers' drafts remain untouched: Storage cannot atomically compare/delete them.
             acknowledgeCanvasDraft(storage, sent, saved.version);
+            rememberCanvasBaseline(storage, saved.version, saved.document);
             if (restoredSource.current) { removeCanvasDraft(storage, restoredSource.current); restoredSource.current = null; }
             if (!disposed) { try { setLocalDraftCount(readCanvasDrafts(storage).length); } catch { /* Draft count is decorative; save acknowledgement remains authoritative. */ } }
             if (draft.current?.revision === sent.revision) draft.current = null;
             else if (draft.current) draft.current = { ...draft.current, baseVersion: saved.version };
             current.current = saved;
             storage.setItem('awwo.cloud.version', String(Math.max(saved.version, Number(storage.getItem('awwo.cloud.version')) || 0)));
-            if (!disposed) setSaveState(pending.current ? '等待同步…' : '已同步');
+            if (!disposed) setSaveState(failed.current ? '未同步' : pending.current ? '等待同步…' : '已同步');
           } catch (error) {
+            const alreadyFailed = failed.current;
             failed.current = true; pending.current ||= document;
             if (!disposed) {
               setSaveState('未同步');
-              setError(error instanceof SaaSApiError && error.status === 409 ? '画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。' : `保存失败：${message(error)}。未同步草稿保留在本机，重新加载后可恢复或导出。`);
+              // A newer local save failure means pending may exist only in memory.
+              // Do not replace its export warning with a claim that all edits are on disk.
+              if (!alreadyFailed) setError(serverConfirmed || isCanvasStorageQuotaError(error) ? localDraftFailure(error)
+                : error instanceof SaaSApiError && error.status === 409 ? '画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。' : `保存失败：${message(error)}。未同步草稿保留在本机，重新加载后可恢复或导出。`);
             }
           }
         }
@@ -484,7 +561,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
         pending.current = document;
         draft.current = persistCanvasDraft(storage, writerId, current.current!.version, pending.current!);
       } catch (error) {
-        failed.current = true; setSaveState('未同步'); setError(`本机草稿保存失败：${message(error)}。请立即导出本地副本。`); return;
+        failed.current = true; setSaveState('未同步'); setError(localDraftFailure(error)); return;
       }
       setSaveState('等待同步…'); clearTimeout(timer); timer = setTimeout(() => void flush().catch(() => {}), 450);
     };
@@ -619,12 +696,14 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     }} />;
   if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><section className="saas-page-intro"><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p>{error && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</section></main>;
   const exportLocal = () => {
-    const url = URL.createObjectURL(new Blob([scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}'], { type: 'application/json' }));
+    const latest = pending.current ?? draft.current?.document;
+    const bytes = latest ? JSON.stringify(latest) : scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}';
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/json' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'awwo-canvas-recovery.json'; anchor.click(); URL.revokeObjectURL(url);
   };
   const executionUnavailableReason = runtime === null
     ? t('正在检查执行引擎…', 'Checking the execution engine…')
-    : runtime.available && !runtime.reason && Array.isArray(runtime.models) && runtime.models.length > 0
+    : runtime.available === true && !runtime.reason && Array.isArray(runtime.models) && runtime.models.length > 0
       ? undefined
       : runtime.reason
         ? saasErrorMessage(runtime.reason, locale)
@@ -632,8 +711,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const syncTone = saveState === '已同步' ? 'synced' : saveState === '未同步' || saveState === '存在未同步草稿' ? 'warning' : 'pending';
   return <div className="saas-canvas-shell">
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
-    {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status">{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</div>}
-    <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true}
+    {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
+    <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       taskDraft={knowledgeTaskDraft} previewDesk={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} />}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}

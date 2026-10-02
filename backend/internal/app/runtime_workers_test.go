@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,49 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRuntimeCatalogCapacityAndHealthEnvelope(t *testing.T) {
+	for _, runtime := range []string{runtimePI, runtimeOpenAIAgents} {
+		for _, count := range []int{128, 129, 256, 257} {
+			t.Run(fmt.Sprintf("%s/%d", runtime, count), func(t *testing.T) {
+				models := make([]piModel, count)
+				for i := range models {
+					models[i] = piModel{ID: fmt.Sprintf("model-%03d", i), Name: strings.Repeat("display", 30), Provider: "llmgate", Runtime: runtime}
+				}
+				raw, _ := json.Marshal(piHealth{Ready: true, Model: models[0].ID, Models: models})
+				if count == 256 && len(raw) <= 65536 {
+					t.Fatal("fixture must exceed the previous health bound")
+				}
+				worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(raw) }))
+				defer worker.Close()
+				cfg := testConfig()
+				cfg.PIURL, cfg.OpenAIAgentsURL, cfg.OpenAIAgentsToken = worker.URL, worker.URL, strings.Repeat("o", 32)
+				health, err := New(nil, cfg).probeRuntime(t.Context(), runtime)
+				if count > 256 {
+					if err == nil {
+						t.Fatal("oversized worker catalog accepted")
+					}
+				} else if err != nil || len(health.Models) != count {
+					t.Fatal("catalog was truncated or rejected", err)
+				}
+			})
+		}
+	}
+	for _, size := range []int{maxRuntimeHealthBytes, maxRuntimeHealthBytes + 1} {
+		t.Run(fmt.Sprintf("body/%d", size), func(t *testing.T) {
+			body := `{"ready":true,"model":"default","models":[{"id":"default","runtime":"openai-agents"}]}`
+			body += strings.Repeat(" ", size-len(body))
+			worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
+			defer worker.Close()
+			cfg := testConfig()
+			cfg.OpenAIAgentsURL, cfg.OpenAIAgentsToken = worker.URL, strings.Repeat("o", 32)
+			_, err := New(nil, cfg).probeRuntime(t.Context(), runtimeOpenAIAgents)
+			if (err != nil) != (size > maxRuntimeHealthBytes) {
+				t.Fatal("health byte limit not enforced", err)
+			}
+		})
+	}
+}
 
 func TestOptionalRuntimeConfiguration(t *testing.T) {
 	c := testConfig()

@@ -16,6 +16,22 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Private scratchpad text a provider streams in its reasoning field; it must never leave the worker.
 const REASONING_TEXT = 'weigh 权衡 the private ledger 44102 before answering';
 
+test('model catalog supports 256 total models and rejects overflow without leaking credentials', () => {
+  const profiles = Array.from({ length: 255 }, (_, i) => ({ id: `catalog-${i}`, provider: 'openai', model: `upstream-${i}`, apiKeyEnv: 'CATALOG_KEY' }));
+  const load = value => loadConfig({ ...ENV, CATALOG_KEY: 'catalog-test-secret', AWWO_PI_MODELS_JSON: value });
+  const config = load(JSON.stringify(profiles));
+  assert.equal(config.models.length, 256);
+  assert.equal(config.ready, true);
+  assert.equal(resolveModelConfig(config, 'catalog-254').model, 'upstream-254');
+  const health = JSON.stringify(publicHealth(config));
+  for (const value of ['catalog-test-secret', 'CATALOG_KEY', 'apiKey', 'baseURL']) assert.ok(!health.includes(value));
+  for (const values of [[...profiles, { ...profiles[0], id: 'overflow' }], [...profiles.slice(0, -1), profiles[0]]]) assert.throws(() => load(JSON.stringify(values)), /MODELS_JSON/);
+  const missing = profiles.map((profile, i) => i === 254 ? { ...profile, apiKeyEnv: 'MISSING_LAST_KEY' } : profile);
+  assert.equal(load(JSON.stringify(missing)).ready, false);
+  assert.equal(load(' '.repeat(512 * 1024 - 2) + '[]').models.length, 1);
+  for (const value of [' '.repeat(512 * 1024 - 1) + '[]', JSON.stringify([{ baseURL: 'https://example.test/' + 'é'.repeat(270_000) }])]) assert.throws(() => load(value), /512 KiB/);
+});
+
 test('Gate-only Pi personal configuration advertises its policy', () => {
   const env = { AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'true', AWWO_PI_TOKEN: TOKEN };
   const config = loadConfig(env);

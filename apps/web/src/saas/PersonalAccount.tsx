@@ -176,6 +176,8 @@ export function ConnectionSettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState("");
+  const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [refreshResult, setRefreshResult] = useState<{ id: string; error: boolean; message: string } | null>(null);
   const [removing, setRemoving] = useState<Connection | null>(null);
   const providerForm = useRef<HTMLFormElement>(null);
   const removalTrigger = useRef<HTMLButtonElement | null>(null);
@@ -188,8 +190,11 @@ export function ConnectionSettings({
     (trigger.isConnected ? trigger : providerForm.current?.querySelector('select'))?.focus();
     removalTrigger.current = null;
   }, [removing]);
-  const refresh = async () =>
-    onChange(await api<Connections>("/auth/connections"));
+  const refresh = async () => {
+    const latest = await api<Connections>("/auth/connections");
+    onChange(latest);
+    return latest;
+  };
   return (
     <AccountLayout
       title={
@@ -320,7 +325,7 @@ export function ConnectionSettings({
           {notice && <p className="saas-connection-success" role="status">{notice}</p>}
           <div className="saas-connection-actions">
             <button data-onboarding="provider-verify" className={canContinue ? undefined : "saas-primary"} disabled={busy || !provider || !key}>
-              {busy ? t("正在验证…", "Verifying…") : t("验证并保存", "Verify and save")}
+              {busy && !refreshing ? t("正在验证…", "Verifying…") : t("验证并保存", "Verify and save")}
             </button>
             {canContinue && <a className="saas-primary saas-buy-link" href={home()}>
               {returnToCanvas ? t("返回画布", "Return to canvas") : t("进入工作区", "Open workspace")}
@@ -386,13 +391,44 @@ export function ConnectionSettings({
                     ))}
                   </ul>
                 </details>
+                {refreshResult?.id === c.id && <p role={refreshResult.error ? 'alert' : 'status'}
+                  className={refreshResult.error ? 'saas-error' : 'saas-connection-success'}>{refreshResult.message}</p>}
               </div>
+              <div className="saas-connection-actions">
+              <button type="button" disabled={busy || !c.hasKey || !catalog.providers.some(p => p.id === c.provider && p.runtimes.includes(c.runtime))}
+                onClick={async () => {
+                  if (busy) return;
+                  setBusy(true);
+                  setRefreshing(c.id);
+                  setRefreshResult(null);
+                  setNotice('');
+                  let updated = false;
+                  try {
+                    await api(`/auth/connections/${encodeURIComponent(c.id)}/refresh`, { method: 'POST' });
+                    updated = true;
+                    const latest = await refresh();
+                    const current = latest.items.find(item => item.id === c.id);
+                    if (current) setRefreshResult({ id: c.id, error: false, message: t(
+                      `模型已同步，共 ${current.models.length} 个。`, `Models synced: ${current.models.length} available.`) });
+                    else setNotice(t('该连接已不存在，清单已更新。', 'This connection no longer exists. The list is up to date.'));
+                  } catch (cause) {
+                    setRefreshResult({ id: c.id, error: true, message: updated
+                      ? t('模型已更新，但清单读取失败，请再次刷新。', 'Models updated, but the list could not be reloaded. Refresh again.')
+                      : saasErrorMessage(cause, locale) });
+                  } finally {
+                    setBusy(false);
+                    setRefreshing(null);
+                  }
+                }}>
+                {refreshing === c.id ? t('正在同步…', 'Syncing…') : t('刷新模型', 'Refresh models')}
+              </button>
               <button
                 disabled={busy}
                 onClick={event => { removalTrigger.current = event.currentTarget; setRemoving(c); }}
               >
                 {t("移除连接", "Remove connection")}
               </button>
+              </div>
             </article>
           ))}
           <p>

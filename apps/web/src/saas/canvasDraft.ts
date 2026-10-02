@@ -58,7 +58,13 @@ export function rememberCanvasBaseline(storage: ScopedStorage, version: number, 
   let previousVersion = 0;
   try { previousVersion = JSON.parse(storage.getItem(CANVAS_BASELINE_KEY) || '{}').version || 0; } catch { /* Replace a corrupt clean marker, never draft data. */ }
   if (previousVersion > version) return; // A late response cannot roll a newer acknowledgement backwards.
-  storage.setItem(CANVAS_BASELINE_KEY, JSON.stringify({ version, document: canonicalCanvasDocumentJSON(document) }));
+  const baseline = JSON.stringify({ version, document: canonicalCanvasDocumentJSON(document) });
+  try { storage.setItem(CANVAS_BASELINE_KEY, baseline); }
+  catch (error) {
+    // This is only a proof cache. Losing it may prompt recovery, but cannot lose edits
+    // or turn a successful server save into an unsynced document.
+    if (!isCanvasStorageQuotaError(error)) throw error;
+  }
 }
 
 export function isKnownSyncedCache(storage: ScopedStorage, document: CanvasDocument): boolean {
@@ -74,7 +80,16 @@ export function isKnownSyncedCache(storage: ScopedStorage, document: CanvasDocum
 /** Each editor owns a separate key. A second tab cannot overwrite the first tab's unsaved work. */
 export function persistCanvasDraft(storage: ScopedStorage, writerId: string, baseVersion: number, document: CanvasDocument): CanvasDraft {
   const draft: CanvasDraft = { schemaVersion: 1, writerId, revision: crypto.randomUUID(), baseVersion, dirty: true, updatedAt: Date.now(), document };
-  storage.setItem(`${CANVAS_DRAFT_PREFIX}${writerId}`, JSON.stringify(draft));
+  const key = `${CANVAS_DRAFT_PREFIX}${writerId}`;
+  const raw = JSON.stringify(draft);
+  try { storage.setItem(key, raw); }
+  catch (error) {
+    if (!isCanvasStorageQuotaError(error) || storage.getItem(CANVAS_BASELINE_KEY) === null) throw error;
+    // Reclaim only the captured canvas's optional synced proof. Never evict drafts,
+    // the current document or run journals, even if another tab changes them.
+    storage.removeItem(CANVAS_BASELINE_KEY);
+    storage.setItem(key, raw);
+  }
   return draft;
 }
 
@@ -95,6 +110,13 @@ export function readCanvasDrafts(storage: ScopedStorage): SavedCanvasDraft[] {
 export function removeCanvasDraft(storage: ScopedStorage, saved: SavedCanvasDraft): boolean {
   if (storage.getItem(saved.key) !== saved.raw) return false;
   storage.removeItem(saved.key); return true;
+}
+
+export function isCanvasStorageQuotaError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { name?: unknown; code?: unknown };
+  return value.name === 'QuotaExceededError' || value.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+    || value.code === 22 || value.code === 1014;
 }
 
 export function acknowledgeCanvasDraft(storage: ScopedStorage, sent: CanvasDraft, savedVersion: number): void {

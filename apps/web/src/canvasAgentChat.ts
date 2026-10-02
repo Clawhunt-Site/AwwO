@@ -20,7 +20,7 @@ export type AgentChatFrame =
   | { event: 'done'; status: string } // the run ended
   // Message delivered + agent woken, but no live run surfaced (honest, not a fake reply).
   | { event: 'no_run'; issueId: string; detail: string }
-  | { event: 'error'; detail: string; code?: string };
+  | { event: 'error'; detail: string; code?: string; admissionRejected?: true };
 
 function s(v: unknown): string {
   return typeof v === 'string' ? v : '';
@@ -61,13 +61,17 @@ export interface StreamOpts {
   signal?: AbortSignal;
 }
 
-async function responseFailure(res: Response): Promise<{ detail: string; code?: string }> {
+async function responseFailure(res: Response): Promise<{ detail: string; code?: string; admissionRejected?: true }> {
   const failure = typeof res.json === 'function'
     ? await res.json().catch(() => null) as Record<string, unknown> | null
     : null;
+  const code = s(failure?.code) || s(failure?.error);
   return {
     detail: s(failure?.detail) || s(failure?.error) || `gateway responded ${res.status}`,
-    ...(s(failure?.error) ? { code: s(failure?.error) } : {}),
+    ...(code ? { code } : {}),
+    // This proof is emitted by the SaaS admission boundary, never inferred from status alone.
+    // Streamed error frames deliberately do not accept it: those may follow an accepted run.
+    ...(res.status >= 400 && res.status < 500 && failure?.admissionRejected === true ? { admissionRejected: true as const } : {}),
   };
 }
 

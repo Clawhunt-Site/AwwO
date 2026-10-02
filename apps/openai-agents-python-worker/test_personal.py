@@ -9,6 +9,36 @@ from config import ConfigError, bind_user_model, load_config, public_health
 from server import create_app
 
 
+class CatalogCapacityTests(unittest.TestCase):
+    def setUp(self):
+        self.env = {"AWWO_OPENAI_AGENTS_TOKEN": "t" * 32, "AWWO_OPENAI_AGENTS_MODEL": "default-model",
+                    "AWWO_OPENAI_AGENTS_API_KEY": "default-test-secret", "CATALOG_KEY": "catalog-test-secret"}
+
+    def load(self, value):
+        return load_config({**self.env, "AWWO_OPENAI_AGENTS_MODELS_JSON": value})
+
+    def test_256_total_models_and_late_credential_isolation(self):
+        profiles = [{"id": f"catalog-{i}", "provider": "openai", "model": f"upstream-{i}", "apiKeyEnv": "CATALOG_KEY"} for i in range(255)]
+        config = self.load(json.dumps(profiles))
+        self.assertTrue(config.ready)
+        self.assertEqual(len(config.models), 256)
+        self.assertEqual(config.models[-1].model, "upstream-254")
+        health = json.dumps(public_health(config))
+        for value in ["catalog-test-secret", "default-test-secret", "CATALOG_KEY", "apiKey", "baseURL"]:
+            self.assertNotIn(value, health)
+        for values in [profiles + [{**profiles[0], "id": "overflow"}], profiles[:-1] + [profiles[0]]]:
+            with self.assertRaises(ConfigError):
+                self.load(json.dumps(values))
+        profiles[-1]["apiKeyEnv"] = "MISSING_LAST_KEY"
+        self.assertFalse(self.load(json.dumps(profiles)).ready)
+
+    def test_512_kib_utf8_envelope(self):
+        self.assertEqual(len(self.load(" " * (512 * 1024 - 2) + "[]").models), 1)
+        for value in [" " * (512 * 1024 - 1) + "[]", json.dumps([{"baseURL": "https://example.test/" + "é" * 270_000}], ensure_ascii=False)]:
+            with self.assertRaisesRegex(ConfigError, "too large"):
+                self.load(value)
+
+
 class PersonalCredentialsTests(unittest.TestCase):
     def setUp(self):
         self.config = load_config({"AWWO_CREDENTIAL_MODE": "user", "AWWO_OPENAI_AGENTS_TOKEN": "t" * 32})

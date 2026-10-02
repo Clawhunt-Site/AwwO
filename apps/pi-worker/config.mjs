@@ -26,6 +26,8 @@ function integer(value, fallback, minimum, maximum, name) {
 }
 
 const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens']);
+const MAX_CATALOG_MODELS = 256; // Includes the required default profile.
+const MAX_CATALOG_BYTES = 512 * 1024;
 const MODEL_SELECTOR = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$/;
 
 function validBaseURL(baseURL) {
@@ -52,11 +54,11 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
   if (serialized === undefined || serialized === '') return Object.freeze([defaultProfile]);
   // Configuration errors must not fall back to an unintended provider. Error
   // text deliberately omits JSON, URLs, key values, and environment references.
-  let problem = 'expected a JSON array containing at most 32 profiles';
+  let problem = 'expected a JSON array containing at most 255 additional profiles within 512 KiB';
   try {
-    if (typeof serialized !== 'string' || serialized.length > 65_536) throw new Error();
+    if (typeof serialized !== 'string' || Buffer.byteLength(serialized, 'utf8') > MAX_CATALOG_BYTES) throw new Error();
     const values = JSON.parse(serialized);
-    if (!Array.isArray(values) || values.length > 32) throw new Error();
+    if (!Array.isArray(values) || values.length >= MAX_CATALOG_MODELS) throw new Error();
     const profiles = [defaultProfile];
     const ids = new Set([defaultProfile.id]);
     for (const [index, value] of values.entries()) {

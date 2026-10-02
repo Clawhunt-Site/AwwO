@@ -5,6 +5,7 @@ import { ActionMenu } from './ActionMenu';
 import { api, tenantPath, saasErrorMessage, type CanvasRecord, type Tenant } from './api';
 import { ListPager, usePagedList } from './ListPager';
 import { useSaaSPreferences } from './preferences';
+import { CANVAS_SEARCH_MAX_LENGTH, readCanvasListView, saveCanvasListView } from './canvasListView';
 
 const updatedAt = (canvas: CanvasRecord) => Date.parse(canvas.updatedAt) || 0;
 /** Most recently touched first; canvases touched at the same time keep the server's order. */
@@ -12,17 +13,34 @@ const byRecentUpdate = (items: ReadonlyArray<CanvasRecord>) => [...items].sort((
 
 /** The workspace's canvases, most recently updated first. With `recentLimit`, only that many are
  * shown until the operator expands the full list in place (its pages, rename and delete). Search
- * filters the page already loaded; it never sends a request. */
-export function CanvasList({ tenant, onOpen, recentLimit }: { tenant: Tenant; onOpen: (canvasId: string) => void; recentLimit?: number }) {
+ * matches only the loaded page; paging stays explicit, and clearing a search returns recent mode. */
+type CanvasListProps = { tenant: Tenant; onOpen: (canvasId: string) => void; recentLimit?: number; userId?: string };
+export function CanvasList(props: CanvasListProps) {
+  // A changed identity must never inherit another account's search or in-flight list request.
+  return <ScopedCanvasList key={JSON.stringify([props.userId ?? null, props.tenant.id])} {...props} />;
+}
+
+function ScopedCanvasList({ tenant, onOpen, recentLimit, userId }: CanvasListProps) {
   const { locale, t } = useSaaSPreferences();
   const path = tenantPath(tenant.id, '/canvases');
   const listing = usePagedList<CanvasRecord>(path);
   const readOnly = tenant.role === 'reader' || tenant.status !== 'active';
   const [editing, setEditing] = useState<{ canvas: CanvasRecord; action: 'rename' | 'delete' } | null>(null);
-  const [query, setQuery] = useState('');
-  const [expanded, setExpanded] = useState(false);
+  const [view, setView] = useState(() => readCanvasListView(userId, tenant.id));
+  const { query, expanded } = view;
+  const setQuery = (query: string) => {
+    const bounded = query.slice(0, CANVAS_SEARCH_MAX_LENGTH);
+    setView(value => ({ ...value, query: bounded }));
+    // Clearing a search returns a collapsed list to the actual recent page, not a hidden later page.
+    if (!bounded.trim() && !expanded && listing.pageNumber > 1) listing.refresh();
+  };
+  const setExpanded = (expanded: boolean) => setView(value => ({ ...value, expanded }));
+  const searchInput = useRef<HTMLInputElement>(null);
+  const clearSearch = () => { setQuery(''); searchInput.current?.focus(); };
+  useEffect(() => { saveCanvasListView(userId, tenant.id, view); }, [userId, tenant.id, view]);
   const titleId = useId();
   const listId = useId();
+  const searchStatusId = useId();
   // A page restored from the back/forward cache shows the list as it was when it was left.
   const refresh = useRef(listing.refresh);
   refresh.current = listing.refresh;
@@ -48,7 +66,7 @@ export function CanvasList({ tenant, onOpen, recentLimit }: { tenant: Tenant; on
     if (expanded && listing.pageNumber > 1) listing.refresh();
     setExpanded(!expanded);
   };
-  const searchStatus = !needle || !listing.page ? ''
+  const searchStatus = !listing.page ? '' : !needle ? (morePages ? t('只搜索当前页', 'Search covers this page only') : '')
     : `${matches.length ? t(`找到 ${matches.length} 张画布`, `${matches.length} ${matches.length === 1 ? 'canvas' : 'canvases'} found`)
       : t(`没有名称包含“${query.trim()}”的画布`, `No canvas name contains “${query.trim()}”`)}${morePages ? t('（只搜索当前页）', ' (this page only)') : ''}`;
 
@@ -70,8 +88,10 @@ export function CanvasList({ tenant, onOpen, recentLimit }: { tenant: Tenant; on
         {count && <span className="saas-library-count">{t(`${count} 张画布`, `${count} ${count === '1' ? 'canvas' : 'canvases'}`)}</span>}
       </div>
       <div className="saas-library-meta">
-        {(items.length > 0 || query) && <label className="saas-list-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label={t('按名称搜索画布', 'Search canvases by name')} placeholder={t('搜索画布', 'Search canvases')} value={query} onChange={event => setQuery(event.target.value)} maxLength={100} /></label>}
-        {showingAll && morePages ? <ListPager label={t('画布分页', 'Canvas pages')} page={listing.pageNumber} busy={listing.loading} previous={listing.previous} next={listing.next} refresh={listing.refresh}/> : <button type="button" className="saas-list-refresh" disabled={listing.loading} onClick={listing.refresh}><RefreshCw size={14} aria-hidden="true"/>{t('刷新列表', 'Refresh list')}</button>}
+        {(items.length > 0 || query) && <label className="saas-list-search"><Search size={14} aria-hidden="true" /><input ref={searchInput} type="search" aria-label={t('按名称搜索画布', 'Search canvases by name')} aria-describedby={searchStatus ? searchStatusId : undefined} placeholder={t('搜索画布', 'Search canvases')} value={query} onChange={event => setQuery(event.target.value)} maxLength={CANVAS_SEARCH_MAX_LENGTH}
+          onKeyDown={event => { if (event.key === 'Escape' && query) { event.preventDefault(); clearSearch(); } }} /></label>}
+        {query && <button type="button" className="saas-link" onClick={clearSearch}>{t('清除搜索', 'Clear search')}</button>}
+        {(showingAll || needle) && morePages ? <ListPager label={t('画布分页', 'Canvas pages')} page={listing.pageNumber} busy={listing.loading} previous={listing.previous} next={listing.next} refresh={listing.refresh}/> : <button type="button" className="saas-list-refresh" disabled={listing.loading} onClick={listing.refresh}><RefreshCw size={14} aria-hidden="true"/>{t('刷新列表', 'Refresh list')}</button>}
         {canExpand && <button type="button" className="saas-list-toggle" aria-expanded={expanded} aria-controls={listId} onClick={toggle}>
           {expanded ? <><ChevronUp size={14} aria-hidden="true" />{t('收起', 'Show recent only')}</> : <><ChevronDown size={14} aria-hidden="true" />{listing.next || listing.pageNumber > 1 ? t('查看全部画布', 'View all canvases') : t(`查看全部 ${items.length} 张`, `View all ${items.length}`)}</>}
         </button>}
@@ -79,7 +99,7 @@ export function CanvasList({ tenant, onOpen, recentLimit }: { tenant: Tenant; on
     </div>
     {readOnly && <p className="saas-runtime-note" role="status">{t('只读成员：可以浏览画布、会话和导出副本，不能编辑或运行。', 'Reader: browse canvases and conversations or export a copy. Editing and execution require member access.')}</p>}
     {Boolean(listing.error) && <p role="alert" className="saas-error">{saasErrorMessage(listing.error, locale)}</p>}
-    <p className="saas-list-search-status" role="status">{searchStatus}</p>
+    <p id={searchStatusId} className="saas-list-search-status" role="status">{searchStatus}</p>
     <div id={listId}>
       {listing.loading ? <div className={`saas-canvas-list is-loading${showingAll ? '' : ' is-recent'}`} role="status" aria-label={t('正在加载画布…', 'Loading canvases…')}>{Array.from({ length: showingAll ? 3 : Math.min(limit, 4) }, (_, index) => <div key={index} className="saas-canvas-card saas-canvas-skeleton" aria-hidden="true"><span /><i /><i /></div>)}</div>
         : listing.page && <div data-onboarding="canvas-list" className={`saas-canvas-list${showingAll || needle ? '' : ' is-recent'}`}>{visible.map(card)}{items.length === 0 && <section className="saas-empty-guide">

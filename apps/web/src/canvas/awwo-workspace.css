@@ -163,6 +163,12 @@
 .canvas-run-note-dismiss { flex: none; font-size: 18px; line-height: 1; }
 .canvas-run-note-action:hover, .canvas-run-note-dismiss:hover { background: var(--awwo-hover, #80808020); }
 .canvas-run-note-action:disabled { opacity: .5; cursor: default; }
+.awwo-workspace .awwo-canvas-bar { position: relative; }
+.awwo-workspace .awwo-run-slot .canvas-run-note { top: calc(100% + 8px); right: 16px; max-width: min(420px, calc(100% - 32px)); }
+.canvas-run-note-head { flex-wrap: wrap; }
+.canvas-run-note-action, .canvas-run-note-dismiss { min-height: 36px; }
+.canvas-run-note-head > .canvas-run-note-action { flex-shrink: 0; }
+.canvas-run-note-head > span { min-width: 120px; }
 .canvas-run-note-details { max-height: 240px; overflow-y: auto; white-space: normal; }
 .canvas-run-note-details p { margin: 8px 0; }
 .canvas-run-note-details ul { margin: 4px 0; padding-left: 20px; }

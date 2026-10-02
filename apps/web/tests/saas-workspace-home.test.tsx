@@ -277,3 +277,18 @@ it('keeps an unsent request in this tab, and a page restored from the back/forwa
   expect(box()).not.toHaveAttribute('readonly');
   expect(screen.getByRole('button', { name: '空白画布' })).toBeEnabled();
 });
+
+
+it('quick starters only fill a draft and let the user restore their own words before sending', async () => {
+  const { posts } = server(); const onOpen = vi.fn(); view({ onOpen });
+  fireEvent.change(box(), { target: { value: '我的原始任务' } });
+  const starter = example('weekly-sales-report');
+  fireEvent.click(screen.getByRole('button', { name: `填写示例：${starter.title.zh}` }));
+  expect(box()).toHaveValue(starter.prompt.zh);
+  expect(box()).toHaveFocus();
+  expect(posts).toHaveLength(0); expect(onOpen).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '恢复原输入' }));
+  expect(box()).toHaveValue('我的原始任务');
+  expect(readHomeDraft(draftScope)).toBe('我的原始任务');
+  expect(posts).toHaveLength(0);
+});

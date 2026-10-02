@@ -15,8 +15,9 @@ concurrency:
 
 jobs:
   accounts:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    name: Account and database regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:18.4-bookworm
@@ -31,37 +32,43 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: |
-            apps/web/package-lock.json
-            apps/pi-worker/package-lock.json
-            apps/openai-agents-worker/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install application dependencies
-        run: |
-          npm ci --prefix apps/web
-          npm ci --ignore-scripts --prefix apps/pi-worker
-          npm ci --ignore-scripts --prefix apps/openai-agents-worker
       - name: Account and database regressions
         working-directory: backend
         env:
           AWWO_TEST_DATABASE_URL: postgres://awwo:synthetic-ci-password@127.0.0.1:5432/awwo_test?sslmode=disable
         run: |
-          go test -race -count=1 ./...
+          go test -race -count=1 -timeout=40m ./...
           go vet ./...
+
+  workers:
+    name: Model workers and isolation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            apps/pi-worker/package-lock.json
+            apps/openai-agents-worker/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install model worker dependencies
+        run: |
+          npm ci --ignore-scripts --prefix apps/pi-worker
+          npm ci --ignore-scripts --prefix apps/openai-agents-worker
       - name: Worker isolation and startup regressions
         env:
           AWWO_TEST_WORKSPACE_IMAGE: awwo-workspace:ci
           AWWO_TEST_DOCKER_EXECUTABLE: /usr/bin/docker
+          AWWO_TEST_DOCKER_CONTEXT: default
         run: |
           docker build -f deploy/saas/workspace/Dockerfile -t awwo-workspace:ci .
           npm run typecheck:workspace --prefix apps/openai-agents-worker
@@ -73,15 +80,107 @@ jobs:
         run: |
           python -m pip install -e ./apps/openai-agents-python-worker
           python -m unittest discover -s apps/openai-agents-python-worker -p 'test_*.py'
+
+  web:
+    name: SaaS web regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --prefix apps/web
       - name: Web regressions and production build
         run: |
-          npm run test:saas --prefix apps/web
+          npm run test:saas --prefix apps/web -- --maxWorkers=2
           npm run typecheck:saas --prefix apps/web
           npm run build:saas
+
+  containers:
+    name: Existing production containers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
       - name: Build production containers
         run: |
-          docker build -f deploy/saas/api.Dockerfile -t awwo-api:ci .
+          docker build --build-arg AWWO_REVISION="$GITHUB_SHA" -f deploy/saas/api.Dockerfile -t awwo-api:ci .
           docker build -f deploy/saas/pi.Dockerfile -t awwo-pi:ci .
           docker build -f deploy/saas/openai-agents.Dockerfile -t awwo-openai-agents:ci .
           docker run --rm --network none awwo-openai-agents:ci node --input-type=module -e 'await import("./runner.mjs"); await import("./workspace-runtime.ts"); await import("./workspace-context.ts"); console.log("Agents runtime imports passed")'
           docker build -f deploy/saas/web.Dockerfile -t awwo-web:ci .
+
+  managed-execution:
+    name: OpenMaus Linux amd64 execution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            apps/pi-worker/package-lock.json
+            apps/openai-agents-worker/package-lock.json
+            apps/openmaus-worker/package-lock.json
+      - name: Install locked execution dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          npm ci --ignore-scripts --prefix apps/pi-worker
+          npm ci --ignore-scripts --prefix apps/openai-agents-worker
+          npm ci --ignore-scripts --prefix apps/openmaus-worker
+      - name: Strict types, model protocols and release boundaries
+        run: |
+          npm run typecheck --prefix apps/openmaus-worker
+          npm run check:saas:computer-model
+          node apps/openmaus-worker/node_modules/typescript/bin/tsc -p scripts/tsconfig.saas-release.json
+          npm run test:saas:computer-model
+          node --test scripts/awwo-saas-release.test.ts
+          npm run test:saas:openmaus
+      - name: Build pinned core and real workspace
+        run: |
+          npm run setup --prefix apps/openmaus-worker
+          docker --context default build --platform linux/amd64 -f deploy/saas/workspace/Dockerfile -t awwo-workspace:managed-ci .
+      - name: Real core and Docker approval, question, denial, cancellation, disconnect and budget
+        env:
+          AWWO_OPENMAUS_REAL_TEST: "1"
+          AWWO_TEST_DOCKER_EXECUTABLE: /usr/bin/docker
+          AWWO_TEST_DOCKER_CONTEXT: default
+          AWWO_TEST_WORKSPACE_IMAGE: awwo-workspace:managed-ci
+        run: npm run test:saas:openmaus
+      - name: Production image startup and unavailable-Docker boundary
+        run: |
+          docker --context default build --platform linux/amd64 -f deploy/saas/openmaus.Dockerfile -t awwo-openmaus:ci .
+          node scripts/awwo-openmaus-image-smoke.ts awwo-openmaus:ci
+
+  native-release:
+    name: Build verified native release archive
+    needs: [accounts, workers, web, containers, managed-execution]
+    # Only main can produce deployable release packages. Upload is not deployment.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Build clean-source Linux release with runtime dependencies and workspace image
+        env:
+          VITE_CLAWHUNT_SITE_URL: ${{ vars.AWWO_CLAWHUNT_SITE_URL }}
+        run: node scripts/awwo-saas-release.ts --output .local/saas-release --docker-context default
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awwo-saas-${{ github.sha }}-linux-amd64
+          path: .local/saas-release/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

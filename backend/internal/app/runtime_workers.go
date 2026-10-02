@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	runtimePI           = "pi"
-	runtimeOpenAIAgents = "openai-agents"
+	runtimePI             = "pi"
+	runtimeOpenAIAgents   = "openai-agents"
+	maxRuntimeModels      = 256
+	maxRuntimeHealthBytes = 512 * 1024
 )
 
 type runtimeCatalog map[string]piHealth
@@ -133,8 +135,8 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		return h, errors.New("Runtime is unavailable")
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
-	if err != nil || len(body) > 65536 {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRuntimeHealthBytes+1))
+	if err != nil || len(body) > maxRuntimeHealthBytes {
 		return piHealth{}, errors.New("Runtime provider is not ready")
 	}
 	if a.cfg.UserCredentials {
@@ -177,7 +179,7 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 			return piHealth{}, errors.New("Runtime provider is not ready")
 		}
 	}
-	if len(h.Models) > 128 {
+	if len(h.Models) > maxRuntimeModels {
 		return piHealth{}, errors.New("Runtime model catalog exceeds limit")
 	}
 	// The entitlement belongs to the workspace, never to the worker: a worker that

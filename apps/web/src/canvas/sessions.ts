@@ -85,6 +85,9 @@ export type HistoryState = 'unloaded' | 'loading' | 'loaded' | 'unreadable';
 export interface NodeSession {
   turns: Turn[];
   streaming: boolean;
+  /** When the current stream began (epoch ms); absent while idle. Lives in the store so an
+   *  elapsed readout survives the tile being culled and remounted. */
+  streamingSince?: number;
   /** Raw run status / phase note from the gateway ('' never used; null = nothing to show). */
   status: string | null;
   history: HistoryState;
@@ -229,7 +232,20 @@ export function appendToTurn(nodeId: string, turnId: number, chunk: string): voi
 }
 
 export function setStreaming(nodeId: string, streaming: boolean): void {
-  update(nodeId, (session) => (session.streaming === streaming ? null : { ...session, streaming }));
+  update(nodeId, (session) => (session.streaming === streaming ? null : streaming
+    ? { ...session, streaming, streamingSince: Date.now() }
+    : idleSession(session)));
+}
+
+/** A NEW stream on this node starts now. Each transport calls this when it opens a stream, so a
+ *  stream that supersedes a still-live one restarts the clock instead of inheriting its age. */
+export function beginStreaming(nodeId: string): void {
+  update(nodeId, (session) => ({ ...session, streaming: true, streamingSince: Date.now() }));
+}
+
+function idleSession(session: NodeSession): NodeSession {
+  const { streamingSince: _since, ...idle } = session;
+  return { ...idle, streaming: false };
 }
 
 export function setStatus(nodeId: string, status: string | null): void {

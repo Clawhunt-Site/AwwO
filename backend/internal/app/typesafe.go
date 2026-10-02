@@ -446,7 +446,7 @@ func (a *App) verifyTypeSafeAccess(ctx context.Context, record typeSafeAuditReco
 	if err != nil {
 		return err
 	}
-	valid, err := a.validateClawHuntSession(ctx, record.SessionHash, record.Actor, issuer, subject, grant)
+	valid, err := a.verifyClawHuntSessionNow(ctx, record.SessionHash, record.Actor, issuer, subject, grant)
 	if err != nil {
 		return err
 	}

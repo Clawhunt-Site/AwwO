@@ -52,15 +52,15 @@ it('starts with the model rail collapsed on a desktop stage and remembers expans
   expect(localStorage.getItem(RAIL_MODEL_KEY)).toBe('1');
 });
 
-it('shows configured models first and keeps every brand searchable on request', async () => {
+it('shows configured models first and keeps model search visible in the expanded rail', async () => {
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
   expandModels();
   expect(await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
   expect(screen.queryByText('Codex / OpenAI')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '查看全部 5 个品牌' }));
   expect(screen.getByText('Codex / OpenAI')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: '搜索模型' }));
   const search = screen.getByRole('searchbox', { name: '查找模型' });
+  expect(search).toBeVisible();
   fireEvent.change(search, { target: { value: 'qwen' } });
   expect(screen.getByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
   expect(screen.queryByText('Codex / OpenAI')).toBeNull();

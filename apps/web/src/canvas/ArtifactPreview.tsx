@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type MouseEvent, type Reac
 import { createPortal } from 'react-dom';
 import { Download, File, Maximize2, X } from 'lucide-react';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
+import { sessionFetch } from '../saas/api';
 import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
 import { artifactImageType } from './artifactImage';
@@ -274,7 +275,7 @@ export function StoredArtifactPreview({ reference, title, identity, renderMarkdo
     }, 15_000);
     void (async () => {
       try {
-        const response = await fetch(url, { credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal: controller.signal, headers: { Accept: 'application/octet-stream' } });
+        const response = await sessionFetch(url, { credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal: controller.signal, headers: { Accept: 'application/octet-stream' } });
         if (!stillCurrent()) { await response.body?.cancel(); return; }
         const expected = new URL(url, window.location.origin).href;
         if (!response.ok || response.redirected || (response.url && response.url !== expected)) {

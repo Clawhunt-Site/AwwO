@@ -334,7 +334,10 @@ it.each([
   window.history.replaceState({}, '', `/?tenant=${tenant.id}&canvas=${cloud.id}`);
   render(<SaaSApp />);
   await screen.findByTestId('canvas-tile-brief');
-  if (note) expect(await screen.findByText(new RegExp(note.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), { selector: '.saas-runtime-note' })).toBeVisible();
+  if (note) await waitFor(() => {
+    expect(document.querySelector('.saas-runtime-note')).toBeVisible();
+    expect(document.querySelector('.saas-runtime-note')).toHaveTextContent(note);
+  });
   else expect(screen.queryByText(/Pi execution is not ready/)).toBeNull();
 });
 

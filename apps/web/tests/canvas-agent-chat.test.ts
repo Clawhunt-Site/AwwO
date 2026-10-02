@@ -22,6 +22,10 @@ describe('normalizeFrame', () => {
     expect(normalizeFrame({})).toEqual({ event: 'error', detail: 'unrecognized frame: (none)' });
     expect(normalizeFrame(null)).toEqual({ event: 'error', detail: 'unrecognized frame: (none)' });
   });
+  it('does not accept pre-admission proof from a streamed error after a run could be accepted', () => {
+    expect(normalizeFrame({ event: 'error', detail: 'Lost event stream', code: 'forbidden', admissionRejected: true }))
+      .toEqual({ event: 'error', detail: 'Lost event stream', code: 'forbidden' });
+  });
 });
 
 function sseBody(frames: Array<{ event: string; data: unknown }>): ReadableStream<Uint8Array> {

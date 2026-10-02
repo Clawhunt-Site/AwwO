@@ -5,6 +5,16 @@ import { createSaaSAccountApi } from '../src/saas/accountApi';
 import { listPage } from '../src/saas/listPage';
 
 const identity = { user: { id: 'owner', name: 'Owner', email: 'owner@example.test', platformRole: 'user' }, tenants: ['a', 'b'].map(id => ({ id, name: `Workspace ${id}`, status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 })) };
+it('localizes expired sessions and retries identity instead of caching a rejection', async () => {
+  document.documentElement.lang = 'zh';
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'Sign in required' } }), { status: 401 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(identity)));
+  vi.stubGlobal('fetch', fetcher);
+  const account = createSaaSAccountApi(vi.fn());
+  await expect(account.getSession()).rejects.toThrow('登录已失效');
+  await expect(account.getSession()).resolves.toMatchObject({ user: { id: 'owner' } });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
 const member = (i: number) => ({ id: `m-${i}`, userId: `u-${i}`, name: `Member ${i}`, email: `m${i}@example.test`, role: 'member' });
 const invite = (i: number) => ({ id: `invite-${i}`, role: 'reader', status: 'active', expiresAt: new Date(Date.UTC(2099, 0, i + 1)).toISOString() });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });

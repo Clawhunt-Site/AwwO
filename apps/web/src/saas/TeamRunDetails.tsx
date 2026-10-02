@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { api, SaaSApiError, saasErrorMessage, tenantPath } from './api';
 import type { TeamRunRecord, TeamTurn } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
@@ -107,7 +108,7 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
   const latestOperation = activity?.items.at(-1);
   return <section className="saas-team-run-details" aria-label={t('运行过程', 'Run process')}>
     <button type="button" className="saas-team-run-toggle" aria-expanded={expanded} onClick={() => { setManuallyOpened(!expanded); setOpen(!expanded); }}>
-      <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+      <ChevronRight size={13} aria-hidden="true" className="saas-team-run-chevron" />
       <strong>{project ? t('项目执行', 'Project execution') : turns.length || record?.executionKind === 'team' ? t('团队协作过程', 'Team collaboration') : t('运行过程', 'Run process')}</strong>
       {record && <span>{runReadFailed ? t('上次确认：', 'Last confirmed: ') : ''}{status(record.status)}{turns.length ? ` · ${turns.length} ${t('次成员调用', 'member calls')}` : ''}{error !== null ? t(' · 读取已暂停', ' · Reading paused') : ''}</span>}
     </button>

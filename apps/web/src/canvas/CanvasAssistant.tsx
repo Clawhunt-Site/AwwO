@@ -122,6 +122,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const log = useRef<HTMLDivElement>(null);
   const canSend = !busy && !submitDisabled && Boolean(draft.trim());
   const lastMessage = messages.at(-1);
+  const duplicateLastError = lastMessage?.role === 'assistant' && lastMessage.status === 'error' && lastMessage.content === error;
   useEffect(() => {
     // Scroll only the conversation region, never the surrounding canvas or page.
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
@@ -198,7 +199,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
 
     {(!welcome || messages.length > 0) && <div ref={log} className="awwo-assistant-messages" role="log" aria-label={t('assistant.conversation')} aria-live="polite" aria-relevant="additions text">
       {messages.length ? <ol>
-        {messages.map(message => <li className={`awwo-assistant-message awwo-assistant-message--${message.role}`} key={message.id}>
+        {messages.filter(message => !(duplicateLastError && message === lastMessage)).map(message => <li className={`awwo-assistant-message awwo-assistant-message--${message.role}`} key={message.id}>
           <p role={message.status === 'error' ? 'alert' : undefined}>{message.content}</p>
           {message.status === 'applied' ? <span className="awwo-assistant-message-status" role="status">{t('assistant.applied')}</span>
             : message.status === 'stale' ? <span className="awwo-assistant-message-status is-stale" role="alert">{t('assistant.stale')}</span> : null}

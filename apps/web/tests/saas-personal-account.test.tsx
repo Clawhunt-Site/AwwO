@@ -366,6 +366,73 @@ it("confirms removal, allows cancellation, and retries readback without repeatin
   expect(changed).toHaveBeenCalledWith(catalog);
 });
 
+it('refreshes a saved catalog without sending credentials and waits for server readback', async () => {
+  const connected = { ...catalog, items: [{ id: 'saved', name: 'Work models', provider: 'llmgate', runtime: 'openai-agents', models: ['old-model'], hasKey: true }] };
+  let readback!: (value: Response) => void;
+  const fetcher = vi.fn().mockResolvedValueOnce(response({}))
+    .mockImplementationOnce(() => new Promise<Response>(resolve => { readback = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  function Host() { const [data, setData] = useState(connected); return <ConnectionSettings catalog={data} onChange={setData} onboarding={false} />; }
+  render(<SaaSPreferencesProvider><Host /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  expect(fetcher.mock.calls[0][0]).toBe('/api/v1/auth/connections/saved/refresh');
+  expect(fetcher.mock.calls[0][1].method).toBe('POST');
+  expect(fetcher.mock.calls[0][1].body).toBeUndefined();
+  expect(screen.getByRole('button', { name: 'Syncing…' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Remove connection' })).toBeDisabled();
+  expect(screen.queryByText(/Models synced:/)).toBeNull();
+  readback(response({ ...connected, items: [{ ...connected.items[0], models: ['old-model', 'new-model'] }] }));
+  expect(await screen.findByRole('status')).toHaveTextContent('Models synced: 2 available.');
+  expect(screen.getByText('new-model')).toBeInTheDocument();
+  expect(screen.getByLabelText('API Key')).toHaveValue('');
+});
+
+it('preserves the saved model list when upstream refresh fails and allows retry', async () => {
+  const connected = { ...catalog, items: [{ id: 'saved', name: 'Work models', provider: 'llmgate', runtime: 'openai-agents', models: ['old-model'], hasKey: true }] };
+  const fetcher = vi.fn().mockResolvedValueOnce(response({ error: { code: 'provider_verification_failed', message: 'Provider unavailable' } }, 422));
+  const changed = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  render(<SaaSPreferencesProvider><ConnectionSettings catalog={connected} onChange={changed} onboarding={false} /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }));
+  await screen.findByRole('alert');
+  expect(changed).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('old-model')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Refresh models' })).toBeEnabled();
+});
+
+it('distinguishes a successful refresh from failed catalog readback', async () => {
+  const connected = { ...catalog, items: [{ id: 'saved', name: 'Work models', provider: 'llmgate', runtime: 'openai-agents', models: ['old-model'], hasKey: true }] };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response({})).mockRejectedValueOnce(new TypeError('offline')));
+  render(<SaaSPreferencesProvider><ConnectionSettings catalog={connected} onChange={vi.fn()} onboarding={false} /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Models updated, but the list could not be reloaded. Refresh again.');
+  expect(screen.queryByText(/Models synced:/)).toBeNull();
+});
+
+it('explains when the refreshed connection disappears during readback', async () => {
+  const connected = { ...catalog, items: [{ id: 'saved', name: 'Work models', provider: 'llmgate', runtime: 'openai-agents', models: ['old-model'], hasKey: true }] };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response({})).mockResolvedValueOnce(response(catalog)));
+  function Host() { const [data, setData] = useState(connected); return <ConnectionSettings catalog={data} onChange={setData} onboarding={false} />; }
+  render(<SaaSPreferencesProvider><Host /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('This connection no longer exists. The list is up to date.');
+  expect(screen.queryByText('Work models')).toBeNull();
+  expect(screen.queryByText(/Models synced:/)).toBeNull();
+});
+
+it('does not offer refresh for a disallowed provider but can refresh an allowed empty catalog', () => {
+  const connected = { ...catalog, providers: [providers[0]], items: [
+    { id: 'legacy', name: 'Legacy provider', provider: 'anthropic', runtime: 'pi', models: ['claude-test'], hasKey: true },
+    { id: 'empty', name: 'Allowed provider', provider: 'llmgate', runtime: 'openai-agents', models: [], hasKey: true },
+  ] };
+  render(<SaaSPreferencesProvider><ConnectionSettings catalog={connected} onChange={vi.fn()} onboarding={false} /></SaaSPreferencesProvider>);
+  const rows = screen.getAllByRole('article');
+  expect(within(rows[0]).getByRole('button', { name: 'Refresh models' })).toBeDisabled();
+  expect(within(rows[1]).getByRole('button', { name: 'Refresh models' })).toBeEnabled();
+});
+
 it('clears a connection success notice after that connection is removed', async () => {
   const connection = { id: 'synthetic', name: 'Temporary test', provider: 'llmgate', runtime: 'openai-agents', models: ['test-model'], hasKey: true };
   const fetch = vi.fn().mockResolvedValueOnce(response({ id: 'synthetic' }))
