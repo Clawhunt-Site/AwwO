@@ -684,6 +684,18 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		// seed, so the allowance is withdrawn here as well, before the prompt is hashed and stored.
 		prompt = withdrawPromptAllowance(prompt)
 	}
+	// Append quoted file bytes after the structured-format rewrite. Rewriting
+	// server prose must never rewrite a matching sentence inside an attachment.
+	if snap.Workspace == nil && turn == nil {
+		var attached bool
+		prompt, attached, e = graphTextFilePrompt(ctx, tx, tid, gid, nid, prompt)
+		if e != nil {
+			return e
+		}
+		if attached {
+			snap.OutputPolicy += "\n\n" + graphFileDataPolicy
+		}
+	}
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
 	framedInstructions := knowledgeSystemPrompt(taskFrameSystemPrompt(instructions, snap.TaskFrame), snap.Knowledge)
 	framedPrompt := knowledgeUserPrompt(prompt, snap.Knowledge)

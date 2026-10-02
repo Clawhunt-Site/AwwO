@@ -507,84 +507,21 @@ func (a *App) requireWorkspacePersonalConnection(ctx context.Context, tx pgx.Tx,
 	return errors.New("personal_model_unavailable")
 }
 
-// Read only artifacts selected by the frozen graph's incoming file edges. Names,
-// tenant, canvas, producer node and field must all agree with the durable artifact.
+// Workspace and text runtimes resolve the same frozen, provenance-checked files.
 func materializeWorkspaceInputs(ctx context.Context, tx pgx.Tx, tid, gid, nid string) ([]workspaceFile, error) {
-	var cid string
-	var raw []byte
-	if err := tx.QueryRow(ctx, "SELECT canvas_id,document FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, gid).Scan(&cid, &raw); err != nil {
+	files, err := readGraphInputFiles(ctx, tx, tid, gid, nid, maxWorkspaceFileBytes, maxWorkspaceInputBytes)
+	if err != nil {
 		return nil, err
 	}
-	var d graphDocument
-	if json.Unmarshal(raw, &d) != nil {
-		return nil, errors.New("invalid_workspace_graph")
-	}
-	nodes := map[string]graphNode{}
-	for _, n := range d.Nodes {
-		nodes[n.ID] = n
-	}
-	inputs := []workspaceFile{}
-	total := 0
-	seen := map[string]bool{}
-	for _, edge := range d.Edges {
-		if edge.ToNode != nid || edge.DataType != "file" {
-			continue
-		}
-		src, ok := nodes[edge.FromNode]
-		if !ok {
-			return nil, errors.New("invalid_workspace_graph")
-		}
-		var output, state string
-		if err := tx.QueryRow(ctx, "SELECT state,output FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, src.ID).Scan(&state, &output); err != nil {
-			return nil, err
-		}
-		if state != "done" && state != "cached" {
-			return nil, errors.New("workspace_input_not_ready")
-		}
-		vals, err := graphOutput(src, output)
-		if err != nil {
-			return nil, err
-		}
-		field := strings.TrimPrefix(edge.FromPort, "out:")
-		ref := vals[field]
-		if strings.TrimSpace(ref) == "" && optionalWorkspaceFile(src, field, false) && optionalWorkspaceFile(nodes[nid], strings.TrimPrefix(edge.ToPort, "in:"), true) {
-			continue
-		}
-		if !strings.HasPrefix(ref, artifactRefPrefix) || field == workspaceSnapshotField {
-			return nil, errors.New("workspace_input_not_stored")
-		}
-		id := strings.TrimPrefix(ref, artifactRefPrefix)
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		if len(inputs) >= 8 {
-			return nil, errors.New("workspace_input_limit")
-		}
-		var name, hash string
-		var data []byte
-		err = tx.QueryRow(ctx, "SELECT name,content,sha256 FROM artifacts WHERE tenant_id=$1 AND canvas_id=$2 AND id=$3 AND node_id=$4 AND field_id=$5 AND size<=$6", tid, cid, id, src.ID, field, maxWorkspaceFileBytes).Scan(&name, &data, &hash)
-		if err != nil {
-			return nil, errors.New("workspace_input_unavailable")
-		}
-		if _, err = artifactName(name); err != nil {
-			return nil, err
-		}
-		display := name
+	inputs := make([]workspaceFile, 0, len(files))
+	for _, file := range files {
+		display := file.Name
 		for len(display) > maxArtifactNameLen-13 {
 			_, width := utf8.DecodeLastRuneInString(display)
 			display = display[:len(display)-width]
 		}
-		f := encodedWorkspaceFile(tokenHash(src.ID + "\x00" + field)[:12]+"-"+display, data)
-		if f.SHA256 != hash {
-			return nil, errors.New("workspace_input_hash_mismatch")
-		}
-		f.SourceNodeID = src.ID
-		f.FieldID = field
-		total += len(data)
-		if total > maxWorkspaceInputBytes {
-			return nil, errors.New("workspace_input_limit")
-		}
+		f := encodedWorkspaceFile(tokenHash(file.SourceNodeID + "\x00" + file.FieldID)[:12]+"-"+display, file.Content)
+		f.SourceNodeID, f.FieldID = file.SourceNodeID, file.FieldID
 		inputs = append(inputs, f)
 	}
 	return inputs, nil

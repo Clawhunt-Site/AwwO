@@ -259,7 +259,8 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 }
 
 // A stored file deliverable is referenced by this prefix instead of inline content, so a
-// downstream node and the browser both receive a retrievable handle rather than a whole payload.
+// browser and saved outputs retain its identity. Graph admission resolves selected file edges
+// into scoped workspace files or complete bounded text attachments for downstream execution.
 const artifactRefPrefix = "awwo-file:"
 
 // Bounds on model-produced files. The runtime is a text model, so a deliverable is text (code,
