@@ -60,9 +60,10 @@ export function clawHuntAccountURL(value?: string): string | null {
   return site ? new URL('/account', site.origin).href : null;
 }
 
-export function clawHuntWaitlistURL(value?: string): string | null {
+/** The main-site page where a signed-in account redeems an AwwO invite code and continues in. */
+export function clawHuntRedeemURL(value?: string): string | null {
   const site = siteURL(value);
-  return site ? new URL('/awwo', site.origin).href : null;
+  return site ? new URL('/awwo?from=signin', site.origin).href : null;
 }
 
 /** Only the main site's dedicated sign-out route may receive a one-time ticket. */

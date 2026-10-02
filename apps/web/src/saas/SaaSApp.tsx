@@ -29,7 +29,7 @@ import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHando
 import { ActionMenu } from './ActionMenu';
 import { AppearanceScope } from './SaaSAppearance';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink } from './SaaSOnboarding';
-import { clearSSOReturnURL, clawHuntAccountURL, clawHuntStartURL, clawHuntWaitlistURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
+import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
 const workspaceURL = (tenant?: string, canvas?: string) => {
@@ -126,7 +126,7 @@ function useAuthOptions() {
   return { options, optionsError: error, retryOptions: () => setRevision(value => value + 1) };
 }
 const ssoFailureCopy: Record<SSOFailureReason, [string, string]> = {
-  waitlisted: ['你的 ClawHunt 账号仍在 AwwO 轮候名单中。请返回主站查看申请状态。', 'Your ClawHunt account is still on the AwwO waitlist. Return to the main site to check your application.'],
+  waitlisted: ['这个 ClawHunt 账号还未开通 AwwO。使用邀请码兑换后即可直接进入；没有邀请码也可以在兑换页加入候补名单。', "This ClawHunt account doesn't have AwwO access yet. Redeem an invite code to enter right away, or join the waitlist on the redemption page."],
   expired: ['登录请求已过期。请重新使用 ClawHunt 账号继续。', 'The sign-in request expired. Continue with ClawHunt again.'],
   unavailable: ['暂时无法完成统一登录。请稍后重试。', 'Unified sign-in is temporarily unavailable. Please try again.'],
   conflict: ['此账号关联存在冲突，尚未访问任何 AwwO 工作区。请联系管理员处理。', 'This account has a linking conflict. No AwwO workspace was opened. Contact an administrator.'],
@@ -135,10 +135,10 @@ const ssoFailureCopy: Record<SSOFailureReason, [string, string]> = {
 function SSOFailure({ reason, signedIn = false }: { reason: SSOFailureReason; signedIn?: boolean }) {
   const { t, locale } = useSaaSPreferences();
   const { options } = useAuthOptions();
-  const waitlistURL = clawHuntWaitlistURL(options?.clawhuntSiteURL);
+  const redeemURL = clawHuntRedeemURL(options?.clawhuntSiteURL);
   return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('账号连接未完成', 'Account connection not completed')}</h1></div>
-    <section className="saas-card"><h2>{t('请检查登录状态', 'Check your sign-in')}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
-      {reason === 'waitlisted' && waitlistURL && <a className="saas-primary saas-sso-action" href={waitlistURL}>{t('查看 AwwO 轮候', 'View the AwwO waitlist')}</a>}
+    <section className="saas-card"><h2>{reason === 'waitlisted' ? t('用邀请码开通 AwwO', 'Unlock AwwO with an invite code') : t('请检查登录状态', 'Check your sign-in')}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
+      {reason === 'waitlisted' && redeemURL && <a className="saas-primary saas-sso-action" href={redeemURL}>{t('输入邀请码进入 AwwO', 'Enter your invite code')}</a>}
       {reason !== 'waitlisted' && <a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('重新使用 ClawHunt 账号继续', 'Continue with ClawHunt again')}</a>}
       <a href="/">{signedIn ? t('返回工作区', 'Back to workspace') : t('返回登录', 'Back to sign in')}</a>
     </section></main>;
@@ -229,7 +229,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
     : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
-    : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a></section>}
+    : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a><small>{t('还没开通 AwwO？登录后输入邀请码即可进入。', 'No access yet? Redeem your invite code right after signing in.')}</small></section>}
     {options.localAuth === true && <form className="saas-card" onSubmit={async event => {
       event.preventDefault(); if (busy) return; setBusy(true); setError(null);
       const values = Object.fromEntries(new FormData(event.currentTarget));

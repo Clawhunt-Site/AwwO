@@ -6,6 +6,8 @@ AwwO can use ClawHunt as its identity issuer. This integration requires a compat
 
 An active, approved ClawHunt account returns to AwwO with a short-lived authorization code. A first-time user receives a workspace and the existing onboarding guide. Personal execution credentials remain a separate user configuration step.
 
+Approval itself is invite-code redemption on the issuer. A signed-in account without approval is sent by the issuer's authorize endpoint to its hosted redemption page (`/awwo?from=signin`); entering a valid code grants approval there and continues into AwwO through a fresh sign-in. Only ineligible accounts — and every account while that hosted page is disabled — return to AwwO with the `waitlisted` callback error, and AwwO's own screen then links to the same redemption page.
+
 If the main-site email matches an existing AwwO account, the user must prove ownership with the original AwwO password once. The stable issuer/subject then maps to the original user ID, retaining workspaces, canvas history and encrypted connections. Matching contact information alone never merges accounts or grants access. A failed password proof consumes the attempt; the user starts a new sign-in flow.
 
 Unified mode directs profile/password management to ClawHunt and uses invitation links for new workspace members. Direct membership grants by contact email are disabled. The issuer must explicitly approve access; registration or waitlist enrollment alone is insufficient. Existing memberships and workspace roles remain unchanged.

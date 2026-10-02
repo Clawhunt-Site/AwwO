@@ -57,16 +57,17 @@ it('routes even a legacy AwwO reset link to the main-site account under unified 
   await waitFor(() => expect(location.search).toBe(''));
 });
 
-it('shows the waitlist result in both languages, clears callback parameters and never signs in', async () => {
+it('offers invite-code redemption in both languages on the waitlisted result, clears callback parameters and never signs in', async () => {
   history.replaceState(null, '', `/?sso=error&reason=waitlisted&invite=${invite}`);
   const fetch = vi.fn(async (url: string) => url.endsWith('/auth/me') ? unauthorized() : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' }));
   vi.stubGlobal('fetch', fetch);
   render(<SaaSApp />);
-  expect(await screen.findByRole('alert')).toHaveTextContent('轮候名单');
-  expect(screen.getByRole('link', { name: '查看 AwwO 轮候' })).toHaveAttribute('href', 'https://clawhunt.example/awwo');
+  expect(await screen.findByRole('alert')).toHaveTextContent('邀请码');
+  expect(screen.getByRole('link', { name: '输入邀请码进入 AwwO' })).toHaveAttribute('href', 'https://clawhunt.example/awwo?from=signin');
   await waitFor(() => expect(location.search).toBe(`?invite=${invite}`));
   fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));
-  expect(screen.getByRole('alert')).toHaveTextContent('waitlist');
+  expect(screen.getByRole('alert')).toHaveTextContent('invite code');
+  expect(screen.getByRole('link', { name: 'Enter your invite code' })).toHaveAttribute('href', 'https://clawhunt.example/awwo?from=signin');
   expect(fetch.mock.calls.some(([url]) => url.endsWith('/auth/login') || url.endsWith('/auth/register'))).toBe(false);
 });
 
