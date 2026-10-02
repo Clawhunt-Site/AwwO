@@ -1,8 +1,9 @@
 import { sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import type { canvasStorage } from '../canvas/canvasStorage';
+import { CANVAS_BASELINE_KEY, compressedCanvasBaseline, isCanvasStorageQuotaError, matchesCompressedCanvasBaseline } from './canvasBaselineCompression';
+export { CANVAS_BASELINE_KEY, isCanvasStorageQuotaError } from './canvasBaselineCompression';
 
 export const CANVAS_DRAFT_PREFIX = 'awwo.cloud.draft.v1:';
-export const CANVAS_BASELINE_KEY = 'awwo.cloud.baseline.v1';
 export const CANVAS_KEPT_DRAFTS_KEY = 'awwo.cloud.kept-drafts.v1';
 type ScopedStorage = ReturnType<typeof canvasStorage>;
 export type CanvasDraft = {
@@ -58,7 +59,8 @@ export function rememberCanvasBaseline(storage: ScopedStorage, version: number, 
   let previousVersion = 0;
   try { previousVersion = JSON.parse(storage.getItem(CANVAS_BASELINE_KEY) || '{}').version || 0; } catch { /* Replace a corrupt clean marker, never draft data. */ }
   if (previousVersion > version) return; // A late response cannot roll a newer acknowledgement backwards.
-  const baseline = JSON.stringify({ version, document: canonicalCanvasDocumentJSON(document) });
+  const baseline = compressedCanvasBaseline(version, canonicalCanvasDocumentJSON(document));
+  if (baseline === null) return; // Oversized optional proof; the acknowledged cloud document still exists.
   try { storage.setItem(CANVAS_BASELINE_KEY, baseline); }
   catch (error) {
     // This is only a proof cache. Losing it may prompt recovery, but cannot lose edits
@@ -69,8 +71,12 @@ export function rememberCanvasBaseline(storage: ScopedStorage, version: number, 
 
 export function isKnownSyncedCache(storage: ScopedStorage, document: CanvasDocument): boolean {
   try {
+    const stored = JSON.parse(storage.getItem(CANVAS_BASELINE_KEY) || '{}');
+    if (stored.encoding !== undefined || stored.migrated !== undefined) {
+      return matchesCompressedCanvasBaseline(stored, canonicalCanvasDocumentJSON(document));
+    }
     // Existing clean markers used insertion order, so normalize them while reading too.
-    const baseline = JSON.parse(JSON.parse(storage.getItem(CANVAS_BASELINE_KEY) || '{}').document);
+    const baseline = JSON.parse(stored.document);
     if (baseline?.version !== 2 || !Array.isArray(baseline.nodes) || !Array.isArray(baseline.edges)) return false;
     return canonicalCanvasDocumentJSON(baseline) === canonicalCanvasDocumentJSON(document);
   }
@@ -110,13 +116,6 @@ export function readCanvasDrafts(storage: ScopedStorage): SavedCanvasDraft[] {
 export function removeCanvasDraft(storage: ScopedStorage, saved: SavedCanvasDraft): boolean {
   if (storage.getItem(saved.key) !== saved.raw) return false;
   storage.removeItem(saved.key); return true;
-}
-
-export function isCanvasStorageQuotaError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const value = error as { name?: unknown; code?: unknown };
-  return value.name === 'QuotaExceededError' || value.name === 'NS_ERROR_DOM_QUOTA_REACHED'
-    || value.code === 22 || value.code === 1014;
 }
 
 export function acknowledgeCanvasDraft(storage: ScopedStorage, sent: CanvasDraft, savedVersion: number): void {
