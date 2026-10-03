@@ -1,6 +1,6 @@
 # AwwO 通过 Amazon Bedrock 提供模型
 
-状态：实现与本地验收完成（2026-10-03），尚未部署。代码推送、生产 IAM 变更与服务部署分别授权、分别验收，不能由本文件推定。
+状态：2026-10-03 已在生产启用：内置目录 `builtin`（23 个已核验模型），三个 worker 都提供；凭证来自 AwwO 专用的 EC2 实例角色（只允许这 23 个区域内基础模型），实例凭证只对三个 worker 开放。跨区域推理（Claude、闭源 GPT 等其余 27 个）尚未授权。
 
 运营方在自己的 AWS 账号里调用 Bedrock，AwwO 的模型架子因此可以列出 Claude、GPT、Grok、Kimi、DeepSeek、Qwen、GLM、MiniMax、Mistral、Llama、Nova、Gemma、Nemotron 等约 50 个热门模型。LLM Gate 保持不变：Bedrock 上没有的模型（例如 Gemini）继续由 Gate 提供，个人连接仍只允许 Gate。
 
@@ -86,7 +86,7 @@ python scripts/bedrock-catalog-check.py --region us-east-1 --profile <aws-profil
 
 ## 凭证与 IAM（运营方选择：EC2 实例角色）
 
-当前实例配置文件 `dongfeng-demo-ssm` 只有 `AmazonSSMManagedInstanceCore`，没有任何 Bedrock 权限；名字显示它可能被其他实例共用，建议为 AwwO 单独建角色。最小策略（把账号与区域换成实际值）：
+2026-10-03 起，生产实例改用 AwwO 专用的实例配置文件 `awwo-saas-instance`（原来的 `dongfeng-demo-ssm` 被多台实例共用，不再使用）：`AmazonSSMManagedInstanceCore` 加一条内联策略，只允许对已核验的 23 个 us-east-1 基础模型调用 `bedrock:InvokeModel` 与 `InvokeModelWithResponseStream`。开放跨区域推理时需要的完整策略（把账号与区域换成实际值）：
 
 ```json
 {
