@@ -120,8 +120,8 @@ func nodePort(n graphNode, id string, input bool) (string, bool) {
 		return "image", true
 	}
 	if !input && id == "result" {
-		if n.AgentKind == "image" {
-			return "image", true
+		if n.AgentKind == "image" || n.AgentKind == "video" {
+			return n.AgentKind, true
 		}
 		return "text", true
 	}

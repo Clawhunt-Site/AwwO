@@ -329,7 +329,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if e = tx.QueryRow(r.Context(), "SELECT count(*) FROM model_invocations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'", tid).Scan(&today); e != nil {
+	if e = tx.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM model_invocations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')", tid).Scan(&today); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -337,8 +337,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
 		return
 	}
-	var model, instructions, kind, runtime, effort, agentID string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind IN ('planner','knowledge','computer') OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID)
+	var model, instructions, kind, runtime, effort, agentID, engine string
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id,a.engine FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind IN ('planner','knowledge','computer') OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID, &engine)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -366,6 +366,10 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		// Internal service sessions cannot inherit a user-authored node that happens
 		// to reuse the reserved node id, persona, team, or task frame.
 		document, nodeID = []byte(`{}`), ""
+	} else if engine == agentEngineMedia {
+		// Image and video nodes run through the media provider, not a model worker.
+		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, model, entitlement)
+		return
 	}
 	team, e := savedNodeTeam(document, nodeID)
 	if e != nil {
@@ -489,6 +493,14 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, v)
 }
 func (a *App) dispatch(tid, id, sid, prompt, instructions, kind string, budget, overhead int, parents ...context.Context) {
+	a.dispatchFor(a.cfg.RunTimeout, tid, id, kind, func(ctx context.Context) {
+		a.execute(ctx, tid, id, sid, prompt, instructions, kind, budget, overhead)
+	}, parents...)
+}
+
+// dispatchFor runs one admitted run under its own deadline. A media run waiting on a provider task
+// when the API shuts down is left running (see leaveForResume) so the next start resumes it.
+func (a *App) dispatchFor(timeout time.Duration, tid, id, kind string, run func(context.Context), parents ...context.Context) {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
@@ -499,7 +511,7 @@ func (a *App) dispatch(tid, id, sid, prompt, instructions, kind string, budget, 
 		parent = parents[0]
 	}
 	traceCtx, endTrace := a.startAsyncTrace(parent, "awwo.run.execute", kind, "unknown")
-	ctx, cancel := context.WithTimeout(traceCtx, a.cfg.RunTimeout)
+	ctx, cancel := context.WithTimeout(traceCtx, timeout)
 	a.running[id] = cancel
 	a.tasks.Add(1)
 	a.mu.Unlock()
@@ -514,7 +526,10 @@ func (a *App) dispatch(tid, id, sid, prompt, instructions, kind string, budget, 
 		}()
 		defer cancel()
 		defer func() { a.mu.Lock(); delete(a.running, id); a.mu.Unlock() }()
-		a.execute(ctx, tid, id, sid, prompt, instructions, kind, budget, overhead)
+		run(ctx)
+		if a.resumesAfterRestart(id) {
+			return
+		}
 		// Every accepted child must become terminal even if execution returned
 		// before provider admission or after a failed persistence operation.
 		a.finish(tid, id, "interrupted", "", "execution_interrupted")
@@ -561,6 +576,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	// would leave that half unenforced for exactly the snapshot it is meant to catch.
 	if !structuredContractConsistent(snapshot) {
 		a.finish(tid, id, "failed", "", "snapshot_invalid")
+		return
+	}
+	if snapshot.Media != nil {
+		a.executeMedia(ctx, tid, id, sid, prompt, snapshot)
 		return
 	}
 	if snapshot.Team != nil {

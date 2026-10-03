@@ -62,6 +62,8 @@ type Config struct {
 	NewWorkspaceModels     modelEntitlement
 	NewWorkspaceRunsPerDay int
 	MaxOwnedWorkspaces     int
+	// Image and video generation through RunningHub (media_config.go); off unless configured.
+	mediaSettings
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -72,6 +74,9 @@ func ConfigFromEnv() (Config, error) {
 		return c, err
 	}
 	if err := c.typeSafeFromEnv(); err != nil {
+		return c, err
+	}
+	if err := c.mediaFromEnv(); err != nil {
 		return c, err
 	}
 	c.UserCredentials = env("AWWO_CREDENTIAL_MODE", "operator") == "user"
@@ -177,10 +182,16 @@ func (c Config) Validate() error {
 	if err := validateTypeSafeConfig(c); err != nil {
 		return err
 	}
+	if err := validateMediaConfig(c); err != nil {
+		return err
+	}
 	if err := c.validateClawHunt(); err != nil {
 		return err
 	}
 	if err := c.validateWorkspaceDefaults(); err != nil {
+		return err
+	}
+	if err := validateMediaExposure(c); err != nil {
 		return err
 	}
 	if (c.UserCredentials || len(c.CredentialKey) > 0) && len(c.CredentialKey) != 32 {

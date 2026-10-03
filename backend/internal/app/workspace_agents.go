@@ -42,7 +42,7 @@ func resolveWorkspaceAgent(ctx context.Context, tx pgx.Tx, tid string, raw json.
 		return nil, nil, invalidSetup("An existing workspace Agent cannot be replaced by an inline team")
 	}
 	var name, runtime, model, effort, instructions string
-	err = tx.QueryRow(ctx, "SELECT name,runtime,model,effort,instructions FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal FOR SHARE", tid, ref.AgentID).Scan(&name, &runtime, &model, &effort, &instructions)
+	err = tx.QueryRow(ctx, "SELECT name,runtime,model,effort,instructions FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' FOR SHARE", tid, ref.AgentID).Scan(&name, &runtime, &model, &effort, &instructions)
 	if noRows(err) {
 		return nil, nil, missingSetupReference()
 	}

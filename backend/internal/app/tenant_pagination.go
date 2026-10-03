@@ -21,7 +21,7 @@ func (a *App) tenantList(w http.ResponseWriter, r *http.Request, kind string) {
 	s := map[string]tenantPageSource{
 		"members":  {"memberships m JOIN users u ON u.id=m.user_id", "jsonb_build_object('id',u.id,'userId',u.id,'email',u.email,'name',u.name,'role',m.role)", "m.tenant_id", "m.created_at", "m.user_id", "", nil},
 		"canvases": {"canvases", canvasJSON, "tenant_id", "created_at", "id", "", nil},
-		"agents":   {"agents", agentJSON, "tenant_id", "created_at", "id", "NOT internal", nil},
+		"agents":   {"agents", agentJSON, "tenant_id", "created_at", "id", "NOT internal AND engine='worker'", nil},
 		"sessions": {"node_sessions", sessionJSON, "tenant_id", "created_at", "id", "kind='node'", []string{"canvasId", "sessionId"}},
 		"runs":     {"runs", runJSON, "tenant_id", "created_at", "id", "", []string{"sessionId", "operationId", "active"}},
 		"invites":  {"tenant_invites i JOIN tenants t ON t.id=i.tenant_id LEFT JOIN memberships m ON m.tenant_id=i.tenant_id AND m.user_id=i.created_by", "jsonb_build_object('id',i.id,'role',i.role,'createdBy',i.created_by,'createdAt',i.created_at,'expiresAt',i.expires_at,'status'," + inviteStatusSQL + ",'acceptedBy',i.accepted_by,'acceptedAt',i.accepted_at,'revokedAt',i.revoked_at)", "i.tenant_id", "i.created_at", "i.id", "", nil},

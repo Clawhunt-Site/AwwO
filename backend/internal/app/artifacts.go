@@ -159,13 +159,20 @@ func (a *App) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
 	var name string
 	var content []byte
-	e := a.db.QueryRow(r.Context(), "SELECT name,content FROM artifacts WHERE tenant_id=$1 AND id=$2 AND field_id<>'__workspace_snapshot'", tid, id).Scan(&name, &content)
+	var storage *string
+	var size int64
+	e := a.db.QueryRow(r.Context(), "SELECT name,content,storage_path,size FROM artifacts WHERE tenant_id=$1 AND id=$2 AND field_id<>'__workspace_snapshot'", tid, id).Scan(&name, &content, &storage, &size)
 	if noRows(e) {
 		fail(w, 404, "not_found", "File not found")
 		return
 	}
 	if e != nil {
 		a.dbError(w, e)
+		return
+	}
+	if storage != nil {
+		// A generated image or video is kept on disk, not in the row.
+		a.downloadStoredMedia(w, r, tid, name, *storage, size)
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")

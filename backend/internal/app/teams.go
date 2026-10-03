@@ -39,6 +39,7 @@ type executionSnapshot struct {
 	Workspace *workspacePlan    `json:"workspace,omitempty"`
 	Knowledge *knowledgeContext `json:"knowledge,omitempty"`
 	Computer  *computerPlan     `json:"computer,omitempty"`
+	Media     *mediaPlan        `json:"media,omitempty"`
 
 	Runtime          string             `json:"runtime,omitempty"`
 	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`
@@ -296,7 +297,9 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		}
 		var active, today int
 		if e == nil {
-			e = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='running'),count(*) FILTER(WHERE created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') FROM model_invocations WHERE tenant_id=$1`, tid).Scan(&active, &today)
+			// Image and video generations spend the same daily run quota.
+			e = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='running'),count(*) FILTER(WHERE created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+				+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') FROM model_invocations WHERE tenant_id=$1`, tid).Scan(&active, &today)
 		}
 		if e == nil && today >= daily {
 			e = errInvocationQuota

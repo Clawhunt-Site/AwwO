@@ -143,7 +143,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		var selection struct{ Runtime, Model, Effort, Persona string }
+		var selection struct{ Runtime, Model, Effort, Persona, AgentKind string }
 		if json.Unmarshal(resolved, &selection) != nil {
 			fail(w, 400, "invalid_node_setup", "Invalid node configuration")
 			return
@@ -158,7 +158,17 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "invalid_node_setup", err.Error())
 			return
 		}
-		if _, err = a.runtimeSnapshot(r.Context(), entitlement, catalog, selection.Runtime, selection.Model, selection.Effort, selection.Persona, team); err != nil {
+		// With media generation off, an image or video node is refused exactly as before it existed.
+		if mediaAgentKind(selection.AgentKind) && a.cfg.mediaConfigured() {
+			if selectedAgent != nil {
+				fail(w, 400, "invalid_node_setup", "Image and video nodes cannot use a workspace Agent")
+				return
+			}
+			if err = a.mediaSetupAllowed(selection.AgentKind, selection.Model, entitlement); err != nil {
+				fail(w, 400, "invalid_node_setup", err.(setupError).message)
+				return
+			}
+		} else if _, err = a.runtimeSnapshot(r.Context(), entitlement, catalog, selection.Runtime, selection.Model, selection.Effort, selection.Persona, team); err != nil {
 			var input setupError
 			if errors.As(err, &input) {
 				if input.code == "personal_engine_required" || (a.cfg.UserCredentials && input.code == "model_unavailable") {
@@ -245,7 +255,7 @@ func setupScope(nodes []json.RawMessage, scope []string) (map[int]bool, error) {
 	return selected, nil
 }
 
-func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguration, error) {
+func setupConfig(raw json.RawMessage, catalog runtimeCatalog, media bool) (setupConfiguration, error) {
 	var n struct{ ID, Title, Runtime, Model, Persona, AgentKind, Effort string }
 	if json.Unmarshal(raw, &n) != nil {
 		return setupConfiguration{}, invalidSetup("Node configuration contains invalid field types")
@@ -255,6 +265,9 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguratio
 	}
 	if n.AgentKind == "" {
 		n.AgentKind = "llm"
+	}
+	if media && mediaAgentKind(n.AgentKind) {
+		return mediaSetupConfig(raw, n.ID, n.Title, n.Runtime, n.AgentKind, n.Model)
 	}
 	if !validRuntime(n.Runtime) || (n.AgentKind != "llm" && n.AgentKind != "coding") || !validEffortLevel(n.Effort) {
 		return setupConfiguration{}, invalidSetup("Only supported runtime text/coding nodes with a well-formed effort setting are supported")
@@ -297,7 +310,7 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog) (setupConfiguratio
 }
 
 func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, raw json.RawMessage, catalog runtimeCatalog, selected *setupBinding) (json.RawMessage, error) {
-	config, err := setupConfig(raw, catalog)
+	config, err := setupConfig(raw, catalog, a.cfg.mediaConfigured())
 	if err != nil {
 		return nil, err
 	}
@@ -317,9 +330,9 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 			return nil, missingSetupReference()
 		}
 	}
-	oldConfig := setupConfiguration{Runtime: "pi"}
+	oldConfig, oldEngine := setupConfiguration{Runtime: "pi"}, agentEngineWorker
 	if old != nil {
-		if err = tx.QueryRow(ctx, "SELECT name,model,instructions,runtime,effort FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, old.AgentID).Scan(&oldConfig.Name, &oldConfig.Model, &oldConfig.Persona, &oldConfig.Runtime, &oldConfig.Effort); noRows(err) {
+		if err = tx.QueryRow(ctx, "SELECT name,model,instructions,runtime,effort,engine FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, old.AgentID).Scan(&oldConfig.Name, &oldConfig.Model, &oldConfig.Persona, &oldConfig.Runtime, &oldConfig.Effort, &oldEngine); noRows(err) {
 			return nil, missingSetupReference()
 		} else if err != nil {
 			return nil, err
@@ -350,7 +363,7 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		return nil, invalidSetup("Active thread and node conversation must agree before initialization")
 	}
 	configRaw, _ := json.Marshal(config)
-	changed := old != nil && (oldConfig.Runtime != config.Runtime || oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Effort != config.Effort || oldConfig.Persona != config.Persona)
+	changed := old != nil && (oldConfig.Runtime != config.Runtime || oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Effort != config.Effort || oldConfig.Persona != config.Persona || oldEngine != config.engine())
 	if selected != nil && old != nil && selected.AgentID != old.AgentID {
 		changed = true
 	}
@@ -366,7 +379,7 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		binding = selected
 	} else if old == nil || changed {
 		binding = &setupBinding{CompanyID: tid, AgentID: randomID(), AgentName: config.Name}
-		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions,runtime,effort) VALUES($1,$2,$3,$4,$5,$6,$7)", binding.AgentID, tid, config.Name, config.Model, config.Persona, config.Runtime, config.Effort); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions,runtime,effort,engine) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", binding.AgentID, tid, config.Name, config.Model, config.Persona, config.Runtime, config.Effort, config.engine()); err != nil {
 			return nil, err
 		}
 	}

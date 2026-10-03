@@ -54,6 +54,11 @@ type App struct {
 	capabilityNotes       sync.Map
 	capabilityNoteCount   atomic.Int64
 	capabilityNotesCapped atomic.Bool
+	// media is the RunningHub client, built on first use when media generation is configured;
+	// resumable holds media runs left running at shutdown for the next start to resume.
+	media         *runningHub
+	resumable     map[string]bool
+	mediaReserved int64
 }
 type rateEntry struct {
 	start time.Time
@@ -97,7 +102,13 @@ func (a *App) Start(ctx context.Context) error {
 		return e
 	}
 	defer tx.Rollback(ctx)
-	rows, e := tx.Query(ctx, "UPDATE runs SET status='interrupted',error='API restarted before completion',updated_at=now() WHERE status IN ('queued','running') RETURNING tenant_id,id")
+	resume := []resumableMedia{}
+	if a.cfg.mediaConfigured() {
+		if resume, e = resumableMediaRuns(ctx, tx); e != nil {
+			return e
+		}
+	}
+	rows, e := tx.Query(ctx, "UPDATE runs SET status='interrupted',error='API restarted before completion',updated_at=now() WHERE status IN ('queued','running') AND NOT ($1 AND status='running' AND COALESCE(media_task ? 'taskId',false)) RETURNING tenant_id,id", a.cfg.mediaConfigured())
 	if e != nil {
 		return e
 	}
@@ -164,6 +175,8 @@ func (a *App) Start(ctx context.Context) error {
 			}
 		}
 	}()
+	a.resumeMedia(resume)
+	a.startMediaSweeper(watch)
 	return a.recoverGraphs(ctx)
 }
 func (a *App) Close() {
@@ -269,6 +282,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.deleteCanvas, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/artifacts", a.tenant(a.listArtifacts, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}", a.tenant(a.downloadArtifact, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}/media", a.tenant(a.mediaArtifact, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/media", a.tenant(a.mediaCatalogue, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/agents", a.tenant(a.listAgents, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/agents", a.tenant(a.createAgent, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/agents/{id}", a.tenant(a.getAgent, 1))
@@ -320,7 +335,9 @@ func (a *App) security(next http.Handler) http.Handler {
 		if !a.workerAvailable(w) {
 			return
 		}
-		if !strings.HasSuffix(r.URL.Path, "/events") {
+		// Event streams and inline media (a seekable video) outlive a request deadline; the media
+		// route bounds itself. Everything else, including the media catalogue, keeps this one.
+		if !strings.HasSuffix(r.URL.Path, "/events") && !(strings.Contains(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/media")) {
 			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 			defer cancel()
 			r = r.WithContext(ctx)

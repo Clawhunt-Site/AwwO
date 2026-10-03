@@ -321,7 +321,7 @@ func (a *App) listAgents(w http.ResponseWriter, r *http.Request) {
 	a.tenantList(w, r, "agents")
 }
 func (a *App) getAgent(w http.ResponseWriter, r *http.Request) {
-	v, e := oneJSON(r.Context(), a.db, "SELECT "+agentJSON+" FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", r.PathValue("tenantId"), r.PathValue("id"))
+	v, e := oneJSON(r.Context(), a.db, "SELECT "+agentJSON+" FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker'", r.PathValue("tenantId"), r.PathValue("id"))
 	a.replyOne(w, v, e, 200)
 }
 func (a *App) createAgent(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +355,7 @@ func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		if b.AdapterType != "" {
 			var previous string
-			if err := tx.QueryRow(r.Context(), "SELECT runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal FOR UPDATE", r.PathValue("tenantId"), id).Scan(&previous); err != nil {
+			if err := tx.QueryRow(r.Context(), "SELECT runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' FOR UPDATE", r.PathValue("tenantId"), id).Scan(&previous); err != nil {
 				return nil, err
 			}
 			if previous != b.AdapterType {
@@ -368,7 +368,7 @@ func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		return oneJSON(r.Context(), tx, "UPDATE agents SET name=$3,role=$4,title=$5,model=$6,instructions=$7,runtime=COALESCE(NULLIF($8,''),runtime),effort=COALESCE($9,effort) WHERE tenant_id=$1 AND id=$2 AND NOT internal RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Name, b.Role, b.Title, b.Model, b.Instructions, b.AdapterType, b.Effort)
+		return oneJSON(r.Context(), tx, "UPDATE agents SET name=$3,role=$4,title=$5,model=$6,instructions=$7,runtime=COALESCE(NULLIF($8,''),runtime),effort=COALESCE($9,effort) WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Name, b.Role, b.Title, b.Model, b.Instructions, b.AdapterType, b.Effort)
 	})
 }
 func (a *App) agentInstructions(w http.ResponseWriter, r *http.Request) {
@@ -383,7 +383,7 @@ func (a *App) agentInstructions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mutateObject(w, r, "agent.instructions.updated", r.PathValue("id"), 200, func(tx pgx.Tx, id string) (json.RawMessage, error) {
-		return oneJSON(r.Context(), tx, "UPDATE agents SET instructions=$3 WHERE tenant_id=$1 AND id=$2 AND NOT internal RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Content)
+		return oneJSON(r.Context(), tx, "UPDATE agents SET instructions=$3 WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Content)
 	})
 }
 func (a *App) deleteAgent(w http.ResponseWriter, r *http.Request) {

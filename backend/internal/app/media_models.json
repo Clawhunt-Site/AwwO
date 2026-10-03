@@ -1,0 +1,1118 @@
+{
+  "version": 1,
+  "provider": "runninghub",
+  "source": "RunningHub Standard Model API OpenAPI docs, read 2026-10-03",
+  "notes": [
+    "Only text-to-image and text-to-video models: models that need an input image wait for an upload flow.",
+    "Parameters are closed choices checked against each model's OpenAPI request schema; example prompts and URLs are not copied.",
+    "verified is the date of a successful real call with this deployment's key; empty means not yet called."
+  ],
+  "models": [
+    {
+      "id": "rh.seedream-v5-pro",
+      "name": "Seedream 5.0 Pro",
+      "vendor": "bytedance",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/seedream-v5-pro/text-to-image",
+      "prompt": {
+        "minLength": 5,
+        "maxLength": 5000
+      },
+      "params": [
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "1k",
+            "2k"
+          ],
+          "default": "2k",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "outputFormat",
+          "type": "enum",
+          "values": [
+            "jpeg",
+            "png"
+          ],
+          "default": "jpeg",
+          "label": [
+            "输出格式",
+            "Output format"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-494859257.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.nano-banana-pro",
+      "name": "Nano Banana Pro",
+      "vendor": "google",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/rhart-image-n-pro-official/text-to-image",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 20000
+      },
+      "params": [
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "1:1",
+            "3:2",
+            "2:3",
+            "3:4",
+            "4:3",
+            "4:5",
+            "5:4",
+            "9:16",
+            "16:9",
+            "21:9"
+          ],
+          "default": "1:1",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "1k",
+            "2k",
+            "4k"
+          ],
+          "default": "1k",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184534.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.nano-banana-2",
+      "name": "Nano Banana 2",
+      "vendor": "google",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/rhart-image-n-g31-flash-official/text-to-image",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 20000
+      },
+      "params": [
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "1:1",
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "5:4",
+            "4:5",
+            "21:9"
+          ],
+          "default": "1:1",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "1k",
+            "2k",
+            "4k"
+          ],
+          "default": "1k",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184537.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.gpt-image-2",
+      "name": "GPT Image 2",
+      "vendor": "openai",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/rhart-image-g-2-official/text-to-image",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 20000
+      },
+      "params": [
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "1:1",
+            "2:3",
+            "3:2",
+            "3:4",
+            "4:3",
+            "4:5",
+            "5:4",
+            "9:16",
+            "16:9",
+            "21:9"
+          ],
+          "default": "1:1",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "1k",
+            "2k",
+            "4k"
+          ],
+          "default": "1k",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "quality",
+          "type": "enum",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "medium",
+          "label": [
+            "质量",
+            "Quality"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448969338.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.qwen-image-3-pro",
+      "name": "Qwen-Image 3.0 Pro",
+      "vendor": "alibaba",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/alibaba/qwen-image-3.0-pro/text-to-image",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 3000
+      },
+      "params": [
+        {
+          "name": "size",
+          "type": "enum",
+          "values": [
+            "1328*1328",
+            "1664*928",
+            "928*1664",
+            "1472*1140",
+            "1140*1472"
+          ],
+          "default": "1328*1328",
+          "label": [
+            "尺寸",
+            "Size"
+          ]
+        },
+        {
+          "name": "imageNum",
+          "type": "enum",
+          "values": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "default": "1",
+          "label": [
+            "生成张数",
+            "Images"
+          ]
+        },
+        {
+          "name": "promptExtend",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "自动扩写提示词",
+            "Expand the prompt"
+          ]
+        },
+        {
+          "name": "negativePrompt",
+          "type": "text",
+          "maxLength": 600,
+          "label": [
+            "反向提示词",
+            "Negative prompt"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-494859258.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.midjourney-v7",
+      "name": "Midjourney V7",
+      "vendor": "midjourney",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/youchuan/text-to-image-v7",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 8192
+      },
+      "params": [
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "1:1",
+            "4:3",
+            "3:2",
+            "16:9",
+            "3:4",
+            "2:3",
+            "9:16"
+          ],
+          "default": "1:1",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "quality",
+          "type": "enum",
+          "values": [
+            "1",
+            "2",
+            "4"
+          ],
+          "default": "1",
+          "label": [
+            "质量",
+            "Quality"
+          ]
+        },
+        {
+          "name": "stylize",
+          "type": "integer",
+          "min": 0,
+          "max": 1000,
+          "default": 100,
+          "label": [
+            "风格化",
+            "Stylize"
+          ]
+        },
+        {
+          "name": "chaos",
+          "type": "integer",
+          "min": 0,
+          "max": 100,
+          "default": 0,
+          "label": [
+            "多样性",
+            "Chaos"
+          ]
+        },
+        {
+          "name": "raw",
+          "type": "boolean",
+          "default": false,
+          "label": [
+            "原始模式",
+            "Raw mode"
+          ]
+        },
+        {
+          "name": "negativePrompt",
+          "type": "text",
+          "maxLength": 2000,
+          "label": [
+            "反向提示词",
+            "Negative prompt"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184531.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.grok-imagine",
+      "name": "Grok Imagine",
+      "vendor": "xai",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/rhart-image-x-official/text-to-image",
+      "prompt": {
+        "minLength": 5,
+        "maxLength": 20000
+      },
+      "params": [
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "1:1",
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "2:1",
+            "1:2"
+          ],
+          "default": "1:1",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "outputFormat",
+          "type": "enum",
+          "values": [
+            "jpeg",
+            "png"
+          ],
+          "default": "jpeg",
+          "label": [
+            "输出格式",
+            "Output format"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448969339.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.wan-2-7-pro",
+      "name": "Wan 2.7 Pro",
+      "vendor": "alibaba",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/alibaba/wan-2.7/text-to-image-pro",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 5000
+      },
+      "params": [
+        {
+          "name": "width",
+          "type": "integer",
+          "min": 512,
+          "max": 4096,
+          "default": 1024,
+          "label": [
+            "宽度（像素）",
+            "Width (px)"
+          ]
+        },
+        {
+          "name": "height",
+          "type": "integer",
+          "min": 512,
+          "max": 4096,
+          "default": 1024,
+          "label": [
+            "高度（像素）",
+            "Height (px)"
+          ]
+        },
+        {
+          "name": "thinkingMode",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "深度思考",
+            "Thinking mode"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184527.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.jimeng-4-6",
+      "name": "Jimeng 4.6",
+      "vendor": "bytedance",
+      "kind": "image",
+      "mode": "text-to-image",
+      "endpoint": "/openapi/v2/bytedance/jimeng-4.6/text-to-image",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 800
+      },
+      "params": [
+        {
+          "name": "scale",
+          "type": "integer",
+          "min": 1,
+          "max": 100,
+          "default": 50,
+          "label": [
+            "文本相关性",
+            "Text adherence"
+          ]
+        },
+        {
+          "name": "forceSingle",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "只生成一张",
+            "Single image"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-465292103.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.kling-v3-pro",
+      "name": "Kling 3.0 Pro",
+      "vendor": "kuaishou",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/kling-v3.0-pro/text-to-video",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 2500
+      },
+      "params": [
+        {
+          "name": "duration",
+          "type": "enum",
+          "values": [
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15"
+          ],
+          "default": "5",
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        },
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ],
+          "default": "16:9",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "sound",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "生成音频",
+            "Generate audio"
+          ]
+        },
+        {
+          "name": "cfgScale",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "default": 0.5,
+          "label": [
+            "提示词相关性",
+            "Prompt adherence"
+          ]
+        },
+        {
+          "name": "negativePrompt",
+          "type": "text",
+          "maxLength": 2500,
+          "label": [
+            "反向提示词",
+            "Negative prompt"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184414.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.seedance-2",
+      "name": "Seedance 2.0",
+      "vendor": "bytedance",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/rhart-video/sparkvideo-2.0/text-to-video",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 20480
+      },
+      "params": [
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "duration",
+          "type": "enum",
+          "values": [
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15"
+          ],
+          "default": "5",
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        },
+        {
+          "name": "ratio",
+          "type": "enum",
+          "values": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:3",
+            "3:4",
+            "21:9",
+            "adaptive"
+          ],
+          "default": "16:9",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "generateAudio",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "生成音频",
+            "Generate audio"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-494859271.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.veo-3-1-fast",
+      "name": "Veo 3.1 Fast",
+      "vendor": "google",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/rhart-video-v3.1-fast-official/text-to-video",
+      "prompt": {
+        "minLength": 5,
+        "maxLength": 8000
+      },
+      "params": [
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "16:9",
+            "9:16"
+          ],
+          "default": "16:9",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "duration",
+          "type": "enum",
+          "values": [
+            "4",
+            "6",
+            "8"
+          ],
+          "default": "8",
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        },
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "720p",
+            "1080p",
+            "4k"
+          ],
+          "default": "720p",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "generateAudio",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "生成音频",
+            "Generate audio"
+          ]
+        },
+        {
+          "name": "negativePrompt",
+          "type": "text",
+          "maxLength": 2000,
+          "label": [
+            "反向提示词",
+            "Negative prompt"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184430.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.sora-2",
+      "name": "Sora 2",
+      "vendor": "openai",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/rhart-video-s-official/text-to-video",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 4000
+      },
+      "params": [
+        {
+          "name": "size",
+          "type": "enum",
+          "values": [
+            "1280x720",
+            "720x1280"
+          ],
+          "default": "1280x720",
+          "label": [
+            "尺寸",
+            "Size"
+          ]
+        },
+        {
+          "name": "duration",
+          "type": "enum",
+          "values": [
+            "4",
+            "8",
+            "12"
+          ],
+          "default": "4",
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184442.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.hailuo-2-3-pro",
+      "name": "Hailuo 2.3 Pro",
+      "vendor": "minimax",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/minimax/hailuo-2.3/t2v-pro",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "params": [
+        {
+          "name": "enablePromptExpansion",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "自动扩写提示词",
+            "Expand the prompt"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184423.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.vidu-q3-pro",
+      "name": "Vidu Q3 Pro",
+      "vendor": "shengshu",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/vidu/text-to-video-q3-pro",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 4000
+      },
+      "params": [
+        {
+          "name": "style",
+          "type": "enum",
+          "values": [
+            "general",
+            "anime"
+          ],
+          "default": "general",
+          "label": [
+            "风格",
+            "Style"
+          ]
+        },
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:3",
+            "3:4"
+          ],
+          "default": "16:9",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "540p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "duration",
+          "type": "enum",
+          "values": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16"
+          ],
+          "default": "5",
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "生成音频",
+            "Generate audio"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184407.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.wan-2-7",
+      "name": "Wan 2.7",
+      "vendor": "alibaba",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/alibaba/wan-2.7/text-to-video",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 5000
+      },
+      "params": [
+        {
+          "name": "duration",
+          "type": "enum",
+          "values": [
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15"
+          ],
+          "default": "5",
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        },
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "720P",
+            "1080P"
+          ],
+          "default": "720P",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:3",
+            "3:4"
+          ],
+          "default": "16:9",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "promptExtend",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "自动扩写提示词",
+            "Expand the prompt"
+          ]
+        },
+        {
+          "name": "negativePrompt",
+          "type": "text",
+          "maxLength": 500,
+          "label": [
+            "反向提示词",
+            "Negative prompt"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184436.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.grok-imagine-video",
+      "name": "Grok Imagine Video",
+      "vendor": "xai",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/rhart-video-g-official/text-to-video",
+      "prompt": {
+        "minLength": 5,
+        "maxLength": 800
+      },
+      "params": [
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ],
+          "default": "16:9",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "720p",
+            "480p"
+          ],
+          "default": "720p",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "duration",
+          "type": "enum",
+          "values": [
+            "6",
+            "10"
+          ],
+          "default": "6",
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184433.md",
+      "verified": ""
+    },
+    {
+      "id": "rh.pixverse-v6",
+      "name": "PixVerse V6",
+      "vendor": "pixverse",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/pixverse-v6/text-to-video",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 2048
+      },
+      "params": [
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "540p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "duration",
+          "type": "integer",
+          "min": 1,
+          "max": 15,
+          "default": 5,
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        },
+        {
+          "name": "generateAudioSwitch",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "生成音频",
+            "Generate audio"
+          ]
+        },
+        {
+          "name": "aspectRatio",
+          "type": "enum",
+          "values": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:3",
+            "3:4",
+            "21:9"
+          ],
+          "default": "16:9",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184444.md",
+      "verified": ""
+    }
+  ]
+}

@@ -199,14 +199,18 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 404, "not_found", "Node binding does not belong to this workspace")
 				return
 			}
-			var model, instructions, runtime, effort string
-			e = tx.QueryRow(r.Context(), "SELECT model,instructions,runtime,effort FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions, &runtime, &effort)
+			var model, instructions, runtime, effort, engine string
+			e = tx.QueryRow(r.Context(), "SELECT model,instructions,runtime,effort,engine FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions, &runtime, &effort, &engine)
 			if noRows(e) {
 				fail(w, 404, "not_found", "Node agent not found in workspace")
 				return
 			}
 			if e != nil {
 				a.dbError(w, e)
+				return
+			}
+			if engine == agentEngineMedia {
+				fail(w, 400, "media_graph_unsupported", "Image and video nodes run on their own, not as part of a canvas run")
 				return
 			}
 			team, e := savedNodeTeam(raw, n.ID)
