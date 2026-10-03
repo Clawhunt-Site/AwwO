@@ -9,6 +9,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 ### Added
 
 - Add a per-model switch that turns a model's hidden thinking off in both openai-agents workers: `AWWO_OPENAI_AGENTS_DISABLE_THINKING=true` for the default model, or `disableThinking: true` on a catalog profile, adds `chat_template_kwargs.enable_thinking=false` to that model's Chat Completions requests. It is for Qwen-style models such as qwen3.8-27b-p6, whose hidden reasoning otherwise spends 2,000–8,000 of a node's 4,096 output tokens. Off by default, never inherited, never sent on Responses, and not part of `/health`; it covers the operator model catalog, while personal connections are unchanged.
+- Give every homepage production case a real AwwO canvas and its recorded run. A case now opens to “How it was made”: the canvas stage by stage, each agent's task and actual delivery, the delivered result in an opaque sandbox, and a run receipt with model, execution settings, timings and the result's SHA-256. Members can copy a case's canvas as a clean draft. The eight new canvases are sized for the default execution settings (one model call per node, at most 4,096 output tokens) with the model's hidden thinking switched off, and ran that way on a local copy of the production API and worker revisions, with no production writes. Records are generated from raw runs by `scripts/showcase/` and never edited; machine paths and identifiers are redacted, and each note counts every run of its canvas, failed ones included.
 - Add tenant knowledge sources, immutable revisions, provenance, reviewable proposals and restoration, with selected knowledge revisions frozen into planning and execution context.
 - Add a managed OpenMaus execution assistant that reuses AwwO model connections, runs the pinned open-source core in restricted Docker workspaces, and returns approvals, questions, cancellable runs and published artifacts to the canvas. End users do not configure a second OpenMaus account or provider key.
 - Add canvas previews for HTML, WebGL 3D, paged PDF and a read-only IDE file tree/source window, with artifact provenance and knowledge archival.
@@ -23,6 +24,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Changed
 
+- Retire the three playable mock-ups made outside AwwO from the production cases; the cards now label their cover footage 「封面示意 · AI 生成」 apart from the knowledge base's recording, and claim delivery only where a published run delivered.
 - Keep the home page focused on starting work: offer editable prompt starters next to the composer and three interactive examples before expanding the complete library. Keep model search visible and model rows compact, preserving every runtime and capability label.
 - Support bounded catalogs of up to 256 models per runtime or personal connection, rejecting overflow instead of silently hiding models. Existing workspace model permissions remain unchanged.
 - Keep workspace navigation focused on the active workspace and account; move language, theme, guidance and maintenance actions into an accessible overflow menu.

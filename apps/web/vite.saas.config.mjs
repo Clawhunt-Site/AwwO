@@ -12,7 +12,7 @@ export default defineConfig({
       next();
     });
   } },
-  // The homepage's case footage and playable builds (showcase/) ship with the hosted site only, not through public/,
+  // The homepage's case footage (showcase/) ships with the hosted site only, not through public/,
   // which the desktop build bundles too. The dev server already serves them from the root.
   { name: 'awwo-saas-showcase', apply: 'build', writeBundle(options) { cpSync(join(root, 'showcase'), join(options.dir, 'showcase'), { recursive: true }); } }],
   define: { 'import.meta.env.VITE_AWWO_SAAS': JSON.stringify('1') },

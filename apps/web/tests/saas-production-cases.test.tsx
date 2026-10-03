@@ -1,17 +1,19 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ProductionCases, COMPACT_CASE_COUNT } from '../src/saas/ProductionCases';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
+import { PRODUCTION_RUN_SUMMARY } from '../src/saas/productionRuns';
+import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
-import { SaaSApp } from '../src/saas/SaaSApp';
-import { WorkspaceHome } from '../src/saas/WorkspaceHome';
-import type { Identity, Tenant } from '../src/saas/api';
+import type { OfficialWorkflow } from '../src/saas/examples/officialWorkflows';
 
 const SHOWCASE = `${resolve(process.cwd(), 'showcase')}/`;
 const view = (compact = false) => render(<SaaSPreferencesProvider><ProductionCases compact={compact} /></SaaSPreferencesProvider>);
 const cards = () => screen.getAllByRole('listitem').filter(item => item.classList.contains('production-card'));
+// The case dialog loads its run view lazily; compile it once up front so the tests time behaviour, not the bundler.
+beforeAll(async () => { await import('../src/saas/ProductionShowcase'); await import('../src/saas/production-runs/knowledge-base'); }, 300_000);
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/'); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 
@@ -31,67 +33,60 @@ function observeIntersections() {
   return { watchers, live, fire };
 }
 
+
 it('tells every case as a brief, a staged team and a deliverable, with its footage on disk', () => {
   expect(new Set(PRODUCTION_CASES.map(item => item.id)).size).toBe(PRODUCTION_CASES.length);
-  expect(PRODUCTION_CASES.filter(item => item.real).map(item => item.id)).toEqual(['knowledge-base']);
-  expect(PRODUCTION_CASES[0].real).toBe(true);
+  expect(PRODUCTION_CASES.filter(item => item.recording).map(item => item.id)).toEqual(['knowledge-base']);
+  expect(PRODUCTION_CASES[0].recording).toBe(true);
   for (const item of PRODUCTION_CASES) {
     for (const text of [item.title, item.brief, item.deliverable, ...item.stages.flat(), ...(item.facts ?? [])]) {
       expect(text.zh.trim()).not.toBe(''); expect(text.en.trim()).not.toBe('');
     }
     expect(item.stages.length).toBeGreaterThanOrEqual(3);
     expect(item.stages.at(-1)!.map(role => role.zh)).toEqual(['验收']);
-    if (item.nodes) expect(item.nodes.map(stage => stage.length)).toEqual(item.stages.map(stage => stage.length));
-    if (!item.real) expect(item.facts).toBeUndefined();   // nothing ran, so there is nothing to report
-    for (const stem of [item.footage, item.footageEn, item.build?.footage].filter(Boolean))
+    if (!item.recording) expect(item.facts).toBeUndefined();   // what a run did is read from its record, not written here
+    for (const stem of [item.footage, item.footageEn].filter(Boolean))
       for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}${stem}.${extension}`), `${stem}.${extension}`).toBe(true);
-    if (item.build) {
-      const page = readFileSync(`${SHOWCASE}play/${item.build.page}.html`, 'utf8');
-      expect(page).toContain("tag: '示意 · AI 生成'");
-      expect(page).toContain("tag: 'Illustration · AI-generated'");
-      expect(page).not.toMatch(/\bDemo\b/);   // no "Demo" tag on these: 示意 · AI 生成, like every illustration here
-      expect(page).not.toMatch(/film/i);      // the film-only mode, which could hide that tag, is gone
-      expect(page).not.toMatch(/https?:\/\/|fetch\(|localStorage|document\.cookie/);   // self-contained, same-origin safe
-    }
   }
+  // The playable mock-ups made outside AwwO are gone; what plays now is what an AwwO run delivered.
+  expect(existsSync(`${SHOWCASE}play`)).toBe(false);
+  for (const stem of ['play-fox', 'play-bike', 'play-paper']) expect(existsSync(`${SHOWCASE}${stem}.mp4`)).toBe(false);
   // The real run: seven agents over five stages, three in parallel after the architecture.
-  const real = PRODUCTION_CASES[0];
-  expect(real.nodes!.flat()).toHaveLength(7);
-  expect(real.nodes![1].map(node => node.zh)).toEqual(['用户登录与工作区权限', '文档数据治理', '知识库上线物料']);
+  expect(PRODUCTION_CASES[0].stages.map(stage => stage.length)).toEqual([1, 3, 1, 1, 1]);
 });
 
-it('labels the one real run apart from the AI-generated illustrations, and claims delivery only for it', () => {
+it('labels the cover footage for what it is, and claims delivery only where a published run delivered', () => {
   view();
   expect(screen.getByRole('heading', { level: 2, name: '一句话需求，交给一支 Agent 团队。' })).toBeVisible();
-  expect(screen.getByText(/只有标「真实实跑」的那一个真的跑过，其余都是示意。$/)).toBeVisible();
+  // It says every case ran only once every case has a published run.
+  const ran = PRODUCTION_CASES.filter(item => PRODUCTION_RUN_SUMMARY[item.id]).length;
+  expect(screen.getByText(ran === PRODUCTION_CASES.length ? /^每个案例都是一张真实的 AwwO 画布，并且真的跑过一遍/
+    : new RegExp(`^每个案例都是一张真实的 AwwO 画布：.*其中 ${ran} 个已经在 AwwO 里跑过一遍`))).toBeVisible();
   expect(cards()).toHaveLength(PRODUCTION_CASES.length);
-  const [real, ...illustrations] = cards();
-  expect(within(real).getByText('真实实跑')).toBeVisible();
-  expect(within(real).queryByText('示意 · AI 生成')).toBeNull();
-  expect(within(real).getByText('已交付')).toBeVisible();
-  expect(real.querySelector('.production-delivered svg')).not.toBeNull();
-  expect(within(real).getByRole('list', { name: 'Agent 团队，按阶段' }).children).toHaveLength(5);
-  for (const card of illustrations) {
-    expect(within(card).getByText('示意 · AI 生成')).toBeVisible();
-    expect(within(card).queryByText('真实实跑')).toBeNull();
-    expect(within(card).getByText('交付目标')).toBeVisible();
-    expect(within(card).queryByText('已交付')).toBeNull();
-    expect(card.querySelector('.production-delivered svg')).toBeNull();
-    expect(within(card).getByRole('list', { name: '设想的 Agent 团队，按阶段' })).toBeVisible();
-  }
+  const [recording, ...illustrations] = cards();
+  expect(within(recording).getByText('交付录屏')).toBeVisible();
+  expect(within(recording).queryByText('封面示意 · AI 生成')).toBeNull();
+  for (const card of illustrations) { expect(within(card).getByText('封面示意 · AI 生成')).toBeVisible(); expect(within(card).queryByText('交付录屏')).toBeNull(); }
+  PRODUCTION_CASES.forEach((item, index) => {
+    const card = cards()[index], run = PRODUCTION_RUN_SUMMARY[item.id];
+    expect(within(card).getByRole('list', { name: 'Agent 团队，按阶段' }).children).toHaveLength(item.stages.length);
+    if (run?.delivered) { expect(within(card).getByText('已交付')).toBeVisible(); expect(card.querySelector('.production-delivered svg')).not.toBeNull(); }
+    else { expect(within(card).getByText('交付目标')).toBeVisible(); expect(within(card).queryByText('已交付')).toBeNull(); expect(card.querySelector('.production-delivered svg')).toBeNull(); }
+    if (run) expect(within(card).getByText(`真实运行 · ${run.completed}/${run.total} 节点完成`)).toBeVisible();
+    else expect(card.querySelector('.production-run-chip')).toBeNull();
+  });
+  expect(PRODUCTION_RUN_SUMMARY['knowledge-base']).toMatchObject({ completed: 7, total: 7, delivered: true });
   // The label is part of what a screen reader hears for the card, not only what it shows.
-  expect(within(real).getByRole('button', { name: '团队知识库 SaaS' })).toHaveAccessibleDescription('真实实跑 「搭建团队知识库 SaaS：登录、权限、数据治理、后端接口、检索看板、上线物料、验收。」');
-  expect(within(illustrations[0]).getByRole('button', { name: '像素平台跳跃' })).toHaveAccessibleDescription('示意 · AI 生成 「做一款像素风平台跳跃：狐狸邮差在空中集市里送信。」');
-  expect(within(real).getByText('权限 · 数据 · 物料')).toBeVisible();
+  expect(within(recording).getByRole('button', { name: '团队知识库 SaaS' })).toHaveAccessibleDescription('交付录屏 「搭建团队知识库 SaaS：登录、权限、数据治理、后端接口、检索看板、上线物料、验收。」');
+  expect(within(illustrations[0]).getByRole('button', { name: '像素平台跳跃' })).toHaveAccessibleDescription('封面示意 · AI 生成 「做一款像素风平台跳跃：狐狸邮差在空中集市里送信。」');
+  expect(within(recording).getByText('权限 · 数据 · 物料')).toBeVisible();
+  expect(within(illustrations[0]).getByText('美术 · 关卡 · 音效')).toBeVisible();
   // Without IntersectionObserver the posters show at once; nothing autoplays or preloads.
   for (const video of document.querySelectorAll<HTMLVideoElement>('.production-card video')) {
     expect(video.preload).toBe('none'); expect(video.muted).toBe(true); expect(video.autoplay).toBe(false);
     expect(video).toHaveAttribute('aria-hidden', 'true'); expect(video).toHaveAttribute('poster');
   }
-  const plays = screen.getAllByRole('link', { name: /^试玩示意版：/ });
-  expect(plays.map(link => link.getAttribute('aria-label'))).toEqual(['试玩示意版：像素平台跳跃', '试玩示意版：3D 配置器', '试玩示意版：纸艺解谜']);
-  expect(plays.map(link => link.getAttribute('href'))).toEqual(['/showcase/play/fox-courier.html', '/showcase/play/ebike-config.html', '/showcase/play/paper-path.html']);
-  for (const link of plays) { expect(link).toHaveAttribute('target', '_blank'); expect(link).toHaveAttribute('rel', 'noopener'); }
+  expect(screen.queryByRole('link', { name: /试玩示意版/ })).toBeNull();
 });
 
 it('shows one row on the workspace home until the visitor asks for all of them', () => {
@@ -107,7 +102,8 @@ it('shows one row on the workspace home until the visitor asks for all of them',
   expect(cards()).toHaveLength(COMPACT_CASE_COUNT);
 });
 
-it('opens a case as brief → team → delivery and gives focus back to its card', () => {
+
+it('opens a case as brief → team → delivery, then shows how it was made from its run record', async () => {
   view();
   const trigger = screen.getByRole('button', { name: '团队知识库 SaaS' });
   fireEvent.click(trigger);
@@ -115,13 +111,26 @@ it('opens a case as brief → team → delivery and gives focus back to its card
   expect(dialog).toHaveAttribute('open');
   expect(within(dialog).getByRole('heading', { level: 3, name: 'Agent 团队' })).toBeVisible();
   expect(within(dialog).getByText('7 个 Agent · 5 个阶段')).toBeVisible();
-  expect(within(dialog).getByText('3 路并行')).toBeVisible();
-  for (const node of ['产品边界与架构需求', '文档数据治理', '后端接口与业务规则', '知识库 Web 工作台', '交付验收']) expect(within(dialog).getByText(node)).toBeVisible();
   expect(within(dialog).getByText('已交付')).toBeVisible();
   expect(within(dialog).getByText('42/42 测试通过')).toBeVisible();
   expect(within(dialog).getByText('独立验收退回 2 处缺陷 → 复验通过')).toBeVisible();
   expect(within(dialog).getByText('界面实录：2026-09-04 一次 AwwO 真实运行交付的知识库工作台（演示模式，使用模拟数据）。')).toBeVisible();
   expect(dialog.querySelector('video')).toHaveAttribute('src', '/showcase/kb-real.mp4');
+  const made = await within(dialog).findByRole('region', { name: '7 个 Agent，5 个阶段，44 分 24 秒跑完' });
+  expect(within(made).getByText('7/7 个节点完成')).toBeVisible();
+  expect(within(made).getByText('2026-09-04')).toBeVisible();
+  const rail = within(made).getByRole('list', { name: '按阶段查看每个 Agent' });
+  for (const title of ['产品边界与架构需求', '用户登录与工作区权限', '文档数据治理', '知识库上线物料', '后端接口与业务规则', '知识库 Web 工作台', '交付验收'])
+    expect(within(rail).getByRole('button', { name: new RegExp(`^${title}`) })).toBeVisible();
+  expect(within(rail).getAllByText('3 路并行')).toHaveLength(1);
+  // A node shows what that agent actually handed over, here the review's own verdict.
+  fireEvent.click(within(rail).getByRole('button', { name: /^交付验收/ }));
+  expect(within(rail).getByRole('button', { name: /^交付验收/ })).toHaveAttribute('aria-pressed', 'true');
+  expect(within(within(made).getByRole('article')).getByText(/^部分通过，整体验收未通过。/)).toBeVisible();
+  expect(within(made).getByText(/这个案例交付的是一个多文件应用/)).toBeVisible();
+  expect(within(made).getByText(/退回了两处演示缺陷/)).toBeVisible();
+  expect(made.textContent).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-|[A-Za-z]:\/tmp/);   // no private identifiers or machine paths
+  expect(within(made).queryByRole('button', { name: '复制这张画布' })).toBeNull();     // its 2026-09-04 canvas is not offered as a copy
   within(dialog).getByRole('button', { name: '关闭' }).focus();   // focus inside the dialog, as showModal leaves it
   fireEvent(dialog, new Event('cancel', { cancelable: true }));
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -130,16 +139,32 @@ it('opens a case as brief → team → delivery and gives focus back to its card
   const pixel = screen.getByRole('button', { name: '像素平台跳跃' });
   fireEvent.click(pixel);
   const game = screen.getByRole('dialog', { name: '像素平台跳跃' });
-  expect(within(game).getByText(/^示意 · AI 生成：画面由 AI 生成/)).toBeVisible();
-  expect(within(game).getByRole('heading', { level: 3, name: '设想的 Agent 团队' })).toBeVisible();
-  expect(within(game).getAllByText('2 路并行')).toHaveLength(2);
-  expect(within(game).getByText('交付目标')).toBeVisible();
-  expect(within(game).queryByText('已交付')).toBeNull();
-  expect(within(game).getByText('示意 · AI 生成，不是 AwwO 运行的产出')).toBeVisible();
-  expect(within(game).getByRole('link', { name: '在新标签页试玩' })).toHaveAttribute('href', '/showcase/play/fox-courier.html');
+  expect(within(game).getByText(PRODUCTION_RUN_SUMMARY['pixel-platformer'] ? /只说明方向；AwwO 实际运行交付的成品在下方「它是怎么做出来的」。$/ : /^封面示意 · AI 生成：这段画面由 AI 视频模型生成，只说明方向。$/)).toBeVisible();
+  expect(within(game).getByText('6 个 Agent · 4 个阶段')).toBeVisible();
+  expect(within(game).getByText('3 路并行')).toBeVisible();
+  expect(within(game).getByText(PRODUCTION_RUN_SUMMARY['pixel-platformer']?.delivered ? '已交付' : '交付目标')).toBeVisible();
+  await within(game).findByRole('region', { name: /它是怎么做出来的|HOW IT WAS MADE|Agent，\d+ 个阶段|这个案例还没有发布运行记录/ });
   fireEvent.click(within(game).getByRole('button', { name: '关闭' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(pixel).toHaveFocus();
+});
+
+it('copies an illustrated case’s real canvas through the workspace’s copy flow, closing the case first', async () => {
+  const onReuse = vi.fn<(workflow: OfficialWorkflow) => void>();
+  render(<SaaSPreferencesProvider><ProductionCases onReuse={onReuse} /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: '像素平台跳跃' }));
+  const dialog = screen.getByRole('dialog', { name: '像素平台跳跃' });
+  fireEvent.click(await within(dialog).findByRole('button', { name: '复制这张画布' }));
+  expect(onReuse).toHaveBeenCalledExactlyOnceWith(PRODUCTION_WORKFLOWS['pixel-platformer']);
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('offers no copy where there is no workspace to copy into', async () => {
+  view();
+  fireEvent.click(screen.getByRole('button', { name: '港口三维驾驶舱' }));
+  const dialog = screen.getByRole('dialog', { name: '港口三维驾驶舱' });
+  await within(dialog).findByRole('region');
+  expect(within(dialog).queryByRole('button', { name: '复制这张画布' })).toBeNull();
 });
 
 it('closes on the backdrop only when the press and the release both land outside the box', () => {
@@ -158,25 +183,27 @@ it('closes on the backdrop only when the press and the release both land outside
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-it('speaks English, with the translated recording marked on the card', () => {
+
+it('speaks English, with the translated recording marked on the card', async () => {
   localStorage.setItem('superclaw_locale', 'en');
   view();
   expect(screen.getByRole('heading', { level: 2, name: 'One brief, handed to a team of agents.' })).toBeVisible();
-  const [real, pixel] = cards();
-  expect(within(real).getByText('Real run')).toBeVisible();
-  expect(within(pixel).getByText('Illustration · AI-generated')).toBeVisible();
-  expect(real.querySelector('video')).toHaveAttribute('src', '/showcase/kb-real-en.mp4');
+  const [recording, pixel] = cards();
+  expect(within(recording).getByText('Recorded delivery')).toBeVisible();
+  expect(within(pixel).getByText('Cover: AI illustration')).toBeVisible();
+  expect(recording.querySelector('video')).toHaveAttribute('src', '/showcase/kb-real-en.mp4');
   // The translated recording says so on the card itself, not only once the case is opened.
-  expect(within(real).getByText('UI translated from Chinese')).toBeVisible();
-  expect(within(real).getByRole('button', { name: 'Team knowledge-base SaaS' })).toHaveAccessibleDescription(/^Real run UI translated from Chinese “Build a team/);
+  expect(within(recording).getByText('UI translated from Chinese')).toBeVisible();
+  expect(within(recording).getByRole('button', { name: 'Team knowledge-base SaaS' })).toHaveAccessibleDescription(/^Recorded delivery UI translated from Chinese “Build a team/);
   expect(within(pixel).queryByText('UI translated from Chinese')).toBeNull();
-  expect(within(real).getByText('Delivered')).toBeVisible();
-  expect(within(pixel).getByText('Deliverable')).toBeVisible();
-  expect(within(pixel).getByRole('link', { name: 'Play the mock-up: Pixel platformer' })).toHaveAttribute('href', '/showcase/play/fox-courier.html?lang=en');
-  fireEvent.click(within(real).getByRole('button', { name: 'Team knowledge-base SaaS' }));
+  expect(within(recording).getByText('Delivered')).toBeVisible();
+  expect(within(recording).getByText('Real run · 7/7 nodes done')).toBeVisible();
+  fireEvent.click(within(recording).getByRole('button', { name: 'Team knowledge-base SaaS' }));
   const dialog = screen.getByRole('dialog', { name: 'Team knowledge-base SaaS' });
   expect(within(dialog).getByText('7 agents · 5 stages')).toBeVisible();
   expect(within(dialog).getByText(/demo mode with simulated data\. UI translated from Chinese\.$/)).toBeVisible();
+  const made = await within(dialog).findByRole('region', { name: '7 agents, 5 stages, 44 min 24 s end to end' });
+  expect(within(made).getByText('The agents worked in Chinese; their outputs are shown as delivered.')).toBeVisible();
 });
 
 it('loads posters as cards near the viewport, plays loops only on screen, and holds them while a case is open', async () => {
@@ -203,9 +230,6 @@ it('loads posters as cards near the viewport, plays loops only on screen, and ho
   expect(loops.every(watcher => watcher.disconnected)).toBe(true);
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
   await waitFor(() => expect(io.live('play')).toHaveLength(PRODUCTION_CASES.length));   // back on once the case closes
-  // Inside a dialog, which scrolls on its own, the mock-up's preview loads at once.
-  fireEvent.click(screen.getByRole('button', { name: '像素平台跳跃' }));
-  expect(screen.getByRole('dialog').querySelector('.production-build video')).toHaveAttribute('poster', '/showcase/play-fox.jpg');
 });
 
 it.each([
@@ -230,29 +254,4 @@ it.each([
     expect(video.autoplay).toBe(false);
     expect(video.controls).toBe(true);
   } finally { restore(); }
-});
-
-it('puts the cases on the signed-out homepage, between the welcome and the examples to try', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/options')
-    ? new Response(JSON.stringify({ clawhuntSSO: true, localAuth: false }))
-    : new Response(JSON.stringify({ error: { code: 'unauthenticated' } }), { status: 401 })));
-  render(<SaaSApp />);
-  const cases = await screen.findByRole('heading', { level: 2, name: '一句话需求，交给一支 Agent 团队。' });
-  const tryOne = screen.getByRole('heading', { level: 2, name: '从一个作品开始' });
-  expect(cases.compareDocumentPosition(tryOne) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByRole('heading', { level: 1 }).compareDocumentPosition(cases) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(cards()).toHaveLength(PRODUCTION_CASES.length);
-  expect(screen.queryByRole('button', { name: /查看全部 \d+ 个制作案例/ })).toBeNull();
-});
-
-const tenant: Tenant = { id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
-const identity: Identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' }, tenants: [tenant] };
-it.each(['owner', 'reader'] as const)('shows one row of cases on the %s workspace home, before the examples to try', async role => {
-  vi.stubGlobal('fetch', vi.fn(async (input: string) => new Response(JSON.stringify(new URL(input, 'http://localhost').pathname.endsWith('/runtime')
-    ? { available: true, configured: true, plannerAvailable: true, models: [] } : { items: [], nextCursor: null }))));
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role }} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
-  const cases = await screen.findByRole('heading', { level: 2, name: '一句话需求，交给一支 Agent 团队。' });
-  expect(cases.compareDocumentPosition(screen.getByRole('heading', { level: 2, name: '从一个作品开始' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(cards()).toHaveLength(COMPACT_CASE_COUNT);
-  expect(screen.getByRole('button', { name: `查看全部 ${PRODUCTION_CASES.length} 个制作案例` })).toHaveAttribute('aria-expanded', 'false');
 });

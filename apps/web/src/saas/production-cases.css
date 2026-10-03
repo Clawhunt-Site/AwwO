@@ -36,7 +36,7 @@
 .production-card:hover, .production-card:focus-within { transform: translateY(-2px); border-color: color-mix(in srgb, var(--saas-accent) 40%, transparent); box-shadow: var(--saas-raise-hover, 0 12px 32px #0000001f); }
 .production-card.is-real { border-color: color-mix(in srgb, var(--production-real) 45%, transparent); }
 .production-card-media { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--saas-soft); }
-.production-card-media video, .production-build video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.production-card-media video { display: block; width: 100%; height: 100%; object-fit: cover; }
 .production-card-media > .production-label { position: absolute; top: 10px; left: 10px; }
 .production-kind { position: absolute; top: 10px; right: 10px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; line-height: 1.4; color: #fff; background: #0b122080; backdrop-filter: blur(6px); white-space: nowrap; }
 .production-card-copy { display: flex; flex: 1; flex-direction: column; gap: 10px; padding: 16px 18px; }
@@ -57,12 +57,11 @@
 .production-delivered b { color: var(--saas-muted); font-weight: 600; }
 .production-delivered.is-done b, .production-delivered svg { color: var(--production-real); }
 .production-delivered svg { flex-shrink: 0; margin-right: -2px; }
+.production-run-chip { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  color: var(--production-real); background: color-mix(in srgb, var(--production-real) 12%, transparent); }
+.production-run-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.production-dialog p.production-made-pending { margin: 26px 0 0; padding-top: 22px; border-top: 1px solid var(--production-line); color: var(--saas-muted); font-size: 12.5px; }
 .production-translated { position: absolute; left: 10px; bottom: 10px; padding: 3px 8px; border-radius: 999px; font-size: 10.5px; line-height: 1.4; color: #fff; background: #0b1220b3; backdrop-filter: blur(6px); white-space: nowrap; }
-.production-play { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 5px 11px; border-radius: 8px; background: var(--saas-text);
-  color: var(--saas-card); font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap; }
-.production-card-footer .production-play { margin-left: auto; }   /* stays right when a long deliverable wraps it */
-.production-play:hover { background: color-mix(in srgb, var(--saas-text) 85%, var(--saas-accent)); }
-.production-play:focus-visible { outline: 2px solid var(--saas-accent); outline-offset: 2px; }
 
 /* the case, opened: footage beside the three steps */
 .production-dialog.saas-native-dialog { width: min(1120px, 94vw); max-height: 92dvh; }
@@ -91,11 +90,6 @@
 .production-stages small { color: var(--saas-accent); font-size: 11px; white-space: nowrap; }
 .production-facts { display: grid; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 12.5px; line-height: 1.6; }
 .production-facts li::before { content: '✓'; margin-right: 6px; color: var(--production-real); font-weight: 700; }
-.production-build { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 12px; padding: 10px; border: 1px solid var(--production-line); border-radius: 12px; }
-.production-build video { aspect-ratio: 16 / 9; height: auto; border-radius: 8px; background: var(--saas-soft); }
-.production-build > div { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12.5px; }
-.production-build small { color: var(--saas-muted); font-size: 11px; }
-.production-build .production-play { margin-top: 4px; }
 
 @media (max-width: 1050px) { .production-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .production-dialog-grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) {
@@ -106,5 +100,5 @@
   .production-dialog-body { padding: 16px; }
   .production-dialog h2 { font-size: 20px; }
 }
-@media (max-width: 520px) { .production-grid { grid-template-columns: 1fr; } .production-build { grid-template-columns: 120px minmax(0, 1fr); } }
+@media (max-width: 520px) { .production-grid { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .production-card { transition: none; } .production-card:hover, .production-card:focus-within { transform: none; } }

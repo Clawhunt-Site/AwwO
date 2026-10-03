@@ -181,6 +181,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     setFocusRequest(value => value + 1);
   };
 
+  // A production case's canvas and an official example are copied the same way.
+  const copyOfficial = (item: OfficialWorkflow) => { if (!sending.current) { setError(null); setOfficialCopy(item); } };
   const example = notice?.kind === 'case' ? STARTER_CASES.find(item => item.id === notice.caseId) : undefined;
   const noticeText = example ? t(`已填入案例「${example.title.zh}」，可以直接生成，也可以先修改。`, `Filled in the “${example.title.en}” example. Generate it as is, or edit it first.`)
     : notice?.kind === 'restored' ? t('已恢复原来的输入。', 'Your earlier text is back.') : '';
@@ -229,8 +231,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <ProductionCases compact />
-    <OfficialExamples compact onReuse={item => { if (!sending.current) { setError(null); setOfficialCopy(item); } }} disabled={busy}
+    <ProductionCases compact onReuse={copyOfficial} />
+    <OfficialExamples compact onReuse={copyOfficial} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}
       error={error !== null ? saasErrorMessage(error, locale) : undefined} />
     {officialCopy && <OfficialCopySetup key={`${tenant.id}:${officialCopy.id}`} item={officialCopy} tenantId={tenant.id} locale={locale} busy={busy}

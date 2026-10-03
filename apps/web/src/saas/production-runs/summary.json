@@ -1,0 +1,83 @@
+{
+  "3d-configurator": {
+    "completed": 5,
+    "total": 5,
+    "seconds": 182,
+    "delivered": true,
+    "capturedOn": "2026-10-03",
+    "model": "qwen3.8-27b-p6",
+    "runtime": "openai-agents"
+  },
+  "glider-adventure": {
+    "completed": 5,
+    "total": 5,
+    "seconds": 121,
+    "delivered": true,
+    "capturedOn": "2026-10-03",
+    "model": "qwen3.8-27b-p6",
+    "runtime": "openai-agents"
+  },
+  "knowledge-base": {
+    "completed": 7,
+    "total": 7,
+    "seconds": 2664,
+    "delivered": true,
+    "capturedOn": "2026-09-04",
+    "model": "Codex",
+    "runtime": "codex_local"
+  },
+  "papercraft-puzzle": {
+    "completed": 7,
+    "total": 7,
+    "seconds": 114,
+    "delivered": true,
+    "capturedOn": "2026-10-03",
+    "model": "qwen3.8-27b-p6",
+    "runtime": "openai-agents"
+  },
+  "party-game": {
+    "completed": 6,
+    "total": 6,
+    "seconds": 121,
+    "delivered": true,
+    "capturedOn": "2026-10-03",
+    "model": "qwen3.8-27b-p6",
+    "runtime": "openai-agents"
+  },
+  "pixel-platformer": {
+    "completed": 6,
+    "total": 6,
+    "seconds": 141,
+    "delivered": true,
+    "capturedOn": "2026-10-03",
+    "model": "qwen3.8-27b-p6",
+    "runtime": "openai-agents"
+  },
+  "port-twin": {
+    "completed": 5,
+    "total": 5,
+    "seconds": 165,
+    "delivered": true,
+    "capturedOn": "2026-10-03",
+    "model": "qwen3.8-27b-p6",
+    "runtime": "openai-agents"
+  },
+  "rhythm-runner": {
+    "completed": 6,
+    "total": 6,
+    "seconds": 149,
+    "delivered": true,
+    "capturedOn": "2026-10-03",
+    "model": "qwen3.8-27b-p6",
+    "runtime": "openai-agents"
+  },
+  "summer-ad": {
+    "completed": 6,
+    "total": 6,
+    "seconds": 109,
+    "delivered": true,
+    "capturedOn": "2026-10-03",
+    "model": "qwen3.8-27b-p6",
+    "runtime": "openai-agents"
+  }
+}
