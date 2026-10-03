@@ -24,7 +24,7 @@ import { boundsOfBoxes } from './viewport';
 export type PortSide = 'input' | 'output';
 
 /** Closed set of channels a wire can carry. */
-export type DataType = 'text' | 'image' | 'number' | 'boolean' | 'file';
+export type DataType = 'text' | 'image' | 'video' | 'number' | 'boolean' | 'file';
 
 export interface PortSpec {
   id: string;
@@ -77,7 +77,7 @@ export function portsFor(node: CanvasNode): PortSpec[] {
   }
   const ports: PortSpec[] = [{ id: 'context', side: 'input', dataType: 'text', multi: true }];
   if (node.agentKind === 'image') ports.push({ id: 'reference', side: 'input', dataType: 'image' });
-  ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' ? 'image' : 'text' });
+  ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' ? node.agentKind : 'text' });
   return ports;
 }
 

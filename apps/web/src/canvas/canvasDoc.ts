@@ -25,7 +25,11 @@ import { normalizeContract, type NodeContract } from './nodeContracts';
 import type { AgentTemplateId } from './agentTemplates';
 import { sanitizeNodeTeam, type NodeTeam } from './nodeTeam';
 
-export type AgentKind = 'llm' | 'coding' | 'image';
+export type AgentKind = 'llm' | 'coding' | 'image' | 'video';
+
+/** An image or video node's parameter choices. An absent key takes the model's default on the server. */
+export type MediaParamValue = string | number | boolean;
+export type MediaParams = Record<string, MediaParamValue>;
 
 /** The real agent standing behind a session tile, once bound (hired on the control plane).
  *  null = the tile is a local draft — configurable, but it cannot chat or run yet. */
@@ -88,6 +92,8 @@ export interface SessionNode extends CanvasNodeBase {
   contract?: NodeContract;
   /** Preserve unknown versions unchanged; editors must validate before interpreting. */
   taskFrame?: unknown;
+  /** Image and video nodes only: choices for the model's closed parameters. */
+  mediaParams?: MediaParams;
 }
 
 /** Conversation metadata and drafts persist locally; transcripts are restored from the server. */
@@ -197,13 +203,14 @@ export const AGENT_KIND_META: Record<AgentKind, { label: string; glyph: string }
   llm: { label: 'LLM', glyph: 'L' },
   coding: { label: '编码', glyph: 'C' },
   image: { label: '图像', glyph: 'I' },
+  video: { label: '视频', glyph: 'V' },
 };
 
 /** Default tile sizes. Sessions are taller because they render a live transcript. */
 export const SESSION_NODE_SIZE = { w: 340, h: 260 } as const;
 export const FORM_NODE_SIZE = { w: 300, h: 200 } as const;
 
-const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image'];
+const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video'];
 const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review'];
 /** Waypoint slots are the number-row keys; anything outside is clamped into range. */
 export const WAYPOINT_MIN_SLOT = 1;
@@ -373,6 +380,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
     // and thread are the operator's real work, and losing them to a typo'd enum would be worse
     // than showing it as an LLM tile they can switch back.
     const agentKind = AGENT_KINDS.includes(r.agentKind as AgentKind) ? (r.agentKind as AgentKind) : 'llm';
+    const mediaParams = sanitizeMediaParams(r.mediaParams);
     let binding: AgentBinding | null = null;
     if (r.binding && typeof r.binding === 'object') {
       const b = r.binding as Record<string, unknown>;
@@ -412,16 +420,30 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       lastOutput: sanitizeOutput(r.lastOutput),
       ...(contract ? { contract } : {}),
       ...(Object.hasOwn(r, 'taskFrame') ? { taskFrame: r.taskFrame } : {}),
+      ...(mediaParams ? { mediaParams } : {}),
     };
   }
 
   return null;
 }
 
+const MEDIA_PARAM_NAME = /^[A-Za-z][A-Za-z0-9]{0,40}$/;
+
+/** Keeps well-formed parameter choices; the server validates them against the model at each run. */
+function sanitizeMediaParams(raw: unknown): MediaParams | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const params: MediaParams = {};
+  for (const [name, value] of Object.entries(raw as Record<string, unknown>).slice(0, 16)) {
+    if (!MEDIA_PARAM_NAME.test(name)) continue;
+    if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && value.length <= 8000)) params[name] = value;
+  }
+  return Object.keys(params).length ? params : undefined;
+}
+
 function sanitizeEdge(raw: unknown, nodeIds: ReadonlySet<string>): CanvasEdge | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const dataType: DataType = r.dataType === 'image' || r.dataType === 'number' || r.dataType === 'boolean' || r.dataType === 'file'
+  const dataType: DataType = r.dataType === 'image' || r.dataType === 'video' || r.dataType === 'number' || r.dataType === 'boolean' || r.dataType === 'file'
     ? r.dataType : 'text';
   const edge: CanvasEdge = {
     id: str(r.id),

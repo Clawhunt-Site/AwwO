@@ -100,6 +100,15 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     // Distinct from model_unavailable: the model exists but is not open to this
     // workspace, so the fix is an administrator grant rather than another model.
     model_not_allowed: ['此模型未向本工作区开放，请选择本工作区可用的模型或联系管理员。', 'This model is not available to this workspace. Choose one offered to it or contact an administrator.'],
+    media_unavailable: ['图像与视频生成尚未配置，请联系管理员。', 'Image and video generation is not configured. Contact an administrator.'],
+    media_storage_full: ['媒体存储空间不足，暂停新的图像与视频生成；请联系管理员。', 'Media storage is full, so new image and video generations are paused. Contact an administrator.'],
+    media_storage_unavailable: ['暂时无法保存生成的媒体，请联系管理员。', 'Generated media cannot be stored right now. Contact an administrator.'],
+    media_capacity_exceeded: ['今日平台的图像与视频生成额度已用完，请在 UTC 次日重试。', 'Today’s image and video generations for the service are used up. Try again after the next UTC day.'],
+    media_quota_exceeded: ['本工作区今日的图像与视频生成次数已用完，请在 UTC 次日重试或联系管理员。', 'This workspace has used today’s image and video generations. Try again after the next UTC day or contact an administrator.'],
+    media_params_invalid: ['节点的生成参数不适用于所选模型，请在节点配置中修改。', 'The node’s generation settings do not fit the selected model. Change them in the node configuration.'],
+    media_prompt_invalid: ['描述的长度不符合该模型要求，请在节点配置中查看字数范围。', 'The description length does not fit this model. See the allowed range in the node configuration.'],
+    media_knowledge_unsupported: ['图像与视频节点不使用知识库，请取消选择知识后再运行。', 'Image and video nodes do not use knowledge. Clear the knowledge selection and run again.'],
+    media_graph_unsupported: ['图像与视频节点需单独运行，不能加入整张画布的运行。', 'Image and video nodes run on their own, not as part of a canvas run.'],
     invite_used: ['此邀请已被其他账号领取。', 'This invitation was claimed by another account.'],
     invite_expired: ['邀请已过期，请索取新邀请。', 'This invitation has expired. Request a new one.'],
     invite_revoked: ['邀请已撤销，请索取新邀请。', 'This invitation was revoked. Request a new one.'],

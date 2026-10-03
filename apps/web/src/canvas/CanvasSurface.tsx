@@ -50,6 +50,8 @@ import { WirePlane } from './WirePlane';
 import { Marquee, useMarquee } from './Marquee';
 import { AddNodeMenu, type AddNodeKind } from './AddNodeMenu';
 import { InspectorPanel } from './InspectorPanel';
+import { mediaCatalogueOf, type MediaCatalogueState } from './MediaNodeSettings';
+import { mediaKindOf, mediaModelsOf, readMediaCatalogue } from './mediaCatalog';
 import { RunControls } from './RunControls';
 import { GraphSettings } from './GraphSettings';
 import { addReviewPartner } from './reviewPartner';
@@ -270,6 +272,24 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }).finally(() => { if (!controller.signal.aborted && currentSaaSCanvas() === scope) setPaletteLoading(false); });
     return () => controller.abort();
   }, [canInitialize, cloudScope, readOnly, locale, paletteRefresh]);
+  // The workspace's image and video models. A failed read is reported in the inspector, never
+  // shown as a workspace without media models.
+  const [mediaState, setMediaState] = useState<MediaCatalogueState | undefined>(undefined);
+  const [mediaRefresh, setMediaRefresh] = useState(0);
+  useEffect(() => {
+    setMediaState(undefined);
+    if (!canInitialize || readOnly) return;
+    const controller = new AbortController();
+    const scope = cloudScope;
+    setMediaState({ status: 'loading' });
+    void readMediaCatalogue(controller.signal).then(catalogue => {
+      if (!controller.signal.aborted && currentSaaSCanvas() === scope) setMediaState({ status: 'ready', catalogue });
+    }).catch(() => {
+      if (!controller.signal.aborted && currentSaaSCanvas() === scope) setMediaState({ status: 'error' });
+    });
+    return () => controller.abort();
+  }, [canInitialize, cloudScope, readOnly, mediaRefresh]);
+  const mediaKinds = useMemo(() => (['image', 'video'] as const).filter(kind => mediaModelsOf(mediaCatalogueOf(mediaState), kind).length > 0), [mediaState]);
   const inspectorCloseLocked = useRef(false);
   const [bindingLocked, setBindingLocked] = useState(false);
   const onInspectorLockChange = useCallback((locked: boolean) => {
@@ -1292,8 +1312,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const addNode = useCallback(
     (kind: AddNodeKind, world: { x: number; y: number }) => {
       if (!canEditStructure()) return;
+      const media = canInitialize ? mediaKindOf(kind) : null;
+      // A cloud image or video node is a plain generator: no role template, delivery format or
+      // team. The first catalog model is shown, and runs only once the operator saves it.
       const node = kind === 'form' ? createFormNode(world)
-        : kind === 'llm' || kind === 'coding' || kind === 'image'
+        : media ? { ...createSessionNode(media, world), title: t(media === 'video' ? 'node.video' : 'node.image'),
+          model: mediaModelsOf(mediaCatalogueOf(mediaState), media)[0]?.id ?? '' }
+        : kind === 'llm' || kind === 'coding' || kind === 'image' || kind === 'video'
           ? { ...createAgentTemplate('general', world, locale), agentKind: kind }
           : createAgentTemplate(kind, world, locale);
       patchDoc((prev) => ({ ...prev, nodes: [...prev.nodes, node] }), { label: `add:${node.id}` });
@@ -1302,7 +1327,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setInspectorId(node.id);
       return node;
     },
-    [patchDoc, focusNode, locale, canEditStructure],
+    [patchDoc, focusNode, locale, canEditStructure, canInitialize, mediaState, t],
   );
 
   /**
@@ -2034,6 +2059,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const renderInspector = (node: CanvasNode, inline = false) => (
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
       readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || running} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
+      media={canInitialize ? mediaState : undefined} onRetryMedia={() => setMediaRefresh(value => value + 1)}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
       onCreateCompany={!readOnly && onCreateCompany ? () => {
         if (inspectorCloseLocked.current) return;
@@ -2205,6 +2231,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       {!readOnly && addMenu ? (
         <AddNodeMenu
           onOpenModelShelf={modelShelf ? () => setShelfCollapsed(false) : undefined}
+          mediaKinds={canInitialize ? mediaKinds : undefined}
           onOpenAgentLibrary={loadWorkspaceAgents ? () => { setAddMenu(null); setAgentLibraryRequest(value => value + 1); } : undefined}
           at={addMenu.at}
           onPick={(kind) => {

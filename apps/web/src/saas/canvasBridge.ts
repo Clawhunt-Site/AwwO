@@ -100,6 +100,17 @@ export function storedArtifactUrl(value: string): string | null {
   return `${API_BASE}${tenantPath(scope.tenant.id)}/artifacts/${encodeURIComponent(id)}`;
 }
 
+/** The inline (img/video) URL of a generated image or video, or null without an active workspace. */
+export function storedMediaUrl(artifactId: string): string | null {
+  const scope = active;
+  if (!scope || !ARTIFACT_ID.test(artifactId)) return null;
+  return `${API_BASE}${tenantPath(scope.tenant.id)}/artifacts/${encodeURIComponent(artifactId)}/media`;
+}
+
+/** An image or video run reports the provider's own state; there is no invented percentage. */
+const mediaStatusText = (status: unknown): string | null => status === 'queued' ? canvasText('排队等待生成…', 'Queued for generation…')
+  : status === 'running' ? canvasText('正在生成…', 'Generating…') : status === 'saving' ? canvasText('正在保存结果…', 'Saving the result…') : null;
+
 const operationStatus = (operationId: string, run?: any) => ({ operationId,
   state: !run ? 'not_started' : run.terminal ? 'terminal' : 'accepted',
   issueId: run?.sessionId ?? null, runId: run?.id ?? null, terminal: run?.terminal ?? false,
@@ -442,6 +453,10 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
               emit({ event: 'done', status: 'failed' });
             } else if (event.type === 'cancelled') emit({ event: 'done', status: 'cancelled' });
             else if (event.type === 'queued' || event.type === 'running') emit({ event: 'status', status: event.type });
+            else if (event.type === 'media_status') {
+              const status = mediaStatusText(event.status);
+              if (status) emit({ event: 'status', status });
+            }
           });
         } catch { emit({ event: 'error', detail: canvasText('运行连接中断，请恢复运行状态。', 'The run connection was interrupted. Restore the run state.') }); }
         finally { ended = true; controller.close(); }

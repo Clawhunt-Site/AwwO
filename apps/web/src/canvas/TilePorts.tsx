@@ -206,7 +206,7 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
 }
 
 const TYPE_LABEL: Record<DataType, CanvasTextKey> = {
-  text: 'contract.text', image: 'contract.image', number: 'contract.number', boolean: 'contract.boolean', file: 'contract.file',
+  text: 'contract.text', image: 'contract.image', video: 'contract.video', number: 'contract.number', boolean: 'contract.boolean', file: 'contract.file',
 };
 
 export interface TilePortsProps {

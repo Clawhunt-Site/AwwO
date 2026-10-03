@@ -30,7 +30,10 @@
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ArrowDownToLine, BookOpen, Bot, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Trash2, X } from 'lucide-react';
+import { ArrowDownToLine, BookOpen, Bot, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Trash2, Video, X } from 'lucide-react';
+import { parseMediaOutput } from './mediaOutput';
+import { mediaOutputSummaryKey } from './MediaResult';
+import { mediaKindOf } from './mediaCatalog';
 import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
@@ -136,11 +139,20 @@ export function runBadgeText(
   }
 }
 
-/** Summarize declared JSON delivery values; ordinary transcript text keeps its last line. */
-function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<ContractField, 'id'>> = [], displayLocale?: UiLocale): string {
+/** An image or video result reads as what it is, in the reader's language. */
+function mediaPreview(raw: string, locale: UiLocale): string | null {
+  const media = parseMediaOutput(raw);
+  return media ? canvasText(locale, mediaOutputSummaryKey(media), { count: media.items.length }) : null;
+}
+
+/** Summarize declared JSON delivery values; ordinary transcript text keeps its last line. A media
+ *  locale is given only for an image or video node, whose results read as generated files. */
+function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<ContractField, 'id'>> = [], displayLocale?: UiLocale, mediaLocale?: UiLocale): string {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const raw = turns[i].text;
     if (!raw) continue;
+    const media = turns[i].role === 'agent' && mediaLocale ? mediaPreview(raw, displayLocale || mediaLocale) : null;
+    if (media) return media;
     if (displayLocale) {
       const summary = collaborationInputSummary(turns[i], displayLocale)
         || (turns[i].role === 'agent' ? htmlPreviewSummary(raw, displayLocale) : null);
@@ -190,9 +202,11 @@ function firstMeaningfulLine(value: string): string {
   return text.replace(/\*\*([^*]+)\*\*/g, '$1').trim();
 }
 
-function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField, 'id'>>, locale: UiLocale): string {
+function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField, 'id'>>, locale: UiLocale, media = false): string {
   const trimmed = raw.trim();
   if (!trimmed) return '';
+  const generated = media ? mediaPreview(trimmed, locale) : null;
+  if (generated) return generated;
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   try {
     const parsed: unknown = JSON.parse(fenced ? fenced[1] : trimmed);
@@ -220,7 +234,7 @@ function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField
 function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass: string; label: string } {
   if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: canvasText(locale, 'tile.form') };
   const meta = AGENT_KIND_META[node.agentKind];
-  const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : 'node.llm');
+  const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : node.agentKind === 'video' ? 'node.video' : 'node.llm');
   return { glyph: meta.glyph, kindClass: node.agentKind, label };
 }
 
@@ -489,7 +503,8 @@ export const SessionTile = memo(function SessionTile({
 
   // Persist the transcript preview for the glance LOD, but only once the stream has settled —
   // writing mid-stream would put a document save on every delta frame.
-  const liveTail = livePreview(session.turns, sessionNode?.contract?.outputs);
+  const mediaNode = Boolean(sessionNode && mediaKindOf(sessionNode.agentKind));
+  const liveTail = livePreview(session.turns, sessionNode?.contract?.outputs, undefined, mediaNode ? locale : undefined);
   const storedPreview = sessionNode?.preview ?? null;
   useEffect(() => {
     if (viewOnlyRef.current || storedPreview === null || !onPreview) return;
@@ -541,13 +556,13 @@ export const SessionTile = memo(function SessionTile({
       const filled = node.fields.find((f) => f.value.trim());
       return filled ? `${filled.label || t('common.field')}: ${filled.value.trim()}` : t('tile.emptyField');
     }
-    return livePreview(session.turns, node.contract?.outputs, locale) || htmlPreviewSummary(node.preview, locale) || node.preview;
+    return livePreview(session.turns, node.contract?.outputs, locale, mediaKindOf(node.agentKind) ? locale : undefined) || htmlPreviewSummary(node.preview, locale) || node.preview;
   }, [node, session.turns, locale, t]);
   const compactPreview = node.kind === 'session'
     ? node.lastOutput
-      ? `${node.lastOutput.partial ? `${t('tile.partialOutput')} · ` : ''}${publishedPreview(node.lastOutput.text, node.contract?.outputs ?? [], locale) || t('tile.deliveryUpdated')}`
+      ? `${node.lastOutput.partial ? `${t('tile.partialOutput')} · ` : ''}${publishedPreview(node.lastOutput.text, node.contract?.outputs ?? [], locale, Boolean(mediaKindOf(node.agentKind))) || t('tile.deliveryUpdated')}`
       : currentThread?.lastOutput ? t('tile.historicalAvailable')
-        : publishedPreview(preview, node.contract?.outputs ?? [], locale) || t('tile.noDeliverables')
+        : publishedPreview(preview, node.contract?.outputs ?? [], locale, Boolean(mediaKindOf(node.agentKind))) || t('tile.noDeliverables')
     : preview;
 
   const bind =
@@ -572,7 +587,7 @@ export const SessionTile = memo(function SessionTile({
   const busy = interactionLocked || session.streaming || run?.state === 'running' || run?.state === 'waiting';
   const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
-  const NodeIcon = node.kind === 'form' ? FileText : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : Bot;
+  const NodeIcon = node.kind === 'form' ? FileText : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video : Bot;
   const updateFields = (fields: ContractField[]) => {
     if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
     onUpdateNode?.({ ...node, contract: { ...contract, inputs: fields } });
@@ -749,7 +764,7 @@ export const SessionTile = memo(function SessionTile({
                       {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
                     : <TileTranscript key={storeKey} turns={session.turns} history={session.history} streaming={session.streaming} streamingSince={session.streamingSince}
-                      currentRunDetails={currentRunDetails}
+                      currentRunDetails={currentRunDetails} mediaResults={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}

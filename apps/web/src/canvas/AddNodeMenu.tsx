@@ -22,9 +22,11 @@ export interface AddNodeMenuProps {
   onOpenAgentLibrary?: () => void;
   /** Cloud hosts replace role-node shortcuts with the separate model/persona shelf. */
   onOpenModelShelf?: () => void;
+  /** Image and video nodes the host can run (its media catalogue offers a model of that kind). */
+  mediaKinds?: ReadonlyArray<'image' | 'video'>;
 }
 
-export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenModelShelf }: AddNodeMenuProps) {
+export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenModelShelf, mediaKinds = [] }: AddNodeMenuProps) {
   const { locale, t } = useCanvasI18n();
   const items = getAgentTemplates(locale).filter(item => !onOpenModelShelf || item.id === 'general');
   const ref = useRef<HTMLDivElement>(null);
@@ -40,7 +42,7 @@ export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenMod
       x: Math.max(8, Math.min(at.x, bounds.width - menu.offsetWidth - 8)),
       y: Math.max(8, Math.min(at.y, bounds.height - menu.offsetHeight - 8)),
     });
-  }, [at.x, at.y, locale, Boolean(onOpenModelShelf), Boolean(onOpenAgentLibrary)]);
+  }, [at.x, at.y, locale, Boolean(onOpenModelShelf), Boolean(onOpenAgentLibrary), mediaKinds.length]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -73,6 +75,9 @@ export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenMod
         event.stopPropagation(); onClose(); onOpenModelShelf();
       }}>{locale === 'zh' ? '模型与人设…' : 'Models & personas…'}</button>}
       {onOpenAgentLibrary && <button type="button" role="menuitem" className="canvas-add-menu-item" onClick={onOpenAgentLibrary}>{locale === 'zh' ? '选择工作区 Agent…' : 'Choose workspace Agent…'}</button>}
+      {mediaKinds.map(kind => <button key={kind} type="button" role="menuitem" className="canvas-add-menu-item" onClick={event => {
+        event.stopPropagation(); onPick(kind);
+      }}>{t(kind === 'video' ? 'node.addVideo' : 'node.addImage')}</button>)}
       {items.map((item) => (
         <button
           key={item.id}

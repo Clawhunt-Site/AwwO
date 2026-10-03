@@ -13,6 +13,9 @@ import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
 import { appendDeliveryProfile, deliveryCapabilityNotice, deliveryProfiles, type DeliveryProfileId } from './deliveryProfiles';
 import { deliveryPresentation } from './fileDeliveryPresentation';
 import { PendingFileDelivery } from './PendingFileDelivery';
+import { parseMediaOutput } from './mediaOutput';
+import { MediaResult } from './MediaResult';
+import { mediaKindOf } from './mediaCatalog';
 
 /** A display/copy reference only; recognizing a path never reads or opens a file. */
 function localFilePath(value: string, plainFile = false): string | null {
@@ -146,8 +149,10 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
   // A selection belongs to one publication. New Sessions/results and removed fields fall
   // back synchronously, so no render exposes a previous file while effects catch up.
   const selectedField = (selection?.identity === outputIdentity && publishedFields.find(field => field.id === selection.fieldId)) || publishedFields[0];
+  // An image or video node's result names stored files; it is shown as them, not as its record.
+  const media = output && !contract.outputs.length && mediaKindOf(node.agentKind) ? parseMediaOutput(output.text) : null;
   // A malformed or legacy result remains visible as evidence, without manufacturing fields.
-  const showRawOutput = output && (!contract.outputs.length || Boolean(parsed?.errors.length) || !publishedFields.length);
+  const showRawOutput = output && !media && (!contract.outputs.length || Boolean(parsed?.errors.length) || !publishedFields.length);
 
   const updateFields = (fields: ContractField[]) => {
     if (locked) return;
@@ -218,7 +223,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
         {output.source === 'manual' && <span>{t('deliverable.manual')}</span>}
       </div>}
       {parsed?.errors.length ? <p className="awwo-contract-errors" role="alert" title={parsed.errors.join(' ')}>{t('deliverable.invalid')}</p> : null}
-      {showRawOutput ? <article className="awwo-deliverable" data-testid={`canvas-tile-output-${node.id}`}>
+      {media ? <article className="awwo-deliverable" data-testid={`canvas-tile-output-${node.id}`}><MediaResult output={media} /></article>
+      : showRawOutput ? <article className="awwo-deliverable" data-testid={`canvas-tile-output-${node.id}`}>
         <h3 className="awwo-deliverable-title">{t(parsed?.errors.length ? 'deliverable.raw' : 'deliverable.runOutput')}</h3>
         <div className="awwo-deliverable-body awwo-markdown-preview">
           <DeliverableMarkdown>{parsed!.displaySource}</DeliverableMarkdown>

@@ -277,7 +277,7 @@ export function buildCommandRows(
 ): CommandRow[] {
   const key = (id: CanvasCommandId) => keyHints[id] ?? DEFAULT_KEY_HINTS[id];
   const text = (key: Parameters<typeof canvasText>[1], values?: Record<string, string | number>) => canvasText(locale, key, values);
-  const kindLabel = (kind: AgentKind) => text(kind === 'coding' ? 'node.coding' : kind === 'image' ? 'node.image' : 'node.llm');
+  const kindLabel = (kind: AgentKind) => text(kind === 'coding' ? 'node.coding' : kind === 'image' ? 'node.image' : kind === 'video' ? 'node.video' : 'node.llm');
   const rows: CommandRow[] = [];
   if (actions.addSession) {
     (['llm', 'coding', 'image'] as AgentKind[]).forEach((kind) => {
@@ -459,7 +459,7 @@ export function CommandBar({
     const focusRows: CommandRow[] = nodes.map((n) => ({
       id: `focus-${n.id}`,
       label: t('command.focusNode', { title: n.title }),
-      hint: n.kind === 'session' ? t(n.agentKind === 'coding' ? 'node.coding' : n.agentKind === 'image' ? 'node.image' : 'node.llm') : t('node.form'),
+      hint: n.kind === 'session' ? t(n.agentKind === 'coding' ? 'node.coding' : n.agentKind === 'image' ? 'node.image' : n.agentKind === 'video' ? 'node.video' : 'node.llm') : t('node.form'),
       run: () => onFocusNode(n.id),
     }));
     const all = [...commands, ...focusRows];

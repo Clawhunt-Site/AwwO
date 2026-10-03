@@ -32,6 +32,8 @@ import { cleanTaskFrame, isTaskFrame, taskFrameError } from './taskFrame';
 import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
+import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
+import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
 import {
   type AgentKind,
   type CanvasNode,
@@ -58,6 +60,10 @@ export interface InspectorPanelProps {
   onSave: (next: CanvasNode) => void;
   /** SaaS saves and prepares this node in its current workspace in one operation. */
   onInitialize?: (draft: SessionNode) => Promise<void>;
+  /** SaaS image and video models. Absent → image and video tasks are unavailable in a SaaS host. */
+  media?: MediaCatalogueState;
+  /** Read the media catalogue again after a failed read. */
+  onRetryMedia?: () => void;
   /** A binding landed — the surface can re-project the live world so the new agent appears. */
   onBound?: (node: SessionNode) => void;
   /**
@@ -74,12 +80,17 @@ export interface InspectorPanelProps {
 }
 
 const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image'];
+/** Video nodes exist only where a host runs them: the SaaS media generation service. */
+const HOSTED_AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video'];
+const kindKey = (kind: AgentKind) => kind === 'coding' ? 'node.coding' as const : kind === 'image' ? 'node.image' as const
+  : kind === 'video' ? 'node.video' as const : 'node.llm' as const;
 
 /** Agent kind → the hire path's coarse mission-role bucket (canvasHire maps it to AGENT_ROLES). */
 const KIND_TO_MISSION_ROLE: Record<AgentKind, string> = {
   llm: 'plan',
   coding: 'implement',
   image: 'review',
+  video: 'review',
 };
 
 type PersonaResult = 'synced' | 'failed' | 'not-written' | 'none';
@@ -148,6 +159,8 @@ export function InspectorPanel({
   readOnlyMessage,
   onSave,
   onInitialize,
+  media,
+  onRetryMedia,
   onBound,
   onCreateCompany,
   onCloseLockChange,
@@ -227,6 +240,11 @@ export function InspectorPanel({
   }, [node.id]);
   const sessionDraft = draft.kind === 'session' ? draft : null;
   const formDraft = draft.kind === 'form' ? draft : null;
+  const mediaCatalogue = mediaCatalogueOf(media);
+  // A SaaS host saves a media node only once its catalog model and parameters are valid; a host
+  // without the media service never saves one.
+  const mediaDraft = Boolean(onInitialize && sessionDraft && mediaKindOf(sessionDraft.agentKind));
+  const mediaBlocked = mediaDraft && mediaSetupProblem(sessionDraft!, mediaCatalogue) !== null;
   const taskFrameInvalid = sessionDraft ? taskFrameError(sessionDraft.taskFrame) !== null : false;
   const boundCompany = useMemo(
     () => (sessionDraft?.binding ? liveCompanies.find((c) => c.id === sessionDraft.binding?.companyId) : undefined),
@@ -254,7 +272,7 @@ export function InspectorPanel({
     if (mutationLocked() || taskFrameInvalid) return;
     const preparedDraft = draft.kind === 'session' && isTaskFrame(draft.taskFrame)
       ? { ...draft, taskFrame: cleanTaskFrame(draft.taskFrame) } : draft;
-    if (onInitialize && sessionDraft?.agentKind === 'image') return;
+    if (mediaBlocked) return;
     if (sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     if (onInitialize && sessionDraft) {
       if (initialization === 'done') { onClose(); return; }
@@ -348,7 +366,7 @@ export function InspectorPanel({
     // Persist the config FIRST so a mid-bind close never loses the operator's edits.
     onSave(sessionDraft);
     const outcome = await hireAgentIntoCompany(apiBase, companyId, {
-      name: sessionDraft.title || t(sessionDraft.agentKind === 'coding' ? 'node.coding' : sessionDraft.agentKind === 'image' ? 'node.image' : 'node.llm'),
+      name: sessionDraft.title || t(kindKey(sessionDraft.agentKind)),
       missionRole: KIND_TO_MISSION_ROLE[sessionDraft.agentKind],
       adapterType: sessionDraft.runtime,
       model: sessionDraft.model,
@@ -423,21 +441,24 @@ export function InspectorPanel({
             </div>}
             <div className="canvas-inspector-label">{t('inspector.agentType')}</div>
             <div className="canvas-inspector-seg" role="radiogroup" aria-label={t('inspector.agentType')}>
-              {AGENT_KINDS.map((kind) => (
-                <button
+              {(onInitialize ? HOSTED_AGENT_KINDS : AGENT_KINDS).map((kind) => {
+                const media = mediaKindOf(kind);
+                return <button
                   key={kind}
                   type="button"
                   role="radio"
                   aria-checked={sessionDraft.agentKind === kind}
                   className={`canvas-inspector-seg-item${sessionDraft.agentKind === kind ? ' is-on' : ''}`}
-                  disabled={busy || Boolean(sessionDraft.agentRef) || Boolean(onInitialize && kind === 'image')}
-                  onClick={() => editDraft({ ...sessionDraft, agentKind: kind })}
+                  disabled={busy || Boolean(sessionDraft.agentRef) || Boolean(onInitialize && media && !mediaModelsOf(mediaCatalogue, media).length)}
+                  onClick={() => editDraft(onInitialize ? withAgentKind(sessionDraft, kind, mediaCatalogue) : { ...sessionDraft, agentKind: kind })}
                 >
-                  {t(kind === 'coding' ? 'node.coding' : kind === 'image' ? 'node.image' : 'node.llm')}
-                </button>
-              ))}
+                  {t(kindKey(kind))}
+                </button>;
+              })}
             </div>
-            {onInitialize && !sessionDraft.agentRef && <div className="canvas-inspector-hint">{t('inspector.piTaskTypes')}</div>}
+            {onInitialize && !sessionDraft.agentRef && <div className="canvas-inspector-hint">{t(mediaDraft ? 'media.taskTypes' : 'inspector.piTaskTypes')}</div>}
+
+            {mediaDraft ? <MediaNodeSettings node={sessionDraft} state={media} disabled={busy} onChange={editDraft} onRetry={onRetryMedia} /> : <>
 
             <div className="canvas-inspector-label">{t('inspector.runtime')}</div>
             {sessionDraft.agentRef ? <dl className="canvas-inspector-hint">
@@ -491,6 +512,7 @@ export function InspectorPanel({
               runtimes={teamRuntimes} runtimeTools={teamTools}
               disabled={busy || Boolean(sessionDraft.agentRef)} onValidityChange={setTeamCatalogValid}
               onChange={team => editDraft({ ...sessionDraft, team })} />}
+            </>}
             {onInitialize ? <div className="canvas-inspector-initialization" role="status">
               <div className="canvas-inspector-label">{t('inspector.currentWorkspace', { workspace: liveCompanies[0]?.name || t('workspace.name') })}</div>
               <div className="canvas-inspector-hint">{t(initialization === 'pending' ? 'inspector.initializing' : initialization === 'done' ? 'inspector.initialized' : 'inspector.initializeOnSave')}</div>
@@ -603,7 +625,7 @@ export function InspectorPanel({
       </div>
 
       <footer className="canvas-inspector-foot">
-        <button type="button" className="canvas-inspector-save" disabled={busy || taskFrameInvalid || Boolean(onInitialize && sessionDraft?.agentKind === 'image') || Boolean(sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length))} onClick={() => void save()}>
+        <button type="button" className="canvas-inspector-save" disabled={busy || taskFrameInvalid || mediaBlocked || Boolean(sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length))} onClick={() => void save()}>
           {t(onInitialize && sessionDraft ? initialization === 'pending' ? 'inspector.initializing' : initialization === 'done' ? 'common.close' : 'inspector.saveAndInitialize' : 'common.save')}
         </button>
         <button type="button" className="canvas-inspector-cancel" disabled={closeLocked} onClick={close}>

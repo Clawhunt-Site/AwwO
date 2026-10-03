@@ -24,6 +24,8 @@ import './readable-transcript.css';
 import { fileSafeDisplaySource } from './fileDeliveryPresentation';
 import { PendingFileDelivery } from './PendingFileDelivery';
 import { storedArtifactUrl } from '../saas/canvasBridge';
+import { parseMediaOutput } from './mediaOutput';
+import { MediaResult } from './MediaResult';
 
 const markdownComponents: Components = {
   table: ({ node: _node, ...props }) => <div className="canvas-transcript-table"><table {...props} /></div>,
@@ -43,7 +45,7 @@ function RawDetails({ label, text }: { label: string; text: string }) {
   </details>;
 }
 
-function TurnContent({ turn }: { turn: Turn }) {
+function TurnContent({ turn, mediaResults }: { turn: Turn; mediaResults: boolean }) {
   const { locale, t } = useCanvasI18n();
   if (turn.role === 'user') {
     if (turn.nativeSource === 'issue_description') {
@@ -74,6 +76,10 @@ function TurnContent({ turn }: { turn: Turn }) {
       </>;
     }
   }
+  // An image or video node's result names stored files; show them, not the record. Only such a
+  // node's turns are read this way: a text agent cannot present stored media as its own result.
+  const media = mediaResults && turn.role === 'agent' && turn.tone !== 'error' && turn.tone !== 'warn' ? parseMediaOutput(turn.text) : null;
+  if (media) return <MediaResult output={media} />;
   const output = readableOutput(turn);
   // A complete document is a display shape, not proof that a run or collaboration succeeded.
   const confirmedHtml = turn.presentation?.outputState === 'final'
@@ -154,9 +160,11 @@ export interface TileTranscriptProps {
   renderTurnDetails?: (turn: Turn, latest: boolean) => ReactNode;
   /** Admitted graph execution observed independently from the historical messages. */
   currentRunDetails?: ReactNode;
+  /** An image or video node: its results are shown as the stored files they name. */
+  mediaResults?: boolean;
 }
 
-export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false, streamingSince, renderTurnDetails, currentRunDetails }: TileTranscriptProps) {
+export function TileTranscript({ turns, history, streaming, limit, status = null, autoScroll = false, streamingSince, renderTurnDetails, currentRunDetails, mediaResults = false }: TileTranscriptProps) {
   const { locale, t } = useCanvasI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
@@ -273,7 +281,7 @@ export function TileTranscript({ turns, history, streaming, limit, status = null
             <div
               className={`canvas-transcript-turn canvas-transcript-turn--${turn.role}${turn.tone ? ` is-${turn.tone}` : ''}${placeholder ? ' is-pending' : ''}`}
             >
-              {placeholder ? <TurnPresence label={presenceLabel} since={streamingSince} /> : <TurnContent turn={turn} />}
+              {placeholder ? <TurnPresence label={presenceLabel} since={streamingSince} /> : <TurnContent turn={turn} mediaResults={mediaResults} />}
             </div>
             {(turn.runId ? detailOwners.get(turn.runId) === index : turn.role === 'agent')
               && renderTurnDetails?.(turn, index === shown.length - 1)}
