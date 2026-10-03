@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "regions": ["us-east-1"],
+  "source": "Amazon Bedrock ListFoundationModels/ListInferenceProfiles for us-east-1, read 2026-10-03; Converse support from the Bedrock API compatibility table",
+  "notes": [
+    "target is the Converse modelId: a system inference profile (global./us.) where the model is only offered through one, otherwise the in-region model id.",
+    "contextWindow and maxTokens are AwwO's conservative budgets (the workers treat contextWindow as a byte budget), not provider maxima.",
+    "tools is true only where a streamed tool call was observed or the model card documents Converse tool use; models without it run on Pi only.",
+    "verified names the date a real ConverseStream call answered from this account; an empty value means the target needs cross-region inference permission that the probe role did not have."
+  ],
+  "models": [
+    { "id": "bedrock.claude-opus-5-5", "name": "Claude Opus 5.5", "vendor": "anthropic", "target": "global.anthropic.claude-opus-5-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "vendor": "anthropic", "target": "global.anthropic.claude-sonnet-5-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.claude-fable-5-1", "name": "Claude Fable 5.1", "vendor": "anthropic", "target": "global.anthropic.claude-fable-5-1", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.claude-opus-5", "name": "Claude Opus 5", "vendor": "anthropic", "target": "global.anthropic.claude-opus-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.claude-sonnet-5", "name": "Claude Sonnet 5", "vendor": "anthropic", "target": "global.anthropic.claude-sonnet-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.claude-fable-5", "name": "Claude Fable 5", "vendor": "anthropic", "target": "global.anthropic.claude-fable-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.claude-opus-4-8", "name": "Claude Opus 4.8", "vendor": "anthropic", "target": "global.anthropic.claude-opus-4-8", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "vendor": "anthropic", "target": "global.anthropic.claude-sonnet-4-6", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.claude-haiku-4-5", "name": "Claude Haiku 4.5", "vendor": "anthropic", "target": "global.anthropic.claude-haiku-4-5-20251001-v1:0", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+
+    { "id": "bedrock.gpt-6-1-sol", "name": "GPT-6.1 Sol", "vendor": "openai", "target": "global.openai.gpt-6.1-sol", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.gpt-6-sol", "name": "GPT-6 Sol", "vendor": "openai", "target": "global.openai.gpt-6-sol", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.gpt-6-astra", "name": "GPT-6 Astra", "vendor": "openai", "target": "global.openai.gpt-6-astra", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.gpt-6-luna", "name": "GPT-6 Luna", "vendor": "openai", "target": "global.openai.gpt-6-luna", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.gpt-5-6-sol", "name": "GPT-5.6 Sol", "vendor": "openai", "target": "global.openai.gpt-5.6-sol", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.gpt-5-6-terra", "name": "GPT-5.6 Terra", "vendor": "openai", "target": "global.openai.gpt-5.6-terra", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.gpt-5-6-luna", "name": "GPT-5.6 Luna", "vendor": "openai", "target": "global.openai.gpt-5.6-luna", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.gpt-oss-120b", "name": "gpt-oss-120b", "vendor": "openai", "target": "openai.gpt-oss-120b-1:0", "contextWindow": 128000, "maxTokens": 16384, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.gpt-oss-20b", "name": "gpt-oss-20b", "vendor": "openai", "target": "openai.gpt-oss-20b-1:0", "contextWindow": 128000, "maxTokens": 16384, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+
+    { "id": "bedrock.grok-4-7", "name": "Grok 4.7", "vendor": "xai", "target": "global.xai.grok-4.7", "contextWindow": 256000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.grok-4-6", "name": "Grok 4.6", "vendor": "xai", "target": "global.xai.grok-4.6", "contextWindow": 256000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+
+    { "id": "bedrock.kimi-k3", "name": "Kimi K3", "vendor": "moonshot", "target": "global.moonshotai.kimi-k3", "contextWindow": 256000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.kimi-k2-5", "name": "Kimi K2.5", "vendor": "moonshot", "target": "moonshotai.kimi-k2.5", "contextWindow": 256000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.kimi-k2-thinking", "name": "Kimi K2 Thinking", "vendor": "moonshot", "target": "moonshot.kimi-k2-thinking", "contextWindow": 256000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+
+    { "id": "bedrock.deepseek-v3-2", "name": "DeepSeek V3.2", "vendor": "deepseek", "target": "deepseek.v3.2", "contextWindow": 128000, "maxTokens": 16384, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.deepseek-r1", "name": "DeepSeek R1", "vendor": "deepseek", "target": "us.deepseek.r1-v1:0", "contextWindow": 128000, "maxTokens": 32000, "input": ["text"], "tools": false, "runtime": "pi", "verified": "" },
+
+    { "id": "bedrock.qwen3-coder-next", "name": "Qwen3 Coder Next", "vendor": "qwen", "target": "qwen.qwen3-coder-next", "contextWindow": 256000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.qwen3-vl-235b", "name": "Qwen3 VL 235B", "vendor": "qwen", "target": "qwen.qwen3-vl-235b-a22b", "contextWindow": 256000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.qwen3-next-80b", "name": "Qwen3 Next 80B", "vendor": "qwen", "target": "qwen.qwen3-next-80b-a3b", "contextWindow": 256000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.qwen3-32b", "name": "Qwen3 32B", "vendor": "qwen", "target": "qwen.qwen3-32b-v1:0", "contextWindow": 32768, "maxTokens": 8192, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.qwen3-coder-30b", "name": "Qwen3 Coder 30B", "vendor": "qwen", "target": "qwen.qwen3-coder-30b-a3b-v1:0", "contextWindow": 128000, "maxTokens": 16384, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+
+    { "id": "bedrock.glm-5", "name": "GLM-5", "vendor": "zhipu", "target": "zai.glm-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.glm-4-7", "name": "GLM-4.7", "vendor": "zhipu", "target": "zai.glm-4.7", "contextWindow": 200000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.glm-4-7-flash", "name": "GLM-4.7 Flash", "vendor": "zhipu", "target": "zai.glm-4.7-flash", "contextWindow": 128000, "maxTokens": 16384, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+
+    { "id": "bedrock.minimax-m2-5", "name": "MiniMax M2.5", "vendor": "minimax", "target": "minimax.minimax-m2.5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.minimax-m2-1", "name": "MiniMax M2.1", "vendor": "minimax", "target": "minimax.minimax-m2.1", "contextWindow": 200000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+
+    { "id": "bedrock.mistral-large-3", "name": "Mistral Large 3", "vendor": "mistral", "target": "mistral.mistral-large-3-675b-instruct", "contextWindow": 256000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.devstral-2", "name": "Devstral 2", "vendor": "mistral", "target": "mistral.devstral-2-123b", "contextWindow": 256000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.ministral-3-14b", "name": "Ministral 3 14B", "vendor": "mistral", "target": "mistral.ministral-3-14b-instruct", "contextWindow": 128000, "maxTokens": 16384, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.magistral-small", "name": "Magistral Small", "vendor": "mistral", "target": "mistral.magistral-small-2509", "contextWindow": 128000, "maxTokens": 16384, "input": ["text", "image"], "tools": false, "runtime": "pi", "verified": "2026-10-03" },
+    { "id": "bedrock.pixtral-large", "name": "Pixtral Large", "vendor": "mistral", "target": "us.mistral.pixtral-large-2502-v1:0", "contextWindow": 128000, "maxTokens": 16384, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+
+    { "id": "bedrock.llama-4-maverick", "name": "Llama 4 Maverick", "vendor": "meta", "target": "us.meta.llama4-maverick-17b-instruct-v1:0", "contextWindow": 500000, "maxTokens": 8192, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.llama-4-scout", "name": "Llama 4 Scout", "vendor": "meta", "target": "us.meta.llama4-scout-17b-instruct-v1:0", "contextWindow": 500000, "maxTokens": 8192, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.llama-3-3-70b", "name": "Llama 3.3 70B", "vendor": "meta", "target": "us.meta.llama3-3-70b-instruct-v1:0", "contextWindow": 128000, "maxTokens": 8192, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "" },
+
+    { "id": "bedrock.nova-2-lite", "name": "Nova 2 Lite", "vendor": "amazon", "target": "global.amazon.nova-2-lite-v1:0", "contextWindow": 1000000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.nova-pro", "name": "Nova Pro", "vendor": "amazon", "target": "us.amazon.nova-pro-v1:0", "contextWindow": 300000, "maxTokens": 10000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
+    { "id": "bedrock.nova-micro", "name": "Nova Micro", "vendor": "amazon", "target": "us.amazon.nova-micro-v1:0", "contextWindow": 128000, "maxTokens": 10000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "" },
+
+    { "id": "bedrock.gemma-3-27b", "name": "Gemma 3 27B", "vendor": "google", "target": "google.gemma-3-27b-it", "contextWindow": 128000, "maxTokens": 8192, "input": ["text", "image"], "tools": false, "runtime": "pi", "verified": "2026-10-03" },
+    { "id": "bedrock.gemma-3-12b", "name": "Gemma 3 12B", "vendor": "google", "target": "google.gemma-3-12b-it", "contextWindow": 128000, "maxTokens": 8192, "input": ["text", "image"], "tools": false, "runtime": "pi", "verified": "2026-10-03" },
+
+    { "id": "bedrock.nemotron-3-super", "name": "Nemotron 3 Super 120B", "vendor": "nvidia", "target": "nvidia.nemotron-super-3-120b", "contextWindow": 256000, "maxTokens": 32000, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" },
+    { "id": "bedrock.nemotron-3-nano", "name": "Nemotron 3 Nano 30B", "vendor": "nvidia", "target": "nvidia.nemotron-nano-3-30b", "contextWindow": 128000, "maxTokens": 16384, "input": ["text"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-03" }
+  ]
+}

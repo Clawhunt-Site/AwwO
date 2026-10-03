@@ -1,0 +1,2866 @@
+{
+ "model": "global.anthropic.claude-opus-5-5",
+ "requests": [
+  {
+   "name": "minimal",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ]
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Hello"
+       }
+      ]
+     }
+    ],
+    "system": [
+     {
+      "text": "Be brief."
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    }
+   }
+  },
+  {
+   "name": "merged-roles-tools-and-settings",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Rule one."
+     },
+     {
+      "role": "developer",
+      "content": [
+       {
+        "type": "text",
+        "text": "Rule two."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": "First"
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "Second"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": "Checking.",
+      "tool_calls": [
+       {
+        "id": "tooluse_1",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": "{\"expression\":\"2*3\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "tooluse_1",
+      "content": "6"
+     },
+     {
+      "role": "user",
+      "content": "Thanks"
+     }
+    ],
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "stop": "END",
+    "parallel_tool_calls": false,
+    "tool_choice": "auto",
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "First"
+       },
+       {
+        "text": "Second"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "text": "Checking."
+       },
+       {
+        "toolUse": {
+         "toolUseId": "tooluse_1",
+         "name": "calculator",
+         "input": {
+          "expression": "2*3"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "toolResult": {
+         "toolUseId": "tooluse_1",
+         "content": [
+          {
+           "text": "6"
+          }
+         ]
+        }
+       },
+       {
+        "text": "Thanks"
+       }
+      ]
+     }
+    ],
+    "system": [
+     {
+      "text": "Rule one."
+     },
+     {
+      "text": "Rule two."
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512,
+     "temperature": 0.2,
+     "topP": 0.9,
+     "stopSequences": [
+      "END"
+     ]
+    },
+    "toolConfig": {
+     "tools": [
+      {
+       "toolSpec": {
+        "name": "calculator",
+        "description": "Evaluate arithmetic",
+        "inputSchema": {
+         "json": {
+          "type": "object",
+          "properties": {
+           "expression": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "expression"
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "empty-tool-result-and-text-parts",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "input_text",
+        "text": "A"
+       },
+       {
+        "type": "text",
+        "text": "B"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "output_text",
+        "text": "Calling"
+       }
+      ],
+      "tool_calls": [
+       {
+        "id": "t2",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": ""
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "t2",
+      "content": ""
+     },
+     {
+      "role": "user",
+      "content": "Go on"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "AB"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "text": "Calling"
+       },
+       {
+        "toolUse": {
+         "toolUseId": "t2",
+         "name": "calculator",
+         "input": {}
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "toolResult": {
+         "toolUseId": "t2",
+         "content": [
+          {
+           "text": "(empty result)"
+          }
+         ]
+        }
+       },
+       {
+        "text": "Go on"
+       }
+      ]
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    },
+    "toolConfig": {
+     "tools": [
+      {
+       "toolSpec": {
+        "name": "calculator",
+        "description": "Evaluate arithmetic",
+        "inputSchema": {
+         "json": {
+          "type": "object",
+          "properties": {
+           "expression": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "expression"
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "blank-text-dropped-required-choice",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "   "
+     },
+     {
+      "role": "assistant",
+      "content": ""
+     },
+     {
+      "role": "user",
+      "content": "Add"
+     }
+    ],
+    "max_completion_tokens": 64,
+    "tool_choice": "required",
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Add"
+       }
+      ]
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 64
+    },
+    "toolConfig": {
+     "tools": [
+      {
+       "toolSpec": {
+        "name": "calculator",
+        "inputSchema": {
+         "json": {
+          "type": "object",
+          "properties": {}
+         }
+        }
+       }
+      }
+     ],
+     "toolChoice": {
+      "any": {}
+     }
+    }
+   }
+  },
+  {
+   "name": "named-tool-choice",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "tool_choice": {
+     "type": "function",
+     "function": {
+      "name": "calculator"
+     }
+    },
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Hello"
+       }
+      ]
+     }
+    ],
+    "system": [
+     {
+      "text": "Be brief."
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    },
+    "toolConfig": {
+     "tools": [
+      {
+       "toolSpec": {
+        "name": "calculator",
+        "description": "Evaluate arithmetic",
+        "inputSchema": {
+         "json": {
+          "type": "object",
+          "properties": {
+           "expression": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "expression"
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "toolChoice": {
+      "tool": {
+       "name": "calculator"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "tool-choice-none-drops-tools",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "tool_choice": "none",
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Hello"
+       }
+      ]
+     }
+    ],
+    "system": [
+     {
+      "text": "Be brief."
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    }
+   }
+  },
+  {
+   "name": "stop-list-and-null-optionals",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "stop": [
+     "A",
+     "B"
+    ],
+    "temperature": null,
+    "top_p": null,
+    "reasoning_effort": null,
+    "response_format": {
+     "type": "text"
+    },
+    "frequency_penalty": 0,
+    "presence_penalty": 0,
+    "n": 1,
+    "seed": null,
+    "user": "u",
+    "metadata": {
+     "a": "b"
+    }
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Hello"
+       }
+      ]
+     }
+    ],
+    "system": [
+     {
+      "text": "Be brief."
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512,
+     "stopSequences": [
+      "A",
+      "B"
+     ]
+    }
+   }
+  },
+  {
+   "name": "parallel-tools-allowed",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "parallel_tool_calls": true,
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Hello"
+       }
+      ]
+     }
+    ],
+    "system": [
+     {
+      "text": "Be brief."
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    },
+    "toolConfig": {
+     "tools": [
+      {
+       "toolSpec": {
+        "name": "calculator",
+        "description": "Evaluate arithmetic",
+        "inputSchema": {
+         "json": {
+          "type": "object",
+          "properties": {
+           "expression": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "expression"
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "tool-history",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "tooluse_1",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": "{\"expression\":\"1+1\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "tooluse_1",
+      "content": "2"
+     },
+     {
+      "role": "user",
+      "content": "Explain"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Q"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "toolUse": {
+         "toolUseId": "tooluse_1",
+         "name": "calculator",
+         "input": {
+          "expression": "1+1"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "toolResult": {
+         "toolUseId": "tooluse_1",
+         "content": [
+          {
+           "text": "2"
+          }
+         ]
+        }
+       },
+       {
+        "text": "Explain"
+       }
+      ]
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    },
+    "toolConfig": {
+     "tools": [
+      {
+       "toolSpec": {
+        "name": "calculator",
+        "description": "Evaluate arithmetic",
+        "inputSchema": {
+         "json": {
+          "type": "object",
+          "properties": {
+           "expression": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "expression"
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "errors": [
+  {
+   "name": "wrong-model",
+   "body": {
+    "model": "other.model",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "The request model does not match the configured Bedrock model"
+  },
+  {
+   "name": "not-streaming",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": false,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Only streaming requests are supported"
+  },
+  {
+   "name": "reasoning-effort",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "reasoning_effort": "high"
+   },
+   "status": 400,
+   "message": "Reasoning effort is not supported for this Bedrock model"
+  },
+  {
+   "name": "json-schema",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "response_format": {
+     "type": "json_schema",
+     "json_schema": {
+      "name": "x",
+      "schema": {}
+     }
+    }
+   },
+   "status": 400,
+   "message": "Structured response formats are not supported for this Bedrock model"
+  },
+  {
+   "name": "penalty",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "presence_penalty": 0.5
+   },
+   "status": 400,
+   "message": "presence_penalty is not supported by Bedrock Converse"
+  },
+  {
+   "name": "logprobs",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "logprobs": true
+   },
+   "status": 400,
+   "message": "Log probabilities are not supported"
+  },
+  {
+   "name": "two-choices",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "n": 2
+   },
+   "status": 400,
+   "message": "Only one choice is supported"
+  },
+  {
+   "name": "parallel-not-boolean",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "parallel_tool_calls": "no"
+   },
+   "status": 400,
+   "message": "Invalid parallel_tool_calls"
+  },
+  {
+   "name": "seed",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "seed": 7
+   },
+   "status": 400,
+   "message": "seed is not supported by Bedrock Converse"
+  },
+  {
+   "name": "unknown-field",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "verbosity": "low"
+   },
+   "status": 400,
+   "message": "Unsupported request field: verbosity"
+  },
+  {
+   "name": "image-part",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "image_url",
+        "image_url": {
+         "url": "data:image/png;base64,AAAA"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Only text content is supported in user messages"
+  },
+  {
+   "name": "leading-assistant",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "assistant",
+      "content": "Hi"
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "The conversation must start with a user message"
+  },
+  {
+   "name": "trailing-assistant",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Hello"
+     },
+     {
+      "role": "assistant",
+      "content": "Prefill"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "The conversation must end with a user message"
+  },
+  {
+   "name": "system-only",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Only rules"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "The conversation must start with a user message"
+  },
+  {
+   "name": "bad-tool-call-id",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Q"
+     },
+     {
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "id": "bad id",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": "{}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "bad id",
+      "content": "1"
+     },
+     {
+      "role": "user",
+      "content": "go"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Invalid assistant tool call"
+  },
+  {
+   "name": "bad-arguments",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Q"
+     },
+     {
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "id": "t1",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": "{"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "t1",
+      "content": "1"
+     },
+     {
+      "role": "user",
+      "content": "go"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Assistant tool call arguments are not JSON"
+  },
+  {
+   "name": "object-arguments",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Q"
+     },
+     {
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "id": "t1",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": {
+          "expression": "1+1"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "t1",
+      "content": "2"
+     },
+     {
+      "role": "user",
+      "content": "go"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Assistant tool call arguments must be a JSON string"
+  },
+  {
+   "name": "null-arguments",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Q"
+     },
+     {
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "id": "t1",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": null
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "t1",
+      "content": "2"
+     },
+     {
+      "role": "user",
+      "content": "go"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Assistant tool call arguments must be a JSON string"
+  },
+  {
+   "name": "array-arguments",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Q"
+     },
+     {
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "id": "t1",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": "[1]"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "t1",
+      "content": "1"
+     },
+     {
+      "role": "user",
+      "content": "go"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Assistant tool call arguments must be a JSON object"
+  },
+  {
+   "name": "tool-history-without-tools",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "tooluse_1",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": "{\"expression\":\"1+1\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "tooluse_1",
+      "content": "2"
+     },
+     {
+      "role": "user",
+      "content": "Explain"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Tool history requires tool definitions"
+  },
+  {
+   "name": "none-with-tool-history",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "tooluse_1",
+        "type": "function",
+        "function": {
+         "name": "calculator",
+         "arguments": "{\"expression\":\"1+1\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "tooluse_1",
+      "content": "2"
+     },
+     {
+      "role": "user",
+      "content": "Explain"
+     }
+    ],
+    "tool_choice": "none",
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "status": 400,
+   "message": "tool_choice \"none\" cannot be combined with tool history"
+  },
+  {
+   "name": "unknown-named-tool",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "tool_choice": {
+     "type": "function",
+     "function": {
+      "name": "missing"
+     }
+    },
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "calculator",
+       "description": "Evaluate arithmetic",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "expression": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "expression"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "status": 400,
+   "message": "tool_choice names an unknown tool"
+  },
+  {
+   "name": "required-without-tools",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "tool_choice": "required"
+   },
+   "status": 400,
+   "message": "tool_choice requires tools"
+  },
+  {
+   "name": "bad-tool-name",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "1bad"
+      }
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Invalid tool definition"
+  },
+  {
+   "name": "too-many-stops",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "stop": [
+     "a",
+     "b",
+     "c",
+     "d",
+     "e"
+    ]
+   },
+   "status": 400,
+   "message": "Invalid stop sequences"
+  },
+  {
+   "name": "hot-temperature",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "temperature": 3
+   },
+   "status": 400,
+   "message": "Invalid temperature"
+  },
+  {
+   "name": "zero-max-tokens",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 0,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Invalid max tokens"
+  },
+  {
+   "name": "boolean-max-tokens",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": true,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Invalid max tokens"
+  },
+  {
+   "name": "unknown-role",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "function",
+      "content": "x"
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ]
+   },
+   "status": 400,
+   "message": "Unsupported message role"
+  },
+  {
+   "name": "not-object",
+   "body": [],
+   "status": 400,
+   "message": "The request body must be a JSON object"
+  }
+ ],
+ "streams": [
+  {
+   "name": "text-with-reasoning-and-usage",
+   "events": [
+    {
+     "messageStart": {
+      "role": "assistant"
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "reasoningContent": {
+        "text": "think"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "reasoningContent": {
+        "signature": "sig"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockStop": {
+      "contentBlockIndex": 0
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 1,
+      "delta": {
+       "text": "Hi"
+      }
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 1,
+      "delta": {
+       "text": ""
+      }
+     }
+    },
+    {
+     "messageStop": {
+      "stopReason": "end_turn"
+     }
+    },
+    {
+     "metadata": {
+      "usage": {
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "totalTokens": 15,
+       "cacheReadInputTokens": 4
+      },
+      "metrics": {
+       "latencyMs": 9
+      }
+     }
+    }
+   ],
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "role": "assistant",
+        "content": ""
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "reasoning_content": "think"
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "content": "Hi"
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "stop"
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [],
+     "usage": {
+      "prompt_tokens": 14,
+      "completion_tokens": 5,
+      "prompt_tokens_details": {
+       "cached_tokens": 4
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "two-tool-calls",
+   "events": [
+    {
+     "messageStart": {
+      "role": "assistant"
+     }
+    },
+    {
+     "contentBlockStart": {
+      "contentBlockIndex": 0,
+      "start": {
+       "toolUse": {
+        "toolUseId": "tooluse_a",
+        "name": "calculator"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "toolUse": {
+        "input": "{\"expression\""
+       }
+      }
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "toolUse": {
+        "input": ":\"1+1\"}"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockStop": {
+      "contentBlockIndex": 0
+     }
+    },
+    {
+     "contentBlockStart": {
+      "contentBlockIndex": 1,
+      "start": {
+       "toolUse": {
+        "toolUseId": "tooluse_b",
+        "name": "current_time"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 1,
+      "delta": {
+       "toolUse": {
+        "input": ""
+       }
+      }
+     }
+    },
+    {
+     "contentBlockStop": {
+      "contentBlockIndex": 1
+     }
+    },
+    {
+     "messageStop": {
+      "stopReason": "tool_use"
+     }
+    },
+    {
+     "metadata": {
+      "usage": {
+       "inputTokens": 3,
+       "outputTokens": 2,
+       "cacheWriteInputTokens": 6
+      }
+     }
+    }
+   ],
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "role": "assistant",
+        "content": ""
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "tool_calls": [
+         {
+          "index": 0,
+          "id": "tooluse_a",
+          "type": "function",
+          "function": {
+           "name": "calculator",
+           "arguments": ""
+          }
+         }
+        ]
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "tool_calls": [
+         {
+          "index": 0,
+          "function": {
+           "arguments": "{\"expression\""
+          }
+         }
+        ]
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "tool_calls": [
+         {
+          "index": 0,
+          "function": {
+           "arguments": ":\"1+1\"}"
+          }
+         }
+        ]
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "tool_calls": [
+         {
+          "index": 1,
+          "id": "tooluse_b",
+          "type": "function",
+          "function": {
+           "name": "current_time",
+           "arguments": ""
+          }
+         }
+        ]
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "tool_calls"
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [],
+     "usage": {
+      "prompt_tokens": 9,
+      "completion_tokens": 2
+     }
+    }
+   ]
+  },
+  {
+   "name": "length",
+   "events": [
+    {
+     "messageStart": {}
+    },
+    {
+     "contentBlockDelta": {
+      "delta": {
+       "text": "cut"
+      }
+     }
+    },
+    {
+     "messageStop": {
+      "stopReason": "max_tokens"
+     }
+    }
+   ],
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "role": "assistant",
+        "content": ""
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "content": "cut"
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "length"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "filtered",
+   "events": [
+    {
+     "messageStop": {
+      "stopReason": "guardrail_intervened"
+     }
+    }
+   ],
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "content_filter"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "context-window",
+   "events": [
+    {
+     "messageStop": {
+      "stopReason": "model_context_window_exceeded"
+     }
+    }
+   ],
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "length"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "empty-unions-and-redacted-reasoning",
+   "events": [
+    {
+     "messageStart": {}
+    },
+    {
+     "contentBlockStart": {
+      "contentBlockIndex": 0,
+      "start": {}
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {}
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "reasoningContent": {
+        "redactedContent": "AAAA"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockStop": {
+      "contentBlockIndex": 0
+     }
+    },
+    {
+     "messageStop": {
+      "stopReason": "stop_sequence"
+     }
+    }
+   ],
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "role": "assistant",
+        "content": ""
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "stop"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "single-tool-call",
+   "events": [
+    {
+     "messageStart": {
+      "role": "assistant"
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "text": "Two checks."
+      }
+     }
+    },
+    {
+     "contentBlockStop": {
+      "contentBlockIndex": 0
+     }
+    },
+    {
+     "contentBlockStart": {
+      "contentBlockIndex": 1,
+      "start": {
+       "toolUse": {
+        "toolUseId": "tooluse_a",
+        "name": "calculator"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 1,
+      "delta": {
+       "toolUse": {
+        "input": "{\"expression\":\"1+1\"}"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockStop": {
+      "contentBlockIndex": 1
+     }
+    },
+    {
+     "contentBlockStart": {
+      "contentBlockIndex": 2,
+      "start": {
+       "toolUse": {
+        "toolUseId": "tooluse_b",
+        "name": "current_time"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 2,
+      "delta": {
+       "toolUse": {
+        "input": "{\"timezone\":\"UTC\"}"
+       }
+      }
+     }
+    },
+    {
+     "contentBlockStop": {
+      "contentBlockIndex": 2
+     }
+    },
+    {
+     "messageStop": {
+      "stopReason": "tool_use"
+     }
+    },
+    {
+     "metadata": {
+      "usage": {
+       "inputTokens": 20,
+       "outputTokens": 30
+      }
+     }
+    }
+   ],
+   "singleToolCall": true,
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "role": "assistant",
+        "content": ""
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "content": "Two checks."
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "tool_calls": [
+         {
+          "index": 0,
+          "id": "tooluse_a",
+          "type": "function",
+          "function": {
+           "name": "calculator",
+           "arguments": ""
+          }
+         }
+        ]
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "tool_calls": [
+         {
+          "index": 0,
+          "function": {
+           "arguments": "{\"expression\":\"1+1\"}"
+          }
+         }
+        ]
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "tool_calls"
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [],
+     "usage": {
+      "prompt_tokens": 20,
+      "completion_tokens": 30
+     }
+    }
+   ]
+  }
+ ],
+ "streamErrors": [
+  {
+   "name": "incomplete",
+   "events": [
+    {
+     "messageStart": {}
+    },
+    {
+     "contentBlockDelta": {
+      "delta": {
+       "text": "x"
+      }
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "The Bedrock stream ended before the response was complete",
+   "upstream": false
+  },
+  {
+   "name": "unknown-stop",
+   "events": [
+    {
+     "messageStop": {
+      "stopReason": "malformed_tool_use"
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Bedrock ended the response for an unsupported reason",
+   "upstream": false
+  },
+  {
+   "name": "tool-input-outside-call",
+   "events": [
+    {
+     "contentBlockDelta": {
+      "delta": {
+       "toolUse": {
+        "input": "{}"
+       }
+      }
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Bedrock returned tool input outside a tool call",
+   "upstream": false
+  },
+  {
+   "name": "invalid-tool-id",
+   "events": [
+    {
+     "contentBlockStart": {
+      "start": {
+       "toolUse": {
+        "toolUseId": "x y",
+        "name": "calc"
+       }
+      }
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Bedrock returned an invalid tool call",
+   "upstream": false
+  },
+  {
+   "name": "two-members",
+   "events": [
+    {
+     "messageStart": {},
+     "metadata": {}
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Unexpected Bedrock stream event",
+   "upstream": false
+  },
+  {
+   "name": "throttled",
+   "events": [
+    {
+     "messageStart": {}
+    },
+    {
+     "throttlingException": {
+      "message": "slow"
+     }
+    }
+   ],
+   "status": 429,
+   "type": "throttlingException",
+   "message": "The Bedrock stream reported an error",
+   "upstream": true
+  },
+  {
+   "name": "after-stop",
+   "events": [
+    {
+     "messageStop": {
+      "stopReason": "end_turn"
+     }
+    },
+    "__finish__",
+    {
+     "messageStart": {}
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Unexpected Bedrock stream event",
+   "upstream": false
+  },
+  {
+   "name": "unknown-event",
+   "events": [
+    {
+     "messageStart": {}
+    },
+    {
+     "somethingNew": {
+      "x": 1
+     }
+    },
+    {
+     "messageStop": {
+      "stopReason": "stop_sequence"
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Unexpected Bedrock stream event",
+   "upstream": false
+  },
+  {
+   "name": "citation-delta",
+   "events": [
+    {
+     "messageStart": {}
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "citation": {
+        "title": "doc"
+       }
+      }
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Bedrock returned content the bridge cannot relay",
+   "upstream": false
+  },
+  {
+   "name": "unknown-start",
+   "events": [
+    {
+     "contentBlockStart": {
+      "contentBlockIndex": 0,
+      "start": {
+       "image": {
+        "format": "png"
+       }
+      }
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Bedrock returned content the bridge cannot relay",
+   "upstream": false
+  },
+  {
+   "name": "unknown-reasoning-member",
+   "events": [
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "reasoningContent": {
+        "summary": "x"
+       }
+      }
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Bedrock returned content the bridge cannot relay",
+   "upstream": false
+  },
+  {
+   "name": "non-string-text",
+   "events": [
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "text": 7
+      }
+     }
+    }
+   ],
+   "status": 502,
+   "type": "api_error",
+   "message": "Bedrock returned content the bridge cannot relay",
+   "upstream": false
+  }
+ ]
+}

@@ -11,5 +11,5 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": ["computer-model.ts", "user-models.ts"]
+  "include": ["computer-model.ts", "user-models.ts", "bedrock-bridge.ts", "bedrock-catalog.ts", "bedrock-bridge.test.ts", "bedrock-catalog.test.ts"]
 }

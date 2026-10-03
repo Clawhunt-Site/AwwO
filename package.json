@@ -30,6 +30,7 @@
     "build:gateway": "npm run build --prefix apps/gateway",
     "start:user": "node scripts/awwo-user-start.ts",
     "test:user-models": "node --test apps/user-models.test.ts",
+    "test:saas:bedrock": "node --test apps/bedrock-bridge.test.ts apps/bedrock-catalog.test.ts",
     "build:windows": "node apps/windows/build.ts",
     "test:windows": "node --test apps/windows/config.test.ts",
     "test:saas:computer-model": "node --test apps/computer-model.test.ts",
