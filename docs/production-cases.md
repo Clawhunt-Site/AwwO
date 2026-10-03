@@ -1,6 +1,17 @@
-# Production cases
+# Production cases and the work-mode tutorial
 
-The homepage's nine production cases each have a real AwwO canvas that ran, and every case dialog shows how it was made: the canvas stage by stage, what each agent actually delivered, and the run receipt. The eight HTML cases also show the delivered result in a sandbox; the knowledge-base case shows its recorded demo and run evidence instead.
+The homepage's nine production cases each have a real AwwO canvas that ran, and every case dialog shows how it was made: the canvas stage by stage, what each agent actually delivered, and the run receipt. The eight HTML cases also show the delivered result in a sandbox; the knowledge-base case shows its recorded demo and run evidence instead. New accounts first go through a seven-step work-mode tutorial.
+
+## The work-mode tutorial
+
+`apps/web/src/saas/WorkModeTutorial.tsx`, hosted by `SaaSOnboarding.tsx`.
+
+- **What it explains**: brief → canvas → agents → handoffs → parallel stages → run states → review and delivery. Its scenes use the real canvas behind the pixel-platformer case, and that case's recorded run for timings once a record is published. The run-state scene is labelled as an illustration of the status display.
+- **Who must see it**: an account is new when the first workspace it owns was created on or after `TUTORIAL_REQUIRED_SINCE` (2026-10-03) and less than `TUTORIAL_REQUIRED_DAYS` (14) days ago. The identity carries no other per-account date. For a new account the tutorial has no close or skip control, Escape does nothing, a browser's forced close reopens it, and it returns until it is finished. Each step unlocks after its scene has played (`STEP_DWELL_MS`).
+- **Everyone else** sees it once on each device and can skip it. A finished tutorial is never downgraded by a skipped replay.
+- **Replay** is under More options → 「AwwO 工作模式」 / “How AwwO works”. The page-by-page spotlight tour (「使用引导」) stays available on request.
+- **State** is browser-only: `awwo.workmode.v1:<user>` = `completed` | `dismissed`, and `completed` from any tab wins. The API stores no onboarding state. A new account that opens AwwO on a second device within its first 14 days is shown the tutorial again until it finishes it there. Where browser storage is unavailable, a new account is still shown it, on every page load until it has been finished there, since nothing can be remembered; anyone else is not shown it by itself. If its chunk fails to load, a new account gets a notice that reloads the page (the tutorial opens again) instead of the workspace; anyone else carries on without it.
+- It never creates, runs or submits anything. Its last step can focus the home prompt box.
 
 ## The case canvases
 
@@ -26,4 +37,4 @@ A published run must have used exactly the canvas text in `productionWorkflows.t
 
 `scripts/showcase/publish-knowledge-base.mjs` builds the knowledge-base record from the 2026-09-04 evidence in `docs/superpowers/evidence/2026-09-04-awwo/`. That run used its own canvas on the desktop Codex runtime, not one from `productionWorkflows.ts`, so its record carries no `canvasSHA256` or result checksum and its canvas is not offered as a copy.
 
-Tests: `saas-production-workflows`, `saas-production-runs`, `saas-production-cases` and `saas-production-cases-placement`. They pin, among other things, record ↔ canvas identity, summary ↔ record identity, checksums, the absence of private identifiers, and that delivery is claimed only where a run delivered.
+Tests: `saas-production-workflows`, `saas-production-runs`, `saas-production-cases`, `saas-production-cases-placement`, `saas-work-mode-tutorial` and `saas-onboarding-host`. They pin, among other things, record ↔ canvas identity, summary ↔ record identity, checksums, the absence of private identifiers, and that delivery is claimed only where a run delivered.

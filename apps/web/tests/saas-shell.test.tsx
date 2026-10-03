@@ -8,7 +8,7 @@ import { configureSaaSCanvasSave, clearSaaSCanvas } from '../src/saas/canvasBrid
 const identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' },
   tenants: [{ id: 'tenant-a', name: '真实工作区', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 }] };
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
-beforeEach(() => { Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } }); Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } }); localStorage.clear(); localStorage.setItem('awwo.onboarding.v1:user-a:workspace', 'completed'); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/'); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
+beforeEach(() => { Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } }); Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } }); localStorage.clear(); localStorage.setItem('awwo.workmode.v1:user-a', 'completed'); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/'); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); clearSaaSCanvas(); configureSaaSCanvasSave(null); vi.unstubAllGlobals(); });
 
 it('shows login on a missing server session without reading legacy identity tokens', async () => {

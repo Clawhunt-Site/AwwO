@@ -30,7 +30,7 @@ import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHando
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
 import { AppearanceScope } from './SaaSAppearance';
-import { SaaSOnboarding, GuideLauncher, MainSiteLink } from './SaaSOnboarding';
+import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from './SaaSOnboarding';
 import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
@@ -291,7 +291,7 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
         ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined } } : {}) }} />
     <ActionMenu label={t('更多选项', 'More options')}>{close => <>
       <PreferenceControls />
-      <GuideLauncher onLaunch={close} /><MainSiteLink />
+      <TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
       <a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
       {identity.user.platformRole === 'admin' && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}

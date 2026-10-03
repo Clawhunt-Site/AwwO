@@ -47,7 +47,7 @@ export async function sessionFetch(url: string, init: RequestInit = {}): Promise
   }
   return response;
 }
-export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number };
+export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number; createdAt?: string };
 export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
 /** API Agent runtime is persisted independently of a canvas draft. Legacy records default to Pi. */

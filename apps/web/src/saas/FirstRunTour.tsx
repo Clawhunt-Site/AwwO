@@ -8,7 +8,6 @@ export type FirstRunScene = 'workspace' | 'canvas' | 'engines';
 export type FirstRunAction = 'engines' | 'create-canvas' | 'provider-key';
 export type FirstRunTourProps = {
   open: boolean;
-  overview?: boolean;
   scene: FirstRunScene;
   locale: 'zh' | 'en';
   mainSiteURL?: string;
@@ -62,7 +61,7 @@ function findSpotlight(names: string[], width: number, height: number): Rect | n
 }
 
 /** A presentation-only guide. Native modal inertness prevents clicks reaching highlighted controls. */
-export function FirstRunTour({ overview = false, open, scene, locale, mainSiteURL, readOnly = false, personalEngines = true, onClose, onAction }: FirstRunTourProps) {
+export function FirstRunTour({ open, scene, locale, mainSiteURL, readOnly = false, personalEngines = true, onClose, onAction }: FirstRunTourProps) {
   const [requestedIndex, setIndex] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const card = useRef<HTMLElement>(null);
@@ -71,10 +70,7 @@ export function FirstRunTour({ overview = false, open, scene, locale, mainSiteUR
   const [layout, setLayout] = useState<Layout>(() => ({ spotlight: null, card: {}, ...viewport() }));
   const id = useId();
   const siteURL = safeMainSiteURL(mainSiteURL, mainSiteEnvironment());
-  const overviewStep: Step = { key: 'overview', title: ['让任务在画布上完成', 'Take a task from plan to result'],
-    instruction: readOnly ? ['打开画布，查看 Bot 的任务、运行进度与结果。', 'Open a canvas to review Bot tasks, progress and results.'] : ['添加模型或 Bot，写清任务，运行并查看结果。需要协作时，再把节点连起来。', 'Add a model or Bot, describe the task, then run and review the result. Connect nodes when the task needs collaboration.'],
-    hint: readOnly ? ['你可以浏览和导出；编辑、运行需要成员权限。', 'You can browse and export; editing and execution require member access.'] : personalEngines ? ['运行前连接自己的 API Key。稍后可从「更多选项 → 使用引导」查看详细操作。', 'Connect your API key before running. Find the full tour under More options → Getting started.'] : ['稍后可从「更多选项 → 使用引导」查看详细操作。', 'Find the full tour under More options → Getting started.'], targets: [], diagram: true };
-  const steps = overview ? [overviewStep] : stepsFor(scene, readOnly, personalEngines).filter(step => !step.siteLink || Boolean(siteURL));
+  const steps = stepsFor(scene, readOnly, personalEngines).filter(step => !step.siteLink || Boolean(siteURL));
   const index = Math.min(requestedIndex, steps.length - 1);
   const step = steps[index];
   const zh = locale === 'zh';
@@ -140,7 +136,7 @@ export function FirstRunTour({ overview = false, open, scene, locale, mainSiteUR
     <section ref={card} className="first-run-tour-card" style={layout.card} data-spotlight={spotlight ? 'visible' : 'missing'}>
       <header className="first-run-tour-header"><span className="first-run-tour-brand"><Sparkles size={15} aria-hidden="true" />AwwO <span>{zh ? '使用引导' : 'Getting started'}</span></span><button className="first-run-tour-close" type="button" aria-label={zh ? '关闭引导' : 'Close tour'} onClick={() => finish(false)}><X size={18} /></button></header>
       <div className="first-run-tour-content">
-        {!overview && <span className="first-run-tour-count">{zh ? `第 ${index + 1} / ${steps.length} 步` : `Step ${index + 1} of ${steps.length}`}</span>}
+        <span className="first-run-tour-count">{zh ? `第 ${index + 1} / ${steps.length} 步` : `Step ${index + 1} of ${steps.length}`}</span>
         <h2 ref={heading} id={`${id}-title`} tabIndex={-1}>{text(step.title)}</h2>
         <p id={`${id}-instruction`}>{text(step.instruction)}</p>
         {step.diagram && <div className="first-run-tour-map" aria-label={readOnly ? (zh ? '模型、画布任务与 Bot' : 'Models, canvas tasks and Bots') : (zh ? '左侧模型，中间任务画布，右侧 Bot' : 'Models on the left, task canvas in the center, Bots on the right')}>
@@ -150,7 +146,7 @@ export function FirstRunTour({ overview = false, open, scene, locale, mainSiteUR
         {step.action && step.actionLabel && onAction && <button type="button" className="first-run-tour-action" onClick={() => { finish(false); onAction(step.action!); }}>{text(step.actionLabel)}<ArrowRight size={15} /></button>}
         {step.siteLink && siteURL && <a className="first-run-tour-action" href={siteURL} target="_blank" rel="noopener noreferrer">{zh ? '打开 ClawHunt 主站' : 'Open ClawHunt'}<ExternalLink size={14} /></a>}
       </div>
-      <footer className="first-run-tour-footer"><div className="first-run-tour-progress" aria-hidden="true">{steps.map((item, position) => <span key={item.key} className={position <= index ? 'is-reached' : undefined} />)}</div><div className="first-run-tour-buttons"><button className="first-run-tour-skip" type="button" onClick={() => finish(false)}>{zh ? '暂时跳过' : 'Skip for now'}</button><div>{index > 0 && <button className="first-run-tour-back" type="button" aria-label={zh ? '上一步' : 'Previous step'} onClick={() => setIndex(Math.max(0, index - 1))}><ArrowLeft size={16} /></button>}<button className="first-run-tour-next" type="button" onClick={() => index === steps.length - 1 ? finish(true) : setIndex(index + 1)}>{index === steps.length - 1 ? (overview ? (zh ? '开始使用' : 'Get started') : (zh ? '知道了' : 'Got it')) : (zh ? '下一步' : 'Next')}{index === steps.length - 1 ? <Check size={15} /> : <ArrowRight size={15} />}</button></div></div></footer>
+      <footer className="first-run-tour-footer"><div className="first-run-tour-progress" aria-hidden="true">{steps.map((item, position) => <span key={item.key} className={position <= index ? 'is-reached' : undefined} />)}</div><div className="first-run-tour-buttons"><button className="first-run-tour-skip" type="button" onClick={() => finish(false)}>{zh ? '暂时跳过' : 'Skip for now'}</button><div>{index > 0 && <button className="first-run-tour-back" type="button" aria-label={zh ? '上一步' : 'Previous step'} onClick={() => setIndex(Math.max(0, index - 1))}><ArrowLeft size={16} /></button>}<button className="first-run-tour-next" type="button" onClick={() => index === steps.length - 1 ? finish(true) : setIndex(index + 1)}>{index === steps.length - 1 ? (zh ? '知道了' : 'Got it') : (zh ? '下一步' : 'Next')}{index === steps.length - 1 ? <Check size={15} /> : <ArrowRight size={15} />}</button></div></div></footer>
     </section>
   </dialog>, document.body);
 }

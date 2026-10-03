@@ -1,10 +1,12 @@
 # First-run guide
 
-The hosted SaaS UI presents a visual guide on the first visit to each of three scenes: workspace, personal engine settings, and canvas. The native macOS hosted client uses this same UI. Native dialog behavior keeps the background inert, traps keyboard focus, supports Escape, and restores focus after closing. The user can skip and replay using **Getting started / 使用引导**.
+On the first visit to the workspace, canvas or engine-settings page, the hosted SaaS UI opens the **work-mode tutorial** (`WorkModeTutorial.tsx`). It is a seven-step explainer of how AwwO works, described in [production cases and the work-mode tutorial](../../../docs/production-cases.md). Accounts registered from 2026-10-03 must finish it during their first 14 days: it has no close or skip control, Escape does nothing, and it returns until finished. Every other account sees it once and can skip it. Replay it from **More options → How AwwO works / AwwO 工作模式**.
+
+The step-by-step page tour below opens only on request, from **Getting started / 使用引导**. The native macOS hosted client uses the same UI. Native dialog behavior keeps the background inert, traps keyboard focus, supports Escape, and restores focus after closing.
 
 The guide explains personal provider credentials, a first canvas, models on the left, Bots on the right, task input, and explicit execution. Reader instructions match the read-only layout and never suggest editing or running. Workspace-managed model deployments do not tell users to add personal keys. No step creates a canvas, saves a key, purchases credits, or runs inference automatically.
 
-Presentation progress is saved per account and scene on the current browser/device in `awwo.onboarding.v1:<encoded-user-id>:<scene>`. Only `dismissed` or `completed` is stored. It does not sync across devices. Pages with an invitation, account security, suspended/inaccessible workspaces, or administration do not auto-open the guide. A scene waits for its actual content and for an existing modal or draft-recovery prompt to close.
+Tutorial progress is saved per account on the current browser/device in `awwo.workmode.v1:<encoded-user-id>`. Only `dismissed` or `completed` is stored, and `completed` written by any tab wins. Progress does not sync across devices. Where browser storage is unavailable, nothing can be remembered: a new account is still made to finish the tutorial, which then returns on every page load, while anyone else is not shown it by itself; the menu still opens it. If the tutorial's chunk cannot load, a new account sees a notice that reloads the page instead of the workspace, and anyone else carries on without it. Pages with an invitation, account security, suspended/inaccessible workspaces, or administration do not auto-open it. It waits for the page's actual content and for an existing modal or draft-recovery prompt to close. The page tour stores nothing.
 
 ## Main-site navigation
 

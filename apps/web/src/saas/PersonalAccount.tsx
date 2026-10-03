@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, saasErrorMessage, type Identity } from "./api";
 import { PreferenceControls, useSaaSPreferences } from "./preferences";
 import "./personal-account.css";
-import { GuideLauncher, MainSiteLink } from "./SaaSOnboarding";
+import { GuideLauncher, MainSiteLink, TutorialLauncher } from "./SaaSOnboarding";
 import { SecretInput } from "./SecretInput";
 import { clawHuntAccountURL, type AuthOptions } from './clawhuntAuth';
 
@@ -57,7 +57,7 @@ function AccountLayout({
         <a href="/" className="saas-logo">
           AwwO
         </a>
-        <div className="saas-account-header-actions"><PreferenceControls /><GuideLauncher /><MainSiteLink /></div>
+        <div className="saas-account-header-actions"><PreferenceControls /><TutorialLauncher /><GuideLauncher /><MainSiteLink /></div>
       </header>
       <section className="saas-page-intro">
         <h1>{title}</h1>

@@ -1,91 +1,188 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { SaaSOnboarding, GuideLauncher, onboardingScene, onboardingStorageKey } from '../src/saas/SaaSOnboarding';
+import { SaaSOnboarding, GuideLauncher, TutorialLauncher, onboardingScene, tutorialRequired, tutorialStorageKey, TUTORIAL_REQUIRED_SINCE } from '../src/saas/SaaSOnboarding';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { mainSiteEnvironment, safeMainSiteURL } from '../src/saas/mainSite';
 import type { Identity } from '../src/saas/api';
 import type { FirstRunTourProps } from '../src/saas/FirstRunTour';
+import type { WorkModeTutorialProps } from '../src/saas/WorkModeTutorial';
 
 vi.mock('../src/saas/FirstRunTour', () => ({
-  FirstRunTour: ({ open, scene, readOnly, personalEngines, onClose, onAction }: FirstRunTourProps) => open ? <section role="dialog" aria-label={scene}>
+  FirstRunTour: ({ open, scene, readOnly, personalEngines, onClose, onAction }: FirstRunTourProps) => open ? <section role="dialog" aria-label={`tour ${scene}`}>
     <span>{readOnly ? 'Read only' : 'Editable'}</span><span>{personalEngines ? 'Personal' : 'Workspace engine'}</span>
-    <button onClick={() => onClose(false)}>Dismiss guide</button><button onClick={() => onClose(true)}>Complete guide</button>
+    <button onClick={() => onClose(false)}>Dismiss tour</button>
     <button onClick={() => { onClose(false); onAction?.('create-canvas'); }}>Create canvas action</button>
   </section> : null,
 }));
+vi.mock('../src/saas/WorkModeTutorial', () => ({
+  default: ({ open, mandatory, readOnly, onClose, onStart }: WorkModeTutorialProps) => open ? <section role="dialog" aria-label="tutorial">
+    <span>{mandatory ? 'Mandatory' : 'Optional'}</span><span>{readOnly ? 'Read only' : 'Editable'}</span>
+    {!mandatory && <button onClick={() => onClose(false)}>Skip tutorial</button>}
+    <button onClick={() => onClose(true)}>Finish tutorial</button>
+    {onStart && <button onClick={() => { onClose(true); onStart(); }}>Write my first brief</button>}
+  </section> : null,
+}));
 let sequence = 0;
-const identity = (): Identity => ({ user: { id: `guide-user-${++sequence}`, name: 'New user', email: 'new@example.test', platformRole: 'user' }, personalCredentialsRequired: true,
-  tenants: [{ id: 'team', name: 'Team', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 20 }] });
-const content = (user: Identity, ready = true) => <SaaSPreferencesProvider><SaaSOnboarding identity={user}><GuideLauncher />{ready && <div data-onboarding="canvas-list" />}</SaaSOnboarding></SaaSPreferencesProvider>;
+const OLD = '2026-09-01T08:00:00Z';
+const identity = (createdAt: string | undefined = OLD): Identity => ({ user: { id: `guide-user-${++sequence}`, name: 'New user', email: 'new@example.test', platformRole: 'user' }, personalCredentialsRequired: true,
+  tenants: [{ id: 'team', name: 'Team', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 20, ...(createdAt ? { createdAt } : {}) }] });
+const newcomer = () => identity(new Date(Date.now() - 3600_000).toISOString());
+const content = (user: Identity, ready = true) => <SaaSPreferencesProvider><SaaSOnboarding identity={user}><GuideLauncher /><TutorialLauncher />{ready && <div data-onboarding="canvas-list" />}</SaaSOnboarding></SaaSPreferencesProvider>;
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'en'); history.replaceState(null, '', '/?tenant=team'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); history.replaceState(null, '', '/'); });
 
-it('waits for the real page, dismisses once per account and can always replay', async () => {
+it('requires the tutorial only of accounts registered since it shipped, and only for their first two weeks', () => {
+  const since = Date.parse(TUTORIAL_REQUIRED_SINCE), day = 86_400_000;
+  const at = (createdAt?: string, role = 'owner'): Identity => { const user = identity(createdAt); user.tenants[0].role = role; return user; };
+  expect(tutorialRequired(at(new Date(since + day).toISOString()), since + 2 * day)).toBe(true);
+  expect(tutorialRequired(at(new Date(since - 1).toISOString()), since + day)).toBe(false);          // registered before the tutorial
+  expect(tutorialRequired(at(new Date(since + day).toISOString()), since + 16 * day)).toBe(false);    // past the first 14 days
+  expect(tutorialRequired(at(new Date(since + day).toISOString(), 'member'), since + 2 * day)).toBe(false); // joining a team is not registering
+  expect(tutorialRequired(at(undefined), since + day)).toBe(false);
+  expect(tutorialRequired(at('not a date'), since + day)).toBe(false);
+  // The earliest owned workspace is the registration: a newer one does not make an old account new.
+  const both = identity(OLD); both.tenants.push({ ...both.tenants[0], id: 'second', createdAt: new Date(since + day).toISOString() });
+  expect(tutorialRequired(both, since + 2 * day)).toBe(false);
+});
+
+it('opens the tutorial for an existing account once, when the page is ready, and lets it be skipped for good', async () => {
   const user = identity(); const view = render(content(user, false));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   view.rerender(content(user));
-  await screen.findByRole('dialog', { name: 'workspace' });
-  fireEvent.click(screen.getByRole('button', { name: 'Dismiss guide' }));
-  expect(localStorage.getItem(onboardingStorageKey(user.user.id, 'workspace'))).toBe('dismissed');
+  await screen.findByRole('dialog', { name: 'tutorial' });
+  expect(screen.getByText('Optional')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Skip tutorial' }));
+  expect(localStorage.getItem(tutorialStorageKey(user.user.id))).toBe('dismissed');
   view.unmount(); render(content(user));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Getting started' }));
-  expect(screen.getByRole('dialog')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Complete guide' }));
-  expect(localStorage.getItem(onboardingStorageKey(user.user.id, 'workspace'))).toBe('completed');
+  // A replay is always available and never mandatory; finishing it records completion.
+  fireEvent.click(screen.getByRole('button', { name: 'How AwwO works' }));
+  expect(await screen.findByText('Optional')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Finish tutorial' }));
+  expect(localStorage.getItem(tutorialStorageKey(user.user.id))).toBe('completed');
 });
 
-it('keeps users and scenes independent without creating or fetching anything', async () => {
+it('makes a new account finish the tutorial: it comes back until it is completed', async () => {
+  const user = newcomer(); const view = render(content(user));
+  await screen.findByRole('dialog', { name: 'tutorial' });
+  expect(screen.getByText('Mandatory')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Skip tutorial' })).not.toBeInTheDocument();
+  // An earlier dismissal, from a skipped replay say, does not excuse it.
+  view.unmount(); localStorage.setItem(tutorialStorageKey(user.user.id), 'dismissed');
+  const again = render(content(user));
+  await screen.findByRole('dialog', { name: 'tutorial' });
+  fireEvent.click(screen.getByRole('button', { name: 'Finish tutorial' }));
+  expect(localStorage.getItem(tutorialStorageKey(user.user.id))).toBe('completed');
+  again.unmount(); render(content(user));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('keeps accounts apart and never fetches or creates anything', async () => {
   const first = identity(); const second = identity(); const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
-  localStorage.setItem(onboardingStorageKey(first.user.id, 'workspace'), 'completed');
+  localStorage.setItem(tutorialStorageKey(first.user.id), 'completed');
   const view = render(content(first)); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  view.rerender(content(second)); await screen.findByRole('dialog');
-  fireEvent.click(screen.getByRole('button', { name: 'Complete guide' }));
-  expect(localStorage.getItem(onboardingStorageKey(second.user.id, 'canvas'))).toBeNull();
+  view.rerender(content(second)); await screen.findByRole('dialog', { name: 'tutorial' });
+  fireEvent.click(screen.getByRole('button', { name: 'Finish tutorial' }));
+  expect(localStorage.getItem(tutorialStorageKey(second.user.id))).toBe('completed');
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it('does not reopen after a manual dismissal during page loading', async () => {
+it('does not reopen after the tutorial was finished during page loading', async () => {
   const user = identity(); const view = render(content(user, false));
-  fireEvent.click(screen.getByRole('button', { name: 'Getting started' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Dismiss guide' }));
+  fireEvent.click(screen.getByRole('button', { name: 'How AwwO works' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Finish tutorial' }));
   view.rerender(content(user));
-  await waitFor(() => expect(localStorage.getItem(onboardingStorageKey(user.user.id, 'workspace'))).toBe('dismissed'));
+  await waitFor(() => expect(localStorage.getItem(tutorialStorageKey(user.user.id))).toBe('completed'));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
-it('takes the create-canvas step to the home prompt box, only focusing it', async () => {
+it('never downgrades a finished tutorial when a replay is skipped', async () => {
+  const user = identity(); localStorage.setItem(tutorialStorageKey(user.user.id), 'completed');
+  render(content(user));
+  fireEvent.click(screen.getByRole('button', { name: 'How AwwO works' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Skip tutorial' }));
+  expect(localStorage.getItem(tutorialStorageKey(user.user.id))).toBe('completed');
+});
+
+it('hands the last step to the home prompt box, only focusing it', async () => {
   const scroll = vi.fn();
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll });
   const submitted = vi.fn(event => event.preventDefault());
   render(<SaaSPreferencesProvider><SaaSOnboarding identity={identity()}><GuideLauncher />
     <form data-onboarding="canvas-create" onSubmit={submitted}><textarea aria-label="Canvas request" defaultValue="" /></form>
     <div data-onboarding="canvas-list" /></SaaSOnboarding></SaaSPreferencesProvider>);
-  await screen.findByRole('dialog', { name: 'workspace' });
-  fireEvent.click(screen.getByRole('button', { name: 'Create canvas action' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Write my first brief' }));
   await waitFor(() => expect(screen.getByRole('textbox', { name: 'Canvas request' })).toHaveFocus());
   expect(scroll).toHaveBeenCalledWith({ block: 'center', behavior: 'auto' });
   expect(submitted).not.toHaveBeenCalled();
   delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
 });
 
+it('offers no prompt-box hand-off to readers or outside the workspace home', async () => {
+  const reader = identity(); reader.tenants[0].role = 'reader';
+  const view = render(content(reader)); await screen.findByRole('dialog', { name: 'tutorial' });
+  expect(screen.getByText('Read only')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Write my first brief' })).not.toBeInTheDocument();
+  view.unmount(); history.replaceState(null, '', '/?tenant=team&canvas=one');
+  render(<SaaSPreferencesProvider><SaaSOnboarding identity={identity()}><div data-onboarding="canvas-stage" /></SaaSOnboarding></SaaSPreferencesProvider>);
+  await screen.findByRole('dialog', { name: 'tutorial' });
+  expect(screen.queryByRole('button', { name: 'Write my first brief' })).not.toBeInTheDocument();
+});
+
 it('waits for an existing modal to close instead of stealing it', async () => {
   const dialog = document.createElement('dialog'); dialog.setAttribute('open', ''); document.body.append(dialog);
-  render(content(identity())); expect(screen.queryByRole('dialog', { name: 'workspace' })).not.toBeInTheDocument();
+  render(content(identity())); expect(screen.queryByRole('dialog', { name: 'tutorial' })).not.toBeInTheDocument();
   dialog.removeAttribute('open');
-  await screen.findByRole('dialog', { name: 'workspace' }); dialog.remove();
+  await screen.findByRole('dialog', { name: 'tutorial' }); dialog.remove();
 });
 
-it('uses correct readonly and workspace credential instructions', async () => {
+it('keeps the page tour on request, with read-only and workspace-engine instructions', async () => {
   const user = identity(); user.tenants[0].role = 'reader'; user.personalCredentialsRequired = false;
-  render(content(user)); await screen.findByRole('dialog');
+  localStorage.setItem(tutorialStorageKey(user.user.id), 'completed');
+  render(content(user));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Getting started' }));
+  expect(screen.getByRole('dialog', { name: 'tour workspace' })).toBeVisible();
   expect(screen.getByText('Read only')).toBeInTheDocument(); expect(screen.getByText('Workspace engine')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss tour' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
-it('keeps guide usable when local storage is unavailable', async () => {
-  const user = identity(); render(content(user)); await screen.findByRole('dialog');
+it('still makes a new account finish the tutorial where nothing can be remembered', async () => {
   const original = localStorage.setItem; localStorage.setItem = () => { throw new Error('disabled'); };
-  try { fireEvent.click(screen.getByRole('button', { name: 'Dismiss guide' })); await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument()); }
+  try {
+    render(content(newcomer()));
+    expect(await screen.findByText('Mandatory')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip tutorial' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Finish tutorial' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  } finally { localStorage.setItem = original; }
+});
+
+it('does not open by itself for anyone else a tutorial it could not remember, and keeps the menu entry', async () => {
+  const original = localStorage.setItem; localStorage.setItem = () => { throw new Error('disabled'); };
+  try {
+    render(content(identity()));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'How AwwO works' }));
+    expect(await screen.findByText('Optional')).toBeInTheDocument();
+  } finally { localStorage.setItem = original; }
+});
+
+it('lets a completion written by another tab win over a skipped replay in this one', async () => {
+  const user = identity(); render(content(user));
+  fireEvent.click(await screen.findByRole('button', { name: 'Skip tutorial' }));        // this tab: dismissed
+  localStorage.setItem(tutorialStorageKey(user.user.id), 'completed');                  // another tab finished it
+  fireEvent.click(screen.getByRole('button', { name: 'How AwwO works' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Skip tutorial' }));
+  expect(localStorage.getItem(tutorialStorageKey(user.user.id))).toBe('completed');
+});
+
+it('keeps the tutorial usable when local storage is unavailable', async () => {
+  const user = identity(); render(content(user)); await screen.findByRole('dialog', { name: 'tutorial' });
+  const original = localStorage.setItem; localStorage.setItem = () => { throw new Error('disabled'); };
+  try { fireEvent.click(screen.getByRole('button', { name: 'Skip tutorial' })); await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument()); }
   finally { localStorage.setItem = original; }
 });
 
@@ -127,15 +224,15 @@ it('does not enable local HTTP in a production build even with development mode'
 });
 
 
-it('does not interrupt each destination with another automatic tour after the first introduction', async () => {
+
+it('introduces the work mode once, not again on every page', async () => {
   const user = identity();
   const view = render(content(user));
-  await screen.findByRole('dialog');
-  fireEvent.click(screen.getByRole('button', { name: 'Complete guide' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Finish tutorial' }));
   view.unmount();
   history.replaceState(null, '', '/?tenant=team&canvas=one');
   render(<SaaSPreferencesProvider><SaaSOnboarding identity={user}><GuideLauncher /><div data-onboarding="canvas-stage" /></SaaSOnboarding></SaaSPreferencesProvider>);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Getting started' }));
-  expect(screen.getByRole('dialog', { name: 'canvas' })).toBeVisible();
+  expect(screen.getByRole('dialog', { name: 'tour canvas' })).toBeVisible();
 });

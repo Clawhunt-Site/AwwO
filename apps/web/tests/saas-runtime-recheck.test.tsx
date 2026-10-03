@@ -42,7 +42,7 @@ function server(document: CanvasDocument = emptyDocument()) {
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); localStorage.setItem('superclaw_locale', 'zh');
-  localStorage.setItem('awwo.onboarding.v1:recheck-user:workspace', 'dismissed');
+  localStorage.setItem('awwo.workmode.v1:recheck-user', 'dismissed');
   history.replaceState({}, '', `/?tenant=${tenant.id}&canvas=first`);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });

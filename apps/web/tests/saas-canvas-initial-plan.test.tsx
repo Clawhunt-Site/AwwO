@@ -192,7 +192,7 @@ describe('the hosted app carrying a home request through the real planning bridg
   beforeEach(() => {
     cleanup(); resetAllSessions(); localStorage.clear(); sessionStorage.clear();
     localStorage.setItem('superclaw_locale', 'zh');
-    localStorage.setItem('awwo.onboarding.v1:user-a:workspace', 'completed');
+    localStorage.setItem('awwo.workmode.v1:user-a', 'completed');
     configureCanvasStorage('user-a', tenant.id, 'canvas-a');
     window.history.replaceState({}, '', '/?tenant=tenant-a&canvas=canvas-a');
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });

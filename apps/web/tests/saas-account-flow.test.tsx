@@ -8,7 +8,7 @@ const owner = { user: { id: 'alice', name: 'Alice', email: 'alice@example.test',
 const members = [{ userId: 'alice', name: 'Alice', email: 'alice@example.test', role: 'owner' }, { userId: 'bob', name: 'Bob', email: 'bob@example.test', role: 'admin' }];
 const response = (data: unknown, status = 200) => new Response(status === 204 ? null : JSON.stringify(data), { status });
 beforeEach(() => {
-  localStorage.clear(); localStorage.setItem('awwo.onboarding.v1:alice:workspace', 'completed'); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/');
+  localStorage.clear(); localStorage.setItem('awwo.workmode.v1:alice', 'completed'); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/');
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
 });

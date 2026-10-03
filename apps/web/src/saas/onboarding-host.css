@@ -7,3 +7,8 @@
   .saas-account-actions .saas-guide-launch>span { display:none; }
   .saas-account-header-actions { gap:8px; }
 }
+.saas-tutorial-unavailable { max-width:min(420px, calc(100vw - 48px)); padding:24px; border:0; border-radius:16px; background:var(--saas-card,#fff); color:var(--saas-text,#23342b); box-shadow:0 24px 64px rgb(15 23 42 / 30%); }
+.saas-tutorial-unavailable::backdrop { background:rgb(15 23 42 / 55%); }
+.saas-tutorial-unavailable p { margin:0 0 16px; font-size:14px; line-height:1.7; }
+.saas-tutorial-unavailable button { min-height:40px; padding:0 18px; border:0; border-radius:10px; background:var(--saas-accent,#31563d); color:#fff; font-weight:600; cursor:pointer; }
+.saas-tutorial-unavailable button:focus-visible { outline:2px solid var(--saas-accent,#31563d); outline-offset:3px; }
