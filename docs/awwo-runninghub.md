@@ -1,6 +1,6 @@
 # AwwO 图像与视频节点（RunningHub）
 
-状态：实现与本地验收完成（2026-10-03），尚未部署，尚未用真实密钥调用过 RunningHub。代码推送、生产密钥配置与服务部署分别授权、分别验收，不能由本文件推定。
+状态：实现与本地验收完成（2026-10-03），已用真实企业共享 Key 在 runninghub.ai 走通一次完整生成（见文末验收记录）。代码推送、生产密钥配置与服务部署分别授权、分别验收，不能由本文件推定。
 
 画布里的图像节点和视频节点由 RunningHub 的标准模型 API（Standard Model API）执行：节点照常对话、排队、计入并发与取消，但不经过任何模型 worker——API 把提示词和节点参数提交给 RunningHub 一次，记录任务号，轮询到结束，再把结果文件下载到服务器磁盘并记为产物。运行的输出是一条指向这些产物的小记录，画布在对话里直接显示图片或视频。
 
@@ -36,7 +36,7 @@
 | `AWWO_MEDIA_MAX_FILE_MB` | 单个结果文件上限，默认 300（1–2047）。 |
 | `AWWO_MEDIA_MIN_FREE_MB` | 媒体所在文件系统至少保留的空闲空间，默认 2048；低于它时拒绝受理新生成（503 `media_storage_full`），也不再写入结果。 |
 | `AWWO_MEDIA_UNRESTRICTED_WORKSPACES` | 默认 `false`：没有模型白名单的工作区不能使用媒体模型。设为 `true` 才向这类工作区开放全部媒体模型。 |
-| `AWWO_MEDIA_RESULT_HOSTS` | 结果文件允许的下载地址：以 `.` 开头表示该域名的子域名，否则为精确主机名。默认 `.runninghub.ai,.runninghub.cn,rh-images-1252422369.cos.ap-beijing.myqcloud.com`（RunningHub 文档中的结果存储桶），不再放行整个 `.myqcloud.com`。真实调用若出现其他结果主机，确认归属后再加入。 |
+| `AWWO_MEDIA_RESULT_HOSTS` | 结果文件允许的下载地址：以 `.` 开头表示该域名的子域名，否则为精确主机名。默认 `.runninghub.ai,.runninghub.cn,rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com,rh-images-1252422369.cos.ap-beijing.myqcloud.com`：2026-10-03 在 runninghub.ai 上的真实生成，结果来自香港存储桶；北京存储桶是 RunningHub 文档写的那个。两个桶的 APPID 相同（1252422369），同属一个腾讯云账号。不再放行整个 `.myqcloud.com`。真实调用若出现其他结果主机，确认归属后再加入。 |
 | `AWWO_MEDIA_DEV_PROXY` | 仅开发环境：显式的本地代理 `http://127.0.0.1:端口`（例如 Clash）。下载只额外允许拨这一个回环地址；不读取任何代理环境变量。 |
 
 **计费与授权**：生成用的是运营方的 Key。媒体模型只在明确授权时可用——工作区的模型白名单（`tenants.allowed_models`）列出该 `rh.*` id，或运营方用 `AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true` 向无白名单的工作区开放。生产新工作区默认只有 `qwen3.8-27b-p6`，需要的 `rh.*` id 要加入白名单，或通过 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 给新工作区默认开放。每次受理同时写入只关联工作区的 `media_generations` 账本：删除画布（会级联删除运行）不会让每日上限复位；生成也计入工作区自己的每日运行额度（`max_runs_per_day`）。账号可创建的工作区数量由 `AWWO_MAX_OWNED_WORKSPACES` 限制：设置 `AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true`，或在 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 中列出 `rh.*` 模型时，必须同时设置它，否则 API 拒绝启动（否则每新建一个工作区就多一份每日额度）。两个计数都在拿到锁之后读取时间，午夜不会多放行。上限按次数计，不区分 1k 图片与 4k 视频的成本（按模型加权是后续改进）。
@@ -63,7 +63,7 @@
 
 ## 部署清单
 
-1. 准备企业共享 Key，并确认余额与可用模型。**先用一个便宜的图像模型做一次真实调用**，确认结果文件的下载主机在 `AWWO_MEDIA_RESULT_HOSTS` 之内（默认只放行文档中出现的存储桶；若真实结果来自其他主机，每次生成都会计费后被拒绝下载），再把成功日期写进目录的 `verified`。
+1. 准备企业共享 Key，并确认余额与可用模型。**先用一个便宜的图像模型做一次真实调用**，确认结果文件的下载主机在 `AWWO_MEDIA_RESULT_HOSTS` 之内（默认只放行已确认的存储桶；若真实结果来自其他主机，每次生成都会计费后被拒绝下载），再把成功日期写进目录的 `verified`。
 2. API 容器是只读文件系统：`deploy/saas/compose.yml` 为 API 挂载了命名卷 `media-data` 到 `/var/lib/awwo/media`（镜像里该目录属主为 65532）。只在设置了 `AWWO_RUNNINGHUB_API_KEY` 时才把 `AWWO_MEDIA_DIR` 设为该路径。其他部署方式需自行设置 `AWWO_MEDIA_DIR` 为持久、可写的绝对路径（Key 与目录缺一不可，否则 API 拒绝启动），并纳入备份。
 3. 设置 `AWWO_RUNNINGHUB_API_KEY`（不要写进仓库或聊天），按需调整每日上限与时限；`AWWO_MEDIA_TIMEOUT` 不受 nginx 的 `proxy_read_timeout` 约束（生成在后台进行，前端通过事件流跟进）。
 4. 为需要的工作区开放 `rh.*` 模型（或明确设置 `AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true`），并设置 `AWWO_MAX_OWNED_WORKSPACES`。
@@ -73,3 +73,12 @@
 
 - Go：`media_test.go`（目录解析与参数闭集、RunningHub 响应与错误码、结果地址与非公网拒绝、配置校验、格式嗅探、客户端调用与下载上限）；`media_runs_test.go`（PostgreSQL 集成：生成→保存→内联/Range/下载/跨租户、准入拒绝、各类失败的固定错误码、取消后停止轮询、重启恢复不重复提交、清理只删未引用的旧文件）。
 - Web：`apps/web/tests/canvas-media-nodes.test.tsx`（目录解析、参数校验与默认值不落盘、视频节点文档与端口、切换类型、配置面板、结果渲染、生成状态映射）。
+
+## 验收记录（2026-10-03，本机经代理，真实 RunningHub，runninghub.ai）
+
+两次 `rh.seedream-v5-pro`（1k、jpeg）真实生成，均经运营方授权，用的是生产 API 的同一套客户端代码（提交、轮询、结果地址检查、下载、格式嗅探）：
+
+1. 第一次：Key 被标准模型 API 接受，任务 `QUEUED → RUNNING → SUCCESS`（约 40 秒），`results[].url` 与 `outputType` 解析正确；但结果在香港存储桶 `rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com`，不在当时的默认白名单里，下载被拒绝（`media_result_refused`），这次生成已计费。
+2. 把该桶加入默认 `AWWO_MEDIA_RESULT_HOSTS` 后第二次：同样约 40 秒成功，下载 90,771 字节，嗅探为 `image/jpeg`，内容与提示词相符。目录里该模型的 `verified` 记为 2026-10-03。
+
+上传接口（`/openapi/v2/media/upload/binary`，免费）返回的签名地址在另一个主机 `rh-hk-images-switch.xiaoyaoyou.com`。上传的文件不会作为结果下载，所以这个主机不加入白名单。

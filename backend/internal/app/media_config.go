@@ -33,13 +33,14 @@ type mediaSettings struct {
 	MediaDevProxy string
 	// MediaResultHosts are where a result file may be downloaded from: ".domain" allows its
 	// subdomains, any other entry exactly that host. RunningHub serves results from its own domains
-	// and its Tencent COS bucket.
+	// and its Tencent COS buckets: a real runninghub.ai generation (2026-10-03) came from the Hong
+	// Kong bucket; the Beijing one is the bucket RunningHub's documentation names.
 	MediaResultHosts []string
 }
 
 const (
 	defaultRunningHubBaseURL = "https://www.runninghub.ai"
-	defaultMediaResultHosts  = ".runninghub.ai,.runninghub.cn,rh-images-1252422369.cos.ap-beijing.myqcloud.com"
+	defaultMediaResultHosts  = ".runninghub.ai,.runninghub.cn,rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com,rh-images-1252422369.cos.ap-beijing.myqcloud.com"
 )
 
 // The two official RunningHub API origins. The key is sent only to one of them.

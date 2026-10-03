@@ -197,6 +197,22 @@ func TestRunningHubResultHostsAndAddresses(t *testing.T) {
 			t.Fatal("allowed", raw)
 		}
 	}
+	// The defaults, against the hosts real responses used (2026-10-03): a runninghub.ai generation's
+	// result came from the Hong Kong bucket; an upload's signed URL from a CDN host that never
+	// carries a result and stays refused, like any other bucket.
+	defaults := &runningHub{hosts: strings.Split(defaultMediaResultHosts, ",")}
+	for _, raw := range []string{"https://rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com/output/a.jpg",
+		"https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/output/a.png", "https://rh-images.runninghub.cn/a.mp4"} {
+		if u, _ := url.Parse(raw); !defaults.allowedResultURL(u) {
+			t.Fatal("default hosts refuse", raw)
+		}
+	}
+	for _, raw := range []string{"https://rh-hk-images-switch.xiaoyaoyou.com/a.png", "https://other-1252422369.cos.ap-hongkong.myqcloud.com/a.jpg",
+		"https://x.rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com/a.jpg", "https://cos.ap-hongkong.myqcloud.com/a.jpg"} {
+		if u, _ := url.Parse(raw); defaults.allowedResultURL(u) {
+			t.Fatal("default hosts allow", raw)
+		}
+	}
 	for _, addr := range []string{"127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fe80::1", "fc00::1", "::ffff:127.0.0.1", "198.18.0.1"} {
 		if publicAddress(netip.MustParseAddr(addr)) {
 			t.Fatal("treated as public", addr)
