@@ -7,3 +7,6 @@
 
 !apps/user-models.ts
 !apps/computer-model.ts
+!apps/bedrock-bridge.ts
+!apps/bedrock-catalog.ts
+!apps/bedrock-models.json

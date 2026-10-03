@@ -44,6 +44,13 @@ services:
       AWWO_PI_BASE_URL: ${AWWO_PI_BASE_URL:-}
       AWWO_PI_API_KEY: ${AWWO_PI_API_KEY:-}
       AWWO_PI_MODELS_JSON: ${AWWO_PI_MODELS_JSON:-}
+      # Optional curated Bedrock catalog (docs/awwo-bedrock.md). Without AWWO_BEDROCK_API_KEY the
+      # worker signs with the AWS credential chain visible to the container.
+      AWWO_BEDROCK_CATALOG: ${AWWO_BEDROCK_CATALOG:-}
+      AWWO_BEDROCK_REGION: ${AWWO_BEDROCK_REGION:-}
+      AWWO_BEDROCK_MODELS: ${AWWO_PI_BEDROCK_MODELS:-}
+      AWWO_BEDROCK_API_KEY: ${AWWO_BEDROCK_API_KEY:-}
+      AWWO_PLATFORM_PROVIDERS: ${AWWO_PLATFORM_PROVIDERS:-}
       AWWO_PI_MAX_CONCURRENCY: ${AWWO_PI_MAX_CONCURRENCY:-4}
       # A canvas plan is one long structured JSON answer, so the output cap is the binding limit,
       # not the context window. At 4096 output tokens a seven-node plan was cut off mid-string and
@@ -98,6 +105,11 @@ services:
       AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT: ${AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT:-}
       AWWO_OPENAI_AGENTS_DISABLE_THINKING: ${AWWO_OPENAI_AGENTS_DISABLE_THINKING:-}
       AWWO_OPENAI_AGENTS_MODELS_JSON: ${AWWO_OPENAI_AGENTS_MODELS_JSON:-}
+      AWWO_BEDROCK_CATALOG: ${AWWO_BEDROCK_CATALOG:-}
+      AWWO_BEDROCK_REGION: ${AWWO_BEDROCK_REGION:-}
+      AWWO_BEDROCK_MODELS: ${AWWO_OPENAI_AGENTS_BEDROCK_MODELS:-}
+      AWWO_BEDROCK_API_KEY: ${AWWO_BEDROCK_API_KEY:-}
+      AWWO_PLATFORM_PROVIDERS: ${AWWO_PLATFORM_PROVIDERS:-}
       AWWO_OPENAI_AGENTS_TOOLS_JSON: ${AWWO_OPENAI_AGENTS_TOOLS_JSON:-[]}
       AWWO_OPENAI_AGENTS_MAX_CONCURRENCY: ${AWWO_OPENAI_AGENTS_MAX_CONCURRENCY:-4}
       # A node's frozen output contract does not change with its runtime: the same node can require
@@ -169,6 +181,8 @@ services:
       AWWO_CLAWHUNT_URL: ${AWWO_CLAWHUNT_URL:-}
       AWWO_CLAWHUNT_CLIENT_ID: ${AWWO_CLAWHUNT_CLIENT_ID:-}
       AWWO_CLAWHUNT_CLIENT_SECRET: ${AWWO_CLAWHUNT_CLIENT_SECRET:-}
+      # Operator destinations a Gate-only API admits workers for (llmgate, optionally bedrock).
+      AWWO_PLATFORM_PROVIDERS: ${AWWO_PLATFORM_PROVIDERS:-}
       # Optional new-workspace defaults and ownership cap; empty keeps today's behaviour.
       AWWO_NEW_WORKSPACE_ALLOWED_MODELS: ${AWWO_NEW_WORKSPACE_ALLOWED_MODELS:-}
       AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY: ${AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY:-}

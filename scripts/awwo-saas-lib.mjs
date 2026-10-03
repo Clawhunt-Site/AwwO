@@ -39,7 +39,9 @@ export function serviceEnvironments(env) {
   const piCredentials = new Set(['AWWO_PI_API_KEY', ...modelCredentialNames(env, 'AWWO_PI_MODELS_JSON')]);
   const openAIAgentsCredentials = new Set(['AWWO_OPENAI_AGENTS_API_KEY', ...modelCredentialNames(env, 'AWWO_OPENAI_AGENTS_MODELS_JSON')]);
   const modelCredentials = new Set([...piCredentials, ...openAIAgentsCredentials, 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']);
-  const base = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('AWWO_') && !key.startsWith('VITE_AWWO_') && !key.startsWith('OTEL_') && !modelCredentials.has(key)));
+  // Ambient AWS settings (keys, session tokens, profiles, Bedrock API keys) are model credentials
+  // for the Bedrock catalog: they reach the two model workers and no other process.
+  const base = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('AWWO_') && !key.startsWith('VITE_AWWO_') && !key.startsWith('OTEL_') && !key.startsWith('AWS_') && !modelCredentials.has(key)));
   const select = predicate => Object.fromEntries(Object.entries(env).filter(([key]) => predicate(key) && !modelCredentials.has(key)));
   const telemetry = select(key => ['AWWO_METRICS_ENABLED','AWWO_OTEL_ENABLED','AWWO_REVISION','OTEL_EXPORTER_OTLP_ENDPOINT','OTEL_SERVICE_NAME','OTEL_RESOURCE_ATTRIBUTES','OTEL_TRACES_SAMPLER','OTEL_TRACES_SAMPLER_ARG'].includes(key) || key.startsWith('AWWO_TRACE_REF_'));
   // One dotenv drives three processes, each with its own loopback listener.
@@ -50,10 +52,18 @@ export function serviceEnvironments(env) {
   if (env.AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR) openAIAgents.AWWO_METRICS_LISTEN_ADDR = env.AWWO_LOCAL_OPENAI_AGENTS_METRICS_LISTEN_ADDR;
   for (const key of piCredentials) if (Object.hasOwn(env, key)) pi[key] = env[key];
   for (const key of openAIAgentsCredentials) if (Object.hasOwn(env, key)) openAIAgents[key] = env[key];
+  // The Bedrock catalog belongs to the workers; its API key never reaches the API or web. Each worker
+  // reads its own model selection from a prefixed key, as in deploy/saas/compose.yml.
+  for (const [target, models] of [[pi, 'AWWO_PI_BEDROCK_MODELS'], [openAIAgents, 'AWWO_OPENAI_AGENTS_BEDROCK_MODELS']]) {
+    for (const [key, value] of Object.entries(env)) if (key.startsWith('AWS_')) target[key] = value;
+    for (const key of ['AWWO_BEDROCK_CATALOG', 'AWWO_BEDROCK_REGION', 'AWWO_BEDROCK_API_KEY', 'AWWO_PLATFORM_PROVIDERS']) if (Object.hasOwn(env, key)) target[key] = env[key];
+    delete target[models];
+    if (Object.hasOwn(env, models)) target.AWWO_BEDROCK_MODELS = env[models];
+  }
   const openMaus = { ...base, ...select(key => key.startsWith('AWWO_OPENMAUS_') && !['AWWO_OPENMAUS_CONNECTIONS_JSON', 'AWWO_OPENMAUS_URL'].includes(key)) };
   const api = { ...base, ...telemetry, OTEL_SERVICE_NAME: 'awwo-api', ...select(key => key.startsWith('AWWO_')
     && !key.startsWith('AWWO_PI_') && !key.startsWith('AWWO_OPENAI_AGENTS_') && !key.startsWith('AWWO_OPENMAUS_')
-    && key !== 'AWWO_LOCAL_DB_PASSWORD'),
+    && !key.startsWith('AWWO_BEDROCK_') && key !== 'AWWO_LOCAL_DB_PASSWORD'),
     ...select(key => ['AWWO_PI_URL', 'AWWO_PI_TOKEN', 'AWWO_PI_SESSION_WAIT', 'AWWO_OPENAI_AGENTS_URL', 'AWWO_OPENAI_AGENTS_TOKEN', 'AWWO_OPENMAUS_URL', 'AWWO_OPENMAUS_TOKEN', 'AWWO_OPENMAUS_CONNECTIONS_JSON'].includes(key)) };
   const web = { ...base, ...select(key => key.startsWith('VITE_AWWO_') || key === 'AWWO_API_TARGET') };
   return { build: base, pi, openAIAgents, openMaus, api, web };

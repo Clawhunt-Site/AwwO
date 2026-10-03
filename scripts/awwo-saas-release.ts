@@ -10,7 +10,7 @@ import { UPSTREAM_REVISION, PATCH_VERSION } from '../apps/openmaus-worker/setup.
 // All input source comes from git archive; dependencies are installed into that
 // isolated Linux tree from its committed lockfiles before assembling the release.
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sourcePaths = ['LICENSE', 'backend', 'apps/web', 'apps/pi-worker', 'apps/openai-agents-worker', 'apps/openmaus-worker', 'apps/user-models.ts', 'apps/computer-model.ts', 'third_party/openmaus-core', 'deploy/saas/workspace'];
+const sourcePaths = ['LICENSE', 'backend', 'apps/web', 'apps/pi-worker', 'apps/openai-agents-worker', 'apps/openmaus-worker', 'apps/user-models.ts', 'apps/computer-model.ts', 'apps/bedrock-bridge.ts', 'apps/bedrock-catalog.ts', 'apps/bedrock-models.json', 'third_party/openmaus-core', 'deploy/saas/workspace'];
 type DockerImage = { Id: string; Os: string; Architecture: string };
 type BuildOptions = { output: string; dockerContext: string; publicClawHuntURL: string };
 
@@ -148,7 +148,7 @@ export function buildRelease(options: BuildOptions): string {
       }
       if (worker !== 'openmaus-worker') run('npm', ['ci', '--omit=dev', '--ignore-scripts'], target);
     }
-    for (const file of ['user-models.ts', 'computer-model.ts']) cpSync(join(source, 'apps', file), join(release, 'apps', file));
+    for (const file of ['user-models.ts', 'computer-model.ts', 'bedrock-bridge.ts', 'bedrock-catalog.ts', 'bedrock-models.json']) cpSync(join(source, 'apps', file), join(release, 'apps', file));
     run(process.execPath, ['apps/openmaus-worker/setup.ts']);
     const core = join(source, 'apps/openmaus-worker/.runtime/core/dist-server'); verifyCore(core);
     cpSync(core, join(release, 'apps/openmaus-worker/.runtime/core/dist-server'), { recursive: true });

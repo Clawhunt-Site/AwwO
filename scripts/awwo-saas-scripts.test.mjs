@@ -404,6 +404,44 @@ test('identity and Jev settings reach only the API in Compose and local services
   }
 });
 
+// A Bedrock key is a model credential: it may reach the workers that call Bedrock and
+// nothing else, while the platform policy must agree between the API and both workers.
+test('Bedrock settings reach only the workers and the platform policy reaches the API too', async () => {
+  const compose = await readFile(new URL('../deploy/saas/compose.yml', import.meta.url), 'utf8');
+  const service = name => compose.split(/^ {2}(?=\S)/m).find(block => block.startsWith(`${name}:`)) ?? '';
+  const aws = { AWS_ACCESS_KEY_ID: 'ASIASYNTHETIC0000000', AWS_SECRET_ACCESS_KEY: 'synthetic-secret', AWS_SESSION_TOKEN: 'synthetic-session',
+    AWS_PROFILE: 'synthetic-profile', AWS_BEARER_TOKEN_BEDROCK: 'synthetic-bearer' };
+  const local = serviceEnvironments({ AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_REGION: 'us-east-2', AWWO_BEDROCK_API_KEY: 'synthetic-bedrock-key',
+    AWWO_PI_BEDROCK_MODELS: 'bedrock.gemma-3-27b', AWWO_OPENAI_AGENTS_BEDROCK_MODELS: 'bedrock.glm-5', AWWO_PLATFORM_PROVIDERS: 'llmgate,bedrock', ...aws });
+  // Ambient AWS credentials are model credentials too: workers only.
+  for (const [key, value] of Object.entries(aws)) {
+    assert.equal(local.pi[key], value, key);
+    assert.equal(local.openAIAgents[key], value, key);
+    for (const target of [local.api, local.web, local.build, local.openMaus]) assert.equal(target[key], undefined, `${key} leaked`);
+  }
+  for (const [target, models] of [[local.pi, 'bedrock.gemma-3-27b'], [local.openAIAgents, 'bedrock.glm-5']]) {
+    assert.equal(target.AWWO_BEDROCK_CATALOG, 'builtin');
+    assert.equal(target.AWWO_BEDROCK_REGION, 'us-east-2');
+    assert.equal(target.AWWO_BEDROCK_API_KEY, 'synthetic-bedrock-key');
+    assert.equal(target.AWWO_BEDROCK_MODELS, models);
+    assert.equal(target.AWWO_PLATFORM_PROVIDERS, 'llmgate,bedrock');
+    assert.equal(target.AWWO_PI_BEDROCK_MODELS, undefined);
+    assert.equal(target.AWWO_OPENAI_AGENTS_BEDROCK_MODELS, undefined);
+  }
+  assert.equal(local.api.AWWO_PLATFORM_PROVIDERS, 'llmgate,bedrock');
+  for (const target of [local.api, local.web, local.build, local.openMaus]) {
+    for (const key of ['AWWO_BEDROCK_CATALOG', 'AWWO_BEDROCK_REGION', 'AWWO_BEDROCK_API_KEY', 'AWWO_BEDROCK_MODELS']) assert.equal(target[key], undefined, key);
+  }
+  for (const [name, models] of [['pi', 'AWWO_PI_BEDROCK_MODELS'], ['openai-agents', 'AWWO_OPENAI_AGENTS_BEDROCK_MODELS']]) {
+    for (const key of ['AWWO_BEDROCK_CATALOG', 'AWWO_BEDROCK_REGION', 'AWWO_BEDROCK_API_KEY', 'AWWO_PLATFORM_PROVIDERS']) {
+      assert.ok(service(name).includes(`${key}: \${${key}:-}`), `${key} must reach the ${name} worker`);
+    }
+    assert.ok(service(name).includes(`AWWO_BEDROCK_MODELS: \${${models}:-}`), `${name} reads its own Bedrock selection`);
+  }
+  assert.ok(service('api').includes('AWWO_PLATFORM_PROVIDERS: ${AWWO_PLATFORM_PROVIDERS:-}'));
+  for (const name of ['api', 'web', 'database', 'openmaus']) assert.ok(!service(name).includes('AWWO_BEDROCK_'), `Bedrock settings leaked to ${name}`);
+});
+
 // The deployment template carries these only as commented examples, so Compose must
 // forward an empty value, which the API reads as unset.
 test('new-workspace defaults reach only the API and default to unset', async () => {

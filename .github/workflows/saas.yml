@@ -73,6 +73,7 @@ jobs:
           docker build -f deploy/saas/workspace/Dockerfile -t awwo-workspace:ci .
           npm run typecheck:workspace --prefix apps/openai-agents-worker
           npm run test:user-models
+          npm run test:saas:bedrock
           npm run test:saas:pi
           npm run test:saas:openai-agents
           npm run test:saas:scripts
@@ -110,7 +111,8 @@ jobs:
           docker build --build-arg AWWO_REVISION="$GITHUB_SHA" -f deploy/saas/api.Dockerfile -t awwo-api:ci .
           docker build -f deploy/saas/pi.Dockerfile -t awwo-pi:ci .
           docker build -f deploy/saas/openai-agents.Dockerfile -t awwo-openai-agents:ci .
-          docker run --rm --network none awwo-openai-agents:ci node --input-type=module -e 'await import("./runner.mjs"); await import("./workspace-runtime.ts"); await import("./workspace-context.ts"); console.log("Agents runtime imports passed")'
+          docker run --rm --network none awwo-openai-agents:ci node --input-type=module -e 'await import("./runner.mjs"); await import("./workspace-runtime.ts"); await import("./workspace-context.ts"); await import("./config.mjs"); console.log("Agents runtime imports passed")'
+          docker run --rm --network none -e AWWO_BEDROCK_CATALOG=builtin awwo-pi:ci node --input-type=module -e 'const { bedrockCatalogProfiles } = await import("../bedrock-catalog.ts"); if (!bedrockCatalogProfiles("pi", process.env).length) throw new Error("empty Bedrock catalog"); await import("@aws-sdk/client-bedrock-runtime"); console.log("Bedrock catalog and SDK load in the Pi image")'
           docker build -f deploy/saas/web.Dockerfile -t awwo-web:ci .
 
   managed-execution:
