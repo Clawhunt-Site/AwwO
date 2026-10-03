@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -172,10 +173,13 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	}
 	if a.cfg.LLMGateOnly {
 		var policy struct {
-			LLMGateOnly     bool            `json:"llmgateOnly"`
-			UserCredentials json.RawMessage `json:"userCredentials"`
+			LLMGateOnly       bool            `json:"llmgateOnly"`
+			PlatformOnly      bool            `json:"platformOnly"`
+			PlatformProviders json.RawMessage `json:"platformProviders"`
+			UserCredentials   json.RawMessage `json:"userCredentials"`
 		}
-		if json.Unmarshal(body, &policy) != nil || !policy.LLMGateOnly || !bytes.Equal(bytes.TrimSpace(policy.UserCredentials), []byte("false")) {
+		if json.Unmarshal(body, &policy) != nil || !bytes.Equal(bytes.TrimSpace(policy.UserCredentials), []byte("false")) ||
+			!a.platformPolicyAccepted(policy.LLMGateOnly, policy.PlatformOnly, policy.PlatformProviders, h.Models) {
 			return piHealth{}, errors.New("Runtime provider is not ready")
 		}
 	}
@@ -230,6 +234,40 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	}
 	a.registerTelemetryModels(runtime, h.Models)
 	return h, nil
+}
+
+// platformPolicyAccepted decides whether a Gate-only API may use a worker. A worker either
+// makes the original claim (llmgateOnly: LLM Gate and nothing else) or declares, with
+// platformOnly, exactly which operator platforms its profiles reach; every one of them must
+// be in this API's own AWWO_PLATFORM_PROVIDERS. A Bedrock model is checked against the
+// claim as well, so a worker cannot route to Bedrock while claiming LLM Gate alone.
+func (a *App) platformPolicyAccepted(gateOnly, platformOnly bool, rawProviders json.RawMessage, models []piModel) bool {
+	bedrockModel := false
+	for _, m := range models {
+		bedrockModel = bedrockModel || m.Provider == "bedrock"
+	}
+	if gateOnly || !platformOnly {
+		return gateOnly && !platformOnly && len(bytes.TrimSpace(rawProviders)) == 0 && !bedrockModel
+	}
+	var providers []string
+	if json.Unmarshal(rawProviders, &providers) != nil || len(providers) == 0 {
+		return false
+	}
+	// The worker must send the canonical list itself: no padding, duplicates or reordering.
+	declared, err := parsePlatformProviders(strings.Join(providers, ","))
+	if err != nil || !slices.Equal(declared, providers) {
+		return false
+	}
+	allowed := a.cfg.PlatformProviders
+	if len(allowed) == 0 {
+		allowed = []string{"llmgate"}
+	}
+	for _, provider := range declared {
+		if !slices.Contains(allowed, provider) {
+			return false
+		}
+	}
+	return !bedrockModel || slices.Contains(declared, "bedrock")
 }
 
 // A probed catalog is entitlement-stamped before it is cached, so everything

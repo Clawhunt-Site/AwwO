@@ -95,6 +95,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     quota_exceeded: ['工作区运行额度已满（并发或每日调用上限）。请在运行记录中检查进行中的任务；若已用完当日额度，请联系平台管理员或等待 UTC 次日重置。', 'The workspace run quota has been reached (concurrent or daily calls). Check active tasks in Run history. If the daily limit is used up, contact a platform administrator or wait for the next UTC day.'],
     personal_engine_required: ['请先到「我的引擎」添加并验证你自己的 API Key。', 'Add and verify your API key in My engines before running.'],
     model_unavailable: ['所选模型不可用，请重新选择服务端提供的模型。', 'The selected model is unavailable. Choose a model offered by the server.'],
+    computer_model_unsupported: ['托管执行暂不支持该模型，请选择列表中提供的模型。', 'Managed execution does not support this model. Choose one from the list.'],
     runtime_unavailable: runtimeUnavailableMessages,
     // Distinct from model_unavailable: the model exists but is not open to this
     // workspace, so the fix is an administrator grant rather than another model.

@@ -422,6 +422,12 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			fail(w, 403, "computer_owner_required", "Only the task owner can execute this session")
 			return
 		}
+		// Managed execution makes non-streaming completion calls, which the Bedrock bridge does
+		// not serve; refuse such a model here instead of after an invocation is reserved.
+		if snapshot.Health.modelProvider(snapshot.Model) == "bedrock" {
+			fail(w, 400, "computer_model_unsupported", "Managed execution cannot use this model")
+			return
+		}
 		snapshot.Computer = &computerPlan{Version: 1, MaxModelCalls: 16}
 		history := []json.RawMessage{}
 		snapshot.History = &history

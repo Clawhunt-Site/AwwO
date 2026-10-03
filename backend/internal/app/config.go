@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +28,11 @@ type Config struct {
 	// LLMGateOnly confines both personal and operator model execution to the
 	// ClawHunt LLM Gate. Workers enforce their own profile URLs and advertise
 	// the same policy before the API admits a run.
-	LLMGateOnly                                                                           bool
+	LLMGateOnly bool
+	// PlatformProviders are the operator destinations a Gate-only API admits workers
+	// for: always llmgate, plus bedrock when AWWO_PLATFORM_PROVIDERS names it. Personal
+	// connections stay Gate-only either way.
+	PlatformProviders                                                                     []string
 	CredentialKey                                                                         []byte
 	SMTPHost, SMTPPort, SMTPUsername, SMTPPassword, SMTPFrom                              string
 	MetricsEnabled, OTelEnabled                                                           bool
@@ -91,6 +96,11 @@ func ConfigFromEnv() (Config, error) {
 	default:
 		return c, errors.New("AWWO_LLMGATE_ONLY must be true or false")
 	}
+	providers, err := parsePlatformProviders(os.Getenv("AWWO_PLATFORM_PROVIDERS"))
+	if err != nil {
+		return c, err
+	}
+	c.PlatformProviders = providers
 	if raw := os.Getenv("AWWO_CREDENTIAL_ENCRYPTION_KEY"); raw != "" {
 		var err error
 		c.CredentialKey, err = base64.StdEncoding.DecodeString(raw)
@@ -224,4 +234,34 @@ func (c Config) Validate() error {
 		return errors.New("replace the public origin placeholder")
 	}
 	return c.validateObservability()
+}
+
+// knownPlatformProviders is the closed, canonically ordered set of operator destinations.
+var knownPlatformProviders = []string{"llmgate", "bedrock"}
+
+// parsePlatformProviders reads AWWO_PLATFORM_PROVIDERS: a comma list of distinct known
+// destinations that always includes llmgate, returned in canonical order. Empty means
+// LLM Gate alone.
+func parsePlatformProviders(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []string{"llmgate"}, nil
+	}
+	seen := map[string]bool{}
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if seen[item] || !slices.Contains(knownPlatformProviders, item) {
+			return nil, errors.New("AWWO_PLATFORM_PROVIDERS must list distinct values from llmgate, bedrock and include llmgate")
+		}
+		seen[item] = true
+	}
+	if !seen["llmgate"] {
+		return nil, errors.New("AWWO_PLATFORM_PROVIDERS must list distinct values from llmgate, bedrock and include llmgate")
+	}
+	providers := []string{}
+	for _, item := range knownPlatformProviders {
+		if seen[item] {
+			providers = append(providers, item)
+		}
+	}
+	return providers, nil
 }

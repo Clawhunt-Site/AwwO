@@ -120,23 +120,7 @@ func (a *App) computerRuntime(w http.ResponseWriter, r *http.Request) {
 		if res.err != nil {
 			continue
 		}
-		h := entitlement.apply(res.health)
-		seen := map[string]bool{}
-		for _, m := range h.Models {
-			label := m.Label
-			if label == "" {
-				label = m.Name
-			}
-			if label == "" {
-				label = m.ID
-			}
-			efforts := append([]string{}, m.ReasoningEfforts...)
-			models = append(models, map[string]any{"id": m.ID, "label": label, "runtime": res.runtime, "efforts": efforts})
-			seen[m.ID] = true
-		}
-		if id := h.defaultModel(); id != "" && !seen[id] {
-			models = append(models, map[string]any{"id": id, "label": id, "runtime": res.runtime, "efforts": []string{}})
-		}
+		models = append(models, computerModelChoices(res.runtime, entitlement.apply(res.health))...)
 	}
 	reason := ""
 	if healthErr != nil {
@@ -146,6 +130,44 @@ func (a *App) computerRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"ready": reason == "", "reason": reason, "models": models, "capabilities": map[string]bool{"workspace": healthErr == nil, "approvals": healthErr == nil}})
 }
+
+// modelProvider names the provider of an advertised model, or "" when the catalog does not list it.
+func (h piHealth) modelProvider(model string) string {
+	for _, m := range h.Models {
+		if m.ID == model {
+			return m.Provider
+		}
+	}
+	return ""
+}
+
+// computerModelChoices lists one runtime's models for managed execution. Managed execution
+// makes single non-streaming completion calls; the Bedrock bridge serves only streaming chat,
+// so Bedrock models are not offered here (the worker also refuses them on that path).
+func computerModelChoices(runtime string, h piHealth) []map[string]any {
+	models := []map[string]any{}
+	seen := map[string]bool{}
+	for _, m := range h.Models {
+		seen[m.ID] = true
+		if m.Provider == "bedrock" {
+			continue
+		}
+		label := m.Label
+		if label == "" {
+			label = m.Name
+		}
+		if label == "" {
+			label = m.ID
+		}
+		efforts := append([]string{}, m.ReasoningEfforts...)
+		models = append(models, map[string]any{"id": m.ID, "label": label, "runtime": runtime, "efforts": efforts})
+	}
+	if id := h.defaultModel(); id != "" && !seen[id] {
+		models = append(models, map[string]any{"id": id, "label": id, "runtime": runtime, "efforts": []string{}})
+	}
+	return models
+}
+
 func (a *App) createComputerRun(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		OperationID          string   `json:"operationId"`

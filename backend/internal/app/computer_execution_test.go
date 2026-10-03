@@ -372,3 +372,46 @@ func TestPostgresComputerUncertainApprovalIsNeverAutomaticallyRepeated(t *testin
 	}
 	h.request(t, owner, "POST", base+"/runs/"+run["id"].(string)+"/cancel", map[string]any{}, 200)
 }
+
+// A Bedrock model is refused when a managed execution run is created, before any invocation is
+// reserved or the execution service is called: the Bedrock bridge serves streaming chat only.
+func TestPostgresComputerRunRefusesBedrockModels(t *testing.T) {
+	pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "models": []map[string]any{
+				{"id": "test-model", "provider": "test", "maxContextTextBytes": 262144},
+				{"id": "bedrock.glm-5", "name": "GLM-5", "provider": "bedrock", "maxContextTextBytes": 262144}}})
+			return
+		}
+		t.Error("unexpected model worker call", r.Method, r.URL.Path)
+	}))
+	defer pi.Close()
+	var runs atomic.Int32
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"service": "awwo-openmaus-worker", "ready": true, "capabilities": map[string]bool{"workspace": true, "approvals": true}})
+			return
+		}
+		runs.Add(1)
+		w.WriteHeader(500)
+	}))
+	defer worker.Close()
+	h := newHarness(t, pi.URL)
+	h.a.cfg.OpenMausURL = worker.URL
+	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
+	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
+	owner, tid, _ := h.register(t, "computer-bedrock@example.test")
+	canvas, _, _ := h.fixture(t, owner, tid)
+	base := "/tenants/" + tid
+	refused := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]string{"operationId": "computer-bedrock", "prompt": "Build a page", "runtime": "pi", "model": "bedrock.glm-5"}, 400)
+	if refused["error"].(map[string]any)["code"] != "computer_model_unsupported" {
+		t.Fatal("unexpected refusal", refused)
+	}
+	var invocations int
+	if e := h.db.QueryRow(t.Context(), "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid).Scan(&invocations); e != nil || invocations != 0 {
+		t.Fatal("a refused run reserved an invocation", invocations, e)
+	}
+	if runs.Load() != 0 {
+		t.Fatal("the execution service was called for a refused run")
+	}
+}
