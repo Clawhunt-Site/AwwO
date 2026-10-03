@@ -94,7 +94,7 @@ flowchart LR
 - 工具：`AWWO_OPENAI_AGENTS_TOOLS_JSON=[]`，显式启用时可填 `["calculator","current_time"]`。
 - 限制：`CONTEXT_WINDOW`、`MAX_TOKENS`、`TIMEOUT_MS`、`CANCEL_GRACE_MS`、`MAX_CONCURRENCY`、`MAX_OUTPUT_BYTES`，完整名称均有 `AWWO_OPENAI_AGENTS_` 前缀。
 
-`provider=openai` 表示 OpenAI 兼容协议，可连接官方或兼容 base URL；协议必须与端点能力一致。首版不直接支持 Anthropic 原生 Messages API。完整变量和约束见 `apps/openai-agents-worker/.env.example`。
+`provider=openai` 表示 OpenAI 兼容协议，可连接官方或兼容 base URL；协议必须与端点能力一致。首版不直接支持 Anthropic 原生 Messages API。`provider=bedrock` 的档案经 Converse 桥调用 Amazon Bedrock（含 Claude），不写 base URL，见 [Bedrock](awwo-bedrock.md)。完整变量和约束见 `apps/openai-agents-worker/.env.example`。
 
 从旧版本升级 Compose 配置时，必须新增一枚独立且至少 32 字符的 `AWWO_OPENAI_AGENTS_TOKEN`，即使当前租户只使用 Pi 也不能复用 `AWWO_PI_TOKEN`。未配置模型凭据时 worker 会以 `unconfigured` 启动，运行时目录会把它标为不可选，不影响已有 Pi 流程。生产部署应分别为 development、staging 和 production 生成不同 token。
 
