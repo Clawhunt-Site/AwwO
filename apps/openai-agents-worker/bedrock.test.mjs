@@ -79,7 +79,8 @@ test('explicit Bedrock profiles in MODELS_JSON are closed shapes without URLs, e
   assert.equal(resolveModelConfig(config({ AWWO_OPENAI_AGENTS_MODELS_JSON: profile({}) }), 'bedrock-kimi').apiKey, '');
   assert.equal(resolveModelConfig(config({ AWWO_OPENAI_AGENTS_MODELS_JSON: profile({}), AWWO_BEDROCK_REGION: 'eu-west-1' }), 'bedrock-kimi').region, 'eu-west-1');
   for (const extra of [{ baseURL: 'https://bedrock-runtime.us-east-1.amazonaws.com' }, { protocol: 'responses' }, { reasoningEfforts: ['high'] }, { defaultReasoningEffort: 'high' },
-    { structuredOutput: true }, { region: 'us-gov-west-1' }, { apiKeyEnv: 'bad name' }, { unknown: 1 }, { contextWindow: 4096, maxTokens: 4000 }]) {
+    { structuredOutput: true }, { disableThinking: true }, { disableThinking: false }, { region: 'us-gov-west-1' }, { apiKeyEnv: 'bad name' }, { unknown: 1 },
+    { contextWindow: 4096, maxTokens: 4000 }]) {
     assert.throws(() => config({ AWWO_OPENAI_AGENTS_MODELS_JSON: profile(extra) }), /not a valid Bedrock profile/, JSON.stringify(extra));
   }
   const missing = config({ AWWO_OPENAI_AGENTS_MODELS_JSON: profile({ apiKeyEnv: 'ABSENT_KEY' }) });

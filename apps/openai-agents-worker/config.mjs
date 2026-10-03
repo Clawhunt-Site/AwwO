@@ -96,7 +96,9 @@ function profileInteger(value, fallback, minimum, maximum) {
 
 // A Bedrock profile reaches the provider only through the Converse bridge, so it has no
 // base URL or protocol of its own, never advertises effort or structured output (the bridge
-// refuses both) and signs with the worker's AWS credentials unless it names an API key.
+// refuses both), takes no thinking switch (Converse has no chat_template_kwargs, so the flag
+// could not be honoured; the Python worker refuses it too) and signs with the worker's AWS
+// credentials unless it names an API key.
 function bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((key) => !PROFILE_FIELDS.has(key))
@@ -108,6 +110,7 @@ function bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing) {
     || (value.reasoningEfforts !== undefined && (!Array.isArray(value.reasoningEfforts) || value.reasoningEfforts.length))
     || (value.defaultReasoningEffort !== undefined && value.defaultReasoningEffort !== '')
     || (value.structuredOutput !== undefined && value.structuredOutput !== false)
+    || value.disableThinking !== undefined
     || (value.name !== undefined && !validProfileName(value.name))) throw new Error();
   let apiKey = '';
   if (value.apiKeyEnv !== undefined) {

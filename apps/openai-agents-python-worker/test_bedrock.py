@@ -182,8 +182,9 @@ class ConfigTests(unittest.TestCase):
         kimi = resolve_model_config(config({"region": "us-east-2", "apiKeyEnv": "BEDROCK_KEY", "name": "Kimi K2.5"}, BEDROCK_KEY=BEDROCK_KEY), "bedrock-kimi")
         self.assertEqual((kimi.region, kimi.api_key, kimi.name, kimi.base_url), ("us-east-2", BEDROCK_KEY, "Kimi K2.5", bridge_base_url("us-east-2")))
         self.assertEqual(resolve_model_config(config({}), "bedrock-kimi").api_key, "")
-        for extra in ({"baseURL": "https://x"}, {"reasoningEfforts": ["high"]}, {"structuredOutput": True}, {"region": "us-gov-west-1"}, {"unknown": 1},
-                      {"contextWindow": 4096, "maxTokens": 4000}):
+        # The thinking switch has no Converse counterpart: both workers refuse it on a Bedrock profile.
+        for extra in ({"baseURL": "https://x"}, {"reasoningEfforts": ["high"]}, {"structuredOutput": True}, {"disableThinking": True},
+                      {"disableThinking": False}, {"region": "us-gov-west-1"}, {"unknown": 1}, {"contextWindow": 4096, "maxTokens": 4000}):
             with self.subTest(extra), self.assertRaises(ConfigError):
                 config(extra)
         missing = config({"apiKeyEnv": "ABSENT_KEY"})
