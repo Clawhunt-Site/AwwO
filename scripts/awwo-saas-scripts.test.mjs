@@ -442,6 +442,33 @@ test('Bedrock settings reach only the workers and the platform policy reaches th
   for (const name of ['api', 'web', 'database', 'openmaus']) assert.ok(!service(name).includes('AWWO_BEDROCK_'), `Bedrock settings leaked to ${name}`);
 });
 
+// The RunningHub key pays for generations: it reaches the API alone, and the media directory is
+// set only together with it, on the volume that keeps generated files.
+test('RunningHub settings reach only the API with its media volume', async () => {
+  const compose = await readFile(new URL('../deploy/saas/compose.yml', import.meta.url), 'utf8');
+  const service = name => compose.split(/^ {2}(?=\S)/m).find(block => block.startsWith(`${name}:`)) ?? '';
+  assert.ok(service('api').includes('AWWO_RUNNINGHUB_API_KEY: ${AWWO_RUNNINGHUB_API_KEY:-}'));
+  assert.ok(service('api').includes('AWWO_MEDIA_DIR: ${AWWO_RUNNINGHUB_API_KEY:+/var/lib/awwo/media}'));
+  // Media for workspaces without an allowlist is an explicit operator choice, off by default.
+  assert.ok(service('api').includes('AWWO_MEDIA_UNRESTRICTED_WORKSPACES: ${AWWO_MEDIA_UNRESTRICTED_WORKSPACES:-false}'));
+  // A submission in flight is awaited at shutdown (30s client timeout), so the API gets longer to stop.
+  assert.match(service('api'), /stop_grace_period: 45s\n/);
+  assert.match(service('api'), /volumes:\n\s+- media-data:\/var\/lib\/awwo\/media\n/);
+  assert.match(compose, /^volumes:\n {2}postgres-data:\n {2}media-data:\n/m);
+  for (const name of ['pi', 'openai-agents', 'openmaus', 'web', 'database']) {
+    assert.ok(!service(name).includes('RUNNINGHUB') && !service(name).includes('AWWO_MEDIA_'), `media settings leaked to ${name}`);
+  }
+  const local = serviceEnvironments({ AWWO_RUNNINGHUB_API_KEY: 'synthetic-rh-key', AWWO_MEDIA_DIR: '/tmp/awwo-media', AWWO_MEDIA_RUNS_PER_DAY: '5' });
+  assert.equal(local.api.AWWO_RUNNINGHUB_API_KEY, 'synthetic-rh-key');
+  assert.equal(local.api.AWWO_MEDIA_DIR, '/tmp/awwo-media');
+  for (const target of [local.pi, local.openAIAgents, local.openMaus, local.web, local.build]) {
+    assert.equal(target.AWWO_RUNNINGHUB_API_KEY, undefined);
+    assert.equal(target.AWWO_MEDIA_DIR, undefined);
+  }
+  const dockerfile = await readFile(new URL('../deploy/saas/api.Dockerfile', import.meta.url), 'utf8');
+  assert.match(dockerfile, /chown 65532:65532 \/var\/lib\/awwo\/media/);
+});
+
 // The deployment template carries these only as commented examples, so Compose must
 // forward an empty value, which the API reads as unset.
 test('new-workspace defaults reach only the API and default to unset', async () => {

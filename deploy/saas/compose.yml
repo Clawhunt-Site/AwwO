@@ -167,6 +167,9 @@ services:
     restart: unless-stopped
     networks: [private]
   api:
+    # A media submission in flight when the API stops is awaited (up to 30s) so its task id is
+    # recorded and the generation resumes after restart instead of being paid for twice.
+    stop_grace_period: 45s
     build:
       context: ../..
       dockerfile: deploy/saas/api.Dockerfile
@@ -224,6 +227,21 @@ services:
       AWWO_BOOTSTRAP_ADMIN_EMAIL: ${AWWO_BOOTSTRAP_ADMIN_EMAIL:?Set the initial administrator email}
       AWWO_BOOTSTRAP_ADMIN_PASSWORD: ${AWWO_BOOTSTRAP_ADMIN_PASSWORD:?Set an initial administrator password}
       AWWO_TRUSTED_PROXY_CIDRS: ${AWWO_TRUSTED_PROXY_CIDRS:-}
+      # Optional image and video nodes (docs/awwo-runninghub.md): an Enterprise-Shared RunningHub key.
+      # Generated files go to the media-data volume, set only when the key is, since the API refuses
+      # one without the other.
+      AWWO_RUNNINGHUB_API_KEY: ${AWWO_RUNNINGHUB_API_KEY:-}
+      AWWO_RUNNINGHUB_BASE_URL: ${AWWO_RUNNINGHUB_BASE_URL:-https://www.runninghub.ai}
+      AWWO_MEDIA_DIR: ${AWWO_RUNNINGHUB_API_KEY:+/var/lib/awwo/media}
+      AWWO_MEDIA_TIMEOUT: ${AWWO_MEDIA_TIMEOUT:-20m}
+      AWWO_MEDIA_RUNS_PER_DAY: ${AWWO_MEDIA_RUNS_PER_DAY:-30}
+      AWWO_MEDIA_TOTAL_RUNS_PER_DAY: ${AWWO_MEDIA_TOTAL_RUNS_PER_DAY:-500}
+      AWWO_MEDIA_MAX_FILE_MB: ${AWWO_MEDIA_MAX_FILE_MB:-300}
+      AWWO_MEDIA_MIN_FREE_MB: ${AWWO_MEDIA_MIN_FREE_MB:-2048}
+      # Workspaces without a model allowlist may use media models only when this is true.
+      AWWO_MEDIA_UNRESTRICTED_WORKSPACES: ${AWWO_MEDIA_UNRESTRICTED_WORKSPACES:-false}
+    volumes:
+      - media-data:/var/lib/awwo/media
     depends_on:
       database: { condition: service_healthy }
       pi: { condition: service_started }
@@ -252,6 +270,7 @@ services:
     networks: [private]
 volumes:
   postgres-data:
+  media-data:
 networks:
   private:
     internal: true
