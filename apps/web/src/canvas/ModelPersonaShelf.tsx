@@ -1,11 +1,12 @@
 import { useId, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { Asterisk, Boxes, Code2, Search, Sparkles, Slash, X } from 'lucide-react';
+import { Asterisk, Boxes, Brain, Cloud, Code2, Cpu, Fish, Gem, Moon, PawPrint, Search, Sparkles, Slash, Star, Waves, Wind, X } from 'lucide-react';
 import { getAgentTemplates, type AgentTemplateId } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
 import type { ModelPaletteGroup, ModelPaletteSelection } from './modelPalette';
 import './model-persona-shelf.css';
 
-const providerGlyphs = { codex: Code2, claude: Asterisk, grok: Slash, gemini: Sparkles, clawhunt: Boxes };
+const providerGlyphs = { codex: Code2, claude: Asterisk, grok: Slash, gemini: Sparkles, deepseek: Fish, qwen: Cloud, kimi: Moon,
+  glm: Brain, minimax: Waves, mistral: Wind, llama: PawPrint, nova: Star, gemma: Gem, nemotron: Cpu, clawhunt: Boxes };
 const collapsedGroupSize = 2;
 
 export interface ModelPersonaShelfProps {

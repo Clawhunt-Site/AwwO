@@ -57,7 +57,7 @@ it('shows configured models first and keeps model search visible in the expanded
   expandModels();
   expect(await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
   expect(screen.queryByText('Codex / OpenAI')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '查看全部 5 个品牌' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看全部 15 个品牌' }));
   expect(screen.getByText('Codex / OpenAI')).toBeVisible();
   const search = screen.getByRole('searchbox', { name: '查找模型' });
   expect(search).toBeVisible();

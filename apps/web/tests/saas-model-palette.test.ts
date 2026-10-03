@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { groupModels, readModelPalette } from '../src/canvas/modelPalette';
+import { groupModels, readModelPalette, type ModelPaletteGroup, type ModelProviderGroup } from '../src/canvas/modelPalette';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { runtimeDefinitions, type SaaSRuntimeStatus, type SaaSRuntimeModel } from '../src/saas/runtimeCatalog';
 
@@ -7,6 +9,8 @@ const status = (models: SaaSRuntimeModel[]): SaaSRuntimeStatus => ({ configured:
   runtimes: ['pi', 'openai-agents'].map(id => ({ id: id as 'pi' | 'openai-agents', name: id, available: true, configured: true, supportsEffortSelection: false, tools: [] })) });
 const model = (id: string, runtime: 'pi' | 'openai-agents' = 'openai-agents', provider = 'openai'): SaaSRuntimeModel => ({ id, name: id, runtime, provider });
 const scope = (id = 'workspace', canvasId = 'canvas') => ({ tenant: { id, name: 'Workspace', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 100 }, canvasId });
+const byId = (groups: ModelPaletteGroup[], id: ModelProviderGroup) => groups.find(group => group.id === id)!;
+const BRAND_ORDER = ['codex', 'claude', 'grok', 'gemini', 'deepseek', 'qwen', 'kimi', 'glm', 'minimax', 'mistral', 'llama', 'nova', 'gemma', 'nemotron', 'clawhunt'];
 afterEach(() => { clearSaaSCanvas(); vi.unstubAllGlobals(); });
 
 it('distinguishes actual workspace execution from text models using the runtime capability only', () => {
@@ -33,21 +37,43 @@ it.each([{ version: 2, available: true, maxModelCalls: 16 }, { version: 1, avail
   expect(groupModels(catalog).flatMap(group => group.models)[0].execution).toBe('text');
 });
 
-it('shows all five groups but enables only actual published models, without treating compatible Qwen as Codex', () => {
+it('shows every brand group but enables only actual published models, grouping Qwen by its published name, never as Codex', () => {
   const groups = groupModels(status([model('qwen3.8-27b-p6'), model('qwen3.8-27b', 'pi')]));
-  expect(groups.map(group => group.id)).toEqual(['codex', 'claude', 'grok', 'gemini', 'clawhunt']);
-  expect(groups.slice(0, 4).every(group => !group.available && !group.models.length && group.reason)).toBe(true);
-  expect(groups[4].label).toBe('ClawHunt · 平台模型');
-  expect(groups[4].models.map(item => item.model)).toEqual(['qwen3.8-27b', 'qwen3.8-27b-p6']);
-  expect(groups[4].models.every(item => item.available && !('effort' in item))).toBe(true);
+  expect(groups.map(group => group.id)).toEqual(BRAND_ORDER);
+  expect(groups.filter(group => group.id !== 'qwen').every(group => !group.available && !group.models.length && group.reason)).toBe(true);
+  const qwen = byId(groups, 'qwen');
+  expect(qwen.label).toBe('通义千问 Qwen');
+  expect(qwen.models.map(item => item.model)).toEqual(['qwen3.8-27b', 'qwen3.8-27b-p6']);
+  expect(qwen.models.every(item => item.available && item.providerGroup === 'qwen' && !('effort' in item))).toBe(true);
+  expect(byId(groups, 'clawhunt').label).toBe('ClawHunt · 平台模型');
 });
 
-it('groups actual GPT models with Codex while keeping compatible Qwen in the platform group', () => {
+it('groups actual GPT models with Codex and every other published brand with its own group', () => {
   const groups = groupModels(status([model('gpt-5-codex'), model('claude-sonnet'), model('grok-4'), model('gemini-2.5-pro'), model('gpt-5'), model('qwen3.8-27b-p6'), model('opaque-claude-alias', 'pi', 'anthropic')]), 'en');
-  expect(groups.map(group => group.models.length)).toEqual([2, 2, 1, 1, 1]);
+  expect(groups.filter(group => group.models.length).map(group => [group.id, group.models.length])).toEqual([['codex', 2], ['claude', 2], ['grok', 1], ['gemini', 1], ['qwen', 1]]);
   expect(groups[0].label).toBe('Codex / OpenAI');
-  expect(groups.every(group => group.available && group.reason === undefined)).toBe(true);
-  expect(groups[4].models[0].model).toBe('qwen3.8-27b-p6');
+  expect(byId(groups, 'qwen').label).toBe('Qwen');
+  expect(groups.filter(group => group.models.length).every(group => group.available && group.reason === undefined)).toBe(true);
+  expect(byId(groups, 'qwen').models[0].model).toBe('qwen3.8-27b-p6');
+});
+
+it('puts every model of the curated Bedrock catalog in its vendor brand group', () => {
+  const catalog = JSON.parse(readFileSync(resolve(process.cwd(), '../bedrock-models.json'), 'utf8')) as { models: { id: string; name: string; vendor: string; runtime: 'pi' | 'openai-agents' }[] };
+  const brand: Record<string, ModelProviderGroup> = { anthropic: 'claude', openai: 'codex', xai: 'grok', moonshot: 'kimi', deepseek: 'deepseek', qwen: 'qwen',
+    zhipu: 'glm', minimax: 'minimax', mistral: 'mistral', meta: 'llama', amazon: 'nova', google: 'gemma', nvidia: 'nemotron' };
+  const groups = groupModels(status(catalog.models.map(entry => ({ id: entry.id, name: entry.name, runtime: entry.runtime, provider: 'bedrock' }))), 'en');
+  for (const entry of catalog.models) {
+    expect(brand[entry.vendor], entry.vendor).toBeDefined();
+    expect(byId(groups, brand[entry.vendor]).models.map(item => item.model), entry.name).toContain(entry.id);
+  }
+  expect(byId(groups, 'clawhunt').models).toEqual([]);
+  expect(groups.flatMap(group => group.models)).toHaveLength(catalog.models.length);
+});
+
+it.each([['gpt-oss-120b', 'codex'], ['gpt-ossify', 'clawhunt'], ['novatek-1', 'clawhunt'], ['llamaindex-agent', 'clawhunt'], ['Kimi K3', 'kimi'],
+  ['deepseek-r1-distill', 'deepseek'], ['Gemma 3 27B', 'gemma'], ['GLM-4.7 Flash', 'glm'], ['Pixtral Large', 'mistral'], ['nemotronic', 'clawhunt']])('recognises %s as %s only from a whole brand word', (name, group) => {
+  const groups = groupModels(status([{ ...model('selector'), name }]));
+  expect(groups.find(item => item.models.length)?.id).toBe(group);
 });
 
 it.each(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'openai/gpt-5.6-sol'])('keeps the real GPT model name and selector when grouping %s', name => {
@@ -69,7 +95,8 @@ it('does not classify compatible models by a GPT alias, display label, or substr
   ];
   const groups = groupModels(status(entries));
   expect(groups[0].models).toEqual([]);
-  expect(groups[4].models.map(item => item.model)).toEqual(entries.map(entry => entry.id));
+  expect(byId(groups, 'qwen').models.map(item => item.model)).toEqual(['gpt-5-alias', 'qwen-gpt-compatible']);
+  expect(byId(groups, 'clawhunt').models.map(item => item.model)).toEqual(['mygpt-5']);
 });
 
 it('uses a GPT selector only when the published model name is absent', () => {
@@ -79,7 +106,7 @@ it('uses a GPT selector only when the published model name is absent', () => {
 
 it('separates the published display name from connection labels without changing identity', () => {
   const groups = groupModels(status([{ ...model('private-selector'), name: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6 · LLM Gate · primary' }]));
-  expect(groups[4].models[0]).toMatchObject({ displayName: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6 · LLM Gate · primary', model: 'private-selector' });
+  expect(byId(groups, 'qwen').models[0]).toMatchObject({ displayName: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6 · LLM Gate · primary', model: 'private-selector' });
 });
 
 it.each(['codex', 'claude', 'grok', 'gemini'])('does not let a %s alias override the published model identity', alias => {
@@ -89,7 +116,7 @@ it.each(['codex', 'claude', 'grok', 'gemini'])('does not let a %s alias override
   ]));
   expect(groups[0].models.map(item => item.model)).toEqual([`${alias}-selection`]);
   expect(groups.slice(1, 4).every(group => group.models.length === 0)).toBe(true);
-  expect(groups[4].models.map(item => item.model)).toEqual([`${alias}-qwen`]);
+  expect(byId(groups, 'qwen').models.map(item => item.model)).toEqual([`${alias}-qwen`]);
 });
 
 it('uses provider hints only when no authoritative model name is published', () => {
@@ -99,7 +126,7 @@ it('uses provider hints only when no authoritative model name is published', () 
   ]));
   expect(groups[1].models.map(item => item.model)).toEqual(['opaque-selector']);
   expect(groups[3].models).toEqual([]);
-  expect(groups[4].models.map(item => item.model)).toEqual(['other-alias']);
+  expect(byId(groups, 'qwen').models.map(item => item.model)).toEqual(['other-alias']);
 });
 
 it('uses distinct runtime/model keys, removes exact duplicates, and never turns an advertised default into an explicit effort', () => {
@@ -117,7 +144,7 @@ it('keeps unavailable models visible but disabled and accepts only the Pi legacy
   const groups = groupModels(catalog);
   expect(groups[1].models[0]).toMatchObject({ available: false, reason: 'Worker unavailable' });
   expect(groups[1].available).toBe(false);
-  expect(groups[4].models[0]).toMatchObject({ runtime: 'pi', available: true });
+  expect(byId(groups, 'clawhunt').models[0]).toMatchObject({ runtime: 'pi', available: true });
   expect(groupModels(null).every(group => !group.available && !group.models.length)).toBe(true);
   const unavailable = status([model('configured-false')]); unavailable.runtimes![1].configured = false;
   expect(groupModels(unavailable).flatMap(group => group.models)[0].available).toBe(false);

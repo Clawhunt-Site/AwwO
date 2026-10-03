@@ -4,7 +4,8 @@ import { currentSaaSCanvas } from '../saas/canvasBridge';
 import { runtimeDefinitions, runtimeModels, type SaaSRuntimeModel, type SaaSRuntimeStatus } from '../saas/runtimeCatalog';
 import type { NodeTeamRuntime } from './nodeTeam';
 
-export type ModelProviderGroup = 'codex' | 'claude' | 'grok' | 'gemini' | 'clawhunt';
+export type ModelProviderGroup = 'codex' | 'claude' | 'grok' | 'gemini' | 'deepseek' | 'qwen' | 'kimi' | 'glm'
+  | 'minimax' | 'mistral' | 'llama' | 'nova' | 'gemma' | 'nemotron' | 'clawhunt';
 export interface ModelPaletteSelection {
   key: string;
   label: string;
@@ -35,9 +36,32 @@ export interface ModelPaletteCatalog {
   models: ModelPaletteSelection[];
 }
 
-const GROUPS: readonly ModelProviderGroup[] = ['codex', 'claude', 'grok', 'gemini', 'clawhunt'];
-const LABELS: Record<ModelProviderGroup, string> = { codex: 'Codex / OpenAI', claude: 'Claude', grok: 'Grok', gemini: 'Gemini', clawhunt: 'ClawHunt' };
+// The original four brands keep their place; the brands a Bedrock catalog adds follow, and
+// platform models whose name names no known brand stay last.
+const GROUPS: readonly ModelProviderGroup[] = ['codex', 'claude', 'grok', 'gemini', 'deepseek', 'qwen', 'kimi', 'glm',
+  'minimax', 'mistral', 'llama', 'nova', 'gemma', 'nemotron', 'clawhunt'];
+const LABELS: Record<ModelProviderGroup, readonly [zh: string, en: string]> = {
+  codex: ['Codex / OpenAI', 'Codex / OpenAI'], claude: ['Claude', 'Claude'], grok: ['Grok', 'Grok'], gemini: ['Gemini', 'Gemini'],
+  deepseek: ['DeepSeek 深度求索', 'DeepSeek'], qwen: ['通义千问 Qwen', 'Qwen'], kimi: ['Kimi · 月之暗面', 'Kimi · Moonshot'],
+  glm: ['GLM · 智谱', 'GLM · Zhipu'], minimax: ['MiniMax', 'MiniMax'], mistral: ['Mistral', 'Mistral'], llama: ['Llama · Meta', 'Llama · Meta'],
+  nova: ['Amazon Nova', 'Amazon Nova'], gemma: ['Gemma · Google', 'Gemma · Google'], nemotron: ['NVIDIA Nemotron', 'NVIDIA Nemotron'],
+  clawhunt: ['ClawHunt · 平台模型', 'ClawHunt · Platform models'],
+};
+// A brand is recognised from a whole word of the published name (a digit or separator may follow).
+const BRANDS: readonly (readonly [ModelProviderGroup, RegExp])[] = [
+  ['deepseek', /(?:^|[^a-z0-9])deepseek(?:[^a-z]|$)/],
+  ['qwen', /(?:^|[^a-z0-9])qwen(?:[^a-z]|$)/],
+  ['kimi', /(?:^|[^a-z0-9])kimi(?:[^a-z]|$)/],
+  ['glm', /(?:^|[^a-z0-9])glm(?:[^a-z]|$)/],
+  ['minimax', /(?:^|[^a-z0-9])minimax(?:[^a-z]|$)/],
+  ['mistral', /(?:^|[^a-z0-9])(?:mistral|ministral|magistral|devstral|pixtral|codestral)(?:[^a-z]|$)/],
+  ['llama', /(?:^|[^a-z0-9])llama(?:[^a-z]|$)/],
+  ['nova', /(?:^|[^a-z0-9])nova(?:[^a-z]|$)/],
+  ['gemma', /(?:^|[^a-z0-9])gemma(?:[^a-z]|$)/],
+  ['nemotron', /(?:^|[^a-z0-9])nemotron(?:[^a-z]|$)/],
+];
 const text = (locale: UiLocale, zh: string, en: string) => locale === 'zh' ? zh : en;
+const groupLabel = (id: ModelProviderGroup, locale: UiLocale) => LABELS[id][locale === 'zh' ? 0 : 1];
 const clean = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
 /** Protocol providers are not model brands: openai can also carry Qwen or other compatible models. */
@@ -50,7 +74,8 @@ function providerGroup(model: SaaSRuntimeModel): ModelProviderGroup {
   if (/(?:^|[^a-z0-9])claude(?:[^a-z0-9]|$)/.test(identity) || provider === 'anthropic') return 'claude';
   if (/(?:^|[^a-z0-9])grok(?:[^a-z0-9]|$)/.test(identity) || ['xai', 'x-ai'].includes(provider)) return 'grok';
   if (/(?:^|[^a-z0-9])gemini(?:[^a-z0-9]|$)/.test(identity) || ['google', 'google-ai', 'google-vertex'].includes(provider)) return 'gemini';
-  if (/^(?:openai[/:])?gpt(?:[- ]?\d)/.test(identity)) return 'codex';
+  if (/^(?:openai[/:])?gpt(?:[- ]?\d|-oss(?:[^a-z]|$))/.test(identity)) return 'codex';
+  for (const [group, pattern] of BRANDS) if (pattern.test(identity)) return group;
   // This group means platform-configured models, not a claim of proprietary model training.
   return 'clawhunt';
 }
@@ -58,7 +83,7 @@ function providerGroup(model: SaaSRuntimeModel): ModelProviderGroup {
 /** Pure projection of this workspace's published catalogue; never invents selectors or model defaults. */
 export function groupModels(status: SaaSRuntimeStatus | null, locale: UiLocale = 'zh'): ModelPaletteGroup[] {
   const unavailable = text(locale, '此工作区尚未配置此品牌的模型。', 'No model from this brand is configured for this workspace.');
-  const groups = GROUPS.map(id => ({ id, label: id === 'clawhunt' ? text(locale, 'ClawHunt · 平台模型', 'ClawHunt · Platform models') : LABELS[id],
+  const groups = GROUPS.map(id => ({ id, label: groupLabel(id, locale),
     models: [] as ModelPaletteSelection[], available: false, reason: status ? unavailable : text(locale, '尚未读取模型目录。', 'The model catalogue has not been loaded.') }));
   if (!status) return groups;
   const seen = new Map<string, string>();
