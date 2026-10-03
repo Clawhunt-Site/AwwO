@@ -47,6 +47,12 @@ def classify_error(error: BaseException) -> dict:
     if name == "ToolCallError":
         return failure_event("TOOL_INPUT_INVALID")
     status = getattr(error, "status_code", None) or getattr(error, "status", None)
+    if status is None:
+        # An error frame inside a stream that already answered 200 carries its status in its body.
+        body = getattr(error, "body", None)
+        inner = body.get("status") if isinstance(body, dict) else None
+        if isinstance(inner, int) and not isinstance(inner, bool) and 400 <= inner <= 599:
+            status = inner
     if status in (401, 403):
         return failure_event("MODEL_AUTHENTICATION")
     if status == 429:

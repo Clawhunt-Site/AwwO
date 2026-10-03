@@ -10,6 +10,7 @@ from typing import AsyncIterator
 from agents import Agent, FunctionTool, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, RunConfig, Runner
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
+from bedrock_bridge import BRIDGE_API_KEY, BedrockConverseTransport
 from config import PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
 from errors import RuntimeError, classify_error
 from provider_observation import ProviderObservation
@@ -216,10 +217,17 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         if cancel_event.is_set():
             yield {"type": "cancelled"}
             return
+        # A Bedrock profile is served by the Converse bridge transport: the SDK keeps its
+        # OpenAI-compatible request and the observation hooks see the bridged stream.
+        bridge = None
+        if profile.provider == "bedrock":
+            bridge = BedrockConverseTransport(region=profile.region, model=profile.model,
+                                              auth={"bearer_token": profile.api_key} if profile.api_key else {"aws": True},
+                                              read_timeout=config.timeout_ms / 1000)
         http_client = DefaultAsyncHttpxClient(event_hooks={
             "request": [observation.on_request], "response": [observation.on_response],
-        })
-        client = AsyncOpenAI(base_url=profile.base_url, api_key=profile.api_key, max_retries=0, http_client=http_client)
+        }, **({"transport": bridge} if bridge else {}))
+        client = AsyncOpenAI(base_url=profile.base_url, api_key=BRIDGE_API_KEY if bridge else profile.api_key, max_retries=0, http_client=http_client)
         tools = _build_tools(request, config)
         agent = Agent(
             name="awwo",

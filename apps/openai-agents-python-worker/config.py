@@ -7,6 +7,11 @@ import os
 import re
 from dataclasses import dataclass, field, replace
 
+from bedrock_bridge import bridge_base_url, valid_region
+from bedrock_catalog import (
+    OPERATOR_ONLY_BEDROCK, CatalogError, bedrock_api_key, bedrock_region, catalog_selection, parse_platform_providers, platform_health,
+    platform_providers_in_use,
+)
 from tools import tool_metadata
 
 MODEL_SELECTOR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$")
@@ -36,11 +41,15 @@ class ModelProfile:
     # False sends `chat_template_kwargs.enable_thinking=false` on Chat Completions, for models
     # (Qwen-style chat templates) whose hidden reasoning would otherwise spend the output budget.
     thinking: bool = True
+    # Display name for the model picker; empty keeps the provider model ID.
+    name: str = ""
+    # Bedrock runtime region; set only for provider "bedrock".
+    region: str = ""
 
     def to_health(self) -> dict:
         return {
             "id": self.id,
-            "name": self.model,
+            "name": self.name or self.model,
             "providerModel": self.model,
             "provider": self.provider,
             "runtime": "openai-agents",
@@ -74,6 +83,7 @@ class Config:
     missing: tuple
     user_credentials: bool = False
     llmgate_only: bool = False
+    platform_providers: tuple = ("llmgate",)
 
 
 def _integer(env: dict, key: str, fallback: int, minimum: int, maximum: int) -> int:
@@ -111,6 +121,48 @@ def _flag(env: dict, key: str) -> bool:
     return value == "true"
 
 
+BEDROCK_PROFILE_FIELDS = {"id", "provider", "model", "region", "apiKeyEnv", "contextWindow", "maxTokens", "name",
+                          "reasoningEfforts", "defaultReasoningEffort", "structuredOutput"}
+
+
+def _bedrock_profile(entry_id: str, name: str, target: str, region: str, api_key: str, context_window: int, max_tokens: int) -> ModelProfile:
+    # Bedrock is reached only through the Converse bridge, as an OpenAI-compatible endpoint;
+    # it never advertises effort (the bridge refuses it).
+    return ModelProfile(id=entry_id, provider="bedrock", model=target, base_url=bridge_base_url(region), api_key=api_key,
+                        protocol="chat_completions", context_window=context_window, max_tokens=max_tokens, name=name, region=region)
+
+
+def _bedrock_models_json_profile(value: dict, env: dict, ids: set, default: ModelProfile, missing: list) -> ModelProfile:
+    invalid = ConfigError("Invalid Bedrock profile in AWWO_OPENAI_AGENTS_MODELS_JSON")
+    if (set(value) - BEDROCK_PROFILE_FIELDS or not isinstance(value.get("id"), str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value["id"]) or value["id"] in ids
+            or not isinstance(value.get("model"), str) or not MODEL_SELECTOR.fullmatch(value["model"])
+            or ("region" in value and not valid_region(value["region"]))
+            or ("apiKeyEnv" in value and (not isinstance(value["apiKeyEnv"], str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", value["apiKeyEnv"])))
+            or value.get("reasoningEfforts", []) != [] or value.get("defaultReasoningEffort", "") != ""
+            or value.get("structuredOutput", False) is not False
+            or ("name" in value and (not isinstance(value["name"], str) or not 1 <= len(value["name"]) <= 80))):
+        raise invalid
+    api_key = ""
+    if "apiKeyEnv" in value:
+        try:
+            api_key = bedrock_api_key(env, value["apiKeyEnv"])
+        except CatalogError:
+            raise invalid
+        if not api_key:
+            missing.append("AWWO_OPENAI_AGENTS_MODELS_JSON_CREDENTIALS")
+    context_window = value.get("contextWindow", default.context_window)
+    max_tokens = value.get("maxTokens", default.max_tokens)
+    if (not isinstance(context_window, int) or not 4096 <= context_window <= 2_000_000
+            or not isinstance(max_tokens, int) or not 128 <= max_tokens <= 32_768 or max_tokens + 256 >= context_window):
+        raise invalid
+    try:
+        region = value.get("region") or bedrock_region(env)
+    except CatalogError as e:
+        raise ConfigError(str(e))
+    return _bedrock_profile(value["id"], value.get("name", value["model"]), value["model"], region, api_key, context_window, max_tokens)
+
+
 def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, missing: list) -> list:
     if serialized is None or serialized == "":
         return [default]
@@ -125,6 +177,10 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
     profiles = [default]
     ids = {default.id}
     for value in values:
+        if isinstance(value, dict) and value.get("provider") == "bedrock":
+            profiles.append(_bedrock_models_json_profile(value, env, ids, default, missing))
+            ids.add(value["id"])
+            continue
         if not isinstance(value, dict) or not isinstance(value.get("id"), str) or value.get("id") in ids:
             raise ConfigError("Invalid model profile in AWWO_OPENAI_AGENTS_MODELS_JSON")
         provider = value.get("provider", "openai")
@@ -227,11 +283,29 @@ def load_config(env: dict | None = None) -> Config:
         reasoning_efforts=efforts, default_reasoning_effort=default_effort,
         thinking=not disable_thinking,
     )
-    models = tuple(_load_profiles(env.get("AWWO_OPENAI_AGENTS_MODELS_JSON"), env, default_profile, missing))
+    configured = _load_profiles(env.get("AWWO_OPENAI_AGENTS_MODELS_JSON"), env, default_profile, missing)
+    try:
+        selected = catalog_selection("openai-agents", env)
+        region = bedrock_region(env) if selected else ""
+        catalog_key = bedrock_api_key(env) if selected else ""
+        platform_providers = parse_platform_providers(env.get("AWWO_PLATFORM_PROVIDERS"))
+    except CatalogError as e:
+        raise ConfigError(f"Bedrock catalog configuration is invalid: {e}")
+    catalog = [_bedrock_profile(entry["id"], entry["name"], entry["target"], region, catalog_key, entry["contextWindow"], entry["maxTokens"])
+               for entry in selected]
+    if any(p.id in {c.id for c in configured} for p in catalog) or len(configured) + len(catalog) > MAX_CATALOG_MODELS:
+        raise ConfigError("Bedrock catalog models must have unique IDs and fit the 256-model catalog")
+    models = tuple(configured + catalog)
     # Legacy "openai" profiles can be protocol adapters for the Gate endpoint.
     # Personal mode replaces every profile before a request can reach the SDK.
-    if llmgate_only and any(p.base_url != DEFAULT_BASE_URLS["llmgate"] for p in models):
+    # Bedrock is a second operator destination only where the platform policy names it.
+    if llmgate_only and any(p.provider != "bedrock" and p.base_url != DEFAULT_BASE_URLS["llmgate"] for p in models):
         raise ConfigError("AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile")
+    if llmgate_only and any(p.provider == "bedrock" for p in models) and "bedrock" not in platform_providers:
+        raise ConfigError("AWWO_LLMGATE_ONLY allows Bedrock profiles only when AWWO_PLATFORM_PROVIDERS includes bedrock")
+    if personal and any(p.provider == "bedrock" for p in models):
+        raise ConfigError(OPERATOR_ONLY_BEDROCK)
+    served = () if personal else models
 
     return Config(
         host=env.get("AWWO_OPENAI_AGENTS_HOST") or "127.0.0.1",
@@ -244,11 +318,13 @@ def load_config(env: dict | None = None) -> Config:
         max_concurrency=_integer(env, "AWWO_OPENAI_AGENTS_MAX_CONCURRENCY", 4, 1, 32),
         max_output_bytes=_integer(env, "AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES", 1_048_576, 1024, 8_388_608),
         context_window=context_window, max_tokens=max_tokens,
-        models=() if personal else models,
+        models=served,
         ready=(len(token) >= 32 and not re.search(r"[\r\n]", token)) if personal else not missing,
         missing=tuple(x for x in dict.fromkeys(missing) if not personal or x == "AWWO_OPENAI_AGENTS_TOKEN"),
         user_credentials=personal,
         llmgate_only=llmgate_only,
+        # What health claims: the destinations these profiles reach, within the policy checked above.
+        platform_providers=platform_providers_in_use(platform_providers, [p.provider for p in served]),
     )
 
 
@@ -258,7 +334,7 @@ def public_health(config: Config, active_runs: int = 0) -> dict:
         "ready": config.ready,
         "configured": config.ready,
         "userCredentials": config.user_credentials,
-        **({"llmgateOnly": True} if config.llmgate_only else {}),
+        **platform_health(config.llmgate_only, config.platform_providers),
         "provider": config.provider or None,
         "model": config.model or None,
         "runtime": "openai-agents",
