@@ -106,6 +106,25 @@ test('admission refuses invalid history, credentials and context before any prov
   assert.equal(s.calls.length, 0);
 });
 
+test('a Bedrock model is refused for managed execution before any request or key leaves the worker', async t => {
+  const bedrockKey = 'ABSKbedrockkey000000000000000000';
+  const originalFetch = globalThis.fetch;
+  const outbound: string[] = [];
+  t.mock.method(globalThis, 'fetch', (target: string | URL | Request, init?: RequestInit) => {
+    const url = String(target instanceof Request ? target.url : target);
+    if (url.includes('amazonaws')) outbound.push(url);
+    return originalFetch(target, init);
+  });
+  for (const [protocol, model] of [['chat_completions', 'bedrock.glm-5'], ['anthropic_messages', 'bedrock.gemma-3-27b']] as const) {
+    const s = await serve(t, protocol, () => assert.fail('No provider request expected'), { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: bedrockKey });
+    const response = await s.send(input({ model }));
+    assert.equal(response.status, 400, protocol);
+    assert.equal((await response.json()).error.code, 'MODEL_NOT_SUPPORTED');
+    assert.equal(s.calls.length, 0);
+  }
+  assert.deepEqual(outbound, []);
+});
+
 test('capacity is shared with existing runs and DELETE aborts the provider and frees its session', { timeout: 5000 }, async t => {
   let received!: () => void; const ready = new Promise<void>(resolve => { received = resolve; });
   const s = await serve(t, 'chat_completions', () => received(), { AWWO_OPENAI_AGENTS_MAX_CONCURRENCY: '1' });

@@ -2,6 +2,8 @@ import { loadWorkspaceConfig, validateWorkspaceRequest } from './workspace-proto
 import { loadObservabilityConfig } from './observability.mjs';
 import { toolMetadata, toolDefinitionBytes, validateToolNames } from './tools.mjs';
 import { deliverySchemaBytes, validateOutputContract } from './delivery-contract.mjs';
+import { assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
+import { validBedrockRegion } from '../bedrock-bridge.ts';
 const DEFAULTS = Object.freeze({ openai: 'https://api.openai.com/v1', llmgate: 'https://api.clawhunt.site/v1' });
 const PROTOCOLS = new Set(['chat_completions', 'responses']);
 
@@ -24,7 +26,7 @@ function integer(value, fallback, minimum, maximum, name) {
   return parsed;
 }
 
-const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'protocol', 'reasoningEfforts', 'defaultReasoningEffort', 'structuredOutput', 'disableThinking', 'name']);
+const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'protocol', 'reasoningEfforts', 'defaultReasoningEffort', 'structuredOutput', 'disableThinking', 'name', 'region']);
 const MAX_CATALOG_MODELS = 256; // Includes the required default profile.
 const MAX_CATALOG_BYTES = 512 * 1024;
 const MODEL_SELECTOR = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$/;
@@ -92,6 +94,37 @@ function profileInteger(value, fallback, minimum, maximum) {
   return value;
 }
 
+// A Bedrock profile reaches the provider only through the Converse bridge, so it has no
+// base URL or protocol of its own, never advertises effort or structured output (the bridge
+// refuses both) and signs with the worker's AWS credentials unless it names an API key.
+function bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some((key) => !PROFILE_FIELDS.has(key))
+    || typeof value.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value.id) || ids.has(value.id)
+    || typeof value.model !== 'string' || !MODEL_SELECTOR.test(value.model)
+    || value.baseURL !== undefined || (value.protocol !== undefined && value.protocol !== 'chat_completions')
+    || (value.region !== undefined && !validBedrockRegion(value.region))
+    || (value.apiKeyEnv !== undefined && (typeof value.apiKeyEnv !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value.apiKeyEnv)))
+    || (value.reasoningEfforts !== undefined && (!Array.isArray(value.reasoningEfforts) || value.reasoningEfforts.length))
+    || (value.defaultReasoningEffort !== undefined && value.defaultReasoningEffort !== '')
+    || (value.structuredOutput !== undefined && value.structuredOutput !== false)
+    || (value.name !== undefined && !validProfileName(value.name))) throw new Error();
+  let apiKey = '';
+  if (value.apiKeyEnv !== undefined) {
+    apiKey = bedrockApiKey(env, value.apiKeyEnv);
+    if (!apiKey) missing.push('AWWO_OPENAI_AGENTS_MODELS_JSON_CREDENTIALS');
+  }
+  const contextWindow = profileInteger(value.contextWindow, defaultProfile.contextWindow, 4096, 2_000_000);
+  const maxTokens = profileInteger(value.maxTokens, defaultProfile.maxTokens, 128, 32_768);
+  if (maxTokens + 256 >= contextWindow) throw new Error();
+  return workerBedrockProfile(bedrockProfile({ id: value.id, name: value.name ?? value.model, vendor: '', target: value.model, contextWindow, maxTokens },
+    value.region ?? bedrockRegion(env), apiKey));
+}
+
+function workerBedrockProfile(profile) {
+  return Object.freeze({ ...profile, protocol: 'chat_completions', reasoningEfforts: Object.freeze([]), defaultReasoningEffort: '', structuredOutput: false });
+}
+
 function loadProfiles(serialized, env, defaultProfile, missing) {
   if (serialized === undefined || serialized === '') return Object.freeze([defaultProfile]);
   // Configuration errors must not fall back to an unintended provider. Error
@@ -104,6 +137,12 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
     const profiles = [defaultProfile];
     const ids = new Set([defaultProfile.id]);
     for (const [index, value] of values.entries()) {
+      if (value?.provider === 'bedrock') {
+        problem = `profile ${index + 1} is not a valid Bedrock profile`;
+        profiles.push(bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing));
+        ids.add(value.id);
+        continue;
+      }
       problem = `profile ${index + 1} has invalid fields, an unsupported provider, or a duplicate ID`;
       if (!value || typeof value !== 'object' || Array.isArray(value)
         || Object.keys(value).some((key) => !PROFILE_FIELDS.has(key))
@@ -171,12 +210,25 @@ export function loadConfig(env = process.env) {
   catch { throw new Error(`AWWO_OPENAI_AGENTS_REASONING_EFFORTS must list distinct levels from ${EFFORT_LEVELS.join(', ')} and AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT, when set, must be one of them`); }
   const structuredOutput = parseStructuredOutput(env.AWWO_OPENAI_AGENTS_STRUCTURED_OUTPUT);
   const disableThinking = parseDisableThinking(env.AWWO_OPENAI_AGENTS_DISABLE_THINKING);
-  const models = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, name: model, apiKey, baseURL, contextWindow, maxTokens, protocol, ...efforts, structuredOutput, disableThinking }), missing);
+  const configured = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, name: model, apiKey, baseURL, contextWindow, maxTokens, protocol, ...efforts, structuredOutput, disableThinking }), missing);
+  let catalog;
+  try { catalog = bedrockCatalogProfiles('openai-agents', env).map(workerBedrockProfile); }
+  catch (error) { throw new Error(`Bedrock catalog configuration is invalid: ${error.message}`); }
+  if (catalog.some(profile => configured.some(item => item.id === profile.id)) || configured.length + catalog.length > MAX_CATALOG_MODELS) {
+    throw new Error('Bedrock catalog models must have unique IDs and fit the 256-model catalog');
+  }
+  const models = Object.freeze([...configured, ...catalog]);
+  const platformProviders = parsePlatformProviders(env.AWWO_PLATFORM_PROVIDERS);
   // Older worker configs use "openai" as the protocol adapter for LLM Gate.
   // The URL is the network destination; personal mode replaces these profiles per request.
-  if (llmgateOnly && models.some(profile => profile.baseURL !== DEFAULTS.llmgate)) {
+  // Bedrock is a second operator destination only where the platform policy names it.
+  if (llmgateOnly && models.some(profile => profile.provider !== 'bedrock' && profile.baseURL !== DEFAULTS.llmgate)) {
     throw new Error('AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile');
   }
+  if (llmgateOnly && models.some(profile => profile.provider === 'bedrock') && !platformProviders.includes('bedrock')) {
+    throw new Error('AWWO_LLMGATE_ONLY allows Bedrock profiles only when AWWO_PLATFORM_PROVIDERS includes bedrock');
+  }
+  assertOperatorOnlyBedrock(userCredentials, models);
   for (const profile of models) {
     if (environment !== 'development' && validBaseURL(profile.baseURL)) {
       const u = new URL(profile.baseURL);
@@ -197,6 +249,8 @@ export function loadConfig(env = process.env) {
     contextWindow, maxTokens, models,
     userCredentials,
     llmgateOnly,
+    // What health claims: the destinations these profiles reach, within the policy checked above.
+    platformProviders: platformProvidersInUse(platformProviders, models),
     ready: userCredentials ? token.length >= 32 && !/[\r\n]/.test(token) : missing.length === 0,
     missing: Object.freeze([...new Set(missing)]),
   });
@@ -207,7 +261,7 @@ export function publicHealth(config, activeRuns = 0, workspaceAvailable = false)
     status: config.ready ? 'ready' : 'unconfigured',
     ready: config.ready,
     userCredentials: config.userCredentials === true,
-    ...(config.llmgateOnly === true ? { llmgateOnly: true } : {}),
+    ...platformHealth(config.llmgateOnly === true, config.platformProviders ?? ['llmgate']),
     // In user-credential mode this worker binds a per-request user model that may carry
     // structuredOutput (see ../user-models.ts), so it declares that it can. Present only
     // in that mode, so an operator-mode health body is byte-identical.

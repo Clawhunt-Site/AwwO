@@ -4,8 +4,12 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resolveModelConfig } from './config.mjs';
+import { createBedrockAuthResolver } from '../bedrock-bridge.ts';
 
 export const TASK_URL = new URL('./pi-task.mjs', import.meta.url);
+// The parent alone reads the AWS credential chain; a Bedrock child only ever receives the
+// API key or the short-lived credentials resolved here, over the same private IPC as any key.
+const resolveBedrockAuth = createBedrockAuthResolver(async () => (await import('@aws-sdk/credential-provider-node')).defaultProvider());
 
 // Deliberately exclude HOME, NODE_OPTIONS, provider keys, proxy credentials,
 // npm options, and the launching user's Pi/extension configuration.
@@ -19,12 +23,17 @@ export function workerEnvironment(directory, executable = process.execPath) {
   };
 }
 
-export async function startIsolatedRun({ config, request, onEvent, onExit }, { taskURL = TASK_URL } = {}) {
+export async function startIsolatedRun({ config, request, onEvent, onExit }, { taskURL = TASK_URL, bedrockAuth = resolveBedrockAuth } = {}) {
   const acceptedAt = performance.now();
   const acceptedAtNs = process.hrtime.bigint().toString();
   let firstDeltaMs;
   let childObservability;
   const modelConfig = resolveModelConfig(config, request.model);
+  let auth;
+  if (modelConfig.provider === 'bedrock') {
+    // Resolved before any directory or process exists, so a missing credential leaves nothing behind.
+    try { auth = await bedrockAuth(modelConfig.apiKey); } catch { throw Object.assign(new Error('Bedrock credentials are unavailable'), { code: 'MODEL_AUTHENTICATION' }); }
+  }
   const directory = await mkdtemp(join(tmpdir(), 'awwo-pi-'));
   const agentDir = join(directory, 'agent');
   let child;
@@ -128,8 +137,11 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
     directory,
     agentDir,
     modelConfig: {
-      provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL, apiKey: modelConfig.apiKey,
+      provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL,
+      // A Bedrock key travels only inside its auth record, never as a provider API key.
+      apiKey: modelConfig.provider === 'bedrock' ? '' : modelConfig.apiKey,
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
+      ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth } : {}),
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };

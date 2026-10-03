@@ -1,4 +1,6 @@
 import { loadObservabilityConfig } from './observability.mjs';
+import { assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
+import { validBedrockRegion } from '../bedrock-bridge.ts';
 const DEFAULTS = Object.freeze({
   llmgate: 'https://api.clawhunt.site/v1',
   openai: 'https://api.openai.com/v1',
@@ -26,6 +28,7 @@ function integer(value, fallback, minimum, maximum, name) {
 }
 
 const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens']);
+const BEDROCK_PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'region', 'name']);
 const MAX_CATALOG_MODELS = 256; // Includes the required default profile.
 const MAX_CATALOG_BYTES = 512 * 1024;
 const MODEL_SELECTOR = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$/;
@@ -50,6 +53,38 @@ function providerProtocol(provider) {
   return provider === 'anthropic' ? 'anthropic_messages' : 'chat_completions';
 }
 
+function validProfileName(name) {
+  if (typeof name !== 'string' || !name.isWellFormed() || /[\p{Cc}\p{Cf}]/u.test(name)) return false;
+  const characters = [...name].length;
+  return characters >= 1 && characters <= 80;
+}
+
+// A Bedrock profile reaches the provider only through the Converse bridge, which Pi calls as
+// an OpenAI-compatible endpoint. It signs with the worker's AWS credentials unless it names a key.
+function bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some((key) => !BEDROCK_PROFILE_FIELDS.has(key))
+    || typeof value.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value.id) || ids.has(value.id)
+    || typeof value.model !== 'string' || !MODEL_SELECTOR.test(value.model)
+    || (value.region !== undefined && !validBedrockRegion(value.region))
+    || (value.apiKeyEnv !== undefined && (typeof value.apiKeyEnv !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value.apiKeyEnv)))
+    || (value.name !== undefined && !validProfileName(value.name))) throw new Error();
+  let apiKey = '';
+  if (value.apiKeyEnv !== undefined) {
+    apiKey = bedrockApiKey(env, value.apiKeyEnv);
+    if (!apiKey) missing.push('AWWO_PI_MODELS_JSON_CREDENTIALS');
+  }
+  const contextWindow = profileInteger(value.contextWindow, defaultProfile.contextWindow, 4096, 2_000_000);
+  const maxTokens = profileInteger(value.maxTokens, defaultProfile.maxTokens, 128, 32_768);
+  if (maxTokens + 256 >= contextWindow) throw new Error();
+  return workerBedrockProfile(bedrockProfile({ id: value.id, name: value.name ?? value.model, vendor: '', target: value.model, contextWindow, maxTokens },
+    value.region ?? bedrockRegion(env), apiKey));
+}
+
+function workerBedrockProfile(profile) {
+  return Object.freeze({ ...profile, protocol: 'chat_completions' });
+}
+
 function loadProfiles(serialized, env, defaultProfile, missing) {
   if (serialized === undefined || serialized === '') return Object.freeze([defaultProfile]);
   // Configuration errors must not fall back to an unintended provider. Error
@@ -62,6 +97,12 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
     const profiles = [defaultProfile];
     const ids = new Set([defaultProfile.id]);
     for (const [index, value] of values.entries()) {
+      if (value?.provider === 'bedrock') {
+        problem = `profile ${index + 1} is not a valid Bedrock profile`;
+        profiles.push(bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing));
+        ids.add(value.id);
+        continue;
+      }
       problem = `profile ${index + 1} has invalid fields, an unsupported provider, or a duplicate ID`;
       if (!value || typeof value !== 'object' || Array.isArray(value)
         || Object.keys(value).some((key) => !PROFILE_FIELDS.has(key))
@@ -108,11 +149,24 @@ export function loadConfig(env = process.env) {
   const contextWindow = integer(env.AWWO_PI_CONTEXT_WINDOW, 32_768, 4096, 2_000_000, 'AWWO_PI_CONTEXT_WINDOW');
   const maxTokens = integer(env.AWWO_PI_MAX_TOKENS, 4096, 128, 32_768, 'AWWO_PI_MAX_TOKENS');
   if (maxTokens + 256 >= contextWindow) missing.push('AWWO_PI_MAX_TOKENS');
-  const models = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens }), missing);
+  const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens }), missing);
+  let catalog;
+  try { catalog = bedrockCatalogProfiles('pi', env).map(workerBedrockProfile); }
+  catch (error) { throw new Error(`Bedrock catalog configuration is invalid: ${error.message}`); }
+  if (catalog.some(profile => configured.some(item => item.id === profile.id)) || configured.length + catalog.length > MAX_CATALOG_MODELS) {
+    throw new Error('Bedrock catalog models must have unique IDs and fit the 256-model catalog');
+  }
+  const models = Object.freeze([...configured, ...catalog]);
+  const platformProviders = parsePlatformProviders(env.AWWO_PLATFORM_PROVIDERS);
   // Provider labels may name the protocol adapter; only the URL chooses the destination.
-  if (llmgateOnly && models.some(profile => profile.baseURL !== DEFAULTS.llmgate)) {
+  // Bedrock is a second operator destination only where the platform policy names it.
+  if (llmgateOnly && models.some(profile => profile.provider !== 'bedrock' && profile.baseURL !== DEFAULTS.llmgate)) {
     throw new Error('AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile');
   }
+  if (llmgateOnly && models.some(profile => profile.provider === 'bedrock') && !platformProviders.includes('bedrock')) {
+    throw new Error('AWWO_LLMGATE_ONLY allows Bedrock profiles only when AWWO_PLATFORM_PROVIDERS includes bedrock');
+  }
+  assertOperatorOnlyBedrock(userCredentials, models);
   return Object.freeze({
     observability: loadObservabilityConfig(env, 'pi', environment),
     host: env.AWWO_PI_HOST ?? '127.0.0.1',
@@ -125,6 +179,8 @@ export function loadConfig(env = process.env) {
     contextWindow, maxTokens, models,
     userCredentials,
     llmgateOnly,
+    // What health claims: the destinations these profiles reach, within the policy checked above.
+    platformProviders: platformProvidersInUse(platformProviders, models),
     ready: userCredentials ? token.length >= 32 && !/[\r\n]/.test(token) : missing.length === 0,
     missing: Object.freeze([...new Set(missing)]),
   });
@@ -135,13 +191,13 @@ export function publicHealth(config, activeRuns = 0) {
     status: config.ready ? 'ready' : 'unconfigured',
     ready: config.ready,
     userCredentials: config.userCredentials === true,
-    ...(config.llmgateOnly === true ? { llmgateOnly: true } : {}),
+    ...platformHealth(config.llmgateOnly === true, config.platformProviders ?? ['llmgate']),
     configured: config.ready,
     provider: config.provider || null,
     model: config.model || null,
     models: config.models.filter((profile) => profile.id && profile.provider).map((profile) => ({
       id: profile.id,
-      name: profile.model,
+      name: profile.name ?? profile.model,
       providerModel: profile.model,
       protocol: profile.protocol,
       provider: profile.provider,

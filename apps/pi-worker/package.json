@@ -12,6 +12,8 @@
     "check": "node --check server.mjs && node --check runner.mjs && node --check pi-task.mjs && node --check config.mjs && node --check usage.mjs && node --check observability.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "3.1048.0",
+    "@aws-sdk/credential-provider-node": "3.972.82",
     "@earendil-works/pi-ai": "0.85.1",
     "@earendil-works/pi-coding-agent": "0.85.1"
   }

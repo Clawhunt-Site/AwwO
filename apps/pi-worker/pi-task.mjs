@@ -34,9 +34,20 @@ async function cancel() {
 
 async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) {
   let unsubscribe;
-  const observer = createProviderObserver(modelConfig.protocol === 'anthropic_messages' ? 'anthropic' : 'chat_completions', { acceptedAtNs });
+  const bedrock = modelConfig.provider === 'bedrock';
+  let observer = createProviderObserver(modelConfig.protocol === 'anthropic_messages' ? 'anthropic' : 'chat_completions', { acceptedAtNs });
   const terminal = event => emit({ ...event, observability: observer.snapshot(event.type) });
+  let bridgeKey;
   try {
+    if (bedrock) {
+      // Bedrock is served through the Converse bridge, which answers Pi's OpenAI-compatible
+      // request itself; the key Pi attaches is only a placeholder the bridge ignores. Loaded
+      // only for Bedrock runs, so other children never pay for the TypeScript module.
+      const [{ BEDROCK_BRIDGE_API_KEY, createBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
+      const fetchImpl = createBedrockFetch({ region: modelConfig.region, model: modelConfig.model, auth: modelConfig.bedrockAuth, sdk });
+      observer = createProviderObserver('chat_completions', { acceptedAtNs, fetchImpl });
+      bridgeKey = BEDROCK_BRIDGE_API_KEY;
+    }
     const [{ InMemoryCredentialStore }, { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager }] = await Promise.all([
       import('@earendil-works/pi-ai'),
       import('@earendil-works/pi-coding-agent'),
@@ -74,7 +85,7 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
         } } : {}),
       }],
     });
-    await modelRuntime.setRuntimeApiKey(providerId, modelConfig.apiKey || 'ollama-local', { signal: controller.signal });
+    await modelRuntime.setRuntimeApiKey(providerId, bedrock ? bridgeKey : modelConfig.apiKey || 'ollama-local', { signal: controller.signal });
     const model = modelRuntime.getModel(providerId, modelConfig.model);
     if (!model) throw new Error('Configured model unavailable');
     const settingsManager = SettingsManager.inMemory({

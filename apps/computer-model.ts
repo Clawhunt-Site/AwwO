@@ -194,6 +194,10 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   let model: Profile;
   try { model = options.resolveModel(bindUserModel(config, body as any, options.runtime), body.model); }
   catch { return reject(400, 'MODEL_NOT_FOUND'); }
+  // Managed execution makes one non-streaming completion call, which the Bedrock bridge does not
+  // serve (it answers the agent runtimes' streaming chat only). Such a model is refused here,
+  // before any capacity is taken or a request leaves the worker.
+  if (model.provider === 'bedrock') return reject(400, 'MODEL_NOT_SUPPORTED');
   const effort = (body.effort === '' ? undefined : body.effort) ?? (model.defaultReasoningEffort || undefined);
   if (effort !== undefined && effort !== 'none' && !model.reasoningEfforts?.includes(effort)) return reject(400, 'EFFORT_NOT_SUPPORTED');
   if (Buffer.byteLength(JSON.stringify(completion)) + completion.messages.length * 32 > model.contextWindow - model.maxTokens - 256) return reject(413, 'CONTEXT_LIMIT');

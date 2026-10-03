@@ -125,9 +125,14 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
     try {
       entry.handle = await startRun({ config: runConfig, request: body, onEvent: emit, onExit: release });
       if (entry.cancelRequested || response.destroyed) entry.handle.cancel();
-    } catch {
+    } catch (error) {
       release();
-      emit({ type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.', observability: parentObservability(undefined, { totalMs: 0, outcome: 'failed' }) });
+      // A Bedrock credential that could not be resolved is a provider authentication failure;
+      // anything else is a worker that could not start.
+      const failure = error?.code === 'MODEL_AUTHENTICATION'
+        ? { type: 'failed', code: 'MODEL_AUTHENTICATION', message: 'The model service rejected its configured credentials.' }
+        : { type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.' };
+      emit({ ...failure, observability: parentObservability(undefined, { totalMs: 0, outcome: 'failed' }) });
     }
   });
   server.requestTimeout = 15_000;

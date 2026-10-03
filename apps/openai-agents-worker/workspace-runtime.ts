@@ -102,8 +102,10 @@ const definitions = [
 ] as const;
 export const WORKSPACE_CONTEXT_RESERVE = 8192;
 
-export async function executeWorkspaceAgent({ request, modelConfig, signal, emit, broker }: {
+export async function executeWorkspaceAgent({ request, modelConfig, signal, emit, broker, modelFetch }: {
   request: Request; modelConfig: ModelConfig; signal: AbortSignal; emit: (event: Event) => Promise<unknown>; broker: WorkspaceBroker;
+  /** Serves model requests instead of the network, e.g. the Bedrock bridge. Never used for ledger callbacks. */
+  modelFetch?: typeof fetch;
 }) {
   const sdk = await import('@openai/agents');
   const { default: OpenAI } = await import('openai');
@@ -139,7 +141,7 @@ export async function executeWorkspaceAgent({ request, modelConfig, signal, emit
       const boundedInput = fitWorkspaceContext(input, modelConfig.contextWindow - modelConfig.maxTokens - 256);
       const index = ++calls;
       await ledger('admit', index);
-      const observer = createProviderObserver(modelConfig.protocol);
+      const observer = createProviderObserver(modelConfig.protocol, modelFetch ? { fetchImpl: modelFetch } : {});
       activeObserver = observer;
       let completed = false, sawDone = false;
       let finishReason = '';

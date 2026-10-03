@@ -9,7 +9,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { authorizeEffort, authorizeOutputContract, authorizeTools, fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { startIsolatedRun } from './runner.mjs';
-import { failureEvent, sanitizeErrorDiagnostic } from './errors.mjs';
+import { failureEvent, RuntimeError, sanitizeErrorDiagnostic } from './errors.mjs';
 
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -170,10 +170,16 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun, 
     try {
       entry.handle = await startRun({ config: runConfig, request: body, onEvent: emit, onExit: release, onDiagnostic: diagnose });
       if (entry.cancelRequested || response.destroyed) entry.handle.cancel();
-    } catch {
-      if (body.workspace) workspaceAvailable = false;
+    } catch (error) {
+      // A Bedrock credential that could not be resolved fails before any sandbox or directory
+      // exists, so it says nothing about the sandbox; every other start failure may.
+      const credentialFailure = error instanceof RuntimeError && error.code === 'MODEL_AUTHENTICATION';
+      if (body.workspace && !credentialFailure) workspaceAvailable = false;
       release();
-      emit({ type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.', observability: parentObservability(undefined, { totalMs: 0, outcome: 'failed' }) });
+      // Only a fixed runtime code (such as that credential failure) is reported as itself;
+      // anything else is a worker that could not start.
+      const failure = error instanceof RuntimeError ? failureEvent(error.code) : { type: 'failed', code: 'WORKER_ERROR', message: 'The model worker could not start.' };
+      emit({ ...failure, observability: parentObservability(undefined, { totalMs: 0, outcome: 'failed' }) });
     }
   });
   server.requestTimeout = 15_000;

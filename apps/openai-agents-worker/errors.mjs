@@ -33,7 +33,10 @@ function chain(error) {
   for (let current = error; current && result.length < 3 && !result.includes(current); current = read(current, 'cause')) result.push(current);
   return result;
 }
-const statusOf = error => { const status = read(error, 'status'); return Number.isInteger(status) && status >= 400 && status <= 599 ? status : undefined; };
+const statusInRange = status => Number.isInteger(status) && status >= 400 && status <= 599 ? status : undefined;
+// An error frame inside a stream that already answered 200 has no HTTP status of its own;
+// the bridge to Bedrock carries one in the frame's error body.
+const statusOf = error => statusInRange(read(error, 'status')) ?? statusInRange(read(read(error, 'error'), 'status'));
 const classOf = error => {
   if (error instanceof RuntimeError) return 'RuntimeError';
   const name = read(error, 'name');

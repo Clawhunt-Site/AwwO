@@ -5,6 +5,7 @@ import { access } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import test, { type TestContext } from 'node:test';
 import { configuration, request, run } from './test-support.mjs';
+import { RuntimeError } from './errors.mjs';
 import { createOpenAIAgentsServer } from './server.mjs';
 import type { WorkspaceRequest } from './workspace-protocol.ts';
 
@@ -16,7 +17,7 @@ type Step = { name: string; args: Record<string, string> } | { final: string; fi
 type JsonObject = Record<string, unknown>;
 type ProviderCall = { body: JsonObject; authorization: string | undefined };
 
-async function fixture(t: TestContext, options: { steps: Step[]; denyAdmission?: number; denySettlement?: number }) {
+async function fixture(t: TestContext, options: { steps: Step[]; denyAdmission?: number; denySettlement?: number; env?: Record<string, string> }) {
   const ledger: JsonObject[] = [], calls: ProviderCall[] = [];
   let wakeProvider: (() => void) | undefined;
   const providerStarted = new Promise<void>(resolve => { wakeProvider = resolve; });
@@ -75,6 +76,7 @@ async function fixture(t: TestContext, options: { steps: Step[]; denyAdmission?:
     AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER: process.env.AWWO_TEST_DOCKER_EXECUTABLE || '/usr/bin/docker',
     AWWO_OPENAI_AGENTS_WORKSPACE_CALLBACK_URL: `${origin}/api/internal/workspace-calls`,
     AWWO_OPENAI_AGENTS_WORKSPACE_MAX_CALLS: '16',
+    ...options.env,
   });
   const workspace: WorkspaceRequest = { version: 1, id: checksum('integration-tenant/session/node'), maxModelCalls: 16,
     callbackURL: `${origin}/api/internal/workspace-calls`, callbackToken: CALLBACK_TOKEN,
@@ -224,6 +226,30 @@ test('sandbox becoming unavailable after its probe withdraws health capability',
   assert.equal(health.workspace.available, false);
   const second = await send('lost-docker-second'); assert.equal(second.status, 503); await second.body?.cancel();
   assert.equal(starts, 1); assert.equal(f.calls.length, 0); assert.equal(f.ledger.length, 0);
+});
+
+test('a Bedrock credential that cannot be resolved fails that run but keeps workspace execution available', { timeout: 10_000 }, async t => {
+  const f = await fixture(t, { steps: [], env: { AWWO_BEDROCK_CATALOG: 'builtin' } });
+  const { config } = f;
+  let starts = 0;
+  const app = createOpenAIAgentsServer(config, {
+    workspaceProbe: async () => undefined,
+    startRun: async () => { starts++; throw new RuntimeError('MODEL_AUTHENTICATION'); },
+  });
+  await app.workspaceReady;
+  app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
+  t.after(() => app.close());
+  const address = app.server.address(); assert.ok(address && typeof address !== 'string');
+  const origin = `http://127.0.0.1:${address.port}`;
+  const send = (runId: string, model?: string) => fetch(`${origin}/internal/runs`, { method: 'POST', headers: { authorization: `Bearer ${config.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(request({ runId, workspace: f.workspace, ...(model ? { model } : {}) })) });
+  const first = await send('bedrock-credential', 'bedrock.glm-5'); assert.equal(first.status, 200);
+  assert.ok((await first.text()).includes('MODEL_AUTHENTICATION'));
+  const health = await (await fetch(`${origin}/health`)).json() as { workspace: { available: boolean } };
+  assert.equal(health.workspace.available, true);
+  // The next project run, on any model, is admitted rather than refused as WORKSPACE_UNAVAILABLE.
+  const second = await send('gate-after-bedrock'); assert.equal(second.status, 200); await second.body?.cancel();
+  assert.equal(starts, 2); assert.equal(f.calls.length, 0); assert.equal(f.ledger.length, 0);
 });
 
 for (const flood of ['text', 'arguments'] as const) test(`provider ${flood} overflow stops before SDK can accumulate an unbounded result`, { skip: !enabled, timeout: 20_000 }, async t => {

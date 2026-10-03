@@ -7,9 +7,13 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { authorizeEffort, authorizeOutputContract, authorizeTools, fitsContextBudget, resolveModelConfig, validateRequest } from './config.mjs';
-import { failureEvent, sanitizeErrorDiagnostic } from './errors.mjs';
+import { failureEvent, RuntimeError, sanitizeErrorDiagnostic } from './errors.mjs';
+import { createBedrockAuthResolver } from '../bedrock-bridge.ts';
 
 export const TASK_URL = new URL('./agent-task.mjs', import.meta.url);
+// The parent alone reads the AWS credential chain; a Bedrock child only ever receives the
+// API key or the short-lived credentials resolved here, over the same private IPC as any key.
+const resolveBedrockAuth = createBedrockAuthResolver(async () => (await import('@aws-sdk/credential-provider-node')).defaultProvider());
 
 // Deliberately exclude HOME, NODE_OPTIONS, provider keys, proxy credentials,
 // npm options, tracing configuration and the launching user's configuration.
@@ -25,7 +29,7 @@ export function workerEnvironment(directory, executable = process.execPath) {
   };
 }
 
-export async function startIsolatedRun({ config, request, onEvent, onExit, onDiagnostic = (_diagnostic) => {} }, { taskURL = TASK_URL } = {}) {
+export async function startIsolatedRun({ config, request, onEvent, onExit, onDiagnostic = (_diagnostic) => {} }, { taskURL = TASK_URL, bedrockAuth = resolveBedrockAuth } = {}) {
   validateRequest(request);
   authorizeTools(config, request);
   authorizeWorkspace(config.workspace, request);
@@ -37,6 +41,11 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
   authorizeEffort(modelConfig, request);
   authorizeOutputContract(modelConfig, request);
   if (!config.ready || !fitsContextBudget(request, modelConfig)) throw new Error('Invalid runtime admission');
+  let auth;
+  if (modelConfig.provider === 'bedrock') {
+    // Resolved before any directory or process exists, so a missing credential leaves nothing behind.
+    try { auth = await bedrockAuth(modelConfig.apiKey); } catch { throw new RuntimeError('MODEL_AUTHENTICATION'); }
+  }
   const directory = await mkdtemp(join(tmpdir(), 'awwo-openai-agents-'));
   let child;
   let sandbox;
@@ -178,9 +187,12 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
     acceptedAtNs,
     request,
     modelConfig: {
-      provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL, apiKey: modelConfig.apiKey,
+      provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL,
+      // A Bedrock key travels only inside its auth record, never as an OpenAI SDK key.
+      apiKey: modelConfig.provider === 'bedrock' ? '' : modelConfig.apiKey,
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
       disableThinking: modelConfig.disableThinking === true,
+      ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth } : {}),
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };
