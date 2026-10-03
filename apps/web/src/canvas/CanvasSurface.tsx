@@ -96,6 +96,8 @@ import { RAIL_MODEL_KEY, isDesktopStage, readRailCollapsed, useDesktopStage, wri
 import { paperclipApiBase } from '../paperclipBridge';
 import { gatewayApiBase } from '../chatAutomations';
 import './canvas.css';
+import './node-view-styles.css';
+import { nodeViewRootProps, useNodeViewPreference } from './nodeViewStyle';
 
 /** How long patches sharing a label keep collapsing into one undo step (one drag = one step). */
 const COALESCE_MS = 900;
@@ -222,6 +224,9 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
 export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
+  // The opened-node look is a viewer preference: it styles focused tiles only and never the document.
+  const [nodeViewPreference] = useNodeViewPreference();
+  const nodeViewRoot = useMemo(() => nodeViewRootProps(nodeViewPreference), [nodeViewPreference]);
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   const setupRequest = useRef<AbortController | null>(null);
@@ -2074,7 +2079,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
-    <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} ref={rootRef}>
+    <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} ref={rootRef} {...nodeViewRoot}>
       <CanvasViewport
         view={view}
         onViewChange={setView}

@@ -6,6 +6,11 @@ export function configureCanvasStorage(userId: string, tenantId: string, canvasI
   scope = [userId, tenantId, canvasId].map(encodeURIComponent).join(':');
 }
 export function canvasStorageKey(key: string): string { return scope ? `awwo.saas:${scope}:${key}` : key; }
+/** A key for one signed-in account's browser preference, or null outside a SaaS account scope. */
+export function userStorageKey(key: string): string | null {
+  const user = scope.split(':')[0];
+  return user ? `awwo.saas:${user}:${key}` : null;
+}
 /** The same account and workspace namespace without the canvas, for small facts that describe how
  * this workspace behaves rather than one canvas (such as how long its plans take). */
 export function workspaceStorage(): Pick<Storage, 'getItem' | 'setItem'> {

@@ -1,0 +1,243 @@
+/* Selectable looks for an opened node (nodeViewStyle.ts). Every rule is scoped to an opened session
+   tile (open or focus level; form cards excluded) under a canvas root that names a style, so closed
+   cards, forms, the canvas chrome and the AwwO default look are untouched. Skins restyle the existing elements only; they add no content: the terminal
+   glyphs are decorative generated text with an empty alternative.
+   The canvas is CSS-transformed: whole-pixel font sizes, no backdrop-filter. */
+
+/* ── Shared variables for every non-default style ─────────────────────────────── */
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-font: var(--ios-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  --nv-mono: var(--ios-mono, ui-monospace, Menlo, Consolas, monospace);
+  --nv-size: 13px; --nv-leading: 1.6; --nv-gap: 10px; --nv-pad-y: 9px; --nv-pad-x: 13px;
+  --nv-radius: 16px; --nv-composer-radius: 16px;
+  --nv-bg: var(--saas-card, var(--awwo-card, #ffffff)); --nv-card: var(--nv-bg); --nv-input: var(--nv-bg);
+  --nv-fg: var(--saas-text, var(--awwo-ink, #1d1d1f)); --nv-muted: var(--saas-muted, var(--awwo-muted, #6e6e73));
+  --nv-line: var(--saas-hairline, var(--awwo-line, #e5e5ea));
+  --nv-accent: var(--saas-accent, #0a84ff); --nv-accent-text: #ffffff; --nv-ink: var(--nv-accent); --nv-link: var(--nv-ink);
+  --nv-user-bg: color-mix(in srgb, var(--nv-accent) 14%, var(--nv-bg)); --nv-user-fg: var(--nv-fg); --nv-agent-bg: var(--nv-bg);
+  --nv-soft: color-mix(in srgb, var(--nv-fg) 5%, var(--nv-bg));
+  /* The frame follows the style too, so header and conversation read as one surface; state
+     borders (running, failed, focus) are untouched. */
+  background-color: var(--nv-card); color: var(--nv-fg);
+}
+
+/* Custom takes its colours and size from the canvas root (validated #rrggbb / px only). The
+   accent arrives adjusted per theme: as a fill that stands out (3:1) and as text that reads (4.5:1). */
+.canvas-root[data-node-style='custom'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-accent: var(--nvc-accent-light, var(--saas-accent, #0a84ff)); --nv-accent-text: var(--nvc-accent-text-light, #ffffff);
+  --nv-size: var(--nvc-size, 13px); --nv-ink: var(--nvc-ink-light, var(--nv-fg)); --nv-link: var(--nv-ink);
+  --nv-user-bg: var(--nvc-user-bg, color-mix(in srgb, var(--nv-accent) 14%, var(--nv-bg))); --nv-user-fg: var(--nvc-user-fg, var(--nv-fg));
+}
+:root[data-theme='dark'] .canvas-root[data-node-style='custom'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-accent: var(--nvc-accent-dark, var(--saas-accent, #0a84ff)); --nv-accent-text: var(--nvc-accent-text-dark, #ffffff); --nv-ink: var(--nvc-ink-dark, var(--nv-fg));
+}
+.canvas-root[data-node-density='compact'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) { --nv-gap: 4px; --nv-pad-y: 5px; --nv-pad-x: 10px; --nv-leading: 1.45; }
+.canvas-root[data-node-density='relaxed'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) { --nv-gap: 16px; --nv-pad-y: 12px; --nv-pad-x: 16px; --nv-leading: 1.75; }
+.canvas-root[data-node-radius='square'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) { --nv-radius: 3px; --nv-composer-radius: 4px; }
+.canvas-root[data-node-radius='soft'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) { --nv-radius: 10px; --nv-composer-radius: 10px; }
+.canvas-root[data-node-radius='round'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) { --nv-radius: 18px; --nv-composer-radius: 20px; }
+.canvas-root[data-node-font='rounded'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) { --nv-font: 'PingFang SC', 'HarmonyOS Sans SC', 'MiSans', 'Microsoft YaHei', -apple-system, 'Segoe UI', sans-serif; }
+.canvas-root[data-node-font='serif'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) { --nv-font: 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', Georgia, 'Times New Roman', serif; }
+.canvas-root[data-node-font='mono'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) { --nv-font: var(--nv-mono); }
+
+/* ── Presets: tuned palettes for light and dark ───────────────────────────────── */
+.canvas-root[data-node-style='codex'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --nv-size: 14px; --nv-leading: 1.65; --nv-gap: 14px; --nv-pad-y: 10px; --nv-pad-x: 16px; --nv-radius: 20px; --nv-composer-radius: 22px;
+  --nv-bg: #ffffff; --nv-input: #ffffff; --nv-fg: #0d0d0d; --nv-muted: #5d5d5d; --nv-line: #e3e3e3;
+  --nv-user-bg: #f2f2f2; --nv-user-fg: #0d0d0d; --nv-accent: #0d0d0d; --nv-accent-text: #ffffff; --nv-ink: #0d0d0d; --nv-link: #0a66d6;
+}
+:root[data-theme='dark'] .canvas-root[data-node-style='codex'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-bg: #212121; --nv-input: #2a2a2a; --nv-fg: #ececec; --nv-muted: #a4a4a4; --nv-line: #3a3a3a;
+  --nv-user-bg: #303030; --nv-user-fg: #ececec; --nv-accent: #ececec; --nv-accent-text: #0d0d0d; --nv-ink: #ececec; --nv-link: #7cb7ff;
+}
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-font: 'PingFang SC', 'HarmonyOS Sans SC', 'MiSans', 'Microsoft YaHei', -apple-system, 'Segoe UI', sans-serif;
+  --nv-size: 14px; --nv-leading: 1.7; --nv-gap: 12px; --nv-pad-y: 10px; --nv-pad-x: 14px; --nv-radius: 12px; --nv-composer-radius: 12px;
+  --nv-bg: #f7f8fa; --nv-card: #ffffff; --nv-input: #ffffff; --nv-fg: #1d2129; --nv-muted: #4e5969; --nv-line: #e5e6eb;
+  --nv-user-bg: #087a5a; --nv-user-fg: #ffffff; --nv-accent: #165dff; --nv-accent-text: #ffffff; --nv-ink: #165dff; --nv-link: #165dff;
+}
+:root[data-theme='dark'] .canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-bg: #17171a; --nv-card: #1f1f23; --nv-input: #232327; --nv-fg: #e8e9eb; --nv-muted: #a9aeb8; --nv-line: #333438;
+  --nv-ink: #6aa1ff; --nv-link: #6aa1ff;
+}
+.canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-font: 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', ui-monospace, Menlo, Consolas, 'Sarasa Mono SC', 'Noto Sans Mono CJK SC', monospace;
+  --nv-mono: var(--nv-font);
+  --nv-size: 13px; --nv-leading: 1.55; --nv-gap: 8px; --nv-radius: 0px; --nv-composer-radius: 6px;
+  --nv-bg: #faf9f5; --nv-input: #faf9f5; --nv-fg: #141413; --nv-muted: #5f5c55; --nv-line: #d8d5cc;
+  --nv-user-bg: transparent; --nv-user-fg: #5f5c55; --nv-accent: #b4461f; --nv-accent-text: #ffffff; --nv-ink: #b4461f; --nv-link: #2b5fb4;
+}
+:root[data-theme='dark'] .canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) {
+  --nv-bg: #1a1a18; --nv-input: #1a1a18; --nv-fg: #ebe8e1; --nv-muted: #9a968d; --nv-line: #3d3b37;
+  --nv-user-fg: #9a968d; --nv-accent: #d97757; --nv-accent-text: #1a1a18; --nv-ink: #d97757; --nv-link: #8ab4f8;
+}
+
+/* ── Variables applied to the opened node's conversation ──────────────────────── */
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-node-chat { background: var(--nv-bg); color: var(--nv-fg); font-family: var(--nv-font); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-chat-heading { border-color: var(--nv-line); color: var(--nv-fg); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-node-panel--conversation { background: transparent; }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-scroll { gap: var(--nv-gap); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn { font-size: var(--nv-size); line-height: var(--nv-leading); padding: var(--nv-pad-y) var(--nv-pad-x); border-radius: var(--nv-radius); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--user { border-color: transparent; background: var(--nv-user-bg); color: var(--nv-user-fg); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--agent { border-color: var(--nv-line); background: var(--nv-agent-bg); color: var(--nv-fg); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--system,
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-status,
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-presence,
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-empty,
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-loading,
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-notice,
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-blocked { color: var(--nv-muted); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn a { color: var(--nv-link); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--user a { color: inherit; text-decoration: underline; }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-working-dots { color: var(--nv-ink); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer { background: var(--nv-bg); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) :is(.awwo-session-sidebar, .awwo-input-drawer, .awwo-node-delivery-drawer) { border-color: var(--nv-line); background: var(--nv-soft); color: var(--nv-fg); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-node-delivery-drawer > header { border-color: var(--nv-line); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-session-list button.is-active,
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-session-sidebar button:hover { background: color-mix(in srgb, var(--nv-fg) 9%, var(--nv-bg)); color: var(--nv-fg); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row { border-color: var(--nv-line); border-radius: var(--nv-composer-radius); background: var(--nv-input); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row:focus-within { border-color: color-mix(in srgb, var(--nv-accent) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--nv-accent) 16%, transparent); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-input { border-radius: var(--nv-composer-radius); color: var(--nv-fg); font-family: var(--nv-font); font-size: var(--nv-size); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-input::placeholder { color: var(--nv-muted); }
+/* html:root outranks the workspace theme's dark send rule (:root[data-theme='dark'] .awwo-workspace ...). */
+html:root .canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-send { border: 0; background: var(--nv-accent); color: var(--nv-accent-text); }
+html:root .canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-send:focus-visible { outline: 2px solid var(--nv-accent); outline-offset: 2px; }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-node-empty strong { color: var(--nv-fg); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-node-empty > span:not(.awwo-node-empty-glyph) { color: var(--nv-muted); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details { border-color: var(--nv-line); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle { color: var(--nv-muted); font-family: var(--nv-font); }
+.canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy'], [data-node-style='claude-code'], [data-node-style='custom']) .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle strong { color: var(--nv-fg); }
+
+/* ── Layouts ──────────────────────────────────────────────────────────────────── */
+/* Flat: replies read as plain text; only your messages keep a bubble. */
+.canvas-root[data-node-layout='flat'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--agent {
+  align-self: stretch; max-width: 100%; padding-inline: 2px; border: 0; border-radius: 0; background: transparent;
+}
+.canvas-root[data-node-layout='flat'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--user { max-width: 80%; border: 0; }
+
+/* Terminal: one monospace column; generated glyphs mark who speaks. */
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-node-chat { font-family: var(--nv-mono); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-scroll { padding: 12px 14px; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn { position: relative; align-self: stretch; max-width: 100%; padding: 0 0 0 22px; border: 0; border-radius: 0;
+    background: transparent; font-family: var(--nv-mono); animation: none; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn::before { position: absolute; top: 0; left: 0; width: 16px; text-align: center; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--user { color: var(--nv-muted); background: transparent; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--user::before { content: '>'; content: '>' / ''; color: var(--nv-muted); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--agent { color: var(--nv-fg); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--agent::before { content: ''; top: calc((var(--nv-size) * var(--nv-leading) - 7px) / 2); left: 5px;
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor; color: var(--nv-fg); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--system::before { content: '⎿'; content: '⎿' / ''; color: var(--nv-muted); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn.is-error::before { color: #d14343; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn.is-pending { padding-left: 0; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn.is-pending::before { content: none; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-presence { gap: 6px; font-family: var(--nv-mono); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-presence .awwo-working-dots { display: none; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-presence::before { content: '✻'; content: '✻' / ''; display: inline-block; width: 16px; color: var(--nv-ink); text-align: center; animation: nv-spin 2.4s linear infinite; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-presence-label { color: var(--nv-ink); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-working-timer::before { content: '('; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-working-timer::after { content: ')'; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row { position: relative; border-radius: var(--nv-composer-radius); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row::before { content: '>'; content: '>' / ''; position: absolute; top: 9px; left: 12px; color: var(--nv-muted); font-family: var(--nv-mono); font-size: var(--nv-size); pointer-events: none; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-input { padding-left: 30px; font-family: var(--nv-mono); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details { width: 100%; border: 0; border-radius: 0; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle { padding-left: 22px; font-family: var(--nv-mono); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-chevron { display: none; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle::before { content: '⎿'; content: '⎿' / ''; margin-right: 6px; color: var(--nv-muted); }
+@keyframes nv-spin { to { transform: rotate(360deg); } }
+
+/* Centered: one comfortable reading column however wide the node is. */
+.canvas-root[data-node-width='centered'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-scroll { padding-inline: max(14px, calc((100% - 760px) / 2)); }
+.canvas-root[data-node-width='centered'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer { padding-inline: max(12px, calc((100% - 784px) / 2)); }
+
+/* ── Preset details ───────────────────────────────────────────────────────────── */
+.canvas-root[data-node-style='codex'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row { box-shadow: 0 1px 3px rgb(0 0 0 / 6%); }
+.canvas-root[data-node-style='codex'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-send { border-radius: 50%; }
+.canvas-root[data-node-style='codex'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details { border: 0; }
+.canvas-root[data-node-style='codex'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle { padding-inline: 2px; font-size: 13px; }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-chat-heading { background: var(--nv-card); }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--user { border-bottom-right-radius: 4px; }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details { padding: 2px 4px; border: 1px solid var(--nv-line); border-radius: 12px; background: var(--nv-card); }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle { font-size: 13px; }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle strong { color: var(--nv-ink); }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer { display: flex; flex-direction: column; }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row { order: 1; background: var(--nv-card); box-shadow: 0 2px 8px rgb(29 33 41 / 6%); }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-notice,
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-blocked { order: 2; text-align: center; }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-send { border-radius: 50%; }
+.canvas-root[data-node-style='workbuddy'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-starter-prompts button { border-radius: 8px; background: var(--nv-card); }
+.canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-chat-heading { font-family: var(--nv-mono); }
+.canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-send { border-radius: 4px; }
+.canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn pre,
+.canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn code { font-family: var(--nv-mono); }
+.canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-node-empty,
+.canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-starter-prompts button { font-family: var(--nv-mono); }
+.canvas-root[data-node-style='claude-code'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-starter-prompts button { border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-presence::before { animation: none; }
+}
+
+/* ── The picker ───────────────────────────────────────────────────────────────── */
+.awwo-node-tools { position: relative; }
+.awwo-node-view-panel {
+  position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; width: 300px; max-height: 440px; overflow: auto;
+  padding: 10px 12px 12px; border: 1px solid var(--saas-hairline, var(--awwo-line, #e5e5ea)); border-radius: 12px;
+  background: var(--saas-card, var(--awwo-card, #ffffff)); color: var(--saas-text, var(--awwo-ink, #1d1d1f));
+  box-shadow: 0 12px 32px rgb(15 23 42 / 16%); font: 12px/1.5 var(--ios-font, system-ui, sans-serif); text-align: left; cursor: default;
+}
+.awwo-node-view-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.awwo-node-view-panel > header strong { font-size: 13px; }
+.awwo-node-view-panel button { font: inherit; cursor: pointer; }
+.awwo-node-view-panel > header button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: inherit; }
+.awwo-node-view-panel > header button:hover { background: var(--saas-soft, #f2f2f7); }
+.awwo-node-view-hint { margin: 0 0 8px; color: var(--saas-muted, var(--awwo-muted, #6e6e73)); font-size: 11px; }
+.awwo-node-view-panel fieldset { margin: 0; padding: 0; border: 0; }
+.awwo-node-view-styles > legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.awwo-node-view-style { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; padding: 7px 8px; border: 1px solid transparent; border-radius: 9px; cursor: pointer; }
+.awwo-node-view-style:hover { background: var(--saas-soft, #f2f2f7); }
+.awwo-node-view-style.is-selected { border-color: color-mix(in srgb, var(--saas-accent, #0a84ff) 55%, transparent); background: color-mix(in srgb, var(--saas-accent, #0a84ff) 8%, transparent); }
+.awwo-node-view-style input { position: absolute; opacity: 0; pointer-events: none; }
+.awwo-node-view-style:has(input:focus-visible) { outline: 2px solid var(--ios-blue, #0a84ff); outline-offset: 1px; }
+.awwo-node-view-style-text { display: grid; min-width: 0; }
+.awwo-node-view-style-text strong { font-size: 12px; }
+.awwo-node-view-style-text small { overflow: hidden; color: var(--saas-muted, var(--awwo-muted, #6e6e73)); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.awwo-node-view-swatch { display: grid; flex: 0 0 38px; grid-template-rows: 8px 8px; gap: 3px; height: 30px; padding: 4px; border: 1px solid var(--saas-hairline, #e5e5ea); border-radius: 7px; background: #ffffff; }
+.awwo-node-view-swatch i { display: block; border-radius: 4px; }
+.awwo-node-view-swatch i:nth-child(1) { justify-self: end; width: 60%; }
+.awwo-node-view-swatch i:nth-child(2) { width: 85%; }
+.awwo-node-view-swatch i:nth-child(3) { display: none; }
+.awwo-node-view-swatch.is-default i:nth-child(1) { background: #d9e8ff; }
+.awwo-node-view-swatch.is-default i:nth-child(2) { border: 1px solid #e5e5ea; background: #ffffff; }
+.awwo-node-view-swatch.is-codex i:nth-child(1) { background: #e8e8e8; }
+.awwo-node-view-swatch.is-codex i:nth-child(2) { height: 3px; margin-top: 3px; background: #0d0d0d; }
+.awwo-node-view-swatch.is-workbuddy { background: #f7f8fa; }
+.awwo-node-view-swatch.is-workbuddy i:nth-child(1) { background: #087a5a; }
+.awwo-node-view-swatch.is-workbuddy i:nth-child(2) { border: 1px solid #e5e6eb; background: #ffffff; }
+.awwo-node-view-swatch.is-claude-code { border-color: #3d3b37; background: #1a1a18; }
+.awwo-node-view-swatch.is-claude-code i:nth-child(1) { justify-self: start; width: 30%; height: 3px; margin-top: 3px; background: #d97757; }
+.awwo-node-view-swatch.is-claude-code i:nth-child(2) { height: 3px; margin-top: 3px; background: #ebe8e1; }
+.awwo-node-view-swatch.is-custom { background: conic-gradient(from 45deg, #ff6b6b, #ffd166, #06d6a0, #4d96ff, #b388ff, #ff6b6b); }
+.awwo-node-view-swatch.is-custom i { display: none; }
+.awwo-node-view-custom { display: grid; gap: 8px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--saas-hairline, #e5e5ea); }
+.awwo-node-view-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.awwo-node-view-presets > span { margin-right: 2px; color: var(--saas-muted, #6e6e73); font-size: 11px; }
+.awwo-node-view-presets button,
+.awwo-node-view-actions button { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 8px; border: 1px solid var(--saas-hairline, #e5e5ea); border-radius: 6px; background: transparent; color: inherit; font-size: 11px; }
+.awwo-node-view-presets button:hover,
+.awwo-node-view-actions button:hover { background: var(--saas-soft, #f2f2f7); }
+.awwo-node-view-choice > legend { margin-bottom: 4px; color: var(--saas-muted, #6e6e73); font-size: 11px; }
+.awwo-node-view-choice > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.awwo-node-view-choice label { position: relative; display: inline-flex; align-items: center; min-height: 24px; padding: 0 9px; border: 1px solid var(--saas-hairline, #e5e5ea); border-radius: 999px; cursor: pointer; font-size: 11px; }
+.awwo-node-view-choice label.is-selected { border-color: var(--saas-accent, #0a84ff); background: color-mix(in srgb, var(--saas-accent, #0a84ff) 10%, transparent); }
+.awwo-node-view-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.awwo-node-view-choice label:has(input:focus-visible) { outline: 2px solid var(--ios-blue, #0a84ff); outline-offset: 1px; }
+.awwo-node-view-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.awwo-node-view-row > label { display: grid; gap: 3px; color: var(--saas-muted, #6e6e73); font-size: 11px; }
+.awwo-node-view-row select { min-height: 26px; padding: 0 6px; border: 1px solid var(--saas-hairline, #e5e5ea); border-radius: 6px; background: var(--saas-input, transparent); color: var(--saas-text, inherit); font: inherit; font-size: 12px; }
+.awwo-node-view-row input[type='color'] { width: 44px; height: 26px; padding: 2px; border: 1px solid var(--saas-hairline, #e5e5ea); border-radius: 6px; background: transparent; cursor: pointer; }
+.awwo-node-view-row input[type='color']:disabled { opacity: .45; cursor: default; }
+.awwo-node-view-row > label.awwo-node-view-check { display: inline-flex; align-items: center; gap: 5px; padding-bottom: 4px; }
+.awwo-node-view-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.awwo-node-view-error { margin: 0; color: var(--saas-danger, #d14343); font-size: 11px; }
+:root[data-theme='dark'] .awwo-node-view-panel { box-shadow: 0 12px 32px rgb(0 0 0 / 45%); }
