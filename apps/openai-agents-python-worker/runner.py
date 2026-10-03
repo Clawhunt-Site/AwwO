@@ -203,6 +203,10 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         settings["store"] = False
     if effort:
         settings["reasoning"] = {"effort": effort}
+    if not profile.thinking and profile.protocol == "chat_completions":
+        # The chat-template switch Qwen-style models read. Opt-in per profile: an endpoint that
+        # does not know the field may reject it.
+        settings["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
     client = None
     http_client = None

@@ -134,7 +134,10 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
       ...(endpoint.origin === 'https://generativelanguage.googleapis.com' ? {} : { store: false }),
       // Only an explicitly admitted level reaches the provider. Without one the
       // request carries no reasoning setting at all, so the provider default applies.
-      ...(request.effort ? { reasoning: { effort: request.effort } } : {}) },
+      ...(request.effort ? { reasoning: { effort: request.effort } } : {}),
+      // The chat-template switch Qwen-style models read. Opt-in per profile: an endpoint that
+      // does not know the field may reject it, and Responses has no chat template.
+      ...(modelConfig.disableThinking === true && modelConfig.protocol === 'chat_completions' ? { providerData: { chat_template_kwargs: { enable_thinking: false } } } : {}) },
   });
   const runner = new sdk.Runner({ tracingDisabled: true, traceIncludeSensitiveData: false, toolNotFoundBehavior: 'raise_error', toolNameCollisionPolicy: 'error' });
   const input = request.messages.map(message => message.role === 'assistant' ? sdk.assistant(message.content) : sdk.user(message.content));

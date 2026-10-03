@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Added
 
+- Add a per-model switch that turns a model's hidden thinking off in both openai-agents workers: `AWWO_OPENAI_AGENTS_DISABLE_THINKING=true` for the default model, or `disableThinking: true` on a catalog profile, adds `chat_template_kwargs.enable_thinking=false` to that model's Chat Completions requests. It is for Qwen-style models such as qwen3.8-27b-p6, whose hidden reasoning otherwise spends 2,000–8,000 of a node's 4,096 output tokens. Off by default, never inherited, never sent on Responses, and not part of `/health`; it covers the operator model catalog, while personal connections are unchanged.
 - Add tenant knowledge sources, immutable revisions, provenance, reviewable proposals and restoration, with selected knowledge revisions frozen into planning and execution context.
 - Add a managed OpenMaus execution assistant that reuses AwwO model connections, runs the pinned open-source core in restricted Docker workspaces, and returns approvals, questions, cancellable runs and published artifacts to the canvas. End users do not configure a second OpenMaus account or provider key.
 - Add canvas previews for HTML, WebGL 3D, paged PDF and a read-only IDE file tree/source window, with artifact provenance and knowledge archival.

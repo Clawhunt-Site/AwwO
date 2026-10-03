@@ -234,6 +234,20 @@ test('reasoning effort levels are advertised per profile, never inherited, and r
 const HEALTH_BEFORE_STRUCTURED_OUTPUT = '{"status":"ready","ready":true,"userCredentials":false,"configured":true,"provider":"openai","model":"fixture-model","runtime":"openai-agents","tracingEnabled":false,"maxModelCallsPerRun":1,"supportsEffortSelection":false,"tools":[],"models":[{"id":"fixture-model","name":"fixture-model","providerModel":"fixture-model","provider":"openai","runtime":"openai-agents","protocol":"chat_completions","contextWindow":32768,"maxOutputTokens":4096,"maxContextTextBytes":28416,"messageOverheadBytes":32,"reasoningEfforts":[],"defaultReasoningEffort":""}],"activeRuns":0,"version":"0.1.0","telemetryProtocolVersion":1,"metricsEnabled":false,"selfHostedTracingEnabled":false,"sdkVersion":"0.18.0","modelConnectivityVerified":false,"limits":{"promptChars":128000,"systemPromptChars":32768,"historyMessageChars":32768,"historyMessages":100,"totalTextChars":262144,"bodyBytes":1048576,"contextWindow":32768,"maxOutputTokens":4096,"maxContextTextBytes":28416,"messageOverheadBytes":32}}';
 const MODEL_KEYS_BEFORE_STRUCTURED_OUTPUT = Object.freeze(['id', 'name', 'providerModel', 'provider', 'runtime', 'protocol', 'contextWindow', 'maxOutputTokens', 'maxContextTextBytes', 'messageOverheadBytes', 'reasoningEfforts', 'defaultReasoningEffort']);
 
+test('the thinking switch is strict, per profile, never inherited and absent from health', () => {
+  assert.equal(configuration().models[0].disableThinking, false);
+  assert.equal(configuration({ AWWO_OPENAI_AGENTS_DISABLE_THINKING: 'true' }).models[0].disableThinking, true);
+  assert.equal(configuration({ AWWO_OPENAI_AGENTS_DISABLE_THINKING: 'false' }).models[0].disableThinking, false);
+  for (const value of ['yes', '1', 'TRUE', ' true']) assert.throws(() => configuration({ AWWO_OPENAI_AGENTS_DISABLE_THINKING: value }), /AWWO_OPENAI_AGENTS_DISABLE_THINKING must be true or false/);
+  const config = configuration({ AWWO_OPENAI_AGENTS_DISABLE_THINKING: 'true', SECOND_KEY: 'second-key', AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([
+    { id: 'second', provider: 'openai', model: 'second-model', apiKeyEnv: 'SECOND_KEY' },
+    { id: 'third', provider: 'openai', model: 'third-model', apiKeyEnv: 'SECOND_KEY', disableThinking: true },
+  ]) });
+  assert.deepEqual(config.models.map(profile => profile.disableThinking), [true, false, true]);
+  assert.throws(() => configuration({ SECOND_KEY: 'second-key', AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([{ id: 'x', provider: 'openai', model: 'x', apiKeyEnv: 'SECOND_KEY', disableThinking: 'true' }]) }), /disableThinking/);
+  assert.deepEqual(publicHealth(configuration({ AWWO_OPENAI_AGENTS_DISABLE_THINKING: 'true' })), publicHealth(configuration()));
+});
+
 test('health with neither structuredOutput nor name set is byte-identical to the catalog before structured output', () => {
   assert.equal(JSON.stringify(publicHealth(configuration())), HEALTH_BEFORE_STRUCTURED_OUTPUT);
   const explicitOff = configuration({ AWWO_OPENAI_AGENTS_STRUCTURED_OUTPUT: 'false', SECOND_KEY: 'k', AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([

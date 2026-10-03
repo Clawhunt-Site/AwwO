@@ -33,6 +33,9 @@ class ModelProfile:
     max_tokens: int
     reasoning_efforts: tuple = field(default_factory=tuple)
     default_reasoning_effort: str = ""
+    # False sends `chat_template_kwargs.enable_thinking=false` on Chat Completions, for models
+    # (Qwen-style chat templates) whose hidden reasoning would otherwise spend the output budget.
+    thinking: bool = True
 
     def to_health(self) -> dict:
         return {
@@ -101,6 +104,13 @@ def _parse_efforts(levels, fallback: str | None) -> tuple[tuple, str]:
     return tuple(parsed), default_effort
 
 
+def _flag(env: dict, key: str) -> bool:
+    value = env.get(key, "")
+    if value not in ("", "false", "true"):
+        raise ConfigError(f"{key} must be true or false")
+    return value == "true"
+
+
 def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, missing: list) -> list:
     if serialized is None or serialized == "":
         return [default]
@@ -141,6 +151,10 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
             efforts, default_effort = _parse_efforts(value.get("reasoningEfforts"), value.get("defaultReasoningEffort"))
         except ConfigError:
             raise ConfigError("Invalid reasoningEfforts in AWWO_OPENAI_AGENTS_MODELS_JSON")
+        # Never inherited: each profile says for its own model whether thinking is switched off.
+        disable_thinking = value.get("disableThinking", False)
+        if not isinstance(disable_thinking, bool):
+            raise ConfigError("Invalid disableThinking in AWWO_OPENAI_AGENTS_MODELS_JSON")
         profiles.append(ModelProfile(
             id=value["id"],
             provider=provider,
@@ -152,6 +166,7 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
             max_tokens=max_tokens,
             reasoning_efforts=efforts,
             default_reasoning_effort=default_effort,
+            thinking=not disable_thinking,
         ))
         ids.add(value["id"])
     return profiles
@@ -203,12 +218,14 @@ def load_config(env: dict | None = None) -> Config:
         efforts, default_effort = _parse_efforts(env.get("AWWO_OPENAI_AGENTS_REASONING_EFFORTS"), env.get("AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT"))
     except ConfigError as e:
         raise ConfigError(str(e))
+    disable_thinking = _flag(env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING")
 
     default_profile = ModelProfile(
         id=model, provider=provider, model=model,
         base_url=base_url, api_key=api_key, protocol=protocol,
         context_window=context_window, max_tokens=max_tokens,
         reasoning_efforts=efforts, default_reasoning_effort=default_effort,
+        thinking=not disable_thinking,
     )
     models = tuple(_load_profiles(env.get("AWWO_OPENAI_AGENTS_MODELS_JSON"), env, default_profile, missing))
     # Legacy "openai" profiles can be protocol adapters for the Gate endpoint.

@@ -90,6 +90,7 @@ flowchart LR
 - Worker 默认模型：`AWWO_OPENAI_AGENTS_PROVIDER=openai`、`MODEL`、`BASE_URL`、`API_KEY`、`PROTOCOL=chat_completions|responses`。
 - Worker 目录：`AWWO_OPENAI_AGENTS_MODELS_JSON`，密钥通过 `apiKeyEnv` 引用。
 - 思考强度：`AWWO_OPENAI_AGENTS_REASONING_EFFORTS` 为默认模型接受的档位，逗号分隔，取值是 none/minimal/low/medium/high/xhigh 的子集，留空表示不支持显式档位；`AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT` 仅用于展示，可以留空，填写时必须属于上述档位。额外模型在 `MODELS_JSON` 中用 `reasoningEfforts` / `defaultReasoningEffort` 各自声明，不继承默认模型。
+- 关闭思考：`AWWO_OPENAI_AGENTS_DISABLE_THINKING=true` 时，默认模型的 Chat Completions 请求会带上 `chat_template_kwargs.enable_thinking=false`（Qwen 类聊天模板读取它），Responses 请求不带；留空或 `false` 表示不改请求，其他取值会让 worker 拒绝启动。它用于隐藏推理会挤占输出额度的模型，只应在接受该字段的端点上开启。额外模型在 `MODELS_JSON` 中用 `disableThinking` 各自声明，不继承默认模型。它只作用于运营方模型目录：`AWWO_CREDENTIAL_MODE=user` 时由 API 按请求构造的个人连接（`userModel`）不携带该开关，行为不变。Node 与 Python 两个 worker 读取同一个变量。
 - 工具：`AWWO_OPENAI_AGENTS_TOOLS_JSON=[]`，显式启用时可填 `["calculator","current_time"]`。
 - 限制：`CONTEXT_WINDOW`、`MAX_TOKENS`、`TIMEOUT_MS`、`CANCEL_GRACE_MS`、`MAX_CONCURRENCY`、`MAX_OUTPUT_BYTES`，完整名称均有 `AWWO_OPENAI_AGENTS_` 前缀。
 

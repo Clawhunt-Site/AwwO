@@ -200,6 +200,31 @@ for (const protocol of ['chat_completions', 'responses']) test(`${protocol} forw
   assert.equal(f.calls.length, 2);
 });
 
+for (const protocol of ['chat_completions', 'responses']) test(`${protocol} sends the thinking switch only for a profile that disables thinking`, { timeout: 15_000 }, async t => {
+  const f = await fixture(t, { text: 'Direct answer' });
+  const plain = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: protocol }), request());
+  assert.deepEqual(businessEvent(await plain.result), { type: 'completed', text: 'Direct answer' });
+  const off = await run(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_PROTOCOL: protocol, AWWO_OPENAI_AGENTS_DISABLE_THINKING: 'true' }), request({ runId: 'run-2', sessionId: 'session-2' }));
+  assert.deepEqual(businessEvent(await off.result), { type: 'completed', text: 'Direct answer' });
+  assert.equal(f.calls.length, 2);
+  assert.ok(!('chat_template_kwargs' in f.calls[0].body));
+  if (protocol === 'chat_completions') assert.deepEqual(f.calls[1].body.chat_template_kwargs, { enable_thinking: false });
+  else assert.ok(!('chat_template_kwargs' in f.calls[1].body));
+});
+
+test('a selected catalog profile sends the thinking switch by its own flag, not the default model’s', { timeout: 15_000 }, async t => {
+  const f = await fixture(t, { text: 'Direct answer' });
+  const config = configuration({ AWWO_OPENAI_AGENTS_BASE_URL: f.baseURL, AWWO_OPENAI_AGENTS_DISABLE_THINKING: 'true', SECOND_KEY: 'fixture-key-b', AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([
+    { id: 'plain', provider: 'openai', model: 'plain-model', baseURL: f.baseURL, apiKeyEnv: 'SECOND_KEY', contextWindow: 8192, maxTokens: 256 },
+    { id: 'quiet', provider: 'openai', model: 'quiet-model', baseURL: f.baseURL, apiKeyEnv: 'SECOND_KEY', contextWindow: 8192, maxTokens: 256, disableThinking: true },
+  ]) });
+  for (const [index, model] of ['quiet', 'plain'].entries()) {
+    const task = await run(config, request({ runId: `run-${index}`, sessionId: `session-${index}`, model }));
+    assert.deepEqual(businessEvent(await task.result), { type: 'completed', text: 'Direct answer' });
+  }
+  assert.deepEqual(f.calls.map(call => [call.body.model, call.body.chat_template_kwargs ?? null]), [['quiet-model', { enable_thinking: false }], ['plain-model', null]]);
+});
+
 const DELIVERY = Object.freeze({ version: 1, fields: [
   { id: 'summary', type: 'markdown', required: true },
   { id: 'hasOwnProperty', type: 'number', required: true },

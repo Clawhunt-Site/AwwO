@@ -180,6 +180,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
     modelConfig: {
       provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL, apiKey: modelConfig.apiKey,
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
+      disableThinking: modelConfig.disableThinking === true,
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };

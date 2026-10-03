@@ -6,7 +6,7 @@ import { fitWorkspaceContext } from './workspace-context.ts';
 import { WORKSPACE_BODY_BYTES, WORKSPACE_FILE_BYTES, type OutputField, type WorkspaceRequest, type WorkspaceToolName } from './workspace-protocol.ts';
 
 type WireFile = { path: string; content: string; encoding: 'utf8' | 'base64'; byteLength: number; sha256: string };
-type ModelConfig = { model: string; apiKey: string; baseURL: string; protocol: 'chat_completions' | 'responses'; contextWindow: number; maxTokens: number };
+type ModelConfig = { model: string; apiKey: string; baseURL: string; protocol: 'chat_completions' | 'responses'; contextWindow: number; maxTokens: number; disableThinking?: boolean };
 type Request = { prompt: string; systemPrompt?: string; messages: { role: 'user' | 'assistant'; content: string }[]; effort?: string; workspace: WorkspaceRequest };
 type Event = { type: string; [key: string]: unknown };
 export type WorkspaceBroker = (name: WorkspaceToolName | 'snapshot', args: Record<string, unknown>) => Promise<unknown>;
@@ -217,7 +217,9 @@ export async function executeWorkspaceAgent({ request, modelConfig, signal, emit
   const agent = new sdk.Agent({ name: 'AwwO project agent', instructions, model, tools, handoffs: [],
     modelSettings: { preserveRawUsage: true, maxTokens: modelConfig.maxTokens, parallelToolCalls: false, retry: { maxRetries: 0 },
       ...(new URL(endpoint).origin === 'https://generativelanguage.googleapis.com' ? {} : { store: false }),
-      ...(request.effort ? { reasoning: { effort: request.effort as 'low' | 'medium' | 'high' } } : {}) } });
+      ...(request.effort ? { reasoning: { effort: request.effort as 'low' | 'medium' | 'high' } } : {}),
+      // As in agent-runtime.mjs: only a profile that disables thinking sends the chat-template switch.
+      ...(modelConfig.disableThinking === true && modelConfig.protocol === 'chat_completions' ? { providerData: { chat_template_kwargs: { enable_thinking: false } } } : {}) } });
   const runner = new sdk.Runner({ tracingDisabled: true, traceIncludeSensitiveData: false, toolNotFoundBehavior: 'raise_error', toolNameCollisionPolicy: 'error' });
   let input: AgentInputItem[] = request.messages.map(message => message.role === 'assistant' ? sdk.assistant(message.content) : sdk.user(message.content));
   input.push(sdk.user(request.prompt));

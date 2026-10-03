@@ -11,7 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from agents import FunctionTool, set_trace_processors
 from openai import AsyncOpenAI
 
-from config import load_config
+from config import ConfigError, load_config, public_health
 from runner import ReasoningCounter, RunRequest, _build_tools, stream_run
 from server import _authorized, create_app
 
@@ -52,13 +52,14 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         site = web.TCPSite(self.server, "127.0.0.1", 0)
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
-        self.config = load_config({
+        self.env = {
             "AWWO_OPENAI_AGENTS_TOKEN": "x" * 32,
             "AWWO_OPENAI_AGENTS_MODEL": "mock-model",
             "AWWO_OPENAI_AGENTS_API_KEY": "synthetic",
             "AWWO_OPENAI_AGENTS_BASE_URL": f"http://127.0.0.1:{port}/v1",
             "AWWO_OPENAI_AGENTS_TOOLS_JSON": '["calculator", "current_time"]',
-        })
+        }
+        self.config = load_config(self.env)
         self.traces = TraceRecorder()
         set_trace_processors([self.traces])
 
@@ -284,6 +285,42 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(events[-1]["observability"]["usage"]["providerTotalTokens"], 6)
                 self.assertEqual(len(self.calls), before + 1)
                 self.assertEqual(len([e for e in events if e["type"] in ("completed", "failed", "cancelled")]), 1)
+
+    async def test_disabled_thinking_reaches_only_chat_requests_of_that_profile(self):
+        await self.collect()
+        self.assertNotIn("chat_template_kwargs", self.calls[-1])
+        await self.collect(config=load_config({**self.env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING": "true"}))
+        self.assertEqual(self.calls[-1]["chat_template_kwargs"], {"enable_thinking": False})
+        # Responses has no chat template, so the switch never reaches it.
+        await self.collect(config=load_config({**self.env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING": "true", "AWWO_OPENAI_AGENTS_PROTOCOL": "responses"}))
+        self.assertNotIn("chat_template_kwargs", self.calls[-1])
+        # A selected catalog profile follows its own flag, never the default model's.
+        base = self.env["AWWO_OPENAI_AGENTS_BASE_URL"]
+        catalog = json.dumps([{"id": "plain", "provider": "openai", "model": "plain-model", "baseURL": base, "apiKeyEnv": "SECOND_KEY"},
+                              {"id": "quiet", "provider": "openai", "model": "quiet-model", "baseURL": base, "apiKeyEnv": "SECOND_KEY", "disableThinking": True}])
+        config = load_config({**self.env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING": "true", "AWWO_OPENAI_AGENTS_MODELS_JSON": catalog, "SECOND_KEY": "k"})
+        for model in ("quiet", "plain"):
+            events = await self.collect(self.request(model=model), config=config)
+            self.assertEqual(events[-1]["type"], "completed", events)
+        self.assertEqual([(call["model"], call.get("chat_template_kwargs")) for call in self.calls[-2:]],
+                         [("quiet-model", {"enable_thinking": False}), ("plain-model", None)])
+
+    def test_thinking_switch_is_strict_and_never_inherited(self):
+        self.assertTrue(self.config.models[0].thinking)
+        self.assertFalse(load_config({**self.env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING": "true"}).models[0].thinking)
+        self.assertTrue(load_config({**self.env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING": "false"}).models[0].thinking)
+        for value in ("yes", "1", "TRUE", " true"):
+            with self.assertRaises(ConfigError):
+                load_config({**self.env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING": value})
+        extra = json.dumps([{"id": "second", "provider": "openai", "model": "second-model", "apiKeyEnv": "SECOND_KEY"},
+                            {"id": "third", "provider": "openai", "model": "third-model", "apiKeyEnv": "SECOND_KEY", "disableThinking": True}])
+        config = load_config({**self.env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING": "true", "AWWO_OPENAI_AGENTS_MODELS_JSON": extra, "SECOND_KEY": "k"})
+        self.assertEqual([profile.thinking for profile in config.models], [False, True, False])
+        with self.assertRaises(ConfigError):
+            load_config({**self.env, "SECOND_KEY": "k", "AWWO_OPENAI_AGENTS_MODELS_JSON": json.dumps(
+                [{"id": "x", "provider": "openai", "model": "x", "apiKeyEnv": "SECOND_KEY", "disableThinking": "true"}])})
+        # The catalog the API reads keeps its shape either way.
+        self.assertEqual(public_health(self.config), public_health(load_config({**self.env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING": "true"})))
 
     async def test_chat_requests_final_provider_usage_in_its_single_call(self):
         events = await self.collect()

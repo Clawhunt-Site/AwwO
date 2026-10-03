@@ -24,7 +24,7 @@ function integer(value, fallback, minimum, maximum, name) {
   return parsed;
 }
 
-const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'protocol', 'reasoningEfforts', 'defaultReasoningEffort', 'structuredOutput', 'name']);
+const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'protocol', 'reasoningEfforts', 'defaultReasoningEffort', 'structuredOutput', 'disableThinking', 'name']);
 const MAX_CATALOG_MODELS = 256; // Includes the required default profile.
 const MAX_CATALOG_BYTES = 512 * 1024;
 const MODEL_SELECTOR = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$/;
@@ -65,6 +65,15 @@ export function parseStructuredOutput(value) {
   if (value === undefined || value === '' || value === 'false') return false;
   if (value === 'true') return true;
   throw new Error('AWWO_OPENAI_AGENTS_STRUCTURED_OUTPUT must be true or false');
+}
+
+// The default profile's thinking switch: 'true' sends chat_template_kwargs.enable_thinking=false on
+// Chat Completions, for Qwen-style models whose hidden reasoning would otherwise spend the output
+// budget. Unset, empty and 'false' leave requests as they were; any other value stops startup.
+export function parseDisableThinking(value) {
+  if (value === undefined || value === '' || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new Error('AWWO_OPENAI_AGENTS_DISABLE_THINKING must be true or false');
 }
 
 function validBaseURL(baseURL) {
@@ -119,11 +128,13 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
       // Efforts are never inherited from the default profile: they describe one
       // provider model, and a profile that says nothing supports no explicit level.
       const efforts = parseEfforts(value.reasoningEfforts, value.defaultReasoningEffort);
-      problem = `profile ${index + 1} has an invalid structuredOutput flag or display name`;
-      if ((value.structuredOutput !== undefined && typeof value.structuredOutput !== 'boolean') || (value.name !== undefined && !validProfileName(value.name))) throw new Error();
+      problem = `profile ${index + 1} has an invalid structuredOutput flag, disableThinking flag or display name`;
+      if ((value.structuredOutput !== undefined && typeof value.structuredOutput !== 'boolean') || (value.disableThinking !== undefined && typeof value.disableThinking !== 'boolean')
+        || (value.name !== undefined && !validProfileName(value.name))) throw new Error();
       // structuredOutput is never inherited either: it asserts that this profile's own
       // endpoint and model honour a JSON schema response format on its protocol.
-      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, name: value.name ?? value.model, baseURL, apiKey, contextWindow, maxTokens, protocol: value.protocol ?? defaultProfile.protocol, ...efforts, structuredOutput: value.structuredOutput === true }));
+      // Neither flag is inherited from the default profile: each states its own model's behaviour.
+      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, name: value.name ?? value.model, baseURL, apiKey, contextWindow, maxTokens, protocol: value.protocol ?? defaultProfile.protocol, ...efforts, structuredOutput: value.structuredOutput === true, disableThinking: value.disableThinking === true }));
       ids.add(value.id);
     }
     return Object.freeze(profiles);
@@ -159,7 +170,8 @@ export function loadConfig(env = process.env) {
   try { efforts = parseEfforts(env.AWWO_OPENAI_AGENTS_REASONING_EFFORTS, env.AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT); }
   catch { throw new Error(`AWWO_OPENAI_AGENTS_REASONING_EFFORTS must list distinct levels from ${EFFORT_LEVELS.join(', ')} and AWWO_OPENAI_AGENTS_DEFAULT_REASONING_EFFORT, when set, must be one of them`); }
   const structuredOutput = parseStructuredOutput(env.AWWO_OPENAI_AGENTS_STRUCTURED_OUTPUT);
-  const models = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, name: model, apiKey, baseURL, contextWindow, maxTokens, protocol, ...efforts, structuredOutput }), missing);
+  const disableThinking = parseDisableThinking(env.AWWO_OPENAI_AGENTS_DISABLE_THINKING);
+  const models = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, name: model, apiKey, baseURL, contextWindow, maxTokens, protocol, ...efforts, structuredOutput, disableThinking }), missing);
   // Older worker configs use "openai" as the protocol adapter for LLM Gate.
   // The URL is the network destination; personal mode replaces these profiles per request.
   if (llmgateOnly && models.some(profile => profile.baseURL !== DEFAULTS.llmgate)) {
