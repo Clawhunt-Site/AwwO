@@ -1,0 +1,430 @@
+/* AwwO hosted app: the older surfaces on the design system — the knowledge workbench and the execution
+ * assistant (both open over the canvas), the account dialog and the admin pages.
+ *
+ * Their own stylesheets keep layout, behaviour and their breakpoints (spacing that varies with the width is
+ * left to them); this file gives them the system's colour, type and controls, so a saved account colour scheme and the dark theme reach them as they reach every other page:
+ * ink pill actions, teal for links and focus, soft filled chips, hairline panels on salt paper. Where a
+ * component rule already reads a local variable (--knowledge-*, --account-accent), the variable is remapped
+ * instead of restating the rule. Loaded after canvas.css and before motion.css. */
+
+/* ── The overlay over the canvas (knowledge workbench, execution assistant) ─────────────────────── */
+.awwo-knowledge-overlay {
+  border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl);
+  background: var(--saas-card); color: var(--saas-text); box-shadow: var(--saas-shadow-xl);
+  font-family: var(--saas-font);
+}
+.awwo-knowledge-overlay::backdrop { background: var(--saas-scrim, rgb(7 22 31 / 46%)); backdrop-filter: blur(6px); }
+/* The frame is the panel: the workbench inside does not draw a second border. */
+.awwo-knowledge-overlay > .knowledge-workbench { border: 0; border-radius: 0; }
+.awwo-knowledge-overlay > :is(.awwo-knowledge-dock-error, .awwo-knowledge-dock-notice) { padding: 10px 22px; border-bottom: 1px solid var(--saas-hairline); font-size: var(--saas-text-sm); }
+.awwo-knowledge-overlay > .awwo-knowledge-dock-error { background: var(--saas-danger-bg); color: var(--saas-danger); }
+.awwo-knowledge-overlay > .awwo-knowledge-dock-notice { background: var(--saas-card); color: var(--saas-muted); }
+.awwo-knowledge-overlay > .awwo-knowledge-resume { gap: 12px; padding: 10px 22px; border-bottom-color: var(--saas-hairline); color: var(--saas-text); font-size: var(--saas-text-sm); }
+.awwo-knowledge-resume :is(select, button) { min-height: 32px; padding: 0 12px; border-color: var(--saas-border-strong); border-radius: var(--saas-radius-pill); background: var(--saas-card); color: var(--saas-text); }
+.awwo-knowledge-resume button:hover:not(:disabled) { background: var(--saas-soft); }
+
+/* ── Knowledge workbench ─────────────────────────────────────────────────────────────────────── */
+.knowledge-workbench {
+  --knowledge-ink: var(--saas-text);
+  --knowledge-muted: var(--saas-muted);
+  --knowledge-border: var(--saas-border);
+  --knowledge-surface: var(--saas-card);
+  --knowledge-bg: color-mix(in srgb, var(--saas-bg) 65%, var(--saas-card));
+  /* Selection and emphasis (the active node, a chosen filter): the account's accent, as on the canvas. */
+  --knowledge-accent: var(--saas-accent);
+  /* The three kinds of knowledge are data, not chrome: fixed hues a colour scheme does not move, so a
+     source never looks like a page. Each has a dot/fill, an AA text shade and a soft tag ground. */
+  --knowledge-kind-source: #2b7ad8; --knowledge-kind-source-ink: #2262a9; --knowledge-kind-source-soft: #e1ecfb;
+  --knowledge-kind-page: #2bb3bb; --knowledge-kind-page-ink: #1c6f76; --knowledge-kind-page-soft: #dcf1f2;
+  --knowledge-kind-decision: #c98a1e; --knowledge-kind-decision-ink: #8f5a0c; --knowledge-kind-decision-soft: #f6ead3;
+  border-color: var(--saas-hairline); border-radius: var(--saas-radius-xl);
+  font-family: var(--saas-font); font-size: var(--saas-text-sm);
+}
+:root[data-theme='dark'] .knowledge-workbench {
+  --knowledge-kind-source: #4c9cf5; --knowledge-kind-source-ink: #8cbcff; --knowledge-kind-source-soft: #11294a;
+  --knowledge-kind-page: #5fe3e8; --knowledge-kind-page-ink: #6cc6c8; --knowledge-kind-page-soft: #0f3236;
+  --knowledge-kind-decision: #e0a84a; --knowledge-kind-decision-ink: #e0a84a; --knowledge-kind-decision-soft: #3a2c12;
+}
+.knowledge-workbench button { border-radius: var(--saas-radius-sm); font-weight: 500; transition: background-color var(--saas-dur-1), border-color var(--saas-dur-1), color var(--saas-dur-1); }
+.knowledge-workbench button:hover:not(:disabled) { background: var(--saas-soft); border-color: var(--saas-border-strong); }
+.knowledge-workbench :focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
+.knowledge-workbench a { color: var(--saas-link); }
+.knowledge-workbench pre { font-family: var(--saas-font-mono); font-size: var(--saas-text-xs); }
+.knowledge-workbench .knowledge-primary { padding-inline: 16px; border-color: transparent; border-radius: var(--saas-radius-pill); background: var(--saas-primary); color: var(--saas-on-primary); font-weight: 600; }
+.knowledge-workbench .knowledge-primary:hover:not(:disabled) { border-color: transparent; background: var(--saas-primary-hover); color: var(--saas-on-primary); }
+.knowledge-workbench .knowledge-primary:disabled { opacity: .45; }
+.knowledge-workbench .knowledge-text-button { color: var(--saas-link) !important; }
+/* Fields: outlined, the system's radius, and the focus ring in place of an outline. */
+.knowledge-workbench :is(input:not([type=checkbox]):not([type=file]), textarea, select) {
+  border-color: var(--saas-border-strong); border-radius: var(--saas-radius-sm); background: var(--saas-card); color: var(--saas-text);
+  transition: border-color var(--saas-dur-1), box-shadow var(--saas-dur-1);
+}
+.knowledge-workbench :is(input:not([type=checkbox]):not([type=file]), textarea, select):focus { outline: none; border-color: var(--saas-focus); box-shadow: var(--saas-focus-ring); }
+.knowledge-workbench input::placeholder, .knowledge-workbench textarea::placeholder { color: var(--saas-subtle); }
+.knowledge-workbench input[type=checkbox] { accent-color: var(--saas-accent); }
+.knowledge-workbench h2 { font: 680 var(--saas-text-xl)/1.25 var(--saas-font-display); font-stretch: var(--saas-head-stretch); letter-spacing: var(--saas-head-track); }
+.knowledge-workbench h3 { font-weight: 650; }
+.knowledge-workbench .knowledge-help { font-size: var(--saas-text-sm); }
+
+.knowledge-header { border-bottom-color: var(--saas-hairline); }
+.knowledge-heading p { font-size: var(--saas-text-sm); }
+.knowledge-mark { border-radius: var(--saas-radius); background: var(--saas-accent-soft); color: var(--saas-accent); }
+.knowledge-header-actions { gap: 8px; }
+.knowledge-header-actions > button { min-height: var(--saas-control); padding: 0 14px; border-radius: var(--saas-radius-pill); }
+.knowledge-header-actions > button:not(.knowledge-primary) { border-color: var(--saas-border-strong); }
+.knowledge-header-actions > button[aria-label] { width: var(--saas-control); padding: 0; }
+.knowledge-alert, .knowledge-notice { border-bottom-color: var(--saas-hairline); font-size: var(--saas-text-sm); }
+.knowledge-alert { background: var(--saas-danger-bg); color: var(--saas-danger); }
+.knowledge-notice { background: var(--saas-success-bg); color: var(--saas-success); }
+.knowledge-limit { border-bottom-color: var(--saas-hairline); background: var(--saas-warning-bg); color: var(--saas-warning); font-size: var(--saas-text-xs); }
+.knowledge-loading { font-size: var(--saas-text-sm); }
+
+/* The library: a segmented switch, a round search field, filter chips and quiet rows. */
+.knowledge-library { border-right-color: var(--saas-hairline); background: color-mix(in srgb, var(--saas-bg) 45%, var(--saas-card)); }
+.knowledge-tabs { gap: 2px; margin-bottom: 12px; padding: 3px; border-radius: var(--saas-radius); background: var(--saas-field); }
+/* The document's 阅读 / 原文 / 历史 switch shares the class: the same control, as wide as its three choices and
+   without the old underline. */
+.knowledge-tabs.knowledge-detail-tabs { width: fit-content; max-width: 100%; margin-bottom: 18px; padding: 3px; border-bottom: 0; }
+.knowledge-tabs.knowledge-detail-tabs button { flex: none; max-width: none; padding: 0 14px; }
+.knowledge-tabs button { min-height: 32px; border: 0; border-radius: 11px; color: var(--saas-muted); font-size: var(--saas-text-sm); white-space: nowrap; }
+.knowledge-workbench .knowledge-tabs button:not([aria-pressed=true]):hover:not(:disabled) { background: color-mix(in srgb, var(--saas-text) 5%, transparent); color: var(--saas-text); }
+.knowledge-workbench .knowledge-tabs button[aria-pressed=true] { background: var(--saas-card); color: var(--saas-text); box-shadow: var(--saas-shadow-xs); font-weight: 600; }
+.knowledge-tabs span { padding: 0 6px; border-radius: 999px; background: var(--saas-soft); color: var(--saas-muted); font-size: 11px; }
+.knowledge-search { padding: 0 4px 0 12px; border-color: var(--saas-border-strong); border-radius: var(--saas-radius-pill); background: var(--saas-card); color: var(--saas-subtle); transition: border-color var(--saas-dur-1), box-shadow var(--saas-dur-1); }
+.knowledge-search:focus-within { border-color: var(--saas-focus); box-shadow: var(--saas-focus-ring); }
+/* The field is the pill around it; the input itself draws nothing (it used to draw a second border). */
+.knowledge-workbench .knowledge-search input:not([type=checkbox]):not([type=file]) { padding: 8px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-size: var(--saas-text-sm); }
+.knowledge-workbench .knowledge-search input:focus-visible { outline: none; }
+.knowledge-search button { width: 30px; min-height: 30px; border-radius: 50%; color: var(--saas-muted); }
+.knowledge-clear-search { min-height: 28px !important; padding: 0 10px !important; border-radius: var(--saas-radius-pill) !important; font-size: var(--saas-text-xs) !important; }
+.knowledge-filters { gap: 4px; padding: 12px 0 10px; }
+.knowledge-filters button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 999px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-workbench .knowledge-filters button:not([aria-pressed=true]):hover:not(:disabled) { background: var(--saas-soft); color: var(--saas-text); }
+.knowledge-workbench .knowledge-filters button[aria-pressed=true] { background: var(--saas-accent-soft); color: var(--saas-accent); font-weight: 600; }
+.knowledge-list-item { border-radius: var(--saas-radius-sm); transition: background-color var(--saas-dur-1); }
+.knowledge-list-item:hover { background: var(--saas-soft); }
+.knowledge-list-item.is-active { border-color: var(--saas-hairline); background: var(--saas-card); box-shadow: var(--saas-shadow-xs); }
+.knowledge-workbench .knowledge-list-item button:hover:not(:disabled) { background: transparent; }
+.knowledge-list-item strong { color: var(--saas-text); font-size: var(--saas-text-sm); }
+.knowledge-list-item small { color: var(--saas-muted); font-size: 11px; }
+.knowledge-proposal-list > button { padding: 9px 10px; gap: 2px; border-radius: var(--saas-radius-sm); }
+.knowledge-proposal-list > button.is-active, .knowledge-workbench .knowledge-proposal-list > button.is-active:hover:not(:disabled) { background: var(--saas-card); box-shadow: var(--saas-shadow-xs); }
+.knowledge-proposal-list strong { font-size: var(--saas-text-sm); }
+.knowledge-proposal-list span { color: var(--saas-muted); font-size: 11px; }
+.knowledge-library .knowledge-new-page { min-height: var(--saas-control); border-style: dashed; border-color: var(--saas-border-strong); border-radius: var(--saas-radius-pill); background: transparent; font-size: var(--saas-text-sm); }
+.knowledge-empty-small { color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.7; }
+
+/* The kinds: dots, graph accents and tags. */
+.knowledge-dot.kind-source, .knowledge-workbench .knowledge-node-accent { background: var(--knowledge-kind-source); fill: var(--knowledge-kind-source); }
+.knowledge-dot.kind-page, .knowledge-workbench .kind-page .knowledge-node-accent { background: var(--knowledge-kind-page); fill: var(--knowledge-kind-page); }
+.knowledge-dot.kind-decision, .knowledge-workbench .kind-decision .knowledge-node-accent { background: var(--knowledge-kind-decision); fill: var(--knowledge-kind-decision); }
+.knowledge-kind { padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+.knowledge-kind.kind-source { background: var(--knowledge-kind-source-soft); color: var(--knowledge-kind-source-ink); }
+.knowledge-kind.kind-page { background: var(--knowledge-kind-page-soft); color: var(--knowledge-kind-page-ink); }
+.knowledge-kind.kind-decision { background: var(--knowledge-kind-decision-soft); color: var(--knowledge-kind-decision-ink); }
+
+/* The map: the canvas's own ground and dots, so it reads as a map of the work. */
+.knowledge-map-column { background: var(--saas-canvas); }
+.knowledge-map-heading h3 { font-size: var(--saas-text-md); }
+.knowledge-map-heading p { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-map-heading select { padding: 6px 10px; font-size: var(--saas-text-xs); }
+.knowledge-graph-shell { background-image: radial-gradient(var(--saas-canvas-dot) .9px, transparent .9px); background-size: 18px 18px; }
+.knowledge-graph-controls { gap: 4px; }
+.knowledge-graph-controls button { min-height: 30px; padding: 0 10px; border-color: var(--saas-hairline); background: var(--saas-raised); box-shadow: var(--saas-shadow-xs); font-size: var(--saas-text-xs); }
+/* Over the graph a hover stays opaque. */
+.knowledge-workbench .knowledge-graph-controls button:hover:not(:disabled) { background: color-mix(in srgb, var(--saas-text) 5%, var(--saas-raised)); }
+.knowledge-graph-column { fill: var(--saas-muted); }
+.knowledge-graph-edge { color: var(--saas-subtle); }
+.knowledge-graph-edge text { stroke: var(--saas-canvas); }
+.knowledge-graph-edge.relation-contradicts { color: var(--saas-danger); }
+.knowledge-graph-edge.relation-supports { color: var(--saas-success); }
+.knowledge-graph-edge.relation-cites { color: var(--knowledge-kind-source-ink); }
+.knowledge-graph-edge.relation-derived_from { color: color-mix(in oklab, var(--saas-bio-lilac) 72%, var(--saas-text)); }
+.knowledge-graph-node.is-selected > rect:first-of-type { fill: color-mix(in srgb, var(--saas-accent) 7%, var(--saas-card)); }
+.knowledge-context-bar { border-top-color: var(--saas-hairline); }
+.knowledge-context-bar strong { font-size: var(--saas-text-sm); font-weight: 600; }
+.knowledge-context-bar span { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-context-bar button { min-height: 32px; padding: 0 12px; border-radius: var(--saas-radius-pill); font-size: var(--saas-text-xs); }
+
+/* The inspector: forms and the document being read. */
+.knowledge-inspector { border-left-color: var(--saas-hairline); }
+.knowledge-inspector form > label, .knowledge-history > label { color: var(--saas-text); font-size: var(--saas-text-sm); font-weight: 500; }
+.knowledge-panel-title h3 { font-size: var(--saas-text-lg); }
+.knowledge-panel-title button { width: 32px; min-height: 32px; border-radius: 50%; color: var(--saas-muted); }
+.knowledge-upload { gap: 6px; border-color: var(--saas-border-strong) !important; border-radius: var(--saas-radius) !important; background: var(--saas-field) !important; color: var(--saas-text); font-size: var(--saas-text-sm) !important; }
+.knowledge-upload small { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-byte-count { color: var(--saas-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.knowledge-byte-count.is-over { color: var(--saas-danger); }
+.knowledge-source-picker, .knowledge-link-editor { border-color: var(--saas-border); border-radius: var(--saas-radius); }
+.knowledge-source-picker legend, .knowledge-link-editor legend { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-source-picker label { font-size: var(--saas-text-sm); }
+.knowledge-source-picker p { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-link-editor select { font-size: var(--saas-text-xs); }
+.knowledge-link-editor li { font-size: var(--saas-text-xs); }
+.knowledge-document-meta { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-document > h3 { font: 680 var(--saas-text-2xl)/1.35 var(--saas-font-display); font-stretch: var(--saas-head-stretch); letter-spacing: var(--saas-head-track); }
+.knowledge-document-actions button { font-size: var(--saas-text-xs); }
+.knowledge-workbench .knowledge-document-actions button[aria-pressed=true] { border-color: color-mix(in srgb, var(--saas-accent) 50%, var(--saas-border)); background: var(--saas-accent-soft); color: var(--saas-accent); }
+.knowledge-markdown { font-size: var(--saas-text-md); line-height: 1.8; }
+.knowledge-markdown :is(pre, code) { font-family: var(--saas-font-mono); }
+.knowledge-markdown pre { border-radius: var(--saas-radius-sm); background: var(--saas-field); }
+.knowledge-markdown blockquote { border-left-color: var(--saas-border-strong); color: var(--saas-muted); }
+.knowledge-markdown table { font-size: var(--saas-text-xs); }
+.knowledge-markdown :is(th, td) { border-color: var(--saas-border); }
+.knowledge-raw { border-color: var(--saas-hairline); border-radius: var(--saas-radius-sm); background: var(--saas-field); }
+.knowledge-hash { color: var(--saas-muted); font-size: 11px; }
+.knowledge-document-relations { border-top-color: var(--saas-hairline); }
+.knowledge-document-relations h4 { font-size: var(--saas-text-sm); }
+.knowledge-document-relations button { border-radius: var(--saas-radius-sm); background: var(--saas-soft); font-size: var(--saas-text-xs); }
+.knowledge-workbench .knowledge-document-relations button:hover:not(:disabled) { background: var(--saas-soft-strong); }
+.knowledge-document-relations button span { color: var(--saas-muted); }
+.knowledge-provenance { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-provenance pre { background: var(--saas-field); border-radius: var(--saas-radius-xs); }
+.knowledge-comparison section { border-color: var(--saas-border); border-radius: var(--saas-radius); background: var(--saas-field); }
+.knowledge-comparison section:last-child { border-left-color: var(--saas-accent); }
+.knowledge-comparison h5 { color: var(--saas-muted); }
+.knowledge-comparison strong { font-size: var(--saas-text-sm); }
+.knowledge-comparison p { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.knowledge-linked-list button, .knowledge-review-actions button { font-size: var(--saas-text-xs); }
+.knowledge-review-actions { background: var(--saas-card); }
+.knowledge-review ul { font-size: var(--saas-text-xs); }
+.knowledge-inline-alert { border-radius: var(--saas-radius-sm); background: var(--saas-danger-bg); color: var(--saas-danger); font-size: var(--saas-text-xs); }
+.knowledge-restore-confirm { border-color: color-mix(in srgb, var(--saas-warning-dot) 55%, var(--saas-border)); border-radius: var(--saas-radius); background: var(--saas-warning-bg); }
+.knowledge-restore-confirm :is(p, button) { font-size: var(--saas-text-xs); }
+.knowledge-pinned-citations small { color: var(--saas-muted); font-family: var(--saas-font-mono); font-size: 11px; }
+:is(.knowledge-graph-empty, .knowledge-inspector-empty) { color: var(--saas-muted); }
+:is(.knowledge-graph-empty, .knowledge-inspector-empty) svg { color: var(--saas-subtle); opacity: 1; }
+:is(.knowledge-graph-empty, .knowledge-inspector-empty) h3 { font-size: var(--saas-text-lg); }
+:is(.knowledge-graph-empty, .knowledge-inspector-empty) p { font-size: var(--saas-text-sm); line-height: 1.7; }
+.knowledge-footer { border-top-color: var(--saas-hairline); color: var(--saas-muted); font-size: var(--saas-text-xs); }
+@media (max-width: 520px) {
+  .knowledge-list-item strong { font-size: var(--saas-text-xs); }
+  .knowledge-list-item small, .knowledge-filters button, .knowledge-context-bar button, .knowledge-graph-controls button { font-size: 11px; }
+  .knowledge-filters button { padding: 0 8px; }
+  .knowledge-context-bar button, .knowledge-context-bar button.knowledge-primary, .knowledge-graph-controls button { padding: 0 6px; }
+  .knowledge-workbench .knowledge-heading h2 { font-size: var(--saas-text-lg); }
+  .knowledge-library .knowledge-tabs button { gap: 4px; font-size: var(--saas-text-xs); }
+  .knowledge-header-actions > button:not([aria-label]) { padding: 0 12px; }
+}
+
+/* ── Execution assistant ─────────────────────────────────────────────────────────────────────── */
+.managed-execution { background: var(--saas-card); color: var(--saas-text); font: 400 var(--saas-text-sm)/1.65 var(--saas-font); }
+.managed-execution h2:where(:not(.managed-execution-preview *)) { font: 680 var(--saas-text-xl)/1.25 var(--saas-font-display); font-stretch: var(--saas-head-stretch); letter-spacing: var(--saas-head-track); }
+.managed-execution h3:where(:not(.managed-execution-preview *)) { font-size: var(--saas-text-md); font-weight: 650; }
+.managed-execution button:where(:not(.managed-execution-preview *)), .managed-execution-artifacts a:where(:not(.managed-execution-preview *)) {
+  border-color: var(--saas-border-strong); border-radius: var(--saas-radius-pill); background: var(--saas-card); font-weight: 500;
+  transition: background-color var(--saas-dur-1), border-color var(--saas-dur-1);
+}
+.managed-execution button:where(:not(.managed-execution-preview *)):hover:not(:disabled) { background: var(--saas-soft); }
+.managed-execution .managed-primary { border-color: transparent; background: var(--saas-primary); color: var(--saas-on-primary); font-weight: 600; }
+.managed-execution .managed-primary:hover:not(:disabled) { background: var(--saas-primary-hover); }
+.managed-execution .managed-primary:disabled { opacity: .45; }
+.managed-execution :focus-visible:where(:not(.managed-execution-preview *)) { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
+.managed-execution label:where(:not(.managed-execution-preview *)) { color: var(--saas-text); font-size: var(--saas-text-sm); font-weight: 500; }
+.managed-execution :is(input, select, textarea):where(:not(.managed-execution-preview *)) {
+  border-color: var(--saas-border-strong); border-radius: var(--saas-radius-sm); background: var(--saas-card); color: var(--saas-text);
+  font-weight: 400; transition: border-color var(--saas-dur-1), box-shadow var(--saas-dur-1);
+}
+.managed-execution :is(input, select, textarea):where(:not(.managed-execution-preview *)):focus { outline: none; border-color: var(--saas-focus); box-shadow: var(--saas-focus-ring); }
+.managed-execution textarea::placeholder { color: var(--saas-subtle); }
+.managed-execution :is(pre, code):where(:not(.managed-execution-preview *)) { font-family: var(--saas-font-mono); }
+.managed-execution code:where(:not(.managed-execution-preview *)) { font-size: 11px; }
+.managed-execution-header { padding: 16px 18px 16px 22px; border-bottom-color: var(--saas-hairline); background: var(--saas-card); }
+/* The panel's mark, as the knowledge workbench's. */
+.managed-execution-header > div:first-child > svg { box-sizing: content-box; flex: none; width: 22px; height: 22px; padding: 9px; border-radius: var(--saas-radius); background: var(--saas-accent-soft); color: var(--saas-accent); }
+.managed-execution-header p { color: var(--saas-muted); font-size: var(--saas-text-sm); }
+.managed-execution-header > div:last-child { gap: 8px; }
+.managed-execution-header > div:last-child > button { width: var(--saas-control); min-height: var(--saas-control); padding: 0; border-radius: 50%; }
+.managed-execution-compose { border-right-color: var(--saas-hairline); background: color-mix(in srgb, var(--saas-bg) 45%, var(--saas-card)); }
+.managed-execution-detail { padding: 24px 28px; }
+.managed-execution-service { padding: 14px 16px; border-color: var(--saas-hairline); border-radius: var(--saas-radius); background: var(--saas-card); box-shadow: var(--saas-shadow-xs); }
+.managed-execution-service p, .managed-execution-artifacts > p, .managed-execution-history > p { color: var(--saas-muted); font-size: var(--saas-text-sm); }
+.managed-execution-service a { color: var(--saas-link); }
+.managed-execution-history > button { padding: 9px 12px; border-color: var(--saas-hairline); border-radius: var(--saas-radius-sm); }
+.managed-execution-history strong { font-size: var(--saas-text-sm); font-weight: 600; }
+.managed-execution-history span { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.managed-execution-history button[aria-pressed=true] { border-color: color-mix(in srgb, var(--saas-accent) 45%, var(--saas-border)); background: var(--saas-accent-soft); box-shadow: inset 3px 0 var(--saas-accent); }
+.managed-execution-empty { color: var(--saas-muted); }
+.managed-execution-empty > svg { color: var(--saas-subtle); }
+.managed-execution-empty h3 { color: var(--saas-text); font-size: var(--saas-text-lg); }
+.managed-execution-empty p { max-width: 420px; font-size: var(--saas-text-sm); line-height: 1.7; }
+.managed-execution-detail-bar > span { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.managed-execution-prompt { font-size: var(--saas-text-lg); font-weight: 600; }
+.managed-execution-id { color: var(--saas-muted); }
+.managed-execution-error, .managed-execution-notice, .managed-execution-warning { border-radius: var(--saas-radius-sm); font-size: var(--saas-text-sm); }
+.managed-execution-error { background: var(--saas-danger-bg); color: var(--saas-danger); }
+.managed-execution-notice { background: var(--saas-success-bg); color: var(--saas-success); }
+.managed-execution-warning { background: var(--saas-warning-bg); color: var(--saas-warning); }
+.managed-execution-evidence { border-left-color: var(--saas-accent); font-size: var(--saas-text-xs); }
+.managed-execution-evidence span { color: var(--saas-muted); }
+.managed-execution-request { border-color: color-mix(in srgb, var(--saas-warning-dot) 55%, var(--saas-border)); border-radius: var(--saas-radius); background: var(--saas-card); }
+.managed-execution-request > div:first-child > span { color: var(--saas-warning); font-size: var(--saas-text-xs); }
+.managed-execution-request pre { border-radius: var(--saas-radius-xs); background: var(--saas-field); }
+.managed-execution-messages article { border-left-color: var(--saas-border); }
+.managed-execution-messages article > div { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.managed-execution-output { border-top-color: var(--saas-hairline); }
+.managed-execution-artifacts article { border-color: var(--saas-hairline); border-radius: var(--saas-radius); background: var(--saas-card); }
+.managed-execution-artifacts small:where(:not(.managed-execution-preview *)) { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.managed-execution-artifacts :is(button, a):where(:not(.managed-execution-preview *)) { font-size: var(--saas-text-xs); }
+.managed-execution-preview {
+  --line: var(--saas-border); --fg: var(--saas-text); --muted: var(--saas-muted); --accent: var(--saas-accent); --accent-soft: var(--saas-accent-soft);
+  border-color: var(--saas-border); border-radius: var(--saas-radius); background: var(--saas-card);
+}
+.managed-execution-import { border-color: var(--saas-border); border-radius: var(--saas-radius-lg); background: var(--saas-card); }
+.managed-execution-import > p { color: var(--saas-muted); font-size: var(--saas-text-sm); }
+@media (max-width: 760px) {
+  .managed-execution-header { padding: 14px 14px 14px 16px; }
+  .managed-execution-header p { font-size: var(--saas-text-xs); }
+  .managed-execution-header > div:first-child > svg { width: 18px; height: 18px; padding: 7px; }
+  .managed-execution-compose { border-bottom-color: var(--saas-hairline); }
+  .managed-execution-detail { padding: 16px; }
+}
+
+/* ── Account dialog ──────────────────────────────────────────────────────────────────────────── */
+/* As the main site's account page: white panels on salt paper, sentence-case labels, ink actions. The
+   selectors repeat the older ones they replace (saas.css styles the dialog inside the account controls,
+   and in the dark), so these apply wherever the dialog opens. */
+.awwo-account-dialog, .saas-account-actions .awwo-account-dialog, :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog {
+  width: min(820px, calc(100vw - 32px)); max-height: calc(100dvh - 40px);
+  border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl);
+  background: var(--saas-card); color: var(--saas-text); box-shadow: var(--saas-shadow-xl);
+  font-family: var(--saas-font);
+}
+/* Open, it is a column: the title stays and the body scrolls under it. */
+.awwo-account-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.awwo-account-dialog::backdrop { background: var(--saas-scrim, rgb(7 22 31 / 46%)); backdrop-filter: blur(6px); }
+.awwo-account-dialog-header, .saas-account-actions .awwo-account-dialog-header, :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog-header {
+  flex: none; padding: 12px 12px 12px 22px; border-bottom: 1px solid var(--saas-hairline); background: var(--saas-card);
+}
+.awwo-account-dialog-header h2 { color: var(--saas-text); font: 650 var(--saas-text-md)/1.3 var(--saas-font); }
+.awwo-account-dialog .awwo-account-dialog-header .awwo-icon-button {
+  display: inline-grid; place-items: center; width: var(--saas-control); height: var(--saas-control); min-height: var(--saas-control); padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--saas-muted);
+}
+.awwo-account-dialog .awwo-account-dialog-header .awwo-icon-button:not(:disabled):hover { background: var(--saas-soft); color: var(--saas-text); }
+.awwo-account-dialog-body { flex: 1 1 auto; min-height: 0; padding: 24px; background: color-mix(in srgb, var(--saas-bg) 72%, var(--saas-card)); }
+.awwo-account-dialog .account-workspace-panel { height: auto; padding: 0; overflow: visible; background: transparent; color: var(--saas-text); font-family: var(--saas-font); }
+:root .awwo-account-dialog .account-workspace-panel, :root[data-theme='dark'] .awwo-account-dialog .account-workspace-panel {
+  --account-accent: var(--saas-accent); --account-accent-soft: var(--saas-accent-soft);
+}
+.awwo-account-dialog .account-workspace-header { margin-bottom: 20px; }
+/* The shared phone rule caps every h1 at 10ch; this title is short and has its own width. */
+.awwo-account-dialog .account-workspace-header h1 { max-width: none; color: var(--saas-text); font: 690 var(--saas-text-3xl)/var(--saas-display-leading, 1.1) var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track); }
+.awwo-account-dialog .account-workspace-header p { margin-top: 8px; color: var(--saas-muted); font-size: var(--saas-text-md); line-height: 1.6; }
+.awwo-account-dialog .account-section-heading h2 { color: var(--saas-text); font: 650 17px/1.35 var(--saas-font); letter-spacing: 0; }
+/* Labels say which account or workspace a panel belongs to: quiet, in sentence case. */
+.awwo-account-dialog :is(.account-eyebrow, .account-section-heading span) { color: var(--saas-muted); font: 500 var(--saas-text-xs)/1.4 var(--saas-font); letter-spacing: 0; text-transform: none; }
+.awwo-account-dialog .account-section-heading { margin-bottom: 16px; color: var(--saas-subtle); }
+.awwo-account-dialog :is(.account-identity-card, .account-section) { border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl); background: var(--saas-card); box-shadow: none; }
+.awwo-account-dialog .account-identity-grid { gap: 14px; margin-bottom: 14px; }
+.awwo-account-dialog .account-identity-card { padding: 18px 20px; }
+.awwo-account-dialog .account-section { margin-bottom: 14px; padding: 22px 24px; }
+.awwo-account-dialog .account-avatar { border-radius: 50%; }
+.awwo-account-dialog .account-avatar-fallback { background: var(--saas-accent-soft); color: var(--saas-accent); font: 650 var(--saas-text-sm)/1 var(--saas-font); }
+.awwo-account-dialog :is(.account-identity-copy strong, .account-member-identity strong, .account-invite-result strong, .account-member-summary strong) { color: var(--saas-text); font-size: var(--saas-text-sm); font-weight: 600; }
+.awwo-account-dialog :is(.account-identity-copy > span:last-child, .account-member-identity span, .account-member-summary span, .account-invite-result span) { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.awwo-account-dialog .account-member-identity small { color: var(--saas-warning); font-size: 11px; }
+.awwo-account-dialog .account-status-badge { gap: 6px; padding: 4px 10px; border: 0; background: var(--saas-accent-soft); color: var(--saas-accent); font: 600 11px/1.3 var(--saas-font); }
+.awwo-account-dialog :is(.account-profile-grid label, .account-company-select, .account-invite-panel > label, .account-member-controls label, .account-member-add label) {
+  gap: 6px; color: var(--saas-muted); font: 500 var(--saas-text-xs)/1.4 var(--saas-font);
+}
+/* max-width: the header's own selects are capped (170px, 100px on phones), and this dialog opens inside the header. */
+.awwo-account-dialog .account-workspace-panel :is(input, select) {
+  max-width: none; min-height: 40px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--saas-radius-sm);
+  background: var(--saas-field); color: var(--saas-text); font: 400 var(--saas-text-sm)/1.4 var(--saas-font);
+  transition: border-color var(--saas-dur-1), box-shadow var(--saas-dur-1), background-color var(--saas-dur-1);
+}
+.awwo-account-dialog .account-workspace-panel :is(input, select):hover:not(:disabled) { border-color: var(--saas-border); }
+.awwo-account-dialog .account-company-select { max-width: 360px; }
+.awwo-account-dialog .account-workspace-panel :is(input, select):focus { outline: none; border-color: var(--saas-focus); background: var(--saas-card); box-shadow: var(--saas-focus-ring); }
+/* Read-only values read as text under their label, not as a field to fill in. */
+.awwo-account-dialog .account-workspace-panel input[readonly] { padding-inline: 0; border-color: transparent; background: transparent; color: var(--saas-text); }
+.awwo-account-dialog .account-workspace-panel input[readonly]:hover { border-color: transparent; }
+.awwo-account-dialog .account-workspace-panel input[readonly]:focus { padding-inline: 0; border-color: transparent; background: transparent; box-shadow: none; outline: 2px solid var(--saas-focus); outline-offset: 4px; }
+.awwo-account-dialog :is(.account-company-scope > p, .account-inline-note, .account-permission-note, .account-empty-state, .account-workspace-state) { color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.6; }
+.awwo-account-dialog :is(.account-primary-button, .account-secondary-button) {
+  min-height: var(--saas-control); padding: 0 16px; gap: 7px; border-radius: var(--saas-radius-pill);
+  font: 600 var(--saas-text-sm)/1.2 var(--saas-font); text-decoration: none;
+}
+.awwo-account-dialog .account-primary-button { border: 1px solid transparent; background: var(--saas-primary); color: var(--saas-on-primary); }
+.awwo-account-dialog .account-primary-button:not(:disabled):hover { border-color: transparent; background: var(--saas-primary-hover); color: var(--saas-on-primary); filter: none; }
+.awwo-account-dialog .account-primary-button:not(:disabled):active { background: var(--saas-primary-active); color: var(--saas-on-primary); }
+.awwo-account-dialog .account-secondary-button { border: 1px solid var(--saas-border-strong); background: var(--saas-card); color: var(--saas-text); }
+.awwo-account-dialog .account-secondary-button:not(:disabled):hover { border-color: color-mix(in srgb, var(--saas-border-strong) 70%, var(--saas-text)); background: color-mix(in srgb, var(--saas-text) 4%, var(--saas-card)); }
+/* An icon button is the icon: no text padding to squeeze it (it used to shrink to a dot). */
+.awwo-account-dialog .account-icon-button {
+  display: inline-grid; place-items: center; width: var(--saas-control); min-width: var(--saas-control); height: var(--saas-control); min-height: var(--saas-control); padding: 0;
+  border: 1px solid var(--saas-border-strong); border-radius: 50%; background: var(--saas-card); color: var(--saas-muted);
+}
+.awwo-account-dialog .account-icon-button:not(:disabled):hover { border-color: color-mix(in srgb, var(--saas-border-strong) 70%, var(--saas-text)); background: var(--saas-soft); color: var(--saas-text); }
+.awwo-account-dialog :is(.account-icon-button, .awwo-icon-button, .account-primary-button, .account-secondary-button) svg { flex: none; }
+.awwo-account-dialog .account-notice { border-color: color-mix(in srgb, var(--saas-danger) 35%, transparent); border-radius: var(--saas-radius-sm); background: var(--saas-danger-bg); color: var(--saas-danger); font-size: var(--saas-text-sm); }
+.awwo-account-dialog .account-member-list { gap: 0; border-color: var(--saas-hairline); border-radius: var(--saas-radius); background: var(--saas-card); }
+.awwo-account-dialog .account-member-row { padding: 12px 14px; background: transparent; }
+.awwo-account-dialog .account-member-row + .account-member-row { border-top: 1px solid var(--saas-hairline); }
+.awwo-account-dialog .account-member-row .account-avatar { border-radius: 50%; }
+.awwo-account-dialog .account-list-pager { gap: 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.awwo-account-dialog .account-invite-panel { margin-top: 18px; padding-top: 18px; border-top-color: var(--saas-hairline); }
+.awwo-account-dialog .account-invite-heading { color: var(--saas-text); font-size: var(--saas-text-md); }
+.awwo-account-dialog .account-invite-heading svg { color: var(--saas-muted); }
+.awwo-account-dialog .account-invite-result { border-color: color-mix(in srgb, var(--saas-accent) 28%, transparent); border-radius: var(--saas-radius); background: var(--saas-accent-soft); }
+.awwo-account-dialog .account-invite-result code { color: var(--saas-text); font-family: var(--saas-font-mono); font-size: 11px; }
+.awwo-account-dialog .account-member-add { gap: 10px 12px; padding: 18px 0 4px; }
+.awwo-account-dialog .account-member-add > p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.6; }
+.awwo-account-dialog .account-invite-list h3 { margin: 0 0 4px; font-size: var(--saas-text-sm); font-weight: 650; }
+.awwo-account-dialog .account-invite-list > p { margin: 0 0 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.awwo-account-dialog .account-invite-row { border-top-color: var(--saas-hairline); font-size: var(--saas-text-sm); }
+@media (max-width: 480px) {
+  /* max-width: the browser caps a modal dialog at 100% - 2em - 6px, which kept this phone width from applying. */
+  .awwo-account-dialog, .saas-account-actions .awwo-account-dialog, :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .awwo-account-dialog-header, .saas-account-actions .awwo-account-dialog-header, :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog-header { padding: 8px 8px 8px 16px; }
+}
+@media (max-width: 520px) {
+  .awwo-account-dialog-body { padding: 14px 12px 20px; }
+  .awwo-account-dialog .account-workspace-header { margin-bottom: 14px; }
+  .awwo-account-dialog .account-section { padding: 16px 14px; }
+  .awwo-account-dialog .account-identity-card { padding: 14px; }
+  .awwo-account-dialog .account-workspace-header h1 { font-size: var(--saas-text-2xl); }
+}
+
+/* ── Admin pages ─────────────────────────────────────────────────────────────────────────────── */
+/* The way back sits beside the logo as a quiet link, not alone in the middle of the bar. */
+.saas-dashboard > header > a:not(.saas-logo) {
+  display: inline-flex; align-items: center; min-height: var(--saas-control); margin-right: auto; padding: 0 14px;
+  border-radius: var(--saas-radius-pill); color: var(--saas-muted); font: 500 var(--saas-text-sm)/1 var(--saas-font); text-decoration: none;
+  transition: background-color var(--saas-dur-1), color var(--saas-dur-1);
+}
+.saas-dashboard > header > a:not(.saas-logo):hover { background: var(--saas-soft); color: var(--saas-text); }
+.saas-admin-summary { margin-bottom: 24px; padding: 24px 28px; border-color: var(--saas-hairline); border-radius: var(--saas-radius-xl); background: var(--saas-card); }
+.saas-admin-summary h2 { font: 650 17px/1.35 var(--saas-font); }
+/* The figures sit in one ruled row, as the main site's account figures. */
+.saas-admin-summary-values { gap: 0; margin: 22px 0 16px; padding-top: 16px; border-top: 1px solid var(--saas-hairline); }
+.saas-admin-summary-values > div { padding: 2px 20px; }
+.saas-admin-summary-values > div:first-child { padding-left: 0; }
+.saas-admin-summary-values > div + div { border-left: 1px solid var(--saas-hairline); }
+/* Proportional figures: each is a single value, and the tabular ones carry a footed 1 and a dotted 0. */
+.saas-admin-summary-values dd { margin-top: 8px; color: var(--saas-text); font: 650 28px/1.1 var(--saas-font-display); font-stretch: var(--saas-head-stretch); letter-spacing: 0; font-variant-numeric: proportional-nums; }
+.saas-admin-summary-active dd { color: var(--saas-text); }
+.saas-admin-summary-active dt::before { content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 7px 1px 0; border-radius: 50%; background: var(--saas-signal); vertical-align: middle; }
+.saas-admin-summary-time { padding-top: 0; border-top: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+@media (max-width: 760px) {
+  .saas-admin-summary { padding: 20px; }
+  .saas-admin-summary-values { gap: 16px 0; }
+  .saas-admin-summary-values > div, .saas-admin-summary-values > div:first-child { padding: 0 12px 0 0; }
+  .saas-admin-summary-values > div + div { border-left: 0; }
+}
+/* Sections switch like the main site's segmented filters; Refresh is an action, set apart at the end. */
+.saas-admin-tabs { align-items: center; gap: 4px; }
+.saas-admin-tabs > button[aria-pressed] { border-color: transparent; background: transparent; color: var(--saas-muted); font-weight: 500; }
+.saas-admin-tabs > button[aria-pressed]:not(:disabled):hover { border-color: transparent; background: var(--saas-soft); color: var(--saas-text); }
+.saas-admin-tabs > button[aria-pressed='true'], .saas-admin-tabs > button[aria-pressed='true']:not(:disabled):hover { background: var(--saas-soft-strong); color: var(--saas-text); font-weight: 600; }
+.saas-admin-tabs > button:not([aria-pressed]) { margin-left: auto; }
+.saas-admin-tools p, .saas-runtime-values dt { opacity: 1; color: var(--saas-muted); }
+.saas-table-wrap { border-color: var(--saas-hairline); border-radius: var(--saas-radius-lg); box-shadow: none; }
+.saas-table-wrap tbody tr:last-child > td { border-bottom: 0; }
+.saas-table-wrap tbody tr:hover > td { background: color-mix(in srgb, var(--saas-text) 2.5%, transparent); }
+/* A cell stays a table cell, so its rule lines up with the rest of the row (a flex cell drew its own). */
+.saas-table-wrap td.saas-admin-actions { display: table-cell; white-space: nowrap; }
+.saas-table-wrap td.saas-admin-actions > * + * { margin-left: 8px; }
+/* On a phone a table scrolls sideways inside its card instead of squeezing every column to one character. */
+@media (max-width: 760px) { .saas-table-wrap table { min-width: 680px; } }
