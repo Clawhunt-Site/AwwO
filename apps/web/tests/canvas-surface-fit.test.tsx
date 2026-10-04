@@ -10,6 +10,10 @@
 // Part 2 — fitting to the REAL stage. A focused node (delivery drawer included) is capped so it
 // never overflows the stage, and the overview refits when the stage changes shape (window resize,
 // a side rail toggling) — but never while a node is focused, since that camera is the operator's.
+//
+// Part 3 — opening a node where it is. Opening keeps the card's corner where it sat on screen (it is
+// never re-centred) and moves the camera only as far as the stage needs; every way out of the open
+// node — closing it, deleting it — glides back to the operator's camera, which is also the one saved.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
@@ -67,6 +71,8 @@ function expectBoxOnStage(world: HTMLElement, box: { x: number; y: number; w: nu
 }
 
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+/** Opening and closing a node glide the camera (260 ms); wait for the glide to land. */
+const glideDone = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 340)); });
 
 beforeEach(() => {
   cleanup();
@@ -117,6 +123,7 @@ describe('CanvasSurface fits the real stage', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话', exact: true }));
     const tile = await screen.findByTestId('canvas-tile-s1');
     await waitFor(() => expect(tile.dataset.lod).toBe('focus'));
+    await glideDone();
     expect(document.querySelector('.canvas-root')).toHaveAttribute('data-narrow-focus', 'true');
     expect(tile.style.width).toBe('520px');
     expect(transformOf(document.querySelector('.canvas-world') as HTMLElement)[2]).toBeGreaterThanOrEqual(0.95);
@@ -131,6 +138,7 @@ describe('CanvasSurface fits the real stage', () => {
     const world = document.querySelector('.canvas-world') as HTMLElement;
     fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话', exact: true }));
     await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    await glideDone();
     const scale = expectBoxOnStage(world, { x: 900, y: 700, w: 1400, h: 900 }, stage);
     // Below fitBounds' 0.75 readable floor: only the cap can put the whole node on stage.
     expect(scale).toBeLessThan(0.75);
@@ -201,6 +209,7 @@ describe('CanvasSurface fits the real stage', () => {
     // Focused: the operator owns the camera, a resize must not move it.
     fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话', exact: true }));
     await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    await glideDone();
     const focused = world.style.transform;
     stage.w = 1000; stage.h = 700;
     act(() => deliverResize());
@@ -280,6 +289,141 @@ describe('CanvasSurface stage chrome', () => {
   });
 });
 
+describe('CanvasSurface opens a node where it is', () => {
+  const stage = { w: 1600, h: 1000 };
+  // A personal camera (zoomed out to 0.8 and panned). Only the root is measured here and the
+  // ResizeObserver never delivers, so nothing refits: the saved camera is the one the canvas opens on.
+  const personal = { x: 40, y: 30, scale: 0.8 };
+  const open = async () => {
+    fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话', exact: true }));
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    await glideDone();
+  };
+  // Through canvasStorage(), whatever account scope an earlier test left configured.
+  beforeEach(() => {
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 200, y: 150 }), view: personal }));
+    stubRootSize(stage.w, stage.h);
+  });
+
+  it('keeps the card\'s corner where it sat, zoomed to a readable scale, with the whole node on stage', async () => {
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    expect(world.style.transform).toBe('translate(40px, 30px) scale(0.8)');
+    await open();
+    const [x, y, scale] = transformOf(world);
+    expect(scale).toBeGreaterThan(personal.scale);
+    expect(x + 200 * scale).toBeCloseTo(200, 3);
+    expect(y + 150 * scale).toBeCloseTo(150, 3);
+    const tile = screen.getByTestId('canvas-tile-s1');
+    expectBoxOnStage(world, { x: 200, y: 150, w: parseFloat(tile.style.width), h: parseFloat(tile.style.height) }, stage);
+    expect(document.querySelector('.canvas-root')).toHaveAttribute('data-node-open', 'true');
+  });
+
+  it('moves the camera only as far as the stage needs when the card sits near an edge', async () => {
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 1700, y: 1000 }), view: personal }));
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    await open();
+    const tile = screen.getByTestId('canvas-tile-s1');
+    const width = parseFloat(tile.style.width), height = parseFloat(tile.style.height);
+    const [x, y, scale] = transformOf(world);
+    // Pinned to the padded bottom-right corner (28 px sides, 82 px bottom), not centred.
+    expect(x + (1700 + width) * scale).toBeCloseTo(stage.w - 28, 3);
+    expect(y + (1000 + height) * scale).toBeCloseTo(stage.h - 82, 3);
+  });
+
+  it('glides back to the operator\'s camera when the node closes, by Escape or by its close button', async () => {
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    await open();
+    expect(world.style.transform).not.toBe('translate(40px, 30px) scale(0.8)');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await glideDone();
+    expect(world.style.transform).toBe('translate(40px, 30px) scale(0.8)');
+    expect(document.querySelector('.canvas-root')).not.toHaveAttribute('data-node-open');
+    await open();
+    fireEvent.click(within(screen.getByTestId('canvas-tile-s1')).getByRole('button', { name: '收起节点' }));
+    await glideDone();
+    expect(world.style.transform).toBe('translate(40px, 30px) scale(0.8)');
+  });
+
+  it('still returns to the operator\'s camera when the node is reopened during the glide back', async () => {
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    await open();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 60)); });
+    fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话', exact: true }));
+    await glideDone();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await glideDone();
+    expect(world.style.transform).toBe('translate(40px, 30px) scale(0.8)');
+  });
+
+  it('returns to the operator\'s camera when the open node is deleted', async () => {
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    await open();
+    const tile = within(screen.getByTestId('canvas-tile-s1'));
+    fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(tile.getByRole('button', { name: '删除', exact: true }));
+    await glideDone();
+    expect(screen.queryByTestId('canvas-tile-s1')).toBeNull();
+    expect(world.style.transform).toBe('translate(40px, 30px) scale(0.8)');
+  });
+
+  it('closes a node whose addition is undone, back to the camera from before it was added', async () => {
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    const before = world.style.transform;
+    fireEvent.doubleClick(document.querySelector('.canvas-viewport') as HTMLElement, { clientX: 700, clientY: 500 });
+    await waitFor(() => expect(document.querySelector('.canvas-root')).toHaveAttribute('data-node-open', 'true'));
+    await glideDone();
+    expect(world.style.transform).not.toBe(before);
+    fireEvent.click(screen.getByRole('button', { name: '撤销', exact: true }));
+    await glideDone();
+    expect(document.querySelectorAll('.canvas-tile')).toHaveLength(1);
+    expect(document.querySelector('.canvas-root')).not.toHaveAttribute('data-node-open');
+    expect(document.querySelector('.canvas-tile--focus')).toBeNull();
+    expect(world.style.transform).toBe(before);
+    // With nothing open, the camera is saved again where the operator takes it.
+    fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
+    const zoomed = transformOf(world);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
+    const saved = JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument;
+    expect([saved.view!.x, saved.view!.y, saved.view!.scale]).toEqual(zoomed);
+  });
+
+  it('leaves the camera where Fit All put it when a review partner is added afterwards', async () => {
+    const output = { id: 'result', label: '结果', type: 'markdown' as const, required: true, value: '' };
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 200, y: 150, contract: { version: 1, inputs: [], outputs: [output] } }), view: personal }));
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: '查看全部节点', exact: true }));
+    const fitted = world.style.transform;
+    expect(fitted).not.toBe('translate(40px, 30px) scale(0.8)');
+    fireEvent.click(screen.getByRole('button', { name: '协作设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加互审搭档' }));
+    await glideDone();
+    expect(document.querySelectorAll('.canvas-tile')).toHaveLength(2);
+    expect(world.style.transform).toBe(fitted);
+  });
+
+  it('saves the operator\'s camera, not the open node\'s, so leaving from an open node reopens where they were', async () => {
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    // The operator's own camera first, so the save has something new to record.
+    fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
+    const mine = transformOf(world);
+    expect(mine).not.toEqual([personal.x, personal.y, personal.scale]);
+    await open();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
+    const saved = JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument;
+    expect([saved.view!.x, saved.view!.y, saved.view!.scale]).toEqual(mine);
+  });
+});
+
 // Last on purpose: the cloud canvas scopes the storage namespace for the rest of the process,
 // so every local-mode test in this file has to run before it.
 describe('CanvasSurface fits the real stage (cloud rails)', () => {
@@ -332,6 +476,7 @@ describe('CanvasSurface fits the real stage (cloud rails)', () => {
     // Focused: a rail toggle leaves the camera where the operator put it.
     fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话', exact: true }));
     await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    await glideDone();
     const focused = world.style.transform;
     fireEvent.click(screen.getByRole('button', { name: '展开 Bot 清单' }));
     await settle();
@@ -352,5 +497,116 @@ describe('CanvasSurface fits the real stage (cloud rails)', () => {
       expect(shelf()).toHaveClass('is-collapsed');
       expect(localStorage.getItem(RAIL_MODEL_KEY)).toBe('1');
     } finally { Object.defineProperty(window, 'innerWidth', { configurable: true, value: width }); }
+  });
+});
+
+describe('CanvasSurface keeps an opened node clear of the inspector (cloud)', () => {
+  it('opened for configuration, a node near the right edge stays left of the floating inspector', async () => {
+    const stage = { w: 1600, h: 1000 };
+    stubStage(stage);
+    const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
+    configureCanvasStorage('user', tenant.id, 'canvas');
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    // On screen the card sits at x = 2000 × 0.8 − 800 = 800 px: opened in place at 1.25× (520 px wide
+    // opened, 650 px on screen) its right edge would reach 1450 px, under the 360 px inspector.
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 2000, y: 300 }), view: { x: -800, y: 0, scale: 0.8 } }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }))));
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={async () => ({ agents: [], models: [] })} />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    const tile = within(await screen.findByTestId('canvas-tile-s1'));
+    expect(world.style.transform).toBe('translate(-800px, 0px) scale(0.8)');
+    fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(tile.getByRole('button', { name: '配置', exact: true }));
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    await glideDone();
+    expect(document.querySelector('.canvas-root > .canvas-inspector')).not.toBeNull();
+    const opened = screen.getByTestId('canvas-tile-s1');
+    const [x, , scale] = transformOf(world);
+    // 12 px inset + 360 px inspector + 16 px clear space on the right: pinned against that edge.
+    expect(x + (2000 + parseFloat(opened.style.width)) * scale).toBeCloseTo(stage.w - 388, 3);
+  });
+
+  it('keeps the node clear of the inspector when it re-fits while being configured (its deliverables open)', async () => {
+    const stage = { w: 1600, h: 1000 };
+    stubStage(stage);
+    const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
+    configureCanvasStorage('user', tenant.id, 'canvas');
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 2000, y: 300 }), view: { x: -800, y: 0, scale: 0.8 } }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }))));
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={async () => ({ agents: [], models: [] })} />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    const tile = within(await screen.findByTestId('canvas-tile-s1'));
+    fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(tile.getByRole('button', { name: '配置', exact: true }));
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    await glideDone();
+    // The deliverables widen the node; it re-fits a frame later, with the inspector still open.
+    fireEvent.click(within(screen.getByTestId('canvas-tile-s1')).getByRole('button', { name: '展开交付物' }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 420)); });
+    expect(document.querySelector('.canvas-root > .canvas-inspector')).not.toBeNull();
+    const opened = screen.getByTestId('canvas-tile-s1');
+    const [x, , scale] = transformOf(world);
+    expect(x + (parseFloat(opened.style.left) + parseFloat(opened.style.width)) * scale).toBeLessThanOrEqual(stage.w - 388 + 0.001);
+  });
+
+  it('gives up part of that clear space before the node would drop below the readable scale', async () => {
+    // A 700 px stage: the full 388 px reserve would leave 284 px for a 520 px node (0.55×).
+    const stage = { w: 700, h: 1000 };
+    stubStage(stage);
+    const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
+    configureCanvasStorage('user', tenant.id, 'canvas');
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 500, y: 300 }), view: { x: 0, y: 0, scale: 0.8 } }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }))));
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={async () => ({ agents: [], models: [] })} />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    const tile = within(await screen.findByTestId('canvas-tile-s1'));
+    expect(world.style.transform).toBe('translate(0px, 0px) scale(0.8)');
+    fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(tile.getByRole('button', { name: '配置', exact: true }));
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    await glideDone();
+    const opened = screen.getByTestId('canvas-tile-s1');
+    const width = parseFloat(opened.style.width);
+    const [x, , scale] = transformOf(world);
+    expect(scale).toBeCloseTo(0.75, 3);
+    // The reserve that leaves: 700 − 28 − 520 × 0.75 = 282 px, so the node ends 282 px from the right.
+    const reserve = stage.w - 28 - width * 0.75;
+    expect(x + (500 + width) * scale).toBeCloseTo(stage.w - reserve, 3);
+  });
+
+  it('reserves nothing where the inspector spans the stage (the hosted app at phone width), and still does on the desktop', async () => {
+    const stage = { w: 700, h: 1000 };
+    stubStage(stage);
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('max-width: 760px'), media: query, onchange: null,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+    }));
+    const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
+    configureCanvasStorage('user', tenant.id, 'canvas');
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }))));
+    const openForConfiguration = async (shell: boolean) => {
+      canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 500, y: 300 }), view: { x: 0, y: 0, scale: 0.8 } }));
+      const surface = <CanvasSurface storageMode="cloud" runtimeReadJson={async () => ({ agents: [], models: [] })} />;
+      const view = render(shell ? <div className="saas-canvas-shell">{surface}</div> : surface);
+      const tile = within(await screen.findByTestId('canvas-tile-s1'));
+      fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+      fireEvent.click(tile.getByRole('button', { name: '配置', exact: true }));
+      await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+      await glideDone();
+      const opened = screen.getByTestId('canvas-tile-s1');
+      const scale = transformOf(document.querySelector('.canvas-world') as HTMLElement)[2];
+      const size = { w: parseFloat(opened.style.width), h: parseFloat(opened.style.height) };
+      view.unmount();
+      return { scale, size };
+    };
+    // In the hosted app the inspector covers the whole stage there: the node opens as without one.
+    const hosted = await openForConfiguration(true);
+    expect(hosted.scale).toBeCloseTo(Math.min(1.25, (stage.w - 56) / hosted.size.w, (stage.h - 106) / hosted.size.h), 3);
+    // The desktop's inspector stays a 360 px panel at that width, so the node still keeps clear of it.
+    const desktop = await openForConfiguration(false);
+    expect(desktop.scale).toBeCloseTo(0.75, 3);
   });
 });

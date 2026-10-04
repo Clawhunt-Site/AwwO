@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, emptyDocument, loadDocumentWithStatus, type SessionNode } from '../src/canvas/canvasDoc';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
@@ -145,6 +145,32 @@ it('waits for native settlement before publishing output or enabling edits', asy
   await screen.findByText(/运行完成：1\/1/);
   expect(screen.getByRole('button', { name: '添加 Agent', exact: true })).not.toBeDisabled();
   expect(loadDocumentWithStatus().doc.nodes[0].lastOutput?.source).toBe('run');
+});
+
+it('returns to the operator\'s camera after opening a delivery from the run summary', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown) => String(url).endsWith('/settle')
+    ? new Response(JSON.stringify({ confirmed: true, status: 'succeeded', holdId: 'native-hold' }))
+    : new Response('{}', { status: 503 })));
+  const node = createAgentTemplate('data', { x: 200, y: 100 });
+  node.runtime = 'claude_local';
+  node.binding = { companyId: 'company', agentId: 'agent', agentName: 'Data agent' };
+  node.contract!.inputs[0].value = 'A ready brief';
+  localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes: [node], view: { x: 40, y: 30, scale: 0.8 } }));
+  render(<CanvasSurface />);
+  const world = document.querySelector('.canvas-world') as HTMLElement;
+  expect(world.style.transform).toBe('translate(40px, 30px) scale(0.8)');
+  fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+  await screen.findByText(/运行完成：1\/1/);
+  // Opening the delivery widens the node and refocuses it a frame later; both must keep the camera
+  // the operator had before it opened.
+  fireEvent.click(screen.getByRole('button', { name: '查看交付物', exact: true }));
+  await waitFor(() => expect(document.querySelector('.canvas-root')).toHaveAttribute('data-node-open', 'true'));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  expect(world.style.transform).not.toBe('translate(40px, 30px) scale(0.8)');
+  fireEvent.keyDown(window, { key: 'Escape' });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  expect(document.querySelector('.canvas-root')).not.toHaveAttribute('data-node-open');
+  expect(world.style.transform).toBe('translate(40px, 30px) scale(0.8)');
 });
 
 it('explains missing input when the operator runs one configured node', async () => {

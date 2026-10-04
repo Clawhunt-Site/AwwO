@@ -164,6 +164,21 @@ export function fitBounds(
 }
 
 /**
+ * Opens bounds where they are instead of centring them: at `scale`, the bounds' top-left corner keeps
+ * its current screen position under `view`, and the camera then moves only as far as needed to show
+ * the whole bounds inside the padded stage (`pad.right`, default `pad.x`, keeps a panel on the right
+ * clear). Bounds larger than the stage align to its top-left.
+ */
+export function openInPlace(view: ViewportState, bounds: Bounds, size: Size, scale: number, pad: FitPadding & { right?: number } = DEFAULT_FIT_PADDING): ViewportState {
+  const width = (bounds.maxX - bounds.minX) * scale;
+  const height = (bounds.maxY - bounds.minY) * scale;
+  const place = (at: number, start: number, end: number) => end < start ? start : Math.min(Math.max(at, start), end);
+  const left = place(bounds.minX * view.scale + view.x, pad.x, size.w - (pad.right ?? pad.x) - width);
+  const top = place(bounds.minY * view.scale + view.y, pad.top, size.h - pad.bottom - height);
+  return { scale, x: left - bounds.minX * scale, y: top - bounds.minY * scale };
+}
+
+/**
  * Whether the whole world-space bounds is on screen at `view` in a viewport of `size`
  * (edges inclusive). Used to decide if a saved viewport still shows the graph on THIS stage —
  * a view persisted on a wide monitor can leave half the graph off a laptop screen.

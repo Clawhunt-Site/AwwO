@@ -93,7 +93,7 @@ import { projectConversationTurns, updateConversationPresentation } from './conv
 import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserveThreadRuntime, rebindNodeThread, sessionStoreKey,
   updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
 import { arrangeNodePositions, presentationNodes } from './nodePresentation';
-import { boundsWithinViewport, fitBounds, fitOverview, focusWorld, visibleBoxIds, type ViewportState } from './viewport';
+import { boundsWithinViewport, fitBounds, fitOverview, focusWorld, MIN_READABLE_FIT_SCALE, openInPlace, visibleBoxIds, type ViewportState } from './viewport';
 import { RAIL_MODEL_KEY, isDesktopStage, readRailCollapsed, useDesktopStage, writeRailCollapsed } from './railState';
 import { paperclipApiBase } from '../paperclipBridge';
 import { gatewayApiBase } from '../chatAutomations';
@@ -107,6 +107,11 @@ const COALESCE_MS = 900;
 const HISTORY_LIMIT = 60;
 /** Stage padding reserved around a focused node (room for the composer and the delivery drawer). */
 const FOCUS_FIT_PADDING = { x: 28, top: 24, bottom: 82 } as const;
+/** How long opening or closing a node glides the camera. */
+const CAMERA_GLIDE_MS = 260;
+/** The inspector overlay (cloud canvases, forms): inset from the stage, width cap, and the clear space
+ *  a node opened for configuration keeps beside it. Below the 760 px breakpoint it spans the stage. */
+const INSPECTOR_OVERLAY = { inset: 12, width: 360, gap: 16 } as const;
 // The focused delivery overlays the conversation whenever the usable stage cannot fit both
 // panes at a readable scale, including laptops with both rails visible.
 const narrowFocusWidth = (stageWidth: number) => stageWidth > 0 && stageWidth <= 900 ? Math.max(280, stageWidth - FOCUS_FIT_PADDING.x * 2) : undefined;
@@ -448,6 +453,44 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [view, setView] = useState<ViewportState>(() => doc.view ?? { x: 0, y: 0, scale: 1 });
   const viewRef = useRef(view);
   viewRef.current = view;
+  // Opening and closing a node glide the camera, so the card is seen to grow out of where it sat and to
+  // shrink back into it. Every other camera change goes through moveCamera, which ends a glide first, so
+  // a pan, zoom, fit or waypoint during one is never overwritten by its next frame. Reduced motion jumps.
+  const glide = useRef<number | null>(null);
+  // Where a glide in progress will land: the camera to reason about while it moves.
+  const glideTarget = useRef<ViewportState | null>(null);
+  const stopGlide = useCallback(() => {
+    if (glide.current !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(glide.current);
+    glide.current = null;
+    glideTarget.current = null;
+  }, []);
+  const moveCamera = useCallback((next: ViewportState | ((previous: ViewportState) => ViewportState)) => {
+    stopGlide();
+    setView(next);
+  }, [stopGlide]);
+  /** Glides to `target`; the world point `anchor` travels in a straight line on screen while the zoom
+   *  changes geometrically (a node's corner, so the card stays under the eye). */
+  const glideTo = useCallback((target: ViewportState, anchor: { x: number; y: number }) => {
+    stopGlide();
+    const from = viewRef.current;
+    const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduced || typeof requestAnimationFrame !== 'function' || !(from.scale > 0) || !(target.scale > 0)) { setView(target); return; }
+    glideTarget.current = target;
+    const fromX = anchor.x * from.scale + from.x, fromY = anchor.y * from.scale + from.y;
+    const toX = anchor.x * target.scale + target.x, toY = anchor.y * target.scale + target.y;
+    // Elapsed time is read from one clock: the frame timestamp's origin is not guaranteed to match.
+    const started = performance.now();
+    const frame = () => {
+      const t = Math.min(1, Math.max(0, (performance.now() - started) / CAMERA_GLIDE_MS));
+      const k = 1 - (1 - t) ** 3;
+      const scale = from.scale * (target.scale / from.scale) ** k;
+      setView(t >= 1 ? target : { scale, x: fromX + (toX - fromX) * k - anchor.x * scale, y: fromY + (toY - fromY) * k - anchor.y * scale });
+      glide.current = t >= 1 ? null : requestAnimationFrame(frame);
+      if (t >= 1) glideTarget.current = null;
+    };
+    glide.current = requestAnimationFrame(frame);
+  }, [stopGlide]);
+  useEffect(() => stopGlide, [stopGlide]);
   // The camera the app itself last fitted to the overview. While the live view is still that camera
   // (within tap slop, same scale) the operator has not taken it, so a stage change may refit it; a real
   // pan, a zoom, a focus or a waypoint moves it further and the camera is the operator's from then on.
@@ -455,8 +498,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: { w: number; h: number }) => {
     const next = fitNodeOverview(fitNodes, box);
     lastAutoView.current = next;
-    setView(next);
-  }, []);
+    moveCamera(next);
+  }, [moveCamera]);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const sizeRef = useRef(size);
   sizeRef.current = size;
@@ -498,6 +541,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (!nodes.length || !box || inspectorCloseLocked.current) return;
     setInspectorId(null);
     setFocusedId(null);
+    focusReturn.current = null;
     autoFit(nodes, box);
   }, [nodes, viewportSize, autoFit]);
 
@@ -546,29 +590,50 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [size, railsVersion, modelRailCollapsed, viewportSize, autoFit]);
 
   const focusNode = useCallback(
-    (nodeId: string) => {
+    (nodeId: string, options: { configure?: boolean } = {}) => {
       if (inspectorCloseLocked.current) return;
       const box = viewportSize();
       const node = presentationNodes(docRef.current.nodes, nodeId, narrowFocusWidth(box?.w ?? sizeRef.current.w)).find((n) => n.id === nodeId);
       if (!node) return;
-      if (focusedId !== nodeId) {
-        if (!focusedId) focusReturn.current = viewRef.current;
-        setInspectorId(current => current === nodeId ? current : null);
-      }
+      // The camera as it will be once a glide in progress lands: reopening mid-glide must not take a
+      // passing frame for the operator's camera.
+      const current = glideTarget.current ?? viewRef.current;
+      // The operator's camera is kept from the first open until the node is left: every way out clears
+      // it, so an empty one means nothing is open, whatever render this callback came from.
+      if (focusReturn.current === null) focusReturn.current = current;
+      if (focusedId !== nodeId) setInspectorId(current => current === nodeId ? current : null);
       setFocusedId(nodeId);
       setSelection([nodeId]);
       if (!box) return;
       // Cap the focus scale so the whole node — delivery drawer included — fits the stage inside
-      // the focus padding; fitBounds' readable floor otherwise lets a wide node overflow it.
+      // the focus padding.
       const pad = FOCUS_FIT_PADDING;
-      const availW = Math.max(120, box.w - pad.x * 2);
       const availH = Math.max(120, box.h - pad.top - pad.bottom);
+      // Opened to be configured (or re-fitted while its inspector is open) where the inspector floats
+      // over the stage (cloud canvases, forms), the node keeps clear of it, as far as it can while
+      // staying readable: the reserve shrinks before the node would drop below the readable scale.
+      // Where the inspector spans the stage instead (the hosted app at 760 px and below), nothing is
+      // reserved.
+      const spansStage = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 760px)').matches)
+        && Boolean(rootRef.current?.closest('.saas-canvas-shell'));
+      const inspectorRoom = INSPECTOR_OVERLAY.inset + Math.min(INSPECTOR_OVERLAY.width, box.w - INSPECTOR_OVERLAY.inset * 2) + INSPECTOR_OVERLAY.gap;
+      const readable = Math.min(MIN_READABLE_FIT_SCALE, availH / Math.max(1, node.h));
+      const configuring = options.configure || inspectorRef.current === nodeId;
+      const right = configuring && (canInitialize || node.kind === 'form') && !spansStage
+        ? Math.max(pad.x, Math.min(inspectorRoom, box.w - pad.x - node.w * readable)) : pad.x;
+      const availW = Math.max(120, box.w - pad.x - right);
       const maxScale = Math.min(1.25, availW / Math.max(1, node.w), availH / Math.max(1, node.h));
-      setView(fitBounds({ minX: node.x, minY: node.y, maxX: node.x + node.w, maxY: node.y + node.h }, box,
-        { minScale: 0.2, maxScale }, pad));
+      // Open the node where it is, never re-centred: the operator's own zoom when it is readable and the
+      // node fits, the card's corner kept where it sat on screen, moved only as far as the stage needs.
+      const scale = current.scale >= 1 && current.scale <= maxScale ? current.scale : maxScale;
+      glideTo(openInPlace(current, { minX: node.x, minY: node.y, maxX: node.x + node.w, maxY: node.y + node.h }, box, scale, { ...pad, right }),
+        { x: node.x, y: node.y });
     },
-    [focusedId, viewportSize],
+    [focusedId, viewportSize, glideTo, canInitialize],
   );
+  // The latest focusNode, for a focus deferred to the next frame (an older one judges a stale render).
+  const focusNodeRef = useRef(focusNode);
+  focusNodeRef.current = focusNode;
 
   const arrangeNodes = useCallback(() => {
     if (!canEditStructure()) return;
@@ -576,19 +641,29 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     patchDoc(previous => ({ ...previous, nodes: arranged }), { label: 'arrange:nodes' });
     setInspectorId(null);
     setFocusedId(null);
+    focusReturn.current = null;
     const box = viewportSize();
     if (box) autoFit(arranged, box);
   }, [canEditStructure, patchDoc, viewportSize, autoFit]);
 
+  /** The camera the operator had before opening a node, glided back to (and forgotten), so leaving a
+   *  node — closing it, deleting it, adding a review partner from it — lands where they were. */
+  const restoreFocusCamera = useCallback(() => {
+    const back = focusReturn.current;
+    focusReturn.current = null;
+    // Only an open node has a camera to return from; with none open, a leftover one is just forgotten.
+    if (!back || !focusedRef.current) return;
+    const node = docRef.current.nodes.find(candidate => candidate.id === focusedRef.current);
+    if (node) glideTo(back, { x: node.x, y: node.y });
+    else moveCamera(back);
+  }, [glideTo, moveCamera]);
+
   const unfocus = useCallback(() => {
     if (inspectorCloseLocked.current) return;
     setInspectorId(null);
+    restoreFocusCamera();
     setFocusedId(null);
-    if (focusReturn.current) {
-      setView(focusReturn.current);
-      focusReturn.current = null;
-    }
-  }, []);
+  }, [restoreFocusCamera]);
 
   const toggleFocus = useCallback(
     (nodeId?: string) => {
@@ -612,11 +687,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setSelection([nextId]);
         const n = renderNodes.find((x) => x.id === nextId);
         if (n && sizeRef.current.w) {
-          setView(focusWorld(viewRef.current, n.x + n.w / 2, n.y + n.h / 2, sizeRef.current));
+          moveCamera(focusWorld(viewRef.current, n.x + n.w / 2, n.y + n.h / 2, sizeRef.current));
         }
       }
     },
-    [nodes, renderNodes, selection, focusedId, focusNode],
+    [nodes, renderNodes, selection, focusedId, focusNode, moveCamera],
   );
 
   // ---- waypoints ----------------------------------------------------------------------------
@@ -633,7 +708,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const recallWaypoint = useCallback(
     (slot: number) => {
       const wp = doc.waypoints.find((w) => w.slot === slot);
-      if (wp) setView(wp.view);
+      if (wp) moveCamera(wp.view);
     },
     [doc.waypoints],
   );
@@ -1306,8 +1381,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const w = Math.max(220, node.w + (open ? 260 : -260));
       return { ...node, deliverablesOpen: open, w, x: node.x - (w - node.w) / 2 };
     }) }), { silent: true });
-    requestAnimationFrame(() => focusNode(nodeId));
-  }, [canEditStructure, patchDoc, focusNode]);
+    requestAnimationFrame(() => focusNodeRef.current(nodeId));
+  }, [canEditStructure, patchDoc]);
 
   const addNode = useCallback(
     (kind: AddNodeKind, world: { x: number; y: number }) => {
@@ -1323,7 +1398,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           : createAgentTemplate(kind, world, locale);
       patchDoc((prev) => ({ ...prev, nodes: [...prev.nodes, node] }), { label: `add:${node.id}` });
       setSelection([node.id]);
-      focusNode(node.id);
+      focusNode(node.id, { configure: true });
       setInspectorId(node.id);
       return node;
     },
@@ -1406,10 +1481,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         for (const key of keys) { resetSession(key); forgetNode(key); }
       }
       setSelection((prev) => prev.filter((id) => !kill.has(id)));
+      if (focusedRef.current && kill.has(focusedRef.current)) restoreFocusCamera();
       setFocusedId((prev) => (prev && kill.has(prev) ? null : prev));
       setInspectorId((prev) => (prev && kill.has(prev) ? null : prev));
     },
-    [canEditStructure, patchDoc],
+    [canEditStructure, patchDoc, restoreFocusCamera],
   );
 
   const saveNode = useCallback(
@@ -1504,6 +1580,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   // ---- overlays -----------------------------------------------------------------------------
   const [inspectorId, setInspectorId] = useState<string | null>(null);
+  // Live, for a focus that re-fits a node while it is being configured (focusNode reads it).
+  const inspectorRef = useRef<string | null>(null);
+  inspectorRef.current = inspectorId;
+  // A node can leave the document without being closed: undoing its addition, a redo, an edit in
+  // another tab. It closes then as deleting it would (back to the operator's camera), and an
+  // inspector left on a missing node closes too.
+  useEffect(() => {
+    if (focusedId && !nodes.some(node => node.id === focusedId)) { restoreFocusCamera(); setFocusedId(null); }
+    if (inspectorId && !nodes.some(node => node.id === inspectorId) && !inspectorCloseLocked.current) setInspectorId(null);
+  }, [nodes, focusedId, inspectorId, restoreFocusCamera]);
   const inspectorNode = inspectorId ? nodes.find((n) => n.id === inspectorId) ?? null : null;
   // Viewport culling: tiles outside the visible world rect (plus margin) are not mounted.
   // SessionTile's header contract assumes this — a culled-and-remounted tile must not lose
@@ -1563,7 +1649,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     [patchDoc],
   );
   const tileOnConfigure = useCallback(
-    (id: string) => { if (!inspectorCloseLocked.current) { setInspectorId(id); focusNode(id); } },
+    (id: string) => { if (!inspectorCloseLocked.current) { setInspectorId(id); focusNode(id, { configure: true }); } },
     [focusNode],
   );
   const tileDelete = useCallback(
@@ -1633,7 +1719,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const commandActions: CanvasCommandActions = useMemo(
     () => readOnly ? ({
       fitAll, toggleTimeline: () => setTimelineOpen(o => !o),
-      toggleMinimap: () => setMinimapOpen(o => !o), recallWaypoint: () => recallWaypoint(1),
+      toggleMinimap: focusedId ? undefined : () => setMinimapOpen(o => !o), recallWaypoint: () => recallWaypoint(1),
     }) : ({
       addSession: (kind) => addAtViewCenter(kind),
       canEdit,
@@ -1641,7 +1727,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       stop: stopRun,
       fitAll,
       toggleTimeline: () => setTimelineOpen((o) => !o),
-      toggleMinimap: () => setMinimapOpen((o) => !o),
+      // While a node is open the minimap steps aside, so it is not offered then (as in the toolbar).
+      toggleMinimap: focusedId ? undefined : () => setMinimapOpen((o) => !o),
       // Slot 1 is the palette's default drawer for waypoints; the keyboard covers 1-9.
       saveWaypoint: () => saveWaypoint(1),
       recallWaypoint: () => recallWaypoint(1),
@@ -1656,7 +1743,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       canUndo: canEdit && history.undo > 0,
       canRedo: canEdit && history.redo > 0,
     }),
-    [readOnly, addAtViewCenter, canEdit, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo, runUnavailableReason],
+    [readOnly, addAtViewCenter, canEdit, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo, runUnavailableReason, focusedId],
   );
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
@@ -1685,6 +1772,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     patchDoc(prev => ({ ...prev, nodes: [...prev.nodes, ...template.nodes], edges: [...prev.edges, ...template.edges] }), { label: 'template:development' });
     setSelection([template.nodes[0].id]);
     setFocusedId(null);
+    focusReturn.current = null;
     fitted.current = true;
     const box = viewportSize();
     if (box) autoFit([...currentNodes, ...template.nodes], box);
@@ -1693,7 +1781,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const zoomBy = (factor: number) => {
     const box = viewportSize();
     if (!box) return;
-    setView(prev => {
+    moveCamera(prev => {
       const scale = Math.max(.1, Math.min(2.5, prev.scale * factor));
       const ratio = scale / prev.scale;
       return { scale, x: box.w / 2 - (box.w / 2 - prev.x) * ratio, y: box.h / 2 - (box.h / 2 - prev.y) * ratio };
@@ -1705,9 +1793,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (readOnly) return;
     // The viewport is not an edit: panning is navigation, and letting it clear the redo stack
     // would silently destroy a redo the user was about to reach for.
+    // While a node is open the camera is the node's; save the operator's, so leaving the canvas from an
+    // open node reopens where they were.
+    const kept = focusedRef.current && focusReturn.current ? focusReturn.current : view;
     const t = setTimeout(
-      () => patchDoc((prev) => (prev.view === view || (prev.view?.x === view.x && prev.view?.y === view.y && prev.view?.scale === view.scale)
-        ? prev : { ...prev, view }), { silent: true }),
+      () => patchDoc((prev) => (prev.view === kept || (prev.view?.x === kept.x && prev.view?.y === kept.y && prev.view?.scale === kept.scale)
+        ? prev : { ...prev, view: kept }), { silent: true }),
       400,
     );
     return () => clearTimeout(t);
@@ -1872,6 +1963,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         patchDoc(() => applied.doc, { label: `ai:${id}` });
         setLastPlanRevision(canvasPlanRevision(docRef.current));
         setFocusedId(null);
+        focusReturn.current = null;
         setInspectorId(null);
         setSelection(applied.addedNodeIds);
         setAssistantOpen(true);
@@ -2069,7 +2161,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       onClose={() => { if (!inspectorCloseLocked.current) setInspectorId(null); }}
       style={inline
         ? { position: 'relative', width: '100%', height: '100%', inset: 'auto', borderRadius: 0 }
-        : { position: 'absolute', top: 12, right: 12, bottom: 12, width: 'min(360px, calc(100% - 24px))', borderRadius: 12 }}
+        : { position: 'absolute', top: INSPECTOR_OVERLAY.inset, right: INSPECTOR_OVERLAY.inset, bottom: INSPECTOR_OVERLAY.inset,
+          width: `min(${INSPECTOR_OVERLAY.width}px, calc(100% - ${INSPECTOR_OVERLAY.inset * 2}px))`, borderRadius: 12 }}
     />
   );
 
@@ -2098,17 +2191,17 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           if (!canEditStructure()) return;
           const result = addReviewPartner(docRef.current, nodeId, locale);
           patchDoc(() => result.doc, { label: 'review-partner' });
-          setSelection([result.reviewerId]); setFocusedId(null);
+          setSelection([result.reviewerId]); restoreFocusCamera(); setFocusedId(null);
         }} />}
-      <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
+      <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id, { configure: true }); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
         onViewOutput={id => { toggleDeliverables(id, true); focusNode(id); setTimelineOpen(false); }}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
-    <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} ref={rootRef} {...nodeViewRoot}>
+    <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef} {...nodeViewRoot}>
       <CanvasViewport
         view={view}
-        onViewChange={setView}
+        onViewChange={moveCamera}
         onResize={setSize}
         onBackgroundPointerDown={(e) => {
           wiring.clearPending();
@@ -2198,7 +2291,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.fitAll} title={viewText.fitAll} disabled={!nodes.length} onClick={fitAll}><Maximize2 size={16} /></button>
         <button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={readOnly || running || initializing || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
-        <button className="awwo-minimap-toggle" aria-label={viewText.showMinimap} title={viewText.showMinimap} aria-pressed={minimapOpen} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
+        <button className="awwo-minimap-toggle" aria-label={viewText.showMinimap} title={focusedId ? t('surface.minimapWhileOpen') : viewText.showMinimap} aria-pressed={minimapOpen} disabled={Boolean(focusedId)} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.undo} title={viewText.undo} disabled={readOnly || running || initializing || !history.undo} onClick={undo}><Undo2 size={16} /></button>
         <button aria-label={viewText.redo} title={viewText.redo} disabled={readOnly || running || initializing || !history.redo} onClick={redo}><Redo2 size={16} /></button>
@@ -2210,7 +2303,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           boxes={renderNodes}
           view={view}
           size={size}
-          onCenter={(wx, wy) => setView(focusWorld(viewRef.current, wx, wy, sizeRef.current))}
+          onCenter={(wx, wy) => moveCamera(focusWorld(viewRef.current, wx, wy, sizeRef.current))}
         />
       ) : null}
 

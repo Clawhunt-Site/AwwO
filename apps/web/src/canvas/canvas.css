@@ -973,7 +973,11 @@
   box-shadow: 0 18px 44px var(--shadow);
   cursor: crosshair;
   touch-action: none;
+  transition: opacity 160ms ease, visibility 160ms;
 }
+/* An open node opens where its card sat, so it can reach any corner of the stage: the map steps aside
+   rather than cover it (its composer usually sits right where the map does). */
+.canvas-root[data-node-open] .canvas-minimap { opacity: 0; visibility: hidden; pointer-events: none; }
 .canvas-minimap-node {
   position: absolute;
   border-radius: 3px;
