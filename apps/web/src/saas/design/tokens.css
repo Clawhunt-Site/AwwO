@@ -1,0 +1,302 @@
+/* AwwO design foundation for the hosted app: colour, type, space, radius, depth and motion.
+ *
+ * Aligned with the ClawHunt main site's "Tide Pool" system (light "Low tide", dark "Night dive") and its
+ * AwwO family pages, so moving between clawhunt and AwwO feels like one product: salt paper, abyss ink,
+ * ink-filled pill actions, teal for links, focus and live work, the AwwO orb as the product's mark.
+ *
+ * Authority, highest first:
+ *   1. Kernel appearance tokens (--bg-base, --bg-sidebar, --bg-card, --border-light, --text-primary,
+ *      --text-secondary, --accent, --warn, --danger-bg, --agent-running). A saved account colour scheme
+ *      writes them inline on :root (AppearanceScope), so it always wins; the values here are only the
+ *      untouched default (the "default" preset writes nothing).
+ *   2. Semantic tokens (--saas-*). Components read these. Each is derived from the kernel tokens.
+ *   3. Bridges for the older families (--ios-*, --awwo-*, the canvas root's --page/--card/…, a node's
+ *      --awwo-card/…). Shared stylesheets keep their names and follow this system.
+ *
+ * Loaded after ios-theme.css with the same selectors, so these definitions are the ones that apply. */
+
+/* Mona Sans, as on the main site: Latin only (CJK keeps the platform's UI face), self-hosted with the
+   app, so nothing is fetched from a third party. SIL Open Font License, see fonts/LICENSE-mona-sans.txt. */
+@font-face {
+  font-family: 'Mona Sans';
+  src: url('./fonts/mona-sans-latin-standard-normal.woff2') format('woff2-variations');
+  font-weight: 200 900;
+  font-stretch: 75% 125%;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Mona Sans';
+  src: url('./fonts/mona-sans-latin-ext-standard-normal.woff2') format('woff2-variations');
+  font-weight: 200 900;
+  font-stretch: 75% 125%;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ── 1. Kernel defaults ─────────────────────────────────────────────────────────────────────── */
+:root {
+  --bg-base: #eef0ef;
+  --bg-sidebar: #f7f8f8;
+  --bg-card: #ffffff;
+  --border-light: #dde3e2;
+  --text-primary: #0b2230;
+  --text-secondary: #4b5d65;
+  --accent: #2b7ad8;
+  --accent-soft: #e1ecfb;
+  --warn: #8f5a0c;
+  --warn-soft: #f6ead3;
+  --danger-bg: #c8382f;
+  --agent-running: #2bb3bb;
+  --agent-running-soft: rgb(43 179 187 / 14%);
+  --sc-accent: #2b7ad8;
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  --bg-base: #07161f;
+  --bg-sidebar: #0a1c27;
+  --bg-card: #0c2230;
+  --border-light: #1f3a4b;
+  --text-primary: #e7eef0;
+  --text-secondary: #a3b5bc;
+  --accent: #4c9cf5;
+  --accent-soft: #11294a;
+  --warn: #e0a84a;
+  --warn-soft: #3a2c12;
+  --danger-bg: #ff7a70;
+  --agent-running: #5fe3e8;
+  --agent-running-soft: rgb(95 227 232 / 16%);
+  --sc-accent: #4c9cf5;
+  color-scheme: dark;
+}
+
+/* Theme-only values that no account scheme can express (status hues, depth, the canvas, the brand).
+   Status text is a step deeper than the main site's so it stays AA on its own soft chip. */
+:root {
+  --saas-success: #1d7049;
+  --saas-success-dot: #2f9e6b;
+  --saas-success-soft: #dcefe4;
+  --saas-warning-dot: #c98a1e;
+  --saas-shadow-xs: 0 1px 2px rgb(11 34 48 / 6%);
+  --saas-shadow-sm: 0 1px 2px rgb(11 34 48 / 5%), 0 2px 6px rgb(11 34 48 / 6%);
+  --saas-shadow-md: 0 12px 32px -14px rgb(11 34 48 / 22%), 0 2px 6px rgb(11 34 48 / 5%);
+  --saas-shadow-lg: 0 18px 48px -18px rgb(11 34 48 / 28%), 0 2px 6px rgb(11 34 48 / 6%);
+  --saas-shadow-xl: 0 28px 80px -24px rgb(11 34 48 / 42%);
+  --saas-scrim: rgb(7 22 31 / 46%);
+  --saas-canvas: color-mix(in srgb, var(--bg-base) 96%, var(--text-primary));
+  --saas-canvas-dot: color-mix(in srgb, var(--text-primary) 13%, transparent);
+  --saas-canvas-shadow: rgb(11 34 48 / 9%);
+  --saas-wire: color-mix(in srgb, var(--text-primary) 38%, transparent);
+  /* The main site's blue deepened toward the ink, as its --accent-ink: AA as text on paper, salt and
+     mist (in every light scheme), and white on it reads too. Fills (selection, ports, progress) take the
+     same blue. */
+  --saas-accent: color-mix(in oklab, var(--accent) 74%, var(--text-primary));
+  /* Links, focus and the "held" state are the tide-pool teal (AA on salt, foam and mist). */
+  --saas-link: #1c6f76;
+  --saas-link-hover: #13545a;
+  /* The AwwO family's live colour: glows, dots and rings of work in progress. */
+  --saas-bio: #2bb3bb;
+  --saas-bio-lilac: #8b78e6;
+  /* Floating surfaces (menus, popovers, panels): foam over the page, lifted by shadow. */
+  --saas-raised: var(--bg-card);
+  /* Text on accent and danger fills where relative colours are unsupported: both fills are deep here. */
+  --saas-accent-text: #fff;
+  --saas-on-danger: #fff;
+}
+:root[data-theme='dark'] {
+  --saas-success: #5cc28f;
+  --saas-success-dot: #4cb581;
+  --saas-success-soft: #12352a;
+  --saas-warning-dot: #e0a84a;
+  --saas-shadow-xs: 0 1px 2px rgb(0 0 0 / 40%);
+  --saas-shadow-sm: 0 1px 2px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 24%);
+  --saas-shadow-md: inset 0 1px 0 rgb(255 255 255 / 3%), 0 12px 32px -12px rgb(0 0 0 / 55%);
+  --saas-shadow-lg: inset 0 1px 0 rgb(255 255 255 / 3%), 0 18px 48px -16px rgb(0 0 0 / 60%);
+  --saas-shadow-xl: inset 0 1px 0 rgb(255 255 255 / 4%), 0 28px 80px -20px rgb(0 0 0 / 72%);
+  --saas-scrim: rgb(2 8 12 / 62%);
+  --saas-canvas: color-mix(in srgb, var(--bg-base) 72%, #000);
+  --saas-canvas-dot: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  --saas-canvas-shadow: rgb(0 0 0 / 45%);
+  --saas-wire: color-mix(in srgb, var(--text-primary) 34%, transparent);
+  --saas-accent: var(--accent);
+  --saas-link: #6cc6c8;
+  --saas-link-hover: #93dcdd;
+  --saas-bio: #5fe3e8;
+  --saas-bio-lilac: #a99bff;
+  /* In the dark, depth reads as light: floating surfaces sit a step above the card. */
+  --saas-raised: color-mix(in srgb, var(--bg-card) 92%, #fff);
+  /* The dark theme's accent and danger fills are light, so their text is ink. */
+  --saas-accent-text: #041219;
+  --saas-on-danger: #041219;
+}
+
+/* ── 2. Semantic tokens ─────────────────────────────────────────────────────────────────────── */
+:root, :root[data-theme='dark'] {
+  /* surfaces */
+  --saas-bg: var(--bg-base);
+  --saas-sidebar: var(--bg-sidebar);
+  --saas-card: var(--bg-card);
+  --saas-node: var(--bg-card);
+  --saas-input: var(--bg-card);
+  /* A filled field or chip ("mist" on the main site). */
+  --saas-field: color-mix(in srgb, var(--bg-base) 95%, var(--text-primary));
+  --saas-soft: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  --saas-soft-strong: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  /* text */
+  --saas-text: var(--text-primary);
+  --saas-muted: var(--text-secondary);
+  --saas-subtle: color-mix(in srgb, var(--text-secondary) 90%, var(--bg-card));
+  /* lines */
+  --saas-border: var(--border-light);
+  --saas-hairline: color-mix(in srgb, var(--border-light) 72%, transparent);
+  --saas-border-strong: color-mix(in srgb, var(--border-light) 86%, var(--text-primary));
+  /* Actions are ink pills, as on the main site (navy in the light, salt-white in the dark). The accent is
+     selection and emphasis; it is no longer the button colour. */
+  --saas-accent-soft: var(--accent-soft);
+  --saas-primary: var(--text-primary);
+  --saas-primary-hover: color-mix(in oklab, var(--text-primary) 88%, var(--accent));
+  --saas-primary-active: color-mix(in oklab, var(--text-primary) 78%, var(--accent));
+  --saas-on-primary: var(--bg-card);
+  /* Text on an accent or danger fill (--saas-accent-text, --saas-on-danger): set per theme above, and
+     from the fill's own lightness below where the browser can. */
+  --saas-focus: var(--saas-link);
+  --saas-focus-ring: 0 0 0 4px color-mix(in srgb, var(--saas-link) 18%, transparent);
+  /* The claw on the main calls to action: the ClawHunt mark, in the brand's blue-to-teal. */
+  --saas-brand-grad: linear-gradient(105deg, #2f7be0 0%, #2593c8 52%, #1aa3a8 100%);
+  /* live work */
+  --saas-signal: var(--agent-running);
+  --saas-signal-soft: var(--agent-running-soft);
+  /* outcomes */
+  --saas-success-bg: var(--saas-success-soft);
+  --saas-warning: var(--warn);
+  --saas-warning-bg: var(--warn-soft);
+  --saas-danger: var(--danger-bg);
+  --saas-danger-bg: color-mix(in srgb, var(--danger-bg) 10%, var(--bg-card));
+
+  /* type — Mona Sans for Latin (self-hosted above), then the main site's CJK faces. Display titles use
+     the same family narrowed (font-stretch) and tightened, as the main site sets them. */
+  --saas-font: 'Mona Sans', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', system-ui, sans-serif;
+  --saas-font-display: var(--saas-font);
+  --saas-font-mono: ui-monospace, 'Cascadia Code', 'SF Mono', 'JetBrains Mono', Consolas, monospace;
+  --saas-display-stretch: 78%;
+  --saas-display-track: -0.038em;
+  --saas-head-stretch: 88%;
+  --saas-head-track: -0.022em;
+  --saas-text-xs: 12px;
+  --saas-text-sm: 13px;
+  --saas-text-md: 14px;
+  --saas-text-lg: 16px;
+  --saas-text-xl: 18px;
+  --saas-text-2xl: 22px;
+  --saas-text-3xl: 28px;
+  --saas-text-4xl: 36px;
+  --saas-text-5xl: 46px;
+
+  /* shape — the main site's radii: small 8, control 14, card 18, panel 24, tank 28–32, pills */
+  --saas-radius-xs: 8px;
+  --saas-radius-sm: 10px;
+  --saas-radius: 14px;
+  --saas-radius-lg: 18px;
+  --saas-radius-xl: 24px;
+  --saas-radius-2xl: 28px;
+  --saas-radius-pill: 999px;
+  --saas-control-sm: 30px;
+  --saas-control: 36px;
+  --saas-control-lg: 42px;
+
+  /* motion — the main site's curves */
+  --saas-ease: cubic-bezier(.16, 1, .3, 1);
+  --saas-ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --saas-ease-spring: cubic-bezier(.34, 1.4, .64, 1);
+  --saas-dur-1: 140ms;
+  --saas-dur-2: 200ms;
+  --saas-dur-3: 260ms;
+
+  /* ── 3. Bridges for older names ── */
+  --saas-raise: var(--saas-shadow-sm);
+  --saas-raise-hover: var(--saas-shadow-md);
+  --saas-thumb-bg: color-mix(in srgb, var(--saas-canvas) 75%, var(--saas-card));
+  --saas-thumb-grid: color-mix(in srgb, var(--saas-text) 9%, transparent);
+  --saas-thumb-node: var(--saas-card);
+  --saas-thumb-ink: color-mix(in srgb, var(--saas-text) 34%, transparent);
+  --ios-blue: var(--saas-accent);
+  --ios-green: var(--saas-success-dot);
+  --ios-secondary: var(--saas-muted);
+  --ios-surface: color-mix(in srgb, var(--saas-card) 70%, var(--saas-bg));
+  --ios-shadow: var(--saas-shadow-sm);
+  --ios-font: var(--saas-font);
+  --ios-mono: var(--saas-font-mono);
+}
+
+@supports (color: oklch(from red l c h)) {
+  :root, :root[data-theme='dark'] {
+    --saas-accent-text: oklch(from var(--saas-accent) clamp(0, (0.64 - l) * 1000, 1) 0 0);
+    --saas-on-danger: oklch(from var(--saas-danger) clamp(0, (0.64 - l) * 1000, 1) 0 0);
+  }
+}
+/* Chinese display type, as on the main site: CJK glyphs are square, so headings keep natural spacing,
+   and multi-line titles get a little more leading than the condensed Latin ones. */
+:root:lang(zh), :root[data-theme='dark']:lang(zh) { --saas-display-track: 0; --saas-head-track: 0; --saas-display-leading: 1.14; }
+
+/* The agent workspace (canvas page). */
+.awwo-workspace, :root[data-theme='dark'] .awwo-workspace {
+  --awwo-bg: var(--saas-bg);
+  --awwo-surface: var(--saas-sidebar);
+  --awwo-ink: var(--saas-text);
+  --awwo-muted: var(--saas-muted);
+  --awwo-border: var(--saas-border);
+  --awwo-accent: var(--saas-accent);
+  --awwo-accent-soft: var(--saas-accent-soft);
+  --awwo-hover: var(--saas-soft);
+  font-family: var(--saas-font);
+}
+:root[data-theme='dark'] .awwo-workspace { color-scheme: dark; }
+
+/* The canvas world. Running work is the live signal (the AwwO teal) everywhere: on tiles, rails and
+   the timeline alike. */
+.awwo-workspace .canvas-root, :root[data-theme='dark'] .awwo-workspace .canvas-root {
+  --page: var(--saas-canvas);
+  --panel: var(--saas-raised);
+  --card: var(--saas-node);
+  --grid: var(--saas-canvas-dot);
+  --text: var(--saas-text);
+  --muted: var(--saas-muted);
+  --faint: var(--saas-subtle);
+  --line: var(--saas-border);
+  --soft: color-mix(in srgb, var(--saas-text) 4%, var(--saas-node));
+  --strong: var(--saas-primary);
+  --strong-text: var(--saas-on-primary);
+  --blue: var(--saas-accent);
+  --teal: var(--saas-signal);
+  --edge: var(--saas-wire);
+  --shadow: var(--saas-canvas-shadow);
+  --ok: var(--saas-success);
+  --warn: var(--saas-warning);
+  --err: var(--saas-danger);
+  --amber: var(--saas-signal);
+  --kind-form: var(--saas-muted);
+  --kind-llm: var(--saas-accent);
+  --kind-coding: var(--saas-accent);
+  --kind-image: var(--saas-accent);
+  --ease: var(--saas-ease);
+  --fs-micro: 11px;
+  --fs-meta: 12px;
+  --fs-body: 13px;
+  --fs-title: 14px;
+  font-family: var(--saas-font);
+  letter-spacing: 0;
+}
+
+/* One agent card. */
+.awwo-workspace .canvas-root .canvas-tile.awwo-node, :root[data-theme='dark'] .awwo-workspace .canvas-root .canvas-tile.awwo-node {
+  --awwo-card: var(--saas-node);
+  --awwo-ink: var(--saas-text);
+  --awwo-muted: var(--saas-muted);
+  --awwo-line: var(--saas-border);
+  --awwo-soft: color-mix(in srgb, var(--saas-text) 4%, var(--saas-node));
+  --awwo-teal: var(--saas-accent);
+  --awwo-tint: var(--saas-accent-soft);
+  --awwo-error: var(--saas-danger);
+}

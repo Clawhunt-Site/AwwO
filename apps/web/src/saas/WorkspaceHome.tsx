@@ -194,6 +194,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
 
   return <>
     <section className="saas-home-hero" aria-labelledby={titleId}>
+      <span className="saas-home-orb" aria-hidden="true" />
       <p className="saas-home-workspace">{tenant.name}</p>
       <h1 id={titleId}>{text('assistant.title')}</h1>
       <p className="saas-home-lead">{t('描述你想交付的成果。先确认分工，再开始执行。', 'Describe what you want to deliver. Review the plan, then run it.')}</p>

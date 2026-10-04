@@ -2,7 +2,7 @@ import { SecretInput } from './SecretInput';
 import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye } from 'lucide-react';
+import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound } from 'lucide-react';
 import { api, onSessionEnded, tenantPath, trackSignedInSession, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
@@ -293,7 +293,7 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
       <PreferenceControls />
       <TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
-      <a href={accountURL('security')}>{t('账号安全', 'Security')}</a>
+      <a href={accountURL('security')}><KeyRound size={16}/>{t('账号安全', 'Security')}</a>
       {identity.user.platformRole === 'admin' && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => {
       forgetPendingInvite();
@@ -305,7 +305,7 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
           location.assign(logoutURL);
         } else location.reload();
       } catch { setError(t('退出失败，请重试。', 'Sign-out failed. Please try again.')); }
-    }}><LogOut size={16}/></button>
+    }}><LogOut size={16}/><span>{t('退出登录', 'Sign out')}</span></button>
     </>}</ActionMenu>
     {creatingWorkspace && <CreateWorkspaceDialog onClose={() => setCreatingWorkspace(false)} onCreated={id => navigate(id)} />}
     {error && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
