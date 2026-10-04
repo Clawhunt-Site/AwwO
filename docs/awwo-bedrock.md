@@ -1,6 +1,6 @@
 # AwwO 通过 Amazon Bedrock 提供模型
 
-状态：2026-10-03 已在生产启用：内置目录 `builtin`（23 个已核验模型），三个 worker 都提供；凭证来自 AwwO 专用的 EC2 实例角色（只允许这 23 个区域内基础模型），实例凭证只对三个 worker 开放。跨区域推理（Claude、闭源 GPT 等其余 27 个）尚未授权。
+状态：生产启用中。2026-10-03 开放 23 个区域内模型，2026-10-04 再开放 19 个经跨区域推理配置文件调用的模型（Claude 8 个、Grok 2 个、Kimi K3、DeepSeek R1、Pixtral Large、Llama 3 个、Nova 3 个），内置目录 `builtin` 共 42 个，三个 worker 都提供。凭证来自 AwwO 专用的 EC2 实例角色，只允许目录里的这些模型；实例凭证只对三个 worker 开放。Claude Sonnet 5.5 与 7 个 GPT 尚未开放：AWS Marketplace 以 `INVALID_PAYMENT_INSTRUMENT` 拒绝订阅，账号补上有效付款方式后才能订阅并验收（见文末 2026-10-04 记录）。
 
 运营方在自己的 AWS 账号里调用 Bedrock，AwwO 的模型架子因此可以列出 Claude、GPT、Grok、Kimi、DeepSeek、Qwen、GLM、MiniMax、Mistral、Llama、Nova、Gemma、Nemotron 等约 50 个热门模型。LLM Gate 保持不变：Bedrock 上没有的模型（例如 Gemini）继续由 Gate 提供，个人连接仍只允许 Gate。
 
@@ -46,9 +46,9 @@ flowchart LR
 | `target` | Converse `modelId`：只通过推理配置文件提供的模型用 `global.`/`us.` 配置文件，否则用区域内模型 ID |
 | `contextWindow` / `maxTokens` | AwwO 的保守预算（worker 把 contextWindow 当字节预算），不是厂商上限 |
 | `input` | `text`，可含 `image`（仅展示；桥目前只发文本） |
-| `tools` | 观察到流式工具调用或文档写明支持；没有工具能力的模型只放 Pi |
+| `tools` | 观察到流式工具调用或文档写明 ConverseStream 支持工具；没有工具能力的模型只放 Pi。Pixtral Large 与 Llama 只在非流式 Converse 接受工具（ConverseStream 回答 “This model doesn't support tool use in streaming mode”），所以放 Pi |
 | `runtime` | 默认归属：有工具能力的放 `openai-agents`（含项目执行），其余放 `pi`，每个模型默认只出现一次 |
-| `verified` | 本账号真实调用成功的日期；空值表示需要跨区域推理权限、尚未实测，`builtin` 模式不提供这些模型 |
+| `verified` | 经 AwwO worker 在本账号真实调用成功的日期；空值表示尚未开放（目前是 Marketplace 订阅被拒的 8 个），`builtin` 模式不提供这些模型 |
 
 目录顶层的 `regions` 记录这些条目核对过的区域（目前只有 `us-east-1`）：模型 ID 和推理配置文件因区域而异，`AWWO_BEDROCK_REGION` 不在其中时内置目录直接拒绝启动，其他区域请先核对，再用 `*_MODELS_JSON` 写明确的档案。目录在每个 worker 启动时严格校验，格式错误直接拒绝启动。模型会下线或改名：修改目录前先只读核对账号可见的模型（不产生推理费用）：
 
@@ -86,7 +86,7 @@ python scripts/bedrock-catalog-check.py --region us-east-1 --profile <aws-profil
 
 ## 凭证与 IAM（运营方选择：EC2 实例角色）
 
-2026-10-03 起，生产实例改用 AwwO 专用的实例配置文件 `awwo-saas-instance`（原来的 `dongfeng-demo-ssm` 被多台实例共用，不再使用）：`AmazonSSMManagedInstanceCore` 加一条内联策略，只允许对已核验的 23 个 us-east-1 基础模型调用 `bedrock:InvokeModel` 与 `InvokeModelWithResponseStream`。开放跨区域推理时需要的完整策略（把账号与区域换成实际值）：
+2026-10-03 起，生产实例改用 AwwO 专用的实例配置文件 `awwo-saas-instance`（原来的 `dongfeng-demo-ssm` 被多台实例共用，不再使用）：`AmazonSSMManagedInstanceCore` 加两条内联策略，都只允许 `bedrock:InvokeModel` 与 `InvokeModelWithResponseStream`。`awwo-bedrock-verified-models` 列出 23 个 us-east-1 区域内基础模型；`awwo-bedrock-cross-region-profiles`（2026-10-04）列出 27 个推理配置文件，以及账号 `ListInferenceProfiles` 报告的、每个配置文件实际路由到的基础模型 ARN（`global.` 为不带区域的 ARN 加 us-east-1，`us.` 为 us-east-1/us-east-2/us-west-2），一共 88 个资源，不用通配。下面是按通配写的宽策略，只作参考（把账号与区域换成实际值）：
 
 ```json
 {
@@ -113,16 +113,15 @@ python scripts/bedrock-catalog-check.py --region us-east-1 --profile <aws-profil
 ```
 
 - 跨区域推理是必需的：Claude、GPT-5.6/6.x、Grok、Kimi K3、Llama 4、Nova 等**只能**通过 `global.`/`us.` 推理配置文件调用，配置文件会路由到其他区域（`global.` 的模型 ARN 不带区域），所以策略必须同时允许配置文件与各区域的基础模型。若组织 SCP 限制区域，需要放开相应区域或只用 `us.` 配置文件。
-- 2026-10-03 用 PlatformEngineer SSO 角色实测：区域内模型全部可调用，所有推理配置文件目标均被拒绝（该角色只允许区域内基础模型）。这是那个角色的权限范围，不是模型访问问题；目录里 `verified` 为空的条目要等实例角色获得上述权限后再验收。
-- 第三方模型首次调用可能需要 Marketplace 订阅；Anthropic 模型在账号首次使用时可能要求提交用例表单。
+- 2026-10-03 用 PlatformEngineer SSO 角色实测：区域内模型全部可调用，所有推理配置文件目标均被拒绝（该角色只允许区域内基础模型）。2026-10-04 实例角色加上跨区域策略后，这些配置文件都能调用，只有 Marketplace 订阅失败的模型除外。
+- 第三方模型要有 Marketplace 订阅（协议）。`aws bedrock get-foundation-model-availability` 的 `agreementAvailability` 为 `AVAILABLE` 才算订好；为 `NOT_AVAILABLE` 时，用 `ListFoundationModelAgreementOffers` 与 `CreateFoundationModelAgreement` 接受公开报价（按量计费，不退款）。2026-10-04 为 Claude Sonnet 5.5 与 7 个 GPT 接受了报价，但 Marketplace 在约 12 秒内终止了协议，调用报 `INVALID_PAYMENT_INSTRUMENT: A valid payment instrument must be provided`：账号要有可用于 Marketplace 购买的有效付款方式。订阅处于中间状态时，个别调用可能短暂成功，随后又被拒，所以要以协议状态和实例角色的真实调用为准。实例角色没有 `aws-marketplace:*` 权限，不会自己去订阅。
 - worker 父进程读取凭证链；子进程整轮运行都用启动时拿到的凭证（最长 600 s 超时加 10 s 宽限），所以剩余有效期不足 15 分钟时父进程就让凭证链强制刷新（凭证源暂时给不出新凭证时每分钟最多再问一次；刷新失败而现有凭证仍有至少 1 分钟时继续用现有凭证）。子进程只通过私有 IPC 收到短期凭证或 API Key，从不自己读凭证链。Python worker 进程内直接使用 boto3 凭证链（botocore 自动刷新），并按区域、Key 和超时复用客户端（连接池 32）；凭证链暂时取不到凭证时不缓存客户端、本次报 `MODEL_AUTHENTICATION`，下次调用重新解析。
 
 ### 凭证边界（启用前必读）
 
 实例角色的凭证来自 IMDS（169.254.169.254），**主机上任何进程都能取到**，不只是 worker：API、nginx 后面的服务、worker 启动的子进程都一样。给角色加上 Bedrock 权限，也就让这些进程在被攻破时可以调用 Bedrock（主要风险是费用滥用）。启用前至少做一项：
 
-1. **只让 worker 访问 IMDS**（推荐，保持无静态密钥）：原生 systemd 部署按服务 cgroup 放行，例如
-   `iptables -A OUTPUT -d 169.254.169.254 -m cgroup --path system.slice/awwo-saas-pi.service -j ACCEPT`，对两个 OpenAI Agents worker 单元同样放行，SSM agent（root）保留，其余一律 `REJECT`。同一 uid 的服务无法靠用户名区分，所以用 cgroup 而不是 `--uid-owner`。
+1. **只让 worker 访问 IMDS**（推荐，保持无静态密钥）：原生 systemd 部署给除三个 worker 外的每个 AwwO 单元加 `IPAddressDeny=169.254.169.254/32`，例如 `systemctl set-property awwo-saas-api IPAddressDeny=169.254.169.254/32`：立即作用于运行中的单元，持久写在 `/etc/systemd/system.control/`，重启后仍有效。生产（2026-10-03）对 API、web、TypeSafe、数据库、cloudflared、OpenMaus 与两个 acceptance 单元这样做了。不要用 `iptables -m cgroup --path`：这条规则绑定的是创建规则时那个 cgroup 对象，单元重启会建出新的 cgroup，放行就静默失效。同一 uid 的服务也无法靠 `--uid-owner` 区分。
 2. **或改用 Bedrock API Key**：只写进 worker 的环境文件（root 所有、0600，经 systemd `EnvironmentFile` 载入），实例角色不加 Bedrock 权限。
 3. **Compose**：保持 IMDS hop limit 为 1（容器经网桥多一跳，取不到实例凭证），给两个 worker 容器配 `AWWO_BEDROCK_API_KEY`；API 容器不会收到这个变量。
 
@@ -135,7 +134,7 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 1. IAM：为 AwwO 实例角色附加上述策略，并先按“凭证边界”限制 IMDS（运营方操作）。
 2. 发布包含本变更的 API 与三个 worker（Python worker 的 venv 需安装 `boto3==1.43.75`），先 API 后 worker。
 3. API 环境：`AWWO_PLATFORM_PROVIDERS=llmgate,bedrock`。
-4. worker 环境（Pi、JS、Python 各自的 env 文件）：`AWWO_BEDROCK_CATALOG=builtin`（先只开已核验的 23 个模型）、`AWWO_PLATFORM_PROVIDERS=llmgate,bedrock`，可选 `AWWO_BEDROCK_REGION`、`AWWO_BEDROCK_MODELS`。实例角色获得跨区域推理权限后，对 Claude、GPT 等各做一次冒烟，再改为 `builtin-all`（或在 `AWWO_BEDROCK_MODELS` 中逐个列出），并把核验日期写回目录的 `verified`。
+4. worker 环境（Pi、JS、Python 各自的 env 文件）：`AWWO_BEDROCK_CATALOG=builtin`（只开已核验的模型，2026-10-04 起 42 个）、`AWWO_PLATFORM_PROVIDERS=llmgate,bedrock`，可选 `AWWO_BEDROCK_REGION`、`AWWO_BEDROCK_MODELS`。实例角色获得跨区域推理权限后，对 Claude、GPT 等各做一次冒烟，再改为 `builtin-all`（或在 `AWWO_BEDROCK_MODELS` 中逐个列出），并把核验日期写回目录的 `verified`。
 5. 读回每个 worker 的 `/health`：`platformOnly: true`、模型列表含 `bedrock.*`，且不含任何 URL 或密钥。
 6. **工作区模型权限**：现网新工作区默认只允许 `qwen3.8-27b-p6`（`tenants.allowed_models`）。不调整的话用户看不到新模型；开放哪些模型（Opus 等高价模型的成本）由运营方决定，通过管理端 `PATCH /api/v1/admin/tenants/{id}` 或 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 设置。
 7. 用一个测试工作区对一到两个模型做真实冒烟（不在生产创建测试画布时可用 shadow-plan 流程）。
@@ -145,6 +144,7 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 - 思考强度：Bedrock 档案目前不宣告任何档位，桥拒绝 `reasoning_effort`。Claude 与 GPT 的映射需要在实例角色获得权限后真实验证再开放。
 - 结构化输出：不宣告 `structuredOutput`，节点交付契约走文本路径。
 - 只发文本；图像输入、文件附件不经过桥。
+- Pixtral Large 与 Llama 不调用工具：Bedrock 不在流式模式下为它们提供工具，所以它们在 Pi 上作为纯对话模型提供。
 - 托管执行不支持 Bedrock 模型（见上文）。
 - 计费走 AWS 账单；`AWWO_MODEL_PRICING_JSON` 未加入 Bedrock 价格，用量估算显示为未知。
 
@@ -165,3 +165,18 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 自动测试：桥与目录单测 26 项、JS worker Bedrock 集成 10 项（官方 Agents SDK 端到端、工具、一次两个工具调用只执行第一个、错误码、中途限流、子进程凭证传递）、项目执行在凭证失败后仍可用、托管执行拒绝 Bedrock、Python 17 项（含与 TS 的向量一致性：9 个请求、30 个拒绝、7 个流、12 个流错误）、Go 平台策略 54 种声明组合与托管执行模型列表、网页目录分组（全部 50 个目录模型归入正确品牌）。
 
 安全复核（2026-10-03，独立 reviewer 子代理）提出 10 项，均已处理：凭证失败曾让整个 worker 关闭项目执行；`parallel_tool_calls: false` 曾被忽略；托管执行曾把 Bedrock 模型发往桥不服务的路径；健康声明曾取自策略而非实际模型；内置目录曾可在未核对的区域启用；凭证刷新余量短于一轮运行；`seed`、对象形式的工具参数、未知流事件曾被静默忽略；中途错误曾丢失状态码；Python 每次调用都新建 boto3 会话。第 10 项（`qwen3.8-27b-p6` 从「ClawHunt · 平台模型」移到「通义千问 Qwen」组）是有意的界面变化，待运营方确认。复核第二轮又发现并修复：Python 客户端缓存会把一次凭证链失败固化成持续故障（阻断项）；桥自己的拒绝被归为服务不可用；关闭目录时仍读取目录文件；直接 API 创建托管执行时未拒绝 Bedrock 模型；compose 示例未提示必须是运营方模式；连接池小于并发；测试读取了本机真实凭证链。
+
+## 验收记录（2026-10-04，生产主机，实例角色，真实 Bedrock）
+
+在生产主机上用发布 `8c245632` 的 worker 代码起临时 worker（transient unit，awwo-saas 用户，18097/18098/18099 端口，随机 token，载入正式单元的环境文件，加 `AWWO_BEDROCK_CATALOG=builtin-all`），凭证就是生产实例角色。正式 worker 和数据库都没碰：
+
+| 路径 | 模型 | 结果 |
+| --- | --- | --- |
+| Python + calculator（生产 openai-agents 路径） | Claude Opus 5.5、Fable 5.1、Opus 5、Sonnet 5、Fable 5、Opus 4.8、Sonnet 4.6、Haiku 4.5，Grok 4.7、4.6，Kimi K3，Nova 2 Lite、Pro、Micro | 全部完成，工具调用一次，结果 `{"value": 391.0}`（17×23；runner 的 `stop_on_first_tool` 把工具结果作为答案） |
+| Python + calculator | Pixtral Large、Llama 4 Maverick、Llama 4 Scout、Llama 3.3 70B | 被拒：ConverseStream 不支持这些模型流式调用工具；非流式 Converse 带工具可用，流式不带工具可用 |
+| JS，不带工具 | 上面 4 个，以及 Haiku 4.5、Nova Micro、Llama 3.3 70B | 全部完成；这 4 个改为 `tools: false`、放 Pi |
+| Pi | DeepSeek R1 | 完成 |
+| Python + calculator | GPT-6.1 Sol、6 Sol、6 Astra、6 Luna、5.6 Sol、5.6 Terra | 当时完成，随后同一角色调用 5.6 Terra 被拒（要求 `aws-marketplace:Subscribe`）：订阅没有建立，不开放 |
+| Python | Claude Sonnet 5.5、GPT-5.6 Luna | `INVALID_PAYMENT_INSTRUMENT`，不开放 |
+
+目录据此把 19 个模型的 `verified` 记为 2026-10-04，`builtin` 共 42 个；Claude Sonnet 5.5 与 7 个 GPT 留空，等账号补上付款方式、订阅成功后再按同样方式验收。
