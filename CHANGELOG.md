@@ -43,6 +43,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Keep a just-linked session when the page's first session check answers late: a reply can now end only the session its request was sent under, so the signed-out lookup made before an account link no longer marks the new session ended and stops the page's updates.
 - Recover local draft writes from storage pressure by reclaiming only the current canvas's optional sync-proof cache. Acknowledge confirmed saves before replacing that cache, surface failed working-cache writes, and export the latest in-memory edits without removing other drafts or run history.
 - Retry an unavailable execution-engine status without reloading the canvas, losing input, or starting work automatically.
 - Show failed-node reasons in the execution timeline and open the relevant node directly. Completed runs link to their actual terminal deliveries, with a choice when several outputs are available.

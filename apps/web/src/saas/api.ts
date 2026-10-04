@@ -6,24 +6,32 @@ export class SaaSApiError extends Error {
 // sent again: pollers stop reaching the server, and the page offers a new sign-in instead.
 let signedIn = false;
 let sessionEnded = false;
+// Which session a request belongs to: it changes at every sign-in and sign-out, so a reply can end only the
+// session it was sent under. The page's first /auth/me goes out signed out; when its 401 arrives after a
+// sign-in that finished meanwhile, it says nothing about the new session.
+let sessionGeneration = 0;
 const sessionEndListeners = new Set<() => void>();
-/** Marks whether the page currently holds a signed-in session; either way an earlier ended one is cleared. */
+/** Marks whether the page currently holds a signed-in session; either way an earlier ended one is cleared.
+ *  Call it only when the credential changes (sign-in, account link, sign-out): each call starts a new
+ *  session, so replies to requests already in flight can no longer end it. */
 export function trackSignedInSession(active: boolean): void {
   signedIn = active;
   sessionEnded = false;
+  sessionGeneration += 1;
 }
 export function onSessionEnded(listener: () => void): () => void {
   sessionEndListeners.add(listener);
   return () => { sessionEndListeners.delete(listener); };
 }
-function endSession(): void {
-  if (!signedIn || sessionEnded) return;
+function endSession(sentUnder: number): void {
+  if (!signedIn || sessionEnded || sentUnder !== sessionGeneration) return;
   sessionEnded = true;
   for (const listener of [...sessionEndListeners]) listener();
 }
 const ENDED_MESSAGE = 'Your session expired. Sign in again.';
 export async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   if (sessionEnded && !path.startsWith('/auth/')) throw new SaaSApiError(401, 'unauthorized', ENDED_MESSAGE);
+  const sentUnder = sessionGeneration;
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body) headers.set('Content-Type', 'application/json');
@@ -32,7 +40,7 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   if (!response.ok) {
     const error = new SaaSApiError(response.status, payload?.error?.code || 'request_failed',
       payload?.error?.message || (typeof payload?.error === 'string' ? payload.error : `请求失败（${response.status}）`));
-    if (error.status === 401 && error.code === 'unauthorized') endSession();
+    if (error.status === 401 && error.code === 'unauthorized') endSession(sentUnder);
     throw error;
   }
   return payload as T;
@@ -40,10 +48,11 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
 /** fetch for API responses read raw (event streams, downloads), under the same session-ended rule as api(). */
 export async function sessionFetch(url: string, init: RequestInit = {}): Promise<Response> {
   if (sessionEnded) return new Response(JSON.stringify({ error: { code: 'unauthorized', message: ENDED_MESSAGE } }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  const sentUnder = sessionGeneration;
   const response = await fetch(url, init);
-  if (response.status === 401 && signedIn && !sessionEnded) {
+  if (response.status === 401 && signedIn && !sessionEnded && sentUnder === sessionGeneration) {
     const code = await response.clone().json().then((payload: any) => payload?.error?.code, () => undefined);
-    if (code === 'unauthorized') endSession();
+    if (code === 'unauthorized') endSession(sentUnder);
   }
   return response;
 }

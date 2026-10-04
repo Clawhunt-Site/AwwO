@@ -4,6 +4,7 @@ import { SaaSApp } from '../src/saas/SaaSApp';
 import { clearSSOReturnURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL } from '../src/saas/clawhuntAuth';
 import { appearanceFixture } from './saas-appearance-fixture';
 import { PENDING_INVITE_KEY } from '../src/saas/pendingInvite';
+import { api } from '../src/saas/api';
 
 const identity = { user: { id: 'legacy-user', name: 'Ada', email: 'ada@example.test', platformRole: 'user' }, tenants: [], authentication: 'clawhunt', clawhuntSiteURL: 'https://clawhunt.example/' };
 const invite = 'fixture_invite_token_0123456789abcdef';
@@ -114,7 +115,7 @@ it('does not grant a workspace when the legacy password is wrong', async () => {
   expect(screen.queryByRole('heading', { name: '选择工作区' })).toBeNull();
 });
 
-it.each(['old-identity', 'service-error'] as const)('keeps a completed account link when the initial session request returns a late %s', async (lateResult) => {
+it.each(['old-identity', 'service-error', 'signed-out'] as const)('keeps a completed account link when the initial session request returns a late %s', async (lateResult) => {
   history.replaceState(null, '', '/?sso=link');
   let finishSession!: (value: Response) => void;
   const pendingSession = new Promise<Response>(resolve => { finishSession = resolve; });
@@ -133,12 +134,45 @@ it.each(['old-identity', 'service-error'] as const)('keeps a completed account l
   await act(async () => {
     finishSession(lateResult === 'old-identity'
       ? response({ ...identity, user: { ...identity.user, id: 'previous-user', name: 'Previous account' } })
-      : response({ error: { code: 'sso_unavailable', message: 'Previous request failed' } }, 503));
+      : lateResult === 'service-error' ? response({ error: { code: 'sso_unavailable', message: 'Previous request failed' } }, 503)
+      // Sent before the link, while signed out: its 401 says nothing about the session the link started.
+      : unauthorized());
   });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
   expect(await screen.findByRole('button', { name: '账号与工作区' })).toHaveTextContent('Ada');
   expect(screen.queryByText('Previous account')).toBeNull();
   expect(screen.queryByText('Previous request failed')).toBeNull();
   expect(screen.queryByRole('button', { name: '重新连接' })).toBeNull();
+  expect(screen.queryByText(/登录已失效，页面已停止自动更新/)).toBeNull();
+});
+
+it('still ends a linked session on its own 401 after ignoring the signed-out answer from before the link', async () => {
+  history.replaceState(null, '', '/?sso=link');
+  let finishSession!: (value: Response) => void;
+  const pendingSession = new Promise<Response>(resolve => { finishSession = resolve; });
+  let expired = false;
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/auth/me')) return pendingSession;
+    if (url.endsWith('/auth/clawhunt/pending')) return response({ email: identity.user.email, expiresAt: '2099-01-01T00:00:00Z' });
+    if (url.endsWith('/auth/clawhunt/link')) return response(identity);
+    if (url.endsWith('/appearance')) return response(appearanceFixture);
+    return expired ? unauthorized() : response({ items: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<SaaSApp />);
+  fireEvent.change(await screen.findByLabelText('原 AwwO 密码'), { target: { value: 'synthetic-old-password' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '验证并保留工作区' })); });
+  expect(await screen.findByRole('button', { name: '账号与工作区' })).toHaveTextContent('Ada');
+  await act(async () => { finishSession(unauthorized()); await new Promise(resolve => setTimeout(resolve, 20)); });
+  // The answer from before the link is ignored: requests still go out (an ended session would not send this one).
+  const sent = fetch.mock.calls.length;
+  await act(async () => { await api('/tenants/probe/canvases'); });
+  expect(fetch.mock.calls.length).toBe(sent + 1);
+  expect(screen.queryByText(/登录已失效，页面已停止自动更新/)).toBeNull();
+  // The linked session's own 401 still ends it.
+  expired = true;
+  await act(async () => { await api('/tenants/probe/canvases').catch(() => undefined); });
+  expect(await screen.findByText(/登录已失效，页面已停止自动更新/)).toBeVisible();
 });
 
 it('rejects expired pending links without showing the old-account password form', async () => {

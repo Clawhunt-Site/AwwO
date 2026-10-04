@@ -50,6 +50,41 @@ it('keeps requests flowing while signed out and for other 401 answers', async ()
   stop();
 });
 
+it('lets a 401 end only the session its request was sent under', async () => {
+  let answer!: (value: Response) => void;
+  const fetch = vi.fn(async (url: string) => url.endsWith('/auth/me') ? new Promise<Response>(resolve => { answer = resolve; }) : ended());
+  vi.stubGlobal('fetch', fetch);
+  const listener = vi.fn();
+  const stop = onSessionEnded(listener);
+  // The page's first session lookup goes out signed out, and a sign-in completes before it answers.
+  const lookup = api('/auth/me');
+  trackSignedInSession(true);
+  answer(ended());
+  await expect(lookup).rejects.toMatchObject({ status: 401, code: 'unauthorized' });
+  expect(listener).not.toHaveBeenCalled();
+  // The new session is untouched: requests still go out, and its own 401 still ends it.
+  await expect(api('/tenants/t/canvases')).rejects.toMatchObject({ status: 401 });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(listener).toHaveBeenCalledTimes(1);
+  stop();
+});
+
+it('lets a raw read end only the session it was sent under', async () => {
+  let answer!: (value: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(async () => new Promise<Response>(resolve => { answer = resolve; })));
+  const listener = vi.fn();
+  const stop = onSessionEnded(listener);
+  trackSignedInSession(true);
+  const read = sessionFetch('/api/v1/tenants/t/runs/r/events');
+  // That session is left and another begins before the read answers.
+  trackSignedInSession(false);
+  trackSignedInSession(true);
+  answer(ended());
+  expect((await read).status).toBe(401);
+  expect(listener).not.toHaveBeenCalled();
+  stop();
+});
+
 it('applies the same rule to raw API reads such as event streams and downloads', async () => {
   const fetch = vi.fn(async (url: string) => url.endsWith('/archive') ? response({ error: { code: 'not_found' } }, 401) : ended());
   vi.stubGlobal('fetch', fetch);
