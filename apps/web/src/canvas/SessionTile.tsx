@@ -375,6 +375,18 @@ export const SessionTile = memo(function SessionTile({
   };
   const lod: TileLod = compact ? 'card' : lodFor(frame, scale, focused);
   const rootRef = useRef<HTMLDivElement>(null);
+  // The overflow menu closes when the pointer goes down anywhere outside its card (the canvas, another
+  // card, a rail). Pressing inside the card, e.g. to drag it, leaves the menu open. Capture phase, because
+  // canvas gestures stop propagation before the event would bubble to the document.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && rootRef.current?.contains(event.target)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside, true);
+    return () => document.removeEventListener('pointerdown', closeOutside, true);
+  }, [menuOpen]);
   // The live view scale, read inside pointer gestures so a mid-drag zoom stays correct.
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
@@ -551,6 +563,22 @@ export const SessionTile = memo(function SessionTile({
 
   const { kindClass, label } = glyphOf(node, locale);
   const dot = dotStateFor(session, run);
+  // A card that finishes or fails while you watch answers once (`is-just-done` / `is-just-failed`, a
+  // short ripple in the hosted skin). Only a change from running seen while mounted counts: a card that
+  // loads or re-mounts already finished stays still (one restored as running ripples when it settles).
+  // The mark is read through `dot`, so it can never outlast the state it marks, even for the frame
+  // before the effect clears it.
+  const [justSettled, setJustSettled] = useState<'done' | 'failed' | null>(null);
+  const previousDot = useRef(dot);
+  useEffect(() => {
+    const before = previousDot.current;
+    previousDot.current = dot;
+    if (before !== 'running' || (dot !== 'done' && dot !== 'failed')) { setJustSettled(null); return; }
+    setJustSettled(dot);
+    const timer = setTimeout(() => setJustSettled(null), 1000);
+    return () => clearTimeout(timer);
+  }, [dot]);
+  const settledMark = justSettled === dot ? justSettled : null;
   const preview = useMemo(() => {
     if (node.kind === 'form') {
       const filled = node.fields.find((f) => f.value.trim());
@@ -584,6 +612,8 @@ export const SessionTile = memo(function SessionTile({
   const showBody = lod !== 'glance';
   const tail = TAIL_LINES[lod];
   const expanded = !compact && (Boolean(configurationPanel) || lod === 'open' || lod === 'focus');
+  // A menu opened in one layout does not follow the card into another (opening or collapsing the node).
+  useEffect(() => { setMenuOpen(false); }, [compact, expanded]);
   const busy = interactionLocked || session.streaming || run?.state === 'running' || run?.state === 'waiting';
   const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
@@ -630,7 +660,7 @@ export const SessionTile = memo(function SessionTile({
       // exists to answer "which node failed" could not answer it.
       className={`canvas-tile awwo-node canvas-tile--${kindClass} canvas-tile--${lod}${
         selected ? ' canvas-tile--selected' : ''
-      } is-${dot}${compact ? ' is-compact' : ''}`}
+      } is-${dot}${settledMark ? ` is-just-${settledMark}` : ''}${compact ? ' is-compact' : ''}`}
       style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
       data-testid={`canvas-tile-${nodeId}`}
       data-lod={lod}
@@ -654,8 +684,10 @@ export const SessionTile = memo(function SessionTile({
           data-dot={dot}
           aria-hidden="true"
         />
+        {/* Zoomed out, the title keeps 13px on screen down to scale .5; below that a compact card caps it
+            (about 11px at the default fit zoom of .43) so a short title and a state chip still fit. */}
         <span className="canvas-tile-title" title={node.title}
-          style={lod === 'card' || lod === 'glance' ? { fontSize: Math.min(compact ? 20 : 32, 13 / Math.max(.1, scale)) } : undefined}>
+          style={lod === 'card' || lod === 'glance' ? { fontSize: Math.min(compact ? 26 : 32, 13 / Math.max(.1, scale)) } : undefined}>
           {node.title}
         </span>
         {!compact && node.kind === 'session' && node.team ? <span className="node-team-badge" data-testid={`node-team-badge-${nodeId}`}>

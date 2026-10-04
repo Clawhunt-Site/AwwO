@@ -1,0 +1,105 @@
+/* AwwO hosted app: interaction feedback — how surfaces arrive and how the page answers an action.
+ *
+ * Only motion that answers something the person did (open, press, submit) or the progress of work they
+ * started (an agent finishing, failing). Arrivals are short (120–260 ms) and ease out; nothing loops
+ * except live work (canvas.css). Keyframes animate the individual `translate`/`scale` properties, which
+ * compose with any positioning transform an element already has. Everything after the keyframes applies
+ * only with `prefers-reduced-motion: no-preference`, so reduced motion gets none of it. */
+
+@keyframes awwo-pop-in { from { opacity: 0; translate: 0 -4px; scale: .97; } }
+@keyframes awwo-rise-in { from { opacity: 0; translate: 0 8px; } }
+@keyframes awwo-dialog-in { from { opacity: 0; translate: 0 10px; scale: .975; } }
+@keyframes awwo-scrim-in { from { opacity: 0; } }
+@keyframes awwo-from-left { from { opacity: 0; translate: -14px 0; } }
+@keyframes awwo-from-right { from { opacity: 0; translate: 14px 0; } }
+@keyframes awwo-toast-in { from { opacity: 0; translate: 0 -8px; } }
+@keyframes awwo-node-open { from { opacity: .5; scale: .985; } }
+/* The ripple runs over the card's resting state ring (canvas.css), so the last frame is the resting look. */
+@keyframes awwo-node-done-ping {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--saas-success-dot) 55%, transparent), 0 0 0 2px color-mix(in srgb, var(--saas-success-dot) 14%, transparent), var(--awwo-node-shadow, 0 0 0 transparent); }
+  100% { box-shadow: 0 0 0 16px transparent, 0 0 0 2px color-mix(in srgb, var(--saas-success-dot) 14%, transparent), var(--awwo-node-shadow, 0 0 0 transparent); }
+}
+@keyframes awwo-node-failed-ping {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--saas-danger) 55%, transparent), 0 0 0 3px color-mix(in srgb, var(--saas-danger) 16%, transparent), var(--awwo-node-shadow, 0 0 0 transparent); }
+  100% { box-shadow: 0 0 0 16px transparent, 0 0 0 3px color-mix(in srgb, var(--saas-danger) 16%, transparent), var(--awwo-node-shadow, 0 0 0 transparent); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* ── Menus and popovers: drop in from where they were opened ───────────────────────────── */
+  .sc-popover, .saas-action-menu.sc-popover { animation: awwo-pop-in var(--saas-dur-2) var(--saas-ease); transform-origin: top right; }
+  html:root .saas-canvas-shell :is(.awwo-node-menu, .canvas-root .canvas-add-menu, .awwo-node-view-panel) {
+    animation: awwo-pop-in var(--saas-dur-2) var(--saas-ease); transform-origin: top right;
+  }
+
+  /* ── Dialogs: the scrim fades, the panel settles up into place ──────────────────────────── */
+  dialog[open]:is(.saas-native-dialog, .official-copy-setup, .work-mode-tutorial, .awwo-artifact-dialog, .awwo-knowledge-overlay, .saas-tutorial-unavailable) {
+    animation: awwo-dialog-in var(--saas-dur-3) var(--saas-ease);
+  }
+  dialog[open]:is(.saas-native-dialog, .official-copy-setup, .work-mode-tutorial, .awwo-artifact-dialog, .awwo-knowledge-overlay, .saas-tutorial-unavailable)::backdrop {
+    animation: awwo-scrim-in var(--saas-dur-2) ease-out;
+  }
+  .saas-dialog-backdrop { animation: awwo-scrim-in var(--saas-dur-2) ease-out; }
+  .saas-dialog-backdrop > .saas-card { animation: awwo-dialog-in var(--saas-dur-3) var(--saas-ease); }
+  html:root .saas-canvas-shell :is(.canvas-cmdbar, .awwo-agent-library) { animation: awwo-dialog-in var(--saas-dur-3) var(--saas-ease); }
+  html:root .saas-canvas-shell :is(.canvas-cmdbar-overlay, .awwo-library-backdrop) { animation: awwo-scrim-in var(--saas-dur-2) ease-out; }
+
+  /* ── Panels slide in from the edge they belong to ───────────────────────────────────────── */
+  html:root .saas-canvas-shell .awwo-planner-sidebar { animation: awwo-from-left var(--saas-dur-3) var(--saas-ease); }
+  .saas-graph-panel { animation: awwo-from-right var(--saas-dur-3) var(--saas-ease); }
+  html:root .saas-canvas-shell .canvas-root .awwo-node-delivery-drawer { animation: awwo-from-right var(--saas-dur-3) var(--saas-ease); }
+  html:root .saas-canvas-shell .canvas-runline { animation: awwo-rise-in var(--saas-dur-3) var(--saas-ease); }
+  html:root .saas-canvas-shell .canvas-root > .canvas-inspector { animation: awwo-from-right var(--saas-dur-3) var(--saas-ease); }
+
+  /* ── Notes about the run arrive like toasts ─────────────────────────────────────────────── */
+  /* Not the selection toolbar: it re-mounts on every selection change, so an entrance would blink. */
+  html:root .saas-canvas-shell :is(.awwo-handoff-note, .awwo-run-slot .canvas-run-note) {
+    animation: awwo-toast-in var(--saas-dur-3) var(--saas-ease);
+  }
+  .saas-session-ended { animation: awwo-toast-in var(--saas-dur-3) var(--saas-ease); }
+
+  /* ── Agent cards ────────────────────────────────────────────────────────────────────────── */
+  /* Opening an agent expands it out of its card. */
+  html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.canvas-tile--focus:not(.is-compact) { animation: awwo-node-open var(--saas-dur-3) var(--saas-ease); }
+  /* Finishing or failing while you watch answers once with a ripple. The tile sets `is-just-*` only for a
+     change it saw happen, so a canvas reopened with finished work stays still. Selected and open cards
+     keep their ring instead; their content already shows what changed. */
+  html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.is-just-done:not(.canvas-tile--selected, .canvas-tile--focus) {
+    animation: awwo-node-done-ping .9s var(--saas-ease) 1;
+  }
+  html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.is-just-failed:not(.canvas-tile--selected, .canvas-tile--focus) {
+    animation: awwo-node-failed-ping .9s var(--saas-ease) 1;
+  }
+
+  /* ── Pressing answers immediately ───────────────────────────────────────────────────────── */
+  /* Controls dip while pressed; large cards dip less, so the page doesn't seem to jump. A button whose
+     click area is a stretched ::after (the case cards) never scales: a scaled element becomes the containing
+     block of its positioned pseudo-elements, which would shrink the click area mid-press and drop the
+     click. Its card dips instead. The full-width examples row doesn't dip. */
+  :is(.saas-login, .saas-dashboard, .saas-card, .saas-native-dialog) button:not(:disabled, .production-card-open, .saas-case-pick, .saas-home-examples-toggle):active,
+  button.saas-primary:not(:disabled):active, a.saas-primary:active, .saas-sso-action:active,
+  html:root .saas-canvas-shell :is(.canvas-run-btn, .canvas-run-timeline-toggle, .awwo-primary, .awwo-secondary, .awwo-assistant-send, .awwo-view-tools button, .awwo-icon-button):not(:disabled):active {
+    scale: .97;
+  }
+  :is(.saas-login, .saas-dashboard) :is(.official-card-open, .saas-canvas-open):not(:disabled):active,
+  :is(.saas-login, .saas-dashboard) .production-card:has(.production-card-open:active),
+  :is(.saas-login, .saas-dashboard) .saas-case-card:has(.saas-case-pick:not(:disabled):active) {
+    scale: .99;
+  }
+  /* Component rules restate their own `transition` lists, so the property list is forced here: each rule
+     keeps its durations (a shorter duration list repeats over the properties) and the press eases. */
+  :is(.saas-login, .saas-dashboard, .saas-card, .saas-native-dialog) button, button.saas-primary, a.saas-primary, .saas-sso-action,
+  html:root .saas-canvas-shell :is(.canvas-run-btn, .canvas-run-timeline-toggle, .awwo-primary, .awwo-secondary, .awwo-assistant-send, .awwo-view-tools button, .awwo-icon-button) {
+    transition-property: background-color, border-color, color, box-shadow, opacity, scale !important;
+  }
+  /* A control that declares no transition at all gets a short one (zero specificity: any real rule wins). */
+  :where(.saas-login, .saas-dashboard, .saas-card, .saas-native-dialog) :where(button), :where(button.saas-primary, a.saas-primary, .saas-sso-action),
+  :where(.saas-canvas-shell) :where(.canvas-run-btn, .canvas-run-timeline-toggle, .awwo-primary, .awwo-secondary, .awwo-assistant-send, .awwo-view-tools button, .awwo-icon-button) {
+    transition-duration: var(--saas-dur-1); transition-timing-function: var(--saas-ease);
+  }
+  /* The case cards keep their own transitions (system.css) and add the dip. */
+  :is(.saas-login, .saas-dashboard) :is(.production-card, .saas-case-card) { transition-property: border-color, box-shadow, scale; }
+
+  /* A send button's arrow nudges up under the pointer. */
+  .saas-dashboard .saas-home-send:not(:disabled):hover svg, .awwo-assistant-send:not(:disabled):hover svg { translate: 0 -1px; }
+  .saas-dashboard .saas-home-send svg, .awwo-assistant-send svg { transition: translate var(--saas-dur-1) var(--saas-ease); }
+}

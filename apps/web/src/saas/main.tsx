@@ -9,5 +9,6 @@ import '../canvas/ios-theme.css';
 import './design/tokens.css';
 import './design/system.css';
 import './design/canvas.css';
+import './design/motion.css';
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><ErrorBoundary><SaaSApp /></ErrorBoundary></React.StrictMode>);

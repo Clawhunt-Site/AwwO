@@ -9,8 +9,9 @@
 //     clause).
 //
 // Plus the honesty invariant the composer carries: an unbound tile says WHY it cannot send.
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { SessionTile } from '../src/canvas/SessionTile';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { resetAllSessions } from '../src/canvas/sessions';
@@ -116,6 +117,88 @@ describe('SessionTile compact header actions', () => {
     expect(screen.getByRole('button', { name: '聚焦', exact: true })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '删除', exact: true }));
     expect(onDelete).toHaveBeenCalledWith('s1');
+  });
+
+  it('marks a card that finishes or fails while mounted, briefly, and never one that loads finished', () => {
+    vi.useFakeTimers();
+    try {
+      const tile = (state: 'running' | 'done' | 'failed' | 'waiting') => <StrictMode><SessionTile node={node()} scale={1} run={{ state }} /></StrictMode>;
+      const classes = () => screen.getByTestId('canvas-tile-s1').className.split(/\s+/);
+      const loaded = render(tile('done'));
+      expect(classes()).toContain('is-done');
+      expect(classes()).not.toContain('is-just-done');
+      loaded.unmount();
+
+      const view = render(tile('running'));
+      // Every class value the card ever commits, so a mark that outlives its state for a frame shows up.
+      const committed: string[] = [];
+      const observer = new MutationObserver(records => { for (const record of records) committed.push(record.oldValue ?? ''); });
+      const element = screen.getByTestId('canvas-tile-s1');
+      observer.observe(element, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+      view.rerender(tile('done'));
+      expect(classes()).toContain('is-just-done');
+      act(() => { vi.advanceTimersByTime(999); });
+      expect(classes()).toContain('is-just-done');
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(classes()).not.toContain('is-just-done');
+      view.rerender(tile('running'));
+      view.rerender(tile('failed'));
+      expect(classes()).toContain('is-just-failed');
+      // A new run taking over clears the mark in the same commit.
+      view.rerender(tile('waiting'));
+      expect(classes()).not.toContain('is-just-failed');
+      view.rerender(tile('running'));
+      view.rerender(tile('done'));
+      view.rerender(tile('running'));
+      observer.takeRecords().forEach(record => committed.push(record.oldValue ?? ''));
+      committed.push(element.className);
+      observer.disconnect();
+      const both = committed.filter(value => /\bis-just-(done|failed)\b/.test(value) && !/\bis-(done|failed)\b/.test(value));
+      expect(both).toEqual([]);
+      // Unmounting with a mark pending leaves no timer behind.
+      view.rerender(tile('done'));
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes the overflow menu on a press outside the card and keeps it for presses on the card', () => {
+    const { rerender } = render(<SessionTile node={node()} scale={1} focused onConfigure={vi.fn()} onToggleFocus={vi.fn()} onDelete={vi.fn()} />);
+    const tile = screen.getByTestId('canvas-tile-s1');
+    fireEvent.click(screen.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.pointerDown(tile);
+    expect(screen.getByRole('button', { name: '删除', exact: true })).toBeTruthy();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('button', { name: '删除', exact: true })).toBeNull();
+    // The compact card's menu follows the same rule.
+    rerender(<SessionTile node={node()} scale={1} compact onConfigure={vi.fn()} onDelete={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '更多节点操作' }));
+    expect(screen.getByRole('button', { name: '删除', exact: true })).toBeTruthy();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('button', { name: '删除', exact: true })).toBeNull();
+  });
+
+  it('closes one card\'s menu when another card is pressed, and when the card changes layout', () => {
+    const second = { ...node(), id: 's2', title: '第二个会话' };
+    render(<>
+      <SessionTile node={node()} scale={1} compact onConfigure={vi.fn()} onDelete={vi.fn()} />
+      <SessionTile node={second} scale={1} compact onConfigure={vi.fn()} onDelete={vi.fn()} />
+    </>);
+    const first = within(screen.getByTestId('canvas-tile-s1'));
+    fireEvent.click(first.getByRole('button', { name: '更多节点操作' }));
+    expect(first.getByRole('button', { name: '删除', exact: true })).toBeTruthy();
+    fireEvent.pointerDown(screen.getByTestId('canvas-tile-s2'));
+    expect(first.queryByRole('button', { name: '删除', exact: true })).toBeNull();
+    cleanup();
+
+    // Opening the node from its compact card does not carry the compact card's menu along.
+    const { rerender } = render(<SessionTile node={node()} scale={1} compact onConfigure={vi.fn()} onDelete={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '更多节点操作' }));
+    expect(screen.getByRole('button', { name: '删除', exact: true })).toBeTruthy();
+    rerender(<SessionTile node={node()} scale={1} focused onConfigure={vi.fn()} onToggleFocus={vi.fn()} onDelete={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: '删除', exact: true })).toBeNull();
   });
 });
 
