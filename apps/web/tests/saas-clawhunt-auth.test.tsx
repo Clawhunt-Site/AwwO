@@ -64,7 +64,8 @@ it('offers invite-code redemption in both languages on the waitlisted result, cl
   vi.stubGlobal('fetch', fetch);
   render(<SaaSApp />);
   expect(await screen.findByRole('alert')).toHaveTextContent('邀请码');
-  expect(screen.getByRole('link', { name: '输入邀请码进入 AwwO' })).toHaveAttribute('href', 'https://clawhunt.example/awwo?from=signin');
+  // The alert renders at once; the redemption link only once /auth/options has named the ClawHunt site.
+  await waitFor(() => expect(screen.getByRole('link', { name: '输入邀请码进入 AwwO' })).toHaveAttribute('href', 'https://clawhunt.example/awwo?from=signin'));
   await waitFor(() => expect(location.search).toBe(`?invite=${invite}`));
   fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));
   expect(screen.getByRole('alert')).toHaveTextContent('invite code');
@@ -84,10 +85,11 @@ it('requires the original AwwO password before linking the verified ClawHunt sub
   vi.stubGlobal('fetch', fetch);
   render(<SaaSApp />);
   expect(await screen.findByRole('heading', { name: '验证原 AwwO 密码' })).toBeVisible();
-  expect(screen.getByText('ada@example.test')).toBeVisible();
+  // The heading renders at once; the account and the password field only once the pending link is read.
+  expect(await screen.findByText('ada@example.test')).toBeVisible();
   expect(screen.queryByRole('button', { name: '登录' })).toBeNull();
   expect(location.search).toBe('');
-  fireEvent.change(screen.getByLabelText('原 AwwO 密码'), { target: { value: 'synthetic-old-password' } });
+  fireEvent.change(await screen.findByLabelText('原 AwwO 密码'), { target: { value: 'synthetic-old-password' } });
   fireEvent.click(screen.getByRole('button', { name: '验证并保留工作区' }));
   await waitFor(() => expect(location.search).toBe(`?invite=${invite}`));
   expect(await screen.findByText(/Invited/)).toBeVisible();
@@ -241,7 +243,7 @@ it('restores a stored invitation once an existing AwwO account has been linked',
   // The link screen holds the stored invitation untouched until linking succeeds.
   expect(await screen.findByRole('heading', { name: '验证原 AwwO 密码' })).toBeVisible();
   expect(sessionStorage.getItem(PENDING_INVITE_KEY)).not.toBeNull();
-  fireEvent.change(screen.getByLabelText('原 AwwO 密码'), { target: { value: 'synthetic-old-password' } });
+  fireEvent.change(await screen.findByLabelText('原 AwwO 密码'), { target: { value: 'synthetic-old-password' } });
   fireEvent.click(screen.getByRole('button', { name: '验证并保留工作区' }));
   expect(await screen.findByText(/Invited/)).toBeVisible();
   expect(location.search).toBe(`?invite=${invite}`);

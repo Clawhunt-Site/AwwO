@@ -78,7 +78,8 @@ it('creates, copies and revokes an invitation without storing its token or sendi
   fireEvent.click(await screen.findByRole('button', { name: '复制邀请链接' }));
   await waitFor(() => expect(copy).toHaveBeenCalledWith('http://localhost/?invite=fixture-invite-token'));
   expect(JSON.parse(calls.find(call => call.init.method === 'POST')!.init.body as string)).toEqual({ role: 'member' });
-  fireEvent.click(screen.getByRole('button', { name: '撤销邀请' }));
+  // Creating reloads the first page of invitations (the list is paginated): the row appears once that has loaded.
+  fireEvent.click(await screen.findByRole('button', { name: '撤销邀请' }));
   await waitFor(() => expect(screen.queryByRole('button', { name: '复制邀请链接' })).toBeNull());
   expect(calls.find(call => call.init.method === 'DELETE')?.url).toBe('/api/v1/tenants/team-a/invites/invite-a');
   expect(JSON.stringify(localStorage)).not.toContain('fixture-invite-token');
