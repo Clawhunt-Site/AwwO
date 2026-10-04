@@ -89,7 +89,8 @@ class CatalogTests(unittest.TestCase):
         # builtin alone offers only the models verified with a real call.
         verified = catalog_selection("openai-agents", {"AWWO_BEDROCK_CATALOG": "builtin"})
         self.assertEqual([e["id"] for e in verified], [e["id"] for e in entries if e["runtime"] == "openai-agents" and e["verified"]])
-        self.assertNotIn("bedrock.claude-opus-5-5", [e["id"] for e in verified])
+        self.assertIn("bedrock.claude-opus-5-5", [e["id"] for e in verified])
+        self.assertNotIn("bedrock.gpt-6-1-sol", [e["id"] for e in verified])
         self.assertTrue(all(entry["tools"] for entry in agents))
         self.assertEqual(catalog_selection("openai-agents", {}), [])
         picked = catalog_selection("openai-agents", {"AWWO_BEDROCK_CATALOG": "builtin", "AWWO_BEDROCK_MODELS": "bedrock.kimi-k3,bedrock.claude-opus-5-5"})

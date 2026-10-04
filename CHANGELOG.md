@@ -28,6 +28,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Changed
 
+- Offer 19 more Bedrock models in the built-in catalog (42 of 50): Claude Opus 5.5, Fable 5.1, Opus 5, Sonnet 5, Fable 5, Opus 4.8, Sonnet 4.6 and Haiku 4.5, Grok 4.7 and 4.6, Kimi K3, DeepSeek R1, Pixtral Large, Llama 4 Maverick and Scout, Llama 3.3 70B, and Nova 2 Lite, Pro and Micro. Each was verified through the workers with the production instance role, on cross-region inference profiles. Pixtral Large and the Llama models move to Pi as plain chat models, because Bedrock does not stream tool calls for them. Claude Sonnet 5.5 and the seven GPT models stay off until AWS Marketplace accepts the account's subscription (it refused it with `INVALID_PAYMENT_INSTRUMENT`).
 - Replace the one-card automatic introduction with the work-mode tutorial; the step-by-step page tour stays available on request.
 - Retire the three playable mock-ups made outside AwwO from the production cases; the cards now label their cover footage 「封面示意 · AI 生成」 apart from the knowledge base's recording, and claim delivery only where a published run delivered.
 - Keep the home page focused on starting work: offer editable prompt starters next to the composer and three interactive examples before expanding the complete library. Keep model search visible and model rows compact, preserving every runtime and capability label.

@@ -28,7 +28,7 @@ test('the built-in catalog adds Bedrock profiles to the Agents worker after its 
   // builtin alone offers only the models verified with a real call.
   const verified = config({ AWWO_BEDROCK_CATALOG: 'builtin' }).models.slice(1).map(profile => profile.id);
   assert.deepEqual(verified, expected.filter(entry => entry.verified).map(entry => entry.id));
-  assert.ok(!verified.includes('bedrock.claude-opus-5-5'));
+  assert.ok(verified.includes('bedrock.claude-opus-5-5') && !verified.includes('bedrock.gpt-6-1-sol'));
   const health = publicHealth(c);
   const claude = health.models.find(model => model.id === 'bedrock.claude-opus-5-5');
   assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5', providerModel: 'global.anthropic.claude-opus-5-5', provider: 'bedrock',

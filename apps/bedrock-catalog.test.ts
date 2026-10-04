@@ -56,10 +56,11 @@ test('the catalog is off unless enabled, and contributes each worker only its ow
   assert.deepEqual(bedrockCatalogProfiles('pi', { AWWO_BEDROCK_CATALOG: 'off' }), []);
   assert.throws(() => bedrockCatalogProfiles('pi', { AWWO_BEDROCK_CATALOG: 'all' }), /off, builtin or builtin-all/);
   const entries = readBedrockCatalog();
-  // builtin offers only models verified with a real call; the rest need cross-region permission.
+  // builtin offers only models verified with a real call; the rest are not offered yet.
   const verified = bedrockCatalogProfiles('openai-agents', { AWWO_BEDROCK_CATALOG: 'builtin' });
   assert.deepEqual(verified.map(profile => profile.id), entries.filter(item => item.runtime === 'openai-agents' && item.verified).map(item => item.id));
-  assert.ok(!verified.some(profile => profile.id === 'bedrock.claude-opus-5-5'));
+  assert.ok(verified.some(profile => profile.id === 'bedrock.claude-opus-5-5'));
+  assert.ok(!verified.some(profile => profile.id === 'bedrock.gpt-6-1-sol'));
   assert.ok(verified.length >= 15);
   const agents = bedrockCatalogProfiles('openai-agents', { AWWO_BEDROCK_CATALOG: 'builtin-all' });
   const pi = bedrockCatalogProfiles('pi', { AWWO_BEDROCK_CATALOG: 'builtin-all' });
