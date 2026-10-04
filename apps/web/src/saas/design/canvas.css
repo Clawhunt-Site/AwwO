@@ -20,6 +20,9 @@
 @keyframes awwo-wire-signal { to { stroke-dashoffset: -36; } }
 @keyframes awwo-msg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes awwo-dot-hold { 0%, 100% { opacity: .25; } 30% { opacity: 1; } 60% { opacity: .25; } }
+/* The delivery drawer's fade while more is below (scroll-driven; see .awwo-deliverables below). */
+@property --awwo-scroll-fade { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes awwo-scroll-fade { from, 88% { --awwo-scroll-fade: 44px; } to { --awwo-scroll-fade: 0px; } }
 
 html:root .saas-canvas-shell {
   background: var(--saas-canvas);
@@ -349,20 +352,23 @@ html:root .saas-canvas-shell {
 
   /* Closed cards: title, state and the latest line of output. */
   .canvas-root .awwo-node.is-compact { border-radius: 16px; }
-  /* Zoomed out, a state chip is unreadable and only truncates the title; the dot, ring and border
-     carry the state there. Hidden visually, kept for assistive technology. */
-  .canvas-root .awwo-node.is-compact[data-lod='glance'] :is(.canvas-tile-bind, .canvas-tile-badge) {
+  /* Zoomed out (SessionTile sets data-zoom="far"), a state chip is unreadable and only truncates the title.
+     The run states the card's own dot, ring and border show (running, done, failed, blocked) hide their chip
+     visually, kept for assistive technology; the others (queued, reused, cancelled, a draft, a connection
+     still to confirm) have no other mark, so their chip stays, as a small coloured pill. */
+  .canvas-root .awwo-node.is-compact[data-zoom='far'] .canvas-tile-badge:is(.canvas-tile-badge--running, .canvas-tile-badge--done, .canvas-tile-badge--failed, .canvas-tile-badge--blocked) {
     position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }
-  /* The title takes its width first; the chip fills what is left, up to its own width (zoomed out it
-     shrinks to a sliver, and the dot and border still show the state). */
-  .canvas-root .awwo-node.is-compact .canvas-tile-title { flex: 0 1 auto; }
-  /* A long agent name takes a second line instead of an ellipsis after five characters. */
+  /* The title keeps at least four characters a line and takes whatever the chip leaves; a long agent name
+     takes a second line instead of an ellipsis after five characters. The chip keeps its whole label
+     ("上游节点未完成", not "上游…") while that fits, and past it gives way with an ellipsis; the full text
+     stays in its title. */
   .canvas-root .awwo-node.is-compact .canvas-tile-title {
+    flex: 1 0 4em;
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; text-wrap: pretty; line-height: 1.25;
   }
-  .canvas-root .awwo-node.is-compact :is(.canvas-tile-bind, .canvas-tile-badge) { flex: 1 1 0; max-width: max-content; min-width: 0; overflow: hidden; text-overflow: clip; white-space: nowrap; }
-  .canvas-root .awwo-node.is-compact :is(.canvas-tile-bind, .canvas-tile-badge) { padding-inline: 5px; }
+  /* max-width: none lifts the older 82px cap (awwo-node.css), which clipped the longer labels by itself. */
+  .canvas-root .awwo-node.is-compact :is(.canvas-tile-bind, .canvas-tile-badge) { flex: 0 1 auto; min-width: 0; max-width: none; padding-inline: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .canvas-root .awwo-node.is-compact .awwo-node-tools > button { min-width: 24px; padding: 0 4px; }
   .canvas-root .awwo-node.is-compact .canvas-tile-head { min-height: 48px; padding: 12px 14px 4px; gap: 6px; }
   .canvas-root .awwo-node.is-compact .canvas-tile-glyph { width: 26px; height: 26px; }
@@ -562,6 +568,16 @@ html:root .saas-canvas-shell {
     & .awwo-expected-deliverables li { border-bottom-color: rgb(140 200 220 / 10%); }
   }
   .canvas-root .awwo-node-delivery-drawer > header { min-height: 44px; border-bottom-color: var(--saas-hairline); color: var(--saas-text); font: 650 var(--saas-text-sm)/1.3 var(--saas-font); }
+  /* A long delivery scrolls inside the drawer: its last lines fade at the edge while more is below, and the
+     fade lifts at the end. Scroll-driven, so it follows the reader; where that is unsupported, or the
+     content fits, nothing fades. */
+  .canvas-root .awwo-node-delivery-drawer .awwo-deliverables {
+    /* A control scrolled into view by the keyboard stops above the fade, focus ring and all. */
+    scroll-padding-bottom: 44px;
+    scrollbar-width: thin; scrollbar-color: var(--saas-border-strong) transparent;
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--awwo-scroll-fade)), transparent);
+    animation: awwo-scroll-fade linear both; animation-timeline: scroll(self block);
+  }
   .canvas-root .awwo-deliverables-title { color: var(--saas-text); font-size: var(--saas-text-sm); }
   .canvas-root .awwo-deliverables-receipt { color: var(--saas-muted); font-size: var(--saas-text-xs); }
   .canvas-root .awwo-deliverables-receipt::before { background: var(--saas-success-dot); }
@@ -603,6 +619,19 @@ html:root .saas-canvas-shell {
   .canvas-runline-row:hover { background: var(--saas-soft); }
   .canvas-runline-row:hover :is(.canvas-runline-elapsed, .canvas-runline-runtime) { color: var(--saas-muted); }
   .canvas-runline-name { font: 500 var(--saas-text-sm)/1.3 var(--saas-font); color: var(--saas-text); }
+  @media (min-width: 681px) {
+    /* Names and engines run long ("openai-agents · qwen3.8-27b-p6"): the columns follow their content,
+       names take two lines before an ellipsis, and the bar takes what is left. */
+    .canvas-runline-row { grid-template-columns: minmax(140px, 1fr) minmax(0, max-content) minmax(64px, 1.6fr) 44px minmax(0, max-content); }
+    .canvas-runline-name { white-space: normal; }
+    .canvas-runline-node { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+    .canvas-runline-state { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    .canvas-runline-runtime { max-width: 300px; }
+  }
+  @media (min-width: 601px) {
+    /* Beside an open minimap the timeline stops short of it instead of covering it. */
+    .awwo-workspace .canvas-root:has(> .canvas-minimap) > .canvas-runline { right: 200px !important; }
+  }
   .canvas-runline-dot { width: 6px; height: 6px; border-radius: 50%; }
   .canvas-runline-node:hover { color: var(--saas-link); }
   .canvas-runline-state {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { SessionTile } from '../src/canvas/SessionTile';
+import { COMPACT_CHIP_MIN_SCALE, SessionTile } from '../src/canvas/SessionTile';
 import { createSessionNode, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { resetAllSessions, setStreaming } from '../src/canvas/sessions';
 
@@ -107,6 +107,21 @@ describe('AwwO conversational cards', () => {
     fireEvent.click(screen.getByRole('button', { name: '更多节点操作' }));
     fireEvent.click(within(screen.getByTestId('canvas-tile-frontend')).getByRole('button', { name: '运行节点' }));
     expect(onRunNode).toHaveBeenCalledWith('frontend');
+  });
+
+  it('marks a compact card zoomed out past a readable state chip, keeping the chip for assistive technology', () => {
+    const blocked = { state: 'blocked' as const, detail: '上游节点未完成' };
+    const { rerender } = render(<SessionTile node={node()} compact scale={1} focused={false} run={blocked} />);
+    const tile = () => screen.getByTestId('canvas-tile-frontend');
+    expect(tile()).not.toHaveAttribute('data-zoom');
+    rerender(<SessionTile node={node()} compact scale={COMPACT_CHIP_MIN_SCALE} focused={false} run={blocked} />);
+    expect(tile()).not.toHaveAttribute('data-zoom');
+    rerender(<SessionTile node={node()} compact scale={COMPACT_CHIP_MIN_SCALE - 0.05} focused={false} run={blocked} />);
+    expect(tile()).toHaveAttribute('data-zoom', 'far');
+    expect(screen.getByTestId('canvas-tile-run-frontend')).toHaveTextContent('上游节点未完成');
+    // An open card draws its own level of detail and is never marked.
+    rerender(<SessionTile node={node()} scale={0.3} focused={false} run={blocked} />);
+    expect(tile()).not.toHaveAttribute('data-zoom');
   });
 
   it('localizes a persisted recovery code in the run badge and title', () => {

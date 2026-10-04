@@ -832,6 +832,7 @@
   box-shadow: 0 22px 58px var(--shadow);
   color: var(--text);
   overflow: hidden;
+  transition: opacity 160ms ease, visibility 160ms;
 }
 .canvas-runline-head {
   display: flex;
@@ -976,8 +977,9 @@
   transition: opacity 160ms ease, visibility 160ms;
 }
 /* An open node opens where its card sat, so it can reach any corner of the stage: the map steps aside
-   rather than cover it (its composer usually sits right where the map does). */
-.canvas-root[data-node-open] .canvas-minimap { opacity: 0; visibility: hidden; pointer-events: none; }
+   rather than cover it (its composer usually sits right where the map does). The run timeline does the
+   same, since it spans the bottom of the stage; both come back when the node closes. */
+.canvas-root[data-node-open] :is(.canvas-minimap, .canvas-runline) { opacity: 0; visibility: hidden; pointer-events: none; }
 .canvas-minimap-node {
   position: absolute;
   border-radius: 3px;

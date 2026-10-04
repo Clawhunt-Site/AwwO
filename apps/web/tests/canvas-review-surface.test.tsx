@@ -189,6 +189,41 @@ describe('CanvasSurface review Graph native transport integration', () => {
     expect(within(timeline.getByTestId('runline-review-reviewer')).getByText('已达轮次上限且尚未通过评审，请查看修改意见后继续。')).toBeVisible();
   });
 
+  it('steps the timeline aside while a node is open and offers it again once the node closes', async () => {
+    const peer = nativePeer(); const doc = graph(); doc.execution!.maxRounds = 1;
+    await start(doc); await waitFor(() => expect(peer.turns).toHaveLength(1));
+    await finishTurn(peer.turns[0], '# Unapproved candidate');
+    await waitFor(() => expect(peer.turns).toHaveLength(2));
+    await finishTurn(peer.turns[1], verdict(false));
+    await waitFor(() => expect(loadRunJournal()).toBeNull());
+    const root = document.querySelector('.canvas-root')!;
+    const controls = within(screen.getByRole('group', { name: '运行控制' }));
+    expect(screen.getByRole('region', { name: '执行时间线' })).toBeInTheDocument();
+    expect(controls.getByRole('button', { name: '收起时间线' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '打开 Reviewer' }));
+    expect(root).toHaveAttribute('data-node-open');
+    // The drawer keeps its state (the stylesheet hides it under data-node-open); its toggle and the palette
+    // command wait for the node to close.
+    expect(screen.getByRole('region', { name: '执行时间线' })).toBeInTheDocument();
+    const waiting = controls.getByRole('button', { name: '时间线' });
+    expect(waiting).toBeDisabled();
+    expect(waiting).toHaveAttribute('title', '节点打开时时间线暂时让开');
+    fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
+    expect(screen.getByTestId('cmdbar-row-fit')).toBeInTheDocument();
+    expect(screen.queryByTestId('cmdbar-row-timeline')).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('cmdbar-row-fit')).toBeNull());
+
+    const collapse = screen.queryByRole('button', { name: '收起节点' });
+    if (collapse) fireEvent.click(collapse);
+    expect(root).not.toHaveAttribute('data-node-open');
+    expect(screen.getByRole('region', { name: '执行时间线' })).toBeInTheDocument();
+    expect(controls.getByRole('button', { name: '收起时间线' })).toBeEnabled();
+    fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
+    expect(screen.getByTestId('cmdbar-row-timeline')).toBeInTheDocument();
+  });
+
   it('sends real Stop for the active native run and never starts the next review turn', async () => {
     const peer = nativePeer(); await start(); await waitFor(() => expect(peer.turns).toHaveLength(1));
     fireEvent.click(screen.getByRole('button', { name: /停止/ }));

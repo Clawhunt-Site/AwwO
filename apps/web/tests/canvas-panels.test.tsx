@@ -279,6 +279,22 @@ describe('RunControls', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('disables the timeline toggle with its reason while the timeline cannot show', () => {
+    const onToggleTimeline = vi.fn();
+    const props = { nodes: [sessionNode()], edges: [], running: false, runs: { s1: { state: 'done' as const } },
+      onStart: vi.fn(), onStop: vi.fn(), onToggleTimeline, timelineOpen: true };
+    const { rerender } = render(<RunControls {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '收起时间线' }));
+    expect(onToggleTimeline).toHaveBeenCalledTimes(1);
+    rerender(<RunControls {...props} timelineUnavailableReason="节点打开时时间线暂时让开" />);
+    // Hidden, the timeline is not "open" to collapse: the toggle says what it is and why it waits.
+    const waiting = screen.getByRole('button', { name: '时间线' });
+    expect(waiting).toBeDisabled();
+    expect(waiting).toHaveAttribute('title', '节点打开时时间线暂时让开');
+    fireEvent.click(waiting);
+    expect(onToggleTimeline).toHaveBeenCalledTimes(1);
+  });
+
   it('counts live progress from real node states and summarises 成功/失败/被阻断 honestly', () => {
     const nodes = [sessionNode({ id: 's1' }), sessionNode({ id: 's2' }), sessionNode({ id: 's3' })];
     const { rerender } = render(

@@ -67,6 +67,9 @@ export type SelectMode = 'only' | 'additive' | 'preserve';
 export const MIN_TILE_W = 220;
 export const MIN_TILE_H = 140;
 
+/** Below this zoom a compact card's state chip is too small to read (see `data-zoom` on the tile). */
+export const COMPACT_CHIP_MIN_SCALE = 0.8;
+
 export const TILE_COPY = {
   bound: '已连接',
   bindPending: '绑定待确认',
@@ -374,6 +377,9 @@ export const SessionTile = memo(function SessionTile({
     else onUpdateNode?.(updateNodeDraft(node, value));
   };
   const lod: TileLod = compact ? 'card' : lodFor(frame, scale, focused);
+  // Zoomed out past this, a compact card's 11px state chip is under 9px on screen: `data-zoom="far"` lets the
+  // card hide the chips its dot, ring and border already show and give the row to the title.
+  const zoomedOut = compact && scale < COMPACT_CHIP_MIN_SCALE;
   const rootRef = useRef<HTMLDivElement>(null);
   // The overflow menu closes when the pointer goes down anywhere outside its card (the canvas, another
   // card, a rail). Pressing inside the card, e.g. to drag it, leaves the menu open. Capture phase, because
@@ -664,6 +670,7 @@ export const SessionTile = memo(function SessionTile({
       style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
       data-testid={`canvas-tile-${nodeId}`}
       data-lod={lod}
+      data-zoom={zoomedOut ? 'far' : undefined}
       data-presentation={compact ? "compact" : "workbench"}
       data-node-id={nodeId}
       data-template={template?.id}
@@ -703,7 +710,7 @@ export const SessionTile = memo(function SessionTile({
           </span>
         ) : null}
         {bind && (!compact || bind.cls !== 'bound') ? (
-          <span className={`canvas-tile-bind canvas-tile-bind--${bind.cls}`} data-testid={`canvas-tile-bind-${nodeId}`}>
+          <span className={`canvas-tile-bind canvas-tile-bind--${bind.cls}`} data-testid={`canvas-tile-bind-${nodeId}`} title={bind.text}>
             {bind.text}
           </span>
         ) : null}

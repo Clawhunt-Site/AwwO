@@ -313,7 +313,11 @@ button.saas-primary:not(:disabled):active, :is(.saas-login, .saas-dashboard, .sa
 .saas-canvas-thumb.is-empty span:nth-child(2) { border-style: solid; border-color: color-mix(in srgb, var(--saas-accent) 55%, transparent); }
 .saas-canvas-card-body { display: flex; flex-direction: column; gap: 4px; padding: 14px 52px 16px 16px; min-width: 0; }
 .saas-canvas-list .saas-canvas-open > span.saas-canvas-card-body { display: flex; place-items: initial; width: auto; height: auto; border-radius: 0; background: none; color: inherit; font-size: inherit; }
-.saas-canvas-list .saas-canvas-card :is(h2, h3) { margin: 0; font: 650 15px/1.4 var(--saas-font); letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A canvas is named by the request that made it, often a whole sentence: two lines before it gives way. */
+.saas-canvas-list .saas-canvas-card :is(h2, h3) {
+  margin: 0; font: 650 15px/1.4 var(--saas-font); letter-spacing: -.01em; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; text-wrap: pretty;
+}
 .saas-canvas-card-meta { display: flex; align-items: center; gap: 8px; color: var(--saas-subtle); font: 400 var(--saas-text-xs)/1.5 var(--saas-font); }
 .saas-canvas-card-meta > * + *::before { content: '·'; margin-right: 8px; opacity: .6; }
 .saas-canvas-list .saas-canvas-actions { position: absolute; top: auto; bottom: 12px; right: 8px; padding: 0; }
@@ -543,7 +547,7 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-home-section-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 .saas-home-section-title h2 { margin: 0; font-size: 22px; line-height: 1.25; }
 .saas-home-section-title p { flex-basis: 100%; margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.6; }
-.saas-home-section-title .saas-library-count { color: var(--saas-subtle); font-size: var(--saas-text-sm); }
+.saas-home-section-title .saas-library-count { color: var(--saas-muted); font-size: var(--saas-text-sm); }
 .saas-home-section .saas-library-meta { flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .saas-list-search {
   display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px;

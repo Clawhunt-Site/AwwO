@@ -1718,7 +1718,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const canEdit = !running && !recovering && canEditStructure();
   const commandActions: CanvasCommandActions = useMemo(
     () => readOnly ? ({
-      fitAll, toggleTimeline: () => setTimelineOpen(o => !o),
+      fitAll, toggleTimeline: focusedId ? undefined : () => setTimelineOpen(o => !o),
       toggleMinimap: focusedId ? undefined : () => setMinimapOpen(o => !o), recallWaypoint: () => recallWaypoint(1),
     }) : ({
       addSession: (kind) => addAtViewCenter(kind),
@@ -1726,8 +1726,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       run: runUnavailableReason ? undefined : () => void startRun(),
       stop: stopRun,
       fitAll,
-      toggleTimeline: () => setTimelineOpen((o) => !o),
-      // While a node is open the minimap steps aside, so it is not offered then (as in the toolbar).
+      // While a node is open the timeline and the minimap step aside, so they are not offered then (as in
+      // the run controls and the toolbar).
+      toggleTimeline: focusedId ? undefined : () => setTimelineOpen((o) => !o),
       toggleMinimap: focusedId ? undefined : () => setMinimapOpen((o) => !o),
       // Slot 1 is the palette's default drawer for waypoints; the keyboard covers 1-9.
       saveWaypoint: () => saveWaypoint(1),
@@ -2197,6 +2198,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         onViewOutput={id => { toggleDeliverables(id, true); focusNode(id); setTimelineOpen(false); }}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
+        timelineUnavailableReason={focusedId ? t('run.timelineWhileOpen') : undefined}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
     <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef} {...nodeViewRoot}>
       <CanvasViewport

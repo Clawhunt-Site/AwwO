@@ -51,6 +51,8 @@ export interface RunControlsProps {
   /** Timeline drawer toggle (omitted → the toggle button is not rendered). */
   onToggleTimeline?: () => void;
   timelineOpen?: boolean;
+  /** Why the timeline cannot show now (an open node has the stage): the toggle is disabled with this title. */
+  timelineUnavailableReason?: string;
   style?: CSSProperties;
 }
 
@@ -99,6 +101,7 @@ export function RunControls({
   onStop,
   onToggleTimeline,
   timelineOpen = false,
+  timelineUnavailableReason,
   style,
 }: RunControlsProps) {
   const { locale, t } = useCanvasI18n();
@@ -226,8 +229,9 @@ export function RunControls({
       ) : null}
 
       {onToggleTimeline && hasRuns ? (
-        <button type="button" className="canvas-run-timeline-toggle" onClick={onToggleTimeline}>
-          {t(timelineOpen ? 'run.timelineCollapse' : 'run.timeline')}
+        <button type="button" className="canvas-run-timeline-toggle" disabled={Boolean(timelineUnavailableReason)}
+          title={timelineUnavailableReason} onClick={onToggleTimeline}>
+          {t(timelineOpen && !timelineUnavailableReason ? 'run.timelineCollapse' : 'run.timeline')}
         </button>
       ) : null}
     </div>
