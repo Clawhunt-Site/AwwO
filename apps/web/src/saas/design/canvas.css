@@ -370,6 +370,9 @@ html:root .saas-canvas-shell {
   /* max-width: none lifts the older 82px cap (awwo-node.css), which clipped the longer labels by itself. */
   .canvas-root .awwo-node.is-compact :is(.canvas-tile-bind, .canvas-tile-badge) { flex: 0 1 auto; min-width: 0; max-width: none; padding-inline: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .canvas-root .awwo-node.is-compact .awwo-node-tools > button { min-width: 24px; padding: 0 4px; }
+  /* In an open node's header the state chip keeps its whole label too (it clipped to 「失…」 beside a long
+     title): the title gives way first, with an ellipsis; a long blocked reason is capped and keeps its title. */
+  .canvas-root .awwo-node:not(.is-compact) .canvas-tile-badge { flex-shrink: 0; max-width: min(45%, 220px); }
   .canvas-root .awwo-node.is-compact .canvas-tile-head { min-height: 48px; padding: 12px 14px 4px; gap: 6px; }
   .canvas-root .awwo-node.is-compact .canvas-tile-glyph { width: 26px; height: 26px; }
   .canvas-root .awwo-compact-open {
@@ -548,7 +551,7 @@ html:root .saas-canvas-shell {
       --saas-accent: #2262a9; --saas-accent-soft: #e1ecfb; --saas-accent-text: #fff;
       --saas-success: #1d7049; --saas-success-bg: #dcefe4; --saas-success-dot: #2f9e6b;
       --saas-warning: #8f5a0c; --saas-warning-bg: #f6ead3; --saas-warning-dot: #c98a1e;
-      --saas-danger: #c8382f; --saas-danger-bg: #faebea; --saas-on-danger: #fff;
+      --saas-danger: #c8382f; --saas-danger-bg: #fbefee; --saas-on-danger: #fff;
       --saas-signal: #2bb3bb; --saas-signal-soft: rgb(43 179 187 / 14%);
       --text: #0b2230; --muted: #4b5d65; --faint: #586a71; --line: #dde3e2; --card: #fff; --panel: #fff; --soft: #f6f7f7;
       --awwo-ink: #0b2230; --awwo-muted: #4b5d65; --awwo-line: #dde3e2; --awwo-border: #dde3e2;

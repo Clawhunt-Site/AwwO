@@ -45,6 +45,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Keep failure text readable and whole: the failed state chips, the timeline's failed state and error banners now meet WCAG AA on their pale red ground (they measured 4.46:1), and an open node's header keeps its state chip whole beside a long title, which gives way first with an ellipsis.
 - Show the account dialog's close and refresh icons, which the page's button padding had squeezed to a dot; keep its selects full width and in the text colour (header rules capped them at 170px, 100px on phones); line up the admin table's row rules (its action cell was not a table cell); and stop the knowledge search field drawing a second border inside the first.
 - Keep a just-linked session when the page's first session check answers late: a reply can now end only the session its request was sent under, so the signed-out lookup made before an account link no longer marks the new session ended and stops the page's updates.
 - Recover local draft writes from storage pressure by reclaiming only the current canvas's optional sync-proof cache. Acknowledge confirmed saves before replacing that cache, surface failed working-cache writes, and export the latest in-memory edits without removing other drafts or run history.

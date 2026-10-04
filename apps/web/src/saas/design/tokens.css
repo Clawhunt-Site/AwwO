@@ -173,7 +173,9 @@
   --saas-warning: var(--warn);
   --saas-warning-bg: var(--warn-soft);
   --saas-danger: var(--danger-bg);
-  --saas-danger-bg: color-mix(in srgb, var(--danger-bg) 10%, var(--bg-card));
+  /* 8%, not 10%: the light danger red (#c8382f) on a 10% tint measured 4.46:1, just under AA for the
+     failed chips and error banners that set it as text on this ground. */
+  --saas-danger-bg: color-mix(in srgb, var(--danger-bg) 8%, var(--bg-card));
 
   /* type — Mona Sans for Latin (self-hosted above), then the main site's CJK faces. Display titles use
      the same family narrowed (font-stretch) and tightened, as the main site sets them. */
