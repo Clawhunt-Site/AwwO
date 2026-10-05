@@ -62,6 +62,9 @@ type identityFixture struct {
 	grantSeconds   atomic.Int64  // token expires_in; 0 means 3600
 	grantExpiry    atomic.Int64  // introspect expires_at (Unix); 0 means an hour from now
 	hold           chan struct{} // when set before requests, introspection waits until it is closed
+	invitesStatus  atomic.Int32  // the invites backchannel answers with this status; 0 means 200
+	invitesBody    atomic.Value  // its answer (map[string]any); unset means a member with three codes
+	invitesGrant   atomic.Value  // the grant token AwwO sent it
 	id             clawHuntIdentity
 	challenge      string
 }
@@ -111,6 +114,20 @@ func newIdentityFixture(t *testing.T, h *harness, email, subject string) *identi
 				expires = time.Now().Add(time.Hour).Unix()
 			}
 			writeJSON(w, 200, map[string]any{"active": f.active.Load(), "expires_at": expires, "identity": f.id})
+		case "/api/awwo/sso/invites":
+			var b map[string]string
+			json.NewDecoder(r.Body).Decode(&b)
+			f.invitesGrant.Store(b["grant_token"])
+			if status := f.invitesStatus.Load(); status != 0 {
+				w.WriteHeader(int(status))
+				return
+			}
+			if body := f.invitesBody.Load(); body != nil {
+				writeJSON(w, 200, body)
+				return
+			}
+			writeJSON(w, 200, map[string]any{"active": f.active.Load(), "sub": f.id.Subject, "member": true, "limit": 3, "codes": []map[string]string{
+				{"code": "AWWO-AB12-CD34-EF56", "status": "unused"}, {"code": "AWWO-GH78-JK9M-NP0Q", "status": "used"}, {"code": "AWWO-RSTV-WXYZ-0123", "status": "revoked"}}})
 		case "/api/awwo/sso/revoke":
 			if !f.active.Load() {
 				writeJSON(w, 200, map[string]string{"logout_url": h.cfg.PublicOrigin + "/"})

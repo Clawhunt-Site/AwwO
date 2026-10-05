@@ -28,7 +28,10 @@ The defaults reach every creation path: standalone registration, a first ClawHun
 
 ## Configuration and protocol
 
-The issuer must implement `/api/awwo/sso/{authorize,token,introspect,revoke,logout}`. AwwO exposes `/api/v1/auth/clawhunt/{start,callback,pending,link}`.
+The issuer must implement `/api/awwo/sso/{authorize,token,introspect,revoke,logout}`, and `invites` for the account page's invite codes. AwwO exposes `/api/v1/auth/clawhunt/{start,callback,pending,link,invites}`.
+
+- `GET /api/v1/auth/clawhunt/start?signup=1` asks the issuer for its sign-up view (`prompt=create`); an issuer that predates it ignores the parameter and signs in as before.
+- `POST /api/v1/auth/clawhunt/invites` (signed in) answers `{member, limit, codes: [{code, status}]}`, the account's own AwwO invite codes. AwwO asks `POST /api/awwo/sso/invites` with its client credentials and the session's grant and shows only printed codes (`AWWO-XXXX-XXXX-XXXX`) with a known status (`unused`, `used`, `revoked`), and only when the answer's `sub` is the session's subject. An inactive answer ends the session (401); any other failure is `503 invites_unavailable`; on a deployment without ClawHunt the route answers 404. Each account gets one read at a time and ten a minute (`429 rate_limited`), a bound of its own, so the page never holds a sign-in slot or spends an address's sign-in budget. Share links put the code in the fragment, `https://<issuer>/awwo#invite=<code>`.
 
 | AwwO setting | Issuer counterpart or requirement |
 | --- | --- |

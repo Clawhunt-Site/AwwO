@@ -442,6 +442,8 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-login .saas-card { gap: 16px; padding: 28px; border: 0; box-shadow: var(--saas-shadow-xl), 0 0 0 1px var(--saas-hairline) inset; }
 .saas-login .saas-card h2 { margin: 0 0 4px; font-size: var(--saas-text-2xl); }
 .saas-login .saas-card > button.saas-link { align-self: center; min-height: 32px; }
+/* "Create a ClawHunt account" under the sign-in action: a quiet link, the action stays the one pill. */
+.saas-login .saas-card > a.saas-sso-signup { align-self: center; display: inline-flex; align-items: center; min-height: 32px; color: var(--saas-accent); font-size: var(--saas-text-sm); font-weight: 600; text-underline-offset: 4px; }
 .saas-login .saas-card > .saas-secret-field + button.saas-link { align-self: flex-end; margin-top: -8px; font-size: var(--saas-text-xs); }
 .saas-login .saas-card > button.saas-primary { margin-top: 4px; padding-left: 9px; gap: 10px; }
 .saas-login a.saas-sso-action { padding-left: 9px; gap: 10px; }

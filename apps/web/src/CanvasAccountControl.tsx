@@ -12,7 +12,7 @@ export interface CanvasAccountControlProps {
   onLogin: () => void;
   onLogout: () => void;
   onOpenWorkspaceAuth: () => void;
-  workspace?: { displayName: string; selectedCompanyId: string | null; onCompanyChange: (id: string) => void; api: AccountApi; externalProfile?: { url?: string } };
+  workspace?: { displayName: string; selectedCompanyId: string | null; onCompanyChange: (id: string) => void; api: AccountApi; externalProfile?: { url?: string; invitesUrl?: string } };
 }
 
 /** Native modal semantics keep keyboard focus inside account management. */

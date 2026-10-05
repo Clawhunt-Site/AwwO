@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, Copy, ExternalLink, RefreshCw, ShieldCheck, UserPlus, Users } from 'lucide-react';
+import { Check, Copy, ExternalLink, Gift, RefreshCw, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { accountApi, AccountApiError } from './accountApi';
 import type {
   AccountApi,
@@ -37,7 +37,7 @@ export interface AccountWorkspacePanelProps {
   /** SaaS uses its own cookie identity and never exposes an external-account login. */
   workspaceOnly?: boolean;
   /** When SaaS SSO owns profile changes, show current values without a local save action. */
-  externalProfile?: { url?: string };
+  externalProfile?: { url?: string; invitesUrl?: string };
 }
 
 type Copy = ReturnType<typeof accountCopy>;
@@ -605,6 +605,7 @@ export function AccountWorkspacePanel({
               : <span className="account-inline-note">{locale === 'zh' ? '资料由 ClawHunt 主站管理。' : 'Your profile is managed on ClawHunt.'}</span>
               : <button type="button" className="account-primary-button" disabled={profileBusy || !profileName.trim()} onClick={() => void saveProfile()}>{text.saveProfile}</button>}
           </div>
+          {externalProfile?.invitesUrl ? <a className="account-invite-friends-link" href={externalProfile.invitesUrl}><Gift size={15} aria-hidden="true" />{locale === 'zh' ? '邀请好友：查看你的 3 个邀请码' : 'Invite friends: see your three invite codes'}</a> : null}
           {profileNotice ? <div className="account-inline-note" role="status">{profileNotice}</div> : null}
         </section>
       ) : null}

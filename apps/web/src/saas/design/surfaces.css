@@ -366,6 +366,7 @@
 .awwo-account-dialog .account-list-pager { gap: 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
 .awwo-account-dialog .account-invite-panel { margin-top: 18px; padding-top: 18px; border-top-color: var(--saas-hairline); }
 .awwo-account-dialog .account-invite-heading { color: var(--saas-text); font-size: var(--saas-text-md); }
+.awwo-account-dialog .account-invite-friends-link { color: var(--saas-accent); font-size: var(--saas-text-sm); }
 .awwo-account-dialog .account-invite-heading svg { color: var(--saas-muted); }
 .awwo-account-dialog .account-invite-result { border-color: color-mix(in srgb, var(--saas-accent) 28%, transparent); border-radius: var(--saas-radius); background: var(--saas-accent-soft); }
 .awwo-account-dialog .account-invite-result code { color: var(--saas-text); font-family: var(--saas-font-mono); font-size: 11px; }

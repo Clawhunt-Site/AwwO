@@ -128,6 +128,11 @@ func (a *App) clawHuntStart(w http.ResponseWriter, r *http.Request) {
 	a.identityFlowCookie(w, browser, 300)
 	sum := sha256.Sum256([]byte(verifier))
 	params := url.Values{"client_id": {a.cfg.ClawHuntClientID}, "redirect_uri": {a.cfg.PublicOrigin + "/api/v1/auth/clawhunt/callback"}, "state": {state}, "code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"}}
+	if r.URL.Query().Get("signup") == "1" {
+		// "Create an account" on the sign-in page: a signed-out browser lands on ClawHunt's
+		// sign-up view instead of sign-in (OIDC's prompt=create; older issuers ignore it).
+		params.Set("prompt", "create")
+	}
 	http.Redirect(w, r, a.cfg.ClawHuntURL+"/api/awwo/sso/authorize?"+params.Encode(), http.StatusSeeOther)
 }
 

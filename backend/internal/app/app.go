@@ -49,6 +49,8 @@ type App struct {
 	runEvents   runEventNotifier
 	// clawHuntSessions holds recent issuer verifications of signed-in sessions.
 	clawHuntSessions *clawHuntSessionCache
+	// inviteReads bounds each account's invite-code reads (clawhunt_invites.go).
+	inviteReads inviteReadLimiter
 	// capabilityNotes remembers which cleared worker capabilities were already logged,
 	// bounded by capabilityNoteLimit; capabilityNotesCapped marks the one-time notice.
 	capabilityNotes       sync.Map
@@ -232,6 +234,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/auth/clawhunt/callback", a.authRate(a.clawHuntCallback))
 	m.HandleFunc("GET /api/v1/auth/clawhunt/pending", a.authRate(a.clawHuntPending))
 	m.HandleFunc("POST /api/v1/auth/clawhunt/link", a.authRate(a.clawHuntLink))
+	m.HandleFunc("POST /api/v1/auth/clawhunt/invites", a.auth(a.clawHuntInvites))
 	m.HandleFunc("GET /api/v1/auth/options", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"passwordRecovery": !a.clawHuntEnabled() && a.cfg.SMTPHost != "", "clawhuntSSO": a.clawHuntEnabled(), "localAuth": !a.clawHuntEnabled(), "clawhuntSiteURL": a.cfg.ClawHuntURL})
 	})

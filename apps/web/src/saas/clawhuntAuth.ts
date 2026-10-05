@@ -13,9 +13,11 @@ export type SSOReturn =
 export type SSOFailureReason = Exclude<SSOReturn, { kind: 'link' }>['reason'];
 
 const inviteToken = (value: string | null): value is string => Boolean(value && /^[A-Za-z0-9_-]{32,256}$/.test(value));
-export function clawHuntStartURL(search: string): string {
+export function clawHuntStartURL(search: string, { signup = false }: { signup?: boolean } = {}): string {
   const invite = new URLSearchParams(search).get('invite');
-  return inviteToken(invite) ? `/api/v1/auth/clawhunt/start?invite=${encodeURIComponent(invite)}` : '/api/v1/auth/clawhunt/start';
+  const query = [inviteToken(invite) ? `invite=${encodeURIComponent(invite)}` : '', signup ? 'signup=1' : ''].filter(Boolean).join('&');
+  // signup=1: "Create an account" asks ClawHunt for its sign-up view (the API forwards prompt=create).
+  return query ? `/api/v1/auth/clawhunt/start?${query}` : '/api/v1/auth/clawhunt/start';
 }
 
 /** A successful link can restore only the existing first-party invitation route. */
@@ -64,6 +66,16 @@ export function clawHuntAccountURL(value?: string): string | null {
 export function clawHuntRedeemURL(value?: string): string | null {
   const site = siteURL(value);
   return site ? new URL('/awwo?from=signin', site.origin).href : null;
+}
+
+/** A member's share link: the main site's invite page with the code filled in, for printed codes only.
+ *  The code rides in the fragment, which no server log and no analytics on the main site records. */
+export function clawHuntInviteLink(code: string, value?: string): string | null {
+  const site = siteURL(value);
+  if (!site || !/^AWWO(-[0-9A-Z]{4}){3}$/.test(code)) return null;
+  const url = new URL('/awwo', site.origin);
+  url.hash = `invite=${code}`;
+  return url.href;
 }
 
 /** Only the main site's dedicated sign-out route may receive a one-time ticket. */

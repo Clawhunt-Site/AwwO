@@ -5,6 +5,7 @@ import "./personal-account.css";
 import { GuideLauncher, MainSiteLink, TutorialLauncher } from "./SaaSOnboarding";
 import { SecretInput } from "./SecretInput";
 import { clawHuntAccountURL, type AuthOptions } from './clawhuntAuth';
+import { InviteFriends } from './InviteFriends';
 
 type Provider = { id: string; name: string; runtimes: string[] };
 type Connection = {
@@ -98,6 +99,10 @@ export function PersonalEngineGate({
     return () => controller.abort();
   }, [identity.user.id, needed, revision]);
   if (section === "security") return <AccountSecurity personalCredentialsRequired={needed} identity={identity} />;
+  if (section === "invites") return <AccountLayout title={t("邀请好友", "Invite friends")} intro={t("每个开通了 AwwO 的账号都有 3 个邀请码。把邀请链接发给好友，对方就能用 ClawHunt 账号开通 AwwO。", "Every account with AwwO access has three invite codes. Send a friend an invite link and they can open AwwO with their ClawHunt account.")}>
+    <nav className="saas-personal-nav"><a href={home()}>{t("返回工作区", "Back to workspace")}</a><a href={accountURL("security")}>{t("账号安全", "Account security")}</a></nav>
+    <InviteFriends identity={identity} />
+  </AccountLayout>;
   if (section === "engines" && !needed) return <AccountLayout title={t("模型服务", "Model service")} intro={t("AwwO 已通过 LLM Gate 提供模型，无需填写个人 API Key。", "AwwO provides models through LLM Gate. No personal API key is needed.")}><a href={home()}>{t("返回工作区", "Back to workspace")}</a></AccountLayout>;
   if (!needed) return <>{children}</>;
   const hasUsableConnection = catalog?.items.some((item) =>
@@ -507,6 +512,7 @@ export function AccountSecurity({ personalCredentialsRequired = true, identity }
     >
       <nav className="saas-personal-nav">
         {personalCredentialsRequired && <a href={accountURL("engines")}>{t("我的执行引擎", "My engines")}</a>}
+        {unified && <a href={accountURL("invites")}>{t("邀请好友", "Invite friends")}</a>}
         <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
       </nav>
       {error !== null && (

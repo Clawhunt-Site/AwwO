@@ -433,6 +433,23 @@
   grid-column: 1 / -1;
 }
 
+/* An account linked to ClawHunt: its own AwwO invite codes, on the personal page. */
+.account-invite-friends-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--account-accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.account-invite-friends-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .account-invite-result {
   display: grid;
   grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr) auto;
