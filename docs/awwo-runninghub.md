@@ -99,3 +99,5 @@
 - 所有结果文件都在香港存储桶 `rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com`，在默认 `AWWO_MEDIA_RESULT_HOSTS` 之内；Wan 2.7 用了 15 分钟，仍在默认 20 分钟时限内。
 - Seedance 2.0 的回答有两条结果：MP4，以及一条 `outputType: text`、没有 URL 的 token 数。当时的 API 会把它当文件下载并以 `media_result_refused` 让整次生成失败，已按上文修复（`mediaFileResults`）。
 - 21 次生成共花费 3.96 美元（账户余额 53.62 → 49.67）。
+- 上面为省钱关掉了音频、提示词扩展与思考。随后对受影响的 8 个模型（Kling、Seedance、Veo、Vidu、PixVerse 开音频，Qwen-Image、Wan 2.7、Wan 2.7 Pro 用默认的扩展/思考）按目录默认值再各生成一次：8 个都成功，每次只有一个文件结果（Seedance 仍多一条 token 数），没有单独的音频文件；共 1.86 美元。
+- 部署前后的两次影子检查（新注册用户经 API 跑 Qwen-Image、PixVerse、Seedance 2.0 各一次）共 1.11 美元；本日合计 35 次生成 6.92 美元（53.62 → 46.70）。
