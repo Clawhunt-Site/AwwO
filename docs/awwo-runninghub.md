@@ -1,6 +1,6 @@
 # AwwO 图像与视频节点（RunningHub）
 
-状态：2026-10-03 已在生产启用（`AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true`：没有模型白名单的工作区也能用全部媒体模型）。上线前用真实企业共享 Key 在 runninghub.ai 走通了一次完整生成（见文末验收记录）；生产上还没有跑过真实生成。
+状态：2026-10-03 已在生产启用（`AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true`：没有模型白名单的工作区也能用全部媒体模型）。上线前用真实企业共享 Key 在 runninghub.ai 走通了一次完整生成；2026-10-05 又在生产主机上用生产 Key 为目录里全部 18 个模型各做了一次真实生成，全部成功，结果都来自已放行的存储桶（见文末验收记录）。
 
 画布里的图像节点和视频节点由 RunningHub 的标准模型 API（Standard Model API）执行：节点照常对话、排队、计入并发与取消，但不经过任何模型 worker——API 把提示词和节点参数提交给 RunningHub 一次，记录任务号，轮询到结束，再把结果文件下载到服务器磁盘并记为产物。运行的输出是一条指向这些产物的小记录，画布在对话里直接显示图片或视频。
 
@@ -20,7 +20,7 @@
 | 图像 | Seedream 5.0 Pro、Nano Banana Pro、Nano Banana 2、GPT Image 2、Qwen-Image 3.0 Pro、Midjourney V7、Grok Imagine、Wan 2.7 Pro、即梦 4.6 |
 | 视频 | Kling 3.0 Pro、Seedance 2.0、Veo 3.1 Fast、Sora 2、海螺 2.3 Pro、Vidu Q3 Pro、Wan 2.7、Grok Imagine Video、PixVerse V6 |
 
-每个模型的参数取自其 OpenAPI 请求定义（`.local/research` 下的生成脚本，提示词示例和 URL 不复制）。`verified` 字段记录用本部署的密钥真实调用成功的日期，目前全部为空。`GET /api/v1/tenants/{tenantId}/media` 返回已配置状态、本工作区可用的模型（受工作区模型白名单约束）和每日上限，不暴露密钥或接口地址。
+每个模型的参数取自其 OpenAPI 请求定义（`.local/research` 下的生成脚本，提示词示例和 URL 不复制）。`verified` 字段记录用本部署的密钥真实调用成功的日期：Seedream 5.0 Pro 为 2026-10-03，其余 17 个为 2026-10-05。`GET /api/v1/tenants/{tenantId}/media` 返回已配置状态、本工作区可用的模型（受工作区模型白名单约束）和每日上限，不暴露密钥或接口地址。
 
 ## 配置（只在 API 上）
 
@@ -48,6 +48,7 @@
 - 用户取消只停止 AwwO 这边的等待：RunningHub 没有文档化的取消接口，已提交的任务可能仍会完成并计费。
 - 轮询中的瞬时错误（限流、5xx、网络）连续超过 12 次才判失败；RunningHub 以错误码回答「仍在排队/运行」（804/813）不算失败。回答里的任务号与所查任务不一致时直接失败（所有工作区共用一个 RunningHub 账号，绝不把别的任务的结果存进这次运行）；包装的 `{code,msg,data}` 只解开一层。
 - RunningHub 的错误信息可能回显提示词或账号信息，从不保存或显示，只映射成固定的错误码：`media_provider_unauthorized`、`media_provider_balance`、`media_provider_busy`、`media_content_rejected`、`media_params_invalid`、`media_timeout`、`media_task_missing`、`media_failed`、`media_no_output`、`media_result_invalid`、`media_result_refused`、`media_result_unavailable`、`media_result_too_large`、`media_storage_failed`。
+- 只下载保存结果里的文件：没有 URL、或 `outputType` 为 `text` 的结果不是文件，直接跳过。Seedance 2.0 在视频之外总会多返回一条这样的结果（token 数）；2026-10-05 之前它会让这次已计费的生成以 `media_result_refused` 失败。一个文件都没有时为 `media_no_output`。
 - 画布整体运行（graph run）不执行媒体节点，返回 `media_graph_unsupported`；媒体节点单独运行。媒体节点不接受知识上下文（`media_knowledge_unsupported`）。
 
 ## 存储与安全
@@ -82,3 +83,19 @@
 2. 把该桶加入默认 `AWWO_MEDIA_RESULT_HOSTS` 后第二次：同样约 40 秒成功，下载 90,771 字节，嗅探为 `image/jpeg`，内容与提示词相符。目录里该模型的 `verified` 记为 2026-10-03。
 
 上传接口（`/openapi/v2/media/upload/binary`，免费）返回的签名地址在另一个主机 `rh-hk-images-switch.xiaoyaoyou.com`。上传的文件不会作为结果下载，所以这个主机不加入白名单。
+
+## 验收记录（2026-10-05，生产主机，生产 Key）
+
+在生产主机上以临时 systemd 单元（`DynamicUser`，Key 由 systemd 从 `media.env` 读入，不出现在命令或输出里）按 API 的请求形状（目录默认值，按 schema 类型发送；为省钱取最低分辨率、最短时长、关音频）为全部 18 个模型各提交一次，轮询到结束，再对结果文件做一次 Range 请求。不写 AwwO 数据库，不落文件。
+
+| 模型 | 结果 | 用时 | 类型 |
+| --- | --- | --- | --- |
+| Seedream 5.0 Pro / Nano Banana Pro / Nano Banana 2 / GPT Image 2 / Wan 2.7 Pro / 即梦 4.6 | SUCCESS | 31–32 s | PNG/JPEG |
+| Qwen-Image 3.0 Pro / Grok Imagine | SUCCESS | 16 s | PNG/JPEG |
+| Midjourney V7 | SUCCESS（4 张） | 58 s | PNG |
+| PixVerse V6 / Vidu Q3 Pro / Veo 3.1 Fast / Grok Imagine Video / Kling 3.0 Pro / Sora 2 | SUCCESS | 32–80 s | MP4 |
+| 海螺 2.3 Pro / Seedance 2.0 / Wan 2.7 | SUCCESS | 198 / 294 / 905 s | MP4 |
+
+- 所有结果文件都在香港存储桶 `rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com`，在默认 `AWWO_MEDIA_RESULT_HOSTS` 之内；Wan 2.7 用了 15 分钟，仍在默认 20 分钟时限内。
+- Seedance 2.0 的回答有两条结果：MP4，以及一条 `outputType: text`、没有 URL 的 token 数。当时的 API 会把它当文件下载并以 `media_result_refused` 让整次生成失败，已按上文修复（`mediaFileResults`）。
+- 21 次生成共花费 3.96 美元（账户余额 53.62 → 49.67）。

@@ -45,6 +45,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Complete Seedance 2.0 video generations: RunningHub answers them with the video and a second, file-less `text` result (the token count), which the API tried to download, so every paid Seedance 2.0 generation failed with `media_result_refused`. Only results with a URL that are not `text` values are stored now; a task without any file still settles as `media_no_output`. All 18 RunningHub catalog models were then generated once with the production key (2026-10-05) and carry that date in `verified`.
 - Keep failure text readable and whole: the failed state chips, the timeline's failed state and error banners now meet WCAG AA on their pale red ground (they measured 4.46:1), and an open node's header keeps its state chip whole beside a long title, which gives way first with an ellipsis.
 - Show the account dialog's close and refresh icons, which the page's button padding had squeezed to a dot; keep its selects full width and in the text colour (header rules capped them at 170px, 100px on phones); line up the admin table's row rules (its action cell was not a table cell); and stop the knowledge search field drawing a second border inside the first.
 - Keep a just-linked session when the page's first session check answers late: a reply can now end only the session its request was sent under, so the signed-out lookup made before an account link no longer marks the new session ended and stops the page's updates.
