@@ -31,7 +31,7 @@ test('the built-in catalog adds Bedrock profiles to the Agents worker after its 
   assert.ok(verified.includes('bedrock.claude-opus-5-5') && !verified.includes('bedrock.gpt-6-1-sol'));
   const health = publicHealth(c);
   const claude = health.models.find(model => model.id === 'bedrock.claude-opus-5-5');
-  assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5', providerModel: 'global.anthropic.claude-opus-5-5', provider: 'bedrock',
+  assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5', providerModel: 'us.anthropic.claude-opus-5-5', provider: 'bedrock',
     runtime: 'openai-agents', protocol: 'chat_completions', contextWindow: 200000, maxOutputTokens: 32000, maxContextTextBytes: 167744,
     messageOverheadBytes: 32, reasoningEfforts: [], defaultReasoningEffort: '' });
   // Health never carries a base URL, region or key.

@@ -3,13 +3,14 @@
   "regions": ["us-east-1"],
   "source": "Amazon Bedrock ListFoundationModels/ListInferenceProfiles for us-east-1, read 2026-10-03; Converse support from the Bedrock API compatibility table",
   "notes": [
+    "Claude Opus 5.5 uses the US inference profile: on 2026-10-05 its global profile answered ServiceUnavailableException to 8 of 8 calls (the instance role and an admin role alike) while us.anthropic.claude-opus-5-5 answered 8 of 8; the instance role is allowed both.",
     "target is the Converse modelId: a system inference profile (global./us.) where the model is only offered through one, otherwise the in-region model id.",
     "contextWindow and maxTokens are AwwO's conservative budgets (the workers treat contextWindow as a byte budget), not provider maxima.",
     "tools is true only where a streamed tool call was observed or the model card documents ConverseStream tool use; models without it run on Pi only. Pixtral Large and the Llama models take tools only in non-streaming Converse (ConverseStream answers \"This model doesn't support tool use in streaming mode\"), so they run on Pi.",
     "verified names the date a real ConverseStream call through the AwwO workers answered from this account (2026-10-04: with the production instance role); an empty value means the model is not offered yet: AWS Marketplace refused its subscription (INVALID_PAYMENT_INSTRUMENT)."
   ],
   "models": [
-    { "id": "bedrock.claude-opus-5-5", "name": "Claude Opus 5.5", "vendor": "anthropic", "target": "global.anthropic.claude-opus-5-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-04" },
+    { "id": "bedrock.claude-opus-5-5", "name": "Claude Opus 5.5", "vendor": "anthropic", "target": "us.anthropic.claude-opus-5-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-04" },
     { "id": "bedrock.claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "vendor": "anthropic", "target": "global.anthropic.claude-sonnet-5-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "" },
     { "id": "bedrock.claude-fable-5-1", "name": "Claude Fable 5.1", "vendor": "anthropic", "target": "global.anthropic.claude-fable-5-1", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-04" },
     { "id": "bedrock.claude-opus-5", "name": "Claude Opus 5", "vendor": "anthropic", "target": "global.anthropic.claude-opus-5", "contextWindow": 200000, "maxTokens": 32000, "input": ["text", "image"], "tools": true, "runtime": "openai-agents", "verified": "2026-10-04" },
