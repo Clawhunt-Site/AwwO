@@ -24,7 +24,7 @@ Three optional API settings shape the workspace a first-time user receives and l
 | `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY` | Integer 1–100000 stored as `maxRunsPerDay` | Column default, 100 |
 | `AWWO_MAX_OWNED_WORKSPACES` | `POST /api/v1/tenants` returns `403 workspace_limit` to an account that is not a platform admin and already owns at least this many workspaces | `0`, unlimited |
 
-The defaults reach every creation path: standalone registration, a first ClawHunt sign-in and `POST /tenants`. The workspace created at registration or first sign-in is never refused by the cap. Intended production values, with operator credentials: `AWWO_NEW_WORKSPACE_ALLOWED_MODELS=qwen3.8-27b-p6`, `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY=50`, `AWWO_MAX_OWNED_WORKSPACES=1`.
+The defaults reach every creation path: standalone registration, a first ClawHunt sign-in and `POST /tenants`. The workspace created at registration or first sign-in is never refused by the cap. Production values, with operator credentials: `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY=50`, `AWWO_MAX_OWNED_WORKSPACES=1`, and since 2026-10-05 an `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` of 30 ids: `qwen3.8-27b-p6` (still the default and planning model), GPT `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra` and eight Claude models, all through LLM Gate, plus the 18 RunningHub `rh.*` media models (until then it was `qwen3.8-27b-p6` alone). Why LLM Gate and not Bedrock or Kiro is in [awwo-bedrock.md](awwo-bedrock.md).
 
 ## Configuration and protocol
 

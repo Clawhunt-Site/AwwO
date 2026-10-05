@@ -39,7 +39,7 @@
 | `AWWO_MEDIA_RESULT_HOSTS` | 结果文件允许的下载地址：以 `.` 开头表示该域名的子域名，否则为精确主机名。默认 `.runninghub.ai,.runninghub.cn,rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com,rh-images-1252422369.cos.ap-beijing.myqcloud.com`：2026-10-03 在 runninghub.ai 上的真实生成，结果来自香港存储桶；北京存储桶是 RunningHub 文档写的那个。两个桶的 APPID 相同（1252422369），同属一个腾讯云账号。不再放行整个 `.myqcloud.com`。真实调用若出现其他结果主机，确认归属后再加入。 |
 | `AWWO_MEDIA_DEV_PROXY` | 仅开发环境：显式的本地代理 `http://127.0.0.1:端口`（例如 Clash）。下载只额外允许拨这一个回环地址；不读取任何代理环境变量。 |
 
-**计费与授权**：生成用的是运营方的 Key。媒体模型只在明确授权时可用——工作区的模型白名单（`tenants.allowed_models`）列出该 `rh.*` id，或运营方用 `AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true` 向无白名单的工作区开放。生产新工作区默认只有 `qwen3.8-27b-p6`，需要的 `rh.*` id 要加入白名单，或通过 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 给新工作区默认开放。每次受理同时写入只关联工作区的 `media_generations` 账本：删除画布（会级联删除运行）不会让每日上限复位；生成也计入工作区自己的每日运行额度（`max_runs_per_day`）。账号可创建的工作区数量由 `AWWO_MAX_OWNED_WORKSPACES` 限制：设置 `AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true`，或在 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 中列出 `rh.*` 模型时，必须同时设置它，否则 API 拒绝启动（否则每新建一个工作区就多一份每日额度）。两个计数都在拿到锁之后读取时间，午夜不会多放行。上限按次数计，不区分 1k 图片与 4k 视频的成本（按模型加权是后续改进）。
+**计费与授权**：生成用的是运营方的 Key。媒体模型只在明确授权时可用——工作区的模型白名单（`tenants.allowed_models`）列出该 `rh.*` id，或运营方用 `AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true` 向无白名单的工作区开放。2026-10-05 起生产新工作区的默认白名单（`AWWO_NEW_WORKSPACE_ALLOWED_MODELS`）包含全部 18 个 `rh.*` 模型（此前只有 `qwen3.8-27b-p6`，新用户看不到图像/视频节点）；其他有白名单的工作区仍需逐个加入。每次受理同时写入只关联工作区的 `media_generations` 账本：删除画布（会级联删除运行）不会让每日上限复位；生成也计入工作区自己的每日运行额度（`max_runs_per_day`）。账号可创建的工作区数量由 `AWWO_MAX_OWNED_WORKSPACES` 限制：设置 `AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true`，或在 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 中列出 `rh.*` 模型时，必须同时设置它，否则 API 拒绝启动（否则每新建一个工作区就多一份每日额度）。两个计数都在拿到锁之后读取时间，午夜不会多放行。上限按次数计，不区分 1k 图片与 4k 视频的成本（按模型加权是后续改进）。
 
 ## 执行与恢复
 

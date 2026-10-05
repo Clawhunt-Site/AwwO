@@ -136,7 +136,7 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 3. API 环境：`AWWO_PLATFORM_PROVIDERS=llmgate,bedrock`。
 4. worker 环境（Pi、JS、Python 各自的 env 文件）：`AWWO_BEDROCK_CATALOG=builtin`（只开已核验的模型，2026-10-04 起 42 个）、`AWWO_PLATFORM_PROVIDERS=llmgate,bedrock`，可选 `AWWO_BEDROCK_REGION`、`AWWO_BEDROCK_MODELS`。实例角色获得跨区域推理权限后，对 Claude、GPT 等各做一次冒烟，再改为 `builtin-all`（或在 `AWWO_BEDROCK_MODELS` 中逐个列出），并把核验日期写回目录的 `verified`。
 5. 读回每个 worker 的 `/health`：`platformOnly: true`、模型列表含 `bedrock.*`，且不含任何 URL 或密钥。
-6. **工作区模型权限**：现网新工作区默认只允许 `qwen3.8-27b-p6`（`tenants.allowed_models`）。不调整的话用户看不到新模型；开放哪些模型（Opus 等高价模型的成本）由运营方决定，通过管理端 `PATCH /api/v1/admin/tenants/{id}` 或 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 设置。
+6. **工作区模型权限**：新工作区按 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 写入 `tenants.allowed_models`。2026-10-05 起现网新工作区的 GPT 与 Claude 一律走 LLM Gate，不含任何 `bedrock.*` 模型（见下方「2026-10-05 渠道选择」）；Bedrock 模型只出现在没有白名单的旧工作区。开放哪些模型（Opus 等高价模型的成本）由运营方决定，单个工作区用管理端 `PATCH /api/v1/admin/tenants/{id}` 调整。
 7. 用一个测试工作区对一到两个模型做真实冒烟（不在生产创建测试画布时可用 shadow-plan 流程）。
 
 ## 限制
@@ -180,3 +180,17 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 | Python | Claude Sonnet 5.5、GPT-5.6 Luna | `INVALID_PAYMENT_INSTRUMENT`，不开放 |
 
 目录据此把 19 个模型的 `verified` 记为 2026-10-04，`builtin` 共 42 个；Claude Sonnet 5.5 与 7 个 GPT 留空，等账号补上付款方式、订阅成功后再按同样方式验收。
+
+## 2026-10-05 渠道选择：新用户的 GPT 与 Claude 走 LLM Gate
+
+需求：新用户登录后能用 GPT、Claude 全系列和 RunningHub 生图生视频，全部走一个能走通的渠道。三条路都实测过（生产主机，运营方凭证）：
+
+| 渠道 | GPT | Claude | 结论 |
+| --- | --- | --- | --- |
+| Bedrock | 7 个 GPT 与 Sonnet 5.5 的 Marketplace 协议仍是 `ERROR`（付款方式无效，需要账号所有者在 Billing 里补付款方式），gpt-5.4/5.5 没有协议 | Opus 5.5、Fable 5.1 等 8 个可用 | 走不通 GPT |
+| Kiro（kiro-cli） | 列出 GPT-5.6 Sol/Terra/Luna | 列出全系列含 5.5 | 不是多租户 API：运营方个人的 IAM Identity Center 席位、按月 10000 credits（当月已用 101%），是 agent CLI，没有图像/视频 |
+| **LLM Gate** | gpt-5.5、gpt-5.6-sol、gpt-5.6-terra：Chat Completions 带工具、流式、Responses 都通过；gpt-5.4 列在 `/v1/models` 但无通道（503），gpt-5.6-luna 无通道 | Opus 5 / 4.8 / 4.7 / 4.6、Sonnet 5 / 4.6、Fable 5、Haiku 4.5，带工具与流式都通过；没有 5.5 一代 | **选用** |
+
+经 AwwO 自己的 worker 代码（临时 worker，载入正式环境与目录）验证：Python worker（节点执行路径，带 calculator 工具）上 3 个 GPT 与 8 个 Claude 全部完成，gpt-5.4 为 `MODEL_UNAVAILABLE`；Pi worker（规划路径）上 GPT 与 Claude 完成。Gate 接受约 7.6 万 token 的输入与 `max_tokens` 32000，Claude Sonnet 5 一次写出 6138 token；一次真实建页（4096 输出上限）GPT 的隐藏推理只用 76–885 token，均正常结束，但 GPT 写满 4000 token 约需 80–90 s，接近 Python worker 默认的 120 s 单节点时限。Gate 的 Claude 自我介绍为「AI-powered development environment」，说明其上游通道带有自己的系统提示词。
+
+于是 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 从 `qwen3.8-27b-p6` 改为 30 个 id：`qwen3.8-27b-p6`（默认与规划模型不变）、上述 3 个 GPT、8 个 Claude、全部 18 个 `rh.*`；gpt-5.4 与所有 `bedrock.*` 不在其中。仍停在旧默认 `{qwen3.8-27b-p6}` 的工作区（当时 1 个）按管理端 PATCH 的写法改为新列表并写审计记录。部署前用影子检查证明：新注册用户的 `/runtime` 恰好是这 12 个文本模型、`/media` 是 18 个媒体模型，GPT/Claude 节点在两种运行时都完成，图像与视频（含 Seedance 2.0）生成后可内联播放，`bedrock.claude-opus-5-5` 与 `gpt-5.4` 在节点初始化时被拒。部署记录见 `docs/awwo-saas-deploy.md`。
