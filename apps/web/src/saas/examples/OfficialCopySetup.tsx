@@ -106,7 +106,10 @@ export function OfficialCopySetup({ item, tenantId, locale, busy, readOnly = fal
     onCancel={event => { event.preventDefault(); close(); }}>
     <form onSubmit={event => { event.preventDefault(); void confirm(); }}>
       <header><span>{recording ? t('制作案例', 'PRODUCTION CASE') : t('官方工作流', 'OFFICIAL WORKFLOW')}</span><h2 id={`${id}-title`}>{t('复制案例到我的画布', 'Copy example to my canvases')}</h2><p>{item.title[locale]}</p></header>
-      <p id={`${id}-description`}>{recording
+      <p id={`${id}-description`}>{recording && item.canvas
+        ? t(`复制 ${recording.capturedOn} 真实运行的那张画布（${item.nodes.length} 个节点）：每个 Agent 的人设、它当时收到的任务和字段说明以及连线都与那次运行一致，并带上每个 Agent 收到和交付的内容（${recording.completed}/${recording.total} 个节点，标为「案例实录」）。可为所有新节点选择同一个执行模型。`,
+          `Copy the canvas of the real run on ${recording.capturedOn} (${item.nodes.length} nodes): every agent’s persona, the task and field descriptions it received, and the wires are as they were in that run, with what every agent received and delivered (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`)
+        : recording
         ? t(`保留 ${item.nodes.length} 个节点、依赖和交付要求，并带上 ${recording.capturedOn} 真实运行中每个 Agent 收到和交付的内容（${recording.completed}/${recording.total} 个节点，标为「案例实录」）。可为所有新节点选择同一个执行模型。`,
           `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`)
         : t(`保留 ${item.nodes.length} 个节点、依赖和交付要求。可为所有新节点选择同一个执行模型。`, `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements. Optionally choose one execution model for every new node.`)}</p>
@@ -126,7 +129,10 @@ export function OfficialCopySetup({ item, tenantId, locale, busy, readOnly = fal
       </div>
       <p className="official-copy-note">{t('此次只创建画布，不初始化、不运行模型。进入画布后检查配置，再开始运行。', 'This only creates a canvas; it does not initialize nodes or run models. Check the configuration in your canvas before starting a run.')}
         {recording && ` ${t(`案例实录由 ${recording.model} 生成，没有在你的工作区运行；运行整张图会换成你自己的结果。`, `The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`)}`}
-        {recording && recording.outputLocale !== locale && ` ${t('这个案例的 Agent 用英文完成，实录按原文显示；画布的任务按中文复制，与 Agent 当时读到的英文原文措辞不同。', 'This case’s agents worked in Chinese, so the recordings are shown as delivered; the canvas’s tasks are copied in English, worded differently from the Chinese the agents read.')}`}</p>
+        {recording && item.canvas && ` ${item.limitations[locale]}`}
+        {recording && (item.canvas ? item.canvas.locale !== locale : recording.outputLocale !== locale) && ` ${item.canvas
+          ? t('这个案例的画布和实录都是英文原文，按原样复制。', 'This case’s canvas and recordings are in Chinese, as they ran, and are copied as they are.')
+          : t('这个案例的 Agent 用英文完成，实录按原文显示；画布的任务按中文复制，与 Agent 当时读到的英文原文措辞不同。', 'This case’s agents worked in Chinese, so the recordings are shown as delivered; the canvas’s tasks are copied in English, worded differently from the Chinese the agents read.')}`}</p>
       {readOnly && <p role="alert">{t('复制画布需要工作区编辑权限。', 'Editing access is required to copy a canvas.')}</p>}
       {displayedError && <p className="saas-error" role="alert">{displayedError}</p>}
       <footer><button type="button" disabled={busy || checking} onClick={close}>{t('取消', 'Cancel')}</button><button type="submit" className="saas-primary" disabled={locked || invalidChoice}>

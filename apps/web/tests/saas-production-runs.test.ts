@@ -79,8 +79,15 @@ it('changes the canvas digest when any task or wire changes, but not with the fr
 it('carries no private identifiers or machine paths into a public record', () => {
   for (const record of RECORDS) {
     const text = JSON.stringify(record);
-    expect(text, record.caseId).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-    expect(text, record.caseId).not.toMatch(/(?<![A-Za-z0-9])[A-Za-z]:[\\/](?![\\/])/);
+    // Every string as it is, not JSON-escaped, so a backslash path is caught too.
+    const strings: string[] = [];
+    const walk = (value: unknown): void => { if (typeof value === 'string') strings.push(value); else if (value && typeof value === 'object') Object.values(value).forEach(walk); };
+    walk(record);
+    for (const value of strings) {
+      expect(value, record.caseId).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      expect(value, record.caseId).not.toMatch(/(?<![A-Za-z0-9])[A-Za-z]:[\\/]/);
+      expect(value, record.caseId).not.toMatch(/(?:^|[^A-Za-z0-9.])(?:\/Users\/|\/home\/|~\/|\\\\[A-Za-z])/);
+    }
     expect(text, record.caseId).not.toMatch(/\bcv-[a-z0-9]{8}-/);              // canvas node identifiers
     expect(text, record.caseId).not.toMatch(/"(?:tenantId|canvasId|sessionId|runId|operationId)"/);
   }

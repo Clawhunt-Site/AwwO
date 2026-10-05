@@ -4,8 +4,8 @@ import type { ProductionRunRecord } from '../productionRuns';
 const record: ProductionRunRecord = {
   "caseId": "knowledge-base",
   "edition": {
-    "zh": "AwwO 桌面版 · Codex 本地执行器（每个节点是一个可读写本地工作目录的 Codex 会话）",
-    "en": "AwwO desktop · Codex local runtime (each node is a Codex session with its own local working directory)"
+    "zh": "AwwO 本地开发预览 · Codex 本地执行器（每个节点是一个可读写本地工作目录的 Codex 会话）",
+    "en": "AwwO local development preview · Codex local runtime (each node is a Codex session with its own local working directory)"
   },
   "runtime": "codex_local",
   "model": "Codex",
@@ -200,24 +200,24 @@ const record: ProductionRunRecord = {
       "from": "product",
       "to": "users",
       "label": {
-        "zh": "产品边界",
-        "en": "Product scope"
+        "zh": "用户与权限需求",
+        "en": "User and permission requirements"
       }
     },
     {
       "from": "product",
       "to": "data",
       "label": {
-        "zh": "产品边界",
-        "en": "Product scope"
+        "zh": "业务需求",
+        "en": "Business requirements"
       }
     },
     {
       "from": "product",
       "to": "materials",
       "label": {
-        "zh": "产品边界",
-        "en": "Product scope"
+        "zh": "产品与品牌要求",
+        "en": "Product and brand requirements"
       }
     },
     {
@@ -232,8 +232,8 @@ const record: ProductionRunRecord = {
       "from": "users",
       "to": "backend",
       "label": {
-        "zh": "身份与权限契约",
-        "en": "Identity and permission contract"
+        "zh": "用户系统契约",
+        "en": "User system contract"
       }
     },
     {
@@ -272,8 +272,8 @@ const record: ProductionRunRecord = {
       "from": "materials",
       "to": "frontend",
       "label": {
-        "zh": "上线物料",
-        "en": "Launch assets"
+        "zh": "文案与素材清单",
+        "en": "Copy and asset list"
       }
     },
     {
@@ -288,8 +288,8 @@ const record: ProductionRunRecord = {
       "from": "frontend",
       "to": "review",
       "label": {
-        "zh": "交付的工作台",
-        "en": "Delivered workspace"
+        "zh": "待验收交付物",
+        "en": "Deliverable to review"
       }
     }
   ],

@@ -7,6 +7,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDuration, loadProductionRun, type ProductionNodeStatus, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
 import { PRODUCTION_WORKFLOWS } from './productionWorkflows';
+import { RECORDED_CASE_WORKFLOWS } from './recordedCanvases';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import type { ProductionCase } from './productionCatalog';
 import './production-made.css';
@@ -24,8 +25,8 @@ function StatusChip({ status }: { status: ProductionNodeStatus }) {
   return <em className={`production-made-status is-${status}`}>{status === 'done' ? <Check size={11} aria-hidden="true" /> : status === 'failed' ? <TriangleAlert size={11} aria-hidden="true" /> : <CircleSlash size={11} aria-hidden="true" />}{t(zh, en)}</em>;
 }
 
-// Like the delivery reader's inert Markdown, but a link that leads nowhere on this site — a file on the
-// machine the run used, kept only as artifacts/<name> — reads as text instead of a dead link.
+// Inert like the delivery reader (canvas/DeliverableMarkdown.tsx), but stricter: only http(s) links are
+// links, and a path on the machine the run used (kept only as artifacts/<name>) is plain text.
 const external = (href?: string) => /^https?:\/\//i.test(href || '');
 const RECORD_MARKDOWN: Components = {
   img: ({ alt }) => <span>{alt || '🖼'}</span>,
@@ -51,7 +52,8 @@ function NodeOutput({ node }: { node: ProductionRunNode }) {
 
 /** How a case was made: its canvas stage by stage, what every agent actually handed over, and the
  * delivered result. Everything shown comes from the run record; the workflow adds only each node's
- * written task and acceptance, which the record's tests pin to the canvas that ran. */
+ * written task and acceptance, which tests pin to the canvas that ran, or for a recorded canvas its
+ * persona, read from the instructions file its agent loaded (production-canvases/). */
 export default function ProductionShowcase({ item, onReuse }: { item: ProductionCase; onReuse?: (workflow: OfficialWorkflow) => void }) {
   const { locale, t } = useSaaSPreferences();
   const id = useId();
@@ -59,7 +61,7 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
   const [selected, setSelected] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const [revision, setRevision] = useState(0);
-  const workflow = PRODUCTION_WORKFLOWS[item.id];
+  const workflow = PRODUCTION_WORKFLOWS[item.id] ?? RECORDED_CASE_WORKFLOWS[item.id];
   useEffect(() => {
     let live = true;
     loadProductionRun(item.id).then(value => { if (live) setRecord(value ?? null); }, () => { if (live) setRecord(null); });

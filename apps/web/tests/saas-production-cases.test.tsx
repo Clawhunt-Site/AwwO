@@ -6,6 +6,7 @@ import { ProductionCases, COMPACT_CASE_COUNT } from '../src/saas/ProductionCases
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { PRODUCTION_RUN_SUMMARY } from '../src/saas/productionRuns';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { KNOWLEDGE_BASE_WORKFLOW } from '../src/saas/recordedCanvases';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { OfficialWorkflow } from '../src/saas/examples/officialWorkflows';
 
@@ -130,7 +131,7 @@ it('opens a case as brief → team → delivery, then shows how it was made from
   expect(within(made).getByText(/这个案例交付的是一个多文件应用/)).toBeVisible();
   expect(within(made).getByText(/退回了两处演示缺陷/)).toBeVisible();
   expect(made.textContent).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-|[A-Za-z]:\/tmp/);   // no private identifiers or machine paths
-  expect(within(made).queryByRole('button', { name: '复制这张画布' })).toBeNull();     // its 2026-09-04 canvas is not offered as a copy
+  expect(within(made).queryByRole('button', { name: '复制这张画布' })).toBeNull();     // no workspace to copy into here
   within(dialog).getByRole('button', { name: '关闭' }).focus();   // focus inside the dialog, as showModal leaves it
   fireEvent(dialog, new Event('cancel', { cancelable: true }));
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -156,6 +157,24 @@ it('copies an illustrated case’s real canvas through the workspace’s copy fl
   const dialog = screen.getByRole('dialog', { name: '像素平台跳跃' });
   fireEvent.click(await within(dialog).findByRole('button', { name: '复制这张画布' }));
   expect(onReuse).toHaveBeenCalledExactlyOnceWith(PRODUCTION_WORKFLOWS['pixel-platformer']);
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('copies the knowledge base’s recorded canvas too, and describes each node from it', async () => {
+  const onReuse = vi.fn<(workflow: OfficialWorkflow) => void>();
+  render(<SaaSPreferencesProvider><ProductionCases onReuse={onReuse} /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: '团队知识库 SaaS' }));
+  const dialog = screen.getByRole('dialog', { name: '团队知识库 SaaS' });
+  const made = await within(dialog).findByRole('region', { name: '7 个 Agent，5 个阶段，44 分 24 秒跑完' });
+  fireEvent.click(within(within(made).getByRole('list', { name: '按阶段查看每个 Agent' })).getByRole('button', { name: /^后端接口与业务规则/ }));
+  const node = within(made).getByRole('article');
+  // The persona it ran with, the template it was made from, what it hands over, and each input it received by name.
+  expect(within(node).getByText('负责基于数据字典和用户权限契约设计后端业务模型、接口契约、权限校验、检索接口、看板接口与服务验证点。')).toBeVisible();
+  expect(within(node).getByText('后端服务')).toBeVisible();
+  expect(within(node).getByText('接口契约')).toBeVisible();
+  expect(within(node).getByRole('button', { name: '用户登录与工作区权限 · 用户系统契约' })).toBeVisible();
+  fireEvent.click(within(dialog).getByRole('button', { name: '复制这张画布' }));
+  expect(onReuse).toHaveBeenCalledExactlyOnceWith(KNOWLEDGE_BASE_WORKFLOW);
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 

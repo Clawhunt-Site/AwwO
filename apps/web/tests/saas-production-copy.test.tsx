@@ -14,6 +14,7 @@ import { createProductionCopyDocument } from '../src/saas/productionCopy';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
 import { loadProductionRun, type ProductionRunRecord } from '../src/saas/productionRuns';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { RECORDED_CASE_WORKFLOWS } from '../src/saas/recordedCanvases';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { WorkspaceHome } from '../src/saas/WorkspaceHome';
 import type { Identity, Tenant } from '../src/saas/api';
@@ -23,9 +24,11 @@ vi.mock('../src/saas/productionRuns', async importOriginal => {
   return { ...actual, loadProductionRun: vi.fn(actual.loadProductionRun) };
 });
 
-const CASES = Object.keys(PRODUCTION_WORKFLOWS);
+// Every published case: the eight canvases compiled from tasks and the knowledge base's recorded one.
+const WORKFLOWS = { ...PRODUCTION_WORKFLOWS, ...RECORDED_CASE_WORKFLOWS };
+const CASES = Object.keys(WORKFLOWS);
 const records = new Map<string, ProductionRunRecord>();
-const copyOf = (id: string) => createProductionCopyDocument(PRODUCTION_WORKFLOWS[id], records.get(id)!, 'zh', null);
+const copyOf = (id: string, locale: 'zh' | 'en' = 'zh') => createProductionCopyDocument(WORKFLOWS[id], records.get(id)!, locale, null);
 const tenant: Tenant = { id: 'copy-workspace', name: 'Copy workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
 const identity: Identity = { user: { id: 'copy-user', name: 'Copy user', email: 'copy@example.invalid', platformRole: 'user' }, tenants: [tenant] };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -38,19 +41,22 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.se
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('carries every agent’s recorded delivery into its copy, as the case’s, on the very canvas that ran', () => {
-  expect(CASES).toHaveLength(8);
+  expect(CASES).toHaveLength(9);
   for (const id of CASES) {
-    const workflow = PRODUCTION_WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
+    const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     // Only results are added: the tasks, contracts and wires are the pinned canvas the case ran on.
     expect(canonicalCanvasText(copy)).toBe(canonicalCanvasText(createOfficialDocument(workflow, 'zh')));
     copy.nodes.forEach((node, index) => {
       const recorded = record.nodes.find(value => value.id === workflow.nodes[index].id)!;
       const session = node as SessionNode;
-      expect(session.lastOutput, `${id}/${recorded.id}`).toEqual({ text: recorded.output, at: Date.parse(`${record.capturedOn}T00:00:00Z`), source: 'case', model: record.model });
+      expect(session.lastOutput, `${id}/${recorded.id}`).toEqual({ text: recorded.outputType === 'fields' ? expect.any(String) : recorded.output,
+        at: Date.parse(`${record.capturedOn}T00:00:00Z`), source: 'case', model: record.model });
       expect(session.deliverablesOpen).toBe(true);
       const parsed = parseContractOutput(session.contract!, session.lastOutput!.text);
       expect(parsed.errors).toEqual([]);
-      if (recorded.outputType === 'markdown') expect(parsed.values.result).toBe(recorded.output);
+      // Several named fields each come back exactly as the agent delivered them.
+      if (recorded.outputType === 'fields') expect({ ...parsed.values }).toEqual(Object.fromEntries(recorded.fields!.map(field => [field.id, field.value])));
+      else if (recorded.outputType === 'markdown') expect(parsed.values.result).toBe(recorded.output);
       else expect(parsed.values.result).toMatch(/^<!doctype html>/i);
     });
   }
@@ -65,7 +71,8 @@ it('shows every agent what it received: each wired input resolves to its upstrea
       expect(context.error, `${id}/${node.title}`).toBeUndefined();
       for (const edge of incoming) {
         const field = edge.toPort.slice('in:'.length), upstream = byId.get(edge.fromNode)!;
-        expect(context.inputs!.find(input => input.id === field)!.value).toBe(parseContractOutput(upstream.contract!, upstream.lastOutput!.text).values.result);
+        // The wire carries the one output field it starts from, not the whole delivery.
+        expect(context.inputs!.find(input => input.id === field)!.value).toBe(parseContractOutput(upstream.contract!, upstream.lastOutput!.text).values[edge.fromPort.slice('out:'.length)]);
         expect(context.recorded?.[field]).toBe(true);
       }
     }
@@ -173,9 +180,9 @@ function server() {
   }));
   return posts;
 }
-async function openCopy() {
-  fireEvent.click(screen.getByRole('button', { name: '像素平台跳跃' }));
-  fireEvent.click(await within(screen.getByRole('dialog', { name: '像素平台跳跃' })).findByRole('button', { name: '复制这张画布' }));
+async function openCopy(name = '像素平台跳跃') {
+  fireEvent.click(screen.getByRole('button', { name }));
+  fireEvent.click(await within(screen.getByRole('dialog', { name })).findByRole('button', { name: '复制这张画布' }));
   return screen.getByRole('dialog', { name: '复制案例到我的画布' });
 }
 
@@ -227,4 +234,62 @@ it('creates nothing when the recording cannot be read, rather than an empty copy
     expect(posts).toHaveLength(0);
     expect(onOpen).not.toHaveBeenCalled();
   } finally { load.mockImplementation(actual); }
+});
+
+it('copies the knowledge base as it ran: its Chinese canvas in an English copy too, each wire carrying one recorded field', () => {
+  const zh = copyOf('knowledge-base'), en = copyOf('knowledge-base', 'en'), record = records.get('knowledge-base')!;
+  expect(canonicalCanvasText(en)).toBe(canonicalCanvasText(zh));
+  const nodes = en.nodes as SessionNode[];
+  expect(nodes.map(node => node.title)).toEqual(['产品边界与架构需求', '用户登录与工作区权限', '文档数据治理', '知识库上线物料', '后端接口与业务规则', '知识库 Web 工作台', '交付验收']);
+  expect(nodes.every(node => node.lastOutput?.source === 'case' && node.lastOutput.model === 'Codex')).toBe(true);
+  // The workspace received the governance agent's data dictionary in the field it had added for it.
+  const context = prepareNodeConversation(nodes[5], en.nodes, en.edges);
+  expect(context.inputs!.find(input => input.label === '文档数据字典')!.value).toBe(record.nodes.find(node => node.id === 'data')!.fields!.find(field => field.id === 'schema')!.value);
+  expect(context.recorded?.documentSchema).toBe(true);
+  render(<NodeDeliverables node={nodes[6]} readOnly onUpdateNode={() => {}} />);
+  // A delivery of several fields counts them after the run it came from.
+  expect(screen.getByText('案例实录 · Codex · 2026-09-04 真实运行 · 3/3 项')).toBeVisible();
+});
+
+it('copies the knowledge base from the workspace home as it ran, and says where it ran before it does', async () => {
+  const posts = server(), onOpen = vi.fn();
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  const setup = await openCopy('团队知识库 SaaS');
+  expect(within(setup).getByText(/^复制 2026-09-04 真实运行的那张画布（7 个节点）：每个 Agent 的人设、它当时收到的任务和字段说明以及连线都与那次运行一致，并带上每个 Agent 收到和交付的内容（7\/7 个节点，标为「案例实录」）。/)).toBeVisible();
+  expect(within(setup).getByText(/案例实录由 Codex 生成，没有在你的工作区运行；运行整张图会换成你自己的结果。 这张画布 2026-09-04 在 AwwO 的本地开发预览里运行，每个 Agent 是一个在那台电脑上有独立工作目录的 Codex 会话。实录里的本机目录和内部 ID 已隐去；实录提到的 artifacts\/ 文件和前端原型留在那台电脑上，没有随画布复制。画布里的任务是按当时的 Codex 本地执行器写的，在你的工作区重新运行时由你选择的模型执行，结果可能不同。$/)).toBeVisible();
+  fireEvent.click(within(setup).getByRole('button', { name: '创建草稿' }));
+  await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
+  expect(posts).toHaveLength(1);
+  expect(posts[0].body.name).toBe('团队知识库 SaaS');
+  const sent = posts[0].body.document;
+  expect([sent.nodes.length, sent.edges.length]).toEqual([7, 12]);
+  expect(sent.nodes.every((node: any) => node.lastOutput?.source === 'case' && node.lastOutput.model === 'Codex' && node.lastOutput.text)).toBe(true);
+});
+
+it('tells an English member that the knowledge base comes over in Chinese, canvas and recordings alike', async () => {
+  localStorage.setItem('superclaw_locale', 'en');
+  server();
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Team knowledge-base SaaS' }));
+  fireEvent.click(await within(screen.getByRole('dialog', { name: 'Team knowledge-base SaaS' })).findByRole('button', { name: 'Copy this canvas' }));
+  const setup = screen.getByRole('dialog', { name: 'Copy example to my canvases' });
+  expect(within(setup).getByText(/^Copy the canvas of the real run on 2026-09-04 \(7 nodes\): every agent’s persona, the task and field descriptions it received, and the wires are as they were in that run/)).toBeVisible();
+  expect(within(setup).getByText(/the artifacts\/ files and the front-end prototype they mention stayed on that computer and are not copied\. The canvas’s tasks were written for that local Codex runtime; a rerun in your workspace uses the model you choose and may turn out differently\. This case’s canvas and recordings are in Chinese, as they ran, and are copied as they are\.$/)).toBeVisible();
+  expect(within(setup).queryByText(/copied in English/)).toBeNull();
+});
+
+it('stops the copy when a delivered node cannot hold its recording, rather than copying it blank under a 7/7 claim', () => {
+  const record = records.get('knowledge-base')!, workflow = WORKFLOWS['knowledge-base'];
+  const renamed = { ...record, nodes: record.nodes.map(node => node.id === 'review' ? { ...node, fields: node.fields!.map((field, index) => index ? field : { ...field, id: 'verdict' }) } : node) };
+  expect(() => createProductionCopyDocument(workflow, renamed, 'zh', null)).toThrow(/review its canvas cannot hold/);
+});
+
+it('carries an optional file a recording left empty as no file, the way the contract and the server read it', () => {
+  const record = records.get('knowledge-base')!, workflow = WORKFLOWS['knowledge-base'];
+  const empty = { ...record, nodes: record.nodes.map(node => node.id === 'frontend' ? { ...node, fields: node.fields!.map(field => field.id === 'preview' ? { ...field, value: '' } : field) } : node) };
+  const frontend = createProductionCopyDocument(workflow, empty, 'zh', null).nodes[workflow.nodes.findIndex(node => node.id === 'frontend')] as SessionNode;
+  const parsed = parseContractOutput(frontend.contract!, frontend.lastOutput!.text);
+  expect(parsed.errors).toEqual([]);
+  expect('preview' in parsed.values).toBe(false);
+  expect(parsed.values.delivery).toBe(record.nodes.find(node => node.id === 'frontend')!.fields!.find(field => field.id === 'delivery')!.value);
 });

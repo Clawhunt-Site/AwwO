@@ -36,6 +36,25 @@ export interface OfficialWorkflow {
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: Localized }>;
   readonly artifacts: ReadonlyArray<Localized>;
   readonly limitations: Localized;
+  /** A canvas kept as it ran, copied instead of compiling `nodes`, which then only lay it out and describe it. */
+  readonly canvas?: RecordedCanvas;
+}
+
+/** One node of a recorded canvas: its title, persona and contract, word for word. */
+export interface RecordedCanvasNode {
+  readonly id: string;
+  readonly title: string;
+  readonly persona: string;
+  readonly inputs: ReadonlyArray<ContractField>;
+  readonly outputs: ReadonlyArray<ContractField>;
+}
+/** A case's canvas exactly as it ran, for a case whose canvas was not compiled from tasks here. */
+export interface RecordedCanvas {
+  /** The language it ran in; a copy keeps it in either interface language. */
+  readonly locale: UiLocale;
+  readonly nodes: ReadonlyArray<RecordedCanvasNode>;
+  /** Each wire carries one output field of a node into one input field of another. */
+  readonly wires: ReadonlyArray<{ readonly from: string; readonly output: string; readonly to: string; readonly input: string }>;
 }
 
 const l = (zh: string, en: string): Localized => ({ zh, en });
@@ -247,6 +266,7 @@ export function getOfficialWorkflow(id: string): OfficialWorkflow | undefined {
  * Each incoming edge has a distinct contract field so fan-in is valid on the SaaS DAG runner.
  * Runtime and model selection are left to the workspace's existing initialization policy. */
 export function createOfficialDocument(item: OfficialWorkflow, locale: UiLocale): CanvasDocument {
+  if (item.canvas) return createRecordedDocument(item, item.canvas);
   const nodes = item.nodes.map((spec): SessionNode => {
     const base = createSessionNode(['frontend', 'backend', 'users'].includes(spec.role) ? 'coding' : 'llm',
       { x: spec.column * 680, y: spec.row * 560 });
@@ -280,6 +300,31 @@ export function createOfficialDocument(item: OfficialWorkflow, locale: UiLocale)
     if (!source || !target) throw new Error(`Invalid official workflow edge: ${link.from} -> ${link.to}`);
     const from = { nodeId: source.id, portId: 'out:result' };
     const to = { nodeId: target.id, portId: `in:from_${link.from}` };
+    return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId,
+      toNode: to.nodeId, toPort: to.portId, dataType: 'text' as const };
+  });
+  return { ...emptyDocument(), nodes, edges };
+}
+
+/** A recorded canvas in the language it ran in, whatever the interface language: every title, persona,
+ * field and wire as recorded, nothing added. The workflow's nodes give only the layout and the kind. */
+function createRecordedDocument(item: OfficialWorkflow, canvas: RecordedCanvas): CanvasDocument {
+  if (canvas.nodes.length !== item.nodes.length) throw new Error(`Recorded canvas ${item.id} does not match its workflow`);
+  const nodes = item.nodes.map((spec): SessionNode => {
+    const recorded = canvas.nodes.find(node => node.id === spec.id);
+    if (!recorded) throw new Error(`Recorded canvas ${item.id} has no node ${spec.id}`);
+    const base = createSessionNode(['frontend', 'backend', 'users'].includes(spec.role) ? 'coding' : 'llm',
+      { x: spec.column * 680, y: spec.row * 560 });
+    return { ...base, title: recorded.title, w: 560, h: 420, persona: recorded.persona,
+      contract: { version: 1, inputs: recorded.inputs.map(field => ({ ...field })), outputs: recorded.outputs.map(field => ({ ...field })) } };
+  });
+  const byId = new Map(item.nodes.map((spec, index) => [spec.id, nodes[index]]));
+  const edges = canvas.wires.map(wire => {
+    const source = byId.get(wire.from);
+    const target = byId.get(wire.to);
+    if (!source || !target) throw new Error(`Invalid recorded wire: ${wire.from} -> ${wire.to}`);
+    const from = { nodeId: source.id, portId: `out:${wire.output}` };
+    const to = { nodeId: target.id, portId: `in:${wire.input}` };
     return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId,
       toNode: to.nodeId, toPort: to.portId, dataType: 'text' as const };
   });

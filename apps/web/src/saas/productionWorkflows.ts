@@ -6,7 +6,7 @@ import type { Localized, OfficialWorkflow, OfficialWorkflowNode } from './exampl
  * records in production-runs/ are what AwwO delivered when it ran. The tasks are sized for AwwO's
  * default execution settings — one model call per node and at most 4,096 output tokens — so the
  * hand-offs stay short and every build is a single small HTML file. The knowledge-base case ran on
- * 2026-09-04 with its own canvas and keeps that record (production-runs/knowledge-base.ts). */
+ * 2026-09-04 with its own canvas, which recordedCanvases.ts keeps as it ran. */
 const l = (zh: string, en: string): Localized => ({ zh, en });
 const n = (id: string, title: Localized, role: AgentTemplateId, column: number, row: number,
   task: Localized, output: Localized, acceptance: Localized, outputType?: 'html'): OfficialWorkflowNode =>
@@ -352,6 +352,6 @@ const RHYTHM: OfficialWorkflow = {
 };
 
 /** Keyed by production case id. The knowledge-base case is not here: it ran on 2026-09-04 with
- * its own canvas, and its record lives in production-runs/knowledge-base.ts. */
+ * its own canvas, kept as it ran in recordedCanvases.ts, and its record lives in production-runs/knowledge-base.ts. */
 export const PRODUCTION_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries(
   [PIXEL, CONFIGURATOR, PAPER, AD, PORT, GLIDER, PARTY, RHYTHM].map(item => [item.id, item]));

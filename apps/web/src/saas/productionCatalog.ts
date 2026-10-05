@@ -2,7 +2,7 @@ import type { UiLocale } from '../locale';
 
 /** Cases for the homepage, each laid out the AwwO way: the brief, a team of agents in stages, and
  * the deliverable. Every case has a real canvas (productionWorkflows.ts, or for the knowledge base
- * the 2026-09-04 canvas) that ran in AwwO; its record is in production-runs/ and the case dialog
+ * the 2026-09-04 canvas in recordedCanvases.ts) that ran in AwwO; its record is in production-runs/ and the case dialog
  * shows what each agent delivered. The cover footage is a recording of the delivery only for the
  * knowledge base (`recording`); the others are AI-generated illustrations, and the cards say so. */
 export type ProductionKind = 'product' | 'game' | 'interactive' | 'film' | 'twin';
