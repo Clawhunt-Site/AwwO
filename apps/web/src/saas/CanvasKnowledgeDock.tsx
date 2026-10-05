@@ -1,9 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { BookMarked, BookOpen, TerminalSquare, X } from 'lucide-react';
+import { BookMarked, BookOpen, X } from 'lucide-react';
 import { api, saasErrorMessage, tenantPath } from './api';
 import { configureCanvasKnowledge } from './canvasBridge';
 import { KnowledgeWorkbench, type KnowledgeArtifactCandidate } from './KnowledgeWorkbench';
-import { ManagedExecutionPanel } from './ManagedExecutionPanel';
 import { createKnowledgeProposal, type KnowledgeContextItem } from './knowledgeApi';
 import { useSaaSPreferences } from './preferences';
 import './canvas-knowledge-dock.css';
@@ -49,7 +48,6 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft }: Props) {
   const { t, locale } = useSaaSPreferences();
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [open, setOpen] = useState(false);
-  const [executionOpen, setExecutionOpen] = useState(false);
   const [selected, setSelected] = useState<KnowledgeContextItem[]>([]);
   // A failed read concerns only the open map. `message` is the latest compilation outcome: shown at
   // the top of the open map and, while the map is closed, marked on its button until it is opened.
@@ -222,14 +220,10 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft }: Props) {
   useLayoutEffect(() => { refit.current(); }, [selected.length]);
   return <div ref={toolsRef} className={compact ? 'awwo-knowledge-tools is-compact' : 'awwo-knowledge-tools'}>
     <button type="button" className="awwo-knowledge-tool" aria-label={mapLabel} title={pending ? `${mapName}${t('：', ': ')}${messageText(pending)}` : mapName} onClick={openMap}><BookOpen size={15} aria-hidden="true" /><span>{mapName}</span>{mark && <i className={`awwo-knowledge-tool-mark is-${mark}`} aria-hidden="true" />}</button>
-    <button type="button" className="awwo-knowledge-tool" aria-label={t('执行助手', 'Execution assistant')} title={t('执行助手', 'Execution assistant')} onClick={() => setExecutionOpen(true)}><TerminalSquare size={15} aria-hidden="true" /><span>{t('执行助手', 'Execution assistant')}</span></button>
     {selected.length > 0 && <span className="awwo-knowledge-references" title={references}><span className="awwo-knowledge-references-label">{references}</span><span className="awwo-knowledge-references-count" aria-hidden="true"><BookMarked size={13} aria-hidden="true" />{selected.length}</span>
       {!readOnly && <button type="button" aria-label={t('清除任务知识引用', 'Clear task knowledge references')} onClick={() => { configureCanvasKnowledge([]); setSelected([]); }}><X size={13} aria-hidden="true" /></button>}</span>}
     <span className="saas-visually-hidden" aria-live="polite">{politeText}</span>
     <span className="saas-visually-hidden" aria-live="assertive">{assertiveText}</span>
-    {executionOpen && <WorkbenchOverlay label={t('执行助手', 'Execution assistant')} onClose={() => setExecutionOpen(false)}><ManagedExecutionPanel tenantId={tenantId} canvasId={canvasId} knowledgeReferences={selected} readOnly={readOnly}
-      onClose={() => setExecutionOpen(false)}
-      onImported={() => setWorkbenchVersion(value => value + 1)} /></WorkbenchOverlay>}
     {open && <WorkbenchOverlay label={t('知识地图工作台', 'Knowledge workbench')} onClose={closeMap}>
       {readError !== null && <p className="awwo-knowledge-dock-error" role="alert">{saasErrorMessage(readError, locale)}</p>}
       {message && <p className={'error' in message ? 'awwo-knowledge-dock-error' : 'awwo-knowledge-dock-notice'} role={'error' in message ? 'alert' : 'status'}>{messageText(message)}</p>}

@@ -32,7 +32,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2 } from 'lucide-react';
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
-import { CanvasAssistant } from './CanvasAssistant';
+import { CanvasAssistant, type AssistantMode, type AssistantModes } from './CanvasAssistant';
 import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
@@ -157,6 +157,9 @@ export interface CanvasSurfaceProps {
   headerTitle?: ReactNode;
   headerActions?: ReactNode;
   canvasTools?: ReactNode;
+  /** The hosted app's 直接执行 mode for the canvas assistant: its task conversation and composer. Absent (the
+   *  desktop app) leaves the assistant planning only. On a read-only canvas it is the assistant's only mode. */
+  assistantExecution?: ReactNode;
   /** A new external draft, never sent without the normal planning action. */
   taskDraft?: { id: string; prompt: string } | null;
   onOpenSettings?: () => void;
@@ -228,7 +231,7 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   // The opened-node look is a viewer preference: it styles focused tiles only and never the document.
@@ -588,6 +591,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }, REFIT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [size, railsVersion, modelRailCollapsed, viewportSize, autoFit]);
+
+  // After a control that had focus goes away (it unmounted or its view closed), focus moves to `selector`.
+  const refocus = useCallback((selector: string) => {
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>(selector)?.focus();
+    });
+  }, []);
 
   const focusNode = useCallback(
     (nodeId: string, options: { configure?: boolean } = {}) => {
@@ -1812,9 +1824,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (!taskDraft || readOnly || appliedTaskDraft.current === taskDraft.id) return;
     appliedTaskDraft.current = taskDraft.id;
     setPlanning(previous => ({ ...previous, draft: [previous.draft.trim(), taskDraft.prompt].filter(Boolean).join('\n\n') }));
-    setAssistantOpen(true);
+    setAssistantMode('plan'); setAssistantOpen(true);
   }, [taskDraft, readOnly]);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  // Which mode the assistant shows. Planning is where it starts and where every planning event returns it.
+  const [assistantMode, setAssistantMode] = useState<AssistantMode>('plan');
+  const noticedRecovery = useRef('');
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState('');
   const [planningRecovery, setPlanningRecovery] = useState<Awaited<ReturnType<typeof readCanvasPlanRecovery>> | null>(null);
@@ -1857,7 +1872,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setPlanningError(previous => previous === recoveredError ? '' : previous);
         recoveryReadError.current = '';
       }
-      if (recovery.pending) setAssistantOpen(true);
+      if (recovery.pending) {
+        // A pending plan brings planning forward once, when it is first seen; later checks leave the user's mode.
+        const id = recovery.operationId ?? 'pending';
+        if (noticedRecovery.current !== id) { noticedRecovery.current = id; setAssistantMode('plan'); }
+        setAssistantOpen(true);
+      }
     } catch (error) {
       if (!stillCurrent()) return;
       setRecoveryLoaded(false);
@@ -1967,7 +1987,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         focusReturn.current = null;
         setInspectorId(null);
         setSelection(applied.addedNodeIds);
-        setAssistantOpen(true);
+        setAssistantMode('plan'); setAssistantOpen(true);
         setPlanningFitId(id);
       }
       appendPlanningMessage(`${id}-assistant`, applied.summary, plan.operations.length ? 'applied' : undefined);
@@ -2098,6 +2118,28 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     </div>,
   };
 
+  // 直接执行 joins planning only where the host provides it; a read-only canvas keeps just its task history.
+  const executeOnly = readOnly && Boolean(assistantExecution);
+  const assistantModes: AssistantModes | undefined = assistantExecution ? {
+    active: executeOnly ? 'execute' : assistantMode,
+    // An empty canvas plans in its welcome, so choosing 编排画布 there closes the side panel instead.
+    onChange: mode => {
+      setAssistantMode(mode); setAssistantOpen(mode === 'execute' || nodes.length > 0);
+      // The control that was pressed may have gone (the welcome's link, or the panel itself on an empty canvas).
+      refocus(mode === 'execute' ? '.awwo-planner-sidebar .awwo-assistant-mode-switch [aria-pressed="true"]' : '.awwo-canvas-assistant--welcome textarea');
+    },
+    execute: assistantExecution,
+    executeOnly,
+  } : undefined;
+  // Closing the panel can take the pressed control with it (its close button; on an empty canvas the toggle).
+  const closeAssistant = () => {
+    setAssistantOpen(false);
+    refocus(nodes.length || executeOnly ? '.awwo-assistant-toggle' : '.awwo-canvas-assistant--welcome textarea');
+  };
+  // The side panel, when it is drawn: planning needs a canvas to work on; a task conversation does not.
+  const assistantPanel = assistantOpen && (executeOnly || (!readOnly && (nodes.length > 0 || assistantModes?.active === 'execute')))
+    ? <CanvasAssistant mode="panel" {...assistantProps} modes={assistantModes} onClose={() => closeAssistant()} /> : undefined;
+
   const addPaletteModel = (model: ModelPaletteSelection, personaId: AgentTemplateId | null, world?: { x: number; y: number }) => {
     if (!canEditStructure() || planningBusy || paletteLoading || paletteError || !cloudScope
       || palette?.tenantId !== cloudScope.tenant.id || palette.canvasId !== cloudScope.canvasId) return;
@@ -2143,7 +2185,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <option value="pi">{locale === 'zh' ? '工作区默认模型' : 'Workspace default'}</option>
       </select></label>
       {plannerProvider === 'jev' ? <small>{jevStatus?.error || (locale === 'zh' ? '选择人设与执行模型，新增最多 3 个节点。' : 'Select personas and models for up to 3 new nodes.')}</small> : null}
-      {nodes.length > 0 && <button type="button" disabled={planningBusy} onClick={() => setAssistantOpen(true)}>{locale === 'zh' ? '开始编排' : 'Start planning'}</button>}
+      {nodes.length > 0 && <button type="button" disabled={planningBusy} onClick={() => { setAssistantMode('plan'); setAssistantOpen(true); }}>{locale === 'zh' ? '开始编排' : 'Start planning'}</button>}
     </div>} /> : undefined;
 
   const currentModelCatalogue = cloudScope && palette?.tenantId === cloudScope.tenant.id && palette.canvasId === cloudScope.canvasId
@@ -2178,10 +2220,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }}
       onFocusNode={focusNode} onAddAgent={addAgent} loadWorkspaceAgents={loadWorkspaceAgents} agentLibraryRequest={agentLibraryRequest} onAddWorkspaceAgent={addWorkspaceAgent} onAddMarketAgent={loadWorkspaceAgents ? addMarketAgent : undefined} onCreateTemplate={createTemplate}
       onSearch={() => setBarMode('search')}
-      assistant={!readOnly && nodes.length && assistantOpen ? <CanvasAssistant mode="panel" {...assistantProps} onClose={() => setAssistantOpen(false)} /> : undefined}
-      welcome={readOnly ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} />}
-      assistantOpen={assistantOpen}
-      onToggleAssistant={readOnly ? undefined : () => setAssistantOpen(value => !value)}
+      assistant={assistantPanel}
+      // While the side panel already shows the task conversation, the welcome stops offering it.
+      welcome={readOnly ? undefined : <CanvasAssistant mode="welcome" {...assistantProps}
+        modes={assistantOpen && assistantModes?.active === 'execute' ? undefined : assistantModes} />}
+      // The toggle reports the panel as it is drawn; a viewer can open the task history even on an empty canvas.
+      assistantOpen={Boolean(assistantPanel)} assistantAvailable={executeOnly}
+      onToggleAssistant={readOnly && !executeOnly ? undefined : () => { if (assistantPanel) closeAssistant(); else setAssistantOpen(true); }}
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
       headerTitle={headerTitle} headerActions={headerActions} canvasTools={canvasTools}

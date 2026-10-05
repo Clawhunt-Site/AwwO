@@ -6,7 +6,6 @@ import { SaaSApiError } from '../src/saas/api';
 import { canvasKnowledgeRevisionIds, clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import type { KnowledgeContextItem } from '../src/saas/knowledgeApi';
 import type { KnowledgeWorkbenchProps } from '../src/saas/KnowledgeWorkbench';
-import type { ManagedExecutionPanelProps } from '../src/saas/ManagedExecutionPanel';
 
 const fixture = vi.hoisted(() => ({
   api: vi.fn(), proposal: vi.fn(), failed: vi.fn(),
@@ -15,11 +14,6 @@ const fixture = vi.hoisted(() => ({
 vi.mock('../src/saas/api', async original => ({ ...await original<typeof import('../src/saas/api')>(), api: fixture.api }));
 vi.mock('../src/saas/knowledgeApi', async original => ({ ...await original<typeof import('../src/saas/knowledgeApi')>(), createKnowledgeProposal: fixture.proposal }));
 vi.mock('../src/saas/preferences', () => ({ useSaaSPreferences: () => ({ locale: 'zh', t: (zh: string) => zh }) }));
-vi.mock('../src/saas/ManagedExecutionPanel', () => ({ ManagedExecutionPanel: (props: ManagedExecutionPanelProps) => <div>
-  <p>Managed execution · {props.canvasId}</p><p>Execution references: {props.knowledgeReferences?.map(item => item.revisionId).join(', ')}</p>
-  <button onClick={props.onClose}>Close execution</button>
-  <button onClick={() => { void props.onImported?.({} as never); }}>Import artifact</button>
-</div> }));
 vi.mock('../src/saas/KnowledgeWorkbench', () => ({ KnowledgeWorkbench: (props: KnowledgeWorkbenchProps) => <div>
   <p>Artifacts: {props.artifacts?.map(item => item.title).join(', ')}</p>
   <button onClick={() => { void props.onTaskContext('quoted content', [fixture.ref as KnowledgeContextItem]); }}>Select evidence</button>
@@ -75,14 +69,10 @@ it('pins revision identities before handing evidence to the task composer', asyn
   fireEvent.click(screen.getByRole('button', { name: '清除任务知识引用' }));
   expect(canvasKnowledgeRevisionIds()).toEqual([]);
 });
-it('opens the integrated assistant with the selected knowledge', () => {
+it('offers the knowledge map as its only tool: tasks run from the canvas assistant', () => {
   render(<CanvasKnowledgeDock tenantId="tenant-a" canvasId="canvas-a" />);
-  fireEvent.click(screen.getByRole('button', { name: '知识地图' })); fireEvent.click(screen.getByText('Select evidence'));
-  fireEvent.click(screen.getByRole('button', { name: '执行助手' }));
-  expect(screen.getByText('Managed execution · canvas-a')).toBeTruthy();
-  expect(screen.getByText('Execution references: rev-a')).toBeTruthy();
-  expect(screen.queryByRole('button', { name: /OpenMaus/ })).toBeNull();
-  fireEvent.click(screen.getByText('Close execution')); expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['知识地图']);
+  expect(screen.queryByRole('button', { name: '执行助手' })).toBeNull();
 });
 const mapButton = () => screen.getByRole('button', { name: /^知识地图/ });
 const live = (kind: 'status' | 'alert') => document.querySelector(`.awwo-knowledge-tools > [aria-live="${kind === 'alert' ? 'assertive' : 'polite'}"]`)?.textContent ?? '';
@@ -142,7 +132,7 @@ it('marks the map button while a compilation runs on after the map closed, then 
   expect(document.querySelector('.awwo-knowledge-tool-mark')).toBeNull();
   expect(fixture.proposal).not.toHaveBeenCalled();
 });
-it('marks a result that arrives after the map closed until the map is opened, whatever else is opened first', async () => {
+it('marks a result that arrives after the map closed until the map is opened', async () => {
   let finish: (value: unknown) => void = () => {};
   const normal = fixture.api.getMockImplementation()!;
   fixture.api.mockImplementation((path: string, init?: RequestInit) => path.endsWith('/compilations/run-a') ? new Promise(resolve => { finish = resolve; }) : normal(path, init));
@@ -153,8 +143,6 @@ it('marks a result that arrives after the map closed until the map is opened, wh
   await act(async () => { finish({ id: 'run-a', status: 'completed', knowledge: { items: [fixture.ref] }, pages: [{ title: 'Compiled page', kind: 'page', content: 'Cites doc-a/rev-a', sourceRevisionIds: ['rev-a'] }] }); });
   await waitFor(() => expect(mapButton()).toHaveAccessibleName('知识地图（有新的整理结果）'));
   expect(live('status')).toBe('已生成 1 份待审核提案。');
-  fireEvent.click(screen.getByRole('button', { name: '执行助手' })); fireEvent.click(screen.getByText('Close execution'));
-  expect(mapButton()).toHaveAccessibleName('知识地图（有新的整理结果）');
   fireEvent.click(mapButton());
   expect(inMap().getByRole('status')).toHaveTextContent('已生成 1 份待审核提案。');
   fireEvent.click(screen.getByText('Close workbench'));
@@ -241,14 +229,6 @@ it('does not select task knowledge in a read-only canvas even if a child calls i
   fireEvent.click(mapButton()); fireEvent.click(screen.getByText('Select evidence'));
   expect(canvasKnowledgeRevisionIds()).toEqual([]); expect(onTaskDraft).not.toHaveBeenCalled();
 });
-it('adds no notice of its own when the execution assistant saves an artifact, which the assistant confirms itself', () => {
-  render(<CanvasKnowledgeDock tenantId="tenant-a" canvasId="canvas-a" />);
-  fireEvent.click(screen.getByRole('button', { name: '执行助手' }));
-  fireEvent.click(screen.getByText('Import artifact'));
-  fireEvent.click(screen.getByText('Close execution'));
-  expect(mapButton()).toHaveAccessibleName('知识地图');
-  expect(live('status')).toBe('');
-});
 it('translates an API failure from its error code', async () => {
   let finish: (cause: unknown) => void = () => {};
   const normal = fixture.api.getMockImplementation()!;
@@ -277,7 +257,7 @@ describe('in a narrow canvas bar', () => {
       if (this.classList.contains('awwo-canvas-bar') || this.classList.contains('awwo-workspace')) return box(0, geometry.end, 0, 44);
       return box(0, 0);
     });
-    // Each tool label is 101px wide whether shown or hidden, so the labels add 2 × (101 + 9) = 220px;
+    // The map's label is 101px wide whether shown or hidden, so it adds 101 + 9 = 110px;
     // a references label adds 90 + 9 more.
     width = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollWidth');
     Object.defineProperty(Element.prototype, 'scrollWidth', { configurable: true, get(this: Element) {
@@ -296,10 +276,10 @@ describe('in a narrow canvas bar', () => {
     geometry.runLeft = 410; resize();
     expect(tools()).toHaveClass('is-compact');
     expect(mapButton()).toHaveAttribute('title', '知识地图');
-    // Icons alone are 220px narrower; labels come back only when they would leave 48px to spare.
-    geometry.toolsRight = 180; geometry.runLeft = 440; resize();
+    // The icon alone is 110px narrower; the label comes back only when it would leave 48px to spare.
+    geometry.toolsRight = 180; geometry.runLeft = 330; resize();
     expect(tools()).toHaveClass('is-compact');
-    geometry.runLeft = 460; resize();
+    geometry.runLeft = 340; resize();
     expect(tools()).not.toHaveClass('is-compact');
   });
   it('shrinks the references chip to a count with the labels, and counts its full text before restoring them', () => {
@@ -313,10 +293,10 @@ describe('in a narrow canvas bar', () => {
     expect(chip.querySelector('.awwo-knowledge-references-label')).toHaveTextContent('已引用 1 份知识');
     expect(chip.querySelector('.awwo-knowledge-references-count')).toHaveTextContent('1');
     expect(chip.querySelector('.awwo-knowledge-references-count')).toHaveAttribute('aria-hidden', 'true');
-    // 220px of tool labels and 99px of references text, plus 48px to spare.
-    geometry.toolsRight = 180; geometry.runLeft = 180 + 300; resize();
+    // 110px of the map's label and 99px of references text, plus 48px to spare.
+    geometry.toolsRight = 180; geometry.runLeft = 180 + 250; resize();
     expect(tools()).toHaveClass('is-compact');
-    geometry.runLeft = 180 + 370; resize();
+    geometry.runLeft = 180 + 260; resize();
     expect(tools()).not.toHaveClass('is-compact');
   });
   it('re-checks before painting a references chip that only fits beside icons', () => {

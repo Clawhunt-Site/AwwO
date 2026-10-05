@@ -323,3 +323,62 @@ describe('canvas assistant UI', () => {
     expect(screen.queryByRole('button', { name: '关闭画布助手' })).toBeNull();
   });
 });
+
+describe('the assistant’s two modes', () => {
+  const modes = (overrides: Partial<NonNullable<CanvasAssistantProps['modes']>> = {}) =>
+    ({ active: 'plan' as const, onChange: vi.fn(), execute: <p>任务对话</p>, ...overrides });
+
+  it('lets the user choose between arranging the canvas and doing a task, and never switches on its own', () => {
+    const choice = modes();
+    const { rerender, container } = render(<Harness mode="panel" modes={choice} />);
+    const group = screen.getByRole('group', { name: '助手模式' });
+    expect(screen.getByRole('button', { name: '编排画布' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '直接执行' })).toHaveAttribute('aria-pressed', 'false');
+    expect(group).toBeVisible();
+    expect(screen.getByText('说出你要的结果，助手安排节点和连线；每次改动都能撤销。')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toBeVisible();
+    expect(screen.queryByText('任务对话')).toBeNull();
+    // Choosing the mode that is already on does nothing.
+    fireEvent.click(screen.getByRole('button', { name: '编排画布' }));
+    expect(choice.onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '直接执行' }));
+    expect(choice.onChange).toHaveBeenCalledExactlyOnceWith('execute');
+    rerender(<Harness mode="panel" modes={{ ...choice, active: 'execute' }} />);
+    expect(screen.getByRole('button', { name: '直接执行' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('助手在隔离的工作区里动手完成，交给你文件；做有影响的操作前会先问你。')).toBeVisible();
+    expect(screen.getByText('任务对话')).toBeVisible();
+    expect(screen.queryByRole('textbox', { name: '画布需求' })).toBeNull();
+    expect(container.querySelector('.awwo-canvas-assistant')).toHaveClass('is-executing');
+  });
+
+  it('keeps a planning draft through a visit to the other mode', () => {
+    const { rerender } = render(<Harness mode="panel" draft="把节点改成移动端" modes={modes()} />);
+    rerender(<Harness mode="panel" draft="把节点改成移动端" modes={modes({ active: 'execute' })} />);
+    rerender(<Harness mode="panel" draft="把节点改成移动端" modes={modes()} />);
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveValue('把节点改成移动端');
+  });
+
+  it('shows only the task history, without a switch, where the canvas cannot be planned', () => {
+    render(<Harness mode="panel" modes={modes({ executeOnly: true })} />);
+    expect(screen.queryByRole('group', { name: '助手模式' })).toBeNull();
+    expect(screen.getByText('任务对话')).toBeVisible();
+    expect(screen.queryByRole('textbox', { name: '画布需求' })).toBeNull();
+  });
+
+  it('offers doing a task directly from the welcome, but not while a plan is being recovered', () => {
+    const choice = modes();
+    const { rerender } = render(<Harness modes={choice} />);
+    expect(screen.queryByRole('group', { name: '助手模式' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '或者直接让助手完成一个任务' }));
+    expect(choice.onChange).toHaveBeenCalledExactlyOnceWith('execute');
+    rerender(<Harness modes={choice} recovery={{ prompt: '原来的任务', canResume: true, busy: false, onResume: vi.fn(), onStop: vi.fn() }} />);
+    expect(screen.queryByRole('button', { name: '或者直接让助手完成一个任务' })).toBeNull();
+  });
+
+  it('stays a planning assistant where the host cannot run tasks', () => {
+    const { rerender } = render(<Harness mode="panel" />);
+    expect(screen.queryByRole('group', { name: '助手模式' })).toBeNull();
+    rerender(<Harness />);
+    expect(screen.queryByRole('button', { name: '或者直接让助手完成一个任务' })).toBeNull();
+  });
+});

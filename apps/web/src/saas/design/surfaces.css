@@ -1,13 +1,14 @@
-/* AwwO hosted app: the older surfaces on the design system — the knowledge workbench and the execution
- * assistant (both open over the canvas), the account dialog and the admin pages.
+/* AwwO hosted app: the older surfaces on the design system — the knowledge workbench (open over the canvas),
+ * the account dialog and the admin pages.
  *
  * Their own stylesheets keep layout, behaviour and their breakpoints (spacing that varies with the width is
- * left to them); this file gives them the system's colour, type and controls, so a saved account colour scheme and the dark theme reach them as they reach every other page:
+ * left to them); this file gives them the system's colour, type and controls, so a saved account colour
+ * scheme and the dark theme reach them as they reach every other page:
  * ink pill actions, teal for links and focus, soft filled chips, hairline panels on salt paper. Where a
  * component rule already reads a local variable (--knowledge-*, --account-accent), the variable is remapped
  * instead of restating the rule. Loaded after canvas.css and before motion.css. */
 
-/* ── The overlay over the canvas (knowledge workbench, execution assistant) ─────────────────────── */
+/* ── The overlay over the canvas (knowledge workbench) ─────────────────────── */
 .awwo-knowledge-overlay {
   border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl);
   background: var(--saas-card); color: var(--saas-text); box-shadow: var(--saas-shadow-xl);
@@ -205,79 +206,6 @@
   .knowledge-workbench .knowledge-heading h2 { font-size: var(--saas-text-lg); }
   .knowledge-library .knowledge-tabs button { gap: 4px; font-size: var(--saas-text-xs); }
   .knowledge-header-actions > button:not([aria-label]) { padding: 0 12px; }
-}
-
-/* ── Execution assistant ─────────────────────────────────────────────────────────────────────── */
-.managed-execution { background: var(--saas-card); color: var(--saas-text); font: 400 var(--saas-text-sm)/1.65 var(--saas-font); }
-.managed-execution h2:where(:not(.managed-execution-preview *)) { font: 680 var(--saas-text-xl)/1.25 var(--saas-font-display); font-stretch: var(--saas-head-stretch); letter-spacing: var(--saas-head-track); }
-.managed-execution h3:where(:not(.managed-execution-preview *)) { font-size: var(--saas-text-md); font-weight: 650; }
-.managed-execution button:where(:not(.managed-execution-preview *)), .managed-execution-artifacts a:where(:not(.managed-execution-preview *)) {
-  border-color: var(--saas-border-strong); border-radius: var(--saas-radius-pill); background: var(--saas-card); font-weight: 500;
-  transition: background-color var(--saas-dur-1), border-color var(--saas-dur-1);
-}
-.managed-execution button:where(:not(.managed-execution-preview *)):hover:not(:disabled) { background: var(--saas-soft); }
-.managed-execution .managed-primary { border-color: transparent; background: var(--saas-primary); color: var(--saas-on-primary); font-weight: 600; }
-.managed-execution .managed-primary:hover:not(:disabled) { background: var(--saas-primary-hover); }
-.managed-execution .managed-primary:disabled { opacity: .45; }
-.managed-execution :focus-visible:where(:not(.managed-execution-preview *)) { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
-.managed-execution label:where(:not(.managed-execution-preview *)) { color: var(--saas-text); font-size: var(--saas-text-sm); font-weight: 500; }
-.managed-execution :is(input, select, textarea):where(:not(.managed-execution-preview *)) {
-  border-color: var(--saas-border-strong); border-radius: var(--saas-radius-sm); background: var(--saas-card); color: var(--saas-text);
-  font-weight: 400; transition: border-color var(--saas-dur-1), box-shadow var(--saas-dur-1);
-}
-.managed-execution :is(input, select, textarea):where(:not(.managed-execution-preview *)):focus { outline: none; border-color: var(--saas-focus); box-shadow: var(--saas-focus-ring); }
-.managed-execution textarea::placeholder { color: var(--saas-subtle); }
-.managed-execution :is(pre, code):where(:not(.managed-execution-preview *)) { font-family: var(--saas-font-mono); }
-.managed-execution code:where(:not(.managed-execution-preview *)) { font-size: 11px; }
-.managed-execution-header { padding: 16px 18px 16px 22px; border-bottom-color: var(--saas-hairline); background: var(--saas-card); }
-/* The panel's mark, as the knowledge workbench's. */
-.managed-execution-header > div:first-child > svg { box-sizing: content-box; flex: none; width: 22px; height: 22px; padding: 9px; border-radius: var(--saas-radius); background: var(--saas-accent-soft); color: var(--saas-accent); }
-.managed-execution-header p { color: var(--saas-muted); font-size: var(--saas-text-sm); }
-.managed-execution-header > div:last-child { gap: 8px; }
-.managed-execution-header > div:last-child > button { width: var(--saas-control); min-height: var(--saas-control); padding: 0; border-radius: 50%; }
-.managed-execution-compose { border-right-color: var(--saas-hairline); background: color-mix(in srgb, var(--saas-bg) 45%, var(--saas-card)); }
-.managed-execution-detail { padding: 24px 28px; }
-.managed-execution-service { padding: 14px 16px; border-color: var(--saas-hairline); border-radius: var(--saas-radius); background: var(--saas-card); box-shadow: var(--saas-shadow-xs); }
-.managed-execution-service p, .managed-execution-artifacts > p, .managed-execution-history > p { color: var(--saas-muted); font-size: var(--saas-text-sm); }
-.managed-execution-service a { color: var(--saas-link); }
-.managed-execution-history > button { padding: 9px 12px; border-color: var(--saas-hairline); border-radius: var(--saas-radius-sm); }
-.managed-execution-history strong { font-size: var(--saas-text-sm); font-weight: 600; }
-.managed-execution-history span { color: var(--saas-muted); font-size: var(--saas-text-xs); }
-.managed-execution-history button[aria-pressed=true] { border-color: color-mix(in srgb, var(--saas-accent) 45%, var(--saas-border)); background: var(--saas-accent-soft); box-shadow: inset 3px 0 var(--saas-accent); }
-.managed-execution-empty { color: var(--saas-muted); }
-.managed-execution-empty > svg { color: var(--saas-subtle); }
-.managed-execution-empty h3 { color: var(--saas-text); font-size: var(--saas-text-lg); }
-.managed-execution-empty p { max-width: 420px; font-size: var(--saas-text-sm); line-height: 1.7; }
-.managed-execution-detail-bar > span { color: var(--saas-muted); font-size: var(--saas-text-xs); }
-.managed-execution-prompt { font-size: var(--saas-text-lg); font-weight: 600; }
-.managed-execution-id { color: var(--saas-muted); }
-.managed-execution-error, .managed-execution-notice, .managed-execution-warning { border-radius: var(--saas-radius-sm); font-size: var(--saas-text-sm); }
-.managed-execution-error { background: var(--saas-danger-bg); color: var(--saas-danger); }
-.managed-execution-notice { background: var(--saas-success-bg); color: var(--saas-success); }
-.managed-execution-warning { background: var(--saas-warning-bg); color: var(--saas-warning); }
-.managed-execution-evidence { border-left-color: var(--saas-accent); font-size: var(--saas-text-xs); }
-.managed-execution-evidence span { color: var(--saas-muted); }
-.managed-execution-request { border-color: color-mix(in srgb, var(--saas-warning-dot) 55%, var(--saas-border)); border-radius: var(--saas-radius); background: var(--saas-card); }
-.managed-execution-request > div:first-child > span { color: var(--saas-warning); font-size: var(--saas-text-xs); }
-.managed-execution-request pre { border-radius: var(--saas-radius-xs); background: var(--saas-field); }
-.managed-execution-messages article { border-left-color: var(--saas-border); }
-.managed-execution-messages article > div { color: var(--saas-muted); font-size: var(--saas-text-xs); }
-.managed-execution-output { border-top-color: var(--saas-hairline); }
-.managed-execution-artifacts article { border-color: var(--saas-hairline); border-radius: var(--saas-radius); background: var(--saas-card); }
-.managed-execution-artifacts small:where(:not(.managed-execution-preview *)) { color: var(--saas-muted); font-size: var(--saas-text-xs); }
-.managed-execution-artifacts :is(button, a):where(:not(.managed-execution-preview *)) { font-size: var(--saas-text-xs); }
-.managed-execution-preview {
-  --line: var(--saas-border); --fg: var(--saas-text); --muted: var(--saas-muted); --accent: var(--saas-accent); --accent-soft: var(--saas-accent-soft);
-  border-color: var(--saas-border); border-radius: var(--saas-radius); background: var(--saas-card);
-}
-.managed-execution-import { border-color: var(--saas-border); border-radius: var(--saas-radius-lg); background: var(--saas-card); }
-.managed-execution-import > p { color: var(--saas-muted); font-size: var(--saas-text-sm); }
-@media (max-width: 760px) {
-  .managed-execution-header { padding: 14px 14px 14px 16px; }
-  .managed-execution-header p { font-size: var(--saas-text-xs); }
-  .managed-execution-header > div:first-child > svg { width: 18px; height: 18px; padding: 7px; }
-  .managed-execution-compose { border-bottom-color: var(--saas-hairline); }
-  .managed-execution-detail { padding: 16px; }
 }
 
 /* ── Account dialog ──────────────────────────────────────────────────────────────────────────── */

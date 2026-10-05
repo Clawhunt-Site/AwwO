@@ -1,4 +1,4 @@
-/* Knowledge map and execution assistant sit in the canvas bar beside the assistant toggle, styled like it;
+/* The knowledge map sits in the canvas bar beside the assistant toggle, styled like it;
    the canvas keeps its full width. In a narrow bar the labels give way to icons (is-compact). */
 .awwo-knowledge-tools{position:relative;display:inline-flex;align-items:center;gap:4px;min-width:0}
 .awwo-canvas-bar .awwo-knowledge-tool{position:relative;display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:6px 9px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--awwo-muted);font:inherit;font-size:12px;white-space:nowrap;cursor:pointer}

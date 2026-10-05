@@ -35,6 +35,19 @@ export interface CanvasAssistantProps {
   progress?: PlanProgress;
   /** Seconds the last successful plan took, measured on this device; shown as an expectation. */
   expectedSeconds?: number;
+  /** A host that can also run tasks (the hosted app) adds 直接执行 beside planning. The user picks the mode;
+   *  nothing is ever routed to execution on its own. */
+  modes?: AssistantModes;
+}
+
+export type AssistantMode = 'plan' | 'execute';
+export interface AssistantModes {
+  active: AssistantMode;
+  onChange: (mode: AssistantMode) => void;
+  /** The execution conversation and its composer, drawn by the host. */
+  execute: ReactNode;
+  /** Execution only, without the switch (a read-only canvas can review its tasks but not plan). */
+  executeOnly?: boolean;
 }
 
 /** The four observable steps of a plan. They advance only on events the run reported. */
@@ -114,7 +127,7 @@ function progressSignature(progress: PlanProgress | undefined): string {
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
 export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
-  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery }: CanvasAssistantProps) {
+  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery, modes }: CanvasAssistantProps) {
   const { locale, t } = useCanvasI18n();
   const examples = [t('assistant.exampleSaas'), t('assistant.exampleData'), t('assistant.exampleContent')];
   const welcome = mode === 'welcome';
@@ -125,10 +138,12 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const canSend = !busy && !recovery && !submitDisabled && Boolean(draft.trim());
   const lastMessage = messages.at(-1);
   const duplicateLastError = lastMessage?.role === 'assistant' && lastMessage.status === 'error' && lastMessage.content === error;
+  // Shown again after the other mode, the conversation opens at its newest message as well.
+  const executing = mode !== 'welcome' && modes ? Boolean(modes.executeOnly || modes.active === 'execute') : false;
   useEffect(() => {
     // Scroll only the conversation region, never the surrounding canvas or page.
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
-  }, [messages.length, lastMessage?.content, lastMessage?.status, busy]);
+  }, [messages.length, lastMessage?.content, lastMessage?.status, busy, executing]);
 
   // Elapsed time is the one progress fact available even before the run emits anything, so a
   // silent model is still visibly alive. It is measured from this request, never accumulated.
@@ -191,14 +206,25 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
     </div>;
   }
 
-  return <section className={`awwo-canvas-assistant awwo-canvas-assistant--${mode}`} aria-label={t('assistant.panelTitle')}>
+  return <section className={`awwo-canvas-assistant awwo-canvas-assistant--${mode}${executing ? ' is-executing' : ''}`} aria-label={t('assistant.panelTitle')}>
     <header className="awwo-assistant-header">
       {welcome ? <h1>{t('assistant.title')}</h1> : <h2>{t('assistant.panelTitle')}</h2>}
       {!welcome && onClose ? <button type="button" className="awwo-assistant-icon-button" aria-label={t('assistant.close')} onClick={onClose}>
         <X size={17} aria-hidden="true" />
       </button> : null}
     </header>
+    {!welcome && modes && !modes.executeOnly ? <div className="awwo-assistant-modes">
+      <div className="awwo-assistant-mode-switch" role="group" aria-label={t('assistant.modes')}>
+        {/* Switching only changes the view: a plan in progress keeps going and shows again on return. */}
+        {(['plan', 'execute'] as const).map(item => <button type="button" key={item} aria-pressed={modes.active === item}
+          onClick={() => { if (modes.active !== item) modes.onChange(item); }}>
+          {t(item === 'plan' ? 'assistant.modePlan' : 'assistant.modeExecute')}
+        </button>)}
+      </div>
+      <p className="awwo-assistant-mode-hint">{t(modes.active === 'plan' ? 'assistant.modePlanHint' : 'assistant.modeExecuteHint')}</p>
+    </div> : null}
 
+    {executing ? modes!.execute : <>
     {(!welcome || messages.length > 0) && <div ref={log} className="awwo-assistant-messages" role="log" aria-label={t('assistant.conversation')} aria-live="polite" aria-relevant="additions text">
       {messages.length ? <ol>
         {messages.filter(message => !(duplicateLastError && message === lastMessage)).map(message => <li className={`awwo-assistant-message awwo-assistant-message--${message.role}`} key={message.id}>
@@ -241,5 +267,8 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       {examples.map(example => <button type="button" key={example} disabled={busy}
         onClick={() => { onDraftChange(example); input.current?.focus(); }}>{example}</button>)}
     </div> : null}
+    {welcome && modes && !recovery ? <button type="button" className="awwo-assistant-execute-link" disabled={busy}
+      onClick={() => modes.onChange('execute')}>{t('assistant.executeFromWelcome')}</button> : null}
+    </>}
   </section>;
 }

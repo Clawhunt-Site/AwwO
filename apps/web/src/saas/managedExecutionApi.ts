@@ -26,7 +26,7 @@ const summary = (value: unknown): value is ExecutionRunSummary => object(value) 
   && string(value.prompt) && string(value.createdAt) && string(value.updatedAt);
 const acceptedRun = (value: unknown): value is Pick<ExecutionRun, 'id' | 'status'> => object(value) && nonempty(value.id) && nonempty(value.status);
 function checked<T>(value: unknown, guard: (value: unknown) => value is T): T {
-  if (!guard(value)) throw new SaaSApiError(502, 'invalid_execution_response', '执行助手返回的数据不完整，请重新读取。');
+  if (!guard(value)) throw new SaaSApiError(502, 'invalid_execution_response', '执行服务返回的数据不完整，请重新读取。');
   return value;
 }
 
@@ -38,7 +38,7 @@ async function bounded(path: string, signal: AbortSignal, init: RequestInit = {}
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
   try { return await api<unknown>(path, { ...init, signal: controller.signal }); }
   catch (error) {
-    if (timedOut && !signal.aborted) throw new SaaSApiError(408, 'execution_request_timeout', '执行助手请求超过 15 秒。请核对状态；未自动重复提交。');
+    if (timedOut && !signal.aborted) throw new SaaSApiError(408, 'execution_request_timeout', '执行请求超过 15 秒。请核对状态；未自动重复提交。');
     throw error;
   } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); }
 }
