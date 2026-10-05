@@ -287,6 +287,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}", a.tenant(a.downloadArtifact, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}/media", a.tenant(a.mediaArtifact, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/media", a.tenant(a.mediaCatalogue, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/route-usage", a.tenant(a.routeUsageView, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/upgrade-interest", a.tenant(a.recordUpgradeInterest, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/agents", a.tenant(a.listAgents, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/agents", a.tenant(a.createAgent, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/agents/{id}", a.tenant(a.getAgent, 1))
@@ -311,7 +313,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/{id}/cancel", a.tenant(a.cancelGraphRun, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/operations/{operationId}/cancel", a.tenant(a.cancelGraphOperation, 2))
 	m.HandleFunc("GET /api/v1/admin/summary", a.admin(a.adminSummary))
-	for _, kind := range []string{"tenants", "users", "runs", "audit"} {
+	for _, kind := range []string{"tenants", "users", "runs", "audit", "interests"} {
 		m.HandleFunc("GET /api/v1/admin/"+kind, a.admin(a.adminList(kind)))
 	}
 	m.HandleFunc("PATCH /api/v1/admin/tenants/{id}", a.admin(a.adminTenant))

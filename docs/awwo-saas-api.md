@@ -59,6 +59,8 @@
 | GET /tenants | 无 | 当前用户的租户列表 |
 | POST /tenants | name | 201，创建租户，当前用户成为 owner；`AWWO_MAX_OWNED_WORKSPACES`>0 时，非平台管理员已拥有不少于该数量的工作区则 403 / workspace_limit（注册与首次 ClawHunt 登录自动创建的工作区不受此限） |
 | GET /tenants/{tenantId}/members | limit?, cursor? | `{items,nextCursor,snapshot}`；reader 以上 |
+| GET /tenants/{tenantId}/route-usage | 无 | reader 以上；今日（UTC）额度 `{limited,daily:{limit,used},routes?:{gate|bedrock|media:{limit,used}},interested,resetsAt}`；每日总数与本工作区的路由次数按准入的算法计数（`not_incurred` 不占路由次数但占每日次数）；不含全站上限、每个工作区与全站的媒体生成上限以及模型清单，准入仍可能拒绝；没有 routeLimits 的工作区 `limited:false` 且无 `routes` |
+| POST /tenants/{tenantId}/upgrade-interest | `{}` | reader 以上，暂停的工作区 403；服务端按上面的计数记录提出时已用完的额度（`daily`=每日总数，或额度大于 0 且已用完的路由；额度为 0 的路由不记），每人每个工作区一行，多次提出取并集；距上次超过 10 分钟才把 `clicks` 加 1；200 `{recorded:true,clicks}`；不改变任何额度 |
 | POST /tenants/{tenantId}/members | 已注册用户 email, role | admin 以上；只有 owner 可任命 admin |
 | PATCH /tenants/{tenantId}/members/{userId} | role | 204；不允许通过此 API 改动 owner |
 | DELETE /tenants/{tenantId}/members/{userId} | 无 | 204；受保护角色不能被低权限成员移除 |
@@ -230,6 +232,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | GET /admin/users | limit?, cursor? | `{items,nextCursor,snapshot}`；用户和平台角色，不返回密码 hash |
 | GET /admin/runs | limit?, cursor? | `{items,nextCursor,snapshot}`；标准 run 对象 |
 | GET /admin/audit | limit?, cursor? | `{items,nextCursor,snapshot}`；id,actorId,tenantId,action,resourceId,createdAt |
+| GET /admin/interests | limit?, cursor? | `{items,nextCursor,snapshot}`；付费意向：id,userId,email,userName,tenantId,tenantName,routes（提出时已用完：daily/gate/bedrock/media）,clicks,createdAt（首次）,lastAt；按首次时间分页 |
 | PATCH /admin/tenants/{id} | status?, maxConcurrentRuns?, maxRunsPerDay?, allowedModels?, routeLimits? | 至少一项；status=active/suspended，并发整数 1–100，每日整数 1–100000；200 返回更新的 tenant（含 allowedModels、routeLimits） |
 
 `allowedModels` 是本工作区的模型清单（entitlement），三态：字段缺省=不改动；`null`=解除限制；数组=替换为该清单。最多 64 个 ID，每个 ID 非空、≤200 字节、不含空白、控制字符或逗号；服务器去重并排序后存储。`null`（即未限制）表示 worker 公布的全部模型都可选，所有现存工作区默认如此；`[]` 表示禁止全部模型。清单是过滤器而非注册表：列了但 worker 未公布的 ID 既不会被提供也不会被运行。写入清单**不取消任何运行**：每次模型调用在扣减配额的同一事务里按 tenants 当前行重新授权（`FOR UPDATE`），被移除的模型无法再被调用一次——排队中的运行、图节点子运行、团队后续成员、重启后恢复的图，全部在各自的准入处以 `model_not_allowed` 终止；而已经发出的调用是在旧清单下被授权的，不会被追溯终止，需要立即掐断在途调用请改用暂停工作区。原始清单只在平台管理端投影（`GET /admin/tenants`、本 PATCH 的响应）出现；工作区成员通过 `GET /tenants/{tenantId}/runtime` 读取已与 worker 实际公布目录求交的结果。部署设置 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS`（逗号分隔，校验与本字段相同；仅限 operator 凭据模式，personal 模式的目录按连接命名模型，启动时拒绝）与 `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY` 只为此后新建的工作区预置清单与每日额度，不改动已有工作区，之后仍可用本 PATCH 修改。

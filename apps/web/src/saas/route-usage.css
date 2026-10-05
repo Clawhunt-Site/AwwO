@@ -1,0 +1,19 @@
+.saas-route-usage-trigger { white-space:nowrap; }
+/* Size and shape come from the header's own button rules, so the chip matches its neighbours on the home
+   and canvas pages. Those rules also clear every border and background, up to
+   .saas-dashboard .saas-account-actions > button:not(:disabled):hover (0,4,1); the chip is visible, so its
+   colour rules outrank them: a doubled class, and :not(:disabled) on hover. */
+.saas-account-actions > button.saas-route-usage-trigger.saas-route-usage-trigger { border:1px solid var(--saas-border); background:var(--saas-card); color:var(--saas-text); }
+.saas-account-actions > button.saas-route-usage-trigger.saas-route-usage-trigger:not(:disabled):hover { border-color:var(--saas-accent); background:var(--saas-card); color:var(--saas-text); }
+/* --saas-warning-bg is a dark-theme colour; a tint of the theme's own card keeps the text readable in both. */
+.saas-account-actions > button.saas-route-usage-trigger.saas-route-usage-trigger.is-out,
+.saas-account-actions > button.saas-route-usage-trigger.saas-route-usage-trigger.is-out:not(:disabled):hover { border-color:var(--saas-warning); background:color-mix(in srgb, var(--saas-warning) 18%, var(--saas-card)); }
+.saas-route-usage { width:min(320px, calc(100vw - 24px)); padding:16px; }
+.saas-route-usage h2 { margin:0 0 6px; font-size:15px; }
+.saas-route-usage p { margin:0 0 12px; color:var(--saas-muted); font-size:13px; line-height:1.55; }
+.saas-route-usage dl { display:grid; gap:6px; margin:0 0 14px; }
+.saas-route-usage dl div { display:flex; justify-content:space-between; gap:12px; font-size:13px; }
+.saas-route-usage dd { margin:0; font-variant-numeric:tabular-nums; color:var(--saas-muted); }
+.saas-route-usage dl div.is-out dd { color:var(--saas-danger); font-weight:600; }
+.saas-route-usage .saas-primary { width:100%; }
+.saas-route-usage p.saas-route-usage-recorded, .saas-route-usage p.saas-route-usage-out { color:var(--saas-text); }

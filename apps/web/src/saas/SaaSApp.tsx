@@ -22,6 +22,7 @@ import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls } from 
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
 import { AdminPanel } from './AdminPanel';
+import { RouteUsageMeter } from './RouteUsageMeter';
 import { RuntimeSettings } from './RuntimeSettings';
 import { WorkspaceHome } from './WorkspaceHome';
 import { OfficialExamples, PublicOfficialExamples } from './examples/OfficialExamples';
@@ -300,6 +301,7 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
   const [creatingWorkspace, setCreatingWorkspace] = useState(() => new URLSearchParams(window.location.search).get('createWorkspace') === '1');
   const accountApi = useMemo(() => createSaaSAccountApi(onProfile), [identity.user.id, onProfile]);
   return <div className="saas-account-actions" data-onboarding="workspace-actions">
+    {tenant && tenant.status === 'active' && <RouteUsageMeter key={tenant.id} tenantId={tenant.id} />}
     {identity.tenants.length > 0 && <select aria-label={t('切换工作区', 'Switch workspace')} value={tenant?.id || ''} onChange={event => navigate(event.target.value)}>{!tenant && <option value="" disabled>{t('选择工作区', 'Choose a workspace')}</option>}{identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? t('（已暂停）', ' (suspended)') : ''}</option>)}</select>}
     {identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}

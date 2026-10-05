@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, saasErrorMessage, type Identity } from './api';
 import { adminPage, collectAdminExport, downloadJSON, type AdminKind, type AdminRow } from './adminData';
+import type { RouteName } from './routeUsage';
 import { useSaaSPreferences } from './preferences';
 import { AdminRunSummary } from './AdminRunSummary';
 import './admin.css';
@@ -49,7 +50,7 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
     finally { setPending(false); }
   };
   if (!isAdmin) return <main className="saas-notice"><h1>{t('无平台管理权限', 'Platform access denied')}</h1><p>{t('请联系平台管理员。', 'Contact a platform administrator.')}</p><a href="/">{t('返回工作区', 'Back to workspace')}</a></main>;
-  const labels: Record<AdminKind, string> = { tenants: t('租户', 'Tenants'), users: t('用户', 'Users'), runs: t('运行', 'Runs'), audit: t('审计日志', 'Audit log') };
+  const labels: Record<AdminKind, string> = { tenants: t('租户', 'Tenants'), users: t('用户', 'Users'), runs: t('运行', 'Runs'), audit: t('审计日志', 'Audit log'), interests: t('付费意向', 'Upgrade interest') };
   const date = (value: string) => value ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : '—';
   return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a><a href="/">{t('返回工作区', 'Back to workspace')}</a>{controls}</header>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('仅平台管理员可见', 'Visible to platform administrators')}</span><h1>{t('平台管理', 'Platform administration')}</h1><p>{t('管理工作区状态与执行额度，查询用户、运行及审计记录。', 'Manage workspace status and run limits; inspect users, runs and audit records.')}</p></section>
@@ -58,8 +59,9 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
     <div className="saas-admin-tools"><p>{t('每页 50 条；导出会读取当前分类的全部分页，范围以首次查询时间限定。记录内容以各页读取时为准。', '50 records per page. Export reads all pages in this section, bounded by the first query time. Record values reflect when each page is read.')}</p>
       {exportCount === null ? <button onClick={exportAll}>{t('导出全部 JSON', 'Export all JSON')}</button> : <><span role="status">{t(`已读取 ${exportCount} 条`, `Read ${exportCount} records`)}</span><button onClick={() => exporting.current?.abort()}>{t('取消导出', 'Cancel export')}</button></>}
     </div>
+    {tab === 'interests' && <p className="saas-admin-note">{t('用户在「今日额度」里点「想要更多次数」后出现在这里，每人每个工作区一行；「提出时已用完」汇总每次提出时已经用完的额度；10 分钟内重复点击只算一次。', 'People appear here after choosing “I want more calls” in Today’s allowance, one row per person and workspace. “Used up when asked” gathers what they had used up each time they asked; presses within 10 minutes count once.')}</p>}
     {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
-    {!rows ? <p role="status">{error ? t('数据加载失败，可刷新重试。', 'Loading failed. Refresh to retry.') : t('正在加载…', 'Loading…')}</p> : <div className="saas-table-wrap"><table><thead><tr>{tab === 'tenants' ? <><th>{t('工作区', 'Workspace')}</th><th>{t('状态', 'Status')}</th><th>{t('并发 / 每日次数', 'Concurrent / daily runs')}</th><th>{t('可用模型', 'Available models')}</th><th>{t('操作', 'Actions')}</th></> : tab === 'users' ? <><th>{t('用户', 'User')}</th><th>{t('邮箱', 'Email')}</th><th>{t('平台角色', 'Platform role')}</th></> : tab === 'runs' ? <><th>{t('运行', 'Run')}</th><th>{t('租户', 'Tenant')}</th><th>{t('状态', 'Status')}</th><th>{t('创建时间', 'Created')}</th></> : <><th>{t('操作', 'Action')}</th><th>{t('操作者', 'Actor')}</th><th>{t('租户', 'Tenant')}</th><th>{t('时间', 'Time')}</th></>}</tr></thead><tbody>{rows.map(row => <tr key={row.id}>{tab === 'tenants' ? <><td>{row.name}</td><td>{row.status === 'active' ? t('正常', 'Active') : t('已暂停', 'Suspended')}</td><td>{row.maxConcurrentRuns} / {row.maxRunsPerDay}</td><td>{allowedModelsLabel(row.allowedModels, t)}</td><td className="saas-admin-actions"><button disabled={pending} onClick={() => setEditing(row)}>{t('编辑配额', 'Edit limits')}</button><button disabled={pending} onClick={() => changeStatus(row)}>{row.status === 'active' ? t('暂停工作区', 'Suspend workspace') : t('恢复工作区', 'Resume workspace')}</button></td></> : tab === 'users' ? <><td>{row.name}</td><td>{row.email}</td><td>{row.platformRole}</td></> : tab === 'runs' ? <><td>{row.id}</td><td>{row.tenantId}</td><td>{row.status}</td><td>{date(row.createdAt)}</td></> : <><td>{row.action}</td><td>{row.actorId || '—'}</td><td>{row.tenantId || '—'}</td><td>{date(row.createdAt)}</td></>}</tr>)}</tbody></table>{rows.length === 0 && <p>{t('暂无记录。', 'No records.')}</p>}</div>}
+    {!rows ? <p role="status">{error ? t('数据加载失败，可刷新重试。', 'Loading failed. Refresh to retry.') : t('正在加载…', 'Loading…')}</p> : <div className="saas-table-wrap"><table><thead><tr>{tab === 'tenants' ? <><th>{t('工作区', 'Workspace')}</th><th>{t('状态', 'Status')}</th><th>{t('并发 / 每日次数', 'Concurrent / daily runs')}</th><th>{t('可用模型', 'Available models')}</th><th>{t('路由次数（每天）', 'Route limits (daily)')}</th><th>{t('操作', 'Actions')}</th></> : tab === 'interests' ? <><th>{t('用户', 'User')}</th><th>{t('邮箱', 'Email')}</th><th>{t('工作区', 'Workspace')}</th><th>{t('提出时已用完', 'Used up when asked')}</th><th>{t('提出次数', 'Times asked')}</th><th>{t('首次', 'First')}</th><th>{t('最近', 'Latest')}</th></> : tab === 'users' ? <><th>{t('用户', 'User')}</th><th>{t('邮箱', 'Email')}</th><th>{t('平台角色', 'Platform role')}</th></> : tab === 'runs' ? <><th>{t('运行', 'Run')}</th><th>{t('租户', 'Tenant')}</th><th>{t('状态', 'Status')}</th><th>{t('创建时间', 'Created')}</th></> : <><th>{t('操作', 'Action')}</th><th>{t('操作者', 'Actor')}</th><th>{t('租户', 'Tenant')}</th><th>{t('时间', 'Time')}</th></>}</tr></thead><tbody>{rows.map(row => <tr key={row.id}>{tab === 'tenants' ? <><td>{row.name}</td><td>{row.status === 'active' ? t('正常', 'Active') : t('已暂停', 'Suspended')}</td><td>{row.maxConcurrentRuns} / {row.maxRunsPerDay}</td><td>{allowedModelsLabel(row.allowedModels, t)}</td><td>{routeLimitsLabel(row.routeLimits, t)}</td><td className="saas-admin-actions"><button disabled={pending} onClick={() => setEditing(row)}>{t('编辑配额', 'Edit limits')}</button><button disabled={pending} onClick={() => changeStatus(row)}>{row.status === 'active' ? t('暂停工作区', 'Suspend workspace') : t('恢复工作区', 'Resume workspace')}</button></td></> : tab === 'interests' ? <><td>{row.userName}</td><td>{row.email}</td><td>{row.tenantName}</td><td>{routesLabel(row.routes, t)}</td><td>{row.clicks}</td><td>{date(row.createdAt)}</td><td>{date(row.lastAt)}</td></> : tab === 'users' ? <><td>{row.name}</td><td>{row.email}</td><td>{row.platformRole}</td></> : tab === 'runs' ? <><td>{row.id}</td><td>{row.tenantId}</td><td>{row.status}</td><td>{date(row.createdAt)}</td></> : <><td>{row.action}</td><td>{row.actorId || '—'}</td><td>{row.tenantId || '—'}</td><td>{date(row.createdAt)}</td></>}</tr>)}</tbody></table>{rows.length === 0 && <p>{t('暂无记录。', 'No records.')}</p>}</div>}
     <div className="saas-admin-tools"><button disabled={pending || !rows || cursors.length === 1} onClick={() => setCursors(value => value.slice(0, -1))}>{t('上一页', 'Previous')}</button><span>{t(`第 ${cursors.length} 页`, `Page ${cursors.length}`)}</span><button disabled={pending || !rows || !nextCursor} onClick={() => setCursors(value => [...value, nextCursor])}>{t('下一页', 'Next')}</button></div>
     {editing && <QuotaEditor row={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
   </main>;
@@ -72,6 +74,23 @@ function allowedModelsLabel(value: unknown, t: (zh: string, en: string) => strin
   return value.length === 0 ? t('全部禁止', 'None') : value.join(', ');
 }
 
+const routeNames: Array<[RouteName, string, string]> = [['gate', 'Claude / GPT', 'Claude / GPT'], ['bedrock', 'Bedrock', 'Bedrock'], ['media', '图片视频', 'Images / video']];
+
+/** Absent route limits are no limits; a stored object names each limited route. */
+function routeLimitsLabel(value: unknown, t: (zh: string, en: string) => string): string {
+  if (!value || typeof value !== 'object') return t('不限', 'None');
+  const limits = value as Record<string, unknown>;
+  const parts = routeNames.filter(([route]) => typeof limits[route] === 'number').map(([route, zh, en]) => `${t(zh, en)} ${limits[route] === 0 ? t('关闭', 'closed') : limits[route]}`);
+  return parts.length ? parts.join(' · ') : t('不限', 'None');
+}
+
+/** What a person had used up when they asked for more: the daily total ("daily") and the routes. */
+function routesLabel(value: unknown, t: (zh: string, en: string) => string): string {
+  const routes = Array.isArray(value) ? value : [];
+  const parts = [...(routes.includes('daily') ? [t('总次数', 'All calls')] : []), ...routeNames.filter(([route]) => routes.includes(route)).map(([, zh, en]) => t(zh, en))];
+  return parts.length ? parts.join(t('、', ', ')) : t('提出时未用完', 'Nothing used up yet');
+}
+
 function QuotaEditor({ row, onClose, onSaved }: { row: AdminRow; onClose: () => void; onSaved: () => void }) {
   const { t, locale } = useSaaSPreferences();
   const [concurrent, setConcurrent] = useState(String(row.maxConcurrentRuns));
@@ -81,6 +100,11 @@ function QuotaEditor({ row, onClose, onSaved }: { row: AdminRow; onClose: () => 
   // The entitlement is only sent when the operator actually touched it, so editing
   // a quota never rewrites an allowlist it was not shown editing.
   const [touched, setTouched] = useState(false);
+  // Route limits follow the same rule: sent only when edited, so a quota edit never rewrites them.
+  const stored = row.routeLimits && typeof row.routeLimits === 'object' ? row.routeLimits as Record<string, unknown> : null;
+  const [routed, setRouted] = useState(stored !== null);
+  const [routes, setRoutes] = useState<Record<RouteName, string>>(() => ({ gate: String(stored?.gate ?? ''), bedrock: String(stored?.bedrock ?? ''), media: String(stored?.media ?? '') }));
+  const [routesTouched, setRoutesTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   return <div className="saas-dialog-backdrop"><form className="saas-card" role="dialog" aria-modal="true" aria-labelledby="saas-quota-title" onSubmit={async event => {
@@ -91,9 +115,20 @@ function QuotaEditor({ row, onClose, onSaved }: { row: AdminRow; onClose: () => 
     // them safe separators here.
     const ids = models.split(/[\s,]+/).filter(Boolean);
     if (touched && restricted && (ids.length > 64 || ids.some(id => id.length > 200))) { setError(t('最多 64 个模型 ID，每个不超过 200 字节。', 'At most 64 model ids, each up to 200 bytes.')); return; }
+    // Hidden route fields are not checked: unticking the box drops them.
+    const limits: Partial<Record<RouteName, number>> = {};
+    for (const [route] of routed ? routeNames : []) {
+      const raw = routes[route].trim();
+      if (!raw) continue;
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value < 0 || value > 100000) { setError(t('路由次数请输入 0–100000 的整数。', 'Route limits must be whole numbers from 0 to 100000.')); return; }
+      limits[route] = value;
+    }
+    if (routesTouched && routed && Object.keys(limits).length === 0) { setError(t('至少填写一项路由次数，或取消勾选。', 'Fill in at least one route limit, or clear the checkbox.')); return; }
     setBusy(true); setError('');
     const body: Record<string, unknown> = { maxConcurrentRuns: c, maxRunsPerDay: d };
     if (touched) body.allowedModels = restricted ? ids : null;
+    if (routesTouched) body.routeLimits = routed ? limits : null;
     try { await api(`/admin/tenants/${encodeURIComponent(row.id)}`, { method: 'PATCH', body: JSON.stringify(body) }); onSaved(); }
     catch (cause) { setError(cause); }
     finally { setBusy(false); }
@@ -103,6 +138,9 @@ function QuotaEditor({ row, onClose, onSaved }: { row: AdminRow; onClose: () => 
     <label><input type="checkbox" checked={restricted} onChange={event => { setRestricted(event.target.checked); setTouched(true); }} />{t('限制可用模型', 'Restrict available models')}</label>
     {restricted && <label>{t('可用模型 ID（逗号或空格分隔）', 'Allowed model ids (comma or space separated)')}<input value={models} onChange={event => { setModels(event.target.value); setTouched(true); }} /></label>}
     <p>{t('留空表示禁止全部模型。被移除的模型在后续每次调用准入时都会被拒绝，但已经发出的调用不会被追溯终止；要立即掐断在途调用请暂停工作区。', 'An empty list blocks every model. A removed model is refused at every later invocation, but calls already sent are not terminated retroactively. Suspend the workspace to cut those off.')}</p>
+    <label><input type="checkbox" checked={routed} onChange={event => { setRouted(event.target.checked); setRoutesTouched(true); }} />{t('按路由限每日次数', 'Limit daily calls per model route')}</label>
+    {routed && routeNames.map(([route, zh, en]) => <label key={route}>{t(`${zh}（每天）`, `${en} (per day)`)}<input type="number" min="0" max="100000" step="1" placeholder={t('不限', 'No limit')} value={routes[route]} onChange={event => { const value = event.target.value; setRoutes(current => ({ ...current, [route]: value })); setRoutesTouched(true); }} /></label>)}
+    <p>{t('路由次数算在每日上限之内；默认模型不受路由次数限制。留空表示该路由不限，0 表示关闭该路由。', 'Route limits count inside the daily limit; the default model is not route-limited. Leave a route empty for no limit; 0 closes it.')}</p>
     {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}<button type="submit" disabled={busy}>{busy ? t('保存中…', 'Saving…') : t('保存配额', 'Save limits')}</button><button type="button" disabled={busy} onClick={onClose}>{t('取消', 'Cancel')}</button>
   </form></div>;
 }
