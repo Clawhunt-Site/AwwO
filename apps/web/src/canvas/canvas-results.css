@@ -1,0 +1,166 @@
+/* The canvas's 成果 view (CanvasResults.tsx), laid over the stage in place of the board. Only the hosted
+ * app opts in, so it is written on the design system's tokens. The deliverable viewer inside keeps its
+ * own rules (they apply here as on a node, see `:is(.canvas-root, .awwo-results)`); this file gives it
+ * the node colours those rules read, and the room of an exhibit: the result large and framed, the steps
+ * that made it in a numbered column beside it. */
+
+.awwo-results {
+  --awwo-card: var(--saas-card); --awwo-ink: var(--saas-text); --awwo-muted: var(--saas-muted); --awwo-line: var(--saas-border);
+  --awwo-soft: var(--saas-input); --awwo-teal: var(--saas-accent); --awwo-tint: var(--saas-soft); --awwo-error: var(--saas-danger);
+  position: absolute; inset: 0; z-index: 60; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  padding: 22px 24px 32px; background: var(--saas-canvas); color: var(--saas-text); font-family: var(--saas-font);
+  -webkit-font-smoothing: antialiased;
+}
+.awwo-results *, .awwo-results *::before, .awwo-results *::after { box-sizing: border-box; }
+.awwo-results button { font: inherit; cursor: pointer; }
+.awwo-results button:disabled { cursor: not-allowed; opacity: .5; }
+.awwo-results :is(button, a):focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
+
+.awwo-results-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 296px); gap: 20px 24px; align-items: start;
+  max-width: 1480px; margin: 0 auto;
+}
+.awwo-results-main { display: grid; gap: 16px; min-width: 0; }
+.awwo-results-aside { position: sticky; top: 0; display: grid; gap: 14px; min-width: 0; }
+
+/* ── The result ─────────────────────────────────────────────────────────────────────────────── */
+.awwo-results-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; margin-bottom: 14px; }
+.awwo-results-head > div:first-child { min-width: 0; }
+.awwo-results-label { margin: 0 0 6px; color: var(--saas-muted); font-size: var(--saas-text-xs); font-weight: 600; }
+.awwo-results-head h2 {
+  margin: 0; color: var(--saas-text); font: 690 clamp(24px, 2.3vw, 34px)/1.08 var(--saas-font-display);
+  font-stretch: var(--saas-head-stretch, normal); letter-spacing: var(--saas-head-track, -.01em); overflow-wrap: anywhere; text-wrap: balance;
+}
+.awwo-results-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 0 0; color: var(--saas-muted); font-size: var(--saas-text-sm); }
+.awwo-results-caveat { padding: 2px 10px; border-radius: var(--saas-radius-pill); background: var(--saas-warning-bg); color: var(--saas-warning); font-size: var(--saas-text-xs); font-weight: 600; }
+.awwo-results-head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.awwo-results-secondary, .awwo-results-run {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 15px; border: 0;
+  border-radius: var(--saas-radius-pill); font: 600 var(--saas-text-sm)/1 var(--saas-font); white-space: nowrap;
+  transition: background var(--saas-dur-1), box-shadow var(--saas-dur-1);
+}
+.awwo-results-secondary { background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-border) inset; color: var(--saas-text); }
+.awwo-results-secondary:hover { background: var(--saas-soft); }
+.awwo-results-run { background: var(--saas-primary); color: var(--saas-on-primary); }
+.awwo-results-run:hover:not(:disabled) { background: var(--saas-primary-hover); }
+
+/* The deliverable itself is framed as the exhibit in the skin (design/canvas.css, 成果 view). */
+.awwo-results-nothing, .awwo-results-form > p { margin: 0; padding: 28px 22px; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset; color: var(--saas-muted); }
+.awwo-results-form {
+  & h3 { margin: 0 0 10px; color: var(--saas-muted); font-size: var(--saas-text-xs); font-weight: 600; }
+  & dl { display: grid; gap: 1px; margin: 0; overflow: hidden; border-radius: var(--saas-radius-lg); background: var(--saas-hairline); box-shadow: 0 0 0 1px var(--saas-hairline); }
+  & dl > div { display: grid; grid-template-columns: minmax(90px, 28%) minmax(0, 1fr); gap: 12px; padding: 12px 16px; background: var(--saas-card); }
+  & dt { color: var(--saas-muted); font-size: var(--saas-text-sm); }
+  & dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--saas-text-sm); }
+}
+
+/* An agent's acceptance check, kept apart from the result and labelled as what it is. */
+.awwo-results-review {
+  display: grid; gap: 8px; padding: 14px 18px 12px; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset;
+  & header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+  & h3 { margin: 0; font: 650 var(--saas-text-md)/1.3 var(--saas-font); }
+  & header p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+}
+.awwo-results-review-text {
+  max-height: 9.6em; overflow: hidden; color: var(--saas-text); font-size: var(--saas-text-sm); line-height: 1.6; overflow-wrap: anywhere;
+  mask-image: linear-gradient(to bottom, #000 72%, transparent);
+  & :is(p, ul, ol) { margin: 0 0 .5em; }
+  & :is(ul, ol) { padding-left: 1.3em; }
+  & code { padding: 0 4px; border-radius: 4px; background: var(--saas-field); font: 12px/1.5 var(--saas-font-mono); }
+  & :is(h1, h2, h3, h4) { margin: 0 0 .4em; font-size: var(--saas-text-sm); }
+}
+.awwo-results-link { justify-self: start; padding: 2px 0; border: 0; background: none; color: var(--saas-link); font: 600 var(--saas-text-xs)/1.4 var(--saas-font); }
+.awwo-results-link:hover { color: var(--saas-link-hover); text-decoration: underline; text-underline-offset: 3px; }
+
+/* ── Nothing yet ───────────────────────────────────────────────────────────────────────────── */
+.awwo-results-empty {
+  display: grid; align-content: center; justify-items: start; gap: 12px; min-height: 340px; padding: 44px 40px;
+  border-radius: var(--saas-radius-xl); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset;
+  & h2 { margin: 0; font: 690 clamp(24px, 2.2vw, 32px)/1.1 var(--saas-font-display); font-stretch: var(--saas-head-stretch, normal); letter-spacing: var(--saas-head-track, -.01em); }
+  & p { max-width: 46ch; margin: 0; color: var(--saas-muted); font-size: var(--saas-text-md); line-height: 1.65; }
+  & .awwo-results-reason { color: var(--saas-warning); font-size: var(--saas-text-sm); }
+}
+.awwo-results-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+
+/* ── What the board would have said (why a run did not start, what it is preparing) ───────── */
+/* The two notices of the board, shown here so they are seen; the board under the view cannot show them. */
+.awwo-results-notice {
+  display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; margin: 0 0 14px; padding: 9px 10px 9px 16px;
+  border-radius: var(--saas-radius-pill); color: var(--saas-text); font-size: var(--saas-text-sm); line-height: 1.5;
+  &.is-alert { background: var(--saas-warning-bg); }
+  &.is-status { background: color-mix(in srgb, var(--saas-signal) 9%, var(--saas-card)); }
+  & > svg { flex: none; color: var(--saas-signal); animation: awwo-results-spin 1s linear infinite; }
+  & > button { display: grid; flex: none; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--saas-muted); }
+  & > button:hover { background: var(--saas-soft); color: var(--saas-text); }
+}
+.awwo-results-review.is-partial { box-shadow: 0 0 0 1px color-mix(in srgb, var(--saas-warning) 32%, transparent) inset; }
+
+/* ── While it runs ─────────────────────────────────────────────────────────────────────────── */
+.awwo-results-running {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; width: fit-content; max-width: 100%; margin: 0 0 16px; padding: 9px 16px;
+  border-radius: var(--saas-radius-pill); background: color-mix(in srgb, var(--saas-signal) 9%, var(--saas-card));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--saas-signal) 22%, transparent) inset; font-size: var(--saas-text-sm); font-weight: 600;
+  & svg { color: var(--saas-signal); animation: awwo-results-spin 1s linear infinite; }
+  & small { color: var(--saas-muted); font-size: var(--saas-text-xs); font-weight: 400; }
+}
+@keyframes awwo-results-spin { to { rotate: 360deg; } }
+
+/* ── How it was made ───────────────────────────────────────────────────────────────────────── */
+.awwo-results-stages {
+  padding: 16px 12px 8px 16px; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset;
+  & h3 { margin: 0; font: 650 var(--saas-text-md)/1.3 var(--saas-font); }
+  & > ol { display: grid; margin: 0; padding: 0; list-style: none; }
+}
+.awwo-results-hint { margin: 4px 0 14px; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.5; }
+.awwo-results-stage {
+  position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 0 8px; padding-bottom: 10px;
+  /* The thread from one step to the next. */
+  &:not(:last-child)::before { content: ''; position: absolute; top: 28px; bottom: 2px; left: 11.5px; width: 1px; background: var(--saas-border); }
+  & > ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+}
+.awwo-results-stage-number {
+  display: grid; place-items: center; width: 24px; height: 24px; margin-top: 4px; border-radius: 50%;
+  background: var(--saas-field); color: var(--saas-muted); font: 650 11px/1 var(--saas-font); font-variant-numeric: tabular-nums;
+}
+.awwo-results-stage:has(.awwo-results-final) .awwo-results-stage-number { background: var(--saas-primary); color: var(--saas-on-primary); }
+.awwo-results-stage button {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; padding: 4px 6px 4px 8px; border: 0; border-radius: var(--saas-radius-sm);
+  background: transparent; color: var(--saas-text); font: 500 var(--saas-text-sm)/1.3 var(--saas-font); text-align: left;
+  transition: background var(--saas-dur-1);
+  &:hover { background: var(--saas-soft); }
+  &[aria-pressed='true'] { background: var(--saas-soft-strong); font-weight: 650; }
+}
+.awwo-results-step-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.awwo-results-final, .awwo-results-chip) { flex: none; padding: 1px 8px; border-radius: var(--saas-radius-pill); font: 600 11px/1.5 var(--saas-font); white-space: nowrap; }
+.awwo-results-final { background: var(--saas-primary); color: var(--saas-on-primary); }
+.awwo-results-chip {
+  background: var(--saas-soft-strong); color: var(--saas-muted);
+  &.is-run { background: var(--saas-success-soft); color: var(--saas-success); }
+  &.is-caveat { background: var(--saas-warning-bg); color: var(--saas-warning); }
+  &.is-failed { background: var(--saas-danger-bg); color: var(--saas-danger); }
+  &.is-live { background: var(--saas-signal-soft); color: var(--saas-text); }
+}
+
+@media (max-width: 1100px) {
+  .awwo-results-layout { grid-template-columns: minmax(0, 1fr); }
+  .awwo-results-aside { position: static; }
+}
+@media (max-width: 760px) {
+  .awwo-results { padding: 14px 12px 24px; }
+  .awwo-results-empty { min-height: 0; padding: 28px 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .awwo-results-running svg, .awwo-results-notice > svg { animation: none; }
+}
+
+/* ── The host's run receipt, under the steps ───────────────────────────────────────────────── */
+.awwo-results-receipt {
+  padding: 16px; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset;
+  & h3 { margin: 0 0 4px; font: 650 var(--saas-text-md)/1.3 var(--saas-font); }
+  & dl { display: grid; gap: 6px; margin: 10px 0 0; }
+  & dl > div { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 8px; font-size: var(--saas-text-sm); line-height: 1.45; }
+  & dt { color: var(--saas-muted); }
+  & dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+}
+.awwo-results-receipt-lead { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.awwo-results-receipt-note { margin: 10px 0 0; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.55; }

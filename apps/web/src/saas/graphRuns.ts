@@ -47,6 +47,8 @@ export interface GraphRunSnapshot {
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   nodes: GraphNodeResult[];
   createdAt: string;
+  /** When the run last changed; for a finished run, when it ended. */
+  updatedAt?: string;
   error?: string;
   collaboration?: GraphCollaborationSnapshot | null;
 }
@@ -118,6 +120,38 @@ export interface TeamRunRecord extends RunExecutionMetadata {
   error?: string;
 }
 export const graphIsActive = (snapshot: GraphRunSnapshot) => snapshot.status === 'queued' || snapshot.status === 'running';
+/** A graph-run list as the server sends it, or nothing: a malformed item never passes as a run. */
+export function validGraphRunList(value: unknown): value is { items: GraphRunSnapshot[] } {
+  const items = value && typeof value === 'object' ? (value as { items?: unknown }).items : undefined;
+  return Array.isArray(items) && items.every(raw => {
+    if (!raw || typeof raw !== 'object') return false;
+    const item = raw as GraphRunSnapshot;
+    return typeof item.id === 'string' && typeof item.status === 'string' && typeof item.createdAt === 'string'
+      && (item.updatedAt === undefined || typeof item.updatedAt === 'string') && (item.scope === undefined || Array.isArray(item.scope))
+      && Array.isArray(item.nodes) && item.nodes.every(node => node && typeof node === 'object' && typeof node.nodeId === 'string' && typeof node.state === 'string')
+      && (item.document == null || (typeof item.document === 'object' && Array.isArray(item.document.nodes)))
+      && (item.collaboration == null || validGraphCollaboration(item.collaboration, item.scope));
+  });
+}
+
+// The run panel's latest read of a canvas's runs, shared with the views that show them (the 成果 receipt),
+// so a canvas page reads its runs once per poll, not once per view.
+const runFeeds = new Map<string, { items: GraphRunSnapshot[] | null; listeners: Set<() => void> }>();
+const runFeed = (tenantId: string, canvasId: string) => {
+  const key = JSON.stringify([tenantId, canvasId]);
+  let feed = runFeeds.get(key);
+  if (!feed) { feed = { items: null, listeners: new Set() }; runFeeds.set(key, feed); }
+  return feed;
+};
+export function publishGraphRuns(tenantId: string, canvasId: string, items: GraphRunSnapshot[]): void {
+  const feed = runFeed(tenantId, canvasId); feed.items = items;
+  for (const listener of [...feed.listeners]) listener();
+}
+export function latestGraphRuns(tenantId: string, canvasId: string): GraphRunSnapshot[] | null { return runFeed(tenantId, canvasId).items; }
+export function subscribeGraphRuns(tenantId: string, canvasId: string, listener: () => void): () => void {
+  const feed = runFeed(tenantId, canvasId); feed.listeners.add(listener);
+  return () => { feed.listeners.delete(listener); };
+}
 export const graphPath = (tenantId: string, canvasId: string) => tenantPath(tenantId, `/canvases/${encodeURIComponent(canvasId)}/graph-runs`);
 export function hasCloudGraphRuntime(): boolean { return currentSaaSCanvas() !== null; }
 export class GraphNotSubmittedError extends Error {}

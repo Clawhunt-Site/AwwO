@@ -25,13 +25,11 @@ export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: s
 }
 
 /**
- * Explicit, reversible graph layout. Longest-path layers keep every DAG dependency moving
- * right; stable source order keeps peers predictable. Cycles and their unresolved descendants
- * occupy one final column, so malformed graphs still arrange deterministically and terminate.
- * Only positions change. Sessions are laid out at their compact presentation size; forms use
- * their actual dimensions, which can enlarge column and row spacing.
+ * Each node's step in the graph: its longest path from a node with no inputs. Cycles and their
+ * unresolved descendants share one step after every other, so malformed graphs still terminate.
+ * Wires to missing nodes and duplicate wires are ignored.
  */
-export function arrangeNodePositions(nodes: ReadonlyArray<CanvasNode>, edges: ReadonlyArray<CanvasEdge>): CanvasNode[] {
+export function nodeDepths(nodes: ReadonlyArray<CanvasNode>, edges: ReadonlyArray<CanvasEdge>): Map<string, number> {
   const ids = new Set(nodes.map(node => node.id));
   const outgoing = new Map(nodes.map(node => [node.id, new Set<string>()]));
   const indegree = new Map(nodes.map(node => [node.id, 0]));
@@ -56,9 +54,20 @@ export function arrangeNodePositions(nodes: ReadonlyArray<CanvasNode>, edges: Re
     }
   }
   const fallbackRank = ready.reduce((max, id) => Math.max(max, rank.get(id)!), -1) + 1;
+  return new Map(nodes.map(node => [node.id, visited.has(node.id) ? rank.get(node.id)! : fallbackRank]));
+}
+
+/**
+ * Explicit, reversible graph layout. Longest-path layers (nodeDepths) keep every DAG dependency
+ * moving right; stable source order keeps peers predictable. Only positions change. Sessions are
+ * laid out at their compact presentation size; forms use their actual dimensions, which can
+ * enlarge column and row spacing.
+ */
+export function arrangeNodePositions(nodes: ReadonlyArray<CanvasNode>, edges: ReadonlyArray<CanvasEdge>): CanvasNode[] {
+  const depths = nodeDepths(nodes, edges);
   const layers = new Map<number, CanvasNode[]>();
   for (const node of nodes) {
-    const layer = visited.has(node.id) ? rank.get(node.id)! : fallbackRank;
+    const layer = depths.get(node.id)!;
     const peers = layers.get(layer) || [];
     peers.push(node);
     layers.set(layer, peers);

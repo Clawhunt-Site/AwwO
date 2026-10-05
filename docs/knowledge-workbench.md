@@ -18,10 +18,11 @@ npm run dev:saas
 
 默认打开 `http://127.0.0.1:5189/`。启动器读取当前 checkout 的 `.local/awwo-saas/.env`，初始账号及秘密保存在该本地文件中。端口、模型连接、账号初始化和服务生命周期详见 [SaaS 本地开发指南](awwo-saas-development.md)。修改服务端连接配置后须重启对应服务。
 
-登录后进入工作区并打开画布，画布工具栏上与本文相关的入口有两个。工具栏较窄时「知识地图」只显示图标，悬停可看到名称：
+登录后进入工作区并打开画布，画布工具栏上与本文相关的入口有三个。工具栏较窄时「知识地图」只显示图标，悬停可看到名称：
 
 - **知识地图**：浏览资料、页面、决策及其关系，导入资料，创建或审核提案，查看修订历史。关闭地图后仍在进行的整理，其进度、结果或失败原因会标记在「知识地图」按钮上（悬停可看到内容），下次打开地图时显示在顶部。
 - **画布助手 → 直接执行**：画布助手顶部可在「编排画布」和「直接执行」之间切换，由用户选择，不会自动转去执行。「直接执行」使用 AwwO「我的引擎」中的模型创建工作区任务，以对话形式查看历史、审批工具调用、回复问题、停止任务并保存真实产物。
+- **编排 | 成果**：「成果」视图放大展示画布最后交付的东西，旁边列出每一步的交付和运行回执，详见下文“交付物预览”。
 
 reader 可以查看知识、执行历史和产物，不能导入、审核、恢复、发起整理、带入新任务或创建执行任务。审批、回答问题和停止任务还要求当前用户是该运行的发起人。权限由 Go API 再次校验。
 
@@ -61,7 +62,7 @@ reader 可以查看知识、执行历史和产物，不能导入、审核、恢�
 
 ## 交付物预览
 
-节点的「交付物」和「直接执行」交付的文件就是成果区：文件按实际格式在原处打开对应的查看器。节点还没有交付物时，交付物里会说明这四类文件可以直接预览。预览只读取任务交付物，不提供本地上传或示例文件。
+画布的「成果」视图是成果区：它放大展示画布的成果（最远一步交付的网页、媒体或文件，没有时是最远一步的交付；验收类节点只作为 Agent 的检查意见显示），旁边按顺序列出每一步，点开就看到那一步的交付，另附运行回执（只写明“最近一次完成这一步的整图运行”）。部分结果、手动发布和后续步骤尚未交付的情况都会标明。工作区首页的「最近的成果」按最新交付列出这些画布，网页以不运行脚本的静态预览显示，点开直接进入该画布的成果视图。此外，节点的「交付物」和直接执行任务交付的文件都在原处按实际格式打开对应的查看器。节点还没有交付物时，交付物里会说明这四类文件可以直接预览。预览只读取任务交付物，不提供本地上传或示例文件。
 
 | 类型 | 支持内容与交互 | 主要边界 |
 | --- | --- | --- |
@@ -143,10 +144,11 @@ flowchart LR
 | --- | --- | --- |
 | 画布整合 | `apps/web/src/saas/CanvasKnowledgeDock.tsx`、`SaaSApp.tsx` | 当前租户/画布作用域、画布工具栏入口、打开知识地图时读取的产物列表、整理恢复与带入任务 |
 | 知识界面 | `apps/web/src/saas/KnowledgeWorkbench.tsx`、`knowledgeApi.ts` | 地图、正文、搜索、导入、提案审核、历史；解析并校验 API 返回值 |
-| 预览 | `apps/web/src/canvas/ArtifactPreview.tsx`、`BinaryArtifactPreview.tsx`、各 `*Preview.tsx`、`previewData.ts` | 实际字节读取、格式分流、资源预算、渲染和清理；节点交付物与直接执行的产物共用 |
+| 预览 | `apps/web/src/canvas/ArtifactPreview.tsx`、`BinaryArtifactPreview.tsx`、各 `*Preview.tsx`、`previewData.ts` | 实际字节读取、格式分流、资源预算、渲染和清理；节点交付物、成果视图与直接执行的产物共用 |
 | 知识持久化 | `backend/internal/app/knowledge.go`、`migrations/019_knowledge.sql`、`migrations/021_knowledge_source_origins.sql` | 租户隔离、原件、不可变修订、追加来源、当前关系、提案、幂等操作和审计 |
 | 执行证据 | `knowledge_context.go`、`wiki_compiler.go`、`runs.go`、`team_context.go`、`graph_runs.go` | 固定版本上下文、编译输出校验、配额和预算、各运行路径的证据传递 |
 | 直接执行（画布助手） | `useManagedExecution.ts`、`AssistantExecution.tsx`、`managedExecutionApi.ts`；`canvas/CanvasAssistant.tsx` 的模式切换 | 同一模型目录、任务对话与历史、审批和问题、停止、产物预览与归档、刷新 |
+| 成果区 | `canvas/canvasResultModel.ts`、`canvas/CanvasResults.tsx`、`CanvasRunReceipt.tsx`、`ResultsGallery.tsx` | 从画布文档选出成果与步骤（文档、首页同一规则）、成果视图、运行回执、首页「最近的成果」 |
 | 内置执行后端 | `computer_execution.go`、`computer_model_proxy.go`、`migrations/022_computer_execution.sql` | 运行授权、持久审批、幂等回执、个人模型代理、产物与配额 |
 | 托管核心与沙箱 | `apps/openmaus-worker/`、`apps/computer-model.ts`、`workspace-sandbox.ts` | 固定上游核心、原生工具审批、隔离工作区、模型协议转换和资源清理 |
 | 外部兼容 API | `openmaus_bridge.go`、`migrations/020_openmaus_dispatch.sql`、`OpenMausBridgePanel.tsx` | 旧外部实例的租户绑定、显式发送、回执查询、消息入库 |
@@ -163,7 +165,7 @@ flowchart LR
 # 预览格式、安全边界与基础交互
 npm run test:previews --prefix apps/web
 
-# SaaS 前端（包含知识、直接执行、旧桥接、画布集成与预览测试）
+# SaaS 前端（包含知识、直接执行、成果视图、旧桥接、画布集成与预览测试）
 npm run test:saas --prefix apps/web
 npm run typecheck:saas --prefix apps/web
 npm run build:saas

@@ -7,7 +7,8 @@ import { api, onSessionEnded, tenantPath, trackSignedInSession, SaaSApiError, sa
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, isCanvasStorageQuotaError, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, type CanvasDraft, type SavedCanvasDraft } from './canvasDraft';
-import { CanvasSurface, type InitialPlanRequest } from '../canvas/CanvasSurface';
+import { CanvasSurface, type CanvasResultsOptions, type InitialPlanRequest } from '../canvas/CanvasSurface';
+import { CanvasRunReceipt } from './CanvasRunReceipt';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
 import { withCanvasRunOwnership } from '../canvas/runOwnership';
@@ -43,6 +44,19 @@ const workspaceURL = (tenant?: string, canvas?: string) => {
   return '/' + (query.size ? '?' + query : '');
 };
 const navigate = (tenant?: string, canvas?: string) => window.location.assign(workspaceURL(tenant, canvas));
+/** A canvas page's 成果 view, kept in the address (?view=results) so a reload or a link opens it again. */
+function canvasResultsOptions(tenantId: string, canvasId: string): CanvasResultsOptions {
+  return {
+    // Read when the canvas mounts (a remount after draft recovery must see the address as it is then).
+    get initialView() { return new URLSearchParams(window.location.search).get('view') === 'results' ? 'results' : 'canvas'; },
+    onViewChange: view => {
+      const url = new URL(window.location.href);
+      if (view === 'results') url.searchParams.set('view', 'results'); else url.searchParams.delete('view');
+      history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+    },
+    receipt: final => <CanvasRunReceipt tenantId={tenantId} canvasId={canvasId} final={final} />,
+  };
+}
 function CanvasBackLink({ tenantId }: { tenantId: string }) {
   const { t } = useSaaSPreferences();
   // A normal navigation preserves beforeunload protection for unsynced changes.
@@ -340,6 +354,7 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   const { locale, t } = useSaaSPreferences();
   // A viewer can review the canvas's tasks in the assistant but not start or answer one.
   const execution = useManagedExecution(tenant.id, canvasId, { readOnly: true });
+  const resultsView = useMemo(() => canvasResultsOptions(tenant.id, canvasId), [tenant.id, canvasId]);
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -361,6 +376,7 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone="readonly" status={<><Eye size={12} aria-hidden="true" /><span title={t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}>{t('只读', 'Read-only')}</span><span className="saas-visually-hidden">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span></>} />}
       canvasTools={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} readOnly />}
       assistantExecution={<AssistantExecution execution={execution} />}
+      results={resultsView}
       headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
@@ -382,6 +398,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const { locale, t } = useSaaSPreferences();
   // The canvas assistant's 直接执行 mode; it reads nothing until the mode is first opened.
   const execution = useManagedExecution(tenant.id, canvasId);
+  const resultsView = useMemo(() => canvasResultsOptions(tenant.id, canvasId), [tenant.id, canvasId]);
   const localDraftFailure = (error: unknown) => isCanvasStorageQuotaError(error)
     ? t('本机存储空间已满，自动保存已暂停。请先导出本地副本保留最新编辑。', 'Local browser storage is full. Autosave is paused. Export a local copy to preserve your latest edits.')
     : `本机草稿保存失败：${message(error)}。请立即导出本地副本。`;
@@ -737,6 +754,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       taskDraft={knowledgeTaskDraft} canvasTools={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} />}
       assistantExecution={<AssistantExecution execution={execution} />}
+      results={resultsView}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
       headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {

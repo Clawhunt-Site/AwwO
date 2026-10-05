@@ -68,7 +68,8 @@ const deliveryMarkdownComponents: Components = {
   img: ({ alt }) => <span>{alt || '🖼'}</span>,
 };
 
-function DeliverableMarkdown({ children }: { children: string }) {
+/** A delivery's Markdown, inert: images become their alt text, links open apart, local paths are copy-only. */
+export function DeliverableMarkdown({ children }: { children: string }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={deliveryUrlTransform} components={deliveryMarkdownComponents}>{children}</ReactMarkdown>;
 }
 
@@ -128,10 +129,13 @@ export interface NodeDeliverablesProps {
   node: SessionNode;
   readOnly: boolean;
   onUpdateNode?: (node: SessionNode) => void;
+  /** 'result' shows only what the node published, as the canvas's 成果 view does: no editors, and not an
+   *  earlier conversation's result. The tile drawer is 'drawer'. */
+  presentation?: 'drawer' | 'result';
 }
 
 /** Only published output is a deliverable. Editing a form never creates one implicitly. */
-export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverablesProps) {
+export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 'drawer' }: NodeDeliverablesProps) {
   const { locale, t } = useCanvasI18n();
   const [publishErrors, setPublishErrors] = useState<string[]>([]);
   const [selection, setSelection] = useState<{ identity: string; fieldId: string } | null>(null);
@@ -139,7 +143,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
   const selectedPanelId = useId();
   const deliverableTitle = getAgentTemplateForNode(node, locale)?.deliverableTitle;
   const contract = node.contract ?? emptyContract();
-  const output = node.lastOutput ?? activeNodeThread(node).lastOutput;
+  const result = presentation === 'result';
+  const output = result ? node.lastOutput ?? undefined : node.lastOutput ?? activeNodeThread(node).lastOutput;
   // Looking at an earlier Session must not publish its historical result downstream.
   const historical = !node.lastOutput && Boolean(output);
   const locked = readOnly || !onUpdateNode;
@@ -190,8 +195,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
   ].filter(Boolean) : [];
 
   return <div className="awwo-deliverables">
-    {deliverableTitle ? <h3 className="awwo-deliverables-title">{deliverableTitle}</h3> : null}
-    {!locked && <details className="awwo-deliverables-editor">
+    {deliverableTitle && !result ? <h3 className="awwo-deliverables-title">{deliverableTitle}</h3> : null}
+    {!locked && !result && <details className="awwo-deliverables-editor">
       <summary>{locale === 'zh' ? '添加交付要求' : 'Add a deliverable'}</summary>
       <label>{locale === 'zh' ? '交付形式' : 'Deliverable type'}
         <select value={deliveryProfile} onChange={event => setDeliveryProfile(event.target.value as DeliveryProfileId)}>
@@ -217,10 +222,11 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
     </> : <>
       {/* Where this came from and how complete it is, before the content itself. Caveats
           (history, partial, manual) are amber; plain provenance stays quiet. */}
-      {receipt.length ? <div className={`awwo-deliverables-receipt${output.partial || historical || output.source === 'case' ? ' is-caveat' : ''}`}>
+      {/* The 成果 view states where a result came from in its own heading. */}
+      {receipt.length && !result ? <div className={`awwo-deliverables-receipt${output.partial || historical || output.source === 'case' ? ' is-caveat' : ''}`}>
         <span className="awwo-deliverables-source" title={dated ? new Date(output.at).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : undefined}>{receipt.join(' · ')}</span>
       </div> : null}
-      {(historical || output.partial || output.source === 'manual' || output.source === 'case') && <div className="awwo-deliverables-meta">
+      {!result && (historical || output.partial || output.source === 'manual' || output.source === 'case') && <div className="awwo-deliverables-meta">
         {historical && <span>{t('deliverable.historical')}</span>}
         {output.partial && <span>{t('deliverable.partial')}</span>}
         {output.source === 'manual' && <span>{t('deliverable.manual')}</span>}
@@ -273,7 +279,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
         })}
       </div>}
     </>}
-    <details className="awwo-deliverables-editor">
+    {!result && <details className="awwo-deliverables-editor">
       <summary>{t('deliverable.editForm')}</summary>
       <ContractFields fields={contract.outputs} label={t('deliverable.outputLabel')} readOnly={locked} onChange={updateFields} />
       <div className="awwo-output-publish">
@@ -283,6 +289,6 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
         </button>
       </div>
       {publishErrors.length ? <div className="awwo-contract-errors" role="alert">{publishErrors.join(' ')}</div> : null}
-    </details>
+    </details>}
   </div>;
 }

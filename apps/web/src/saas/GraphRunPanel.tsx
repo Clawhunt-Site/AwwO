@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
-import { graphPath, graphIsActive, validGraphCollaboration, type GraphRunSnapshot, type GraphCollaborationPhase } from './graphRuns';
+import { graphPath, graphIsActive, publishGraphRuns, validGraphRunList, type GraphRunSnapshot, type GraphCollaborationPhase } from './graphRuns';
 import { TeamRunDetails } from './TeamRunDetails';
 import { RunEvidence } from './RunEvidence';
 import { GraphNodeOutput } from './GraphNodeOutput';
@@ -40,11 +40,10 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const result = await api<{ items: GraphRunSnapshot[] }>(graphPath(tenantId, canvasId), { signal: controller.signal });
+        const result = await api<unknown>(graphPath(tenantId, canvasId), { signal: controller.signal });
         if (controller.signal.aborted) return;
-        if (!Array.isArray(result.items) || result.items.some(item => !item || typeof item.id !== 'string' || !Array.isArray(item.nodes)
-          || (item.collaboration != null && !validGraphCollaboration(item.collaboration, item.scope)))) throw new Error('Invalid graph run response');
-        setItems(result.items); setError(null);
+        if (!validGraphRunList(result)) throw new Error('Invalid graph run response');
+        setItems(result.items); setError(null); publishGraphRuns(tenantId, canvasId, result.items);
       } catch (error) { if (!controller.signal.aborted) setError(error); }
       if (!controller.signal.aborted) timer = setTimeout(() => void poll(), open ? 2000 : 5000);
     };

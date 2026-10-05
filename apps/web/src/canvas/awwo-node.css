@@ -171,29 +171,29 @@
 .canvas-root .awwo-node-delivery-drawer { width: 320px; flex: 0 0 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--awwo-line); background: var(--awwo-card); }
 .canvas-root .awwo-node-delivery-drawer > header { min-height: 37px; padding: 5px 10px; border-bottom: 1px solid var(--awwo-line); display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
 .canvas-root .awwo-node-delivery-drawer > header > span { display: flex; align-items: center; gap: 6px; }
-.canvas-root .awwo-deliverables { padding: 12px; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; font-size: 12px; }
-.canvas-root .awwo-deliverables-meta { color: var(--awwo-muted); font-size: 10px; margin-bottom: 10px; }
-.canvas-root .awwo-deliverables-empty { color: var(--awwo-muted); text-align: center; padding: 45px 8px; }
-.canvas-root .awwo-deliverable { border: 1px solid var(--awwo-line); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
-.canvas-root .awwo-deliverable-title { margin: 0; padding: 9px 12px; background: var(--awwo-soft); font-size: 12px; font-weight: 600; }
-.canvas-root .awwo-deliverable-files { display: flex; gap: 4px; overflow-x: auto; padding: 2px 2px 8px; margin-bottom: 2px; }
-.canvas-root .awwo-deliverable-files button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: 180px; min-height: 32px; padding: 6px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--awwo-muted); font: inherit; font-size: 11px; cursor: pointer; }
-.canvas-root .awwo-deliverable-files button span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.canvas-root .awwo-deliverable-files button svg { flex-shrink: 0; }
-.canvas-root .awwo-deliverable-files button[aria-pressed="true"] { border-color: var(--awwo-line); background: var(--awwo-soft); color: var(--awwo-ink); }
-.canvas-root .awwo-deliverable-files button:hover { color: var(--awwo-ink); background: var(--awwo-soft); }
-.canvas-root .awwo-deliverable-files button:focus-visible { outline: 2px solid var(--awwo-teal); outline-offset: -2px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverables { padding: 12px; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; font-size: 12px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverables-meta { color: var(--awwo-muted); font-size: 10px; margin-bottom: 10px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverables-empty { color: var(--awwo-muted); text-align: center; padding: 45px 8px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable { border: 1px solid var(--awwo-line); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-title { margin: 0; padding: 9px 12px; background: var(--awwo-soft); font-size: 12px; font-weight: 600; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-files { display: flex; gap: 4px; overflow-x: auto; padding: 2px 2px 8px; margin-bottom: 2px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-files button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: 180px; min-height: 32px; padding: 6px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--awwo-muted); font: inherit; font-size: 11px; cursor: pointer; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-files button span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-files button svg { flex-shrink: 0; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-files button[aria-pressed="true"] { border-color: var(--awwo-line); background: var(--awwo-soft); color: var(--awwo-ink); }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-files button:hover { color: var(--awwo-ink); background: var(--awwo-soft); }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-files button:focus-visible { outline: 2px solid var(--awwo-teal); outline-offset: -2px; }
 /* A stored file deliverable: the body is a download action, not previewable text. */
-.canvas-root .awwo-deliverable-file { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--awwo-accent, #286454); text-decoration: underline; text-underline-offset: 3px; }
-.canvas-root .awwo-deliverable-body { padding: 10px 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
-.canvas-root .awwo-deliverable-body p { margin: 0 0 8px; }
-.canvas-root .awwo-deliverable-body h1, .canvas-root .awwo-deliverable-body h2 { font-size: 15px; margin: 0 0 10px; }
-.canvas-root .awwo-deliverable-body img { max-width: 100%; }
-.canvas-root .awwo-deliverable-body pre { white-space: pre-wrap; font-size: 11px; }
-.canvas-root .awwo-deliverables-editor summary { cursor: pointer; color: var(--awwo-muted); font-size: 11px; padding: 8px 0; }
-.canvas-root .awwo-deliverables-editor .awwo-contract-field { padding: 8px; }
-.canvas-root .awwo-deliverables .awwo-field-header { flex-wrap: wrap; }
-.canvas-root .awwo-deliverables .awwo-field-name { flex-basis: 100%; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-file { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--awwo-accent, #286454); text-decoration: underline; text-underline-offset: 3px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-body { padding: 10px 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-body p { margin: 0 0 8px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-body h1, :is(.canvas-root, .awwo-results) .awwo-deliverable-body h2 { font-size: 15px; margin: 0 0 10px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-body img { max-width: 100%; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-body pre { white-space: pre-wrap; font-size: 11px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverables-editor summary { cursor: pointer; color: var(--awwo-muted); font-size: 11px; padding: 8px 0; }
+:is(.canvas-root, .awwo-results) .awwo-deliverables-editor .awwo-contract-field { padding: 8px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverables .awwo-field-header { flex-wrap: wrap; }
+:is(.canvas-root, .awwo-results) .awwo-deliverables .awwo-field-name { flex-basis: 100%; }
 .canvas-root .awwo-input-drawer { flex: 0 1 auto; max-height: 52%; padding: 10px 12px; border-block: 1px solid var(--awwo-line); background: var(--awwo-soft); }
 /* A copied case node (productionCopy.ts) with nothing said or run yet opens on what it was asked and
    received: the inputs fill the column, and the empty conversation's hint waits until they close. */
@@ -215,7 +215,7 @@
 
 .canvas-root .awwo-node.canvas-tile--selected { z-index: 2; }
 .canvas-root .awwo-node.canvas-tile--focus { z-index: 3; }
-.canvas-root .awwo-deliverable-body.awwo-markdown-preview { white-space: normal; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-body.awwo-markdown-preview { white-space: normal; }
 
 /* The graph stays quiet until one Agent is opened. */
 .canvas-root .awwo-node.is-compact { border-radius: 10px; box-shadow: 0 2px 8px #24362b08; }
@@ -276,9 +276,9 @@
 .canvas-root .awwo-starter-prompts button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--awwo-line); border-radius: 6px; background: var(--awwo-card); color: var(--awwo-muted); font: inherit; font-size: 10px; }
 .canvas-root .awwo-starter-prompts button:hover { color: var(--template-accent); border-color: var(--template-accent); }
 .canvas-root .awwo-field-help { font-size: 11px; line-height: 1.65; color: var(--awwo-muted); margin: 7px 0; }
-.canvas-root .awwo-deliverables-title { font-size: 12px; font-weight: 600; margin: 0 0 10px; color: var(--template-accent, var(--awwo-ink)); }
+:is(.canvas-root, .awwo-results) .awwo-deliverables-title { font-size: 12px; font-weight: 600; margin: 0 0 10px; color: var(--template-accent, var(--awwo-ink)); }
 
-.canvas-root .awwo-deliverables:has(.awwo-expected-deliverables) .awwo-deliverables-empty { padding: 12px 0 8px; text-align: left; font-size: 11px; }
-.canvas-root .awwo-expected-deliverables { padding: 0; margin: 0 0 16px; list-style: none; }
-.canvas-root .awwo-expected-deliverables li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--awwo-line); font-size: 11px; }
-.canvas-root .awwo-expected-deliverables li span:last-child { flex-shrink: 0; font-size: 9px; color: var(--awwo-muted); background: var(--awwo-soft); padding: 2px 5px; border-radius: 4px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverables:has(.awwo-expected-deliverables) .awwo-deliverables-empty { padding: 12px 0 8px; text-align: left; font-size: 11px; }
+:is(.canvas-root, .awwo-results) .awwo-expected-deliverables { padding: 0; margin: 0 0 16px; list-style: none; }
+:is(.canvas-root, .awwo-results) .awwo-expected-deliverables li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--awwo-line); font-size: 11px; }
+:is(.canvas-root, .awwo-results) .awwo-expected-deliverables li span:last-child { flex-shrink: 0; font-size: 9px; color: var(--awwo-muted); background: var(--awwo-soft); padding: 2px 5px; border-radius: 4px; }

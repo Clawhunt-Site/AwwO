@@ -76,6 +76,10 @@
 .awwo-planner-sidebar { width: 330px; flex: 0 0 330px; min-width: 0; border-right: 1px solid var(--awwo-border); background: var(--awwo-surface); z-index: 30; }
 .awwo-assistant-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--awwo-muted); font-size: 12px !important; white-space: nowrap; }
 .awwo-assistant-toggle:hover, .awwo-assistant-toggle[aria-expanded='true'] { background: var(--awwo-accent-soft); color: var(--awwo-accent); }
+/* 编排 | 成果, where the host offers a results view: first in the canvas bar. */
+.awwo-view-switch { display: inline-flex; flex: none; gap: 2px; padding: 2px; border-radius: 9px; background: var(--awwo-accent-soft); }
+.awwo-view-switch > button { min-height: 28px; padding: 3px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--awwo-muted); font-size: 12px; font-weight: 550; white-space: nowrap; cursor: pointer; }
+.awwo-view-switch > button[aria-pressed='true'] { background: var(--awwo-surface); color: var(--awwo-ink); box-shadow: 0 1px 3px #0000000f; }
 .awwo-planner-connection { display: flex; align-items: center; gap: 7px; font-size: 11px; line-height: 1.6; }
 .awwo-planner-connection > button { margin-left: auto; padding: 2px 5px; background: transparent; color: var(--awwo-accent); border: 0; border-radius: 4px; font-size: 11px; }
 .awwo-planner-connection .is-ready { background: var(--awwo-accent); }
@@ -315,7 +319,7 @@
 .saas-canvas-shell .canvas-root > .canvas-inspector .canvas-inspector-body > * { flex-shrink: 0; }
 .saas-canvas-shell .canvas-root > .canvas-inspector .canvas-inspector-foot > button { min-height: 36px; }
 @media (max-width: 900px) {
-  .saas-canvas-shell .awwo-stage-canvas:has(.canvas-root > .canvas-inspector) { z-index: 31; }
+  .saas-canvas-shell .awwo-stage-canvas:has(.canvas-root > .canvas-inspector):not(:has(> .awwo-results)) { z-index: 31; }
 }
 @media (max-width: 760px) {
   .saas-canvas-shell .awwo-workspace .awwo-canvas-bar { flex-wrap: wrap; gap: 8px; min-width: 0; }

@@ -14,13 +14,15 @@ const byRecentUpdate = (items: ReadonlyArray<CanvasRecord>) => [...items].sort((
 /** The workspace's canvases, most recently updated first. With `recentLimit`, only that many are
  * shown until the operator expands the full list in place (its pages, rename and delete). Search
  * matches only the loaded page; paging stays explicit, and clearing a search returns recent mode. */
-type CanvasListProps = { tenant: Tenant; onOpen: (canvasId: string) => void; recentLimit?: number; userId?: string };
+type CanvasListProps = { tenant: Tenant; onOpen: (canvasId: string) => void; recentLimit?: number; userId?: string;
+  /** The newest canvases as loaded (the first page), for views built from the same list (the home's 最近的成果). */
+  onFirstPage?: (canvases: ReadonlyArray<CanvasRecord>) => void };
 export function CanvasList(props: CanvasListProps) {
   // A changed identity must never inherit another account's search or in-flight list request.
   return <ScopedCanvasList key={JSON.stringify([props.userId ?? null, props.tenant.id])} {...props} />;
 }
 
-function ScopedCanvasList({ tenant, onOpen, recentLimit, userId }: CanvasListProps) {
+function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage }: CanvasListProps) {
   const { locale, t } = useSaaSPreferences();
   const path = tenantPath(tenant.id, '/canvases');
   const listing = usePagedList<CanvasRecord>(path);
@@ -51,6 +53,9 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId }: CanvasListPro
   }, []);
 
   const items = listing.page ? byRecentUpdate(listing.page.items) : [];
+  const firstPage = useRef(onFirstPage);
+  firstPage.current = onFirstPage;
+  useEffect(() => { if (listing.page && listing.pageNumber === 1) firstPage.current?.(listing.page.items); }, [listing.page, listing.pageNumber]);
   const needle = query.trim().toLocaleLowerCase();
   const matches = needle ? items.filter(canvas => canvas.name.toLocaleLowerCase().includes(needle)) : items;
   const limit = recentLimit ?? Infinity;

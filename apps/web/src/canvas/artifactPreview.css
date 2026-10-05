@@ -1,6 +1,6 @@
 .awwo-artifact-preview { width: 100%; min-width: 0; }
-.canvas-root .awwo-deliverable-body.awwo-deliverable-with-preview { padding: 0; white-space: normal; }
-.canvas-root .awwo-artifact-preview { --line: var(--awwo-line); --fg: var(--awwo-ink); --muted: var(--awwo-muted); --accent-soft: var(--awwo-tint); --accent: var(--awwo-teal); }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-body.awwo-deliverable-with-preview { padding: 0; white-space: normal; }
+:is(.canvas-root, .awwo-results) .awwo-artifact-preview { --line: var(--awwo-line); --fg: var(--awwo-ink); --muted: var(--awwo-muted); --accent-soft: var(--awwo-tint); --accent: var(--awwo-teal); }
 .awwo-artifact-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line, #dde5e1); }
 .awwo-artifact-toolbar button, .awwo-artifact-toolbar a { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; border: 0; border-radius: 5px; padding: 5px 8px; color: var(--muted, #5c6f65); background: transparent; font: inherit; font-size: 12px; line-height: 1.2; white-space: nowrap; text-decoration: none; cursor: pointer; }
 .awwo-artifact-modes { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 7px; background: var(--accent-soft, #e8efeb); }

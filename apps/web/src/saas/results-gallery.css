@@ -1,0 +1,55 @@
+/* The workspace home's 最近的成果 (ResultsGallery.tsx). Fewer and larger than the canvas cards above it: each
+ * card is a print of the result itself (a page as it renders without scripts, a document's opening lines),
+ * not a diagram of the canvas, captioned with the step that delivered it and where it came from. */
+
+.saas-results-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px;
+  margin: 0; padding: 0; list-style: none;
+}
+.saas-result-card {
+  display: flex; flex-direction: column; height: 100%; overflow: hidden;
+  border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-lg); background: var(--saas-card);
+  color: var(--saas-text); text-decoration: none;
+  transition: border-color var(--saas-dur-2) var(--saas-ease), box-shadow var(--saas-dur-2) var(--saas-ease);
+}
+.saas-result-card:hover { border-color: var(--saas-border); box-shadow: var(--saas-shadow-lg); }
+.saas-result-card:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
+
+/* The print: 16:10, the page laid out at desktop width and scaled down, untouchable. */
+.saas-result-thumb {
+  position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden;
+  border-bottom: 1px solid var(--saas-hairline); background: var(--saas-thumb-bg);
+}
+.saas-result-thumb.is-page { background: #fff; }
+.saas-result-thumb.is-page iframe {
+  position: absolute; top: 0; left: 0; width: 400%; height: 400%; border: 0; transform: scale(.25); transform-origin: 0 0;
+  pointer-events: none; background: #fff;
+}
+.saas-result-thumb-label {
+  position: absolute; left: 10px; bottom: 10px; padding: 2px 9px; border-radius: var(--saas-radius-pill);
+  background: color-mix(in srgb, var(--saas-card) 88%, transparent); color: var(--saas-muted); font-size: 11px; font-weight: 600;
+  box-shadow: 0 0 0 1px var(--saas-hairline); backdrop-filter: blur(6px);
+}
+.saas-result-thumb.is-text { padding: 18px 20px; background: var(--saas-card); }
+.saas-result-thumb.is-text > span {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 7; line-clamp: 7; overflow: hidden;
+  color: var(--saas-muted); font: 400 12px/1.65 var(--saas-font); overflow-wrap: anywhere;
+}
+.saas-result-thumb.is-kind { display: grid; place-content: center; justify-items: center; gap: 8px; color: var(--saas-muted); }
+.saas-result-thumb.is-kind small { font-size: var(--saas-text-xs); }
+
+.saas-result-body { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px 16px; min-width: 0; }
+.saas-result-body strong {
+  overflow: hidden; color: var(--saas-text); font: 650 15px/1.4 var(--saas-font); letter-spacing: -.01em;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.saas-result-canvas { overflow: hidden; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.saas-result-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; color: var(--saas-subtle); font-size: var(--saas-text-xs); }
+.saas-result-chip { padding: 1px 8px; border-radius: var(--saas-radius-pill); background: var(--saas-soft-strong); color: var(--saas-muted); font-weight: 600; line-height: 1.6; }
+.saas-result-chip.is-run { background: var(--saas-success-soft); color: var(--saas-success); }
+.saas-result-chip:is(.is-partial, .is-manual, .is-case) { background: var(--saas-warning-bg); color: var(--saas-warning); }
+.saas-results-empty {
+  margin: 0; padding: 22px 20px; border: 1px dashed var(--saas-border); border-radius: var(--saas-radius-lg);
+  color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.6;
+}
+@media (prefers-reduced-motion: reduce) { .saas-result-card { transition: none; } }

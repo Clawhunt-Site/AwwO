@@ -57,10 +57,15 @@ export interface AgentWorkspaceProps {
   /** Whether the host's model rail is collapsed right now, and how to expand it. */
   modelRailCollapsed?: boolean;
   onExpandModelRail?: () => void;
+  /** The canvas's 成果 view, where the host offers one: the switch sits first in the canvas bar, and while
+   *  it is chosen `results` covers the board (which stays mounted underneath, its state untouched). */
+  view?: 'canvas' | 'results';
+  onViewChange?: (view: 'canvas' | 'results') => void;
+  results?: ReactNode;
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, canvasTools, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, assistantAvailable = false, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, canvasTools, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, assistantAvailable = false, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, view = 'canvas', onViewChange, results, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -278,10 +283,14 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
         <div className="awwo-page-title">{headerTitle ?? <div className="awwo-breadcrumb">AwwO<ChevronRight size={12} /><span>{workspaceName || t('workspace.name')}</span></div>}</div>
         <div className="awwo-header-actions"><button className="awwo-icon-button awwo-command-search" aria-label={t('workspace.search')} onClick={onSearch}><Search size={18} /></button>{headerActions}{accountControl}</div>
       </header>
-      <div className="awwo-canvas-bar">{onToggleAssistant && (nodes.length > 0 || assistantOpen || assistantAvailable) ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}{canvasTools}{!headerTitle && <div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div>}<div className="awwo-run-slot">{toolbar}</div></div>
+      <div className="awwo-canvas-bar">{onViewChange && nodes.length > 0 ? <div className="awwo-view-switch" role="group" aria-label={t('results.view')}>
+        {(['canvas', 'results'] as const).map(item => <button type="button" key={item} aria-pressed={view === item}
+          onClick={() => { if (view !== item) onViewChange(item); }}>{t(item === 'canvas' ? 'results.viewCanvas' : 'results.viewResults')}</button>)}
+      </div> : null}{onToggleAssistant && (nodes.length > 0 || assistantOpen || assistantAvailable) ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}{canvasTools}{!headerTitle && <div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div>}<div className="awwo-run-slot">{toolbar}</div></div>
       <section className="awwo-stage" aria-label={t('workspace.stage')}>
         {assistant ? <aside className="awwo-planner-sidebar" aria-label={t('workspace.assistant')}>{assistant}</aside> : null}
         <div data-onboarding="canvas-stage" className="awwo-stage-canvas" onDragOver={onModelDragOver} onDrop={onModelDrop}>{children}
+        {view === 'results' && results}
         {!nodes.length && <div className={`awwo-empty${welcome ? ' has-assistant' : ''}`}>
           {welcome || <>
           <div className="awwo-empty-kicker"><span />{t('workspace.emptyKicker')}</div>

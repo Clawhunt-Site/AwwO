@@ -6,6 +6,7 @@ import { useCanvasI18n } from '../canvas/i18n';
 import { useEnterToSend } from '../canvas/composerKeys';
 import { useSaaSPreferences } from './preferences';
 import { CanvasList } from './CanvasList';
+import { ResultsGallery } from './ResultsGallery';
 import { CaseGallery } from './CaseGallery';
 import { HOME_PROMPT_MAX_CHARACTERS, canvasNameFromPrompt, clearHomeDraft, readHomeDraft, saveHomeDraft } from './homePrompt';
 import { savePlanHandoff } from './planHandoff';
@@ -42,9 +43,11 @@ export function WorkspaceHome(props: HomeProps) {
 
 function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
   const { t } = useSaaSPreferences();
+  const [canvases, setCanvases] = useState<ReadonlyArray<CanvasRecord> | null>(null);
   return <>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
-    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onFirstPage={setCanvases} />
+    <ResultsGallery tenant={tenant} canvases={canvases} />
     <ProductionCases compact />
     <OfficialExamples compact readOnly />
   </>;
@@ -52,6 +55,7 @@ function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
 
 function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const { locale, t } = useSaaSPreferences();
+  const [canvases, setCanvases] = useState<ReadonlyArray<CanvasRecord> | null>(null);
   const { t: text } = useCanvasI18n();
   const scope = useMemo(() => ({ user: identity.user.id, tenant: tenant.id }), [identity.user.id, tenant.id]);
   const [draft, setDraft] = useState(() => readHomeDraft(scope));
@@ -244,7 +248,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     <section id={examplesId} className="saas-home-prompt-ideas" aria-label={t('案例灵感', 'Example ideas')} hidden={!examplesOpen}>
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
-    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onFirstPage={setCanvases} />
+    <ResultsGallery tenant={tenant} canvases={canvases} />
     <ProductionCases compact onReuse={copyProduction} />
     <OfficialExamples compact onReuse={copyOfficial} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}

@@ -33,6 +33,7 @@ import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePoint
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantMode, type AssistantModes } from './CanvasAssistant';
+import { CanvasResults } from './CanvasResults';
 import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
@@ -160,6 +161,9 @@ export interface CanvasSurfaceProps {
   /** The hosted app's 直接执行 mode for the canvas assistant: its task conversation and composer. Absent (the
    *  desktop app) leaves the assistant planning only. On a read-only canvas it is the assistant's only mode. */
   assistantExecution?: ReactNode;
+  /** The hosted app's 成果 view: the canvas's result large, the steps that made it, and the host's run
+   *  receipt. Absent (the desktop app) leaves the canvas without it. */
+  results?: CanvasResultsOptions;
   /** A new external draft, never sent without the normal planning action. */
   taskDraft?: { id: string; prompt: string } | null;
   onOpenSettings?: () => void;
@@ -231,7 +235,16 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
   return { companies, refresh: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export interface CanvasResultsOptions {
+  /** The host's record of the run behind the result. */
+  receipt?: (final: CanvasNode | null) => ReactNode;
+  /** Open in the 成果 view (a link to a canvas's results). */
+  initialView?: 'canvas' | 'results';
+  /** The view changed; a host can keep it in the address. */
+  onViewChange?: (view: 'canvas' | 'results') => void;
+}
+
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, results, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   // The opened-node look is a viewer preference: it styles focused tiles only and never the document.
@@ -592,6 +605,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return () => clearTimeout(timer);
   }, [size, railsVersion, modelRailCollapsed, viewportSize, autoFit]);
 
+  // What the stage shows: the board, or (where the host offers it) the canvas's 成果. The board stays
+  // mounted under the results, so its camera, runs and open node are as they were on the way back.
+  const [stageView, setStageView] = useState<'canvas' | 'results'>(() => results?.initialView === 'results' ? 'results' : 'canvas');
+  const stageViewRef = useRef(stageView);
+  const onStageViewChange = useRef(results?.onViewChange);
+  onStageViewChange.current = results?.onViewChange;
+  const changeStageView = useCallback((next: 'canvas' | 'results') => {
+    if (stageViewRef.current === next) return;
+    stageViewRef.current = next; setStageView(next); onStageViewChange.current?.(next);
+  }, []);
+  // The 成果 view needs something to show the steps of; an emptied canvas returns to the board.
+  const showingResults = Boolean(results) && stageView === 'results' && nodes.length > 0;
+  useEffect(() => { if (stageView === 'results' && !nodes.length) changeStageView('canvas'); }, [stageView, nodes.length, changeStageView]);
   // After a control that had focus goes away (it unmounted or its view closed), focus moves to `selector`.
   const refocus = useCallback((selector: string) => {
     requestAnimationFrame(() => {
@@ -604,6 +630,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const focusNode = useCallback(
     (nodeId: string, options: { configure?: boolean } = {}) => {
       if (inspectorCloseLocked.current) return;
+      // Opening a node always shows the board.
+      changeStageView('canvas');
       const box = viewportSize();
       const node = presentationNodes(docRef.current.nodes, nodeId, narrowFocusWidth(box?.w ?? sizeRef.current.w)).find((n) => n.id === nodeId);
       if (!node) return;
@@ -641,7 +669,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       glideTo(openInPlace(current, { minX: node.x, minY: node.y, maxX: node.x + node.w, maxY: node.y + node.h }, box, scale, { ...pad, right }),
         { x: node.x, y: node.y });
     },
-    [focusedId, viewportSize, glideTo, canInitialize],
+    [focusedId, viewportSize, glideTo, canInitialize, changeStageView],
   );
   // The latest focusNode, for a focus deferred to the next frame (an older one judges a stale render).
   const focusNodeRef = useRef(focusNode);
@@ -924,7 +952,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           if (result?.kind === 'session' && result.lastOutput && !result.lastOutput.partial) {
             const opened = { ...docRef.current, nodes: docRef.current.nodes.map(node => node.id === leadId ? { ...node, deliverablesOpen: true } : node) };
             if (saveLocalDocument(opened)) { docRef.current = opened; setDoc(opened); }
-            focusNode(leadId);
+            // Someone watching the 成果 view already sees the result there; it stays open.
+            if (stageViewRef.current !== 'results') focusNode(leadId);
           }
         }
         setHandoffNote(surfaceNotice(t, Object.values(next.nodes).some(node => node.detail === 'recovery_input_changed') ? 'recovery_input_changed' : next.serverGraph ? 'graph_recovery_complete' : 'recovery_complete'));
@@ -1689,6 +1718,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setSelection((prev) => (additive ? Array.from(new Set([...prev, ...ids])) : ids)),
   });
 
+  // The board's shortcuts (delete, undo, run, …) pause while the 成果 view covers it.
   const keyBindings = useCanvasKeys({
     onFocusToggle: () => toggleFocus(),
     onCycle: cycle,
@@ -1712,7 +1742,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       else if (focusedId) unfocus();
       else setSelection([]);
     },
-  });
+  }, !showingResults);
 
   /** A palette-created node lands in the middle of what the operator is looking at. */
   const addAtViewCenter = useCallback(
@@ -2215,11 +2245,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       modelCatalogue={currentModelCatalogue}
       personaControls={modelShelf ? <ModelPersonaControls personaId={palettePersona} onPersonaChange={setPalettePersona}
         disabled={!canEdit || planningBusy || initializing || bindingLocked} /> : undefined}
-      onModelDrop={onModelDrop} onModelDragOver={event => {
-        if (Array.from(event.dataTransfer?.types ?? []).includes(MODEL_DRAG_MIME) && canEditStructure() && !planningBusy) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }
+      onModelDrop={showingResults ? undefined : onModelDrop} onModelDragOver={event => {
+        if (!showingResults && Array.from(event.dataTransfer?.types ?? []).includes(MODEL_DRAG_MIME) && canEditStructure() && !planningBusy) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }
       }}
       onFocusNode={focusNode} onAddAgent={addAgent} loadWorkspaceAgents={loadWorkspaceAgents} agentLibraryRequest={agentLibraryRequest} onAddWorkspaceAgent={addWorkspaceAgent} onAddMarketAgent={loadWorkspaceAgents ? addMarketAgent : undefined} onCreateTemplate={createTemplate}
-      onSearch={() => setBarMode('search')}
+      onSearch={() => { changeStageView('canvas'); setBarMode('search'); }}
       assistant={assistantPanel}
       // While the side panel already shows the task conversation, the welcome stops offering it.
       welcome={readOnly ? undefined : <CanvasAssistant mode="welcome" {...assistantProps}
@@ -2230,6 +2260,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
       headerTitle={headerTitle} headerActions={headerActions} canvasTools={canvasTools}
+      view={showingResults ? 'results' : 'canvas'} onViewChange={results ? changeStageView : undefined}
+      results={showingResults ? <CanvasResults nodes={nodes} edges={edges} execution={doc.execution} runs={runs} running={running} readOnly={readOnly}
+        runUnavailableReason={runUnavailableReason} onRun={readOnly ? undefined : () => void startRun()}
+        notice={initializing ? { kind: 'status', text: locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…' }
+          : handoffNote ? { kind: 'alert', text: handoffNote, onDismiss: () => setHandoffNote('') } : undefined}
+        onOpenNode={id => { focusNode(id); refocus('.awwo-view-switch button'); }}
+        onBack={() => { changeStageView('canvas'); refocus('.awwo-view-switch button'); }} receipt={results?.receipt} /> : undefined}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked || initializing}>{accountControl}</div>}
       toolbar={<>{!cloudScope && <GraphSettings doc={doc} selectedNodeId={selection[0]} selectedEdgeId={selectedEdgeId}
         disabled={readOnly || running || initializing || bindingLocked} onChange={next => { if (canEditStructure()) patchDoc(() => next, { label: 'graph-settings' }); }}
@@ -2242,10 +2279,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id, { configure: true }); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
         onViewOutput={id => { toggleDeliverables(id, true); focusNode(id); setTimelineOpen(false); }}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
-        onToggleTimeline={() => setTimelineOpen(o => !o)} timelineOpen={timelineOpen}
+        onToggleTimeline={() => { const fromResults = stageViewRef.current === 'results'; changeStageView('canvas'); setTimelineOpen(o => fromResults || !o); }} timelineOpen={timelineOpen && !showingResults}
         timelineUnavailableReason={focusedId ? t('run.timelineWhileOpen') : undefined}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
-    <div className="canvas-root" data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef} {...nodeViewRoot}>
+    {/* Under the 成果 view the board is out of reach (the shortcuts pause too) but stays as it was. */}
+    <div className="canvas-root" inert={showingResults || undefined} data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef} {...nodeViewRoot}>
       <CanvasViewport
         view={view}
         onViewChange={moveCamera}

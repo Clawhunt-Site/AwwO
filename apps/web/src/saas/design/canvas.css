@@ -120,6 +120,17 @@ html:root .saas-canvas-shell {
     &[aria-expanded='true'], &[aria-pressed='true'] { background: var(--saas-text); color: var(--saas-card); box-shadow: none; }
   }
   .awwo-knowledge-tool-mark { box-shadow: 0 0 0 2px var(--saas-sidebar); }
+  /* 编排 | 成果: a two-way switch, drawn like the assistant's modes so a switch never reads as a toggle. */
+  .awwo-view-switch {
+    margin-right: 6px; padding: 3px; border-radius: var(--saas-radius-pill); background: var(--saas-field);
+    & > button {
+      min-height: 28px; padding: 0 14px; border-radius: var(--saas-radius-pill); color: var(--saas-muted); font: 600 var(--saas-text-sm)/1 var(--saas-font);
+      transition: background var(--saas-dur-1), color var(--saas-dur-1), box-shadow var(--saas-dur-1);
+      &:hover:not([aria-pressed='true']) { color: var(--saas-text); }
+      &[aria-pressed='true'] { background: var(--saas-card); color: var(--saas-text); box-shadow: 0 0 0 1px var(--saas-hairline) inset, var(--saas-shadow-xs); }
+      &:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 1px; }
+    }
+  }
 
   .awwo-run-slot .canvas-run-ctl { gap: 8px; }
   .awwo-workspace .awwo-run-slot .canvas-run-btn {
@@ -581,21 +592,39 @@ html:root .saas-canvas-shell {
     mask-image: linear-gradient(to bottom, #000 calc(100% - var(--awwo-scroll-fade)), transparent);
     animation: awwo-scroll-fade linear both; animation-timeline: scroll(self block);
   }
-  .canvas-root .awwo-deliverables-title { color: var(--saas-text); font-size: var(--saas-text-sm); }
-  .canvas-root .awwo-deliverables-receipt { color: var(--saas-muted); font-size: var(--saas-text-xs); }
-  .canvas-root .awwo-deliverables-receipt::before { background: var(--saas-success-dot); }
-  .canvas-root .awwo-deliverables-receipt.is-caveat::before { background: var(--saas-warning-dot); }
-  .canvas-root .awwo-deliverable { border-color: var(--saas-border); border-radius: 14px; background: var(--saas-node); box-shadow: var(--saas-shadow-xs); }
-  .canvas-root .awwo-deliverable-title { border-bottom-color: var(--saas-hairline); background: transparent; color: var(--saas-text); font-size: var(--saas-text-sm); }
-  .canvas-root .awwo-deliverable-head { border-bottom-color: var(--saas-hairline); }
-  .canvas-root .awwo-deliverable-copy { border-radius: var(--saas-radius-xs); color: var(--saas-muted); }
-  .canvas-root .awwo-deliverable-copy:hover { background: var(--saas-soft); color: var(--saas-text); }
-  .canvas-root .awwo-deliverable-copy.is-copied { color: var(--saas-success); }
-  .canvas-root .awwo-deliverable-files button { border-radius: var(--saas-radius-xs); color: var(--saas-muted); font-size: var(--saas-text-xs); }
-  .canvas-root .awwo-deliverable-files button[aria-pressed='true'] { border-color: var(--saas-border); background: var(--saas-soft); color: var(--saas-text); }
-  .canvas-root .awwo-expected-deliverables { border-color: var(--saas-border); border-radius: var(--saas-radius); background: var(--saas-node); }
-  .canvas-root .awwo-expected-deliverables li { border-bottom-color: var(--saas-hairline); font-size: var(--saas-text-xs); }
-  .canvas-root .awwo-deliverables-meta > span { background: var(--saas-warning-bg); color: var(--saas-warning); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverables-title { color: var(--saas-text); font-size: var(--saas-text-sm); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverables-receipt { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverables-receipt::before { background: var(--saas-success-dot); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverables-receipt.is-caveat::before { background: var(--saas-warning-dot); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverable { border-color: var(--saas-border); border-radius: 14px; background: var(--saas-node); box-shadow: var(--saas-shadow-xs); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverable-title { border-bottom-color: var(--saas-hairline); background: transparent; color: var(--saas-text); font-size: var(--saas-text-sm); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverable-head { border-bottom-color: var(--saas-hairline); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverable-copy { border-radius: var(--saas-radius-xs); color: var(--saas-muted); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverable-copy:hover { background: var(--saas-soft); color: var(--saas-text); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverable-copy.is-copied { color: var(--saas-success); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverable-files button { border-radius: var(--saas-radius-xs); color: var(--saas-muted); font-size: var(--saas-text-xs); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverable-files button[aria-pressed='true'] { border-color: var(--saas-border); background: var(--saas-soft); color: var(--saas-text); }
+  :is(.canvas-root, .awwo-results) .awwo-expected-deliverables { border-color: var(--saas-border); border-radius: var(--saas-radius); background: var(--saas-node); }
+  :is(.canvas-root, .awwo-results) .awwo-expected-deliverables li { border-bottom-color: var(--saas-hairline); font-size: var(--saas-text-xs); }
+  :is(.canvas-root, .awwo-results) .awwo-deliverables-meta > span { background: var(--saas-warning-bg); color: var(--saas-warning); }
+  /* 成果 view: the result is the exhibit, framed larger than in a node's drawer, with nothing around it that edits. */
+  .awwo-results {
+    & .awwo-deliverables { flex: none; padding: 0; overflow: visible; font-size: var(--saas-text-sm); }
+    & .awwo-deliverable { margin: 0; border: 0; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset, var(--saas-shadow-md); }
+    & .awwo-deliverable-files { margin-bottom: 8px; }
+    & .awwo-deliverable-body:not(.awwo-deliverable-with-preview) { padding: 18px 20px; font-size: var(--saas-text-md); line-height: 1.7; }
+    & .awwo-artifact-frame { min-height: 0; height: clamp(420px, calc(100dvh - 330px), 1100px); }
+    & :is(.awwo-artifact-source, .awwo-artifact-markdown) { max-height: clamp(420px, calc(100dvh - 330px), 1100px); }
+    & .awwo-artifact-markdown { padding: 22px 26px; font-size: var(--saas-text-md); }
+    /* A page that needs its scripts (a game, an animation) shows little until it runs; running it is the
+       first thing offered here, still a choice the reader makes. */
+    & .awwo-artifact-execution > button:first-child {
+      min-height: 30px; padding: 0 14px; border-radius: var(--saas-radius-pill); background: var(--saas-primary); color: var(--saas-on-primary); font-weight: 600;
+      &:hover { background: var(--saas-primary-hover); color: var(--saas-on-primary); }
+      &[aria-pressed='true'] { background: var(--saas-field); color: var(--saas-text); }
+    }
+    @media (max-width: 760px) { & .awwo-artifact-frame { height: 62dvh; } }
+  }
 
   /* Fields inside a node (task, contract, outputs). */
   .canvas-root :is(.awwo-field-header input, .awwo-field-header select, .awwo-field-value) {
@@ -896,31 +925,31 @@ html:root .saas-canvas-shell {
 .awwo-workspace .canvas-root .awwo-starter-prompts button:not(:disabled):hover { border-color: color-mix(in srgb, var(--saas-accent) 45%, transparent); background: var(--saas-soft); color: var(--saas-text); }
 .awwo-workspace .canvas-root .awwo-node-delivery-drawer { background: color-mix(in srgb, var(--saas-bg) 40%, var(--saas-card)); }
 .awwo-workspace .canvas-root .awwo-node-delivery-drawer > header { min-height: 44px; padding: 6px 10px 6px 14px; border-bottom-color: var(--saas-hairline); font-size: 12.5px; font-weight: 600; }
-.awwo-workspace .canvas-root .awwo-deliverables { padding: 14px; font-size: 12.5px; }
-.awwo-workspace .canvas-root .awwo-deliverables-title { margin-bottom: 4px; color: var(--saas-text); font-size: 13px; }
-.awwo-workspace .canvas-root .awwo-deliverables-receipt { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; color: var(--saas-muted); font-size: 11.5px; }
-.awwo-workspace .canvas-root .awwo-deliverables-receipt::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--saas-success-dot); flex-shrink: 0; }
-.awwo-workspace .canvas-root .awwo-deliverables-receipt.is-caveat::before { background: var(--saas-warning-dot); }
-.awwo-workspace .canvas-root .awwo-deliverable-head { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--saas-hairline); }
-.awwo-workspace .canvas-root .awwo-deliverable-head .awwo-deliverable-title { flex: 1; min-width: 0; border-bottom: 0; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables { padding: 14px; font-size: 12.5px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-title { margin-bottom: 4px; color: var(--saas-text); font-size: 13px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-receipt { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; color: var(--saas-muted); font-size: 11.5px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-receipt::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--saas-success-dot); flex-shrink: 0; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-receipt.is-caveat::before { background: var(--saas-warning-dot); }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-head { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--saas-hairline); }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-head .awwo-deliverable-title { flex: 1; min-width: 0; border-bottom: 0; }
 /* Multi-file deliveries name the file in the selector above; the header then only carries copy. */
-.awwo-workspace .canvas-root .awwo-deliverable-head-spacer { flex: 1; min-height: 34px; }
-.awwo-workspace .canvas-root .awwo-deliverable-copy { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; height: 26px; margin-right: 6px; padding: 0 7px; border: 0; border-radius: 7px; background: transparent; color: var(--saas-muted); font: inherit; font-size: 11px; cursor: pointer; transition: background-color .15s, color .15s; }
-.awwo-workspace .canvas-root .awwo-deliverable-copy:hover { background: var(--saas-soft); color: var(--saas-text); }
-.awwo-workspace .canvas-root .awwo-deliverable-copy.is-copied { color: var(--saas-success); }
-.awwo-workspace .canvas-root .awwo-deliverable-copy:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 1px; }
-.awwo-workspace .canvas-root .awwo-deliverable-copy-text:empty { display: none; }
-.awwo-workspace .canvas-root .awwo-deliverables-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; font-size: 11px; }
-.awwo-workspace .canvas-root .awwo-deliverables-meta > span { padding: 2px 8px; border-radius: 999px; background: var(--saas-warning-bg); color: var(--saas-warning); }
-.awwo-workspace .canvas-root .awwo-deliverable { border-color: var(--saas-hairline); background: var(--saas-card); box-shadow: var(--saas-shadow-xs); }
-.awwo-workspace .canvas-root .awwo-deliverable-title { padding: 10px 12px; border-bottom: 1px solid var(--saas-hairline); background: transparent; font-size: 12.5px; }
-.awwo-workspace .canvas-root .awwo-deliverables-empty { padding: 28px 8px 14px; font-size: 12.5px; }
-.awwo-workspace .canvas-root .awwo-expected-deliverables { overflow: hidden; border: 1px solid var(--saas-hairline); border-radius: 12px; background: var(--saas-card); }
-.awwo-workspace .canvas-root .awwo-expected-deliverables li { padding: 10px 12px; border-bottom-color: var(--saas-hairline); font-size: 12.5px; }
-.awwo-workspace .canvas-root .awwo-expected-deliverables li:last-child { border-bottom: 0; }
-.awwo-workspace .canvas-root .awwo-expected-deliverables li span:last-child { border-radius: 999px; padding: 2px 8px; font-size: 11px; }
-.awwo-workspace .canvas-root .awwo-deliverables-editor { margin-top: 4px; border-top: 1px solid var(--saas-hairline); }
-.awwo-workspace .canvas-root .awwo-deliverables-editor > summary { padding: 12px 0 6px; font-size: 12px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-head-spacer { flex: 1; min-height: 34px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-copy { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; height: 26px; margin-right: 6px; padding: 0 7px; border: 0; border-radius: 7px; background: transparent; color: var(--saas-muted); font: inherit; font-size: 11px; cursor: pointer; transition: background-color .15s, color .15s; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-copy:hover { background: var(--saas-soft); color: var(--saas-text); }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-copy.is-copied { color: var(--saas-success); }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-copy:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 1px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-copy-text:empty { display: none; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; font-size: 11px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-meta > span { padding: 2px 8px; border-radius: 999px; background: var(--saas-warning-bg); color: var(--saas-warning); }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable { border-color: var(--saas-hairline); background: var(--saas-card); box-shadow: var(--saas-shadow-xs); }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverable-title { padding: 10px 12px; border-bottom: 1px solid var(--saas-hairline); background: transparent; font-size: 12.5px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-empty { padding: 28px 8px 14px; font-size: 12.5px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-expected-deliverables { overflow: hidden; border: 1px solid var(--saas-hairline); border-radius: 12px; background: var(--saas-card); }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-expected-deliverables li { padding: 10px 12px; border-bottom-color: var(--saas-hairline); font-size: 12.5px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-expected-deliverables li:last-child { border-bottom: 0; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-expected-deliverables li span:last-child { border-radius: 999px; padding: 2px 8px; font-size: 11px; }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-editor { margin-top: 4px; border-top: 1px solid var(--saas-hairline); }
+.awwo-workspace :is(.canvas-root, .awwo-results) .awwo-deliverables-editor > summary { padding: 12px 0 6px; font-size: 12px; }
 /* Run receipt under a reply: a single quiet row until opened. */
 .awwo-workspace .canvas-root .saas-team-run-details { align-self: flex-start; width: min(100%, 520px); margin-block: 0; border-color: var(--saas-hairline); border-radius: 12px; background: transparent; animation: awwo-msg-in .18s var(--saas-ease); }
 .awwo-workspace .canvas-root .saas-team-run-details .saas-team-run-toggle { min-height: 32px; padding: 6px 10px; color: var(--saas-muted); font-size: 12px; border-radius: 12px; }
