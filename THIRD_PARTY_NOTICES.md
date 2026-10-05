@@ -18,7 +18,7 @@ imports keep their original README, lockfiles, and license files under
 - `server/` derives from `paperclipai/paperclip` and includes pre-existing host-specific modifications. Its imported Git tree is `729b741740efba9dae8807db58db7b730a8a0b93`, from SuperClaw source commit `c8db2818be40511bbb42ad5435028105a738e61c`. This records the actual source snapshot, not a claim of equality to an unmodified upstream release. Preserve `server/LICENSE` and component-specific licenses, including `server/packages/adapters/hermes/LICENSE`.
 - `third_party/clawwork/` includes the vendored source and its existing attribution. Preserve its `NOTICE` and license files, including its attribution to Pi v0.79.10.
 - `examples/knowledge-workbench/data/unicode/` contains Unicode data used by the generated example; preserve the accompanying Unicode licenses and source hashes.
-- AwwO's own code has not been assigned a new open-source license by this migration. Third-party licenses apply to their respective components only.
+- AwwO's own code is licensed under the MIT License; see `LICENSE`. Third-party licenses apply to their respective components only.
 
 ## AwwO SaaS runtime dependencies
 
