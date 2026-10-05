@@ -19,10 +19,11 @@ import (
 // downloads, and sweeping files no artifact references any more. Paths are built only from
 // server-generated identifiers and validated again on every read.
 
-// storeMediaResults downloads each result into AWWO_MEDIA_DIR/<tenant>/<run>/<sha256>.<ext> and
-// records it as an artifact of the run's canvas node. A file whose bytes are not an image (for an
-// image node) or a video (for a video node) is refused, whatever the provider called it.
+// storeMediaResults downloads each result file into AWWO_MEDIA_DIR/<tenant>/<run>/<sha256>.<ext>
+// and records it as an artifact of the run's canvas node. A file whose bytes are not an image (for
+// an image node) or a video (for a video node) is refused, whatever the provider called it.
 func (a *App) storeMediaResults(ctx context.Context, hub *runningHub, tid, id, sid string, m *mediaModel, results []rhResult) (string, error) {
+	results = mediaFileResults(results)
 	if len(results) == 0 {
 		return "", &rhError{Code: "media_no_output"}
 	}
@@ -53,6 +54,20 @@ func (a *App) storeMediaResults(ctx context.Context, hub *runningHub, tid, id, s
 	}
 	output, _ := json.Marshal(map[string]any{"type": mediaOutputType, "version": 1, "kind": m.Kind, "model": m.ID, "items": items})
 	return string(output), nil
+}
+
+// mediaFileResults keeps the results that are files. A provider may report a value next to the
+// generated file: Seedance 2 adds its token count as a "text" result without a URL. Such a result
+// has nothing to download, so it is not stored and does not fail a generation that was paid for.
+func mediaFileResults(results []rhResult) []rhResult {
+	files := []rhResult{}
+	for _, r := range results {
+		r.URL = strings.TrimSpace(r.URL)
+		if r.URL != "" && !strings.EqualFold(strings.TrimSpace(r.OutputType), "text") {
+			files = append(files, r)
+		}
+	}
+	return files
 }
 
 func (a *App) storeMediaResult(ctx context.Context, hub *runningHub, tmp, tid, id, canvasID, nodeID string, m *mediaModel, index int, result rhResult) (mediaItem, error) {

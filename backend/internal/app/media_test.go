@@ -170,6 +170,17 @@ func TestParseRunningHubTasks(t *testing.T) {
 	if task, err := parseRHTask([]byte(many)); err != nil || len(task.Results) != rhMaxResults {
 		t.Fatal("results are not capped", len(task.Results), err)
 	}
+	// A Seedance 2 answer, shaped as RunningHub sent it on 2026-10-05: the video, then the token
+	// count as a value without a URL. Only the video is a file to store.
+	seedance := `{"taskId":"1","status":"SUCCESS","results":[{"url":"https://rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com/v.mp4","outputType":"mp4"},` +
+		`{"url":"","outputType":"text","text":"23224","name":"","zindex":0}]}`
+	task, err = parseRHTask([]byte(seedance))
+	if files := mediaFileResults(task.Results); err != nil || len(task.Results) != 2 || len(files) != 1 || files[0].OutputType != "mp4" {
+		t.Fatal("non-file results are not skipped", task.Results, err)
+	}
+	if files := mediaFileResults([]rhResult{{URL: " ", OutputType: "png"}, {URL: "https://a.runninghub.ai/t.txt", OutputType: "Text"}}); len(files) != 0 {
+		t.Fatal("a result without a URL or a text value counted as a file", files)
+	}
 	if e, _ := asRHError(rhCodeError("415")); !e.Transient {
 		t.Fatal("busy must be transient")
 	}

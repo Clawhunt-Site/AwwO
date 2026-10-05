@@ -525,6 +525,46 @@ func TestPostgresMediaRunFailuresSettleWithClosedCodes(t *testing.T) {
 	}
 }
 
+// RunningHub answers a Seedance 2 generation with the video and its token count, a "text" result
+// without a URL. Only the file is stored, so the run completes; a task that reports no file at all
+// still has no output. Each entry pins one rule: a value listed first (numbering), an empty URL of a
+// media type, a padded URL (trimmed), and a text value that has a URL (here a PNG, which a video node
+// would refuse).
+func TestPostgresMediaRunSkipsResultsThatAreNotFiles(t *testing.T) {
+	h, rh := newMediaHarness(t)
+	c, tid, _ := h.register(t, "media-value-result@example.test")
+	_, canvas := mediaCanvas(t, h, c, tid, mediaNode("vid", "video", "rh.seedance-2", nil))
+	sid := setupNodeAt(canvas, 0)["issueId"].(string)
+	tokens := map[string]any{"url": "", "outputType": "text", "text": "23224"}
+	rh.set(nil, func(task string, n int) (int, any) {
+		return 200, map[string]any{"taskId": task, "status": "SUCCESS", "results": []any{tokens,
+			map[string]any{"url": "", "outputType": "mp4"},
+			map[string]any{"url": " https://files.runninghub.ai/out.mp4 ", "outputType": "mp4"},
+			map[string]any{"url": "https://files.runninghub.ai/out.png", "outputType": "text"}}}
+	})
+	run := h.mediaRun(t, c, tid, sid, "a paper boat drifting on a lake", 202)
+	done := h.awaitRun(t, c, tid, run["id"].(string), "completed")
+	var out mediaOutput
+	if e := json.Unmarshal([]byte(done["output"].(string)), &out); e != nil || out.Kind != "video" || out.Model != "rh.seedance-2" || len(out.Items) != 1 {
+		t.Fatal("output", done["output"], e)
+	}
+	if item := out.Items[0]; item.ContentType != "video/mp4" || item.Name != "video-1.mp4" || item.Size != int64(len(testMP4)) {
+		t.Fatal("item", item)
+	}
+	var artifacts int
+	if e := h.db.QueryRow(t.Context(), "SELECT count(*) FROM artifacts WHERE tenant_id=$1 AND run_id=$2", tid, run["id"]).Scan(&artifacts); e != nil || artifacts != 1 {
+		t.Fatal("artifacts", artifacts, e)
+	}
+
+	rh.set(nil, func(task string, n int) (int, any) {
+		return 200, map[string]any{"taskId": task, "status": "SUCCESS", "results": []any{tokens}}
+	})
+	run = h.mediaRun(t, c, tid, sid, "a paper boat drifting on a lake", 202)
+	if status, code := awaitRunRow(t, h, tid, run["id"].(string), "failed", "completed"); status != "failed" || code != "media_no_output" {
+		t.Fatal("a task without a file settled", status, code)
+	}
+}
+
 func TestPostgresMediaRunCancelStopsPolling(t *testing.T) {
 	h, rh := newMediaHarness(t)
 	c, tid, _ := h.register(t, "media-cancel@example.test")
