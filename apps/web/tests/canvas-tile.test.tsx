@@ -9,6 +9,8 @@
 //     clause).
 //
 // Plus the honesty invariant the composer carries: an unbound tile says WHY it cannot send.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -255,4 +257,10 @@ describe('SessionTile composer', () => {
     fireEvent.click(button);
     expect(onSend).toHaveBeenCalledWith(bound, '继续旧画布中的任务', expect.any(Function), '继续旧画布中的任务');
   });
+});
+
+it('keeps an open node’s conversation in its own box, so a squeezed transcript never paints over the composer', () => {
+  // jsdom has no layout; the rule found in a real browser (a run status drawn over the composer) is checked.
+  const css = readFileSync(resolve(process.cwd(), 'src/canvas/awwo-node.css'), 'utf8');
+  expect(css).toMatch(/\.canvas-root \.awwo-node \.canvas-transcript \{[^}]*overflow: hidden;/);
 });
