@@ -78,6 +78,11 @@ for (const protocol of PROTOCOLS) test(`${protocol} run B on the same tenant and
   assert.deepEqual(turns, [['user', RUN_B_PROMPT]]);
   const serialized = JSON.stringify(bodyB);
   for (const leaked of [...Object.values(RUN_A), ...PROVIDER_IDS]) assert.ok(!serialized.includes(leaked), `run B must not carry ${leaked}`);
+  // Every user turn leaves as exactly its string, not as an input_text part list: LLM Gate's Responses endpoint
+  // ignores a user message in that shape (2026-10-05: GPT answered "How can I help you today?" to every prompt).
+  const userContents = body => (protocol === 'responses' ? body.input : body.messages).filter(item => item.role === 'user').map(item => item.content);
+  assert.deepEqual(userContents(bodyA), [RUN_A.historyUser, RUN_A.prompt]);
+  assert.deepEqual(userContents(bodyB), [RUN_B_PROMPT]);
 });
 
 // The exact-URL fetch guard is checked by behaviour, not by spelling. The run executes

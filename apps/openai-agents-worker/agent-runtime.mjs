@@ -11,6 +11,12 @@ const REASONING_REPORT_MS = 500;
 const CHAT_REASONING_FIELDS = ['reasoning_content', 'reasoning', 'reasoning_text'];
 const RESPONSES_REASONING_DELTAS = new Set(['response.reasoning_summary_text.delta', 'response.reasoning_text.delta']);
 
+/** A user turn as plain text. sdk.user() wraps text in an input_text part list, which the Responses converter
+ * sends as {role, content:[parts]}, and LLM Gate's Responses endpoint ignores a user message in that shape:
+ * GPT then answers "How can I help you today?" to every prompt. The string content is the whole fix: it is valid
+ * on both protocols, both SDK converters pass it through unchanged, and it is what the Python worker sends. */
+const userMessage = content => ({ type: 'message', role: 'user', content });
+
 function codePoints(text) {
   let count = 0;
   for (const _ of text) count += 1;
@@ -140,8 +146,8 @@ export async function executeAgent({ request, modelConfig, signal, emit, observe
       ...(modelConfig.disableThinking === true && modelConfig.protocol === 'chat_completions' ? { providerData: { chat_template_kwargs: { enable_thinking: false } } } : {}) },
   });
   const runner = new sdk.Runner({ tracingDisabled: true, traceIncludeSensitiveData: false, toolNotFoundBehavior: 'raise_error', toolNameCollisionPolicy: 'error' });
-  const input = request.messages.map(message => message.role === 'assistant' ? sdk.assistant(message.content) : sdk.user(message.content));
-  input.push(sdk.user(request.prompt));
+  const input = request.messages.map(message => message.role === 'assistant' ? sdk.assistant(message.content) : userMessage(message.content));
+  input.push(userMessage(request.prompt));
   const result = await runner.run(agent, input, { stream: true, signal, maxTurns: 1 });
   try {
     for await (const event of result) {

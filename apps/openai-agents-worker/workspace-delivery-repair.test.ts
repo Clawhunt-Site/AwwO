@@ -85,6 +85,10 @@ test('one invalid final is repaired with the same history and separately admitte
     || (Array.isArray(item.content) && item.content.some(part => part && typeof part === 'object' && 'text' in part && part.text === invalid.text)))));
   assert.ok(JSON.stringify(repairMessages).includes('original authorized project'));
   assert.ok(JSON.stringify(repairMessages).includes('final delivery was rejected'));
+  // The task and the repair request leave as plain text (LLM Gate's Responses endpoint ignores an input_text part list).
+  const userTurns = repairMessages.filter(item => item.role === 'user');
+  assert.ok(userTurns.length >= 2 && userTurns.every(item => typeof item.content === 'string'));
+  assert.ok(String(userTurns.at(-1)?.content).startsWith('The final delivery was rejected'));
   assert.deepEqual(state.operations, ['snapshot']);
 });
 

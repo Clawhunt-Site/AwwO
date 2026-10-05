@@ -10,6 +10,9 @@ type ModelConfig = { model: string; apiKey: string; baseURL: string; protocol: '
 type Request = { prompt: string; systemPrompt?: string; messages: { role: 'user' | 'assistant'; content: string }[]; effort?: string; workspace: WorkspaceRequest };
 type Event = { type: string; [key: string]: unknown };
 export type WorkspaceBroker = (name: WorkspaceToolName | 'snapshot', args: Record<string, unknown>) => Promise<unknown>;
+// A user turn as plain text, as in agent-runtime.mjs: LLM Gate's Responses endpoint ignores a user message whose
+// content is the input_text part list sdk.user() produces; the string content is the fix.
+const userMessage = (content: string): AgentInputItem => ({ type: 'message', role: 'user', content });
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 
 /** Callback credentials are used only by trusted orchestration, never placed in model state. */
@@ -223,8 +226,8 @@ export async function executeWorkspaceAgent({ request, modelConfig, signal, emit
       // As in agent-runtime.mjs: only a profile that disables thinking sends the chat-template switch.
       ...(modelConfig.disableThinking === true && modelConfig.protocol === 'chat_completions' ? { providerData: { chat_template_kwargs: { enable_thinking: false } } } : {}) } });
   const runner = new sdk.Runner({ tracingDisabled: true, traceIncludeSensitiveData: false, toolNotFoundBehavior: 'raise_error', toolNameCollisionPolicy: 'error' });
-  let input: AgentInputItem[] = request.messages.map(message => message.role === 'assistant' ? sdk.assistant(message.content) : sdk.user(message.content));
-  input.push(sdk.user(request.prompt));
+  let input: AgentInputItem[] = request.messages.map(message => message.role === 'assistant' ? sdk.assistant(message.content) : userMessage(message.content));
+  input.push(userMessage(request.prompt));
   let text: string | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     const result = await runner.run(agent, input, { stream: true, signal, maxTurns: request.workspace.maxModelCalls - calls });
@@ -238,7 +241,7 @@ export async function executeWorkspaceAgent({ request, modelConfig, signal, emit
       // One bounded correction uses the same sandbox and the same per-call
       // admission. No files, usage or successful checks are invented by repair.
       input = [...result.history];
-      input.push(sdk.user(`The final delivery was rejected because it does not match the required fields or a required file has not been published. Correct the delivery using the existing project files. Required output definition: ${JSON.stringify(fields)}. Verified published fields: ${JSON.stringify([...published.keys()])}. Return only a valid JSON object with exact field IDs, using empty-string placeholders for published files. Use workspace_publish/archive if a required file is still missing. You have ${request.workspace.maxModelCalls - calls} model calls remaining.`));
+      input.push(userMessage(`The final delivery was rejected because it does not match the required fields or a required file has not been published. Correct the delivery using the existing project files. Required output definition: ${JSON.stringify(fields)}. Verified published fields: ${JSON.stringify([...published.keys()])}. Return only a valid JSON object with exact field IDs, using empty-string placeholders for published files. Use workspace_publish/archive if a required file is still missing. You have ${request.workspace.maxModelCalls - calls} model calls remaining.`));
     }
   }
   if (text === undefined) throw new RuntimeError('OUTPUT_CONTRACT_INVALID');

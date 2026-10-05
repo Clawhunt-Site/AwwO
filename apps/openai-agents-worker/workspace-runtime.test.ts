@@ -93,7 +93,8 @@ test('SDK workspace loop edits, tests and publishes with one admission and recei
   });
   const base = await listening(server); t.after(() => { server.closeAllConnections(); server.close(); });
   const operations: string[] = [], events: Record<string, unknown>[] = [];
-  await executeWorkspaceAgent({ request: { prompt: 'Build and test a page', messages: [], workspace: workspace(`${base}/api/internal/workspace-calls`) },
+  await executeWorkspaceAgent({ request: { prompt: 'Build and test a page',
+    messages: [{ role: 'user', content: 'Earlier request' }, { role: 'assistant', content: 'Earlier reply' }], workspace: workspace(`${base}/api/internal/workspace-calls`) },
     modelConfig: { model: 'fixture', apiKey: 'provider-secret-not-in-sandbox', baseURL: `${base}/v1`, protocol: 'chat_completions', contextWindow: 65_536, maxTokens: 4096 }, signal: new AbortController().signal,
     emit: async event => { events.push(event); }, broker: async (name, args) => {
       operations.push(name);
@@ -106,6 +107,8 @@ test('SDK workspace loop edits, tests and publishes with one admission and recei
     } });
   assert.equal(calls.length, 5);
   assert.ok(calls.every(call => call.store === false));
+  // History and task reach the provider as plain text (LLM Gate's Responses endpoint ignores an input_text part list).
+  assert.deepEqual((calls[0].messages as { role: string; content: unknown }[]).filter(item => item.role === 'user').map(item => item.content), ['Earlier request', 'Build and test a page']);
   assert.deepEqual(ledger.map(item => [item.operation, item.index]), Array.from({ length: 5 }, (_, i) => [['admit', i + 1], ['settle', i + 1]]).flat());
   assert.ok(ledger.filter(item => item.operation === 'settle').every(item => item.status === 'completed'));
   assert.ok(!JSON.stringify(calls).includes(workspace().callbackToken));
