@@ -412,6 +412,8 @@
 .account-invite-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(140px, 220px) auto;
+  /* The role and the button back-fill the heading's row even when a note comes between them. */
+  grid-auto-flow: row dense;
   align-items: end;
   gap: 10px;
   margin-top: 14px;
@@ -428,7 +430,11 @@
   font-size: 13px;
 }
 
-.account-invite-panel > .account-permission-note,
+/* Only the heading, the role and the button share a row. Everything else takes one of its own:
+   the ClawHunt note, the permission note, the new link, the invitation pager and list. Without
+   this, the note an account linked to ClawHunt sees took the role's cell, and the rest shifted
+   one cell each (a one-word-wide note, the button squeezed to a dot, the list under the role). */
+.account-invite-panel > :not(.account-invite-heading, label, button),
 .account-invite-result {
   grid-column: 1 / -1;
 }
