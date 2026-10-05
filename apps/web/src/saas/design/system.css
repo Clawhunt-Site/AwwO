@@ -628,6 +628,8 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 /* "Ran for real" in the light theme is the app's success ink, AA on its own tint (the dark theme keeps
    the cases' own light green). */
 .production-cases, .production-dialog { --production-real: var(--saas-success); }
+/* The 真实运行 label on a filled chip, not a 13% wash of the page (that left it at 4.4:1 in the light theme). */
+:is(.production-legend, .production-dialog-meta) .production-label.is-real { background: var(--saas-success-soft); }
 .production-cases .production-heading h2, .official-heading :is(h1, h2) {
   font: 690 clamp(28px, 3.4vw, 40px)/var(--saas-display-leading, 1.08) var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track); text-wrap: balance;
 }
