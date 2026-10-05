@@ -1,13 +1,13 @@
 import { appearanceFixture } from './saas-appearance-fixture';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CanvasList } from '../src/saas/CanvasList';
 import { CreateWorkspaceDialog, SaaSApp } from '../src/saas/SaaSApp';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { CanvasRecord, Tenant } from '../src/saas/api';
-import { createFormNode, emptyDocument } from '../src/canvas/canvasDoc';
+import { CANVAS_STORAGE_KEY, createFormNode, createSessionNode, emptyDocument, sanitizeDocument, type CanvasDocument, type NodeOutput } from '../src/canvas/canvasDoc';
 import { canvasStorage } from '../src/canvas/canvasStorage';
-import { loadRunJournal, saveRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
+import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
 import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 import type { GraphRunSnapshot } from '../src/saas/graphRuns';
 
@@ -369,4 +369,98 @@ it('links a personal-mode canvas runtime warning to engine settings without clai
   expect(note).not.toHaveTextContent('Pi execution');
   expect(note).not.toHaveTextContent('Add an API key');
   expect(within(note as HTMLElement).getByRole('link', { name: 'My engines' })).toHaveAttribute('href', `/?tenant=${tenant.id}&canvas=${cloud.id}&account=engines`);
+});
+
+// Opening a canvas in a browser with no run journal rebuilds its latest run from the server. As production records
+// a failed run: the failed step shows the partial delivery the running browser stamped, and the server sends the
+// blocked step after it with an output of "".
+describe('opening a canvas after its latest run', () => {
+  const identity = { user: { id: 'user-a', name: 'Alice', email: 'alice@example.test', platformRole: 'user' }, tenants: [tenant] };
+  const step = (id: string, x: number, lastOutput?: NodeOutput) => ({
+    ...createSessionNode('llm', { x, y: 0 }), id, title: `Step ${id}`, runtime: 'openai', model: 'qwen',
+    binding: { companyId: tenant.id, agentId: `agent-${id}`, agentName: id }, ...(lastOutput ? { lastOutput } : {}),
+  });
+  const browserStamp = Date.parse('2026-10-03T08:30:15.360Z');
+  const serverStart = '2026-10-03T08:30:15.878Z';
+  type Run = Omit<GraphRunSnapshot, 'id' | 'operationId' | 'canvasId' | 'documentVersion' | 'document' | 'scope'>;
+  /** Opens the canvas as a browser with no run journal would. `submitted` is the document the run was given. */
+  function open(document: CanvasDocument, run: Run, submitted: CanvasDocument = document) {
+    const cloud = { ...record(0), document };
+    const latest: GraphRunSnapshot = { id: 'graph-latest', operationId: 'operation-latest', canvasId: cloud.id, documentVersion: cloud.version, document: submitted, scope: ['a', 'b'], ...run };
+    const reads: string[] = []; const writes: string[] = []; const saved: CanvasDocument[] = []; const journalWrites: string[] = [];
+    // The test storage defines setItem on the instance, so a Storage.prototype spy would see nothing.
+    const setItem = localStorage.setItem;
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((key: string, value: string) => {
+      if (key.includes(CANVAS_RUN_JOURNAL_KEY)) journalWrites.push(key);
+      return setItem.call(localStorage, key, value);
+    });
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (init.method && init.method !== 'GET') {
+        writes.push(init.method);
+        if (init.method === 'PUT') {
+          const body = JSON.parse(String(init.body)).document as CanvasDocument; saved.push(body);
+          return json({ ...cloud, version: cloud.version + 1, document: body });
+        }
+      } else reads.push(url);
+      if (url.endsWith('/appearance')) return json(appearanceFixture);
+      if (url.endsWith('/auth/me')) return json(identity);
+      if (url.endsWith('/runtime')) return json({ available: false, configured: false, models: [] });
+      if (url.endsWith('/graph-runs')) return json({ items: [latest] });
+      if (url.endsWith('/graph-runs/graph-latest')) return json(latest);
+      return json(cloud);
+    }));
+    window.history.replaceState({}, '', `/?tenant=${tenant.id}&canvas=${cloud.id}`);
+    render(<SaaSApp />);
+    const shown = () => JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY) || '{}').nodes as CanvasDocument['nodes'];
+    const discovered = () => reads.some(url => url.endsWith('/graph-runs'));
+    return { writes, saved, journalWrites, shown, discovered, restore: () => spy.mockRestore() };
+  }
+  // Past the run read and the 450 ms autosave a recovery would cause.
+  const settle = () => act(() => new Promise(resolve => setTimeout(resolve, 1500)));
+
+  it('does not recover a failed run it already shows again, so the canvas is neither re-stamped nor saved', async () => {
+    const document = sanitizeDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 },
+      nodes: [step('a', 0, { text: 'Partial page', at: browserStamp, source: 'run', partial: true }), step('b', 500)] });
+    const view = open(document, { status: 'failed', createdAt: serverStart, updatedAt: '2026-10-03T08:31:47Z',
+      nodes: [{ nodeId: 'a', state: 'failed', output: 'Partial page', partial: true }, { nodeId: 'b', state: 'blocked', output: '', detail: 'Upstream did not complete' }] });
+    try {
+      await screen.findByTestId('canvas-tile-a');
+      await settle();
+      expect(view.discovered()).toBe(true);
+      expect(view.journalWrites).toEqual([]);
+      expect(view.writes).toEqual([]);
+      expect(screen.queryByText('已从后台恢复运行结果。')).toBeNull();
+      expect(view.shown()[0].lastOutput).toEqual({ text: 'Partial page', at: browserStamp, source: 'run', partial: true });
+    } finally { view.restore(); }
+  });
+
+  it('still recovers a result the canvas does not show yet, saves it once, and then opens quietly', async () => {
+    const document = sanitizeDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [step('a', 0), step('b', 500)] });
+    const run: Run = { status: 'completed', createdAt: serverStart, updatedAt: '2026-10-03T08:31:47Z',
+      nodes: [{ nodeId: 'a', state: 'done', output: 'Delivered page' }, { nodeId: 'b', state: 'done', output: 'Checked' }] };
+    const first = open(document, run);
+    let saved: CanvasDocument;
+    try {
+      await screen.findByText('已从后台恢复运行结果。');
+      expect(first.journalWrites.length).toBeGreaterThan(0);
+      await waitFor(() => expect(first.saved).toHaveLength(1));
+      await settle();
+      expect(first.writes).toEqual(['PUT']);
+      saved = first.saved[0];
+      expect(saved.nodes.map(node => node.lastOutput?.text)).toEqual(['Delivered page', 'Checked']);
+      expect(saved.nodes[0].lastOutput?.at).toBe(Date.parse(serverStart));
+    } finally { first.restore(); }
+    // Another browser opens the saved canvas: nothing is left to recover.
+    cleanup(); localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh');
+    const second = open(sanitizeDocument(saved!), run, document);
+    try {
+      await screen.findByTestId('canvas-tile-a');
+      await settle();
+      expect(second.discovered()).toBe(true);
+      expect(second.journalWrites).toEqual([]);
+      expect(second.writes).toEqual([]);
+      expect(screen.queryByText('已从后台恢复运行结果。')).toBeNull();
+    } finally { second.restore(); }
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { createSessionNode, emptyDocument, type CanvasDocument, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
 import type { CanvasRunJournal } from '../src/canvas/runJournal';
 import { journalSummary } from '../src/canvas/runJournal';
 import {
@@ -7,6 +7,7 @@ import {
   mergeRecoveredManualConversation,
   mergePersistedManualConversations,
   persistRecoveredManualConversation,
+  recoverableOutput,
   recoveryJournalForDocument,
   prepareRunDocument,
   runInputFingerprint,
@@ -551,5 +552,78 @@ describe('run input fingerprint', () => {
     (reordered.nodes[0] as SessionNode).y = 200;
     (reordered.nodes[2] as SessionNode).y = 0;
     expect(runInputFingerprint(reordered, ['b'])).not.toBe(runInputFingerprint(original, ['b']));
+  });
+});
+
+describe('recovering a run the canvas already shows', () => {
+  // The browser that ran a step stamps its delivery with its own clock; a journal rebuilt from the server starts at
+  // the server's. Applying the same run again must leave the canvas as it is, so opening it saves nothing.
+  const shownAt = (doc: CanvasDocument, at: number): CanvasDocument => ({
+    ...doc, nodes: doc.nodes.map(node => node.lastOutput ? { ...node, lastOutput: { ...node.lastOutput, at } } as CanvasNode : node),
+  });
+
+  it('keeps each delivery it already shows, its time included', () => {
+    const applied = shownAt(applyRecoveredDocument(graph(), journal(graph())), 97);
+    const again = applyRecoveredDocument(applied, journal(applied));
+    // The whole canvas is unchanged: nothing to save.
+    expect(again).toEqual(applied);
+    expect(again.nodes.map(node => node.lastOutput?.at ?? null)).toEqual([97, 97, null]);
+  });
+
+  it('brings a kept delivery back after a changed step upstream invalidated it', () => {
+    // a was published by hand over the run's result, so the run's result replaces it; b shows the run's own result.
+    const ran = shownAt(applyRecoveredDocument(graph(), journal(graph())), 97);
+    const handPublished = { ...ran, nodes: ran.nodes.map(node => node.id === 'a' ? { ...node, lastOutput: { ...node.lastOutput!, source: 'manual' as const } } as CanvasNode : node) };
+    const recovered = applyRecoveredDocument(handPublished, journal(handPublished));
+    expect(recovered.nodes[0].lastOutput).toEqual({ text: 'new-a', at: 100, source: 'run' });
+    expect(recovered.nodes[1].lastOutput).toBe(handPublished.nodes[1].lastOutput);
+    expect(recovered.nodes[2].lastOutput ?? null).toBeNull();
+  });
+
+  it('keeps what was published downstream since, while a changed step still invalidates it', () => {
+    // a → b → c; the run covered a and b, and c was published by hand afterwards.
+    const ran = shownAt(applyRecoveredDocument(graph(), journal(graph())), 97);
+    const published = { ...ran, nodes: ran.nodes.map(node => node.id === 'c' ? { ...node, lastOutput: { text: 'by hand', at: 120, source: 'manual' as const } } as CanvasNode : node) };
+    expect(applyRecoveredDocument(published, journal(published))).toEqual(published);
+    const changed = journal(published);
+    const rerun = applyRecoveredDocument(published, { ...changed, nodes: { ...changed.nodes, b: { ...changed.nodes.b, output: 'newer-b' } } });
+    expect(rerun.nodes.map(node => node.lastOutput?.text ?? null)).toEqual(['new-a', 'newer-b', null]);
+  });
+
+  it('still stamps a result the canvas does not show yet with the run’s start, and keeps the one it does', () => {
+    const applied = shownAt(applyRecoveredDocument(graph(), journal(graph())), 97);
+    const newer = journal(applied);
+    const recovered = applyRecoveredDocument(applied, { ...newer, nodes: { ...newer.nodes, b: { ...newer.nodes.b, output: 'newer-b' } } });
+    expect(recovered.nodes.map(node => [node.lastOutput?.text ?? null, node.lastOutput?.at ?? null])).toEqual([['new-a', 97], ['newer-b', 100], [null, null]]);
+  });
+
+  it('replaces a shown delivery whose standing changed: partial, or published by hand', () => {
+    const applied = applyRecoveredDocument(graph(), journal(graph()));
+    const nodes = applied.nodes.map((node, index) => index === 0 ? { ...node, lastOutput: { ...node.lastOutput!, at: 97, partial: true } }
+      : index === 1 ? { ...node, lastOutput: { ...node.lastOutput!, at: 97, source: 'manual' as const } } : node) as CanvasNode[];
+    const shown = { ...applied, nodes };
+    const recovered = applyRecoveredDocument(shown, journal(shown));
+    expect(recovered.nodes.slice(0, 2).map(node => node.lastOutput)).toEqual([
+      { text: 'new-a', at: 100, source: 'run' }, { text: 'new-b', at: 100, source: 'run' }]);
+  });
+});
+
+describe('what a recovery publishes', () => {
+  const step = (state: string, output?: string) => ({ nodeId: 'a', threadId: 'default', companyId: 'company-1', agentId: 'agent-a',
+    issueId: null, runId: null, state, ...(output === undefined ? {} : { output }) }) as CanvasRunJournal['nodes'][string];
+
+  it('publishes a finished step’s text, partial or not', () => {
+    for (const state of ['done', 'failed', 'cancelled']) expect(recoverableOutput({}, step(state, 'text'))).toBe('text');
+  });
+
+  it('publishes a collaboration step’s latest proposal whatever its state', () => {
+    const collaboration = { goal: 'Agree on one plan' } as unknown as CanvasRunJournal['collaboration'];
+    expect(recoverableOutput({ collaboration }, step('waiting', 'proposal'))).toBe('proposal');
+    expect(recoverableOutput({ collaboration }, step('waiting', ''))).toBeNull();
+  });
+
+  it('publishes nothing for a step that is waiting, blocked, reused or left no text (the server sends those as "")', () => {
+    for (const [state, output] of [['blocked', ''], ['blocked', 'Upstream did not complete'], ['waiting', ''], ['running', 'so far'],
+      ['cached', 'old result'], ['done', ''], ['failed', undefined]] as const) expect(recoverableOutput({}, step(state, output))).toBeNull();
   });
 });

@@ -12,7 +12,7 @@ import { CanvasRunReceipt } from './CanvasRunReceipt';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
 import { withCanvasRunOwnership } from '../canvas/runOwnership';
-import { runInputFingerprint } from '../canvas/runRecoveryDocument';
+import { recoverableOutput, runInputFingerprint } from '../canvas/runRecoveryDocument';
 import { graphPath, graphIsActive, graphRecoveryJournal, type GraphRunSnapshot } from './graphRuns';
 import { GraphRunPanel } from './GraphRunPanel';
 import { createCanvasRuntimeReader } from '../canvasRuntimeReader';
@@ -511,7 +511,14 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
               const document = sanitizeDocument(value.document);
               const recovered = graphRecoveryJournal(latest, tenant.id, document);
               const inputsMatch = recovered.inputFingerprint === runInputFingerprint(document, recovered.scope);
-              const unpublished = latest.nodes.some(item => typeof item.output === 'string' && document.nodes.find(node => node.id === item.nodeId)?.lastOutput?.text !== item.output);
+              // Only a result the recovery would publish counts. Outside a collaboration the server records every
+              // waiting, blocked or reused step with an empty output; counting that as missing re-recovered an
+              // applied run on every open.
+              const unpublished = recovered.scope.some(id => {
+                const item = recovered.nodes[id];
+                const output = item ? recoverableOutput(recovered, item) : null;
+                return output !== null && document.nodes.find(node => node.id === id)?.lastOutput?.text !== output;
+              });
               if (graphIsActive(latest) || (inputsMatch && unpublished)) {
                 await withCanvasRunOwnership(async () => {
                   // Another tab may have started a newer operation while discovery was pending.

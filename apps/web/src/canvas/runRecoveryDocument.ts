@@ -1,7 +1,7 @@
 import { canvasStorage } from './canvasStorage';
 import { nodeTeamFingerprint } from './nodeTeam';
 import { taskFrameFingerprint } from './taskFrame';
-import type { CanvasDocument, CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
+import type { CanvasDocument, CanvasEdge, CanvasNode, NodeOutput, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
 import type { CanvasRunJournal } from './runJournal';
 import { activeThreadId, updateThreadIssueId } from './nodeThreads';
@@ -460,6 +460,51 @@ function belongsToJournalBinding(
 }
 
 /**
+ * The result a recovery of `journal` publishes for one of its steps, or null: a finished step's text, or in a
+ * collaboration a step's latest proposal. Outside a collaboration a step still waiting, blocked or reused (cached),
+ * or one that finished without text, publishes nothing; the server records those with an empty output, which is
+ * not a result the canvas is missing.
+ */
+export function recoverableOutput(
+  journal: Pick<CanvasRunJournal, 'collaboration'>,
+  item: CanvasRunJournal['nodes'][string],
+): string | null {
+  return (journal.collaboration || ['done', 'failed', 'cancelled'].includes(item.state)) && item.output ? item.output : null;
+}
+
+/** The delivery a recovery writes into this node, or null when it leaves the node's output alone. */
+function recoveredDelivery(
+  node: CanvasNode,
+  journal: FingerprintedRunJournal,
+  inputsMatch: boolean,
+  selected: ReadonlySet<string>,
+): NodeOutput | null {
+  const item = journal.nodes[node.id];
+  // A node id/thread id can survive rebinding. Output from the old Agent must never be merged
+  // into the replacement Agent's session.
+  if (!item || !belongsToJournalBinding(node, item) || journal.manual || !inputsMatch || !selected.has(node.id)) return null;
+  const currentOutput = recoverableOutput(journal, item) ? item : null;
+  // A later interrupted round must not hide the last inspectable attempt. Retain it only
+  // for the exact same Session/binding, always as partial evidence, never as approval.
+  const priorOutput = !currentOutput && item.state !== 'running' && journal.review
+    && journal.review.outcome !== 'approved'
+    ? [...journal.review.turns].reverse().find(turn => turn.nodeId === node.id
+      && turn.round < journal.review!.round && turn.issueId === item.issueId
+      && turn.threadId === item.threadId && belongsToJournalBinding(node, turn)
+      && ['done', 'failed', 'cancelled'].includes(turn.state) && turn.output)
+    : null;
+  const evidence = currentOutput ?? priorOutput;
+  if (!evidence?.output) return null;
+  const complete = currentOutput?.state === 'done' && (journal.collaboration ? currentOutput.partial === false : !currentOutput.partial) && (!journal.review || journal.review.outcome === 'approved')
+    && (!journal.collaboration || (journal.serverGraph?.status === 'completed' && node.id === journal.collaboration.synthesizerNodeId));
+  return { text: evidence.output, at: journal.startedAt, source: 'run', ...(complete ? {} : { partial: true }) };
+}
+
+/** Whether a node already shows this delivery: the same text from a run, with the same standing. */
+const showsDelivery = (shown: NodeOutput | null | undefined, delivery: NodeOutput) =>
+  Boolean(shown && shown.source === 'run' && shown.text === delivery.text && (shown.partial === true) === (delivery.partial === true));
+
+/**
  * Merge one confirmed recovery batch without letting normal freshness invalidation erase a
  * downstream result from that same coherent run. The caller writes this returned document
  * directly; passing it through invalidateOutputs a second time would recreate the bug.
@@ -470,49 +515,40 @@ export function applyRecoveredDocument(
 ): CanvasDocument {
   const inputsMatch = journal.inputFingerprint === runInputFingerprint(doc, journal.scope);
   const selected = new Set(journal.scope);
+  const deliveries = new Map(doc.nodes.map(node => [node.id, recoveredDelivery(node, journal, inputsMatch, selected)]));
+  // A delivery the canvas already shows is kept as it is, its time included, and is not a change downstream. A
+  // journal rebuilt from the server starts at the server's clock while the browser that ran the step stamped its
+  // own, so re-stamping the same result changed (and saved) the canvas, and clearing it again erased what was
+  // published downstream since.
+  const kept = new Set(doc.nodes.filter(node => {
+    const delivery = deliveries.get(node.id);
+    return Boolean(delivery && showsDelivery(node.lastOutput, delivery));
+  }).map(node => node.id));
 
   // First apply ordinary freshness rules. This clears old scope results and anything downstream,
   // including nodes outside a partial-run scope. Manual conversation recovery does not touch the
   // publication graph at all.
   const cleared = journal.manual ? doc : {
     ...doc,
-    nodes: doc.nodes.map(node => selected.has(node.id) && belongsToJournalThread(node, journal.nodes[node.id]?.threadId ?? '')
+    nodes: doc.nodes.map(node => selected.has(node.id) && !kept.has(node.id) && belongsToJournalThread(node, journal.nodes[node.id]?.threadId ?? '')
       && node.lastOutput != null ? { ...node, lastOutput: null } : node),
   };
   const invalidated = journal.manual ? doc : invalidateOutputs(doc, cleared);
 
   const nodes = invalidated.nodes.map(node => {
     const item = journal.nodes[node.id];
-    // A node id/thread id can survive rebinding. Server identities and output from
-    // the old Agent must never be merged into the replacement Agent's session.
+    // Server identities from the old Agent must never be merged into the replacement Agent's session.
     if (!item || !belongsToJournalBinding(node, item)) return node;
     let next = node;
     // Issue ids are server evidence, not an execution-input edit. Merge them after freshness
     // invalidation so a newly observed id cannot erase an existing manual publication.
     if (next.kind === 'session' && item.issueId) next = updateThreadIssueId(next, item.threadId, item.issueId);
-    if (journal.manual || !inputsMatch || !selected.has(node.id)) return next;
-    const currentOutput = (journal.collaboration || ['done', 'failed', 'cancelled'].includes(item.state)) && item.output ? item : null;
-    // A later interrupted round must not hide the last inspectable attempt. Retain it only
-    // for the exact same Session/binding, always as partial evidence, never as approval.
-    const priorOutput = !currentOutput && item.state !== 'running' && journal.review
-      && journal.review.outcome !== 'approved'
-      ? [...journal.review.turns].reverse().find(turn => turn.nodeId === node.id
-        && turn.round < journal.review!.round && turn.issueId === item.issueId
-        && turn.threadId === item.threadId && belongsToJournalBinding(node, turn)
-        && ['done', 'failed', 'cancelled'].includes(turn.state) && turn.output)
-      : null;
-    const evidence = currentOutput ?? priorOutput;
-    if (!evidence?.output) return next;
-    return {
-      ...next,
-      lastOutput: {
-        text: evidence.output,
-        at: journal.startedAt,
-        source: 'run' as const,
-        ...(currentOutput?.state === 'done' && (journal.collaboration ? currentOutput.partial === false : !currentOutput.partial) && (!journal.review || journal.review.outcome === 'approved')
-          && (!journal.collaboration || (journal.serverGraph?.status === 'completed' && node.id === journal.collaboration.synthesizerNodeId)) ? {} : { partial: true }),
-      },
-    };
+    const delivery = deliveries.get(node.id);
+    if (!delivery) return next;
+    // A kept delivery comes back even where a changed step upstream invalidated it: this run produced it.
+    const shown = kept.has(node.id) ? doc.nodes.find(original => original.id === node.id)?.lastOutput : null;
+    if (shown) return next.lastOutput === shown ? next : { ...next, lastOutput: shown };
+    return { ...next, lastOutput: delivery };
   });
   return nodes.some((node, index) => node !== doc.nodes[index]) ? { ...invalidated, nodes } : invalidated;
 }
