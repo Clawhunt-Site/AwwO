@@ -19,7 +19,7 @@ it('publishes a record for real cases only, and summarises each one exactly', ()
     const delivery = record.nodes.find(node => node.id === record.artifactNodeId);
     expect(PRODUCTION_RUN_SUMMARY[record.caseId], record.caseId).toEqual({ completed: record.completed, total: record.total, seconds: record.seconds,
       delivered: record.caseId === 'knowledge-base' ? true : delivery?.status === 'done' && delivery.outputType === 'html' && Boolean(delivery.output),
-      capturedOn: record.capturedOn, model: record.model, runtime: record.runtime });
+      capturedOn: record.capturedOn, model: record.model, runtime: record.runtime, outputLocale: record.outputLocale });
   }
 });
 

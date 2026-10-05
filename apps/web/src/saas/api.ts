@@ -90,6 +90,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     clawhunt_invite_required: ['请创建邀请链接，对方使用 ClawHunt 账号确认后加入工作区。', 'Create an invitation link so the recipient can join with their ClawHunt account.'],
     sso_unavailable: ['暂时无法确认 ClawHunt 账号，请稍后重试。', 'Could not verify your ClawHunt account right now. Try again later.'],
     invalid_cursor: ['分页已失效，请刷新列表重新开始。', 'Pagination expired. Refresh the listing.'],
+    case_record_unavailable: ['无法读取这个案例的运行实录，没有创建画布。请刷新后重试。', 'Could not load this case’s run recording, so no canvas was created. Refresh and try again.'],
     invalid_pagination: ['分页参数无效，请刷新列表重新开始。', 'The pagination parameters are invalid. Refresh the listing.'],
     email_exists: ['此邮箱已注册，请登录。', 'This email is already registered. Please sign in.'],
     not_found: ['找不到此资源，或你没有访问权限。', 'This resource was not found or is not accessible.'],

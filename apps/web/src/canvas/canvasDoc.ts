@@ -133,11 +133,20 @@ export interface NodeOutput {
   /**
    * Where it came from. Honesty matters here: a result the operator hand-picked out of a chat
    * must never be presented as something the engine produced, and a partial capture off a FAILED
-   * run must never look like a completed one.
+   * run must never look like a completed one. `case` is a published production case's recorded
+   * delivery, copied in with its canvas: it is real, but it did not run in this workspace.
    */
-  source: 'run' | 'manual';
+  source: 'run' | 'manual' | 'case';
   /** True when the run that produced this did not succeed — the text is evidence, not a result. */
   partial?: boolean;
+  /** For a case recording, the model that produced it (the copy may run another one). */
+  model?: string;
+}
+
+/** "qwen3.8-27b-p6 · 2026-10-03": the model that made a case recording and the day it ran (UTC). */
+export function caseRunLabel(output: NodeOutput): string {
+  const day = output.at > 0 && output.at < 8.64e15 ? new Date(output.at).toISOString().slice(0, 10) : '';
+  return [output.model, day].filter(Boolean).join(' · ');
 }
 
 export interface FormField {
@@ -284,11 +293,13 @@ function sanitizeOutput(raw: unknown): NodeOutput | null {
   const text = typeof r.text === 'string' ? r.text : '';
   if (!text) return null;
   const at = typeof r.at === 'number' && Number.isFinite(r.at) ? r.at : 0;
+  const source = r.source === 'manual' || r.source === 'case' ? r.source : 'run';
   return {
     text,
     at,
-    source: r.source === 'manual' ? 'manual' : 'run',
+    source,
     ...(r.partial === true ? { partial: true } : {}),
+    ...(source === 'case' && typeof r.model === 'string' && r.model && r.model.length <= 200 ? { model: r.model } : {}),
   };
 }
 

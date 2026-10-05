@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, Plus } from 'lucide-react';
-import { api, tenantPath, saasErrorMessage, type CanvasRecord, type Identity, type Tenant } from './api';
+import { api, tenantPath, saasErrorMessage, SaaSApiError, type CanvasRecord, type Identity, type Tenant } from './api';
 import { emptyDocument } from '../canvas/canvasDoc';
 import { useCanvasI18n } from '../canvas/i18n';
 import { useEnterToSend } from '../canvas/composerKeys';
@@ -14,6 +14,7 @@ import { OfficialExamples } from './examples/OfficialExamples';
 import { ProductionCases } from './ProductionCases';
 import { type OfficialWorkflow } from './examples/officialWorkflows';
 import { OfficialCopySetup, createOfficialCopyDocument, type OfficialCopyModel } from './examples/OfficialCopySetup';
+import { loadProductionRun, PRODUCTION_RUN_SUMMARY } from './productionRuns';
 import { readOfficialSelection, clearOfficialSelection } from './examples/officialSelection';
 
 /** Recent canvases shown before the operator expands the full list. */
@@ -60,7 +61,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
-  const [officialCopy, setOfficialCopy] = useState<OfficialWorkflow | null>(null);
+  // `production`: a homepage production case, whose copy carries its recorded run (productionCopy.ts).
+  const [officialCopy, setOfficialCopy] = useState<{ item: OfficialWorkflow; production: boolean } | null>(null);
   // The operator's own text, set aside when an example replaced it.
   const [replaced, setReplaced] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
@@ -123,7 +125,15 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     setNotice(null);
     setReplaced(null);
   };
-  const create = async (prompt: string | null, official?: OfficialWorkflow, model: OfficialCopyModel | null = null) => {
+  // A production case's copy carries what each agent delivered in its recorded run. When that
+  // recording cannot be read, nothing is created: an empty copy is what this exists to replace.
+  const productionCopyDocument = async (official: OfficialWorkflow, model: OfficialCopyModel | null) => {
+    const unavailable = () => new SaaSApiError(0, 'case_record_unavailable', 'The case run recording could not be loaded.');
+    const [record, copy] = await Promise.all([loadProductionRun(official.id), import('./productionCopy')]).catch(() => { throw unavailable(); });
+    if (!record) throw unavailable();
+    return copy.createProductionCopyDocument(official, record, locale, model);
+  };
+  const create = async (prompt: string | null, official?: OfficialWorkflow, model: OfficialCopyModel | null = null, production = false) => {
     if (sending.current || tenant.role === 'reader' || tenant.status !== 'active') return;
     sending.current = true;
     setBusy(true);
@@ -132,7 +142,9 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     const untitled = t('未命名', 'Untitled');
     const name = official ? official.title[locale] : prompt === null ? untitled : exampleTitle(prompt) ?? canvasNameFromPrompt(prompt, untitled);
     try {
-      const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document: official ? createOfficialCopyDocument(official, locale, model) : emptyDocument() }) });
+      const document = !official ? emptyDocument() : production ? await productionCopyDocument(official, model) : createOfficialCopyDocument(official, locale, model);
+      if (!mounted.current) return;
+      const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document }) });
       if (!mounted.current) return;
       if (prompt !== null) {
         // Leaving now would lose the request: the canvas could only open with an empty prompt box.
@@ -182,7 +194,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   };
 
   // A production case's canvas and an official example are copied the same way.
-  const copyOfficial = (item: OfficialWorkflow) => { if (!sending.current) { setError(null); setOfficialCopy(item); } };
+  const copyOfficial = (item: OfficialWorkflow) => { if (!sending.current) { setError(null); setOfficialCopy({ item, production: false }); } };
+  const copyProduction = (item: OfficialWorkflow) => { if (!sending.current) { setError(null); setOfficialCopy({ item, production: true }); } };
   const example = notice?.kind === 'case' ? STARTER_CASES.find(item => item.id === notice.caseId) : undefined;
   const noticeText = example ? t(`已填入案例「${example.title.zh}」，可以直接生成，也可以先修改。`, `Filled in the “${example.title.en}” example. Generate it as is, or edit it first.`)
     : notice?.kind === 'restored' ? t('已恢复原来的输入。', 'Your earlier text is back.') : '';
@@ -232,12 +245,13 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <ProductionCases compact onReuse={copyOfficial} />
+    <ProductionCases compact onReuse={copyProduction} />
     <OfficialExamples compact onReuse={copyOfficial} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}
       error={error !== null ? saasErrorMessage(error, locale) : undefined} />
-    {officialCopy && <OfficialCopySetup key={`${tenant.id}:${officialCopy.id}`} item={officialCopy} tenantId={tenant.id} locale={locale} busy={busy}
+    {officialCopy && <OfficialCopySetup key={`${tenant.id}:${officialCopy.item.id}`} item={officialCopy.item} tenantId={tenant.id} locale={locale} busy={busy}
+      recording={officialCopy.production ? PRODUCTION_RUN_SUMMARY[officialCopy.item.id] : undefined}
       error={error !== null ? saasErrorMessage(error, locale) : undefined} onClose={() => setOfficialCopy(null)}
-      onConfirm={model => create(null, officialCopy, model)} />}
+      onConfirm={model => create(null, officialCopy.item, model, officialCopy.production)} />}
   </>;
 }

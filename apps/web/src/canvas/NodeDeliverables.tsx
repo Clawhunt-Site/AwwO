@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type ReactNode } from 'react';
 import { ArrowUpFromLine, Check, Copy, FileText } from 'lucide-react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { SessionNode } from './canvasDoc';
+import { caseRunLabel, type SessionNode } from './canvasDoc';
 import { ContractFields } from './ContractFields';
 import { emptyContract, parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
 import { activeNodeThread } from './nodeThreads';
@@ -174,13 +174,16 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
     onUpdateNode?.({ ...node, lastOutput: { text, at: Date.now(), source: 'manual' } });
   };
 
-  // Only recorded facts: an output with no source claims no provenance, a legacy one no time.
-  const dated = Boolean(output && output.at >= 1e12);
+  // Only recorded facts: an output with no source claims no provenance, a legacy one no time, and a
+  // case recording only the day its run is labelled with.
+  const dated = Boolean(output && output.source !== 'case' && output.at >= 1e12);
   const now = useMinuteClock(dated);
   const age = output ? deliveryAge(output.at, now, t) : '';
   const receipt = output ? [
-    output.source === 'run' ? t('deliverable.fromRun') : output.source === 'manual' ? t('deliverable.fromManual') : '',
-    age ? t('deliverable.receivedAt', { age }) : '',
+    output.source === 'run' ? t('deliverable.fromRun') : output.source === 'manual' ? t('deliverable.fromManual')
+      : output.source === 'case' ? t('deliverable.fromCase', { run: caseRunLabel(output) }) : '',
+    // A case recording's date is the case's run, already named above, not when this canvas got it.
+    age && output.source !== 'case' ? t('deliverable.receivedAt', { age }) : '',
     // A field present but blank was not delivered; count only what has content.
     !showRawOutput && contract.outputs.length > 1
       ? t('deliverable.fieldCount', { done: publishedFields.filter(field => String(parsed!.values[field.id]).trim() !== '').length, total: contract.outputs.length }) : '',
@@ -214,13 +217,14 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode }: NodeDeliverab
     </> : <>
       {/* Where this came from and how complete it is, before the content itself. Caveats
           (history, partial, manual) are amber; plain provenance stays quiet. */}
-      {receipt.length ? <div className={`awwo-deliverables-receipt${output.partial || historical ? ' is-caveat' : ''}`}>
+      {receipt.length ? <div className={`awwo-deliverables-receipt${output.partial || historical || output.source === 'case' ? ' is-caveat' : ''}`}>
         <span className="awwo-deliverables-source" title={dated ? new Date(output.at).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : undefined}>{receipt.join(' · ')}</span>
       </div> : null}
-      {(historical || output.partial || output.source === 'manual') && <div className="awwo-deliverables-meta">
+      {(historical || output.partial || output.source === 'manual' || output.source === 'case') && <div className="awwo-deliverables-meta">
         {historical && <span>{t('deliverable.historical')}</span>}
         {output.partial && <span>{t('deliverable.partial')}</span>}
         {output.source === 'manual' && <span>{t('deliverable.manual')}</span>}
+        {output.source === 'case' && !historical && <span>{t('deliverable.case')}</span>}
       </div>}
       {parsed?.errors.length ? <p className="awwo-contract-errors" role="alert" title={parsed.errors.join(' ')}>{t('deliverable.invalid')}</p> : null}
       {media ? <article className="awwo-deliverable" data-testid={`canvas-tile-output-${node.id}`}><MediaResult output={media} /></article>

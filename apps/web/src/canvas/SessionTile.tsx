@@ -358,7 +358,8 @@ export const SessionTile = memo(function SessionTile({
   const sub = useCallback((cb: () => void) => subscribe(storeKey, cb), [storeKey]);
   const snap = useCallback(() => getSnapshot(storeKey), [storeKey]);
   const session = useSyncExternalStore(sub, snap, snap);
-  const [inputOpen, setInputOpen] = useState(false);
+  // A copied case node not yet set up has said and run nothing: open, it leads with what it was asked and received.
+  const [inputOpen, setInputOpen] = useState(node.kind === 'session' && node.lastOutput?.source === 'case' && !node.binding);
   const [templateOpen, setTemplateOpen] = useState(false);
   const template = node.kind === 'session' ? getAgentTemplateForNode(node, locale) : undefined;
   const [deliverablesOpen, setDeliverablesOpen] = useState(node.kind === 'session' && Boolean(node.deliverablesOpen));
@@ -594,7 +595,7 @@ export const SessionTile = memo(function SessionTile({
   }, [node, session.turns, locale, t]);
   const compactPreview = node.kind === 'session'
     ? node.lastOutput
-      ? `${node.lastOutput.partial ? `${t('tile.partialOutput')} · ` : ''}${publishedPreview(node.lastOutput.text, node.contract?.outputs ?? [], locale, Boolean(mediaKindOf(node.agentKind))) || t('tile.deliveryUpdated')}`
+      ? `${node.lastOutput.partial ? `${t('tile.partialOutput')} · ` : node.lastOutput.source === 'case' ? `${t('tile.caseOutput')} · ` : ''}${publishedPreview(node.lastOutput.text, node.contract?.outputs ?? [], locale, Boolean(mediaKindOf(node.agentKind))) || t('tile.deliveryUpdated')}`
       : currentThread?.lastOutput ? t('tile.historicalAvailable')
         : publishedPreview(preview, node.contract?.outputs ?? [], locale, Boolean(mediaKindOf(node.agentKind))) || t('tile.noDeliverables')
     : preview;
@@ -648,6 +649,9 @@ export const SessionTile = memo(function SessionTile({
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
+  const emptyConversation = session.turns.length === 0 && !currentRunDetails && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming;
+  // A copied case node with nothing said or run yet opens on its inputs (what it was asked and received).
+  const caseIntro = node.kind === 'session' && node.lastOutput?.source === 'case' && emptyConversation && !(templateOpen && template);
   const outputView = output ? <div className="canvas-tile-output" data-testid={`canvas-tile-output-${nodeId}`}>
     <div className="canvas-tile-output-head">
       <span className="canvas-tile-output-label">{t(output.partial ? 'tile.partialOutput' : 'tile.lastPublished')}</span>
@@ -769,7 +773,7 @@ export const SessionTile = memo(function SessionTile({
               ))}
             </div>
           ) : (
-            <div className={`awwo-node-workbench${deliverablesOpen || configurationPanel ? ' has-deliverables' : ''}`}>
+            <div className={`awwo-node-workbench${deliverablesOpen || configurationPanel ? ' has-deliverables' : ''}${caseIntro ? ' is-case-intro' : ''}`}>
               {expanded && sessionsOpen ? <nav className="awwo-session-sidebar" aria-label={t('tile.sessionManagement')}>
                 <div className="awwo-session-heading"><span>{t('tile.sessions')}</span><button type="button" aria-label={t('tile.collapseSessions')} title={t('tile.collapseList')} onClick={() => setSessionsOpen(false)}><PanelLeftClose size={14} /></button></div>
                 <button className="awwo-session-new" type="button" aria-label={t('tile.newSession')} disabled={readOnly} onClick={() => changeThread()}><Plus size={14} />{t('tile.new')}</button>
@@ -790,13 +794,13 @@ export const SessionTile = memo(function SessionTile({
                 </div> : null}
                 {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
                   <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={() => setInputOpen(false)}><X size={14} /></button></header>
-                  <ContractFields valuesFirst fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
+                  <ContractFields valuesFirst fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className="awwo-node-panel awwo-node-panel--conversation">
                   {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
                     <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
                     <AgentTemplateDetails template={template} contract={contract} />
-                  </section> : session.turns.length === 0 && !currentRunDetails && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming ?
+                  </section> : emptyConversation ?
                     <div className="awwo-node-empty" data-template={template?.id}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
                       <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound')}</span>

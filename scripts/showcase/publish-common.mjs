@@ -20,7 +20,7 @@ export function writeRecord(file, record) {
 /** Keep production-runs/summary.json — what the homepage cards show without loading a record — in step. */
 export function writeSummary(file, record, delivered) {
   const summary = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
-  summary[record.caseId] = { completed: record.completed, total: record.total, seconds: record.seconds, delivered, capturedOn: record.capturedOn, model: record.model, runtime: record.runtime };
+  summary[record.caseId] = { completed: record.completed, total: record.total, seconds: record.seconds, delivered, capturedOn: record.capturedOn, model: record.model, runtime: record.runtime, outputLocale: record.outputLocale };
   const ordered = Object.fromEntries(Object.keys(summary).sort().map(key => [key, summary[key]]));
   fs.writeFileSync(file, JSON.stringify(ordered, null, 2) + '\n');
 }

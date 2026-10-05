@@ -242,6 +242,8 @@ export function getOfficialWorkflow(id: string): OfficialWorkflow | undefined {
 }
 
 /** Mint a clean document, never clone bindings, conversations, credentials or sample results.
+ * A production case's copy adds its recorded deliveries afterwards (productionCopy.ts); the canvas
+ * its run record is pinned to never carries them.
  * Each incoming edge has a distinct contract field so fan-in is valid on the SaaS DAG runner.
  * Runtime and model selection are left to the workspace's existing initialization policy. */
 export function createOfficialDocument(item: OfficialWorkflow, locale: UiLocale): CanvasDocument {

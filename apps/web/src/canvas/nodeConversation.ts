@@ -10,6 +10,8 @@ export interface NodeConversationContext {
   inputs?: ContractField[];
   /** Connected field ids mapped to upstream titles (or its saved id if the node was removed). */
   sources?: Record<string, string>;
+  /** Connected field ids whose value is an upstream node's case recording, not a run of this workspace. */
+  recorded?: Record<string, true>;
 }
 
 export function prepareNodeConversation(
@@ -30,6 +32,7 @@ export function prepareNodeConversation(
     if (field) sources[field.id] = byId.get(edge.fromNode)?.title ?? edge.fromNode;
   }
   const upstream: UpstreamInput[] = [];
+  const recorded: Record<string, true> = Object.create(null);
   for (const edge of incoming) {
     const source = byId.get(edge.fromNode);
     const input = portsFor(node).find((port) => port.side === 'input' && port.id === edge.toPort);
@@ -48,6 +51,7 @@ export function prepareNodeConversation(
       ? parseContractOutput(source.contract, source.lastOutput.text).values[edge.fromPort.slice('out:'.length)] ?? ''
       : source.lastOutput.text;
     upstream.push({ fromTitle: source.title, toPort: edge.toPort, output: text });
+    if (source.lastOutput.source === 'case') recorded[edge.toPort.slice('in:'.length)] = true;
   }
   try {
     const messagePrefix = buildNodeMessage(node, upstream);
@@ -55,7 +59,7 @@ export function prepareNodeConversation(
       const connected = upstream.find((input) => input.toPort === `in:${field.id}`);
       return { ...field, value: connected ? connected.output : field.value };
     });
-    return { messagePrefix, inputs, sources };
+    return { messagePrefix, inputs, sources, recorded };
   } catch (error) {
     return { messagePrefix: '', sources, error: error instanceof Error ? error.message : '节点输入尚未就绪。' };
   }

@@ -18,6 +18,8 @@ export interface ContractFieldsProps {
   fields: ContractField[];
   resolvedFields?: ContractField[];
   sources?: Record<string, string>;
+  /** Fields whose resolved value is an upstream case recording (nodeConversation.ts). */
+  recorded?: Record<string, true>;
   onChange: (fields: ContractField[]) => void;
   readOnly?: boolean;
   /** Task entry starts with values; contract customization remains available on demand. */
@@ -73,7 +75,7 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
   </div>;
 }
 
-export function ContractFields({ fields, resolvedFields, sources, onChange, readOnly = false, valuesFirst = false, label }: ContractFieldsProps) {
+export function ContractFields({ fields, resolvedFields, sources, recorded, onChange, readOnly = false, valuesFirst = false, label }: ContractFieldsProps) {
   const { locale, t } = useCanvasI18n();
   const instanceId = useId();
   const [editingSchema, setEditingSchema] = useState(false);
@@ -114,7 +116,7 @@ export function ContractFields({ fields, resolvedFields, sources, onChange, read
         <label className="awwo-field-required"><input type="checkbox" aria-label={locale === 'zh' ? `${name}${t('contract.required')}` : `${name} ${t('contract.required')}`} checked={field.required}
           disabled={readOnly} onChange={(event) => patch(field.id, { required: event.target.checked })} />{t('contract.required')}</label></> : <div className="awwo-field-value-label"><strong>{name}</strong>{field.required && <span>{t('contract.required')}</span>}</div>}
         {helpId ? <p className="awwo-field-help" id={helpId}>{field.help}</p> : null}
-        {source && <p className="awwo-field-hint">{t(resolvedFields ? 'contract.sourceResolved' : 'contract.sourceWaiting', { source })}</p>}
+        {source && <p className="awwo-field-hint">{t(resolvedFields ? (recorded?.[field.id] ? 'contract.sourceCase' : 'contract.sourceResolved') : 'contract.sourceWaiting', { source })}</p>}
         {field.type === 'markdown' ? <MarkdownValue field={displayed} name={name} readOnly={valueReadOnly} placeholder={field.placeholder} describedBy={helpId} onChange={(value) => patch(field.id, { value })} />
           : field.type === 'boolean' ? <select className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
             onChange={(event) => patch(field.id, { value: event.target.value })}>

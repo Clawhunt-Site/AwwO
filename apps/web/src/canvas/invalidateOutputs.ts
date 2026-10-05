@@ -49,6 +49,10 @@ function edgeCounts(edges: ReadonlyArray<CanvasEdge>): Map<string, { count: numb
  * node. Traversal includes both graphs, so deletion cannot hide an old dependency. An explicit
  * new manual publication is retained even when a simultaneous edit would invalidate that node.
  * The caller validates manual publications before applying this freshness policy.
+ *
+ * A case recording (`source: 'case'`) is a copied case's delivery, kept for reference rather than
+ * produced by this node's settings, so settings, wires and structure leave it in place; only a
+ * replaced upstream output, on which it no longer stands, clears it.
  */
 export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): CanvasDocument {
   const before = new Map(prev.nodes.map((node) => [node.id, node]));
@@ -63,6 +67,8 @@ export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): C
   }
 
   const invalid = new Set<string>();
+  // Downstream of a replaced output: the only staleness a case recording has.
+  const replaced = new Set<string>();
   if (JSON.stringify(prev.execution) !== JSON.stringify(next.execution)) next.nodes.forEach(node => invalid.add(node.id));
   const published = new Set<string>();
   for (const node of prev.nodes) {
@@ -73,7 +79,7 @@ export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): C
     if (old && executionKey(old) !== executionKey(node)) invalid.add(node.id);
     if (outputKey(old?.lastOutput) !== outputKey(node.lastOutput)) {
       if (node.lastOutput?.source === 'manual') published.add(node.id);
-      for (const id of downstream.get(node.id) ?? []) invalid.add(id);
+      for (const id of downstream.get(node.id) ?? []) { invalid.add(id); replaced.add(id); }
     }
   }
 
@@ -85,17 +91,21 @@ export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): C
     if (old?.count !== current?.count) invalid.add((current ?? old)!.toNode);
   }
 
-  const queue = [...invalid];
-  for (let i = 0; i < queue.length; i += 1) {
-    for (const id of downstream.get(queue[i]) ?? []) {
-      if (invalid.has(id)) continue;
-      invalid.add(id);
-      queue.push(id);
+  for (const marked of [invalid, replaced]) {
+    const queue = [...marked];
+    for (let i = 0; i < queue.length; i += 1) {
+      for (const id of downstream.get(queue[i]) ?? []) {
+        if (marked.has(id)) continue;
+        marked.add(id);
+        invalid.add(id);
+        queue.push(id);
+      }
     }
   }
   let changed = false;
   const nodes = next.nodes.map((node) => {
     if (!invalid.has(node.id) || published.has(node.id) || node.lastOutput == null) return node;
+    if (node.lastOutput.source === 'case' && !replaced.has(node.id)) return node;
     changed = true;
     return { ...node, lastOutput: null };
   });

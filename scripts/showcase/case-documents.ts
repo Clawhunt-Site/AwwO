@@ -3,8 +3,9 @@ import { createOfficialDocument } from '../../apps/web/src/saas/examples/officia
 import type { CanvasDocument } from '../../apps/web/src/canvas/canvasDoc';
 import type { UiLocale } from '../../apps/web/src/locale';
 
-/** The canvases a member gets from 「复制这张画布」 with one model chosen for every node, which is
- * also what run-production-cases.mjs runs. Nothing else is bound: no agents, sessions or results. */
+/** The canvases behind 「复制这张画布」 with one model chosen for every node, which is what
+ * run-production-cases.mjs runs. Nothing else is bound: no agents, sessions or results. (A member's
+ * copy also carries the case's recorded deliveries, productionCopy.ts; a recording run starts without them.) */
 export function caseDocuments(locale: UiLocale, runtime: string, model: string): Record<string, { name: string; document: CanvasDocument }> {
   return Object.fromEntries(Object.values(PRODUCTION_WORKFLOWS).map(item => {
     const document = createOfficialDocument(item, locale);

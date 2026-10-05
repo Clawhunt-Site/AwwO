@@ -195,6 +195,11 @@
 .canvas-root .awwo-deliverables .awwo-field-header { flex-wrap: wrap; }
 .canvas-root .awwo-deliverables .awwo-field-name { flex-basis: 100%; }
 .canvas-root .awwo-input-drawer { flex: 0 1 auto; max-height: 52%; padding: 10px 12px; border-block: 1px solid var(--awwo-line); background: var(--awwo-soft); }
+/* A copied case node (productionCopy.ts) with nothing said or run yet opens on what it was asked and
+   received: the inputs fill the column, and the empty conversation's hint waits until they close. */
+.canvas-root .awwo-node-workbench.is-case-intro .awwo-input-drawer { flex: 1 1 auto; max-height: none; }
+.canvas-root .awwo-node-workbench.is-case-intro .awwo-input-drawer + .awwo-node-panel--conversation { flex: 0 0 auto; }
+.canvas-root .awwo-node-workbench.is-case-intro .awwo-input-drawer + .awwo-node-panel--conversation > .awwo-node-empty { display: none; }
 .canvas-root .awwo-input-drawer > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 11px; }
 .canvas-root .awwo-node-delivery-drawer:has(.canvas-inspector) { position: absolute; inset: 0 0 0 auto; width: min(340px, 100%); z-index: 9; box-shadow: -4px 0 16px #0001; }
 .canvas-root .awwo-node .canvas-inspector { border: 0; background: var(--awwo-card); color: var(--awwo-ink); }

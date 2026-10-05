@@ -71,8 +71,11 @@ export interface ProductionRunSummary {
   readonly capturedOn: string;
   readonly model: string;
   readonly runtime: string;
+  /** The language the agents worked in. */
+  readonly outputLocale: UiLocale;
 }
-export const PRODUCTION_RUN_SUMMARY: Readonly<Record<string, ProductionRunSummary>> = summary;
+// summary.json types its locale as a plain string; tests pin every entry to its published record.
+export const PRODUCTION_RUN_SUMMARY = summary as Readonly<Record<string, ProductionRunSummary>>;
 
 /** Each record loads on its own when its case opens; none is in the homepage bundle. */
 const RECORDS = import.meta.glob<{ default: ProductionRunRecord }>('./production-runs/*.ts');
