@@ -41,8 +41,9 @@
 .wmt-dwell[data-ready] { animation: none; transform: scaleX(1); opacity: 0; }
 @keyframes wmt-dwell { to { transform: scaleX(1); } }
 
-/* scenes */
-.wmt-scene { position: relative; display: grid; gap: 12px; min-height: 290px; padding: 20px; border: 1px solid var(--wmt-line); border-radius: 18px; background: var(--saas-soft, #eef3e9); font-size: 12.5px; }
+/* scenes. One column no wider than the scene: an auto column grows to its widest unbreakable line (the
+   one-line prompt), which pushed the prompt and the canvas past the scene and over the words beside it. */
+.wmt-scene { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-height: 290px; padding: 20px; border: 1px solid var(--wmt-line); border-radius: 18px; background: var(--saas-soft, #eef3e9); font-size: 12.5px; }
 .wmt-scene b { font-weight: 650; }
 .wmt-flow { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; gap: 10px; }
 .wmt-flow > span { position: relative; display: grid; gap: 6px; padding: 18px 12px; border: 1px solid var(--wmt-line); border-radius: 14px; background: var(--saas-card, #fff); text-align: center;
@@ -73,7 +74,7 @@
 .wmt-anatomy article header small { color: var(--saas-muted, #66766b); font-size: 11px; }
 .wmt-anatomy article p { margin: 0; color: var(--saas-muted, #66766b); font-size: 11.5px; line-height: 1.6; }
 .wmt-anatomy article p.wmt-check { display: flex; gap: 5px; color: var(--wmt-done); }
-.wmt-port { display: grid; gap: 4px; padding: 10px; border: 1px dashed var(--wmt-line); border-radius: 12px; color: var(--saas-muted, #66766b); font-size: 10.5px; animation: wmt-rise .5s ease both; animation-delay: .5s; }
+.wmt-port { display: grid; gap: 4px; padding: 10px; border: 1px dashed var(--wmt-line); border-radius: 12px; color: var(--saas-muted, #66766b); font-size: 10.5px; overflow-wrap: anywhere; animation: wmt-rise .5s ease both; animation-delay: .5s; }
 .wmt-port b { color: var(--saas-text, #23342b); font-size: 11.5px; line-height: 1.4; }
 .wmt-port.is-out { animation-delay: .9s; }
 .wmt-handoff { grid-template-columns: minmax(0, 1fr) 90px minmax(0, 1fr); align-items: center; }

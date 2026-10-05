@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import WorkModeTutorial, { STEP_DWELL_MS, type WorkModeTutorialProps } from '../src/saas/WorkModeTutorial';
@@ -114,4 +116,17 @@ it('keeps keys inside the tutorial', () => {
   fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Delete' });
   expect(pageKey).not.toHaveBeenCalled();
   document.removeEventListener('keydown', pageKey);
+});
+
+it('lays every scene on columns that cannot grow past it', () => {
+  // An auto column (or a bare 1fr) grows to its widest unbreakable line: the one-line prompt once pushed the
+  // prompt and the canvas over the words beside the scene. jsdom has no layout, so the rule itself is checked.
+  const css = readFileSync(resolve(process.cwd(), 'src/saas/work-mode-tutorial.css'), 'utf8');
+  expect(css).toMatch(/\.wmt-scene \{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/);
+  for (const [, value] of css.matchAll(/grid-template-columns:\s*([^;]+);/g)) {
+    const tracks = value.trim().replace(/\s*,\s*/g, ', ');
+    for (const track of tracks.match(/repeat\(\d+, minmax\([^)]*\)\)|minmax\([^)]*\)|\S+/g) ?? []) {
+      expect(track, tracks).toMatch(/^(minmax\(0, [\d.]+fr\)|repeat\(\d+, minmax\(0, [\d.]+fr\)\)|\d+px)$/);
+    }
+  }
 });
