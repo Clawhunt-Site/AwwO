@@ -127,3 +127,16 @@ it('keeps wired values and reader access locked in the simplified input view', (
   expect(screen.getByLabelText('需求的值')).toBeDisabled();
   expect(screen.queryByRole('button', { name: '编辑字段结构' })).toBeNull();
 });
+
+it('previews a wired delivery as inert as the delivery itself: no navigation away, no image requests', () => {
+  const wired = field({ id: 'from_design', label: '设计', value: '' });
+  const delivered = '[规格](artifacts/spec.md) · [参考](https://example.com/guide) · ![示意图](https://example.com/pixel.png)';
+  render(<ContractFields fields={[wired]} resolvedFields={[{ ...wired, value: delivered }]} sources={{ from_design: '设计节点' }} label="输入" onChange={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: '预览设计' }));
+  const preview = screen.getByLabelText(canvasText('zh', 'contract.previewName', { name: '设计' }));
+  expect(preview.querySelector('img')).toBeNull();
+  expect(preview).toHaveTextContent('示意图');
+  expect(screen.getByRole('link', { name: '参考' })).toHaveAttribute('target', '_blank');
+  expect(screen.getByText('规格').closest('a')).toBeNull();
+  expect(screen.getByText('规格')).toHaveAttribute('title', 'artifacts/spec.md');
+});

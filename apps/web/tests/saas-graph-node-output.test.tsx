@@ -162,3 +162,13 @@ it.each(['["untyped","array"]', '{"unknown":"not the historical field"}', '{"res
   expect(container.querySelector('pre')!.textContent).toBe(source);
   expect(screen.queryByText('Original response')).toBeNull();
 });
+
+it('keeps a link without a scheme as text in a node result, as deliveries do, and opens web links apart', () => {
+  const source = '[后端契约](artifacts/backend-contract-v1.md)，见[第二节](#notes)。[Documentation](https://example.com/docs)';
+  render(view(graph(), result({ output: JSON.stringify({ result: source }) })));
+  const field = within(screen.getByRole('region', { name: 'Saved deliverable' }));
+  expect(field.getByText('后端契约').closest('a')).toBeNull();
+  expect(field.getByText('后端契约')).toHaveAttribute('title', 'artifacts/backend-contract-v1.md');
+  expect(field.getByText('第二节').closest('a')).toBeNull();
+  expect(field.getByRole('link', { name: 'Documentation' })).toHaveAttribute('target', '_blank');
+});

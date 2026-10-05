@@ -1,7 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { Bold, Eye, Heading2, Link2, List, Pencil, Plus, Trash2 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { DeliverableMarkdown } from './DeliverableMarkdown';
 import { validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
 
@@ -27,7 +26,8 @@ export interface ContractFieldsProps {
   label: string;
 }
 
-/** The serialized value always remains Markdown; preview never rewrites the source. */
+/** The serialized value always remains Markdown; preview never rewrites the source. A wired value is
+ * another agent's delivery, so the preview renders it as inert as the delivery itself. */
 function MarkdownValue({ field, name, readOnly, onChange, placeholder, describedBy }: {
   field: ContractField;
   name: string;
@@ -69,7 +69,7 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
       </button>
     </div>
     {preview ? <div className="awwo-markdown-preview" aria-label={t('contract.previewName', { name })} aria-describedby={describedBy}>
-      {field.value ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{field.value}</ReactMarkdown> : <span className="awwo-field-hint">{t('contract.noContent')}</span>}
+      {field.value ? <DeliverableMarkdown>{field.value}</DeliverableMarkdown> : <span className="awwo-field-hint">{t('contract.noContent')}</span>}
     </div> : <textarea ref={editor} className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={describedBy} value={field.value}
       disabled={readOnly} rows={4} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? t('contract.placeholder')} />}
   </div>;

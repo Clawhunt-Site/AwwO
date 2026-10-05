@@ -395,6 +395,14 @@ describe('local delivery file references', () => {
     expect(screen.queryByRole('button', { name: /复制路径/ })).toBeNull();
   });
 
+  it('keeps a link without a scheme as text: it named a file where the agent worked, not a page here', () => {
+    render(<NodeDeliverables node={publishedMarkdown('[验收报告](artifacts/acceptance-report.md)，见[第二节](#notes)')} readOnly />);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByText('验收报告')).toHaveAttribute('title', 'artifacts/acceptance-report.md');
+    expect(screen.getByText('第二节')).toHaveAttribute('title', '#notes');
+    expect(screen.queryByRole('button', { name: /复制路径/ })).toBeNull();
+  });
+
   it.each(['javascript:alert%281%29', 'data:text/html,example', 'vbscript:example'])('retains default sanitization for %s', href => {
     render(<NodeDeliverables node={publishedMarkdown(`[不安全](<${href}>)`)} readOnly />);
     const label = screen.getByText('不安全');
