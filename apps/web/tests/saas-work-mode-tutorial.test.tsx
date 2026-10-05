@@ -110,6 +110,20 @@ it('speaks to readers without inviting them to write a brief', () => {
   expect(screen.queryByRole('button', { name: '去写第一个需求' })).not.toBeInTheDocument();
 });
 
+it('starts every step at its top, however far the last one was scrolled', () => {
+  render(<WorkModeTutorial {...base} />);
+  const body = screen.getByRole('dialog').querySelector('.wmt-body')!;
+  let top = 0;
+  Object.defineProperty(body, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { top = value; } });
+  top = 240; dwell();
+  expect(top).toBe(240);                       // unlocking the step leaves the reader where they are
+  fireEvent.click(next());
+  expect(screen.getByText('第 2 / 7 步')).toBeVisible();
+  expect(top).toBe(0);
+  top = 180; fireEvent.click(screen.getByRole('button', { name: '上一步' }));
+  expect(top).toBe(0);
+});
+
 it('keeps keys inside the tutorial', () => {
   const pageKey = vi.fn(); document.addEventListener('keydown', pageKey);
   render(<WorkModeTutorial {...base} />);

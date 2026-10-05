@@ -110,6 +110,7 @@ export default function WorkModeTutorial({ open, mandatory = false, locale, read
   const [record, setRecord] = useState<ProductionRunRecord | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   // Set before this component closes the dialog itself; any other close of a mandatory tutorial
   // (a browser's repeated-Escape close watcher, for one) is undone.
   const finishing = useRef(false);
@@ -129,7 +130,9 @@ export default function WorkModeTutorial({ open, mandatory = false, locale, read
     setIndex(0); setUnlocked(0);
     return () => { finishing.current = true; if (element?.open) element.close(); if (previous?.isConnected && !previous.closest('[inert]')) previous.focus({ preventScroll: true }); };
   }, [open]);
-  useLayoutEffect(() => { if (open) heading.current?.focus({ preventScroll: true }); }, [open, index]);
+  // Each step starts at its top: on a phone the words scroll below the scene, and the browser's scroll anchoring
+  // would otherwise open the next step scrolled down, past its scene.
+  useLayoutEffect(() => { if (!open) return; if (body.current) body.current.scrollTop = 0; heading.current?.focus({ preventScroll: true }); }, [open, index]);
   // Each step unlocks once, after its scene has played; going back never locks it again.
   useEffect(() => {
     if (!open || unlocked > index) return;
@@ -151,7 +154,7 @@ export default function WorkModeTutorial({ open, mandatory = false, locale, read
       <header className="wmt-header"><span className="wmt-brand">AwwO <span>{zh ? '工作模式' : 'Work mode'}</span></span>
         <span className="wmt-count">{zh ? `第 ${index + 1} / ${STEPS.length} 步` : `Step ${index + 1} of ${STEPS.length}`}</span>
         {!mandatory && <button type="button" className="wmt-close" aria-label={zh ? '关闭讲解' : 'Close the tutorial'} onClick={() => finish(false)}><X size={18} aria-hidden="true" /></button>}</header>
-      <div className="wmt-body">
+      <div className="wmt-body" ref={body}>
         <div className="wmt-visual" aria-hidden="true" key={step.key}><Scene step={step.key} locale={locale} record={record} /><small className="wmt-source">{source}</small></div>
         <div className="wmt-copy">
           <h2 ref={heading} id={`${id}-title`} tabIndex={-1}>{text(step.title, locale)}</h2>
