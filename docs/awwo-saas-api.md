@@ -230,9 +230,11 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | GET /admin/users | limit?, cursor? | `{items,nextCursor,snapshot}`；用户和平台角色，不返回密码 hash |
 | GET /admin/runs | limit?, cursor? | `{items,nextCursor,snapshot}`；标准 run 对象 |
 | GET /admin/audit | limit?, cursor? | `{items,nextCursor,snapshot}`；id,actorId,tenantId,action,resourceId,createdAt |
-| PATCH /admin/tenants/{id} | status?, maxConcurrentRuns?, maxRunsPerDay?, allowedModels? | 至少一项；status=active/suspended，并发整数 1–100，每日整数 1–100000；200 返回更新的 tenant（含 allowedModels） |
+| PATCH /admin/tenants/{id} | status?, maxConcurrentRuns?, maxRunsPerDay?, allowedModels?, routeLimits? | 至少一项；status=active/suspended，并发整数 1–100，每日整数 1–100000；200 返回更新的 tenant（含 allowedModels、routeLimits） |
 
 `allowedModels` 是本工作区的模型清单（entitlement），三态：字段缺省=不改动；`null`=解除限制；数组=替换为该清单。最多 64 个 ID，每个 ID 非空、≤200 字节、不含空白、控制字符或逗号；服务器去重并排序后存储。`null`（即未限制）表示 worker 公布的全部模型都可选，所有现存工作区默认如此；`[]` 表示禁止全部模型。清单是过滤器而非注册表：列了但 worker 未公布的 ID 既不会被提供也不会被运行。写入清单**不取消任何运行**：每次模型调用在扣减配额的同一事务里按 tenants 当前行重新授权（`FOR UPDATE`），被移除的模型无法再被调用一次——排队中的运行、图节点子运行、团队后续成员、重启后恢复的图，全部在各自的准入处以 `model_not_allowed` 终止；而已经发出的调用是在旧清单下被授权的，不会被追溯终止，需要立即掐断在途调用请改用暂停工作区。原始清单只在平台管理端投影（`GET /admin/tenants`、本 PATCH 的响应）出现；工作区成员通过 `GET /tenants/{tenantId}/runtime` 读取已与 worker 实际公布目录求交的结果。部署设置 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS`（逗号分隔，校验与本字段相同；仅限 operator 凭据模式，personal 模式的目录按连接命名模型，启动时拒绝）与 `AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY` 只为此后新建的工作区预置清单与每日额度，不改动已有工作区，之后仍可用本 PATCH 修改。
+
+`routeLimits` 是本工作区按付费模型路由的每日次数（在每日额度之内），同样三态：字段缺省=不改动；`null`=取消路由次数；对象=替换，例如 `{"gate":3,"bedrock":1,"media":1}`。路由按模型 ID 判定：`bedrock.*` 为 `bedrock`，`rh.*`（图像与视频）为 `media`，其余文本模型为 `gate`，部署设置 `AWWO_ROUTE_FREE_MODELS` 列出的自托管默认模型不计入任何路由、只占每日额度。键只能是这三个，值为 0–100000 的整数（0 表示关闭该路由），其他写法返回 400。文本调用在准入时超出本工作区路由次数，运行以 `premium_quota_exceeded` 失败；超出部署设置 `AWWO_ROUTE_TOTAL_PER_DAY` 给所有带路由次数的工作区设的全站每日上限，以 `premium_capacity_exceeded` 失败；图像与视频分别返回 `429 media_quota_exceeded` / `media_capacity_exceeded`。没有 routeLimits（null）的工作区既不受路由次数限制，也不计入全站上限。部署设置 `AWWO_NEW_WORKSPACE_ROUTE_LIMITS` 只为此后新建的工作区预置路由次数。
 
 以上全部要求 platformRole=admin。租户 owner 并不能访问平台后台。每日限额按 UTC 日期计算；降低额度不主动中断正在进行的模型调用，但团队后续成员调用需再次通过准入。暂停租户禁止新增业务写入，并取消当前活跃运行、记录事件；Go 保留历史读取权限，当前 SaaS 暂停页提供切换工作区与退出。恢复不自动重新执行取消过的任务。
 

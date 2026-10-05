@@ -10,6 +10,7 @@
       "maxConcurrentRuns": 3,
       "maxRunsPerDay": 250,
       "name": "Workspace",
+      "routeLimits": null,
       "status": "active"
     },
     "status": 200
@@ -22,6 +23,7 @@
       "maxConcurrentRuns": 3,
       "maxRunsPerDay": 250,
       "name": "Workspace",
+      "routeLimits": null,
       "status": "active"
     },
     "status": 200
@@ -69,6 +71,7 @@
           "maxConcurrentRuns": 2,
           "maxRunsPerDay": 100,
           "name": "Workspace",
+          "routeLimits": null,
           "status": "active"
         },
         {
@@ -78,6 +81,7 @@
           "maxConcurrentRuns": 3,
           "maxRunsPerDay": 250,
           "name": "Workspace",
+          "routeLimits": null,
           "status": "active"
         }
       ],
@@ -105,6 +109,7 @@
       "maxConcurrentRuns": 3,
       "maxRunsPerDay": 250,
       "name": "Workspace",
+      "routeLimits": null,
       "status": "active"
     },
     "status": 200
@@ -117,6 +122,7 @@
       "maxConcurrentRuns": 3,
       "maxRunsPerDay": 250,
       "name": "Workspace",
+      "routeLimits": null,
       "status": "active"
     },
     "status": 200
@@ -129,6 +135,7 @@
       "maxConcurrentRuns": 3,
       "maxRunsPerDay": 250,
       "name": "Workspace",
+      "routeLimits": null,
       "status": "suspended"
     },
     "status": 200

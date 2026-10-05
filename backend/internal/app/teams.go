@@ -266,7 +266,8 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		var concurrent, daily int
 		var restricted bool
 		var allowed []string
-		e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}') FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&status, &concurrent, &daily, &restricted, &allowed)
+		var routes []byte
+		e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&status, &concurrent, &daily, &restricted, &allowed, &routes)
 		if e == nil {
 			e = tx.QueryRow(ctx, "SELECT COALESCE(actor_id,''),status FROM runs WHERE tenant_id=$1 AND id=$2", tid, rid).Scan(&actor, &runStatus)
 		}
@@ -309,6 +310,15 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 			return e
 		}
 		if active < concurrent {
+			// Inside the daily allowance, a route-limited workspace also has a small allowance per
+			// paid model route; the free default model only spends the daily allowance. Checked only
+			// once a slot is free, so a waiting call does not hold the deployment-wide route lock.
+			if routes != nil {
+				if e = a.checkRouteLimit(ctx, tx, tid, model, readRouteLimits(routes)); e != nil {
+					tx.Rollback(context.Background())
+					return e
+				}
+			}
 			e = a.reserveInvocationFacts(ctx, tx, tid, rid, invID, facts)
 			if e == nil {
 				e = tx.Commit(ctx)

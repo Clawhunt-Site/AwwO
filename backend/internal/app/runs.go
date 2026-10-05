@@ -286,7 +286,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	var allowed []string
 	// The entitlement rides along with the quota read, so admission cannot resolve
 	// a model without having loaded the workspace's allowlist first.
-	if e = tx.QueryRow(r.Context(), "SELECT max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}') FROM tenants WHERE id=$1", tid).Scan(&concurrent, &daily, &restricted, &allowed); e != nil {
+	var routes []byte
+	if e = tx.QueryRow(r.Context(), "SELECT max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits FROM tenants WHERE id=$1", tid).Scan(&concurrent, &daily, &restricted, &allowed, &routes); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -368,7 +369,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		document, nodeID = []byte(`{}`), ""
 	} else if engine == agentEngineMedia {
 		// Image and video nodes run through the media provider, not a model worker.
-		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, model, entitlement)
+		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, model, entitlement, readRouteLimits(routes))
 		return
 	}
 	team, e := savedNodeTeam(document, nodeID)

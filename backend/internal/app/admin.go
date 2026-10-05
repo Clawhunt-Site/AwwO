@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 )
 
@@ -18,6 +19,8 @@ func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 		// null and the operator needs both: leave the entitlement alone versus
 		// remove the restriction entirely.
 		Allowed json.RawMessage `json:"allowedModels"`
+		// Same absent/null distinction: leave the route limits alone versus remove them.
+		Routes json.RawMessage `json:"routeLimits"`
 	}
 	if !a.decode(w, r, &b) {
 		return
@@ -27,7 +30,15 @@ func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_input", allowedErr.Error())
 		return
 	}
-	if (b.Status == nil && b.Concurrent == nil && b.Daily == nil && !setAllowed) || (b.Status != nil && *b.Status != "active" && *b.Status != "suspended") || (b.Concurrent != nil && (*b.Concurrent < 1 || *b.Concurrent > 100)) || (b.Daily != nil && (*b.Daily < 1 || *b.Daily > 100000)) {
+	routes, setRoutes, routesErr := normalizeRouteLimits(b.Routes)
+	if _, gated := routes[routeGate]; routesErr == nil && gated && len(a.cfg.RouteFreeModels) == 0 {
+		routesErr = errors.New("a gate route limit needs AWWO_ROUTE_FREE_MODELS to name the default model(s) it exempts")
+	}
+	if routesErr != nil {
+		fail(w, 400, "invalid_input", routesErr.Error())
+		return
+	}
+	if (b.Status == nil && b.Concurrent == nil && b.Daily == nil && !setAllowed && !setRoutes) || (b.Status != nil && *b.Status != "active" && *b.Status != "suspended") || (b.Concurrent != nil && (*b.Concurrent < 1 || *b.Concurrent > 100)) || (b.Daily != nil && (*b.Daily < 1 || *b.Daily > 100000)) {
 		fail(w, 400, "invalid_input", "Invalid tenant status or quota")
 		return
 	}
@@ -43,7 +54,7 @@ func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 	// every model decision is re-authorized against the live row at the next
 	// admission, so a withdrawn model cannot be reached again, and revoking calls
 	// already admitted under the previous entitlement is what suspension is for.
-	v, e := oneJSON(r.Context(), tx, "UPDATE tenants t SET status=COALESCE($2,status),max_concurrent_runs=COALESCE($3,max_concurrent_runs),max_runs_per_day=COALESCE($4,max_runs_per_day),allowed_models=CASE WHEN $5 THEN $6::text[] ELSE allowed_models END WHERE id=$1 RETURNING "+adminTenantJSON, id, b.Status, b.Concurrent, b.Daily, setAllowed, next.column())
+	v, e := oneJSON(r.Context(), tx, "UPDATE tenants t SET status=COALESCE($2,status),max_concurrent_runs=COALESCE($3,max_concurrent_runs),max_runs_per_day=COALESCE($4,max_runs_per_day),allowed_models=CASE WHEN $5 THEN $6::text[] ELSE allowed_models END,route_limits=CASE WHEN $7 THEN $8::jsonb ELSE route_limits END WHERE id=$1 RETURNING "+adminTenantJSON, id, b.Status, b.Concurrent, b.Daily, setAllowed, next.column(), setRoutes, routes.column())
 	if noRows(e) {
 		fail(w, 404, "not_found", "Workspace not found")
 		return

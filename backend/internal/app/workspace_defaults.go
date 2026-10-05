@@ -83,15 +83,15 @@ func (c Config) validateWorkspaceDefaults() error {
 
 // insertTenant is the only statement that creates a workspace, so every creation
 // path, including one added later, starts from the same deployment defaults. Unset
-// defaults leave the migrations' own: NULL (unrestricted) models and the column's
-// daily quota.
+// defaults leave the migrations' own: NULL (unrestricted) models, the column's daily
+// quota and NULL (no) route limits.
 func (a *App) insertTenant(ctx context.Context, tx pgx.Tx, id, name string) error {
-	models := a.cfg.NewWorkspaceModels.column()
+	models, routes := a.cfg.NewWorkspaceModels.column(), a.cfg.NewWorkspaceRouteLimits.column()
 	if a.cfg.NewWorkspaceRunsPerDay == 0 {
-		_, err := tx.Exec(ctx, "INSERT INTO tenants(id,name,allowed_models) VALUES($1,$2,$3::text[])", id, name, models)
+		_, err := tx.Exec(ctx, "INSERT INTO tenants(id,name,allowed_models,route_limits) VALUES($1,$2,$3::text[],$4::jsonb)", id, name, models, routes)
 		return err
 	}
-	_, err := tx.Exec(ctx, "INSERT INTO tenants(id,name,allowed_models,max_runs_per_day) VALUES($1,$2,$3::text[],$4)", id, name, models, a.cfg.NewWorkspaceRunsPerDay)
+	_, err := tx.Exec(ctx, "INSERT INTO tenants(id,name,allowed_models,max_runs_per_day,route_limits) VALUES($1,$2,$3::text[],$4,$5::jsonb)", id, name, models, a.cfg.NewWorkspaceRunsPerDay, routes)
 	return err
 }
 

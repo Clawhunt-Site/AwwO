@@ -62,6 +62,12 @@ type Config struct {
 	NewWorkspaceModels     modelEntitlement
 	NewWorkspaceRunsPerDay int
 	MaxOwnedWorkspaces     int
+	// Daily allowances per paid model route (route_limits.go): stamped onto new workspaces,
+	// deployment-wide ceilings across route-limited workspaces, and the sorted free model ids that
+	// no route limit counts. All empty keeps every workspace on its daily allowance alone.
+	NewWorkspaceRouteLimits routeLimits
+	RouteTotalsPerDay       routeLimits
+	RouteFreeModels         []string
 	// Image and video generation through RunningHub (media_config.go); off unless configured.
 	mediaSettings
 }
@@ -158,6 +164,9 @@ func ConfigFromEnv() (Config, error) {
 	if err := c.workspaceDefaultsFromEnv(); err != nil {
 		return c, err
 	}
+	if err := c.routeSettingsFromEnv(); err != nil {
+		return c, err
+	}
 	if err := c.observabilityFromEnv(); err != nil {
 		return c, err
 	}
@@ -189,6 +198,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.validateWorkspaceDefaults(); err != nil {
+		return err
+	}
+	if err := c.validateRouteSettings(); err != nil {
 		return err
 	}
 	if err := validateMediaExposure(c); err != nil {

@@ -51,6 +51,17 @@ it('translates HTTP and recovered error codes using the current locale while pre
   expect(canvasErrorMessage('Model execution failed', 'output_contract_invalid')).toContain('delivery format');
   expect(canvasErrorMessage('Model execution failed', 'output_contract_invalid')).not.toContain('Check the runtime configuration');
 });
+it('points a free workspace at the default model and the paid plans when its premium calls run out', () => {
+  for (const code of ['premium_quota_exceeded', 'premium_capacity_exceeded']) {
+    document.documentElement.lang = 'zh-CN';
+    expect(canvasErrorMessage('Model execution failed', code)).toContain('默认模型');
+    expect(runErrorText(code, 'zh')).toContain('付费套餐');
+    document.documentElement.lang = 'en';
+    expect(canvasErrorMessage('Model execution failed', code)).toContain('default model');
+    expect(runErrorText(code, 'en')).toContain('Paid plans');
+  }
+  expect(saasErrorMessage(new SaaSApiError(429, 'media_quota_exceeded', 'x'), 'zh')).toContain('付费套餐');
+});
 it('names the worker failures the API maps instead of showing the generic runtime failure', () => {
   // These are the run codes Go derives from the worker's failed-event codes. Each asks
   // for a different action, so none may fall back to "check the runtime configuration",

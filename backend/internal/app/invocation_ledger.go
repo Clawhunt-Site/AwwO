@@ -236,7 +236,7 @@ func invocationFailure(status, code string) string {
 		return "transport"
 	case "database_unavailable", "event_persistence_failed", "turn_persistence_failed", "accounting_commit_failed":
 		return "persistence"
-	case "quota_exceeded":
+	case "quota_exceeded", "premium_quota_exceeded", "premium_capacity_exceeded":
 		return "quota"
 	default:
 		return "validation"

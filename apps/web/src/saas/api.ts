@@ -113,7 +113,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     media_storage_full: ['媒体存储空间不足，暂停新的图像与视频生成；请联系管理员。', 'Media storage is full, so new image and video generations are paused. Contact an administrator.'],
     media_storage_unavailable: ['暂时无法保存生成的媒体，请联系管理员。', 'Generated media cannot be stored right now. Contact an administrator.'],
     media_capacity_exceeded: ['今日平台的图像与视频生成额度已用完，请在 UTC 次日重试。', 'Today’s image and video generations for the service are used up. Try again after the next UTC day.'],
-    media_quota_exceeded: ['本工作区今日的图像与视频生成次数已用完，请在 UTC 次日重试或联系管理员。', 'This workspace has used today’s image and video generations. Try again after the next UTC day or contact an administrator.'],
+    media_quota_exceeded: ['本工作区今日的图像与视频生成次数已用完，请在 UTC 次日重试；需要更多次数请联系管理员，付费套餐也即将上线。', 'This workspace has used today’s image and video generations. Try again after the next UTC day; for more, contact an administrator. Paid plans are coming soon.'],
     media_params_invalid: ['节点的生成参数不适用于所选模型，请在节点配置中修改。', 'The node’s generation settings do not fit the selected model. Change them in the node configuration.'],
     media_prompt_invalid: ['描述的长度不符合该模型要求，请在节点配置中查看字数范围。', 'The description length does not fit this model. See the allowed range in the node configuration.'],
     media_knowledge_unsupported: ['图像与视频节点不使用知识库，请取消选择知识后再运行。', 'Image and video nodes do not use knowledge. Clear the knowledge selection and run again.'],

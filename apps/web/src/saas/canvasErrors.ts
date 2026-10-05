@@ -65,6 +65,10 @@ const runErrors: Record<string, [string, string]> = {
   media_result_too_large: ['生成结果超过文件大小上限，未保存。', 'The result exceeds the file size limit and was not saved.'],
   media_storage_failed: ['生成结果保存失败，请重试。', 'The result could not be saved. Please try again.'],
   media_storage_full: ['媒体存储空间不足，生成结果未保存；请联系管理员。', 'Media storage is full, so the result was not saved. Contact an administrator.'],
+  // A route-limited workspace gets a few free premium calls a day inside its daily allowance; the
+  // default model keeps working, so the copy names that way forward before the paid one.
+  premium_quota_exceeded: ['今天高级模型（Claude、GPT、Bedrock）的免费次数已用完。可以把节点换成默认模型继续，UTC 次日重置；付费套餐即将上线，会提供更多次数。', 'Today’s free calls for premium models (Claude, GPT, Bedrock) are used up. Switch the node to the default model to keep going, or wait for the next UTC day. Paid plans with more calls are coming soon.'],
+  premium_capacity_exceeded: ['今天全站的高级模型免费名额已用完。可以把节点换成默认模型继续，UTC 次日重置；付费套餐即将上线，会提供更多次数。', 'Today’s free premium-model calls for the whole service are used up. Switch the node to the default model to keep going, or wait for the next UTC day. Paid plans with more calls are coming soon.'],
 };
 
 /** The reader's-language copy for a known run failure code, or undefined for anything else (free text,

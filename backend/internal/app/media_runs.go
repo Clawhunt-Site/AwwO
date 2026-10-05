@@ -138,7 +138,7 @@ func (a *App) mediaAdmissionError(w http.ResponseWriter, err error) {
 // createMediaRun admits a run of an image or video node. It shares createRun's transaction, so the
 // workspace's concurrency limit, idempotency and session lock already apply; media adds its own
 // daily limit, counted from durable run rows.
-func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string, b runInput, hash string, document []byte, nodeID, model string, entitlement modelEntitlement) {
+func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string, b runInput, hash string, document []byte, nodeID, model string, entitlement modelEntitlement, routes routeLimits) {
 	ctx := r.Context()
 	if len(b.KnowledgeRevisionIDs) > 0 {
 		fail(w, 400, "media_knowledge_unsupported", "Image and video nodes do not take knowledge context")
@@ -172,6 +172,19 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 	}
 	if total >= a.cfg.MediaTotalRunsPerDay {
 		fail(w, 429, "media_capacity_exceeded", "Today's image and video generations are used up; try again tomorrow")
+		return
+	}
+	// A route-limited workspace also has its own media allowance and shares a deployment-wide
+	// ceiling with the other route-limited workspaces.
+	switch code, e := a.mediaRouteLimit(ctx, tx, routes, today); {
+	case e != nil:
+		a.dbError(w, e)
+		return
+	case code == "media_quota_exceeded":
+		fail(w, 429, code, "This workspace has used today's image and video generations")
+		return
+	case code != "":
+		fail(w, 429, code, "Today's image and video generations are used up; try again tomorrow")
 		return
 	}
 	id := randomID()
