@@ -832,6 +832,18 @@ func paidPlan(id string, start, end int64, paid map[string]int64) map[string]any
 func TestPostgresBillingSyncsWhatWasPaidFromClawHunt(t *testing.T) {
 	h, f, c := clawHuntMember(t)
 	h.a.billingCalls.perMinute = 1000
+	// An account that never subscribed is free, read fresh: no plan stored, none at ClawHunt, nothing stale.
+	f.billingBody.Store("plan", clawHuntPlanBody(f, nil))
+	if out := h.request(t, c, "GET", "/billing", nil, 200); out["plan"] != nil || out["credits"] != nil || out["stale"] != false {
+		t.Fatal("an account that never subscribed", out)
+	}
+	var uid string
+	if e := h.db.QueryRow(context.Background(), "SELECT user_id FROM external_identities").Scan(&uid); e != nil {
+		t.Fatal(e)
+	}
+	if e := h.a.applyPlan(context.Background(), uid, nil, dbNow(t, h)); e != nil {
+		t.Fatal("no subscription and no stored plan", e)
+	}
 	start, end := time.Now().Add(-time.Hour).Unix(), time.Now().Add(30*24*time.Hour).Unix()
 	f.billingBody.Store("plan", clawHuntPlanBody(f, paidPlan("pro", start, end, map[string]int64{"pro": 2000})))
 	out := h.request(t, c, "GET", "/billing", nil, 200)

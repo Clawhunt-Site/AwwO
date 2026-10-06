@@ -140,11 +140,11 @@ func (a *App) applyPlan(ctx context.Context, userID string, p *clawHuntPlan, ask
 		return nil
 	}
 	if p == nil {
+		// No subscription. Without a stored plan there is nothing to end (err still holds the lookup's no-rows).
 		if found {
-			_, err = tx.Exec(ctx, "UPDATE user_plans SET status='canceled',synced_at=$2,retry_after=NULL WHERE user_id=$1", userID, asked)
-		}
-		if err != nil {
-			return err
+			if _, err = tx.Exec(ctx, "UPDATE user_plans SET status='canceled',synced_at=$2,retry_after=NULL WHERE user_id=$1", userID, asked); err != nil {
+				return err
+			}
 		}
 		return tx.Commit(ctx)
 	}
