@@ -21,7 +21,7 @@ npm run dev:saas
 登录后进入工作区并打开画布，画布工具栏上与本文相关的入口有三个。工具栏较窄时「知识地图」只显示图标，悬停可看到名称：
 
 - **知识地图**：浏览资料、页面、决策及其关系，导入资料，创建或审核提案，查看修订历史。关闭地图后仍在进行的整理，其进度、结果或失败原因会标记在「知识地图」按钮上（悬停可看到内容），下次打开地图时显示在顶部。
-- **画布助手 → 直接执行**：画布助手顶部可在「编排画布」和「直接执行」之间切换，由用户选择，不会自动转去执行。「直接执行」使用 AwwO「我的引擎」中的模型创建工作区任务，以对话形式查看历史、审批工具调用、回复问题、停止任务并保存真实产物。
+- **画布助手 → 直接执行**：画布助手只有一个对话框，不用选模式。每条消息先交给服务端判断：调整画布（编排节点与连线），还是直接执行（在工作区里完成任务）；说法明确要改画布的按规则直接编排，其余由服务端的小模型判断，拿不准就调整画布。每条回复标明它是怎么处理的，最近一条可以「改为直接执行」或「改为调整画布」。「直接执行」使用 AwwO「我的引擎」中的模型创建工作区任务，在同一对话里查看历史、审批工具调用、回复问题、停止任务并保存真实产物。
 - **编排 | 成果**：「成果」视图放大展示画布最后交付的东西，旁边列出每一步的交付和运行回执，详见下文“交付物预览”。
 
 reader 可以查看知识、执行历史和产物，不能导入、审核、恢复、发起整理、带入新任务或创建执行任务。审批、回答问题和停止任务还要求当前用户是该运行的发起人。权限由 Go API 再次校验。
@@ -87,7 +87,7 @@ PDF.js 使用随构建分发的 worker、CMap 与标准字体资源，逐页渲�
 
 ### 从任务到知识归档
 
-1. 在画布打开「画布助手」并切到「直接执行」，选择现有模型并提交任务。任务以对话形式排列，较早的任务可以重新展开；关闭画布助手不会取消已经受理的运行。
+1. 在画布打开「画布助手」，说出要完成的任务（输入框下方可选直接执行用的模型）；服务端把它判为直接执行后，任务出现在对话里，较早的任务折叠在对话顶部，可以重新展开；关闭画布助手不会取消已经受理的运行。
 2. 遇到工具审批时，核对动作说明与完整 JSON 参数，明确选择「允许一次」或「拒绝」；遇到问题时填写回答。服务端只接受原发起人且具有写权限的响应，不提供自动批准入口。
 3. 需要中止时点击「停止」，继续读取服务端状态直到确认终态；取消请求被受理不等于资源已经清理。拒绝、执行失败或超限不会被最终回复伪装成成功。
 4. 查看结果和已发布文件（执行过程默认折叠）。每个交付的文件都可以在原处预览，按文件格式和预算实际加载；发布成功不保证所有文件都能渲染。
@@ -147,7 +147,7 @@ flowchart LR
 | 预览 | `apps/web/src/canvas/ArtifactPreview.tsx`、`BinaryArtifactPreview.tsx`、各 `*Preview.tsx`、`previewData.ts` | 实际字节读取、格式分流、资源预算、渲染和清理；节点交付物、成果视图与直接执行的产物共用 |
 | 知识持久化 | `backend/internal/app/knowledge.go`、`migrations/019_knowledge.sql`、`migrations/021_knowledge_source_origins.sql` | 租户隔离、原件、不可变修订、追加来源、当前关系、提案、幂等操作和审计 |
 | 执行证据 | `knowledge_context.go`、`wiki_compiler.go`、`runs.go`、`team_context.go`、`graph_runs.go` | 固定版本上下文、编译输出校验、配额和预算、各运行路径的证据传递 |
-| 直接执行（画布助手） | `useManagedExecution.ts`、`AssistantExecution.tsx`、`managedExecutionApi.ts`；`canvas/CanvasAssistant.tsx` 的模式切换 | 同一模型目录、任务对话与历史、审批和问题、停止、产物预览与归档、刷新 |
+| 直接执行（画布助手） | `useManagedExecution.ts`、`AssistantExecution.tsx`、`managedExecutionApi.ts`、`assistantRouteApi.ts`；`canvas/assistantRouting.ts` 与 `CanvasSurface.tsx` 的统一对话；服务端路由 `backend/internal/app/assistant_route.go` | 同一模型目录、按消息自动路由、任务对话与历史、审批和问题、停止、产物预览与归档、刷新 |
 | 成果区 | `canvas/canvasResultModel.ts`、`canvas/CanvasResults.tsx`、`CanvasRunReceipt.tsx`、`ResultsGallery.tsx` | 从画布文档选出成果与步骤（文档、首页同一规则）、成果视图、运行回执、首页「最近的成果」 |
 | 内置执行后端 | `computer_execution.go`、`computer_model_proxy.go`、`migrations/022_computer_execution.sql` | 运行授权、持久审批、幂等回执、个人模型代理、产物与配额 |
 | 托管核心与沙箱 | `apps/openmaus-worker/`、`apps/computer-model.ts`、`workspace-sandbox.ts` | 固定上游核心、原生工具审批、隔离工作区、模型协议转换和资源清理 |

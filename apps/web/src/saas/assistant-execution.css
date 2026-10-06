@@ -1,6 +1,6 @@
-/* AwwO hosted app: the canvas assistant's 直接执行 mode (AssistantExecution.tsx). Each task is your message
- * and the assistant's card under it: one status line while it runs, the requests it needs you to answer, then
- * the result and its files, with the process folded away.
+/* AwwO hosted app: the canvas assistant's tasks (AssistantExecution.tsx). A message the server routes to
+ * execution gets the assistant's card under it: one status line while it runs, the requests it needs you to
+ * answer, then the result and its files, with the process folded away.
  *
  * Hosted only, so it is written on the design system's tokens. Every rule sits under
  * `html:root .saas-canvas-shell .awwo-canvas-assistant`, which outranks the canvas skin (design/canvas.css)
@@ -11,19 +11,22 @@
 
 html:root .saas-canvas-shell .awwo-canvas-assistant {
   /* ── The conversation ─────────────────────────────────────────────────────────────────────── */
-  .awwo-execution-thread { padding-block: 14px 16px; }
-  .awwo-execution-thread > ol { gap: 14px; }
-  .awwo-execution-thread .awwo-assistant-message--user { max-width: 92%; }
   .awwo-execution-card { padding: 0; }
-  .awwo-execution-intro {
-    display: grid; justify-items: start; gap: 12px; padding: 4px 2px 0;
-    & > svg { color: var(--saas-signal); }
-    & > p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.65; }
-    & .awwo-assistant-examples { flex-flow: column; align-items: stretch; justify-content: flex-start; gap: 8px; width: 100%; max-width: none; margin-top: 2px; }
-    & .awwo-assistant-examples button { width: 100%; padding: 10px 14px; border-radius: var(--saas-radius); text-align: left; font-size: var(--saas-text-sm); }
+  :is(.awwo-execution-note, .awwo-execution-knowledge) { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.55; }
+  /* The canvas's tasks the conversation does not mention (earlier ones, or another device's), folded at its top. */
+  .awwo-execution-earlier {
+    margin: 0 0 18px; padding-bottom: 12px; border-bottom: 1px solid var(--saas-hairline);
+    & > summary {
+      display: flex; align-items: center; gap: 8px; min-height: 28px; list-style: none; cursor: pointer;
+      color: var(--saas-muted); font: 600 var(--saas-text-xs)/1.4 var(--saas-font);
+      &::-webkit-details-marker { display: none; }
+      &::before { content: ''; flex: none; width: 6px; height: 6px; margin: 0 2px 0 3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; rotate: -45deg; transition: rotate var(--saas-dur-2) var(--saas-ease); }
+      &:hover { color: var(--saas-text); }
+    }
+    &[open] > summary::before { rotate: 45deg; }
+    & > ol { margin-top: 12px; }
+    & > ol > .awwo-execution-note { align-self: center; }
   }
-  :is(.awwo-execution-note, .awwo-execution-knowledge, .awwo-execution-blocked) { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.55; }
-  .awwo-execution-thread > ol > .awwo-execution-note { align-self: center; }
   .awwo-execution-loading {
     display: flex; align-items: center; gap: 8px; margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm);
     & svg { color: var(--saas-signal); animation: awwo-execution-spin 1s linear infinite; }
@@ -199,18 +202,21 @@ html:root .saas-canvas-shell .awwo-canvas-assistant {
     color: var(--saas-text); font: 11.5px/1.55 var(--saas-font-mono); white-space: pre-wrap; overflow-wrap: anywhere;
   }
 
-  /* ── The composer ────────────────────────────────────────────────────────────────────────── */
-  .awwo-execution-composer {
-    & .awwo-assistant-composer textarea { min-height: 52px; }
-    & .awwo-assistant-error { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+  /* ── Above the composer: the task service's notices ───────────────────────────────────────────── */
+  .awwo-execution-notices {
+    display: grid; gap: 6px; margin-bottom: 6px;
+    &:empty { display: none; }
+    & .awwo-assistant-error { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin: 0; }
     & .awwo-assistant-error .awwo-assistant-icon-button { width: 24px; height: 24px; margin: -2px -4px 0 0; }
-    & .awwo-execution-knowledge { margin: 0 4px 8px; }
-    & .awwo-execution-blocked { margin: 6px 2px 0; }
-    & > .awwo-execution-note { margin: 0 4px; padding: 10px 0 2px; border-top: 1px solid var(--saas-hairline); }
   }
-  /* The model and its effort: one quiet line above the composer, like planning's runtime line, until opened. */
+  /* ── Under the composer: the model a direct task uses and the knowledge it takes ─────────────────── */
+  .awwo-execution-setup {
+    display: grid; gap: 4px; margin-top: 6px;
+    & .awwo-execution-knowledge { margin: 0 6px 2px; }
+  }
+  /* The model and its effort: one quiet line under the composer until opened. */
   .awwo-execution-settings {
-    margin: 0 0 6px; border: 1px solid transparent; border-radius: var(--saas-radius-sm);
+    margin: 0; border: 1px solid transparent; border-radius: var(--saas-radius-sm);
     transition: background var(--saas-dur-1), border-color var(--saas-dur-1);
     &[open] { border-color: var(--saas-hairline); background: var(--saas-card); }
     & > summary {

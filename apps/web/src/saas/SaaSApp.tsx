@@ -31,7 +31,9 @@ import { rememberOfficialSelection } from './examples/officialSelection';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
-import { AssistantExecution } from './AssistantExecution';
+import { executionHost } from './AssistantExecution';
+import { routeAssistantMessage } from './assistantRouteApi';
+import type { RouteAssistant } from '../canvas/assistantRouting';
 import { useManagedExecution } from './useManagedExecution';
 import { AppearanceScope } from './SaaSAppearance';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from './SaaSOnboarding';
@@ -377,7 +379,7 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
     <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone="readonly" status={<><Eye size={12} aria-hidden="true" /><span title={t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}>{t('只读', 'Read-only')}</span><span className="saas-visually-hidden">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span></>} />}
       canvasTools={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} readOnly />}
-      assistantExecution={<AssistantExecution execution={execution} />}
+      assistantExecution={executionHost(execution)}
       results={resultsView}
       headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
@@ -398,8 +400,10 @@ function readCloudRuntimeStatus(value: unknown): CloudRuntimeStatus {
 
 function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
   const { locale, t } = useSaaSPreferences();
-  // The canvas assistant's 直接执行 mode; it reads nothing until the mode is first opened.
+  // The canvas assistant's tasks; the canvas has the service read once it opens, so routing knows whether one can start.
   const execution = useManagedExecution(tenant.id, canvasId);
+  // The server decides whether each assistant message arranges the canvas or becomes a task.
+  const routeAssistant = useCallback<RouteAssistant>((request, signal) => routeAssistantMessage(tenant.id, canvasId, request, signal), [tenant.id, canvasId]);
   const resultsView = useMemo(() => canvasResultsOptions(tenant.id, canvasId), [tenant.id, canvasId]);
   const localDraftFailure = (error: unknown) => isCanvasStorageQuotaError(error)
     ? t('本机存储空间已满，自动保存已暂停。请先导出本地副本保留最新编辑。', 'Local browser storage is full. Autosave is paused. Export a local copy to preserve your latest edits.')
@@ -762,7 +766,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       taskDraft={knowledgeTaskDraft} canvasTools={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} />}
-      assistantExecution={<AssistantExecution execution={execution} />}
+      assistantExecution={executionHost(execution)} routeAssistant={routeAssistant}
       results={resultsView}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}

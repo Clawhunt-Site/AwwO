@@ -1,13 +1,17 @@
-// The canvas assistant's 直接执行 mode, drawn as a conversation: each task is the user's message followed by
-// the assistant's card (a live one-line status while it runs, the requests it needs answered, then the result
-// and its files). State and every request live in useManagedExecution; this file only draws them.
+// The canvas assistant's tasks, in its one conversation. The server routes each message (canvas/assistantRouting.ts);
+// one it routes to execution becomes a task, drawn here as the assistant's card under the user's message: a live
+// one-line status while it runs, the requests it needs answered, then the result and its files. Also drawn here:
+// the canvas's earlier tasks, the service's notices above the composer and the execution model under it. State and
+// every request live in useManagedExecution; `executionHost` hands them to the canvas.
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, RefreshCw, Square, TerminalSquare, X } from 'lucide-react';
+import { Check, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, RefreshCw, Square, X } from 'lucide-react';
 import { StoredArtifactPreview } from '../canvas/ArtifactPreview';
-import { useEnterToSend } from '../canvas/composerKeys';
+import type { AssistantExecutionHost } from '../canvas/assistantRouting';
 import { ARTIFACT_REF_PREFIX } from './canvasBridge';
 import { renderInertMarkdown } from './inertMarkdown';
 import { saasErrorMessage } from './api';
+import { runErrorText } from './canvasErrors';
+import type { UiLocale } from '../locale';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
 import { KNOWLEDGE_CONTENT_BYTES } from './knowledgeApi';
@@ -34,58 +38,94 @@ function elapsed(from: string, to: number): string {
   const seconds = Math.max(0, Math.floor((to - new Date(from).getTime()) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
+/** Why a task ended without its result, in the reader's words; an unknown code is still named. */
+function taskErrorText(t: T, locale: UiLocale, code: string): string {
+  const known: Record<string, [string, string]> = {
+    computer_busy: ['工作区正忙：它一次只运行一个任务。等当前任务结束后再试。', 'The workspace is busy: it runs one task at a time. Try again when the current task ends.'],
+    computer_unavailable: ['工作区执行服务暂时不可用，请稍后再试。', 'Workspace execution is temporarily unavailable. Try again later.'],
+    computer_rejected: ['执行服务没有接受这个任务，请稍后再试。', 'The execution service did not accept this task. Try again later.'],
+    computer_execution_failed: ['任务执行失败，没有完成。', 'The task failed before it finished.'],
+    computer_stream_ended: ['与执行服务的连接中断，任务没有完成。', 'The connection to the execution service ended before the task finished.'],
+    computer_model_failed: ['模型调用失败，任务没有完成。', 'A model call failed, so the task did not finish.'],
+    computer_admission_denied: ['模型额度或权限不足，任务停在了这里。', 'The model allowance or permission ran out, so the task stopped here.'],
+    computer_output_limit: ['任务的输出超过了上限。', 'The task produced more output than allowed.'],
+    quota_exceeded: ['今天的调用次数已用完，任务没有开始。', 'Today’s calls are used up, so the task did not start.'],
+  };
+  const text = known[code];
+  // The run errors every run shares (the paid plan's and the daily allowances') read as they do on a node.
+  return text ? t(text[0], text[1]) : runErrorText(code, locale) ?? t(`任务没有完成（${code}）。`, `The task did not finish (${code}).`);
+}
 
-export function AssistantExecution({ execution }: { execution: ManagedExecution }) {
+/** What the canvas assistant needs from the hosted app's managed execution. */
+export function executionHost(execution: ManagedExecution): AssistantExecutionHost {
+  return {
+    readOnly: execution.readOnly,
+    ready: !execution.startBlockedReason,
+    activate: execution.activate,
+    setVisible: execution.setVisible,
+    start: execution.start,
+    stop: execution.stopTask,
+    finished: execution.finished,
+    renderTask: taskId => <ExecutionTaskCard execution={execution} taskId={taskId} />,
+    renderEarlier: (mentioned, open) => <ExecutionEarlier execution={execution} mentioned={mentioned} open={open} />,
+    renderNotices: planAvailable => <ExecutionNotices execution={execution} planAvailable={planAvailable} />,
+    settings: <ExecutionSettings execution={execution} />,
+    ...(execution.confirmedTask ? { confirmedTask: execution.confirmedTask } : {}),
+  };
+}
+
+/** One task's card: the open task in full, any other as a line that opens it. */
+function ExecutionTaskCard({ execution, taskId }: { execution: ManagedExecution; taskId: string }) {
   const { t } = useSaaSPreferences();
-  const { activated, activate } = execution;
-  useEffect(() => { if (!activated) activate(); }, [activated, activate]);
-  // Coming back to the mode reads the service and the history again (the first opening loads them above).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (activated) execution.refreshAll(); }, []);
-  const { setVisible } = execution;
-  useEffect(() => { setVisible(true); return () => setVisible(false); }, [setVisible]);
-  const tasks = [...execution.history.items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  // The open task starts at the top of the thread once it is read; a request waiting for you is brought into view.
-  // Later reads of the same task leave the scroll alone.
-  const thread = useRef<HTMLDivElement>(null);
-  const shown = execution.run?.id ?? '';
-  const waiting = execution.run?.approvals.filter(item => item.status === 'pending').map(item => item.id).join(' ') ?? '';
+  const card = useRef<HTMLDivElement>(null);
+  const open = taskId === execution.selectedId;
+  // A task opened from its line starts at the top of the conversation; a new one is left to the conversation's
+  // own scroll to its newest message, and later reads leave the scroll alone.
+  const wasOpen = useRef(open);
   useEffect(() => {
-    const log = thread.current; if (!log || !shown) return;
-    const message = [...log.querySelectorAll<HTMLElement>('[data-task]')].find(item => item.dataset.task === shown);
-    if (message) reveal(log, message, 'start');
-  }, [shown]);
-  useEffect(() => {
-    const log = thread.current; const request = log?.querySelector<HTMLElement>('.awwo-execution-request.is-pending');
-    if (log && request && waiting) reveal(log, request, 'nearest');
-  }, [waiting]);
-  const examples = [
-    t('把这份需求整理成一页可打开的 HTML 原型，交付 index.html。', 'Turn this brief into a one-page HTML prototype and deliver index.html.'),
-    t('读一遍画布里的交付物，写一份上线检查清单，交付 checklist.md。', 'Read the canvas deliveries and write a launch checklist as checklist.md.'),
-  ];
-  return <>
-    <div ref={thread} className="awwo-assistant-messages awwo-execution-thread" role="log" aria-label={t('执行记录', 'Execution history')} aria-live="polite" aria-relevant="additions text">
-      {!activated || (execution.loading && !tasks.length) ? <p className="awwo-assistant-empty" role="status">{t('正在读取执行记录…', 'Loading execution history…')}</p>
-        : tasks.length ? <ol>
-          {execution.history.truncated && <li className="awwo-execution-note">{t('只显示最近的任务。', 'Only recent tasks are shown.')}</li>}
-          {tasks.map(task => <Fragment key={task.id}>
-            <li className="awwo-assistant-message awwo-assistant-message--user" data-task={task.id}><p>{task.prompt || t('（无任务说明）', '(No task text)')}</p></li>
-            <li className="awwo-assistant-message awwo-assistant-message--assistant awwo-execution-card">
-              {task.id === execution.selectedId ? <TaskDetail execution={execution} /> : <TaskSummary execution={execution} task={task} />}
-            </li>
-          </Fragment>)}
-        </ol>
-        : <div className="awwo-execution-intro">
-          <TerminalSquare size={22} aria-hidden="true" />
-          {/* The mode's hint above already says what this does; here, what to write. */}
-          <p>{t('说清要做成什么、交付哪些文件，比如：', 'Say what to get done and which files to deliver, for example:')}</p>
-          {!execution.readOnly && <div className="awwo-assistant-examples" role="group" aria-label={t('示例任务', 'Example tasks')}>
-            {examples.map(example => <button type="button" key={example} onClick={() => execution.setPrompt(example)}>{example}</button>)}
-          </div>}
-        </div>}
-    </div>
-    <ExecutionComposer execution={execution} />
-  </>;
+    const log = card.current?.closest<HTMLElement>('.awwo-assistant-messages');
+    if (open && !wasOpen.current && log && card.current) reveal(log, card.current, 'start');
+    wasOpen.current = open;
+  }, [open]);
+  const task = execution.history.items.find(item => item.id === taskId);
+  return <div ref={card} className="awwo-execution-task" data-task={taskId}>
+    {open ? <TaskDetail execution={execution} />
+      : task ? <TaskSummary execution={execution} task={task} />
+        : execution.loading || !execution.activated ? <p className="awwo-execution-loading" role="status"><Loader2 size={14} aria-hidden="true" />{t('正在读取任务…', 'Reading the task…')}</p>
+          : <p className="awwo-execution-note">{t('这个任务不在最近的记录里。', 'This task is not among the recent ones.')}</p>}
+  </div>;
+}
+
+/** The canvas's tasks the conversation does not mention: earlier ones, or ones started elsewhere. */
+function ExecutionEarlier({ execution, mentioned, open }: { execution: ManagedExecution; mentioned: ReadonlySet<string>; open: boolean }) {
+  const { t, locale } = useSaaSPreferences();
+  const tasks = execution.history.items.filter(task => !mentioned.has(task.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  if (!tasks.length) {
+    // A viewer has only this list (no extras), so it says whether the tasks are being read, could not be read, or
+    // there are none.
+    if (!execution.readOnly) return null;
+    if (execution.error !== null) return <p className="awwo-assistant-error" role="alert">{saasErrorMessage(execution.error, locale)}</p>;
+    if (!execution.activated || execution.loading) return <p className="awwo-execution-loading" role="status"><Loader2 size={14} aria-hidden="true" />{t('正在读取这张画布的任务…', 'Reading this canvas’s tasks…')}</p>;
+    if (execution.historyFailed) return <HistoryFailed execution={execution} />;
+    return <p className="awwo-assistant-empty">{t('这张画布还没有任务。', 'This canvas has no tasks yet.')}</p>;
+  }
+  return <details className="awwo-execution-earlier" open={open}>
+    <summary>{t(`这张画布之前的任务（${tasks.length}）`, `Earlier tasks on this canvas (${tasks.length})`)}</summary>
+    <ol>
+      {execution.history.truncated && <li className="awwo-execution-note">{t('只显示最近的任务。', 'Only recent tasks are shown.')}</li>}
+      {tasks.map(task => <Fragment key={task.id}>
+        <li className="awwo-assistant-message awwo-assistant-message--user"><p>{task.prompt || t('（无任务说明）', '(No task text)')}</p></li>
+        <li className="awwo-assistant-message awwo-assistant-message--assistant awwo-execution-card"><ExecutionTaskCard execution={execution} taskId={task.id} /></li>
+      </Fragment>)}
+    </ol>
+  </details>;
+}
+
+/** The canvas's tasks could not be read: said once, with the way to read them again. */
+function HistoryFailed({ execution }: { execution: ManagedExecution }) {
+  const { t } = useSaaSPreferences();
+  return <div className="awwo-execution-warning" role="status"><p>{t('没读到这张画布的任务。', 'This canvas’s tasks could not be read.')}</p>
+    <button type="button" disabled={execution.loading} onClick={execution.refreshAll}>{t('重新读取', 'Read again')}</button></div>;
 }
 
 function TaskSummary({ execution, task }: { execution: ManagedExecution; task: ExecutionRunSummary }) {
@@ -99,8 +139,16 @@ function TaskSummary({ execution, task }: { execution: ManagedExecution; task: E
 }
 
 function TaskDetail({ execution }: { execution: ManagedExecution }) {
-  const { t } = useSaaSPreferences();
+  const { t, locale } = useSaaSPreferences();
   const run = execution.run;
+  // A request waiting for you is brought into view inside the conversation.
+  const detail = useRef<HTMLDivElement>(null);
+  const waiting = run?.approvals.filter(item => item.status === 'pending').map(item => item.id).join(' ') ?? '';
+  useEffect(() => {
+    const log = detail.current?.closest<HTMLElement>('.awwo-assistant-messages');
+    const request = detail.current?.querySelector<HTMLElement>('.awwo-execution-request.is-pending');
+    if (log && request && waiting) reveal(log, request, 'nearest');
+  }, [waiting]);
   if (!run) return execution.detailLoading || (!execution.error && !execution.pollingPaused)
     ? <p className="awwo-execution-loading" role="status"><Loader2 size={14} aria-hidden="true" />{t('正在读取任务…', 'Reading the task…')}</p>
     // A read that failed or stopped says so, with a way to read again; the task itself may well be running.
@@ -109,12 +157,12 @@ function TaskDetail({ execution }: { execution: ManagedExecution }) {
   const terminal = executionTerminal(run.status);
   const pending = run.approvals.filter(item => item.status === 'pending' || item.status === 'sending' || item.status === 'unknown');
   const answered = run.approvals.filter(item => !pending.includes(item));
-  return <div className="awwo-execution-detail">
+  return <div ref={detail} className="awwo-execution-detail">
     <RunStatus execution={execution} run={run} />
     {execution.pollingPaused && <p className="awwo-execution-warning" role="status">{t('自动读取已暂停，任务可能仍在运行。', 'Automatic reading is paused; the task may still be running.')}
       <button type="button" onClick={execution.refreshDetail}>{t('继续读取', 'Keep reading')}</button></p>}
     {run.truncated && <p className="awwo-execution-note">{t('记录超过显示上限，部分过程未展示。', 'The record exceeds the display limit; part of the process is not shown.')}</p>}
-    {run.error && <p className="awwo-execution-error" role="alert">{run.error}</p>}
+    {run.error && <p className="awwo-execution-error" role="alert">{taskErrorText(t, locale, run.error)}</p>}
     {pending.map(approval => <RequestCard key={approval.id} execution={execution} run={run} approval={approval} />)}
     {run.output && <section className="awwo-execution-result" aria-label={t('任务结果', 'Task result')}>
       <div className="awwo-execution-markdown">{renderInertMarkdown(run.output)}</div>
@@ -247,64 +295,66 @@ function DownloadLink({ execution, artifactId, name }: { execution: ManagedExecu
   return <a className="awwo-assistant-icon-button" href={execution.artifactURL(artifactId)} download={name} aria-label={t(`下载：${name}`, `Download: ${name}`)}><Download size={15} aria-hidden="true" /></a>;
 }
 
-function ExecutionComposer({ execution }: { execution: ManagedExecution }) {
+/** Above the composer: what keeps a task from starting or needs an answer, and where messages go meanwhile. */
+function ExecutionNotices({ execution, planAvailable }: { execution: ManagedExecution; planAvailable: boolean }) {
   const { t, locale } = useSaaSPreferences();
-  const send = () => { if (execution.canSubmit) execution.submit(); };
-  const composerKeys = useEnterToSend(send);
+  if (execution.readOnly) return null;
+  // A start blocked for a reason of its own (not the service, which explains itself below): the chosen model, the
+  // knowledge selection. An unconfirmed submission has its own reconcile box.
+  const blockedHere = execution.activated && !execution.loading && execution.ready && !execution.pendingSubmission ? execution.startBlockedReason : undefined;
+  const elsewhere = planAvailable ? t('消息会用来调整画布。', 'Messages go to the canvas meanwhile.') : '';
+  return <div className="awwo-execution-notices">
+    {execution.error !== null && <p className="awwo-assistant-error" role="alert">{saasErrorMessage(execution.error, locale)}
+      <button type="button" className="awwo-assistant-icon-button" aria-label={t('关闭提示', 'Dismiss')} onClick={execution.clearError}><X size={13} aria-hidden="true" /></button></p>}
+    {execution.notice && <p className={execution.noticeWarning ? 'awwo-execution-warning' : 'awwo-execution-notice'} role="status">{execution.notice}</p>}
+    {execution.historyFailed && <HistoryFailed execution={execution} />}
+    {execution.pendingSubmission && <div className="awwo-execution-warning" role="status">
+      <p>{t('上一次提交的任务结果还没确认。核对会用原来的提交标识，不会多建一个任务。', 'The last task submission is unconfirmed. Reconciling reuses its original identity and never creates a second task.')}</p>
+      <button type="button" disabled={execution.busy} onClick={execution.reconcile}>{t('核对上次提交', 'Reconcile the last submission')}</button>
+    </div>}
+    {execution.activated && !execution.loading && !execution.ready && <div className="awwo-execution-unavailable" role="status">
+      <p>{t('暂时不能直接执行任务。', 'Direct tasks are unavailable for now.')}{elsewhere ? ` ${elsewhere}` : ''} <span>{execution.serviceReason || t('执行服务尚未就绪。', 'The execution service is not ready.')}</span></p>
+      <div className="awwo-assistant-composer-actions">
+        {(execution.needsModel || (execution.runtime && !execution.runtime.models.length)) && <a href={accountURL('engines')}>{t('管理我的引擎', 'Manage my engines')}</a>}
+        <button type="button" disabled={execution.loading} onClick={execution.refreshAll}>{t('重新检查执行服务', 'Check the task service again')}</button>
+      </div>
+    </div>}
+    {blockedHere && <p className="awwo-execution-warning" role="status">{t(`暂时不能直接执行任务：${blockedHere}`, `Direct tasks are paused: ${blockedHere}`)}{elsewhere ? ` ${elsewhere}` : ''}</p>}
+  </div>;
+}
+
+/** Under the composer: the model and effort a direct task uses, one quiet line until opened, and the knowledge it takes. */
+function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
+  const { t } = useSaaSPreferences();
   const models = execution.runtime?.models ?? [];
   const labelCounts = models.reduce<Record<string, number>>((counts, model) => ({ ...counts, [model.label || model.id]: (counts[model.label || model.id] ?? 0) + 1 }), {});
   const optionLabel = (model: typeof models[number]) => labelCounts[model.label || model.id] > 1 ? `${model.label || model.id} · ${model.runtime}` : (model.label || model.id);
   const chosen = execution.choice.model;
-  const settingsSummary = execution.choice.unavailableLabel ? t(`模型：${execution.choice.unavailableLabel}（已不可用）`, `Model: ${execution.choice.unavailableLabel} (unavailable)`)
-    : chosen ? `${t('模型', 'Model')}：${optionLabel(chosen)}${execution.effort ? ` · ${execution.effort}` : ''}` : t('选择执行模型', 'Choose a model');
-  return <div className="awwo-assistant-composer-block awwo-execution-composer">
-    {execution.error !== null && <p className="awwo-assistant-error" role="alert">{saasErrorMessage(execution.error, locale)}
-      <button type="button" className="awwo-assistant-icon-button" aria-label={t('关闭提示', 'Dismiss')} onClick={execution.clearError}><X size={13} aria-hidden="true" /></button></p>}
-    {execution.notice && <p className={execution.noticeWarning ? 'awwo-execution-warning' : 'awwo-execution-notice'} role="status">{execution.notice}</p>}
-    {execution.pendingSubmission && <div className="awwo-execution-warning" role="status">
-      <p>{t('上一次提交的结果还没确认。核对会用原来的提交标识，不会多建一个任务。', 'The last submission is unconfirmed. Reconciling reuses its original identity and never creates a second task.')}</p>
-      {!execution.readOnly && <button type="button" disabled={execution.busy} onClick={() => execution.submit(execution.pendingSubmission!)}>{t('核对上次提交', 'Reconcile the last submission')}</button>}
-    </div>}
-    {execution.activated && !execution.loading && !execution.ready && <div className="awwo-execution-unavailable" role="status">
-      <p>{execution.serviceReason || t('执行服务尚未就绪。', 'The execution service is not ready.')}</p>
-      <div className="awwo-assistant-composer-actions">
-        {(execution.needsModel || (execution.runtime && !execution.runtime.models.length)) && <a href={accountURL('engines')}>{t('管理我的引擎', 'Manage my engines')}</a>}
-        <button type="button" disabled={execution.loading} onClick={execution.refreshAll}>{t('重新检查', 'Check again')}</button>
+  const settingsSummary = execution.choice.unavailableLabel ? t(`直接执行用：${execution.choice.unavailableLabel}（已不可用）`, `Direct tasks use: ${execution.choice.unavailableLabel} (unavailable)`)
+    : chosen ? `${t('直接执行用', 'Direct tasks use')}：${optionLabel(chosen)}${execution.effort ? ` · ${execution.effort}` : ''}` : t('选择直接执行的模型', 'Choose a model for direct tasks');
+  if (execution.readOnly || (!models.length && !execution.choice.unavailableLabel && execution.knowledgeCount === 0)) return null;
+  return <div className="awwo-execution-setup">
+    {(models.length > 0 || execution.choice.unavailableLabel) && <details className="awwo-execution-settings">
+      <summary>{settingsSummary}</summary>
+      <label>{t('直接执行的模型', 'Model for direct tasks')}
+        <select value={execution.choice.key} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.chooseModel(event.target.value)}>
+          {execution.choice.unavailableLabel && <option value={execution.choice.key} disabled>{t(`${execution.choice.unavailableLabel}（已不可用）`, `${execution.choice.unavailableLabel} (unavailable)`)}</option>}
+          {!execution.choice.key && <option value="">{t('选择模型', 'Choose a model')}</option>}
+          {models.map(model => <option key={executionModelKey(model.runtime, model.id)} value={executionModelKey(model.runtime, model.id)}>{optionLabel(model)}</option>)}
+        </select>
+      </label>
+      {!!chosen?.efforts?.length && <label>{t('思考强度', 'Reasoning effort')}
+        <select value={execution.effort} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.setEffort(event.target.value)}>
+          <option value="">{t('模型默认', 'Model default')}</option>
+          {chosen.efforts.map(level => <option key={level} value={level}>{level}</option>)}
+        </select>
+      </label>}
+      {/* Engines are managed in the account; a change there shows here once the list is read again. */}
+      <div className="awwo-execution-settings-actions">
+        <a href={accountURL('engines')}>{t('管理我的引擎', 'Manage my engines')}</a>
+        <button type="button" disabled={execution.loading || execution.busy} onClick={execution.refreshAll}>{execution.loading ? t('正在读取…', 'Reading…') : t('刷新模型列表', 'Refresh the model list')}</button>
       </div>
-    </div>}
-    {execution.readOnly ? <p className="awwo-execution-note">{t('只读访问：可以查看执行记录，不能发起任务。', 'Read-only: you can view tasks but not start one.')}</p> : <>
-      {(models.length > 0 || execution.choice.unavailableLabel) && <details className="awwo-execution-settings">
-        <summary>{settingsSummary}</summary>
-        <label>{t('执行模型', 'Execution model')}
-          <select value={execution.choice.key} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.chooseModel(event.target.value)}>
-            {execution.choice.unavailableLabel && <option value={execution.choice.key} disabled>{t(`${execution.choice.unavailableLabel}（已不可用）`, `${execution.choice.unavailableLabel} (unavailable)`)}</option>}
-            {!execution.choice.key && <option value="">{t('选择模型', 'Choose a model')}</option>}
-            {models.map(model => <option key={executionModelKey(model.runtime, model.id)} value={executionModelKey(model.runtime, model.id)}>{optionLabel(model)}</option>)}
-          </select>
-        </label>
-        {!!chosen?.efforts?.length && <label>{t('思考强度', 'Reasoning effort')}
-          <select value={execution.effort} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.setEffort(event.target.value)}>
-            <option value="">{t('模型默认', 'Model default')}</option>
-            {chosen.efforts.map(level => <option key={level} value={level}>{level}</option>)}
-          </select>
-        </label>}
-        {/* Engines are managed in the account; a change there shows here once the list is read again. */}
-        <div className="awwo-execution-settings-actions">
-          <a href={accountURL('engines')}>{t('管理我的引擎', 'Manage my engines')}</a>
-          <button type="button" disabled={execution.loading || execution.busy} onClick={execution.refreshAll}>{execution.loading ? t('正在读取…', 'Reading…') : t('刷新模型列表', 'Refresh the model list')}</button>
-        </div>
-      </details>}
-      {execution.knowledgeCount > 0 && <p className="awwo-execution-knowledge">{t(`将带上 ${execution.knowledgeCount} 份已选知识`, `Takes ${execution.knowledgeCount} selected knowledge items`)}</p>}
-      <form className="awwo-assistant-composer" aria-label={t('执行任务', 'Run a task')} onSubmit={event => { event.preventDefault(); send(); }}>
-        <textarea aria-label={t('任务说明', 'Task')} placeholder={t('说要完成什么、交付哪些文件…', 'Say what to get done and which files to deliver…')}
-          value={execution.prompt} disabled={execution.busy || !!execution.pendingSubmission} rows={2} maxLength={12000}
-          onChange={event => execution.setPrompt(event.target.value)} {...composerKeys} />
-        {/* An unavailable service is explained above the composer already; this line covers the rest. */}
-        {execution.ready && execution.submitBlockedReason && execution.prompt.trim() && <p className="awwo-execution-blocked">{execution.submitBlockedReason}</p>}
-        <div className="awwo-assistant-composer-actions">
-          <button type="submit" className="awwo-assistant-send" disabled={!execution.canSubmit}><span>{t('开始执行', 'Start')}</span><ArrowUp size={15} aria-hidden="true" /></button>
-        </div>
-      </form>
-    </>}
+    </details>}
+    {execution.knowledgeCount > 0 && <p className="awwo-execution-knowledge">{t(`将带上 ${execution.knowledgeCount} 份已选知识`, `Takes ${execution.knowledgeCount} selected knowledge items`)}</p>}
   </div>;
 }

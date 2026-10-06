@@ -32,7 +32,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2 } from 'lucide-react';
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
-import { CanvasAssistant, type AssistantMode, type AssistantModes } from './CanvasAssistant';
+import { CanvasAssistant, type UnifiedAssistant } from './CanvasAssistant';
+import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHost, type AssistantPending, type AssistantRoute,
+  type RouteAssistant } from './assistantRouting';
 import { CanvasResults } from './CanvasResults';
 import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
@@ -40,7 +42,7 @@ import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } 
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
 import { applyCanvasPlan, canvasPlanRevision } from './canvasPlan';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
-  readCanvasPlanRecovery, cancelCanvasPlanRecovery, type PlanProgress } from './canvasPlanning';
+  readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
@@ -158,9 +160,12 @@ export interface CanvasSurfaceProps {
   headerTitle?: ReactNode;
   headerActions?: ReactNode;
   canvasTools?: ReactNode;
-  /** The hosted app's 直接执行 mode for the canvas assistant: its task conversation and composer. Absent (the
-   *  desktop app) leaves the assistant planning only. On a read-only canvas it is the assistant's only mode. */
-  assistantExecution?: ReactNode;
+  /** The hosted app's managed execution. With it the assistant is one conversation whose messages the server
+   *  routes (routeAssistant) to the canvas or to a task; absent (the desktop app) the assistant only plans. On a
+   *  read-only canvas it shows the canvas's tasks. */
+  assistantExecution?: AssistantExecutionHost;
+  /** Asks the server how to handle one assistant message (POST …/assistant/route). */
+  routeAssistant?: RouteAssistant;
   /** The hosted app's 成果 view: the canvas's result large, the steps that made it, and the host's run
    *  receipt. Absent (the desktop app) leaves the canvas without it. */
   results?: CanvasResultsOptions;
@@ -244,7 +249,7 @@ export interface CanvasResultsOptions {
   onViewChange?: (view: 'canvas' | 'results') => void;
 }
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, results, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   const viewText = surfaceViewMessages(t);
   // The opened-node look is a viewer preference: it styles focused tiles only and never the document.
@@ -441,14 +446,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setDoc(restored);
   }, []);
 
+  // Says whether it stepped back: a canvas that cannot be edited now (a node talking, a run) keeps its document.
   const undo = useCallback(() => {
-    if (!canEditStructure()) return;
+    if (!canEditStructure()) return false;
     const prevDoc = undoStack.current.at(-1);
-    if (!prevDoc) return;
+    if (!prevDoc) return false;
     undoStack.current = undoStack.current.slice(0, -1);
     redoStack.current = [...redoStack.current, docRef.current].slice(-HISTORY_LIMIT);
     restoreDoc(prevDoc);
     syncHistory();
+    return true;
   }, [canEditStructure, restoreDoc, syncHistory]);
 
   const redo = useCallback(() => {
@@ -1875,17 +1882,25 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   // The planning conversation is local UI history, separate from node execution Sessions.
   const [planning, setPlanning] = useState(() => readOnly ? { draft: '', messages: [] } as ReturnType<typeof loadPlanningConversation> : loadPlanningConversation());
+  // A message being handled before it joins the conversation (assistantRouting.ts): the server is routing it, it is
+  // becoming a task, or the task it replaces is stopping. The ref answers a second click in the same tick.
+  const [assistantPending, setAssistantPending] = useState<AssistantPending | null>(null);
+  const pendingRef = useRef<{ pending: AssistantPending; controller?: AbortController } | null>(null);
+  const setPending = (pending: AssistantPending | null, controller?: AbortController) => {
+    pendingRef.current = pending ? { pending, ...(controller ? { controller } : {}) } : null;
+    setAssistantPending(pending);
+  };
+  // Read through a call: a check earlier in the same handler would otherwise narrow it for good.
+  const pendingId = () => pendingRef.current?.pending.id;
   const appliedTaskDraft = useRef('');
   useEffect(() => {
-    if (!taskDraft || readOnly || appliedTaskDraft.current === taskDraft.id) return;
+    // A task draft waits for a message being handled: joined to it in the box, it would be sent with it again.
+    if (!taskDraft || readOnly || appliedTaskDraft.current === taskDraft.id || assistantPending) return;
     appliedTaskDraft.current = taskDraft.id;
     setPlanning(previous => ({ ...previous, draft: [previous.draft.trim(), taskDraft.prompt].filter(Boolean).join('\n\n') }));
-    setAssistantMode('plan'); setAssistantOpen(true);
-  }, [taskDraft, readOnly]);
+    setAssistantOpen(true);
+  }, [taskDraft, readOnly, assistantPending]);
   const [assistantOpen, setAssistantOpen] = useState(false);
-  // Which mode the assistant shows. Planning is where it starts and where every planning event returns it.
-  const [assistantMode, setAssistantMode] = useState<AssistantMode>('plan');
-  const noticedRecovery = useRef('');
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState('');
   const [planningRecovery, setPlanningRecovery] = useState<Awaited<ReturnType<typeof readCanvasPlanRecovery>> | null>(null);
@@ -1928,12 +1943,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setPlanningError(previous => previous === recoveredError ? '' : previous);
         recoveryReadError.current = '';
       }
-      if (recovery.pending) {
-        // A pending plan brings planning forward once, when it is first seen; later checks leave the user's mode.
-        const id = recovery.operationId ?? 'pending';
-        if (noticedRecovery.current !== id) { noticedRecovery.current = id; setAssistantMode('plan'); }
-        setAssistantOpen(true);
-      }
+      if (recovery.pending) setAssistantOpen(true);
     } catch (error) {
       if (!stillCurrent()) return;
       setRecoveryLoaded(false);
@@ -1962,7 +1972,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     focusNode(modelFocusId);
     setModelFocusId(null);
   }, [modelFocusId, focusNode]);
-  useEffect(() => { if (!readOnly) savePlanningConversation(planning); }, [planning, readOnly]);
+  // While a message becomes a task the store holds it as an unconfirmed request, not in the box: leaving the page
+  // before the outcome is known can then neither lose it nor leave it to be sent a second time.
+  useEffect(() => {
+    if (readOnly) return;
+    const starting = assistantPending?.phase === 'starting' ? assistantPending : null;
+    savePlanningConversation(starting ? {
+      draft: planning.draft.trim() === starting.prompt ? '' : planning.draft,
+      messages: [...planning.messages, { id: `${starting.id}-user`, role: 'user' as const, content: starting.prompt, route: 'execute' as const },
+        { id: `${starting.id}-task`, role: 'assistant' as const, content: t('assistant.startUnconfirmed'), status: 'unconfirmed' as const,
+          route: 'execute' as const }].slice(-60),
+    } : planning);
+  }, [planning, readOnly, assistantPending, t]);
   useEffect(() => {
     const controller = new AbortController();
     if (readOnly) return;
@@ -1979,9 +2000,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return () => controller.abort();
   }, [canInitialize, cloudScope, locale, readOnly, paletteRefresh]);
   useEffect(() => () => { planningRequest.current?.controller.abort(); planningRequest.current = null; }, []);
-  const appendPlanningMessage = (id: string, content: string, status?: 'applied' | 'error' | 'stale') => {
+  const appendPlanningMessage = (id: string, content: string, status?: 'applied' | 'error' | 'stale', route?: AssistantRoute) => {
     setPlanning(previous => ({ ...previous, messages: [...previous.messages,
-      { id, role: 'assistant' as const, content, ...(status ? { status } : {}) }].slice(-60) }));
+      { id, role: 'assistant' as const, content, ...(status ? { status } : {}), ...(route ? { route } : {}) }].slice(-60) }));
   };
   // The planner is a model call too. In a hosted personal account it needs the same ready
   // execution engine as graph runs; an explicit unavailable planner status also blocks Pi.
@@ -1992,20 +2013,29 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     : canInitialize && plannerProvider === 'pi' && plannerStatus?.available === false
       ? plannerStatus.error || (locale === 'zh' ? '画布助手暂不可用，请重试。' : 'The canvas assistant is unavailable. Please retry.')
       : '');
-  // `request` plans a prompt the host handed over rather than the box's own draft.
-  const sendPlanningMessage = async (request?: string, resume = false) => {
-    if (readOnlyRef.current) return;
-    // Keep the draft untouched and refuse before allocating a request or calling either planner.
-    if (!resume && planningUnavailableReason) { setPlanningError(planningUnavailableReason); return; }
-    if (recoveryStopInFlight.current || (canInitialize && (!recoveryLoaded || recoveryChecking))) return;
-    if (resume && !planningRecovery?.operationId) return;
-    if (planningRecovery?.pending && (!resume || !planningRecovery.matches)) return;
-    const prompt = (request ?? planning.draft).trim();
-    if (!prompt || planningRequest.current) return;
-    if (journal.current || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
-      setPlanningError(surfaceNotice(t, 'planning_busy'));
-      return;
+  // Why a plan cannot start now: null when it can, '' where the composer already shows why (a check or a stop in
+  // flight, an earlier plan to resume, one under way), else the reason to show.
+  const planBlocker = (resume = false): string | null => {
+    // A message being handled (routed, becoming a task) is the one request in flight; nothing else plans meanwhile.
+    if (readOnlyRef.current || pendingRef.current) return '';
+    if (!resume && planningUnavailableReason) return planningUnavailableReason;
+    if (recoveryStopInFlight.current || (canInitialize && (!recoveryLoaded || recoveryChecking))) return '';
+    if (resume && !planningRecovery?.operationId) return '';
+    if (planningRecovery?.pending && (!resume || !planningRecovery.matches)) return '';
+    if (planningRequest.current) return '';
+    if (journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
+      return surfaceNotice(t, 'planning_busy');
     }
+    return null;
+  };
+  // `request` plans a prompt handed over (a carried-over request, a routed message) rather than the box's draft;
+  // the box is emptied only where it holds that prompt.
+  const sendPlanningMessage = async (request?: string, resume = false) => {
+    // Keep the draft untouched and refuse before allocating a request or calling either planner.
+    const blocked = planBlocker(resume);
+    if (blocked !== null) { if (blocked) setPlanningError(blocked); return; }
+    const prompt = (request ?? planning.draft).trim();
+    if (!prompt) return;
     const snapshot = docRef.current;
     const revision = canvasPlanRevision(snapshot);
     const id = `plan-${Date.now()}-${++planningSequence.current}`;
@@ -2015,9 +2045,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setPlanningBusy(true);
     setPlanningError('');
     setPlanningProgress(undefined);
+    // Where the host also does tasks, every turn says how it was handled.
+    const route = assistantExecution ? 'plan' as const : undefined;
     setPlanning(previous => resume
       ? { ...previous, draft: previous.draft.trim() === prompt ? '' : previous.draft }
-      : { draft: '', messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt }].slice(-60) });
+      : { draft: request === undefined || previous.draft.trim() === prompt ? '' : previous.draft,
+        messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt, ...(route ? { route } : {}) }].slice(-60) });
     try {
       const reportProgress = (progress: PlanProgress) => {
         // A superseded or cancelled request must not repaint the current one's progress.
@@ -2025,12 +2058,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setPlanningProgress(progress);
       };
       const jev = !resume && plannerProvider === 'jev'
-        ? await requestJevPlan(prompt, snapshot, planning.messages, controller.signal, locale, reportProgress) : null;
-      const plan = jev?.plan ?? await planRequest(prompt, snapshot, planning.messages, controller.signal, locale, reportProgress,
+        ? await requestJevPlan(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress) : null;
+      const plan = jev?.plan ?? await planRequest(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress,
         resume ? { recoveryOperationId: planningRecovery!.operationId } : undefined);
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (canvasPlanRevision(docRef.current) !== revision || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
-        appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale');
+        appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale', route);
         setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
         return;
       }
@@ -2043,10 +2076,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         focusReturn.current = null;
         setInspectorId(null);
         setSelection(applied.addedNodeIds);
-        setAssistantMode('plan'); setAssistantOpen(true);
+        setAssistantOpen(true);
         setPlanningFitId(id);
       }
-      appendPlanningMessage(`${id}-assistant`, applied.summary, plan.operations.length ? 'applied' : undefined);
+      appendPlanningMessage(`${id}-assistant`, applied.summary, plan.operations.length ? 'applied' : undefined, route);
       if (!jev) setPlannerStatus(previous => ({ available: true, provider: previous?.provider || 'AI' }));
       // Only a plan that arrived and was accepted is a measurement worth setting expectations with,
       // and only for the same planner: Jev decides differently and takes a different time.
@@ -2056,7 +2089,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       const message = planFailureMessage(t, error);
       setPlanningError(message);
-      appendPlanningMessage(`${id}-assistant`, message, 'error');
+      appendPlanningMessage(`${id}-assistant`, message, 'error', route);
       setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
     } finally {
       if (planningRequest.current?.id === id) {
@@ -2146,13 +2179,136 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return () => clearTimeout(timer);
   }, [initialPlan, readOnly, planning.draft, plannerStatusKnown, planningUnavailableReason, runUnavailableReason,
     canInitialize, recoveryLoaded, recoveryChecking, planningRecovery?.pending]);
+  // ---- one conversation, routed by the server (assistantRouting.ts) -----------------------------------
+  // Where the host also does tasks, each message goes to the server first, which says whether it arranges the
+  // canvas or becomes a task. A message the router cannot answer for is planned: a plan is undone in one step
+  // and makes one call, where a task makes up to sixteen and acts in a workspace.
+  // A message joins the conversation once it is handled. Until then the box keeps it and the conversation shows it
+  // pending, so a stop, a refusal or leaving the page never strands it.
+  const unifiedHost = assistantExecution && routeAssistant ? assistantExecution : undefined;
+  const executionRef = useRef(assistantExecution);
+  executionRef.current = assistantExecution;
+  // Handlers resume after awaiting the server; what they read then is the latest render's (set below).
+  const assistantLatest = useRef<{ planBlocker: typeof planBlocker; sendPlanningMessage: typeof sendPlanningMessage;
+    canUndoPlan: boolean; undo: typeof undo } | null>(null);
+  // Routing needs to know whether a task can start, so a canvas that routes has the service read once it opens.
+  useEffect(() => { if (!readOnly && routeAssistant) executionRef.current?.activate(); }, [readOnly, routeAssistant]);
+  // A start reconciled in this page names its task, and the latest unconfirmed request becomes that task's turn.
+  const confirmedTask = assistantExecution?.confirmedTask;
+  useEffect(() => {
+    if (!confirmedTask || readOnly) return;
+    setPlanning(previous => {
+      if (previous.messages.some(message => message.taskId === confirmedTask)) return previous;
+      let index = -1;
+      previous.messages.forEach((message, at) => { if (message.status === 'unconfirmed') index = at; });
+      if (index < 0) return previous;
+      const { status: _status, ...reply } = previous.messages[index];
+      const messages = [...previous.messages];
+      messages[index] = { ...reply, content: '', taskId: confirmedTask };
+      return { ...previous, messages };
+    });
+  }, [confirmedTask, readOnly]);
+  useEffect(() => () => { pendingRef.current?.controller?.abort(); pendingRef.current = null; }, []);
+  const planAvailable = !readOnly && !planningUnavailableReason;
+  const assistantRoutes = (): AssistantRoute[] => {
+    const routes: AssistantRoute[] = [];
+    if (planAvailable) routes.push('plan');
+    if (assistantExecution?.ready && !assistantExecution.readOnly) routes.push('execute');
+    return routes;
+  };
+  const failureText = (error: unknown) => error instanceof Error && error.message ? error.message : t('assistant.unavailable');
+  const userTurn = (id: string, prompt: string, route: AssistantRoute) => ({ id: `${id}-user`, role: 'user' as const, content: prompt, route });
+  // A message routed to a task. Started, it joins the conversation with its task; refused, with the reason, and the
+  // box keeps it; unconfirmed, the host offers to reconcile it and the box lets it go, so it is not sent twice.
+  const startAssistantTask = async (prompt: string, id: string) => {
+    const host = executionRef.current;
+    if (!host) return;
+    setPending({ id, prompt, phase: 'starting' });
+    try {
+      const taskId = await host.start(prompt);
+      if (!mounted.current) return;
+      setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
+        userTurn(id, prompt, 'execute'), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
+      setAssistantOpen(true);
+      refocus('.awwo-canvas-assistant--panel textarea');
+    } catch (error) {
+      if (!mounted.current) return;
+      const unconfirmed = error instanceof TaskStartUnconfirmed;
+      const reason = unconfirmed ? t('assistant.startUnconfirmed') : failureText(error);
+      if (!unconfirmed) setPlanningError(reason);
+      setPlanning(previous => ({ draft: unconfirmed && previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
+        userTurn(id, prompt, 'execute'), { id: `${id}-task`, role: 'assistant' as const, content: reason,
+          status: unconfirmed ? 'unconfirmed' as const : 'error' as const, route: 'execute' as const }].slice(-60) }));
+    } finally { if (pendingId() === id) setPending(null); }
+  };
+  // A message routed to the canvas: refused with the reason (the box keeps it), or planned.
+  const planRouted = (prompt: string, id: string) => {
+    // The planner takes at most 8000 bytes. A longer message is not turned into a task for its length: the
+    // reply says so, the box keeps it, and 「换一种方式」 offers the task.
+    if (new TextEncoder().encode(prompt).length > 8000) {
+      setPlanning(previous => ({ ...previous, messages: [...previous.messages, userTurn(id, prompt, 'plan'),
+        { id: `${id}-assistant`, role: 'assistant' as const, content: t('assistant.tooLongToPlan'), status: 'error' as const, route: 'plan' as const }].slice(-60) }));
+      return;
+    }
+    const blocked = assistantLatest.current!.planBlocker();
+    if (blocked !== null) { setPlanningError(blocked || t('assistant.notNow')); return; }
+    void assistantLatest.current!.sendPlanningMessage(prompt);
+  };
+  const sendAssistantMessage = async () => {
+    if (!unifiedHost || !routeAssistant) { void sendPlanningMessage(); return; }
+    if (readOnlyRef.current || pendingRef.current || planningRequest.current) return;
+    const prompt = planning.draft.trim();
+    if (!prompt) return;
+    const routes = assistantRoutes();
+    if (!routes.length) { setPlanningError(planningUnavailableReason || t('assistant.unavailable')); return; }
+    const id = `turn-${Date.now()}-${++planningSequence.current}`;
+    setPlanningError('');
+    let route: AssistantRoute = routes.includes('plan') ? 'plan' : routes[0];
+    if (routes.length > 1) {
+      const controller = new AbortController();
+      const request = assistantRouteRequest(prompt, routes, docRef.current, planning.messages);
+      setPending({ id, prompt, phase: 'routing' }, controller);
+      try { route = await routeAssistant(request, controller.signal); }
+      catch { /* The router did not answer: the message is handled the default way rather than lost. */ }
+      // Stopped while it was routed (the box still holds it), or the page has gone.
+      if (pendingId() !== id || controller.signal.aborted || !mounted.current) return;
+      setPending(null);
+    }
+    if (route === 'execute') await startAssistantTask(prompt, id);
+    else planRouted(prompt, id);
+  };
+  /** Stops a message being routed; the box still holds it. False when none is. */
+  const cancelRouting = () => {
+    const current = pendingRef.current;
+    if (current?.pending.phase !== 'routing') return false;
+    current.controller?.abort();
+    setPending(null);
+    return true;
+  };
+
   const canUndoPlan = !readOnly && !planningBusy && !running && !bindingLocked && history.undo > 0
     && lastPlanRevision !== null && canvasPlanRevision(doc) === lastPlanRevision
-    && Boolean(lastCommit.current?.label.startsWith('ai:'));
+    && Boolean(lastCommit.current?.label.startsWith('ai:')) && canEditStructure();
+  assistantLatest.current = { planBlocker, sendPlanningMessage, canUndoPlan, undo };
+  // The plan reply whose change was undone in this page (its stored reply still says applied), while the canvas is
+  // as the undo left it: a redo brings the change back.
+  const [undonePlan, setUndonePlan] = useState<{ reply: string; revision: string } | null>(null);
+  const undoneHere = (reply: { id: string }) => undonePlan?.reply === reply.id && undonePlan.revision === planRevision;
+  const latestAppliedReply = () => {
+    for (let index = planning.messages.length - 1; index >= 0; index--) {
+      const message = planning.messages[index];
+      if (message.role === 'assistant' && message.status === 'applied') return message.id;
+    }
+    return null;
+  };
   const assistantProps = {
-    messages: planning.messages, draft: planning.draft, busy: planningBusy, error: planningError,
-    ...(plannerProvider === 'jev' ? { submitLabel: locale === 'zh' ? '新增工作流' : 'Add workflow' } : {}),
-    submitDisabled: Boolean(planningUnavailableReason) || (canInitialize && (!recoveryLoaded || recoveryChecking)) || recoveryStopping,
+    // A message being handled shows pending in the conversation; the box keeps it, out of sight, until it is.
+    messages: planning.messages, draft: assistantPending && planning.draft.trim() === assistantPending.prompt ? '' : planning.draft,
+    busy: planningBusy, error: planningError,
+    ...(plannerProvider === 'jev' && !unifiedHost ? { submitLabel: locale === 'zh' ? '新增工作流' : 'Add workflow' } : {}),
+    // Where messages are routed, a closed planner still leaves tasks: the composer waits only when neither is open.
+    submitDisabled: (unifiedHost ? !assistantRoutes().length : Boolean(planningUnavailableReason))
+      || (canInitialize && (!recoveryLoaded || recoveryChecking)) || recoveryStopping,
     ...(planningRecovery?.pending && !planningBusy ? { recovery: {
       prompt: planningRecovery.prompt || '', canResume: planningRecovery.matches === true && Boolean(planningRecovery.operationId),
       busy: !recoveryLoaded || recoveryChecking || recoveryStopping,
@@ -2161,10 +2317,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     } } : {}),
     progress: planningProgress, expectedSeconds: plannerProvider === 'jev' ? undefined : lastPlanSeconds,
     onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
-    onSend: () => { void sendPlanningMessage(); }, onCancel: () => { void cancelPlanning(); },
+    onSend: () => { void sendAssistantMessage(); }, onCancel: () => { if (!cancelRouting()) void cancelPlanning(); },
     onUndo: () => {
+      // undo() can still decline (a node began talking since this render); only an undo that happened is said.
       if (!canUndoPlan) return;
-      undo(); setLastPlanRevision(null);
+      const reply = latestAppliedReply();
+      if (!undo()) return;
+      setLastPlanRevision(null);
+      if (reply) setUndonePlan({ reply, revision: canvasPlanRevision(docRef.current) });
       appendPlanningMessage(`undo-${Date.now()}`, surfaceNotice(t, 'plan_undone'));
     }, canUndo: canUndoPlan,
     runtimeControls: <div className="awwo-planner-connection"><span className={(plannerProvider === 'jev' ? jevStatus?.available : plannerStatus?.available) ? 'is-ready' : ''} />
@@ -2174,27 +2334,110 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     </div>,
   };
 
-  // 直接执行 joins planning only where the host provides it; a read-only canvas keeps just its task history.
-  const executeOnly = readOnly && Boolean(assistantExecution);
-  const assistantModes: AssistantModes | undefined = assistantExecution ? {
-    active: executeOnly ? 'execute' : assistantMode,
-    // An empty canvas plans in its welcome, so choosing 编排画布 there closes the side panel instead.
-    onChange: mode => {
-      setAssistantMode(mode); setAssistantOpen(mode === 'execute' || nodes.length > 0);
-      // The control that was pressed may have gone (the welcome's link, or the panel itself on an empty canvas).
-      refocus(mode === 'execute' ? '.awwo-planner-sidebar .awwo-assistant-mode-switch [aria-pressed="true"]' : '.awwo-canvas-assistant--welcome textarea');
-    },
-    execute: assistantExecution,
-    executeOnly,
+  // The latest request and its reply, which 「换一种方式」 hands over to the other way. A hand-over that fails
+  // changes nothing but says why: a plan on the canvas is undone only once its task exists, and a running task is
+  // stopped only where the canvas can take the request.
+  let lastRequestIndex = -1;
+  planning.messages.forEach((message, index) => { if (message.role === 'user') lastRequestIndex = index; });
+  const lastRequest = lastRequestIndex >= 0 ? planning.messages[lastRequestIndex] : undefined;
+  const lastReply = lastRequest ? planning.messages.slice(lastRequestIndex + 1).find(message => message.role === 'assistant' && message.route) : undefined;
+  const switchToTask = async (prompt: string, planOnCanvas: boolean) => {
+    const host = executionRef.current;
+    if (!host) return;
+    const id = `turn-${Date.now()}-${++planningSequence.current}`;
+    setPlanningError('');
+    setPending({ id, prompt, phase: 'starting' });
+    try {
+      const taskId = await host.start(prompt);
+      if (!mounted.current) return;
+      // A canvas edited since the plan, or busy now, keeps it, and the conversation says so: only an undo that
+      // happened is reported as one.
+      const latest = assistantLatest.current!;
+      const undone = planOnCanvas && latest.canUndoPlan && latest.undo();
+      if (undone) setLastPlanRevision(null);
+      setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
+        ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: undone ? surfaceNotice(t, 'plan_undone') : t('assistant.planKept') }] : []),
+        userTurn(id, prompt, 'execute'), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
+      setAssistantOpen(true);
+      refocus('.awwo-canvas-assistant--panel textarea');
+    } catch (error) {
+      if (!mounted.current) return;
+      // A task that may exist joins the conversation as unconfirmed (out of the box, as it may not be sent again),
+      // and the plan stays until it is known.
+      if (error instanceof TaskStartUnconfirmed) {
+        setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
+          ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: t('assistant.planKept') }] : []), userTurn(id, prompt, 'execute'),
+          { id: `${id}-task`, role: 'assistant' as const, content: t('assistant.startUnconfirmed'), status: 'unconfirmed' as const, route: 'execute' as const }].slice(-60) }));
+      } else setPlanningError(failureText(error));
+    } finally { if (pendingId() === id) setPending(null); }
+  };
+  const switchToCanvas = async (prompt: string, taskId?: string) => {
+    const blocked = planBlocker();
+    if (blocked !== null) { setPlanningError(blocked || t('assistant.canvasBusy')); return; }
+    const host = executionRef.current;
+    if (taskId && host && !host.finished(taskId)) {
+      const id = `turn-${Date.now()}-${++planningSequence.current}`;
+      setPlanningError('');
+      setPending({ id, prompt, phase: 'stopping' });
+      try { await host.stop(taskId); }
+      catch (error) { if (mounted.current) setPlanningError(failureText(error)); return; }
+      finally { if (pendingId() === id) setPending(null); }
+      if (!mounted.current) return;
+      // The canvas may have become busy while the task stopped.
+      const again = assistantLatest.current!.planBlocker();
+      if (again !== null) { setPlanningError(`${t('assistant.taskStopped')}${again || t('assistant.canvasBusy')}`); return; }
+    }
+    void assistantLatest.current!.sendPlanningMessage(prompt);
+  };
+  const switchLastRequest = (to: AssistantRoute) => {
+    if (!lastRequest || !lastReply || pendingRef.current || planningRequest.current) return;
+    if (to === 'plan') { void switchToCanvas(lastRequest.content, lastReply.taskId); return; }
+    const planOnCanvas = lastReply.status === 'applied' && !undoneHere(lastReply);
+    if (planOnCanvas && !canUndoPlan) return;
+    // A node that began talking since this render would keep the plan from being undone once the task exists.
+    if (planOnCanvas && !canEditStructure()) { setPlanningError(surfaceNotice(t, 'planning_busy')); return; }
+    void switchToTask(lastRequest.content, planOnCanvas);
+  };
+  const switchRoute = unifiedHost && !readOnly && lastRequest?.route && lastReply && !assistantPending && !planningBusy
+    ? lastRequest.route === 'plan'
+      ? (unifiedHost.ready && (lastReply.status !== 'applied' || undoneHere(lastReply) || canUndoPlan)
+        ? { to: 'execute' as const, onSwitch: () => switchLastRequest('execute') } : undefined)
+      // A task whose start is unconfirmed may exist: it is reconciled, never planned over.
+      : (planAvailable && lastReply.status !== 'unconfirmed' ? { to: 'plan' as const, onSwitch: () => switchLastRequest('plan') } : undefined)
+    : undefined;
+  // Tasks the conversation mentions; the host lists the canvas's others (earlier ones, other devices') at its top.
+  const mentionedTasks = useMemo(() => new Set(planning.messages.flatMap(message => message.taskId ? [message.taskId] : [])), [planning.messages]);
+  // With the planner closed, tasks are the one way left, and the composer says so.
+  const routeNotice = unifiedHost && planningUnavailableReason && unifiedHost.ready ? t('assistant.executeOnly') : undefined;
+  const unified: UnifiedAssistant | undefined = assistantExecution ? {
+    ...(assistantPending ? { pending: assistantPending } : {}),
+    renderTask: assistantExecution.renderTask,
+    earlier: assistantExecution.renderEarlier(mentionedTasks, readOnly),
+    notices: assistantExecution.renderNotices(planAvailable),
+    settings: assistantExecution.settings,
+    ...(switchRoute ? { switchRoute } : {}),
+    ...(routeNotice ? { notice: routeNotice } : {}),
+    readOnly,
   } : undefined;
+  // A read-only canvas shows its tasks; an editable one draws the panel for a canvas to work on or a conversation
+  // with tasks, which needs no canvas.
+  const viewerTasks = readOnly && Boolean(assistantExecution);
   // Closing the panel can take the pressed control with it (its close button; on an empty canvas the toggle).
   const closeAssistant = () => {
     setAssistantOpen(false);
-    refocus(nodes.length || executeOnly ? '.awwo-assistant-toggle' : '.awwo-canvas-assistant--welcome textarea');
+    refocus(nodes.length || viewerTasks || mentionedTasks.size ? '.awwo-assistant-toggle' : '.awwo-canvas-assistant--welcome textarea');
   };
-  // The side panel, when it is drawn: planning needs a canvas to work on; a task conversation does not.
-  const assistantPanel = assistantOpen && (executeOnly || (!readOnly && (nodes.length > 0 || assistantModes?.active === 'execute')))
-    ? <CanvasAssistant mode="panel" {...assistantProps} modes={assistantModes} onClose={() => closeAssistant()} /> : undefined;
+  const assistantPanel = assistantOpen && (viewerTasks || (!readOnly && (nodes.length > 0 || mentionedTasks.size > 0)))
+    ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} onClose={() => closeAssistant()} /> : undefined;
+  const panelShown = Boolean(assistantPanel);
+  // Tasks are read while the conversation is on screen: in the side panel, or in the welcome of an empty canvas,
+  // which draws it (its tasks and the canvas's earlier ones) once there is one. A viewer's host reads nothing before.
+  const tasksShown = panelShown || (!readOnly && !nodes.length && planning.messages.length > 0);
+  useEffect(() => {
+    if (tasksShown) executionRef.current?.activate();
+    executionRef.current?.setVisible(tasksShown);
+  }, [tasksShown]);
+  useEffect(() => () => executionRef.current?.setVisible(false), []);
 
   const addPaletteModel = (model: ModelPaletteSelection, personaId: AgentTemplateId | null, world?: { x: number; y: number }) => {
     if (!canEditStructure() || planningBusy || paletteLoading || paletteError || !cloudScope
@@ -2241,7 +2484,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <option value="pi">{locale === 'zh' ? '工作区默认模型' : 'Workspace default'}</option>
       </select></label>
       {plannerProvider === 'jev' ? <small>{jevStatus?.error || (locale === 'zh' ? '选择人设与执行模型，新增最多 3 个节点。' : 'Select personas and models for up to 3 new nodes.')}</small> : null}
-      {nodes.length > 0 && <button type="button" disabled={planningBusy} onClick={() => { setAssistantMode('plan'); setAssistantOpen(true); }}>{locale === 'zh' ? '开始编排' : 'Start planning'}</button>}
+      {nodes.length > 0 && <button type="button" disabled={planningBusy} onClick={() => setAssistantOpen(true)}>{locale === 'zh' ? '开始编排' : 'Start planning'}</button>}
     </div>} /> : undefined;
 
   const currentModelCatalogue = cloudScope && palette?.tenantId === cloudScope.tenant.id && palette.canvasId === cloudScope.canvasId
@@ -2277,12 +2520,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       onFocusNode={focusNode} onAddAgent={addAgent} loadWorkspaceAgents={loadWorkspaceAgents} agentLibraryRequest={agentLibraryRequest} onAddWorkspaceAgent={addWorkspaceAgent} onAddMarketAgent={loadWorkspaceAgents ? addMarketAgent : undefined} onCreateTemplate={createTemplate}
       onSearch={() => { changeStageView('canvas'); setBarMode('search'); }}
       assistant={assistantPanel}
-      // While the side panel already shows the task conversation, the welcome stops offering it.
-      welcome={readOnly ? undefined : <CanvasAssistant mode="welcome" {...assistantProps}
-        modes={assistantOpen && assistantModes?.active === 'execute' ? undefined : assistantModes} />}
-      // The toggle reports the panel as it is drawn; a viewer can open the task history even on an empty canvas.
-      assistantOpen={Boolean(assistantPanel)} assistantAvailable={executeOnly}
-      onToggleAssistant={readOnly && !executeOnly ? undefined : () => { if (assistantPanel) closeAssistant(); else setAssistantOpen(true); }}
+      // One composer at a time: on an empty canvas whose conversation is in the side panel, the welcome steps aside.
+      welcome={readOnly || assistantPanel ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} unified={unified} />}
+      // The toggle reports the panel as it is drawn; tasks need no canvas, so it is offered on an empty one with them.
+      assistantOpen={panelShown} assistantAvailable={viewerTasks || mentionedTasks.size > 0}
+      onToggleAssistant={readOnly && !assistantExecution ? undefined : () => { if (assistantPanel) closeAssistant(); else setAssistantOpen(true); }}
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
       headerTitle={headerTitle} headerActions={headerActions} canvasTools={canvasTools}

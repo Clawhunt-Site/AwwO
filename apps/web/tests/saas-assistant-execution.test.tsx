@@ -1,10 +1,12 @@
-import { StrictMode } from 'react';
+import { Fragment, StrictMode, useEffect, useState } from 'react';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AssistantExecution } from '../src/saas/AssistantExecution';
+import { TaskStartUnconfirmed } from '../src/canvas/assistantRouting';
+import { executionHost } from '../src/saas/AssistantExecution';
 import { executionModelKey, useManagedExecution } from '../src/saas/useManagedExecution';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { readExecutionRuntime } from '../src/saas/managedExecutionApi';
+import { SaaSApiError } from '../src/saas/api';
 import { clearSaaSCanvas, configureCanvasKnowledge, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
 const base = '/api/v1/tenants/tenant-a';
@@ -20,21 +22,50 @@ const detail = { ...summary, output: '', error: '', canRespond: true, canCancel:
 const source = { id: 'source-a', kind: 'source', title: '汇总原件', content: '# 项目汇总', version: 1, currentRevisionId: 'rev-a', contentHash: 'hash-a', sourceUri: '', provenance: { artifactId: 'artifact-a', runId: 'run-a' }, createdAt: time, updatedAt: time };
 const tenant = { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 
-function Harness({ tenantId = 'tenant-a', canvasId = 'canvas-a', readOnly = false }: { tenantId?: string; canvasId?: string; readOnly?: boolean }) {
+// What the canvas does with the host: activates it when it opens, shows the conversation, and sends a message
+// the server routed to execution through start. The composer here stands in for the assistant's one composer.
+function Conversation({ execution, open = true }: { execution: ReturnType<typeof useManagedExecution>; open?: boolean }) {
+  const host = executionHost(execution);
+  const [tasks, setTasks] = useState<Array<{ id: string; prompt: string }>>([]);
+  const [text, setText] = useState('');
+  const [failure, setFailure] = useState('');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { execution.activate(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { execution.setVisible(open); }, [open]);
+  if (!open) return null;
+  const send = () => {
+    setFailure('');
+    const prompt = text;
+    host.start(prompt).then(id => { setTasks(previous => [...previous, { id, prompt }]); setText(''); }, (error: Error) => setFailure(error.message));
+  };
+  return <div className="awwo-assistant-messages" role="log" aria-label="执行记录">
+    {host.renderEarlier(new Set(tasks.map(task => task.id)), true)}
+    <ol>{tasks.map(task => <Fragment key={task.id}><li>{task.prompt}</li><li>{host.renderTask(task.id)}</li></Fragment>)}</ol>
+    {host.renderNotices(true)}
+    {host.settings}
+    {!execution.readOnly && <form onSubmit={event => { event.preventDefault(); send(); }}>
+      <textarea aria-label="任务说明" value={text} disabled={execution.busy} onChange={event => setText(event.target.value)} />
+      <button type="submit" disabled={!host.ready || execution.busy || !text.trim()}>开始执行</button>
+    </form>}
+    {failure && <p role="alert">{failure}</p>}
+  </div>;
+}
+function Harness({ tenantId = 'tenant-a', canvasId = 'canvas-a', readOnly = false, open = true }: { tenantId?: string; canvasId?: string; readOnly?: boolean; open?: boolean }) {
   const execution = useManagedExecution(tenantId, canvasId, { readOnly });
-  return <AssistantExecution execution={execution} />;
+  return <Conversation key={`${tenantId}/${canvasId}`} execution={execution} open={open} />;
 }
 const view = (props: Parameters<typeof Harness>[0] = {}) => <SaaSPreferencesProvider><Harness {...props} /></SaaSPreferencesProvider>;
 const defaultResponse = (url: string) => url.endsWith('/computer-runtime') ? runtime : url.endsWith('/computer-runs') ? { items: [summary] } : detail;
 const posts = (fetcher: ReturnType<typeof vi.fn>) => fetcher.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
 /** The composer is ready once the catalogue has loaded and offered its model. */
-const composerReady = () => screen.findByText('模型：已有模型连接');
+const composerReady = () => screen.findByText('直接执行用：已有模型连接');
 const task = () => screen.getByRole('textbox', { name: '任务说明' });
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearSaaSCanvas(); });
 
-describe('the canvas assistant’s 直接执行 mode', () => {
-  it('reads nothing until the mode is first opened', async () => {
+describe('the canvas assistant’s tasks', () => {
+  it('reads nothing until the canvas activates it', async () => {
     const fetcher = vi.fn(async (url: string) => json(defaultResponse(url)));
     vi.stubGlobal('fetch', fetcher);
     renderHook(() => useManagedExecution('tenant-a', 'canvas-a'), { wrapper: SaaSPreferencesProvider });
@@ -45,12 +76,12 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual(expect.arrayContaining([`${base}/computer-runtime`, `${base}/canvases/canvas-a/computer-runs`, `${base}/computer-runs/run-a`]));
   });
 
-  it('reads the history again when the mode is opened again, keeping the open task', async () => {
+  it('reads the history again when the conversation is shown again, keeping the open task', async () => {
     let items = [summary];
     const fetcher = vi.fn(async (url: string) => json(url.endsWith('/computer-runs') ? { items } : defaultResponse(url)));
     function Reopen({ open }: { open: boolean }) {
       const execution = useManagedExecution('tenant-a', 'canvas-a');
-      return open ? <AssistantExecution execution={execution} /> : null;
+      return <Conversation execution={execution} open={open} />;
     }
     vi.stubGlobal('fetch', fetcher);
     const { rerender } = render(<SaaSPreferencesProvider><Reopen open /></SaaSPreferencesProvider>);
@@ -87,7 +118,7 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     render(view()); expect(await screen.findByText(reason)).toBeVisible();
     expect(screen.queryByText(service.reason)).toBeNull();
     expect(screen.getByRole('link', { name: '管理我的引擎' })).toHaveAttribute('href', '/?account=engines');
-    expect(screen.getByRole('button', { name: '重新检查' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '重新检查执行服务' })).toBeEnabled();
   });
 
   it('re-reads the service only when asked to check again', async () => {
@@ -98,7 +129,7 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     const reads = () => fetcher.mock.calls.filter(([url]) => url.endsWith('/computer-runtime')).length;
     expect(reads()).toBe(1);
     ready = true;
-    fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新检查执行服务' }));
     await composerReady();
     expect(reads()).toBe(2);
     expect(screen.queryByText('当前没有可用模型')).toBeNull();
@@ -113,16 +144,6 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     render(<StrictMode>{view()}</StrictMode>);
     await composerReady();
     expect(reads).toBe(1); expect(screen.queryByRole('alert')).toBeNull();
-  });
-
-  it('offers example tasks on an empty history and puts the chosen one in the composer without sending it', async () => {
-    const fetcher = vi.fn(async (url: string) => json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url)));
-    vi.stubGlobal('fetch', fetcher); render(view());
-    await composerReady();
-    const examples = within(screen.getByRole('group', { name: '示例任务' }));
-    fireEvent.click(examples.getAllByRole('button')[0]);
-    expect(task()).toHaveValue('把这份需求整理成一页可打开的 HTML 原型，交付 index.html。');
-    expect(posts(fetcher)).toHaveLength(0);
   });
 
   it('runs a task as a conversation: the question, a one-time approval, the result, a download and saving to knowledge', async () => {
@@ -157,6 +178,8 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     expect(screen.getByText(/"command": "write report.md"/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '允许一次' }));
     await screen.findByText('项目汇总已生成');
+    // The response's 'being checked' line is answered by the task's end, and goes.
+    await waitFor(() => expect(screen.queryByText('回应已提交，正在核对任务状态。')).toBeNull());
     expect(screen.getByRole('link', { name: '下载：report.md' })).toHaveAttribute('href', `${base}/artifacts/artifact-a`);
     const responses = fetcher.mock.calls.filter(([url]) => url.endsWith('/respond')).map(([, init]) => JSON.parse(String(init?.body)));
     expect(responses[0]).toMatchObject({ requestId: 'question-a', behavior: 'allow', message: 'Markdown' });
@@ -194,17 +217,17 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     });
     vi.stubGlobal('fetch', fetcher); render(view()); await composerReady();
     fireEvent.change(screen.getByLabelText('思考强度'), { target: { value: 'medium' } });
-    expect(screen.getByText('模型：已有模型连接 · medium')).toBeVisible();
-    fireEvent.change(screen.getByLabelText('执行模型'), { target: { value: executionModelKey('pi', 'plain_model') } });
+    expect(screen.getByText('直接执行用：已有模型连接 · medium')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('pi', 'plain_model') } });
     expect(screen.queryByLabelText('思考强度')).toBeNull();
-    fireEvent.change(screen.getByLabelText('执行模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_a') } });
+    fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_a') } });
     expect(screen.getByLabelText('思考强度')).toHaveValue('');
     // A level the next model also offers is still reset: effort belongs to the model it was chosen for.
     fireEvent.change(screen.getByLabelText('思考强度'), { target: { value: 'low' } });
-    fireEvent.change(screen.getByLabelText('执行模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_c') } });
+    fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_c') } });
     expect(screen.getByLabelText('思考强度')).toHaveValue('');
-    fireEvent.change(screen.getByLabelText('执行模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_a') } });
-    fireEvent.change(screen.getByLabelText('执行模型'), { target: { value: executionModelKey('pi', 'plain_model') } });
+    fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_a') } });
+    fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('pi', 'plain_model') } });
     fireEvent.change(task(), { target: { value: '生成报告' } });
     fireEvent.click(screen.getByRole('button', { name: '开始执行' }));
     await waitFor(() => expect(posts(fetcher)).toHaveLength(1));
@@ -221,17 +244,16 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     act(() => result.current.activate());
     await waitFor(() => expect(result.current.runtime).not.toBeNull());
     act(() => result.current.chooseModel(executionModelKey('openai-agents', 'byok_model_b')));
-    act(() => result.current.setPrompt('生成报告'));
-    expect(result.current.canSubmit).toBe(true);
+    expect(result.current.startBlockedReason).toBeUndefined();
     service = runtime;
     act(() => result.current.refreshAll());
     await waitFor(() => expect(result.current.choice.unavailableLabel).toBe('第二个模型'));
     expect(result.current.choice.key).toBe(executionModelKey('openai-agents', 'byok_model_b'));
-    expect(result.current.canSubmit).toBe(false);
-    expect(result.current.submitBlockedReason).toBe('所选模型已不可用，请重新选择。');
+    expect(result.current.startBlockedReason).toBe('所选模型已不可用，请重新选择。');
+    await expect(result.current.start('生成报告')).rejects.toThrow('所选模型已不可用，请重新选择。');
     act(() => result.current.chooseModel(executionModelKey('openai-agents', 'byok_model_a')));
     expect(result.current.choice.unavailableLabel).toBeUndefined();
-    expect(result.current.canSubmit).toBe(true);
+    expect(result.current.startBlockedReason).toBeUndefined();
   });
 
   it('keeps a model the refreshed list dropped, first and marked unavailable, instead of silently replacing it', async () => {
@@ -239,18 +261,18 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     const fetcher = vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? service : url.endsWith('/computer-runs') ? { items: [] } : detail));
     vi.stubGlobal('fetch', fetcher); render(view()); await composerReady();
     expect(screen.getByRole('link', { name: '管理我的引擎' })).toHaveAttribute('href', '/?account=engines');
-    fireEvent.change(screen.getByLabelText('执行模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_b') } });
+    fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_b') } });
     // The engine is removed in My engines; the list is read again only when asked.
     service = runtime;
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/computer-runtime'))).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
-    expect(await screen.findByText('模型：第二个模型（已不可用）')).toBeVisible();
-    const select = screen.getByLabelText('执行模型') as HTMLSelectElement;
+    expect(await screen.findByText('直接执行用：第二个模型（已不可用）')).toBeVisible();
+    const select = screen.getByLabelText('直接执行的模型') as HTMLSelectElement;
     expect(select).toHaveValue(executionModelKey('openai-agents', 'byok_model_b'));
     expect(select.options[0]).toHaveTextContent('第二个模型（已不可用）');
     expect(select.options[0].disabled).toBe(true);
     fireEvent.change(task(), { target: { value: '生成报告' } });
-    expect(screen.getByText('所选模型已不可用，请重新选择。')).toBeVisible();
+    // A task cannot start, so the assistant's messages are planned until another model is chosen.
     expect(screen.getByRole('button', { name: '开始执行' })).toBeDisabled();
     fireEvent.change(select, { target: { value: executionModelKey('openai-agents', 'byok_model_a') } });
     expect(screen.getByRole('button', { name: '开始执行' })).toBeEnabled();
@@ -339,7 +361,6 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     if (readOnly) {
       expect(screen.queryByRole('form', { name: '执行任务' })).toBeNull();
       expect(screen.queryByRole('button', { name: '存入知识库' })).toBeNull();
-      expect(screen.getByText('只读访问：可以查看执行记录，不能发起任务。')).toBeVisible();
       // Reading stays available: the file still downloads.
       expect(screen.getByRole('link', { name: '下载：report.md' })).toBeVisible();
     }
@@ -352,6 +373,186 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     await screen.findByText('停止请求已提交，正在核对结果。');
     expect(fetcher.mock.calls.find(([url]) => url.endsWith('/cancel'))).toEqual([`${base}/runs/run-a/cancel`, expect.objectContaining({ method: 'POST', body: '{}' })]);
     expect(screen.queryByText('任务已停止。')).toBeNull();
+  });
+
+  it('reads a task it is not showing before stopping it, and stops none that has ended', async () => {
+    const other = { ...summary, id: 'run-b', prompt: '另一个任务', createdAt: '2026-10-01T00:00:00Z' };
+    const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => {
+      if (url.endsWith('/cancel')) return json({ id: 'run-a', status: 'cancelled' });
+      if (url.endsWith('/computer-runs')) return json({ items: [summary, other] });
+      if (url.endsWith('/computer-runs/run-b')) return json({ ...detail, ...other, status: 'completed', canCancel: false });
+      return json(defaultResponse(url));
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a'), { wrapper: SaaSPreferencesProvider });
+    act(() => { result.current.activate(); result.current.setVisible(true); });
+    await waitFor(() => expect(result.current.run?.id).toBe('run-a'));
+    // The list, read once, still has run-b running; it has ended since.
+    expect(result.current.finished('run-b')).toBe(false);
+    await act(async () => { await result.current.stopTask('run-b'); });
+    expect(fetcher.mock.calls.map(([url]) => url)).toContain(`${base}/computer-runs/run-b`);
+    expect(posts(fetcher)).toHaveLength(0);
+    await act(async () => { await result.current.stopTask('run-a'); });
+    expect(posts(fetcher).map(([url]) => url)).toEqual([`${base}/runs/run-a/cancel`]);
+  });
+
+  it('rejects a start whose outcome is unknown as unconfirmed, and a refused one as an error to show', async () => {
+    let refuse = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? refuse ? json({ error: { code: 'invalid_request', message: '任务内容无效' } }, 400) : json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const started = async () => {
+      const { result, unmount } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a'), { wrapper: SaaSPreferencesProvider });
+      act(() => result.current.activate());
+      await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+      let failure: unknown;
+      await act(async () => { failure = await result.current.start('生成报告').catch((error: unknown) => error); });
+      const pending = result.current.pendingSubmission;
+      unmount();
+      return { failure, pending };
+    };
+    const unknown = await started();
+    expect(unknown.failure).toBeInstanceOf(TaskStartUnconfirmed);
+    expect(unknown.pending).not.toBeNull();
+    refuse = true;
+    const refused = await started();
+    expect(refused.failure).toBeInstanceOf(Error);
+    expect(refused.failure).not.toBeInstanceOf(TaskStartUnconfirmed);
+    expect(refused.pending).toBeNull();
+  });
+
+  it('names the task a reconcile confirmed, for the canvas’s unconfirmed request', async () => {
+    const creations: Array<{ operationId: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/computer-runs') && init.method === 'POST') {
+        creations.push(JSON.parse(String(init.body)));
+        return creations.length === 1 ? json({ error: { code: 'unknown', message: '连接中断' } }, 503) : json({ id: `run-z${creations.length > 2 ? '2' : ''}`, status: 'running' }, 202);
+      }
+      return json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url));
+    }));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a'), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    expect(result.current.confirmedTask).toBe('');
+    expect(executionHost(result.current).confirmedTask).toBeUndefined();
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.confirmedTask).toBe('run-z'));
+    expect(executionHost(result.current).confirmedTask).toBe('run-z');
+    // The same text sent again later is a new task, not a replay of the reconciled one.
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const operations = creations.map(body => body.operationId);
+    expect(operations).toHaveLength(3);
+    expect(operations[1]).toBe(operations[0]);
+    expect(operations[2]).not.toBe(operations[0]);
+  });
+
+  it('leaves a refused start’s and stop’s words to the canvas: one message, in the reader’s words', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/computer-runs') && init.method === 'POST') return json({ error: { code: 'forbidden', message: 'Forbidden' } }, 403);
+      if (url.endsWith('/cancel')) return json({ error: { code: 'invalid_state', message: 'Run is not active' } }, 400);
+      if (url.endsWith('/computer-runs/run-gone')) return json({ error: { code: 'not_found', message: 'Not found' } }, 404);
+      return json(url.endsWith('/computer-runs') ? { items: [summary] } : defaultResponse(url));
+    }));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a'), { wrapper: SaaSPreferencesProvider });
+    act(() => { result.current.activate(); result.current.setVisible(true); });
+    await waitFor(() => expect(result.current.run?.id).toBe('run-a'));
+    let stopFailure: unknown;
+    await act(async () => { stopFailure = await result.current.stopTask('run-a').catch((error: unknown) => error); });
+    expect(stopFailure).toBeInstanceOf(Error);
+    expect(stopFailure).not.toBeInstanceOf(SaaSApiError);
+    // A task it is not showing is read first; that read fails in the reader's words too.
+    let readFailure: unknown;
+    await act(async () => { readFailure = await result.current.stopTask('run-gone').catch((error: unknown) => error); });
+    expect(readFailure).toBeInstanceOf(Error);
+    expect(readFailure).not.toBeInstanceOf(SaaSApiError);
+    let startFailure: unknown;
+    await act(async () => { startFailure = await result.current.start('生成报告').catch((error: unknown) => error); });
+    expect(startFailure).toBeInstanceOf(Error);
+    expect(startFailure).not.toBeInstanceOf(SaaSApiError);
+    // The canvas says it; the host shows no second alert of its own, and forgets what a lost access read.
+    expect(result.current.error).toBeNull();
+    expect(result.current.history.items).toEqual([]);
+  });
+
+  it.each([true, false])('says where messages go while tasks cannot start, as far as the canvas can take them (planAvailable=%s)', async planAvailable => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? disabled : url.endsWith('/computer-runs') ? { items: [] } : detail)));
+    function Notices() {
+      const execution = useManagedExecution('tenant-a', 'canvas-a');
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      useEffect(() => { execution.activate(); }, []);
+      return <>{executionHost(execution).renderNotices(planAvailable)}</>;
+    }
+    render(<SaaSPreferencesProvider><Notices /></SaaSPreferencesProvider>);
+    const box = await screen.findByText(/暂时不能直接执行任务。/);
+    if (planAvailable) expect(box).toHaveTextContent('消息会用来调整画布。');
+    else expect(box).not.toHaveTextContent('消息会用来调整画布。');
+  });
+
+  it('says why a task cannot start when the service is ready but no model is chosen', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? { ...runtime, models: [] } : url.endsWith('/computer-runs') ? { items: [] } : detail)));
+    function Notices() {
+      const execution = useManagedExecution('tenant-a', 'canvas-a');
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      useEffect(() => { execution.activate(); }, []);
+      return <>{executionHost(execution).renderNotices(true)}</>;
+    }
+    render(<SaaSPreferencesProvider><Notices /></SaaSPreferencesProvider>);
+    expect(await screen.findByText('暂时不能直接执行任务：先选择执行模型。 消息会用来调整画布。')).toBeVisible();
+  });
+
+  it.each([
+    ['computer_busy', '工作区正忙：它一次只运行一个任务。等当前任务结束后再试。'],
+    ['credits_exhausted', '本期套餐点数已用完。可以把节点换成默认模型继续，点数在下次续费后重置；需要更多点数可以请工作区所有者在「套餐与点数」里升级。'],
+    ['some_new_code', '任务没有完成（some_new_code）。'],
+  ])('says why a task ended without its result (%s) as a sentence', async (code, sentence) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/run-a') ? { ...detail, status: 'failed', error: code, canRespond: false, canCancel: false, approvals: [] } : defaultResponse(url))));
+    render(view());
+    expect(await screen.findByText(sentence)).toBeVisible();
+  });
+
+  it('keeps a known service ready while it is read again', async () => {
+    let hold = false;
+    let release = () => {};
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/computer-runtime') && hold) await new Promise<void>(resolve => { release = resolve; });
+      return json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url));
+    }));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a'), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    hold = true;
+    act(() => result.current.refreshAll());
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    expect(result.current.startBlockedReason).toBeUndefined();
+    await act(async () => { release(); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it.each([true, false])('says when the canvas’s tasks could not be read, and reads them again on request (readOnly=%s)', async readOnly => {
+    let runs: 'hold' | 'fail' | 'none' = readOnly ? 'hold' : 'fail';
+    let release = () => {};
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/computer-runs')) {
+        if (runs === 'hold') await new Promise<void>(resolve => { release = resolve; });
+        return runs === 'none' ? json({ items: [] }) : json({ error: { code: 'unavailable', message: '暂时不可用' } }, 503);
+      }
+      return json(defaultResponse(url));
+    }));
+    render(view({ readOnly }));
+    if (readOnly) {
+      // A viewer has only the list, so it says it is being read.
+      expect(await screen.findByText('正在读取这张画布的任务…')).toBeVisible();
+      runs = 'fail';
+      await act(async () => { release(); });
+    }
+    expect(await screen.findByText('没读到这张画布的任务。')).toBeVisible();
+    expect(screen.queryByRole('alert')).toBeNull();
+    runs = 'none';
+    fireEvent.click(screen.getByRole('button', { name: '重新读取' }));
+    await waitFor(() => expect(screen.queryByText('没读到这张画布的任务。')).toBeNull());
+    if (readOnly) expect(screen.getByText('这张画布还没有任务。')).toBeVisible();
+    else expect(screen.queryByText('这张画布还没有任务。')).toBeNull();
   });
 
   it('never resubmits an uncertain creation and reconciles it with exactly the original identity', async () => {
@@ -367,10 +568,10 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     vi.stubGlobal('fetch', fetcher); render(view()); await composerReady();
     fireEvent.change(task(), { target: { value: '生成报告' } });
     fireEvent.click(screen.getByRole('button', { name: '开始执行' }));
-    await screen.findByText('上一次提交的结果还没确认。核对会用原来的提交标识，不会多建一个任务。');
+    await screen.findByText('上一次提交的任务结果还没确认。核对会用原来的提交标识，不会多建一个任务。');
     expect(inputs).toHaveLength(1);
+    // Until it is reconciled no task starts: the assistant's messages are planned meanwhile.
     expect(screen.getByRole('button', { name: '开始执行' })).toBeDisabled();
-    expect(task()).toBeDisabled();
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
     expect(inputs).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: '核对上次提交' }));
@@ -421,12 +622,13 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     expect(posts(fetcher)).toHaveLength(0);
   });
 
-  it('says why a task cannot be sent instead of only disabling the button', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
-    render(view()); await composerReady();
+  it('says why a task cannot be started, and sends nothing', async () => {
+    const fetcher = vi.fn(async (url: string) => json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url)));
+    vi.stubGlobal('fetch', fetcher); render(view()); await composerReady();
     fireEvent.change(task(), { target: { value: 'x'.repeat(32769) } });
-    expect(screen.getByText('任务内容最多 32 KiB。')).toBeVisible();
-    expect(screen.getByRole('button', { name: '开始执行' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '开始执行' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('任务内容最多 32 KiB。');
+    expect(posts(fetcher)).toHaveLength(0);
   });
 
   it('aborts the old canvas’s read and never shows its late messages after switching canvas', async () => {
@@ -452,7 +654,7 @@ describe('the canvas assistant’s 直接执行 mode', () => {
     // The state lives with the canvas page; the conversation comes and goes with the mode and the panel.
     function Page({ open }: { open: boolean }) {
       const execution = useManagedExecution('tenant-a', 'canvas-a');
-      return open ? <AssistantExecution execution={execution} /> : null;
+      return <Conversation execution={execution} open={open} />;
     }
     vi.stubGlobal('fetch', fetcher);
     const { rerender } = render(<SaaSPreferencesProvider><Page open /></SaaSPreferencesProvider>);

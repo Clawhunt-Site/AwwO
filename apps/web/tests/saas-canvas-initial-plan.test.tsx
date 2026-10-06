@@ -231,7 +231,7 @@ describe('the hosted app carrying a home request through the real planning bridg
     render(<StrictMode><SaaSApp /></StrictMode>);
     await screen.findByRole('button', { name: '继续接收这次规划' });
     expect(planPosts).toBe(1);
-    expect(screen.getByRole('button', { name: '生成画布' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
     expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0);
     fireEvent.change(box(), { target: { value: '之后再做的另一个任务' } });
     remount();
@@ -254,7 +254,7 @@ describe('the hosted app carrying a home request through the real planning bridg
     await screen.findByRole('textbox', { name: '画布需求' });
     await act(async () => { bridge.configureCanvasKnowledge(['knowledge-original']); });
     fireEvent.change(box(), { target: { value: PROMPT } });
-    const generate = screen.getByRole('button', { name: '生成画布' });
+    const generate = screen.getByRole('button', { name: '发送' });
     await waitFor(() => expect(generate).toBeEnabled());
     fireEvent.click(generate);
     await screen.findByRole('button', { name: '继续接收这次规划' });
@@ -340,7 +340,7 @@ describe('the hosted app carrying a home request through the real planning bridg
     fireEvent.click(await screen.findByRole('button', { name: '停止这次规划' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '停止这次规划' })).toBeEnabled());
     expect(screen.queryByText('已取消本次规划，画布未修改。')).toBeNull();
-    expect(screen.getByRole('button', { name: '生成画布' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
     expect(screen.getByRole('group', { name: '上次的规划等待确认' })).toHaveTextContent(PROMPT);
     expect(planPosts).toBe(1);
     expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0);
@@ -348,7 +348,7 @@ describe('the hosted app carrying a home request through the real planning bridg
     fireEvent.click(screen.getByRole('button', { name: '停止这次规划' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: '停止这次规划' })).toBeNull());
     expect(screen.getByText('已取消本次规划，画布未修改。')).toBeVisible();
-    expect(screen.getByRole('button', { name: '生成画布' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled();
     expect(planPosts).toBe(1);
   });
 
@@ -363,7 +363,7 @@ describe('the hosted app carrying a home request through the real planning bridg
     const retry = await screen.findByRole('button', { name: '检查上次规划' });
     await waitFor(() => expect(retry).toBeEnabled());
     expect(screen.getByRole('alert')).toHaveTextContent('无法保存或读取规划恢复记录');
-    expect(screen.getByRole('button', { name: '生成画布' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
     expect(planPosts).toBe(0);
     fault.mockRestore();
     fireEvent.click(retry);

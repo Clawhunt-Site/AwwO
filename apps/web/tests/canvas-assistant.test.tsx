@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
+import { CanvasAssistant, type CanvasAssistantProps, type UnifiedAssistant } from '../src/canvas/CanvasAssistant';
 import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import type { PlanProgress } from '../src/canvas/canvasPlanning';
 
@@ -324,61 +324,125 @@ describe('canvas assistant UI', () => {
   });
 });
 
-describe('the assistant’s two modes', () => {
-  const modes = (overrides: Partial<NonNullable<CanvasAssistantProps['modes']>> = {}) =>
-    ({ active: 'plan' as const, onChange: vi.fn(), execute: <p>任务对话</p>, ...overrides });
+describe('one conversation where the host also does tasks', () => {
+  const unified = (overrides: Partial<UnifiedAssistant> = {}): UnifiedAssistant =>
+    ({ renderTask: id => <p>任务卡片 {id}</p>, ...overrides });
 
-  it('lets the user choose between arranging the canvas and doing a task, and never switches on its own', () => {
-    const choice = modes();
-    const { rerender, container } = render(<Harness mode="panel" modes={choice} />);
-    const group = screen.getByRole('group', { name: '助手模式' });
-    expect(screen.getByRole('button', { name: '编排画布' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: '直接执行' })).toHaveAttribute('aria-pressed', 'false');
-    expect(group).toBeVisible();
-    expect(screen.getByText('说出你要的结果，助手安排节点和连线；每次改动都能撤销。')).toBeVisible();
-    expect(screen.getByRole('textbox', { name: '画布需求' })).toBeVisible();
-    expect(screen.queryByText('任务对话')).toBeNull();
-    // Choosing the mode that is already on does nothing.
-    fireEvent.click(screen.getByRole('button', { name: '编排画布' }));
-    expect(choice.onChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '直接执行' }));
-    expect(choice.onChange).toHaveBeenCalledExactlyOnceWith('execute');
-    rerender(<Harness mode="panel" modes={{ ...choice, active: 'execute' }} />);
-    expect(screen.getByRole('button', { name: '直接执行' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('助手在隔离的工作区里动手完成，交给你文件；做有影响的操作前会先问你。')).toBeVisible();
-    expect(screen.getByText('任务对话')).toBeVisible();
+  it('has no mode to pick: one composer that sends, whatever the message turns out to be', () => {
+    const send = vi.fn();
+    const { rerender } = render(<Harness mode="panel" draft="做一个落地页" onSend={send} unified={unified()} />);
+    expect(screen.queryByRole('group', { name: /模式/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '编排画布' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '直接执行' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveAttribute('placeholder', '说出接下来想要的结果，或交给助手一件事…');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    expect(send).toHaveBeenCalledOnce();
+    rerender(<Harness key="welcome" draft="" unified={unified()} />);
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveAttribute('placeholder', '说出你想要的结果，助手会搭好画布，或直接替你完成…');
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+  });
+
+  it('says on each reply how it was handled, and draws a task where the server made one', () => {
+    render(<Harness mode="panel" unified={unified()} messages={[
+      { id: 'u1', role: 'user', content: '加一个审核节点', route: 'plan' },
+      { id: 'a1', role: 'assistant', content: '已加入审核节点', status: 'applied', route: 'plan' },
+      { id: 'u2', role: 'user', content: '写一封给客户的邮件', route: 'execute' },
+      { id: 'a2', role: 'assistant', content: '', route: 'execute', taskId: 'task-1' },
+    ]} />);
+    const replies = [...document.querySelectorAll('.awwo-assistant-message--assistant')];
+    expect(replies).toHaveLength(2);
+    expect(replies[0]).toHaveTextContent('调整画布');
+    expect(replies[0]).toHaveTextContent('已加入审核节点');
+    expect(replies[1]).toHaveTextContent('直接执行');
+    expect(replies[1]).toHaveTextContent('任务卡片 task-1');
+    // The user's own messages carry no label.
+    expect(screen.getByText('加一个审核节点').closest('li')).not.toHaveTextContent('调整画布');
+  });
+
+  it('shows a message being routed as pending, says so, and lets that be stopped', () => {
+    const cancel = vi.fn();
+    render(<Harness mode="panel" draft="" onCancel={cancel} unified={unified({ pending: { id: 'p', prompt: '做一个落地页', phase: 'routing' } })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('正在判断怎么处理');
+    expect(document.querySelector('.awwo-assistant-message--user.is-pending')).toHaveTextContent('做一个落地页');
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each([['starting', '正在创建任务'], ['stopping', '正在停止任务']] as const)('says a message is %s, with nothing to cancel meanwhile', (phase, headline) => {
+    // Even in the welcome, which otherwise shows no conversation until there is one.
+    render(<Harness draft="" unified={unified({ pending: { id: 'p', prompt: '写一封邮件', phase } })} />);
+    expect(screen.getByRole('status')).toHaveTextContent(headline);
+    expect(document.querySelector('.is-pending')).toHaveTextContent('写一封邮件');
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toBeDisabled();
+  });
+
+  it('gives the focus back to the box once a message has been handled, and takes it from nothing else', () => {
+    const pending = unified({ pending: { id: 'p', prompt: '写一封邮件', phase: 'starting' } });
+    const { rerender } = render(<Harness mode="panel" onClose={() => {}} draft="" unified={pending} />);
+    (document.activeElement as HTMLElement | null)?.blur();
+    rerender(<Harness mode="panel" onClose={() => {}} draft="" unified={unified()} />);
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveFocus();
+    rerender(<Harness mode="panel" onClose={() => {}} draft="" unified={pending} />);
+    screen.getByRole('button', { name: '关闭画布助手' }).focus();
+    rerender(<Harness mode="panel" onClose={() => {}} draft="" unified={unified()} />);
+    expect(screen.getByRole('button', { name: '关闭画布助手' })).toHaveFocus();
+  });
+
+  it('draws the host’s notices above the composer and the model row under it', () => {
+    render(<Harness mode="panel" unified={unified({ notices: <p>任务服务提示</p>, settings: <p>直接执行用的模型</p> })} />);
+    const form = screen.getByRole('form', { name: '画布需求表单' });
+    const before = (node: Node, other: Node) => Boolean(node.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before(screen.getByText('任务服务提示'), form)).toBe(true);
+    expect(before(form, screen.getByText('直接执行用的模型'))).toBe(true);
+  });
+
+  it('keeps an earlier plan’s recovery waiting while a message is handled', () => {
+    render(<Harness mode="panel" recovery={{ prompt: '原来的需求', canResume: true, busy: false, onResume: () => {}, onStop: () => {} }}
+      unified={unified({ pending: { id: 'p', prompt: '写一封邮件', phase: 'routing' } })} />);
+    expect(screen.getByRole('button', { name: '继续接收这次规划' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '停止这次规划' })).toBeDisabled();
+  });
+
+  it('says how messages are handled while one way is closed', () => {
+    render(<Harness mode="panel" unified={unified({ notice: '暂时不能调整画布，消息会作为任务直接执行。' })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('暂时不能调整画布，消息会作为任务直接执行。');
+  });
+
+  it('offers the latest request to the other way, and not while something is in progress', () => {
+    const onSwitch = vi.fn();
+    const messages = [{ id: 'u', role: 'user' as const, content: '写一封给客户的邮件', route: 'plan' as const },
+      { id: 'a', role: 'assistant' as const, content: '画布不需要改动', route: 'plan' as const }];
+    const { rerender } = render(<Harness mode="panel" messages={messages} unified={unified({ switchRoute: { to: 'execute', onSwitch } })} />);
+    fireEvent.click(screen.getByRole('button', { name: '改为直接执行' }));
+    expect(onSwitch).toHaveBeenCalledOnce();
+    rerender(<Harness mode="panel" messages={messages} busy unified={unified({ switchRoute: { to: 'plan', onSwitch } })} />);
+    expect(screen.getByRole('button', { name: '改为调整画布' })).toBeDisabled();
+    rerender(<Harness mode="panel" messages={messages} unified={unified()} />);
+    expect(screen.queryByRole('button', { name: /改为/ })).toBeNull();
+  });
+
+  it('draws the host’s earlier tasks and notices, and only the conversation where it is read-only', () => {
+    const { rerender } = render(<Harness mode="panel" unified={unified({ earlier: <p>之前的任务</p>, notices: <p>任务服务提示</p>, settings: <p>直接执行用的模型</p> })} />);
+    expect(screen.getByText('之前的任务')).toBeVisible();
+    expect(screen.getByText('直接执行用的模型')).toBeVisible();
+    expect(screen.getByText('说出画布上想调整的地方，或交给助手一件事。')).toBeVisible();
+    rerender(<Harness mode="panel" unified={unified({ earlier: <p>之前的任务</p>, notices: <p>任务服务提示</p>, settings: <p>直接执行用的模型</p>, readOnly: true })} />);
+    expect(screen.getByText('之前的任务')).toBeVisible();
+    expect(screen.queryByText('直接执行用的模型')).toBeNull();
     expect(screen.queryByRole('textbox', { name: '画布需求' })).toBeNull();
-    expect(container.querySelector('.awwo-canvas-assistant')).toHaveClass('is-executing');
+    expect(screen.getByText('只读访问：可以查看这张画布的任务。')).toBeVisible();
+    // A viewer sends nothing, so nothing invites a message.
+    expect(screen.queryByText('说出画布上想调整的地方，或交给助手一件事。')).toBeNull();
   });
 
-  it('keeps a planning draft through a visit to the other mode', () => {
-    const { rerender } = render(<Harness mode="panel" draft="把节点改成移动端" modes={modes()} />);
-    rerender(<Harness mode="panel" draft="把节点改成移动端" modes={modes({ active: 'execute' })} />);
-    rerender(<Harness mode="panel" draft="把节点改成移动端" modes={modes()} />);
-    expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveValue('把节点改成移动端');
-  });
-
-  it('shows only the task history, without a switch, where the canvas cannot be planned', () => {
-    render(<Harness mode="panel" modes={modes({ executeOnly: true })} />);
-    expect(screen.queryByRole('group', { name: '助手模式' })).toBeNull();
-    expect(screen.getByText('任务对话')).toBeVisible();
-    expect(screen.queryByRole('textbox', { name: '画布需求' })).toBeNull();
-  });
-
-  it('offers doing a task directly from the welcome, but not while a plan is being recovered', () => {
-    const choice = modes();
-    const { rerender } = render(<Harness modes={choice} />);
-    expect(screen.queryByRole('group', { name: '助手模式' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '或者直接让助手完成一个任务' }));
-    expect(choice.onChange).toHaveBeenCalledExactlyOnceWith('execute');
-    rerender(<Harness modes={choice} recovery={{ prompt: '原来的任务', canResume: true, busy: false, onResume: vi.fn(), onStop: vi.fn() }} />);
-    expect(screen.queryByRole('button', { name: '或者直接让助手完成一个任务' })).toBeNull();
-  });
-
-  it('stays a planning assistant where the host cannot run tasks', () => {
-    const { rerender } = render(<Harness mode="panel" />);
-    expect(screen.queryByRole('group', { name: '助手模式' })).toBeNull();
-    rerender(<Harness />);
-    expect(screen.queryByRole('button', { name: '或者直接让助手完成一个任务' })).toBeNull();
+  it('stays a planning assistant where the host cannot do tasks', () => {
+    const { rerender } = render(<Harness mode="panel" draft="x" messages={[{ id: 'a', role: 'assistant', content: '好的', route: 'plan' }]} />);
+    expect(screen.getByRole('button', { name: '修改画布' })).toBeEnabled();
+    expect(document.querySelector('.awwo-assistant-route')).toBeNull();
+    rerender(<Harness draft="x" />);
+    expect(screen.getByRole('button', { name: '生成画布' })).toBeEnabled();
   });
 });

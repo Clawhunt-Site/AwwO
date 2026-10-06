@@ -58,7 +58,7 @@ it.each(['owner', 'reader'])('keeps the knowledge tools in the %s canvas bar, ou
   await waitFor(() => expect(document.querySelector('.awwo-workspace')).not.toBeNull());
   const bar = within(document.querySelector('.awwo-canvas-bar') as HTMLElement);
   expect(bar.getByRole('button', { name: '知识地图' })).toBeVisible();
-  // Tasks run from the canvas assistant (its 直接执行 mode), not from a separate tool.
+  // Tasks run from the canvas assistant (the server routes a message there), not from a separate tool.
   expect(bar.getByRole('button', { name: '画布助手' })).toBeVisible();
   expect(bar.queryByRole('button', { name: '执行助手' })).toBeNull();
   expect(document.querySelector('.awwo-header .awwo-knowledge-tools')).toBeNull();

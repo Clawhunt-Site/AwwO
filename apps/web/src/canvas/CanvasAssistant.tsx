@@ -5,13 +5,36 @@ import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n'
 import { getAgentTemplates } from './agentTemplates';
 import { useEnterToSend } from './composerKeys';
 import type { PlanProgress } from './canvasPlanning';
+import type { AssistantPending, AssistantPendingPhase, AssistantRoute } from './assistantRouting';
 import type { UiLocale } from '../locale';
 
 export interface CanvasAssistantMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  status?: 'applied' | 'error' | 'stale';
+  status?: 'applied' | 'error' | 'stale' | 'unconfirmed';
+  route?: AssistantRoute;
+  taskId?: string;
+}
+
+/** A host that can also do tasks: one conversation whose messages the server routes (assistantRouting.ts). */
+export interface UnifiedAssistant {
+  /** A message being handled before it joins the conversation: routed, becoming a task, or waiting for the task it
+   *  replaces to stop. */
+  pending?: AssistantPending;
+  renderTask: (taskId: string) => ReactNode;
+  /** Earlier tasks of this canvas the conversation does not mention, at its top. */
+  earlier?: ReactNode;
+  /** Above the composer: the task service's notices. */
+  notices?: ReactNode;
+  /** Under the composer: the model a direct task uses. */
+  settings?: ReactNode;
+  /** Hands the latest request over to the other way, where it can be. */
+  switchRoute?: { to: AssistantRoute; onSwitch: () => void };
+  /** How messages are handled while one way is closed. */
+  notice?: string;
+  /** Viewing only: the conversation and its tasks, without a composer. */
+  readOnly?: boolean;
 }
 
 export interface CanvasAssistantProps {
@@ -35,20 +58,14 @@ export interface CanvasAssistantProps {
   progress?: PlanProgress;
   /** Seconds the last successful plan took, measured on this device; shown as an expectation. */
   expectedSeconds?: number;
-  /** A host that can also run tasks (the hosted app) adds 直接执行 beside planning. The user picks the mode;
-   *  nothing is ever routed to execution on its own. */
-  modes?: AssistantModes;
+  /** A host that can also do tasks (the hosted app): there is no mode to pick, the server routes each message. */
+  unified?: UnifiedAssistant;
 }
 
-export type AssistantMode = 'plan' | 'execute';
-export interface AssistantModes {
-  active: AssistantMode;
-  onChange: (mode: AssistantMode) => void;
-  /** The execution conversation and its composer, drawn by the host. */
-  execute: ReactNode;
-  /** Execution only, without the switch (a read-only canvas can review its tasks but not plan). */
-  executeOnly?: boolean;
-}
+// What a message being handled is waiting for, said in the composer.
+const PENDING_HEADLINE: Record<AssistantPendingPhase, CanvasTextKey> = {
+  routing: 'assistant.routing', starting: 'assistant.starting', stopping: 'assistant.stopping',
+};
 
 /** The four observable steps of a plan. They advance only on events the run reported. */
 const STEPS: ReadonlyArray<CanvasTextKey> = ['assistant.stepSubmit', 'assistant.stepThink', 'assistant.stepWrite', 'assistant.stepCheck'];
@@ -127,35 +144,43 @@ function progressSignature(progress: PlanProgress | undefined): string {
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
 export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
-  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery, modes }: CanvasAssistantProps) {
+  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery, unified }: CanvasAssistantProps) {
   const { locale, t } = useCanvasI18n();
   const examples = [t('assistant.exampleSaas'), t('assistant.exampleData'), t('assistant.exampleContent')];
   const welcome = mode === 'welcome';
-  const sendLabel = submitLabel || t(welcome ? 'assistant.generate' : 'assistant.modify');
+  const pending = unified?.pending;
+  const routing = Boolean(pending);
+  const sendLabel = submitLabel || t(unified ? 'assistant.send' : welcome ? 'assistant.generate' : 'assistant.modify');
   const errorId = useId();
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
-  const canSend = !busy && !recovery && !submitDisabled && Boolean(draft.trim());
+  const canSend = !busy && !routing && !recovery && !submitDisabled && Boolean(draft.trim());
   const lastMessage = messages.at(-1);
   const duplicateLastError = lastMessage?.role === 'assistant' && lastMessage.status === 'error' && lastMessage.content === error;
-  // Shown again after the other mode, the conversation opens at its newest message as well.
-  const executing = mode !== 'welcome' && modes ? Boolean(modes.executeOnly || modes.active === 'execute') : false;
   useEffect(() => {
     // Scroll only the conversation region, never the surrounding canvas or page.
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
-  }, [messages.length, lastMessage?.content, lastMessage?.status, busy, executing]);
+  }, [messages.length, lastMessage?.content, lastMessage?.status, busy, routing]);
 
   // Elapsed time is the one progress fact available even before the run emits anything, so a
   // silent model is still visibly alive. It is measured from this request, never accumulated.
+  // Deciding how to handle a message is part of the same request.
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const startedAt = useRef(0);
+  const waiting = busy || routing;
   useEffect(() => {
-    if (!busy) { setElapsedSeconds(0); return; }
+    if (!waiting) { setElapsedSeconds(0); return; }
     startedAt.current = Date.now();
     setElapsedSeconds(0);
     const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000)), 1000);
     return () => clearInterval(timer);
-  }, [busy]);
+  }, [waiting]);
+  // The box is disabled while a message is handled, which drops the focus; it comes back to the box after.
+  const wasWaiting = useRef(waiting);
+  useEffect(() => {
+    if (wasWaiting.current && !waiting && (!document.activeElement || document.activeElement === document.body)) input.current?.focus();
+    wasWaiting.current = waiting;
+  }, [waiting]);
   // How long the current stage has lasted, so a hint follows the stage rather than the request.
   // Taken when the stage changes, in the same render, so a new stage never inherits a hint.
   const stage = busy ? progress?.stage : undefined;
@@ -170,7 +195,15 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const composerKeys = useEnterToSend(send);
 
   let status: ReactNode = null;
-  if (busy) {
+  if (pending && !busy) {
+    status = <div className="awwo-assistant-status" role="status">
+      <p className="awwo-assistant-status-headline"><Loader2 size={14} aria-hidden="true" /><span>{t(PENDING_HEADLINE[pending.phase])}</span></p>
+      <p className="awwo-assistant-status-meta" aria-hidden="true">
+        <span className="awwo-assistant-status-dot" />
+        <span className="awwo-assistant-status-facts">{formatDuration(t, elapsedSeconds)}</span>
+      </p>
+    </div>;
+  } else if (busy) {
     const step = stepOf(progress?.stage);
     const titleOf = (id: string | undefined) => id ? getAgentTemplates(locale).find(item => item.id === id)?.title : undefined;
     const template = titleOf(progress?.template);
@@ -206,35 +239,36 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
     </div>;
   }
 
-  return <section className={`awwo-canvas-assistant awwo-canvas-assistant--${mode}${executing ? ' is-executing' : ''}`} aria-label={t('assistant.panelTitle')}>
+  const shown = messages.filter(message => !(duplicateLastError && message === lastMessage));
+  return <section className={`awwo-canvas-assistant awwo-canvas-assistant--${mode}`} aria-label={t('assistant.panelTitle')}>
     <header className="awwo-assistant-header">
       {welcome ? <h1>{t('assistant.title')}</h1> : <h2>{t('assistant.panelTitle')}</h2>}
       {!welcome && onClose ? <button type="button" className="awwo-assistant-icon-button" aria-label={t('assistant.close')} onClick={onClose}>
         <X size={17} aria-hidden="true" />
       </button> : null}
     </header>
-    {!welcome && modes && !modes.executeOnly ? <div className="awwo-assistant-modes">
-      <div className="awwo-assistant-mode-switch" role="group" aria-label={t('assistant.modes')}>
-        {/* Switching only changes the view: a plan in progress keeps going and shows again on return. */}
-        {(['plan', 'execute'] as const).map(item => <button type="button" key={item} aria-pressed={modes.active === item}
-          onClick={() => { if (modes.active !== item) modes.onChange(item); }}>
-          {t(item === 'plan' ? 'assistant.modePlan' : 'assistant.modeExecute')}
-        </button>)}
-      </div>
-      <p className="awwo-assistant-mode-hint">{t(modes.active === 'plan' ? 'assistant.modePlanHint' : 'assistant.modeExecuteHint')}</p>
-    </div> : null}
 
-    {executing ? modes!.execute : <>
-    {(!welcome || messages.length > 0) && <div ref={log} className="awwo-assistant-messages" role="log" aria-label={t('assistant.conversation')} aria-live="polite" aria-relevant="additions text">
-      {messages.length ? <ol>
-        {messages.filter(message => !(duplicateLastError && message === lastMessage)).map(message => <li className={`awwo-assistant-message awwo-assistant-message--${message.role}`} key={message.id}>
-          <p role={message.status === 'error' ? 'alert' : undefined}>{message.content}</p>
+    {(!welcome || messages.length > 0 || pending) && <div ref={log} className="awwo-assistant-messages" role="log" aria-label={t('assistant.conversation')} aria-live="polite" aria-relevant="additions text">
+      {unified?.earlier}
+      {shown.length || pending ? <ol>
+        {shown.map(message => <li className={`awwo-assistant-message awwo-assistant-message--${message.role}${message.taskId ? ' awwo-execution-card' : ''}`} key={message.id}>
+          {/* How the server handled the request: said on each reply, never asked of the user beforehand. */}
+          {unified && message.role === 'assistant' && message.route ? <span className={`awwo-assistant-route is-${message.route}`}>
+            {t(message.route === 'plan' ? 'assistant.routePlan' : 'assistant.routeExecute')}</span> : null}
+          {message.taskId && unified ? unified.renderTask(message.taskId) : <p role={message.status === 'error' ? 'alert' : undefined}>{message.content}</p>}
           {message.status === 'applied' ? <span className="awwo-assistant-message-status" role="status">{t('assistant.applied')}</span>
             : message.status === 'stale' ? <span className="awwo-assistant-message-status is-stale" role="alert">{t('assistant.stale')}</span> : null}
         </li>)}
-      </ol> : <p className="awwo-assistant-empty">{t('assistant.empty')}</p>}
+        {pending ? <li className="awwo-assistant-message awwo-assistant-message--user is-pending"><p>{pending.prompt}</p></li> : null}
+        {unified?.switchRoute ? <li className="awwo-assistant-switch">
+          <button type="button" disabled={busy || routing} onClick={unified.switchRoute.onSwitch}>
+            {t(unified.switchRoute.to === 'execute' ? 'assistant.switchToExecute' : 'assistant.switchToPlan')}</button>
+        </li> : null}
+      {/* A viewer sends nothing, so it is the host's task list that says whether there is anything to see. */}
+      </ol> : unified?.readOnly ? null : <p className="awwo-assistant-empty">{t(unified ? 'assistant.unifiedEmpty' : 'assistant.empty')}</p>}
     </div>}
 
+    {unified?.readOnly ? <div className="awwo-assistant-composer-block"><p className="awwo-assistant-readonly">{t('assistant.readOnlyTasks')}</p></div> : <>
     <div className="awwo-assistant-composer-block">
       {error ? <p className="awwo-assistant-error" role="alert" id={errorId}>{error}</p> : null}
       {recovery ? <div className="awwo-assistant-recovery" role="group" aria-label={t('assistant.recoveryTitle')}>
@@ -242,33 +276,35 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
         <p className="awwo-assistant-recovery-prompt">{recovery.prompt}</p>
         <p>{t(recovery.canResume ? 'assistant.recoveryHint' : 'assistant.recoveryChanged')}</p>
         <div className="awwo-assistant-composer-actions">
-          <button type="button" className="awwo-assistant-cancel" disabled={busy || recovery.busy} onClick={recovery.onStop}>{t('assistant.recoveryStop')}</button>
-          <button type="button" className="awwo-assistant-send" disabled={busy || recovery.busy || !recovery.canResume} onClick={recovery.onResume}>{t('assistant.recoveryResume')}</button>
+          <button type="button" className="awwo-assistant-cancel" disabled={busy || routing || recovery.busy} onClick={recovery.onStop}>{t('assistant.recoveryStop')}</button>
+          <button type="button" className="awwo-assistant-send" disabled={busy || routing || recovery.busy || !recovery.canResume} onClick={recovery.onResume}>{t('assistant.recoveryResume')}</button>
         </div>
       </div> : null}
       {runtimeControls ? <div className="awwo-assistant-runtime">{runtimeControls}</div> : null}
+      {unified?.notice ? <p className="awwo-assistant-route-notice" role="status">{unified.notice}</p> : null}
+      {unified?.notices}
       <form className="awwo-assistant-composer" aria-label={t('assistant.form')} onSubmit={event => { event.preventDefault(); send(); }}>
         <textarea ref={input} aria-label={t('assistant.input')} aria-describedby={error ? errorId : undefined}
-          placeholder={t(welcome ? 'assistant.welcomePlaceholder' : 'assistant.panelPlaceholder')}
-          value={draft} disabled={busy} rows={3} maxLength={8000}
+          placeholder={t(unified ? (welcome ? 'assistant.unifiedWelcomePlaceholder' : 'assistant.unifiedPlaceholder')
+            : welcome ? 'assistant.welcomePlaceholder' : 'assistant.panelPlaceholder')}
+          value={draft} disabled={waiting} rows={3} maxLength={8000}
           onChange={event => onDraftChange(event.target.value)} {...composerKeys} />
         {status}
         <div className="awwo-assistant-composer-actions">
-          {busy ? <button type="button" className="awwo-assistant-cancel" onClick={onCancel}><Square size={12} aria-hidden="true" />{t('assistant.cancel')}</button> : null}
+          {busy || pending?.phase === 'routing' ? <button type="button" className="awwo-assistant-cancel" onClick={onCancel}><Square size={12} aria-hidden="true" />{t('assistant.cancel')}</button> : null}
           <button type="submit" className="awwo-assistant-send" disabled={!canSend}><span>{sendLabel}</span><ArrowUp size={15} aria-hidden="true" /></button>
         </div>
       </form>
-      {onUndo ? <button type="button" className="awwo-assistant-undo" disabled={busy || !canUndo} onClick={onUndo}>
+      {unified?.settings}
+      {onUndo ? <button type="button" className="awwo-assistant-undo" disabled={waiting || !canUndo} onClick={onUndo}>
         <Undo2 size={14} aria-hidden="true" />{t('assistant.undo')}
       </button> : null}
     </div>
 
     {welcome && !recovery ? <div className="awwo-assistant-examples" role="group" aria-label={t('assistant.examples')}>
-      {examples.map(example => <button type="button" key={example} disabled={busy}
+      {examples.map(example => <button type="button" key={example} disabled={waiting}
         onClick={() => { onDraftChange(example); input.current?.focus(); }}>{example}</button>)}
     </div> : null}
-    {welcome && modes && !recovery ? <button type="button" className="awwo-assistant-execute-link" disabled={busy}
-      onClick={() => modes.onChange('execute')}>{t('assistant.executeFromWelcome')}</button> : null}
     </>}
   </section>;
 }

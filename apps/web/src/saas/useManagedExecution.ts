@@ -1,10 +1,12 @@
-// The canvas assistant's 直接执行 mode: a task runs in a restricted workspace through the managed execution
-// service. This hook owns its state; AssistantExecution draws it. It keeps the rules the execution panel had:
-// every request is bounded, a running task is polled (never streamed), an unknown submission or response is
-// reconciled with its original operation id instead of being sent again, and requests are answered only by an
-// explicit choice. Nothing loads until the mode is first opened.
+// The canvas assistant's tasks: a message the server routes to execution runs in a restricted workspace through
+// the managed execution service. This hook owns their state; AssistantExecution draws it into the assistant's
+// conversation. It keeps the rules the execution panel had: every request is bounded, a running task is polled
+// (never streamed) while the conversation is on screen, an unknown submission or response is reconciled with
+// its original operation id instead of being sent again, and requests are answered only by an explicit choice.
+// Nothing loads until the canvas activates it.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SaaSApiError } from './api';
+import { TaskStartUnconfirmed } from '../canvas/assistantRouting';
+import { SaaSApiError, saasErrorMessage } from './api';
 import { canvasKnowledgeRevisionIds, subscribeCanvasKnowledge } from './canvasBridge';
 import { createKnowledgeSource } from './knowledgeApi';
 import { useSaaSPreferences } from './preferences';
@@ -51,10 +53,12 @@ export interface ManagedExecution {
   chooseModel: (key: string) => void;
   effort: string;
   setEffort: (effort: string) => void;
-  prompt: string;
-  setPrompt: (prompt: string) => void;
   knowledgeCount: number;
   history: ExecutionRuns;
+  /** The canvas's task list could not be read; refreshAll reads it again. */
+  historyFailed: boolean;
+  /** The task the last reconcile confirmed, if any. */
+  confirmedTask: string;
   selectedId: string;
   select: (id: string) => void;
   /** The selected task's detail, once read. */
@@ -69,10 +73,17 @@ export interface ManagedExecution {
   notice: string;
   noticeWarning: boolean;
   pendingSubmission: ExecutionInput | null;
-  /** Can the composer send now; when it cannot, why (shown, never a silent disabled button). */
-  canSubmit: boolean;
-  submitBlockedReason?: string;
-  submit: (retry?: ExecutionInput) => void;
+  /** Why a task cannot start now, if it cannot (the service, the model, the read-only view, an unconfirmed submission). */
+  startBlockedReason?: string;
+  /** Starts a task with this text: resolves with its id, rejects with the error to show. An unconfirmed
+   *  outcome is kept as the pending submission, reconciled by `reconcile` and never sent again on its own. */
+  start: (prompt: string) => Promise<string>;
+  /** Sends the pending submission again with its original operation id. */
+  reconcile: () => void;
+  /** Stops a task this user started: resolves once the stop is confirmed or the task had ended. */
+  stopTask: (taskId: string) => Promise<void>;
+  /** Whether a task of this canvas has ended, as last read. */
+  finished: (taskId: string) => boolean;
   answers: Record<string, string>;
   setAnswer: (key: string, value: string) => void;
   uncertainResponses: Record<string, ExecutionResponseInput>;
@@ -91,15 +102,31 @@ export interface ManagedExecution {
 }
 
 export function useManagedExecution(tenantId: string, canvasId: string, { readOnly = false }: { readOnly?: boolean } = {}): ManagedExecution {
-  const { t } = useSaaSPreferences();
+  const { t, locale } = useSaaSPreferences();
   const scope = `${tenantId}/${canvasId}`;
   const [activatedScope, setActivatedScope] = useState('');
-  const [visible, setVisible] = useState(false);
+  const [visible, setShown] = useState(false);
+  // Showing the conversation again reads the service and the history again, so a task another member started
+  // appears; the first showing is covered by the activation's own read.
+  const shownBefore = useRef(false);
+  const activatedNow = useRef(false);
+  const setVisible = useCallback((value: boolean) => {
+    setShown(value);
+    if (!value) return;
+    if (shownBefore.current && activatedNow.current) setCatalogueRevision(revision => revision + 1);
+    shownBefore.current = true;
+  }, []);
   const activated = activatedScope === scope;
+  activatedNow.current = activated;
   const [runtime, setRuntime] = useState<ExecutionRuntime | null>(null);
   // The catalogue last read, so a chosen model it later drops keeps its name.
   const runtimeRef = useRef<ExecutionRuntime | null>(null);
   const [history, setHistory] = useState<ExecutionRuns>({ items: [] });
+  const [historyFailed, setHistoryFailed] = useState(false);
+  // The task the last reconcile confirmed: the canvas gives it the request it recorded as unconfirmed.
+  const [confirmedTask, setConfirmedTask] = useState('');
+  // The notice shown waits on the open task's next state; its end answers it.
+  const awaitingOutcome = useRef(false);
   const [catalogueRevision, setCatalogueRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [modelKey, setModelKey] = useState('');
@@ -108,7 +135,6 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   // The label of a chosen model the latest catalogue no longer lists, so it stays visible and must be changed.
   const [staleLabel, setStaleLabel] = useState('');
   const [effort, setEffort] = useState('');
-  const [prompt, setPrompt] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [preview, setPreview] = useState<{ run: string; artifact: string } | null>(null);
   const [run, setRun] = useState<ExecutionRun | null>(null);
@@ -137,22 +163,25 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     if (lastScope.current === scope) return;
     lastScope.current = scope;
     controllers.current.forEach(controller => controller.abort()); controllers.current.clear();
-    submissions.current.clear(); importOperations.current.clear(); lock.current = false;
-    runtimeRef.current = null; setRuntime(null); setHistory({ items: [] }); chooseKey(''); setStaleLabel(''); setEffort(''); setPrompt('');
+    submissions.current.clear(); importOperations.current.clear(); lock.current = false; shownBefore.current = false;
+    runtimeRef.current = null; setRuntime(null); setHistory({ items: [] }); chooseKey(''); setStaleLabel(''); setEffort('');
     setSelectedId(''); setPreview(null); setRun(null); setDetailLoading(false); setPollingPaused(false); setBusy(false);
     setError(null); setNotice(''); setNoticeWarning(false); setPendingSubmission(null); setAnswers({}); setUncertainResponses({});
-    setPendingImport(null); setImportTitle(''); setKnowledgeCount(0);
+    setPendingImport(null); setImportTitle(''); setKnowledgeCount(0); setHistoryFailed(false); setConfirmedTask('');
   }, [scope, chooseKey]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; controllers.current.forEach(controller => controller.abort()); controllers.current.clear(); }; }, []);
 
-  const handleError = useCallback((cause: unknown) => {
-    setError(cause);
+  // A lost session or access forgets what was read; handleError also shows the error, while the canvas shows a
+  // start's or a stop's itself.
+  const forgetIfDenied = useCallback((cause: unknown) => {
     if (cause instanceof SaaSApiError && [401, 403].includes(cause.status)) {
       setRun(null); setSelectedId(''); setHistory({ items: [] }); setRuntime(null); setPendingImport(null); setPreview(null);
     }
   }, []);
+  const handleError = useCallback((cause: unknown) => { setError(cause); forgetIfDenied(cause); }, [forgetIfDenied]);
 
-  // The service and this canvas's tasks, read when the mode first opens and on every explicit refresh.
+  // The service and this canvas's tasks, read once the canvas activates them, when they are shown again, and on
+  // every explicit refresh.
   useEffect(() => {
     if (!activated) return;
     const controller = new AbortController(); setLoading(true); setError(null);
@@ -173,9 +202,11 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
           const known = earlier?.models.find(item => executionModelKey(item.runtime, item.id) === previous);
           setStaleLabel(current => current || (known ? known.label || known.id : `${modelId} · ${runtimeId}`));
         }
-      } else { setRuntime(null); handleError(service.reason); }
-      if (runs.status === 'fulfilled') { setHistory(runs.value); setSelectedId(previous => previous || runs.value.items[0]?.id || ''); }
-      else { setHistory({ items: [] }); handleError(runs.reason); }
+      // The canvas reads the service on open, unasked: a failure there says the service is unavailable (the
+      // extras' quiet line), never an alert, and messages are planned meanwhile.
+      } else setRuntime(null);
+      if (runs.status === 'fulfilled') { setHistory(runs.value); setHistoryFailed(false); setSelectedId(previous => previous || runs.value.items[0]?.id || ''); }
+      else { setHistory({ items: [] }); setHistoryFailed(true); }
       setLoading(false);
     });
     return () => controller.abort();
@@ -192,7 +223,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   // Effort belongs to the model: a model that lists no levels gets none, and a change of model resets it.
   useEffect(() => { if (!choiceModel?.efforts?.includes(effort)) setEffort(''); }, [choiceModel, effort]);
 
-  // The selected task, read until it ends, while the conversation is on screen (leaving the mode or closing
+  // The selected task, read until it ends, while its conversation is on screen (closing
   // the assistant stops reading, never the task); a long task pauses reading after six minutes until refreshed.
   useEffect(() => {
     if (!activated || !visible || !selectedId) return;
@@ -208,7 +239,11 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
             const approval = value.approvals.find(item => executionResponseKey(value.id, item.requestId) === key);
             return !approval || !['allowed', 'denied'].includes(approval.status);
           })));
-          if (executionTerminal(value.status)) return;
+          if (executionTerminal(value.status)) {
+            // A notice that waited on this task's next state (a response or a stop being checked) is answered now.
+            if (awaitingOutcome.current) { awaitingOutcome.current = false; setNotice(''); setNoticeWarning(false); }
+            return;
+          }
           await pause(controller.signal);
         }
         if (!controller.signal.aborted) setPollingPaused(true);
@@ -233,38 +268,88 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     ? t('连接一个模型即可开始。请在「我的引擎」中选择或添加可用模型。', 'Connect a model to begin. Choose or add an available model in My engines.')
     : runtime?.reason === 'Managed execution service is not ready'
       ? t('工作区执行服务暂时不可用，请稍后重新检查。', 'Workspace execution is temporarily unavailable. Check again later.') : runtime?.reason;
-  const promptTooLong = new TextEncoder().encode(prompt.trim()).length > PROMPT_BYTES;
-  const submitBlockedReason = readOnly ? t('只读访问不能发起任务。', 'Read-only access cannot start tasks.')
-    : loading ? undefined
+  const startBlockedReason = readOnly ? t('只读访问不能发起任务。', 'Read-only access cannot start tasks.')
+    // A read again of a service already known (the conversation shown again, a refresh) keeps what was read.
+    : !activated || (loading && !runtime) ? t('正在读取执行服务，请稍候。', 'Reading the execution service. One moment.')
       : !ready ? (serviceReason || t('执行服务尚未就绪。', 'The execution service is not ready.'))
         : staleLabel ? t('所选模型已不可用，请重新选择。', 'The chosen model is no longer available. Choose another.')
           : !choiceModel ? t('先选择执行模型。', 'Choose an execution model first.')
-            : promptTooLong ? t('任务内容最多 32 KiB。', 'Keep the task within 32 KiB.')
+            : pendingSubmission ? t('上一次提交的结果还没确认，请先核对。', 'The last submission is unconfirmed. Reconcile it first.')
               : knowledgeCount > 8 ? t('知识引用最多 8 份。', 'Use at most eight knowledge references.') : undefined;
-  const canSubmit = !busy && !loading && !pendingSubmission && !submitBlockedReason && Boolean(prompt.trim());
 
-  const submit = (retry?: ExecutionInput) => void mutate(async signal => {
-    if (!retry && (!canSubmit || !choiceModel)) return;
-    const draft = retry ?? { prompt: prompt.trim(), runtime: choiceModel!.runtime, model: choiceModel!.id,
-      ...(effort ? { effort } : {}), knowledgeRevisionIds: canvasKnowledgeRevisionIds(), operationId: '' };
+  // Lists a created task at once as the open one, before its first read answers (or fails).
+  const created = (id: string, status: string, text: string) => {
+    const now = new Date().toISOString();
+    setHistory(previous => ({ ...previous, items: [{ id, status, prompt: text, createdAt: now, updatedAt: now },
+      ...previous.items.filter(item => item.id !== id)] }));
+    setSelectedId(id); setRun(null); setPendingImport(null); setPreview(null); setDetailRevision(value => value + 1);
+    setPendingSubmission(null);
+  };
+  const start = async (text: string): Promise<string> => {
+    const prompt = text.trim();
+    const blocked = !prompt ? t('任务内容不能为空。', 'The task is empty.')
+      : new TextEncoder().encode(prompt).length > PROMPT_BYTES ? t('任务内容最多 32 KiB。', 'Keep the task within 32 KiB.') : startBlockedReason;
+    if (blocked) throw new Error(blocked);
+    if (lock.current) throw new Error(t('上一个请求还在处理，请稍候。', 'The previous request is still being handled.'));
+    lock.current = true; setBusy(true); setNotice(''); setNoticeWarning(false);
+    const controller = new AbortController(); controllers.current.add(controller);
+    const draft = { prompt, runtime: choiceModel!.runtime, model: choiceModel!.id, ...(effort ? { effort } : {}),
+      knowledgeRevisionIds: canvasKnowledgeRevisionIds(), operationId: '' };
     const fingerprint = JSON.stringify({ ...draft, operationId: '' });
-    const input = retry ?? { ...draft, operationId: submissions.current.get(fingerprint) ?? newOperationId() };
+    const input = { ...draft, operationId: submissions.current.get(fingerprint) ?? newOperationId() };
     submissions.current.set(fingerprint, input.operationId);
     try {
-      const created = await createExecutionRun(tenantId, canvasId, input, signal);
-      if (signal.aborted) return;
-      // Listed at once as the user's message, before its first read answers (or fails).
-      const now = new Date().toISOString();
-      setHistory(previous => ({ ...previous, items: [{ id: created.id, status: created.status, prompt: input.prompt, createdAt: now, updatedAt: now },
-        ...previous.items.filter(item => item.id !== created.id)] }));
-      setSelectedId(created.id); setRun(null); setPendingImport(null); setPreview(null); setDetailRevision(value => value + 1);
-      setPendingSubmission(null); setPrompt('');
+      const run = await createExecutionRun(tenantId, canvasId, input, controller.signal);
+      created(run.id, run.status, prompt);
       submissions.current.delete(fingerprint);
+      return run.id;
     } catch (cause) {
-      if (!signal.aborted && isUncertain(cause)) setPendingSubmission(input);
+      const unconfirmed = !controller.signal.aborted && isUncertain(cause);
+      if (unconfirmed) setPendingSubmission(input);
+      // A lost session or access clears what was read, as every other request does; the caller shows the error.
+      forgetIfDenied(cause);
+      // The conversation shows the message as it is, so it is already in the reader's words.
+      const text = cause instanceof SaaSApiError ? saasErrorMessage(cause, locale) : cause instanceof Error ? cause.message : String(cause);
+      throw unconfirmed ? new TaskStartUnconfirmed(text) : cause instanceof SaaSApiError ? new Error(text) : cause;
+    } finally { controllers.current.delete(controller); lock.current = false; if (alive.current) setBusy(false); }
+  };
+  const reconcile = () => void mutate(async signal => {
+    const input = pendingSubmission;
+    if (!input) return;
+    // Settled either way below, the submission's identity is let go: the same text sent again later is a new task,
+    // not a replay of this one.
+    const fingerprint = JSON.stringify({ ...input, operationId: '' });
+    try {
+      const run = await createExecutionRun(tenantId, canvasId, input, signal);
+      if (!signal.aborted) { created(run.id, run.status, input.prompt); setConfirmedTask(run.id); submissions.current.delete(fingerprint); }
+    } catch (cause) {
+      // A definite refusal settles the submission; anything else stays unconfirmed for another reconcile.
+      if (!signal.aborted && !isUncertain(cause)) { setPendingSubmission(null); submissions.current.delete(fingerprint); }
       throw cause;
     }
   });
+  const finished = (taskId: string) => {
+    const status = (run?.id === taskId ? run.status : history.items.find(item => item.id === taskId)?.status);
+    return status !== undefined && executionTerminal(status);
+  };
+  const stopTask = async (taskId: string) => {
+    if (readOnly) return;
+    let result: Awaited<ReturnType<typeof cancelExecutionRun>>;
+    try {
+      // The open task is read while it is on screen; another's listed status may be old, so it is read first.
+      const status = run?.id === taskId ? run.status : (await readExecutionRun(tenantId, taskId, new AbortController().signal)).status;
+      if (executionTerminal(status)) return;
+      result = await cancelExecutionRun(tenantId, taskId, new AbortController().signal);
+    } catch (cause) {
+      // Said by the canvas, in the reader's words, as a start's refusal is.
+      forgetIfDenied(cause);
+      throw cause instanceof SaaSApiError ? new Error(saasErrorMessage(cause, locale)) : cause;
+    }
+    if (alive.current) {
+      awaitingOutcome.current = result.status !== 'cancelled'; setNotice(result.status === 'cancelled' ? t('任务已停止。', 'Task stopped.') : t('停止请求已提交，正在核对结果。', 'Stop requested. Checking the outcome.'));
+      setDetailRevision(value => value + 1);
+    }
+  };
   const respond = (approval: ExecutionApproval, behavior: 'allow' | 'deny', retry?: ExecutionResponseInput) => void mutate(async signal => {
     if (!currentRun?.canRespond || executionTerminal(currentRun.status) || (!retry && approval.status !== 'pending')) return;
     const key = executionResponseKey(currentRun.id, approval.requestId);
@@ -277,6 +362,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
       const result = await respondToExecutionRun(tenantId, currentRun.id, input, signal);
       if (signal.aborted) return;
       setNoticeWarning(!result.accepted);
+      awaitingOutcome.current = true;
       setNotice(result.accepted ? t('回应已提交，正在核对任务状态。', 'Response submitted. Checking the task status.')
         : t('回应结果尚未确认。请读取任务状态，勿重复授权。', 'The response outcome is unconfirmed. Read the task status before authorizing again.'));
       setDetailRevision(value => value + 1);
@@ -289,7 +375,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     if (!currentRun?.canCancel || executionTerminal(currentRun.status)) return;
     const result = await cancelExecutionRun(tenantId, currentRun.id, signal);
     if (signal.aborted) return;
-    setNotice(result.status === 'cancelled' ? t('任务已停止。', 'Task stopped.') : t('停止请求已提交，正在核对结果。', 'Stop requested. Checking the outcome.'));
+    awaitingOutcome.current = result.status !== 'cancelled'; setNotice(result.status === 'cancelled' ? t('任务已停止。', 'Task stopped.') : t('停止请求已提交，正在核对结果。', 'Stop requested. Checking the outcome.'));
     setDetailRevision(value => value + 1);
   });
   const importArtifact = () => void mutate(async signal => {
@@ -305,13 +391,13 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     activated, activate: () => setActivatedScope(scope), setVisible, readOnly, loading, runtime, ready, serviceReason, needsModel,
     choice: { key: modelKey, model: choiceModel, ...(staleLabel ? { unavailableLabel: staleLabel } : {}) },
     // Effort belongs to one model: choosing another starts again from the model's default.
-    chooseModel: key => { if (key !== modelKeyRef.current) setEffort(''); chooseKey(key); setStaleLabel(''); }, effort, setEffort, prompt, setPrompt, knowledgeCount,
-    history, selectedId,
+    chooseModel: key => { if (key !== modelKeyRef.current) setEffort(''); chooseKey(key); setStaleLabel(''); }, effort, setEffort, knowledgeCount,
+    history, historyFailed, confirmedTask, selectedId,
     select: id => { setSelectedId(id); setDetailRevision(value => value + 1); setError(null); setPendingImport(null); setPreview(null); },
     run: currentRun, detailLoading, pollingPaused,
     refreshDetail: () => { setError(null); setDetailRevision(value => value + 1); },
     refreshAll: () => { setError(null); setCatalogueRevision(value => value + 1); },
-    busy, error, clearError: () => setError(null), notice, noticeWarning, pendingSubmission, canSubmit, submitBlockedReason, submit,
+    busy, error, clearError: () => setError(null), notice, noticeWarning, pendingSubmission, startBlockedReason, start, reconcile, stopTask, finished,
     answers, setAnswer: (key, value) => setAnswers(previous => ({ ...previous, [key]: value })), uncertainResponses, respond, stop,
     preview, togglePreview: (runId, artifactId) => setPreview(current => current?.run === runId && current.artifact === artifactId ? null : { run: runId, artifact: artifactId }),
     pendingImport, importTitle, setImportTitle,

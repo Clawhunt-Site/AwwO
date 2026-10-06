@@ -806,17 +806,10 @@ html:root .saas-canvas-shell {
   .awwo-planner-connection > span { background: var(--saas-warning-dot); }
   .awwo-planner-connection .is-ready { background: var(--saas-success-dot); }
   .awwo-planner-connection > button { color: var(--saas-link); font-weight: 600; font-size: var(--saas-text-xs); }
-  /* 编排画布 / 直接执行: a filled track with the chosen mode lifted out of it, as the deliverable viewers do. */
-  .awwo-assistant-modes { padding: 12px 14px 2px; }
-  .awwo-assistant-mode-switch { padding: 3px; border-radius: var(--saas-radius-pill); background: var(--saas-field); }
-  .awwo-assistant-mode-switch > button {
-    min-height: 32px; border-radius: var(--saas-radius-pill); color: var(--saas-muted); font: 600 var(--saas-text-sm)/1.2 var(--saas-font);
-    transition: background var(--saas-dur-1), color var(--saas-dur-1), box-shadow var(--saas-dur-1);
-    &:hover:not([aria-pressed='true']) { color: var(--saas-text); }
-    &[aria-pressed='true'] { background: var(--saas-card); color: var(--saas-text); box-shadow: 0 0 0 1px var(--saas-hairline) inset, var(--saas-shadow-xs); }
-  }
-  .awwo-canvas-assistant .awwo-assistant-mode-hint { margin: 8px 4px 0; color: var(--saas-muted); font-size: var(--saas-text-xs); }
-  .awwo-assistant-execute-link { margin-top: 18px; color: var(--saas-link); font: 600 var(--saas-text-sm)/1.4 var(--saas-font); &:hover:not(:disabled) { color: var(--saas-link-hover); } }
+  /* How each reply was handled, said quietly above it, and the one link that hands the request over. */
+  .awwo-assistant-route { color: var(--saas-muted); font: 600 var(--saas-text-xs)/1.4 var(--saas-font); }
+  .awwo-assistant-switch > button { color: var(--saas-link); font: 600 var(--saas-text-xs)/1.4 var(--saas-font); &:hover:not(:disabled) { color: var(--saas-link-hover); } }
+  .awwo-assistant-readonly, .awwo-assistant-route-notice { color: var(--saas-muted); font-size: var(--saas-text-xs); }
 
   /* ── The generation moment ──────────────────────────────────────────────────────────────── */
   /* While the planner builds a new canvas, the welcome becomes your request and one progress card:

@@ -13,8 +13,16 @@ export interface PlanningMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  status?: 'applied' | 'error' | 'stale';
+  /** `unconfirmed`: a task that may have started; the host reconciles it. */
+  status?: 'applied' | 'error' | 'stale' | 'unconfirmed';
+  /** How the server routed this turn, in a host that also does tasks (see assistantRouting.ts). */
+  route?: 'plan' | 'execute';
+  /** The task an executed turn started; the host draws it. */
+  taskId?: string;
 }
+
+/** The turns the planner reads: an executed turn is the workspace's business, not the canvas's. */
+export const planningTurns = (messages: PlanningMessage[]) => messages.filter(message => message.route !== 'execute');
 export interface PlanningConversation { draft: string; messages: PlanningMessage[] }
 export const PLANNING_STORAGE_KEY = 'awwo.canvas.planning.v1';
 /** Seconds the last successful plan took in this workspace on this device; a measurement, shown as
@@ -114,7 +122,9 @@ export function loadPlanningConversation(): PlanningConversation {
         if (!item || typeof item !== 'object') return false;
         const m = item as PlanningMessage;
         return typeof m.id === 'string' && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'
-          && m.content.length <= 20_000 && (m.status === undefined || ['applied', 'error', 'stale'].includes(m.status));
+          && m.content.length <= 20_000 && (m.status === undefined || ['applied', 'error', 'stale', 'unconfirmed'].includes(m.status))
+          && (m.route === undefined || m.route === 'plan' || m.route === 'execute')
+          && (m.taskId === undefined || (typeof m.taskId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(m.taskId)));
       }).slice(-60) : [],
     };
   } catch { return { draft: '', messages: [] }; }
