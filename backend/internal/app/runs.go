@@ -648,6 +648,20 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	facts := invocationMetadata(snapshot, nil)
 	facts.Timing.QueueMs = int64ptr(queueDuration.Milliseconds())
+	// What the call will send at least; the full request, history included, replaces it once built. The call is
+	// reserved before the history is read, so a run counts against its allowances from the moment it starts.
+	facts.InputBytes = int64(len(prompt) + len(instructions))
+	if e = a.reserveInvocation(ctx, tid, id, id, snapshot.Model, facts); e != nil {
+		a.finish(tid, id, "failed", "", e.Error())
+		return
+	}
+	finish := func(status, output, code string) {
+		// The stream's end, stamped before the commit and its retries, bounds its hidden time.
+		if facts.Ended.IsZero() && !facts.Streamed.IsZero() {
+			facts.Ended = time.Now()
+		}
+		a.finishWithFacts(tid, id, status, output, code, facts)
+	}
 	var history []json.RawMessage
 	if snapshot.History != nil {
 		history = *snapshot.History
@@ -655,7 +669,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		history, e = rowsJSON(ctx, a.db, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND m.run_id<>$3 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid, id)
 	}
 	if e != nil {
-		a.finish(tid, id, "failed", "", "history_unavailable")
+		finish("failed", "", "history_unavailable")
 		return
 	}
 	if kind == "planner" || kind == "knowledge" || kind == "computer" {
@@ -674,22 +688,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	body, e := json.Marshal(request)
 	if e != nil {
-		a.finish(tid, id, "failed", "", "invalid_request")
+		finish("failed", "", "invalid_request")
 		return
 	}
-	// The whole request, history included, is what the call holds credits for under a plan.
 	facts.InputBytes = int64(len(body))
-	if e = a.reserveInvocation(ctx, tid, id, id, snapshot.Model, facts); e != nil {
-		a.finish(tid, id, "failed", "", e.Error())
-		return
-	}
-	finish := func(status, output, code string) {
-		// The stream's end, stamped before the commit and its retries, bounds its hidden time.
-		if facts.Ended.IsZero() && !facts.Streamed.IsZero() {
-			facts.Ended = time.Now()
-		}
-		a.finishWithFacts(tid, id, status, output, code, facts)
-	}
 	runtimeCompleted := false
 	defer func() {
 		if !runtimeCompleted {
