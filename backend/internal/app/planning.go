@@ -89,6 +89,10 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	a.createRun(w, next)
 }
 
+// planFieldTypes are the field types a plan may add or change to: the canvas's own (FIELD_TYPES in
+// apps/web/src/canvas/canvasPlan.ts, which the planner is told it may use), html included.
+var planFieldTypes = []string{"text", "markdown", "html", "number", "boolean", "file"}
+
 // This gate validates the transport schema. Frontend applyCanvasPlan separately
 // validates references, field compatibility, cycles and the currently loaded graph.
 func validatePlan(raw string) bool {
@@ -160,7 +164,7 @@ func validatePlan(raw string) bool {
 				return false
 			}
 			f, ok := op["field"].(map[string]any)
-			if !ok || !planKeys(f, "id", "label", "type", "required", "value", "help", "placeholder") || !planID(f["id"]) || f["value"] != "" || !planText(f["label"], 200, false) || !oneOf(f["type"], "text", "markdown", "number", "boolean", "file") {
+			if !ok || !planKeys(f, "id", "label", "type", "required", "value", "help", "placeholder") || !planID(f["id"]) || f["value"] != "" || !planText(f["label"], 200, false) || !oneOf(f["type"], planFieldTypes...) {
 				return false
 			}
 			if _, ok = f["required"].(bool); !ok {
@@ -177,7 +181,7 @@ func validatePlan(raw string) bool {
 			if !ok || len(f) == 0 || !planKeys(f, "label", "type", "required", "help", "placeholder") || !optionalPlanText(f, "label", 200, false) || !optionalPlanText(f, "help", 2000, true) || !optionalPlanText(f, "placeholder", 2000, true) {
 				return false
 			}
-			if v, ok := f["type"]; ok && !oneOf(v, "text", "markdown", "number", "boolean", "file") {
+			if v, ok := f["type"]; ok && !oneOf(v, planFieldTypes...) {
 				return false
 			}
 			if v, ok := f["required"]; ok {
