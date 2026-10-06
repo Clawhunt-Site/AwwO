@@ -147,6 +147,7 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 			LLMGateOnly          bool                 `json:"llmgateOnly"`
 			UserStructuredOutput json.RawMessage      `json:"userStructuredOutput"`
 			Workspace            *workspaceCapability `json:"workspace"`
+			SDKVersion           string               `json:"sdkVersion"`
 		}
 		if resp.StatusCode != 200 || json.Unmarshal(body, &capability) != nil || !capability.Ready || !capability.UserCredentials || (a.cfg.LLMGateOnly && !capability.LLMGateOnly) {
 			return piHealth{}, errors.New("Personal-credential worker is unavailable")
@@ -162,6 +163,9 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		personal, err := a.personalRuntime(ctx, runtime, structured)
 		if err == nil && validWorkspaceCapability(runtime, capability.Workspace) {
 			personal.Workspace = capability.Workspace
+		}
+		if err == nil {
+			personal.SDKVersion = capability.SDKVersion // which worker serves the runtime (computerModelCalls)
 		}
 		return personal, err
 	}

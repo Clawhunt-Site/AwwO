@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -557,5 +558,155 @@ func TestPostgresComputerTaskFitsTheWorkerAndNamesItsRefusals(t *testing.T) {
 		if detail["error"] != want {
 			t.Errorf("worker status %d recorded as %v, want %s", status, detail["error"], want)
 		}
+	}
+}
+
+// Managed execution's model calls go to POST /internal/computer-model on the runtime's worker. Which
+// workers serve it is pinned against the workers themselves: should the Python openai-agents worker gain
+// the route, or stop naming itself "python", this fails and its exclusion must be revisited.
+func TestComputerModelCallsFollowTheWorkers(t *testing.T) {
+	for _, c := range []struct {
+		runtime, sdk string
+		want         bool
+	}{{runtimePI, "", true}, {runtimePI, "python", true}, {runtimeOpenAIAgents, "0.18.0", true}, {runtimeOpenAIAgents, "", true},
+		{runtimeOpenAIAgents, "python", false}, {"other", "", false}} {
+		if got := computerModelCalls(c.runtime, piHealth{SDKVersion: c.sdk}); got != c.want {
+			t.Errorf("computerModelCalls(%q, sdkVersion %q) = %v, want %v", c.runtime, c.sdk, got, c.want)
+		}
+	}
+	read := func(parts ...string) string {
+		raw, e := os.ReadFile(filepath.Join(append([]string{"..", "..", ".."}, parts...)...))
+		if e != nil {
+			t.Fatal(e)
+		}
+		return string(raw)
+	}
+	for _, worker := range [][]string{{"apps", "pi-worker", "server.mjs"}, {"apps", "openai-agents-worker", "server.mjs"}} {
+		if !strings.Contains(read(worker...), "pathname === '/internal/computer-model'") {
+			t.Error("this worker no longer serves managed-execution model calls", worker)
+		}
+	}
+	if strings.Contains(read("apps", "openai-agents-python-worker", "server.py"), "/internal/computer-model") {
+		t.Error("the Python worker serves managed-execution model calls now: drop its exclusion in computerModelCalls")
+	}
+	if !strings.Contains(read("apps", "openai-agents-python-worker", "config.py"), `"sdkVersion": "python"`) {
+		t.Error("the Python worker no longer reports sdkVersion python, which computerModelCalls relies on")
+	}
+}
+
+// The runtime list is Pi first however the probes race, and leaves out a runtime whose worker serves no
+// managed-execution model calls; such a task is refused before an invocation is reserved or the worker is
+// called (production 2026-10-06: the panel preselected Python-worker models, and each task failed at
+// its first model call).
+func TestPostgresComputerRuntimeOffersOnlyWorkersThatServeModelCalls(t *testing.T) {
+	health := func(runtime, model string) map[string]any {
+		return map[string]any{"ready": true, "model": model, "provider": "test", "models": []map[string]any{{"id": model, "provider": "test", "runtime": runtime, "maxContextTextBytes": 262144}}}
+	}
+	pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			time.Sleep(150 * time.Millisecond) // answers after the other runtime
+			writeJSON(w, 200, health(runtimePI, "pi-model"))
+			return
+		}
+		t.Error("unexpected Pi worker call", r.Method, r.URL.Path)
+	}))
+	defer pi.Close()
+	var sdk atomic.Value
+	sdk.Store("python")
+	agents := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			body := health(runtimeOpenAIAgents, "agents-model")
+			body["sdkVersion"] = sdk.Load()
+			writeJSON(w, 200, body)
+			return
+		}
+		t.Error("unexpected openai-agents worker call", r.Method, r.URL.Path)
+	}))
+	defer agents.Close()
+	var runs atomic.Int32
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"service": "awwo-openmaus-worker", "ready": true, "capabilities": map[string]bool{"workspace": true, "approvals": true}})
+			return
+		}
+		runs.Add(1)
+		w.WriteHeader(500)
+	}))
+	defer worker.Close()
+	h := newHarness(t, pi.URL)
+	h.a.cfg.OpenAIAgentsURL = agents.URL
+	h.a.cfg.OpenAIAgentsToken = strings.Repeat("o", 32)
+	h.a.cfg.OpenMausURL = worker.URL
+	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
+	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
+	owner, tid, _ := h.register(t, "computer-runtimes@example.test")
+	canvas, _, _ := h.fixture(t, owner, tid)
+	base := "/tenants/" + tid
+	runtimes := func() []string {
+		listed := []string{}
+		for _, m := range h.request(t, owner, "GET", base+"/computer-runtime", nil, 200)["models"].([]any) {
+			listed = append(listed, m.(map[string]any)["runtime"].(string)+"/"+m.(map[string]any)["id"].(string))
+		}
+		return listed
+	}
+	if got := runtimes(); strings.Join(got, ",") != "pi/pi-model" {
+		t.Fatal("Python-worker models offered for managed execution", got)
+	}
+	refused := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]string{"operationId": "computer-python-worker", "prompt": "Prepare a report", "runtime": "openai-agents", "model": "agents-model"}, 400)
+	if refused["error"].(map[string]any)["code"] != "computer_model_unsupported" {
+		t.Fatal("unexpected refusal", refused)
+	}
+	var invocations int
+	if e := h.db.QueryRow(t.Context(), "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid).Scan(&invocations); e != nil || invocations != 0 {
+		t.Fatal("a refused run reserved an invocation", invocations, e)
+	}
+	if runs.Load() != 0 {
+		t.Fatal("the execution service was called for a refused run")
+	}
+	sdk.Store("0.18.0") // the JavaScript worker serves the runtime: its models are offered, after Pi's
+	if got := runtimes(); strings.Join(got, ",") != "pi/pi-model,openai-agents/agents-model" {
+		t.Fatal("runtime order or availability wrong", got)
+	}
+}
+
+// Personal-credential mode builds each runtime's catalog from the user's connections, and keeps the
+// worker's own identity: a Python worker serving openai-agents is left out there too.
+func TestPostgresComputerRuntimeKeepsTheWorkerIdentityWithPersonalCredentials(t *testing.T) {
+	trusted := func(sdk string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/health" {
+				writeJSON(w, 200, map[string]any{"ready": true, "userCredentials": true, "sdkVersion": sdk})
+				return
+			}
+			t.Error("unexpected model worker call", r.Method, r.URL.Path)
+		}))
+	}
+	pi, agents := trusted(""), trusted("python")
+	defer pi.Close()
+	defer agents.Close()
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"service": "awwo-openmaus-worker", "ready": true, "capabilities": map[string]bool{"workspace": true, "approvals": true}})
+			return
+		}
+		t.Error("unexpected execution service call", r.Method, r.URL.Path)
+	}))
+	defer worker.Close()
+	h := newHarness(t, pi.URL)
+	mockPersonalDiscovery(t, h)
+	h.a.cfg.OpenAIAgentsURL = agents.URL
+	h.a.cfg.OpenAIAgentsToken = strings.Repeat("o", 32)
+	h.a.cfg.OpenMausURL = worker.URL
+	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
+	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
+	owner, tid, _ := h.register(t, "computer-personal-runtimes@example.test")
+	addPersonalConnection(t, h, owner)
+	h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "llmgate", "runtime": "openai-agents", "apiKey": "synthetic-personal-secret", "name": "Agents"}, 201)
+	listed := []string{}
+	for _, m := range h.request(t, owner, "GET", "/tenants/"+tid+"/computer-runtime", nil, 200)["models"].([]any) {
+		listed = append(listed, m.(map[string]any)["runtime"].(string))
+	}
+	if len(listed) == 0 || slices.Contains(listed, runtimeOpenAIAgents) {
+		t.Fatal("personal-credential listing kept Python-worker models or lost Pi's", listed)
 	}
 }

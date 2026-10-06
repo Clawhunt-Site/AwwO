@@ -171,13 +171,18 @@ func (a *App) computerRuntime(w http.ResponseWriter, r *http.Request) {
 		go func(id string) { h, e := a.probeRuntime(r.Context(), id); results <- result{id, h, e} }(runtime)
 	}
 	healthErr := a.computerHealth(r.Context())
-	models := []map[string]any{}
+	healths := map[string]piHealth{}
 	for range 2 {
-		res := <-results
-		if res.err != nil {
-			continue
+		if res := <-results; res.err == nil && computerModelCalls(res.runtime, res.health) {
+			healths[res.runtime] = res.health
 		}
-		models = append(models, computerModelChoices(res.runtime, entitlement.apply(res.health))...)
+	}
+	// A fixed order, Pi first: the probes answer in any order, and the panel preselects the first model.
+	models := []map[string]any{}
+	for _, runtime := range []string{runtimePI, runtimeOpenAIAgents} {
+		if h, ok := healths[runtime]; ok {
+			models = append(models, computerModelChoices(runtime, entitlement.apply(h))...)
+		}
 	}
 	reason := ""
 	if healthErr != nil {
@@ -196,6 +201,20 @@ func (h piHealth) modelProvider(model string) string {
 		}
 	}
 	return ""
+}
+
+// computerModelCalls reports whether a runtime's worker serves managed execution's model calls
+// (POST /internal/computer-model). The Pi worker and the JavaScript openai-agents worker do. The
+// Python openai-agents worker (sdkVersion "python") has no such route, so on it a task fails at its
+// first model call: neither listed nor admitted while that worker serves the runtime.
+func computerModelCalls(runtime string, h piHealth) bool {
+	switch runtime {
+	case runtimePI:
+		return true
+	case runtimeOpenAIAgents:
+		return h.SDKVersion != "python"
+	}
+	return false
 }
 
 // computerModelChoices lists one runtime's models for managed execution. Managed execution

@@ -29,6 +29,9 @@ type piHealth struct {
 	Limits   map[string]any `json:"limits"`
 	Models   []piModel      `json:"models"`
 	Tools    []runtimeTool  `json:"tools,omitempty"`
+	// SDKVersion names the worker implementation behind a runtime: "python" for the Python
+	// openai-agents worker, which serves no managed-execution model calls (computerModelCalls).
+	SDKVersion string `json:"sdkVersion,omitempty"`
 	// Allowed is the workspace model entitlement frozen with this catalog. nil
 	// means unrestricted, so an omitted field keeps every persisted snapshot
 	// decoding exactly as it did before. It travels inside execution snapshots so
@@ -449,6 +452,12 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		// Managed execution makes non-streaming completion calls, which the Bedrock bridge does
 		// not serve; refuse such a model here instead of after an invocation is reserved.
 		if snapshot.Health.modelProvider(snapshot.Model) == "bedrock" {
+			fail(w, 400, "computer_model_unsupported", "Managed execution cannot use this model")
+			return
+		}
+		// Likewise a runtime whose worker serves no managed-execution model calls: the task would fail
+		// at its first one.
+		if !computerModelCalls(snapshot.Runtime, snapshot.Health) {
 			fail(w, 400, "computer_model_unsupported", "Managed execution cannot use this model")
 			return
 		}
