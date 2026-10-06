@@ -155,6 +155,28 @@ class ConfigTests(unittest.TestCase):
         # The JS and Python workers advertise the same Bedrock catalog for the Agents runtime.
         self.assertEqual([m["id"] for m in health["models"][1:]], [e["id"] for e in read_catalog() if e["runtime"] == "openai-agents"])
 
+    def test_health_publishes_the_caps_each_model_is_called_with(self):
+        # The output budget a model answers with is the one thing an operator cannot see from the
+        # outside, and the Python worker was the only runtime omitting it: in production the default
+        # model ran at 4,096 output tokens while Pi and the JS worker ran the same model at 16,384
+        # (2026-10-06). Both numbers are published per model, so a mismatch between runtimes is visible.
+        config = catalog_config(AWWO_OPENAI_AGENTS_CONTEXT_WINDOW="131072", AWWO_OPENAI_AGENTS_MAX_TOKENS="16384")
+        health = public_health(config)
+        default = next(model for model in health["models"] if model["id"] == config.model)
+        self.assertEqual((default["contextWindow"], default["maxOutputTokens"], default["maxContextTextBytes"]),
+                         (131072, 16384, 131072 - 16384 - 256))
+        self.assertEqual((health["limits"]["contextWindow"], health["limits"]["maxOutputTokens"]), (131072, 16384))
+        # A catalog entry keeps its own caps, which is what makes a per-model difference legible.
+        claude = next(model for model in health["models"] if model["id"] == "bedrock.claude-opus-5-5")
+        profile = resolve_model_config(config, "bedrock.claude-opus-5-5")
+        self.assertEqual((claude["contextWindow"], claude["maxOutputTokens"]), (profile.context_window, profile.max_tokens))
+        for model in health["models"]:
+            self.assertGreaterEqual(model["contextWindow"], model["maxOutputTokens"] + 256, model["id"])
+            self.assertEqual(model["maxContextTextBytes"], model["contextWindow"] - model["maxOutputTokens"] - 256, model["id"])
+        # Unset caps stay the documented defaults rather than silently following a catalog entry.
+        defaults = public_health(catalog_config())
+        self.assertEqual((defaults["limits"]["contextWindow"], defaults["limits"]["maxOutputTokens"]), (32768, 4096))
+
     def test_gate_only_policy(self):
         with self.assertRaisesRegex(ConfigError, "AWWO_PLATFORM_PROVIDERS includes bedrock"):
             catalog_config(AWWO_LLMGATE_ONLY="true")

@@ -54,6 +54,12 @@ class ModelProfile:
             "provider": self.provider,
             "runtime": "openai-agents",
             "protocol": self.protocol,
+            # The caps this profile actually calls the provider with, as the JS worker publishes them.
+            # Without them an operator cannot see from /health that a model here answers with a smaller
+            # output budget than the same model on another runtime, which is how the default model sat at
+            # 4,096 output tokens in production while Pi and the JS worker ran it at 16,384 (2026-10-06).
+            "contextWindow": self.context_window,
+            "maxOutputTokens": self.max_tokens,
             "maxContextTextBytes": max(0, self.context_window - self.max_tokens - 256),
             "messageOverheadBytes": 32,
             "reasoningEfforts": list(self.reasoning_efforts),
