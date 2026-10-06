@@ -27,7 +27,8 @@ it('edits quota through Go without changing tenant status and reloads the first 
   const patch = requests.find(request => request.init.method === 'PATCH')!;
   expect(patch.url).toBe('/api/v1/admin/tenants/t-a');
   expect(JSON.parse(String(patch.init.body))).toEqual({ maxConcurrentRuns: 5, maxRunsPerDay: 321 });
-  expect(requests.filter(request => !request.init.method)).toHaveLength(2);
+  // The reload is requested by an effect after the dialog closes, so wait for it rather than count at once.
+  await waitFor(() => expect(requests.filter(request => !request.init.method)).toHaveLength(2));
 });
 
 // An absent list and a present-but-empty list mean opposite things, so the
