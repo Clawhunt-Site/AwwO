@@ -511,9 +511,25 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // (within tap slop, same scale) the operator has not taken it, so a stage change may refit it; a real
   // pan, a zoom, a focus or a waypoint moves it further and the camera is the operator's from then on.
   const lastAutoView = useRef<ViewportState | null>(null);
-  const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: { w: number; h: number }) => {
+  // A camera the app placed on its own (on open, or after the stage changed shape) is a fit to this screen,
+  // not where the operator left the canvas, so it is not saved: opening a canvas on another screen must not
+  // rewrite, and save, the camera they left. A requested fit (Fit All, an arrangement, a plan) is theirs, and
+  // so is a recalled waypoint. A canvas with no saved camera starts on the app's default one.
+  const unsavedCamera = useRef<ViewportState | null>(doc.view ? null : view);
+  // The operator's camera waiting out the save debounce (see the viewport persistence below).
+  const pendingCameraSave = useRef<{ timer: ReturnType<typeof setTimeout>; camera: ViewportState; save: () => void } | null>(null);
+  const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: { w: number; h: number }, automatic = false) => {
     const next = fitNodeOverview(fitNodes, box);
     lastAutoView.current = next;
+    // The app refits only a camera it may take over (a requested fit, say): the operator's camera still waiting to be
+    // saved is saved now, before the refit replaces it, if it is still the live one (not a frame the camera has left).
+    const pending = automatic ? pendingCameraSave.current : null;
+    if (pending) {
+      clearTimeout(pending.timer); pendingCameraSave.current = null;
+      const live = viewRef.current;
+      if (pending.camera.x === live.x && pending.camera.y === live.y && pending.camera.scale === live.scale) pending.save();
+    }
+    unsavedCamera.current = automatic ? next : null;
     moveCamera(next);
   }, [moveCamera]);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -577,7 +593,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // A kept saved view already shows the whole graph, so it counts as fitted: a later stage change
     // may refit it, exactly as it would the overview computed below.
     if (saved && boundsWithinViewport(boundsOfNodes(presentationNodes(nodes, null)), saved, box)) { lastAutoView.current = viewRef.current; return; }
-    autoFit(nodes, box);
+    autoFit(nodes, box, true);
   }, [size, nodes, viewportSize, autoFit]);
 
   // Refit the overview when the stage itself changes shape — a window resize, a rail collapsing
@@ -600,7 +616,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const current = docRef.current.nodes;
       const box = viewportSize();
       if (!current.length || !box) return;
-      autoFit(current, box);
+      autoFit(current, box, true);
     }, REFIT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [size, railsVersion, modelRailCollapsed, viewportSize, autoFit]);
@@ -748,7 +764,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const recallWaypoint = useCallback(
     (slot: number) => {
       const wp = doc.waypoints.find((w) => w.slot === slot);
-      if (wp) moveCamera(wp.view);
+      if (!wp) return;
+      // The operator's choice, even where it matches the app's own fit.
+      unsavedCamera.current = null;
+      moveCamera(wp.view);
     },
     [doc.waypoints],
   );
@@ -1832,6 +1851,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
 
   // Persist the viewport so the canvas reopens where it was left (debounced by the doc save).
+  useEffect(() => () => { if (pendingCameraSave.current) clearTimeout(pendingCameraSave.current.timer); }, []);
   useEffect(() => {
     if (readOnly) return;
     // The viewport is not an edit: panning is navigation, and letting it clear the redo stack
@@ -1839,12 +1859,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // While a node is open the camera is the node's; save the operator's, so leaving the canvas from an
     // open node reopens where they were.
     const kept = focusedRef.current && focusReturn.current ? focusReturn.current : view;
-    const t = setTimeout(
-      () => patchDoc((prev) => (prev.view === kept || (prev.view?.x === kept.x && prev.view?.y === kept.y && prev.view?.scale === kept.scale)
-        ? prev : { ...prev, view: kept }), { silent: true }),
-      400,
-    );
-    return () => clearTimeout(t);
+    // A newer camera replaces one still waiting, so a glide or a gesture never saves an in-between frame.
+    if (pendingCameraSave.current) { clearTimeout(pendingCameraSave.current.timer); pendingCameraSave.current = null; }
+    // Still the app's own camera, a click's wobble included: nothing of the operator's to save (see unsavedCamera).
+    if (isFittedCamera(kept, unsavedCamera.current)) return;
+    const save = () => patchDoc((prev) => (prev.view === kept || (prev.view?.x === kept.x && prev.view?.y === kept.y && prev.view?.scale === kept.scale)
+      ? prev : { ...prev, view: kept }), { silent: true });
+    const timer = setTimeout(() => { pendingCameraSave.current = null; save(); }, 400);
+    pendingCameraSave.current = { timer, camera: kept, save };
   }, [view, patchDoc, readOnly]);
 
   // The planning conversation is local UI history, separate from node execution Sessions.

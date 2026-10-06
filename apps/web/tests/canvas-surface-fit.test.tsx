@@ -145,6 +145,28 @@ describe('CanvasSurface fits the real stage', () => {
     expect(scale).toBeCloseTo((stage.h - 24 - 82) / 900, 3);
   });
 
+  it('saves a requested Fit All even when the stage changes before that save lands', async () => {
+    let deliverResize = () => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliverResize = callback; } observe() {} unobserve() {} disconnect() {} });
+    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed(), view: null }));
+    const stage = { w: 1200, h: 800 };
+    stubStage(stage);
+    render(<CanvasSurface />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    await waitFor(() => expect(world.style.transform).not.toBe('translate(0px, 0px) scale(1)'));
+    fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '查看全部节点', exact: true }));
+    const requested = transformOf(world);
+    // Within the save's 400 ms the stage changes and the app refits its own camera: the requested one still lands.
+    stage.w = 900;
+    act(() => deliverResize());
+    await settle();
+    expect(transformOf(world)).not.toEqual(requested);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
+    const saved = (JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).view!;
+    expect([saved.x, saved.y, saved.scale]).toEqual(requested);
+  });
+
   it('refits the overview when the stage resizes while nothing is focused, and leaves a focused camera alone', async () => {
     let deliverResize = () => {};
     vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliverResize = callback; } observe() {} unobserve() {} disconnect() {} });
@@ -437,6 +459,12 @@ describe('CanvasSurface fits the real stage (cloud rails)', () => {
   };
 
   it('refits an app-fitted overview when a side rail toggles, but never an operator camera or a focused node', async () => {
+    // Only the operator's camera is saved: the app's fits (on open, after a rail toggles) are not.
+    const savedCamera = async () => {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+      const view = (JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).view;
+      return view ? [view.x, view.y, view.scale] : null;
+    };
     const stage = { w: 1200, h: 800 };
     stubStage(stage);
     localStorage.setItem(RAIL_BOT_KEY, '1');
@@ -452,10 +480,12 @@ describe('CanvasSurface fits the real stage (cloud rails)', () => {
     await settle();
     expect(world.style.transform).not.toBe(overview);
     expectBoxOnStage(world, node, stage);
+    expect(await savedCamera()).toBeNull();
 
     // The operator zooms: the camera is theirs, and neither rail moves it.
     fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
     const zoomed = world.style.transform;
+    expect(await savedCamera()).toEqual(transformOf(world));
     stage.w = 1200;
     fireEvent.click(screen.getByRole('button', { name: '展开模型' }));
     await settle();
@@ -467,11 +497,15 @@ describe('CanvasSurface fits the real stage (cloud rails)', () => {
     // View all hands the camera back to the fit, and the next rail toggle refits again.
     fireEvent.click(screen.getByRole('button', { name: '查看全部节点', exact: true }));
     const refitted = world.style.transform;
+    const requested = transformOf(world);
+    // A requested fit is the operator's camera and is saved; the refit after the next rail toggle is not.
+    expect(await savedCamera()).toEqual(requested);
     stage.w = 800;
     fireEvent.click(screen.getByRole('button', { name: '收起模型' }));
     await settle();
     expect(world.style.transform).not.toBe(refitted);
     expectBoxOnStage(world, node, stage);
+    expect(await savedCamera()).toEqual(requested);
 
     // Focused: a rail toggle leaves the camera where the operator put it.
     fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话', exact: true }));

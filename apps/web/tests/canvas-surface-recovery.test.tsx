@@ -96,6 +96,10 @@ it.each(['same event loop turn', 'after a React commit'] as const)(
   const f = foreignCompletionFixture(true);
   render(<CanvasSurface />);
   await waitFor(() => expect(f.fetchMock.mock.calls.some(([url]) => String(url).endsWith('/runs/run'))).toBe(true));
+  // The operator moves the camera (a wheel needs no stage size), so the save queued for it is a real write of this
+  // tab's stale document; the app's own default camera would queue nothing.
+  fireEvent.wheel(document.querySelector('.canvas-viewport') as HTMLElement, { deltaY: -120, clientX: 100, clientY: 100 });
+  expect((document.querySelector('.canvas-world') as HTMLElement).style.transform).not.toBe('translate(0px, 0px) scale(1)');
   fireEvent.click(screen.getByRole('button', { name: '打开 Foreign', exact: true }));
   const completed = { ...f.doc, nodes: [{ ...f.node, title: 'Foreign final', preview: 'AWWO-TURN-RECHECKED' }] };
   await act(async () => { f.completeElsewhere(completed); });

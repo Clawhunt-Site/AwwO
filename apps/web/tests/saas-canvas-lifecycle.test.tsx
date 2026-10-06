@@ -384,9 +384,9 @@ describe('opening a canvas after its latest run', () => {
   const serverStart = '2026-10-03T08:30:15.878Z';
   type Run = Omit<GraphRunSnapshot, 'id' | 'operationId' | 'canvasId' | 'documentVersion' | 'document' | 'scope'>;
   /** Opens the canvas as a browser with no run journal would. `submitted` is the document the run was given. */
-  function open(document: CanvasDocument, run: Run, submitted: CanvasDocument = document) {
+  function open(document: CanvasDocument, run: Run | null, submitted: CanvasDocument = document) {
     const cloud = { ...record(0), document };
-    const latest: GraphRunSnapshot = { id: 'graph-latest', operationId: 'operation-latest', canvasId: cloud.id, documentVersion: cloud.version, document: submitted, scope: ['a', 'b'], ...run };
+    const latest: GraphRunSnapshot | null = run && { id: 'graph-latest', operationId: 'operation-latest', canvasId: cloud.id, documentVersion: cloud.version, document: submitted, scope: ['a', 'b'], ...run };
     const reads: string[] = []; const writes: string[] = []; const saved: CanvasDocument[] = []; const journalWrites: string[] = [];
     // The test storage defines setItem on the instance, so a Storage.prototype spy would see nothing.
     const setItem = localStorage.setItem;
@@ -406,7 +406,7 @@ describe('opening a canvas after its latest run', () => {
       if (url.endsWith('/appearance')) return json(appearanceFixture);
       if (url.endsWith('/auth/me')) return json(identity);
       if (url.endsWith('/runtime')) return json({ available: false, configured: false, models: [] });
-      if (url.endsWith('/graph-runs')) return json({ items: [latest] });
+      if (url.endsWith('/graph-runs')) return json({ items: latest ? [latest] : [] });
       if (url.endsWith('/graph-runs/graph-latest')) return json(latest);
       return json(cloud);
     }));
@@ -418,6 +418,42 @@ describe('opening a canvas after its latest run', () => {
   }
   // Past the run read and the 450 ms autosave a recovery would cause.
   const settle = () => act(() => new Promise(resolve => setTimeout(resolve, 1500)));
+
+  it('opens on a screen its saved camera does not fit without saving the refit, and saves the operator’s own camera', async () => {
+    // A 1200×800 stage: the saved camera leaves the node past the right edge, so the canvas refits as it opens.
+    const stage = { w: 1200, h: 800 };
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() =>
+      ({ x: 0, y: 0, left: 0, top: 0, right: stage.w, bottom: stage.h, width: stage.w, height: stage.h, toJSON() {} }) as DOMRect);
+    const offStage = { x: -235, y: 71, scale: 0.75 };
+    const document = sanitizeDocument({ ...emptyDocument(), view: offStage, nodes: [{ ...step('a', 2000), y: 1500 }] });
+    const view = open(document, null);
+    try {
+      await screen.findByTestId('canvas-tile-a');
+      const world = window.document.querySelector('.canvas-world') as HTMLElement;
+      await waitFor(() => expect(world.style.transform).not.toBe('translate(-235px, 71px) scale(0.75)'));
+      // A camera change is saved 400 ms later and sent 450 ms after that; on a busy runner it lands later still.
+      const quiet = () => act(() => new Promise(resolve => setTimeout(resolve, 3000)));
+      const camera = () => world.style.transform.match(/^translate\(([-\d.e]+)px, ([-\d.e]+)px\) scale\(([-\d.e]+)\)$/)!.slice(1).map(Number);
+      await quiet();
+      expect(view.writes).toEqual([]);
+      // A rail collapses and the stage widens: the app refits its own camera, and that is not saved either.
+      const fitted = world.style.transform;
+      stage.w = 1500;
+      fireEvent.click(screen.getByRole('button', { name: '收起 Bot 清单' }));
+      await waitFor(() => expect(world.style.transform).not.toBe(fitted));
+      await quiet();
+      expect(view.writes).toEqual([]);
+      // The operator's zoom is saved, and the one save carries exactly that camera.
+      fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
+      const zoomed = camera();
+      await waitFor(() => expect(view.saved).toHaveLength(1), { timeout: 5000 });
+      const saved = view.saved[0].view!;
+      expect([saved.x, saved.y, saved.scale]).toEqual(zoomed);
+      // And only that one.
+      await quiet();
+      expect(view.writes).toEqual(['PUT']);
+    } finally { view.restore(); rect.mockRestore(); }
+  }, 30000);
 
   it('does not recover a failed run it already shows again, so the canvas is neither re-stamped nor saved', async () => {
     const document = sanitizeDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 },

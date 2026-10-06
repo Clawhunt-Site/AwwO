@@ -65,15 +65,113 @@ describe('canvas reopen state', () => {
     // The refit is a one-off: the same measurement again does not move the camera.
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
     expect(world.style.transform).toBe(refitted);
-    expect(loadDocumentWithStatus().doc.view).not.toEqual(offStageView);
+    // It is a fit to this stage, not where the operator left the canvas: the camera they saved stays.
+    expect(loadDocumentWithStatus().doc.view).toEqual(offStageView);
+    // Their own move is saved as before.
+    fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
+    const zoomed = parseTransform(world);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+    const saved = loadDocumentWithStatus().doc.view!;
+    expect([saved.x, saved.y, saved.scale]).toEqual(zoomed);
   });
 
-  it.each([null, { x: 12, y: 13, scale: 0 }])('fits a graph that has no valid saved viewport (%j)', async view => {
+  it('does not save the app’s fit when a click on the background wobbles it', async () => {
+    store(offStageView);
+    const { container } = render(<CanvasSurface />);
+    const world = container.querySelector('.canvas-world') as HTMLElement;
+    await waitFor(() => expect(world.style.transform).not.toBe('translate(-235px, 71px) scale(0.75)'));
+    const fitted = world.style.transform;
+    const viewport = container.querySelector('.canvas-viewport') as HTMLElement;
+    fireEvent.pointerDown(viewport, { button: 0, pointerId: 7, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(viewport, { pointerId: 7, clientX: 302, clientY: 201 });
+    fireEvent.pointerUp(viewport, { pointerId: 7, clientX: 302, clientY: 201 });
+    expect(world.style.transform).not.toBe(fitted);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+    expect(loadDocumentWithStatus().doc.view).toEqual(offStageView);
+  });
+
+  it('does not save the app’s fit when a node is opened from it', async () => {
+    // Two nodes far apart: the overview is too small to read, so opening one zooms the camera in.
+    const nodes = [{ ...createSessionNode('llm', { x: 0, y: 0 }), id: 'near' }, { ...createSessionNode('llm', { x: 6000, y: 4000 }), id: 'far' }];
+    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes, view: offStageView }));
+    const { container } = render(<CanvasSurface />);
+    const world = container.querySelector('.canvas-world') as HTMLElement;
+    await waitFor(() => expect(world.style.transform).not.toBe('translate(-235px, 71px) scale(0.75)'));
+    const fitted = world.style.transform;
+    fireEvent.click(screen.getAllByRole('button', { name: '打开 LLM 会话', exact: true })[0]);
+    await waitFor(() => expect(container.querySelector('.canvas-root')).toHaveAttribute('data-node-open', 'true'));
+    // Real frames (an act() wait would commit the glide only at its end), then past the 400 ms save.
+    await new Promise(resolve => setTimeout(resolve, 600));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 500)); });
+    expect(world.style.transform).not.toBe(fitted);
+    expect(loadDocumentWithStatus().doc.view).toEqual(offStageView);
+  });
+
+  it('does not save a frame of the glide back when a node opened from the app’s fit closes', async () => {
+    const nodes = [{ ...createSessionNode('llm', { x: 0, y: 0 }), id: 'near' }, { ...createSessionNode('llm', { x: 6000, y: 4000 }), id: 'far' }];
+    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes, view: offStageView }));
+    const { container } = render(<CanvasSurface />);
+    const world = container.querySelector('.canvas-world') as HTMLElement;
+    await waitFor(() => expect(world.style.transform).not.toBe('translate(-235px, 71px) scale(0.75)'));
+    const fitted = world.style.transform;
+    fireEvent.click(screen.getAllByRole('button', { name: '打开 LLM 会话', exact: true })[0]);
+    await waitFor(() => expect(container.querySelector('.canvas-root')).toHaveAttribute('data-node-open', 'true'));
+    // Real frames, each committed on its own: an act() wait would merge the glide into one commit.
+    await new Promise(resolve => setTimeout(resolve, 600));
+    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    expect(container.querySelector('.canvas-root')).not.toHaveAttribute('data-node-open');
+    expect(world.style.transform).toBe(fitted);
+    expect(loadDocumentWithStatus().doc.view).toEqual(offStageView);
+  });
+
+  it('saves a recalled waypoint, even one set at the app’s fit', async () => {
+    store(offStageView);
+    const { container } = render(<CanvasSurface />);
+    const world = container.querySelector('.canvas-world') as HTMLElement;
+    await waitFor(() => expect(world.style.transform).not.toBe('translate(-235px, 71px) scale(0.75)'));
+    const fitted = parseTransform(world);
+    fireEvent.keyDown(document, { key: '!', code: 'Digit1', shiftKey: true, ctrlKey: true });
+    fireEvent.click(screen.getByRole('button', { name: '缩小', exact: true }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+    expect([loadDocumentWithStatus().doc.view!.x, loadDocumentWithStatus().doc.view!.y, loadDocumentWithStatus().doc.view!.scale]).not.toEqual(fitted);
+    fireEvent.keyDown(document, { key: '1', code: 'Digit1', ctrlKey: true });
+    expect(parseTransform(world)).toEqual(fitted);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+    const saved = loadDocumentWithStatus().doc.view!;
+    expect([saved.x, saved.y, saved.scale]).toEqual(fitted);
+  });
+
+  it('does not save the default camera of a canvas that has none', async () => {
+    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(emptyDocument()));
+    render(<CanvasSurface />);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+    expect(loadDocumentWithStatus().doc.view ?? null).toBeNull();
+  });
+
+  it('saves a requested Fit All, though the same fit on open was not saved', async () => {
+    store(offStageView);
+    const { container } = render(<CanvasSurface />);
+    const world = container.querySelector('.canvas-world') as HTMLElement;
+    await waitFor(() => expect(world.style.transform).not.toBe('translate(-235px, 71px) scale(0.75)'));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+    expect(loadDocumentWithStatus().doc.view).toEqual(offStageView);
+    fireEvent.click(screen.getByRole('button', { name: '查看全部节点' }));
+    const fitted = parseTransform(world);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+    const saved = loadDocumentWithStatus().doc.view!;
+    expect([saved.x, saved.y, saved.scale]).toEqual(fitted);
+  });
+
+  it.each([null, { x: 12, y: 13, scale: 0 }])('fits a graph that has no valid saved viewport (%j), without saving that fit', async view => {
     store(view);
+    const before = loadDocumentWithStatus().doc.view ?? null;
     const { container } = render(<CanvasSurface />);
     const world = container.querySelector('.canvas-world') as HTMLElement;
     await waitFor(() => expect(world.style.transform).not.toBe('translate(0px, 0px) scale(1)'));
     expectCardOnStage(world);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+    expect(loadDocumentWithStatus().doc.view ?? null).toEqual(before);
   });
 
   it.each(['factory', 'template', 'missing-old-preview'])('persists the first reply preview from %s input', async source => {
