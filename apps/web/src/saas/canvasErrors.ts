@@ -67,8 +67,14 @@ const runErrors: Record<string, [string, string]> = {
   media_storage_full: ['媒体存储空间不足，生成结果未保存；请联系管理员。', 'Media storage is full, so the result was not saved. Contact an administrator.'],
   // A route-limited workspace gets a few free premium calls a day inside its daily allowance; the
   // default model keeps working, so the copy names that way forward before the paid one.
-  premium_quota_exceeded: ['今天高级模型（Claude、GPT、Bedrock）的免费次数已用完。可以把节点换成默认模型继续，UTC 次日重置；付费套餐即将上线，会提供更多次数。', 'Today’s free calls for premium models (Claude, GPT, Bedrock) are used up. Switch the node to the default model to keep going, or wait for the next UTC day. Paid plans with more calls are coming soon.'],
-  premium_capacity_exceeded: ['今天全站的高级模型免费名额已用完。可以把节点换成默认模型继续，UTC 次日重置；付费套餐即将上线，会提供更多次数。', 'Today’s free premium-model calls for the whole service are used up. Switch the node to the default model to keep going, or wait for the next UTC day. Paid plans with more calls are coming soon.'],
+  premium_quota_exceeded: ['今天高级模型（Claude、GPT、Bedrock）的免费次数已用完。可以把节点换成默认模型继续，UTC 次日重置；需要更多可以看看 Pro / Max 付费套餐（账号菜单 → 套餐与点数）。', 'Today’s free calls for premium models (Claude, GPT, Bedrock) are used up. Switch the node to the default model to keep going, or wait for the next UTC day. For more, see the Pro and Max plans (account menu → Plans and credits).'],
+  premium_capacity_exceeded: ['今天全站的高级模型免费名额已用完。可以把节点换成默认模型继续，UTC 次日重置；Pro / Max 付费套餐不受这个名额限制（账号菜单 → 套餐与点数）。', 'Today’s free premium-model calls for the whole service are used up. Switch the node to the default model to keep going, or wait for the next UTC day. The Pro and Max plans are not limited by it (account menu → Plans and credits).'],
+  // A paid plan's credits for the period are used up; the default model spends none.
+  plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
+  model_unpriced: ['这个模型还不能按点数计费，请把节点换成其他模型。', 'This model cannot be billed in credits yet. Switch the node to another model.'],
+  credits_exhausted: ['本期套餐点数已用完。可以把节点换成默认模型继续，点数在下次续费后重置；需要更多点数可以请工作区所有者在「套餐与点数」里升级。', 'This period’s plan credits are used up. Switch the node to the default model to keep going; credits reset after the next renewal. For more, the workspace’s owner can upgrade in Plans and credits.'],
+  plan_busy: ['套餐的同时运行数已用满（包括所有者的其他工作区），等其中一个运行结束后再试。', 'The plan’s agents at once are all running, counting the owner’s other workspaces; try again when one finishes.'],
+  plan_media_quota_exceeded: ['套餐今日的图片 / 视频生成次数已用完，UTC 次日恢复。', 'The plan’s image and video generations for today are used up; they come back after the next UTC day.'],
 };
 
 /** The reader's-language copy for a known run failure code, or undefined for anything else (free text,

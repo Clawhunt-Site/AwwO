@@ -1,0 +1,131 @@
+import { useEffect, useRef, useState } from 'react';
+import { Check } from 'lucide-react';
+import { saasErrorMessage, type Identity } from './api';
+import { billingNavigation, fetchBilling, formatCredits, openBillingPortal, planName, startCheckout, stripePage, type Billing, type CatalogPlan, type PlanId } from './billing';
+import { useSaaSPreferences } from './preferences';
+import './plans.css';
+
+// After Stripe sends the browser back, the plan reaches AwwO within moments (ClawHunt reads the finished
+// checkout from Stripe); the page asks again a few times before it says the sync is still on its way.
+const RETURN_POLLS = 8;
+export const returnPoll = { ms: 2500 };
+// A subscription Stripe still holds, whether or not it entitles right now: it is managed, never bought again.
+const SUBSCRIBED = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'paused']);
+
+/** The account's plan and credits, and Pro / Max to buy or change (?account=plans). */
+export function PlansPage({ identity }: { identity: Identity }) {
+  const { t, locale } = useSaaSPreferences();
+  const [billing, setBilling] = useState<Billing | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState<PlanId | 'portal' | null>(null);
+  const [actionError, setActionError] = useState<unknown>(null);
+  const returned = useRef(new URLSearchParams(location.search).get('billing'));
+  const [syncing, setSyncing] = useState(returned.current === 'success');
+  const linked = identity.authentication === 'clawhunt';
+  // The payment page's answer is read once: a reload or a later visit does not show it again.
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    if (!query.has('billing')) return;
+    query.delete('billing');
+    window.history.replaceState(window.history.state, '', location.pathname + (query.size ? '?' + query : '') + location.hash);
+  }, []);
+  // Coming back from Stripe with the browser's Back button restores this page as it was left: busy.
+  useEffect(() => {
+    const restored = (event: PageTransitionEvent) => { if (event.persisted) setBusy(null); };
+    window.addEventListener('pageshow', restored);
+    return () => window.removeEventListener('pageshow', restored);
+  }, []);
+  useEffect(() => {
+    if (!linked) return;
+    const controller = new AbortController();
+    let polls = 0;
+    let timer: number | undefined;
+    const load = (refresh: boolean) => {
+      fetchBilling(refresh, controller.signal).then(value => {
+        if (controller.signal.aborted) return;
+        setBilling(value);
+        setError(null);
+        // Back from a paid checkout: keep asking until the plan arrives.
+        if (returned.current === 'success' && !value.plan?.entitled && ++polls < RETURN_POLLS) {
+          timer = window.setTimeout(() => load(true), returnPoll.ms);
+        } else {
+          setSyncing(false);
+        }
+      }).catch(cause => {
+        if (controller.signal.aborted) return;
+        setError(cause);
+        setSyncing(false);
+      });
+    };
+    load(returned.current !== null);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [identity.user.id, linked]);
+  const go = async (action: PlanId | 'portal') => {
+    setBusy(action); setActionError(null);
+    try {
+      const { url } = action === 'portal' ? await openBillingPortal() : await startCheckout(action);
+      const page = stripePage(url, action === 'portal' ? 'billing.stripe.com' : 'checkout.stripe.com');
+      if (!page) throw new Error(t('支付页面地址无效，请稍后重试。', 'The payment page address is invalid. Try again later.'));
+      billingNavigation.go(page);
+    } catch (cause) {
+      setActionError(cause);
+      setBusy(null);
+    }
+  };
+  if (!linked) return <section className="saas-card saas-plans-note"><p>{t('付费套餐随 ClawHunt 账号提供。使用 ClawHunt 账号登录 AwwO 后即可在这里订阅。', 'Paid plans come with a ClawHunt account. Sign in to AwwO with ClawHunt to subscribe here.')}</p></section>;
+  if (!billing) return <section className="saas-card saas-plans-note" role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在读取套餐…', 'Loading plans…')}</section>;
+  const date = (raw: string) => new Date(raw).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const current = billing.plan?.entitled ? billing.plan : null;
+  // Subscribed, but not entitled: a first payment or a renewal that has not gone through.
+  const held = !current && billing.plan && SUBSCRIBED.has(billing.plan.status) ? billing.plan : null;
+  const features = (plan: CatalogPlan) => [
+    t(`每月 ${formatCredits(plan.credits, locale)} 点（1 点 = 1 美分），用于 Claude、GPT、Bedrock 和图片视频`, `${formatCredits(plan.credits, locale)} credits a month (1 credit = 1 cent) for Claude, GPT, Bedrock, images and video`),
+    t(`默认模型每天 ${formatCredits(plan.dailyCalls, locale)} 次，不扣点`, `${formatCredits(plan.dailyCalls, locale)} default-model calls a day, free of credits`),
+    t(`同时运行 ${plan.concurrentAgents} 个 Agent`, `${plan.concurrentAgents} agents at once`),
+    t(`最多 ${plan.workspaces} 个工作区`, `Up to ${plan.workspaces} workspaces`),
+    t(`每天最多 ${plan.mediaPerDay} 次图片 / 视频生成`, `Up to ${plan.mediaPerDay} image or video generations a day`),
+  ];
+  return <div className="saas-plans">
+    {returned.current === 'cancel' && <p className="saas-plans-notice" role="status">{t('已取消支付，没有扣款。', 'Payment cancelled; you were not charged.')}</p>}
+    {returned.current === 'success' && <p className="saas-plans-notice" role="status">{syncing ? t('支付完成，正在开通套餐…', 'Payment complete. Turning on your plan…')
+      : current ? t(`已开通 ${planName(current.id)}，点数已到账。`, `${planName(current.id)} is on and your credits are ready.`)
+        : t('支付完成，套餐还在同步，几分钟内会生效；刷新本页即可查看。', 'Payment complete. The plan is still syncing and takes effect within minutes; refresh this page to check.')}</p>}
+    {billing.stale && <p className="saas-plans-notice" role="status">{t('暂时无法向 ClawHunt 确认最新状态，下面显示的是上次同步的结果。', 'ClawHunt could not confirm the latest state right now; this is the last synced result.')}</p>}
+    <section className="saas-card saas-plans-current" aria-labelledby="saas-plans-current-title">
+      <h2 id="saas-plans-current-title">{t('当前套餐', 'Current plan')}</h2>
+      {current ? <>
+        <p className="saas-plans-current-name">{planName(current.id)}</p>
+        {billing.credits && <dl className="saas-plans-facts">
+          <div><dt>{t('本期剩余点数', 'Credits left this period')}</dt><dd>{formatCredits(billing.credits.remaining, locale)} / {formatCredits(billing.credits.granted, locale)}</dd></div>
+          {(billing.credits.carried ?? 0) > 0 && <div><dt>{t('上期超支（本期扣除）', 'Carried from last period')}</dt><dd>{formatCredits(billing.credits.carried ?? 0, locale)}</dd></div>}
+          <div><dt>{current.cancelAtPeriodEnd ? t('到期日', 'Ends on') : t('下次续费', 'Renews on')}</dt><dd>{!current.cancelAtPeriodEnd && new Date(current.periodEnd).getTime() < Date.now()
+            ? t('续费处理中，付款完成后新一期的点数会自动到账', 'Renewal in progress; the new period’s credits arrive once it is paid') : date(current.periodEnd)}</dd></div>
+          {current.status === 'past_due' && <div><dt>{t('付款状态', 'Payment')}</dt><dd>{t('续费扣款失败，Stripe 正在重试；请在管理订阅中更新付款方式。', 'The renewal payment failed and Stripe is retrying. Update your payment method in Manage subscription.')}</dd></div>}
+        </dl>}
+        <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{busy === 'portal' ? t('正在打开…', 'Opening…') : t('管理订阅', 'Manage subscription')}</button>
+        <p className="saas-plans-hint">{t('在管理订阅中可以切换 Pro / Max、更新付款方式或取消订阅；取消后本期结束前仍可使用。', 'In Manage subscription you can switch between Pro and Max, update the payment method or cancel; a cancelled plan stays on until the period ends.')}</p>
+      </> : held ? <>
+        <p className="saas-plans-current-name">{planName(held.id)}</p>
+        <p>{t('订阅还没有生效：付款没有完成或续费扣款失败。请在管理订阅中完成付款或更新付款方式，付款成功后点数会自动到账。', 'The subscription is not in effect yet: its payment has not gone through. Complete it or update the payment method in Manage subscription; the credits arrive once it is paid.')}</p>
+        <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{busy === 'portal' ? t('正在打开…', 'Opening…') : t('管理订阅', 'Manage subscription')}</button>
+      </> : <p>{t('免费版：默认模型每天有固定次数，Claude / GPT、Bedrock 和图片视频每天各有少量免费次数，可以在工作区顶部的「今日额度」里查看。', 'Free: a daily number of default-model calls, and a few free Claude / GPT, Bedrock and image or video calls a day. See Today’s allowance at the top of a workspace.')}</p>}
+    </section>
+    <div className="saas-plans-grid">
+      {billing.catalog.map(plan => {
+        const isCurrent = current?.id === plan.id;
+        const subscribed = current ?? held;
+        return <section key={plan.id} className={`saas-card saas-plan${isCurrent ? ' is-current' : ''}`} aria-labelledby={`saas-plan-${plan.id}`}>
+          <h2 id={`saas-plan-${plan.id}`}>{planName(plan.id)}</h2>
+          <p className="saas-plan-price"><strong>${plan.priceUsd}</strong>{t(' / 月', ' / month')}</p>
+          <ul>{features(plan).map(text => <li key={text}><Check size={15} aria-hidden="true" />{text}</li>)}</ul>
+          {isCurrent ? <p className="saas-plan-state">{t('当前套餐', 'Your plan')}</p>
+            : subscribed ? <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{t(`在管理订阅中切换到 ${planName(plan.id)}`, `Switch to ${planName(plan.id)} in Manage subscription`)}</button>
+              : billing.checkoutEnabled ? <button type="button" className="saas-primary" disabled={busy !== null} onClick={() => go(plan.id)}>{busy === plan.id ? t('正在打开支付页…', 'Opening checkout…') : t(`订阅 ${planName(plan.id)}`, `Subscribe to ${planName(plan.id)}`)}</button>
+                : <button type="button" disabled>{t('即将开放', 'Coming soon')}</button>}
+        </section>;
+      })}
+    </div>
+    {Boolean(actionError) && <p role="alert" className="saas-error">{saasErrorMessage(actionError, locale)}</p>}
+    <p className="saas-plans-hint">{t('点数按官方 API 价格的 1.5 倍扣除：文字模型按实际用量；取消的或没有上报用量的调用按发送和收到的内容长度、以及开始输出前的思考时长估算，且不少于调用开始时预留的点数；图片和视频按次计，提供方没有接下的生成不扣点。每期点数等于这一期实际支付的金额（1 点 = 1 美分），期中升级按补差价增加点数，退款会相应扣回；当期有效，不结转，超出当期点数的部分从下一期扣除。支付由 ClawHunt 通过 Stripe 处理，按美元结算。', 'Credits are charged at 1.5 times the official API price: text models by actual usage; a cancelled call, or one without reported usage, is estimated from what it sent and received and how long it thought before answering, and never less than the credits it reserved when it started; images and video per generation, and nothing when the provider never took it. A period’s credits are what was paid for it (1 credit = 1 cent); an upgrade during the period adds what its prorated charge paid, and a refund takes its share back. Credits last for the period and do not roll over; spending past them comes off the next period. Payment is handled by ClawHunt through Stripe, in US dollars.')}</p>
+  </div>;
+}

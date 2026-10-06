@@ -58,9 +58,17 @@ it('points a free workspace at the default model and the paid plans when its pre
     expect(runErrorText(code, 'zh')).toContain('付费套餐');
     document.documentElement.lang = 'en';
     expect(canvasErrorMessage('Model execution failed', code)).toContain('default model');
-    expect(runErrorText(code, 'en')).toContain('Paid plans');
+    expect(runErrorText(code, 'en')).toContain('Pro and Max plans');
+    expect(runErrorText(code, 'en')).toContain('Plans and credits');
   }
   expect(saasErrorMessage(new SaaSApiError(429, 'media_quota_exceeded', 'x'), 'zh')).toContain('付费套餐');
+  // A paid plan whose credits ran out: the default model still works, and the plans page upgrades.
+  document.documentElement.lang = 'zh-CN';
+  expect(runErrorText('credits_exhausted', 'zh')).toContain('默认模型');
+  expect(runErrorText('credits_exhausted', 'en')).toContain('Plans and credits');
+  expect(saasErrorMessage(new SaaSApiError(402, 'credits_exhausted', 'x'), 'zh')).toContain('点数已用完');
+  expect(saasErrorMessage(new SaaSApiError(403, 'checkout_closed', 'x'), 'zh')).toContain('即将开放');
+  expect(saasErrorMessage(new SaaSApiError(409, 'already_subscribed', 'x'), 'en')).toContain('Manage subscription');
 });
 it('names the worker failures the API maps instead of showing the generic runtime failure', () => {
   // These are the run codes Go derives from the worker's failed-event codes. Each asks

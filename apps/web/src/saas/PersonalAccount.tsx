@@ -6,6 +6,7 @@ import { GuideLauncher, MainSiteLink, TutorialLauncher } from "./SaaSOnboarding"
 import { SecretInput } from "./SecretInput";
 import { clawHuntAccountURL, type AuthOptions } from './clawhuntAuth';
 import { InviteFriends } from './InviteFriends';
+import { PlansPage } from './PlansPage';
 
 type Provider = { id: string; name: string; runtimes: string[] };
 type Connection = {
@@ -31,15 +32,18 @@ const connectionUsable = (connection: Connection, catalog: Connections) =>
       provider.runtimes.includes(connection.runtime),
   );
 const engineName = (id: string) => (id === "pi" ? "Pi" : "OpenAI Agents");
+// billing= is the one-time answer of a payment page; it never follows the browser elsewhere.
 const home = () => {
   const query = new URLSearchParams(location.search);
   query.delete("account");
   query.delete("reset");
+  query.delete("billing");
   return "/" + (query.size ? "?" + query : "");
 };
 export function accountURL(section: string) {
   const query = new URLSearchParams(location.search);
   query.set("account", section);
+  query.delete("billing");
   return "/?" + query;
 }
 
@@ -102,6 +106,10 @@ export function PersonalEngineGate({
   if (section === "invites") return <AccountLayout title={t("邀请好友", "Invite friends")} intro={t("每个开通了 AwwO 的账号都有 3 个邀请码。把邀请链接发给好友，对方就能用 ClawHunt 账号开通 AwwO。", "Every account with AwwO access has three invite codes. Send a friend an invite link and they can open AwwO with their ClawHunt account.")}>
     <nav className="saas-personal-nav"><a href={home()}>{t("返回工作区", "Back to workspace")}</a><a href={accountURL("security")}>{t("账号安全", "Account security")}</a></nav>
     <InviteFriends identity={identity} />
+  </AccountLayout>;
+  if (section === "plans") return <AccountLayout title={t("套餐与点数", "Plans and credits")} intro={t("免费版之外，Pro 和 Max 每月给你一笔点数，用于 Claude、GPT、Bedrock 和图片视频生成；默认模型的次数也更多。", "Beyond the free plan, Pro and Max give you monthly credits for Claude, GPT, Bedrock and image or video generation, and more default-model calls.")}>
+    <nav className="saas-personal-nav"><a href={home()}>{t("返回工作区", "Back to workspace")}</a><a href={accountURL("security")}>{t("账号安全", "Account security")}</a></nav>
+    <PlansPage identity={identity} />
   </AccountLayout>;
   if (section === "engines" && !needed) return <AccountLayout title={t("模型服务", "Model service")} intro={t("AwwO 已通过 LLM Gate 提供模型，无需填写个人 API Key。", "AwwO provides models through LLM Gate. No personal API key is needed.")}><a href={home()}>{t("返回工作区", "Back to workspace")}</a></AccountLayout>;
   if (!needed) return <>{children}</>;

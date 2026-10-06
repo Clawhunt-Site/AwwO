@@ -17,3 +17,4 @@
 .saas-route-usage dl div.is-out dd { color:var(--saas-danger); font-weight:600; }
 .saas-route-usage .saas-primary { width:100%; }
 .saas-route-usage p.saas-route-usage-recorded, .saas-route-usage p.saas-route-usage-out { color:var(--saas-text); }
+.saas-route-usage a.saas-route-usage-plans { display:block; margin-top:10px; text-align:center; font-size:13px; }

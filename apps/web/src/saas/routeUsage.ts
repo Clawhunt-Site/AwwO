@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { Credits, PlanId } from './billing';
 
 export type RouteName = 'gate' | 'bedrock' | 'media';
 export type RouteAllowance = { limit: number; used: number };
@@ -6,7 +7,11 @@ export type RouteAllowance = { limit: number; used: number };
  * deployment-wide ceilings, the media caps and the model allowlist are not shown, so admission can still refuse). `routes`
  * is present only for a route-limited workspace and lists only the routes it limits; a route it leaves
  * out has no limit of its own. */
-export type RouteUsage = { limited: boolean; daily: RouteAllowance; routes?: Partial<Record<RouteName, RouteAllowance>>; interested: boolean; resetsAt?: string };
+export type RouteUsage = { limited: boolean; daily: RouteAllowance; routes?: Partial<Record<RouteName, RouteAllowance>>; interested: boolean; resetsAt?: string;
+  /** Set when the workspace's owner has a paid plan: its paid routes spend the owner's credits instead of route limits. */
+  // The renewal date and a pending cancellation are shown to the workspace's owner alone; owner says the plan is
+  // the viewer's own (only its owner can upgrade it).
+  plan?: { id: PlanId; owner?: boolean; periodEnd?: string; cancelAtPeriodEnd?: boolean; credits: Credits } };
 
 export const routeOrder: RouteName[] = ['gate', 'bedrock', 'media'];
 
