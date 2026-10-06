@@ -423,12 +423,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     || (inspectorCloseLocked.current && !allowBindingSave) || hasStreamingConversation(docRef.current.nodes)
   ), []);
 
-  /** Step to a stored document without recording it as a new edit. */
+  /**
+   * Step to a stored document without recording it as a new edit. The camera is not history (its
+   * save is a machine write): the canvas keeps the camera it has now, not the one saved when that
+   * step was taken, which the screen would not show and a reopen would land on.
+   */
   const restoreDoc = useCallback((target: CanvasDocument) => {
     if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || loadRunJournal()) return;
     lastCommit.current = null;
     const live = docRef.current;
-    const restored = invalidateOutputs(live, { ...target, nodes: target.nodes.map(node => {
+    const restored = invalidateOutputs(live, { ...target, view: live.view, nodes: target.nodes.map(node => {
       const current = live.nodes.find(n => n.id === node.id);
       if (node.kind !== 'session' || current?.kind !== 'session') return node;
       return preserveThreadRuntime(node, current);

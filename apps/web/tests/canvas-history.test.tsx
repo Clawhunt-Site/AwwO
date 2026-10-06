@@ -17,6 +17,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, createSessionNode, type CanvasDocument } from '../src/canvas/canvasDoc';
 import { resetAllSessions } from '../src/canvas/sessions';
+import { worldTransform } from '../src/canvas/viewport';
 
 class SilentResizeObserver {
   observe() {}
@@ -126,6 +127,35 @@ describe('undo / redo', () => {
 
     fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', shiftKey: true, ...mod });
     await waitFor(() => expect(storedNodeIds()).toEqual(['b']));
+  });
+
+  it('keeps the camera where it is when an undo or a redo restores an earlier document', async () => {
+    const { container } = render(<CanvasSurface />);
+    const viewport = container.querySelector('.canvas-viewport') as HTMLElement;
+    const storedView = () => (JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).view;
+    const shown = () => (container.querySelector('.canvas-world') as HTMLElement).style.transform;
+
+    deleteTile('a');
+    await waitFor(() => expect(storedNodeIds()).toEqual(['b']));
+    // The camera moves after the edit; its save is a machine write, not a step of its own.
+    fireEvent.wheel(viewport, { deltaY: -120, clientX: 100, clientY: 100 });
+    await waitFor(() => expect(storedView()).not.toEqual({ x: 0, y: 0, scale: 1 }), { timeout: 3000 });
+    const moved = storedView()!;
+
+    // The step undone was stored with the seed's camera.
+    fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', ...mod });
+    await waitFor(() => expect(storedNodeIds()).toEqual(['a', 'b']));
+    expect(storedView()).toEqual(moved);
+    expect(shown()).toBe(worldTransform(moved));
+
+    // The redo's document was stored with the first move; the camera has moved again since.
+    fireEvent.wheel(viewport, { deltaY: -120, clientX: 300, clientY: 200 });
+    await waitFor(() => expect(storedView()).not.toEqual(moved), { timeout: 3000 });
+    const movedAgain = storedView()!;
+    fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', shiftKey: true, ...mod });
+    await waitFor(() => expect(storedNodeIds()).toEqual(['b']));
+    expect(storedView()).toEqual(movedAgain);
+    expect(shown()).toBe(worldTransform(movedAgain));
   });
 
   it('offers undo in the palette, disabled until there is something to undo', async () => {

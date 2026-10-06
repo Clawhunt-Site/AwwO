@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithStatus } from '../src/canvas/canvasDoc';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
@@ -53,6 +53,22 @@ describe('canvas reopen state', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看全部节点' }));
     expect(world.style.transform).not.toBe(savedTransform);
     expectCardOnStage(world);
+  });
+
+  it('keeps the camera the operator saved when an undo follows the app’s own fit', async () => {
+    store(offStageView);
+    const { container } = render(<CanvasSurface />);
+    const world = container.querySelector('.canvas-world') as HTMLElement;
+    await waitFor(() => expect(world.style.transform).not.toBe('translate(-235px, 71px) scale(0.75)'));
+    const tile = within(screen.getByTestId('canvas-tile-reopened-node'));
+    fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(tile.getByRole('button', { name: '删除', exact: true }));
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0));
+    fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true });
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    // The screen shows the app's fit, which is not where the operator left the canvas.
+    expect(world.style.transform).not.toBe('translate(-235px, 71px) scale(0.75)');
+    expect(loadDocumentWithStatus().doc.view).toEqual(offStageView);
   });
 
   it('refits once when the saved viewport leaves the graph off this stage', async () => {
