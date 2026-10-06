@@ -32,6 +32,12 @@ type piHealth struct {
 	// SDKVersion names the worker implementation behind a runtime: "python" for the Python
 	// openai-agents worker, which serves no managed-execution model calls (computerModelCalls).
 	SDKVersion string `json:"sdkVersion,omitempty"`
+	// CompletionOptions are the per-call options the worker's /internal/computer-model keeps
+	// (thinking, maxTokens); the assistant router uses a worker only when it lists them.
+	CompletionOptions []string `json:"completionOptions,omitempty"`
+	// ActiveRuns and MaxConcurrency are the worker's slots in use and in all; the router leaves one free.
+	ActiveRuns     int `json:"activeRuns,omitempty"`
+	MaxConcurrency int `json:"maxConcurrency,omitempty"`
 	// Allowed is the workspace model entitlement frozen with this catalog. nil
 	// means unrestricted, so an omitted field keeps every persisted snapshot
 	// decoding exactly as it did before. It travels inside execution snapshots so

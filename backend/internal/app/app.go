@@ -53,6 +53,8 @@ type App struct {
 	inviteReads inviteReadLimiter
 	// billingCalls bounds each account's plan, checkout and portal calls to the issuer (billing.go).
 	billingCalls inviteReadLimiter
+	// routeLimiter bounds each account's assistant router model calls (assistant_route.go).
+	routeLimiter assistantRouteLimiter
 	// capabilityNotes remembers which cleared worker capabilities were already logged,
 	// bounded by capabilityNoteLimit; capabilityNotesCapped marks the one-time notice.
 	capabilityNotes       sync.Map
@@ -285,6 +287,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases", a.tenant(a.listCanvases, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases", a.tenant(a.createCanvas, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/plan", a.tenant(a.planCanvas, 2))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/assistant/route", a.tenant(a.assistantRoute, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/initialize", a.tenant(a.initializeCanvas, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.getCanvas, 1))
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.updateCanvas, 2))
