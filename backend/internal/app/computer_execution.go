@@ -24,6 +24,61 @@ type computerPlan struct {
 	MaxModelCalls int `json:"maxModelCalls"`
 }
 
+// The managed execution worker accepts one task's run time only within these bounds
+// (apps/openmaus-worker/protocol.ts parseRun) and refuses the whole task otherwise.
+// AWWO_RUN_TIMEOUT also bounds canvas runs, which may run longer (production: 30 min).
+const (
+	computerMinRunTimeout = time.Second
+	computerMaxRunTimeout = 15 * time.Minute
+)
+
+// computerRunTimeout is the run time requested from the worker for one task.
+func computerRunTimeout(run time.Duration) time.Duration {
+	return min(max(run, computerMinRunTimeout), computerMaxRunTimeout)
+}
+
+// computerRefusalWait bounds reading a refusal's body: a peer that sends error headers and then
+// stalls must not hold the run open until its deadline.
+const computerRefusalWait = 2 * time.Second
+
+// computerWorkerCode keeps a code the worker reported only if it has the shape of the worker's own
+// closed set (WORKER_BUSY, INVALID_BUDGET, TIMEOUT, ...); anything else reads as "".
+func computerWorkerCode(code string) string {
+	if len(code) > 64 {
+		return ""
+	}
+	for _, c := range code {
+		if (c < 'A' || c > 'Z') && c != '_' {
+			return ""
+		}
+	}
+	return code
+}
+
+// computerRefusal is the worker's error code for a task it would not start.
+func computerRefusal(response *http.Response) string {
+	stop := time.AfterFunc(computerRefusalWait, func() { response.Body.Close() })
+	defer stop.Stop()
+	var body struct {
+		Error string `json:"error"`
+	}
+	if json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&body) != nil {
+		return ""
+	}
+	return computerWorkerCode(body.Error)
+}
+
+// computerRefusalError is the run error recorded when the worker will not start a task.
+func computerRefusalError(status int) string {
+	switch status {
+	case http.StatusTooManyRequests:
+		return "computer_busy"
+	case http.StatusServiceUnavailable:
+		return "computer_unavailable"
+	}
+	return "computer_rejected"
+}
+
 func validComputerArtifactPath(value string) bool {
 	if value == "" || len(value) > 1024 || path.IsAbs(value) || path.Clean(value) != value || strings.ContainsAny(value, "\\\x00\r\n") || !utf8.ValidString(value) {
 		return false
@@ -324,14 +379,16 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			response.Body.Close()
 		}
 	}()
-	response, e := a.computerRequest(ctx, "POST", "/internal/runs", map[string]any{"runId": rid, "tenantId": tid, "sessionId": sid, "prompt": prompt, "instructions": instructions, "modelProxyURL": a.cfg.ComputerModelProxyURL, "modelProxyToken": token, "timeoutMs": a.cfg.RunTimeout.Milliseconds(), "maxModelCalls": snap.Computer.MaxModelCalls})
+	response, e := a.computerRequest(ctx, "POST", "/internal/runs", map[string]any{"runId": rid, "tenantId": tid, "sessionId": sid, "prompt": prompt, "instructions": instructions, "modelProxyURL": a.cfg.ComputerModelProxyURL, "modelProxyToken": token, "timeoutMs": computerRunTimeout(a.cfg.RunTimeout).Milliseconds(), "maxModelCalls": snap.Computer.MaxModelCalls})
 	if e != nil {
 		a.finish(tid, rid, "failed", "", "computer_unavailable")
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
-		a.finish(tid, rid, "failed", "", "computer_rejected")
+		// The worker's reason is in its body only: log it, or a refused task leaves no trace of why.
+		a.log.Warn("managed execution refused the task", "run", rid, "status", response.StatusCode, "code", computerRefusal(response))
+		a.finish(tid, rid, "failed", "", computerRefusalError(response.StatusCode))
 		return
 	}
 	scanner := bufio.NewScanner(response.Body)
@@ -463,6 +520,7 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			a.finish(tid, rid, "completed", ev.Output, "")
 			return
 		case "failed":
+			a.log.Warn("managed execution task failed", "run", rid, "code", computerWorkerCode(ev.Code))
 			a.finish(tid, rid, "failed", "", "computer_execution_failed")
 			return
 		case "cancelled":

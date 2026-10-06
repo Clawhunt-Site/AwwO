@@ -9,6 +9,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -413,5 +417,145 @@ func TestPostgresComputerRunRefusesBedrockModels(t *testing.T) {
 	}
 	if runs.Load() != 0 {
 		t.Fatal("the execution service was called for a refused run")
+	}
+}
+
+// The worker refuses a task whose run time is outside its own bounds, while AWWO_RUN_TIMEOUT also
+// bounds canvas runs and may be longer (production 30 min: every task was refused, 2026-10-06).
+// The bounds are pinned against the worker's own check, so neither side can drift alone.
+func TestComputerRunTimeoutStaysWithinTheWorkerBounds(t *testing.T) {
+	for in, want := range map[time.Duration]time.Duration{30 * time.Minute: 15 * time.Minute, 15 * time.Minute: 15 * time.Minute,
+		180 * time.Second: 180 * time.Second, 500 * time.Millisecond: time.Second} {
+		if got := computerRunTimeout(in); got != want {
+			t.Errorf("computerRunTimeout(%s) = %s, want %s", in, got, want)
+		}
+	}
+	source, e := os.ReadFile(filepath.Join("..", "..", "..", "apps", "openmaus-worker", "protocol.ts"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	bound := func(op string) int64 {
+		m := regexp.MustCompile(`Number\(timeoutMs\) ` + op + ` ([0-9_]+)`).FindSubmatch(source)
+		if m == nil {
+			t.Fatal("the worker's run-time check moved: update computerMinRunTimeout and computerMaxRunTimeout", op)
+		}
+		n, _ := strconv.ParseInt(strings.ReplaceAll(string(m[1]), "_", ""), 10, 64)
+		return n
+	}
+	if bound("<") != computerMinRunTimeout.Milliseconds() || bound(">") != computerMaxRunTimeout.Milliseconds() {
+		t.Fatal("computer run-time bounds differ from the worker's", bound("<"), bound(">"))
+	}
+}
+
+// The worker's reason for a refused task is read from its closed set of codes, and nothing else:
+// the log line must not carry whatever a broken or hostile peer put in the body.
+func TestComputerRefusalReadsOnlyTheWorkersCodes(t *testing.T) {
+	for body, want := range map[string]string{`{"error":"WORKER_BUSY"}`: "WORKER_BUSY", `{"error":"INVALID_BUDGET"}`: "INVALID_BUDGET",
+		`{"error":"secret value"}`: "", `{"error":"` + strings.Repeat("A", 65) + `"}`: "", `not json`: "", `{}`: ""} {
+		response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+		if got := computerRefusal(response); got != want {
+			t.Errorf("computerRefusal(%s) = %q, want %q", body, got, want)
+		}
+	}
+	for status, want := range map[int]string{429: "computer_busy", 503: "computer_unavailable", 400: "computer_rejected", 409: "computer_rejected", 200: "computer_rejected"} {
+		if got := computerRefusalError(status); got != want {
+			t.Errorf("computerRefusalError(%d) = %s, want %s", status, got, want)
+		}
+	}
+}
+
+// A refusal whose body never arrives is given up on, rather than holding the run open until its
+// deadline.
+func TestComputerRefusalDoesNotWaitOnAStalledBody(t *testing.T) {
+	stalled, writer := io.Pipe()
+	defer writer.Close()
+	started := time.Now()
+	if got := computerRefusal(&http.Response{Body: stalled}); got != "" {
+		t.Fatal("a stalled body produced a code", got)
+	}
+	if waited := time.Since(started); waited < computerRefusalWait || waited > computerRefusalWait+3*time.Second {
+		t.Fatal("refusal body wait not bounded by computerRefusalWait", waited)
+	}
+}
+
+func awaitComputerStatus(t *testing.T, h *harness, c *http.Cookie, path, status string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if value := h.request(t, c, "GET", path, nil, 200); value["status"] == status {
+			return value
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("computer run did not reach", status, h.request(t, c, "GET", path, nil, 200))
+	return nil
+}
+
+// A worker with the real one's admission (run time 1 s–15 min) starts a task even when
+// AWWO_RUN_TIMEOUT is production's 30 min, and a task it will not start fails with a code that
+// says why.
+func TestPostgresComputerTaskFitsTheWorkerAndNamesItsRefusals(t *testing.T) {
+	trusted := teamProvider(t, func(w http.ResponseWriter, r *http.Request, call observedPiCall) { t.Error("no model call expected") })
+	defer trusted.Close()
+	started := make(chan computerWorkerInput, 1)
+	var refuse atomic.Int32
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"service": "awwo-openmaus-worker", "ready": true, "capabilities": map[string]bool{"workspace": true, "approvals": true}})
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(202)
+			return
+		}
+		var input computerWorkerInput
+		_ = json.NewDecoder(r.Body).Decode(&input)
+		switch status := int(refuse.Load()); {
+		case input.TimeoutMs < 1000 || input.TimeoutMs > 900_000:
+			writeJSON(w, 400, map[string]string{"error": "INVALID_BUDGET"})
+			return
+		case status == 429:
+			writeJSON(w, 429, map[string]string{"error": "WORKER_BUSY"})
+			return
+		case status != 0:
+			writeJSON(w, status, map[string]string{"error": "WORKER_NOT_READY"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		started <- input
+		<-r.Context().Done()
+	}))
+	defer worker.Close()
+	h := newHarness(t, trusted.URL)
+	h.a.cfg.RunTimeout = 30 * time.Minute
+	h.a.cfg.OpenMausURL = worker.URL
+	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
+	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
+	owner, tid, _ := h.register(t, "computer-run-time@example.test")
+	canvas, _, _ := h.fixture(t, owner, tid)
+	base := "/tenants/" + tid
+	task := func(operation string) string {
+		run := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]string{"operationId": operation, "prompt": "Prepare a report", "runtime": "pi", "model": "test-model"}, 202)
+		return base + "/computer-runs/" + run["id"].(string)
+	}
+	running := task("computer-within-worker-bounds")
+	select {
+	case input := <-started:
+		if input.TimeoutMs != 900_000 {
+			t.Fatal("run time not capped at the worker's limit", input.TimeoutMs)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker did not start the task", h.request(t, owner, "GET", running, nil, 200))
+	}
+	h.request(t, owner, "POST", base+"/runs/"+strings.TrimPrefix(running, base+"/computer-runs/")+"/cancel", map[string]any{}, 200)
+	awaitComputerStatus(t, h, owner, running, "cancelled")
+	for status, want := range map[int32]string{429: "computer_busy", 503: "computer_unavailable", 409: "computer_rejected"} {
+		refuse.Store(status)
+		detail := awaitComputerStatus(t, h, owner, task(fmt.Sprintf("computer-refused-%d", status)), "failed")
+		if detail["error"] != want {
+			t.Errorf("worker status %d recorded as %v, want %s", status, detail["error"], want)
+		}
 	}
 }
