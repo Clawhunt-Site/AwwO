@@ -1,7 +1,7 @@
 import { bindUserModel } from '../user-models.ts';
 import { createWorkerObservability } from './observability.mjs';
 import { parentObservability, normalizeUsage } from './usage.mjs';
-import { handleComputerModel } from '../computer-model.ts';
+import { COMPUTER_COMPLETION_OPTIONS, handleComputerModel } from '../computer-model.ts';
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -45,6 +45,9 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
     }
     if (request.method === 'GET' && pathname === '/health') {
       const health = publicHealth(config, active.size);
+      // Which per-call options /internal/computer-model keeps, so the API sends them only where they hold.
+      health.completionOptions = [...COMPUTER_COMPLETION_OPTIONS];
+      health.maxConcurrency = config.maxConcurrency;
       if (shuttingDown) { health.ready = false; health.status = 'stopping'; }
       return json(response, health.ready ? 200 : 503, health);
     }

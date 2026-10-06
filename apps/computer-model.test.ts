@@ -13,7 +13,9 @@ const tool = { type: 'function', function: { name: 'workspace_exec', description
 const input = (extra: Record<string, unknown> = {}) => ({ runId: 'run-1', tenantId: 'tenant-1', sessionId: 'session-1', model: 'fixture-model', effort: '', completion: { messages: [{ role: 'user', content: 'Build the project' }], tools: [tool] }, ...extra });
 const call = { id: 'call-1', type: 'function', function: { name: 'workspace_exec', arguments: '{"command":"echo verified"}' } };
 
-async function serve(t: any, protocol: string, handler: (body: any, req: any, res: any) => void, overrides: Record<string, string> = {}) {
+// Anthropic Messages is served by Pi and Chat Completions by the openai-agents worker, unless `worker` says;
+// Pi on Chat Completions binds a Gate model, as the router uses in production.
+async function serve(t: any, protocol: string, handler: (body: any, req: any, res: any) => void, overrides: Record<string, string> = {}, worker?: 'pi' | 'openai-agents') {
   const calls: any[] = [];
   const provider = createServer(async (req, res) => {
     let text = ''; for await (const chunk of req) text += chunk;
@@ -21,9 +23,9 @@ async function serve(t: any, protocol: string, handler: (body: any, req: any, re
   });
   provider.listen(0, '127.0.0.1'); await once(provider, 'listening');
   const baseURL = `http://127.0.0.1:${(provider.address() as any).port}`;
-  const pi = protocol === 'anthropic_messages';
+  const pi = worker ? worker === 'pi' : protocol === 'anthropic_messages';
   const prefix = pi ? 'AWWO_PI' : 'AWWO_OPENAI_AGENTS';
-  const config = (pi ? loadPi : loadOpenAI)({ [`${prefix}_TOKEN`]: token, [`${prefix}_MODEL`]: 'fixture-model', [`${prefix}_API_KEY`]: 'secret-provider-key', [`${prefix}_BASE_URL`]: baseURL + (pi ? '' : '/v1'), [`${prefix}_PROVIDER`]: pi ? 'anthropic' : 'openai', [`${prefix}_PROTOCOL`]: protocol, ...overrides });
+  const config = (pi ? loadPi : loadOpenAI)({ [`${prefix}_TOKEN`]: token, [`${prefix}_MODEL`]: 'fixture-model', [`${prefix}_API_KEY`]: 'secret-provider-key', [`${prefix}_BASE_URL`]: baseURL + (pi ? '' : '/v1'), [`${prefix}_PROVIDER`]: pi ? (protocol === 'anthropic_messages' ? 'anthropic' : 'llmgate') : 'openai', [`${prefix}_PROTOCOL`]: protocol, ...overrides });
   const app = (pi ? createPiServer : createOpenAIAgentsServer)(config);
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
   const origin = `http://127.0.0.1:${app.server.address().port}`;
@@ -147,6 +149,70 @@ test('truncated, invented tools, provider secrets and oversized provider bodies 
   ]) {
     const s = await serve(t, 'chat_completions', (_body, _req, res) => res.end(JSON.stringify(raw)));
     const result = await s.send(); assert.equal(result.status, 502); assert.doesNotMatch(await result.text(), /secret-provider-key/);
+  }
+});
+
+const routing = (extra: Record<string, unknown> = {}) => input({ completion: { messages: [{ role: 'system', content: 'Route the message' }, { role: 'user', content: 'Build the project' }], tools: [] }, ...extra });
+const chatReply = (_body: any, _req: any, res: any) => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"route":"plan"}' }, finish_reason: 'stop' }] }));
+
+test('a call with thinking off asks a Gate model on the Pi worker to skip its hidden reasoning, and only that call', async t => {
+  const s = await serve(t, 'chat_completions', chatReply, {}, 'pi');
+  const off = await s.send(routing({ thinking: false }));
+  assert.equal(off.status, 200);
+  assert.deepEqual(s.calls[0].body.chat_template_kwargs, { enable_thinking: false });
+  for (const extra of [{}, { thinking: true }]) {
+    const on = await s.send(routing(extra));
+    assert.equal(on.status, 200);
+    assert.equal('chat_template_kwargs' in s.calls.at(-1).body, false);
+  }
+});
+
+test('thinking off never reaches a provider that refuses unknown arguments or has no such switch', async t => {
+  const openai = await serve(t, 'chat_completions', chatReply);
+  assert.equal((await openai.send(routing({ thinking: false }))).status, 200);
+  assert.equal('chat_template_kwargs' in openai.calls[0].body, false);
+  const anthropic = await serve(t, 'anthropic_messages', (_body, _req, res) => res.end(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text: '{"route":"plan"}' }] })));
+  assert.equal((await anthropic.send(routing({ thinking: false }))).status, 200);
+  assert.equal('chat_template_kwargs' in anthropic.calls[0].body, false);
+});
+
+test('a per-call option that is not well formed is refused before any provider call', async t => {
+  const s = await serve(t, 'chat_completions', chatReply, {}, 'pi');
+  for (const extra of [{ thinking: 'off' }, { maxTokens: 0 }, { maxTokens: 1.5 }, { maxTokens: '24' }]) {
+    const refused = await s.send(routing(extra));
+    assert.equal(refused.status, 400);
+    assert.equal((await refused.json()).error.code, 'INVALID_INPUT');
+  }
+  assert.equal(s.calls.length, 0);
+});
+
+test('maxTokens lowers a call’s output limit and never raises it past the profile', async t => {
+  const s = await serve(t, 'chat_completions', chatReply, { AWWO_PI_MAX_TOKENS: '2048' }, 'pi');
+  assert.equal((await s.send(routing({ maxTokens: 24 }))).status, 200);
+  assert.equal(s.calls[0].body.max_tokens, 24);
+  assert.equal((await s.send(routing({ maxTokens: 999_999 }))).status, 200);
+  assert.equal(s.calls[1].body.max_tokens, 2048);
+  assert.equal((await s.send(routing())).status, 200);
+  assert.equal(s.calls[2].body.max_tokens, 2048);
+});
+
+test('maxTokens lowers the output limit on the Anthropic Messages and Responses wires as well', async t => {
+  const anthropic = await serve(t, 'anthropic_messages', (_body, _req, res) => res.end(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text: '{"route":"plan"}' }] })));
+  assert.equal((await anthropic.send(routing({ maxTokens: 24 }))).status, 200);
+  assert.equal(anthropic.calls[0].body.max_tokens, 24);
+  const responses = await serve(t, 'responses', (_body, _req, res) => res.end(JSON.stringify({ status: 'completed',
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '{"route":"plan"}' }] }] })));
+  assert.equal((await responses.send(routing({ maxTokens: 24 }))).status, 200);
+  assert.equal(responses.calls[0].body.max_output_tokens, 24);
+});
+
+test('both workers list the per-call options and their slots in their health, for the API to send only where they hold', async t => {
+  for (const worker of ['pi', 'openai-agents'] as const) {
+    const s = await serve(t, 'chat_completions', chatReply, {}, worker);
+    const health = await (await fetch(`${s.origin}/health`)).json();
+    assert.deepEqual(health.completionOptions, ['thinking', 'maxTokens']);
+    assert.equal(health.maxConcurrency, 4);
+    assert.equal(health.activeRuns, 0);
   }
 });
 

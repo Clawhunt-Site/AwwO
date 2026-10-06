@@ -66,9 +66,20 @@ export function validateComputerCompletion(value: unknown): Completion {
   return { messages, tools: cleanTools };
 }
 
-export function providerComputerRequest(completion: Completion, model: Profile, effort?: string): { url: string; headers: Record<string, string>; body: ObjectValue } {
+/** The per-call options /internal/computer-model honours, listed in the worker's health so a caller (the API's
+ *  assistant router) sends them only to a worker that keeps them; an older worker would ignore them. */
+export const COMPUTER_COMPLETION_OPTIONS: readonly string[] = Object.freeze(['thinking', 'maxTokens']);
+
+/** Per-call options. `thinking: false` asks a Chat Completions model served with a chat template (Qwen through
+ *  LLM Gate and the like) to skip its hidden reasoning, as the agents workers' disableThinking profiles do;
+ *  OpenAI and Google refuse unknown arguments and the other protocols have no such switch, so they never get it.
+ *  `maxTokens` lowers the profile's output limit for this call, never raises it. */
+export interface ComputerCallOptions { thinking?: boolean; maxTokens?: number }
+
+export function providerComputerRequest(completion: Completion, model: Profile, effort?: string, options: ComputerCallOptions = {}): { url: string; headers: Record<string, string>; body: ObjectValue } {
   const base = model.baseURL.replace(/\/+$/, '');
   const common = { model: model.model, stream: false };
+  const maxTokens = options.maxTokens ? Math.min(model.maxTokens, options.maxTokens) : model.maxTokens;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (model.protocol === 'anthropic_messages') {
     headers['x-api-key'] = model.apiKey; headers['anthropic-version'] = '2023-06-01';
@@ -87,7 +98,7 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
       if (messages.at(-1)?.role === role) messages.at(-1)!.content.push(...content);
       else messages.push({ role, content });
     }
-    return { url: `${base.endsWith('/v1') ? base : base + '/v1'}/messages`, headers, body: { ...common, max_tokens: model.maxTokens, system: system.join('\n\n'), messages,
+    return { url: `${base.endsWith('/v1') ? base : base + '/v1'}/messages`, headers, body: { ...common, max_tokens: maxTokens, system: system.join('\n\n'), messages,
       ...(completion.tools.length ? { tools: completion.tools.map(t => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters })) } : {}) } };
   }
   headers.authorization = `Bearer ${model.apiKey}`;
@@ -101,7 +112,7 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
         for (const call of msg.tool_calls ?? []) input.push({ type: 'function_call', call_id: call.id, name: call.function.name, arguments: call.function.arguments });
       }
     }
-    return { url: `${base}/responses`, headers, body: { ...common, store: false, include: ['reasoning.encrypted_content'], input, max_output_tokens: model.maxTokens,
+    return { url: `${base}/responses`, headers, body: { ...common, store: false, include: ['reasoning.encrypted_content'], input, max_output_tokens: maxTokens,
       ...(effort && effort !== 'none' ? { reasoning: { effort } } : {}),
       ...(completion.tools.length ? { tools: completion.tools.map(t => ({ type: 'function', ...t.function, strict: false })) } : {}) } };
   }
@@ -110,8 +121,9 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
   // binding. Match the existing Agents wire by checking Google's actual origin.
   const google = new URL(base).origin === 'https://generativelanguage.googleapis.com';
   return { url: `${base}/chat/completions`, headers, body: { ...common, messages: completion.messages.map(({ reasoning_details: _, ...msg }) => msg),
-    ...(model.provider === 'openai' && !google ? { max_completion_tokens: model.maxTokens, store: false } : { max_tokens: model.maxTokens }),
+    ...(model.provider === 'openai' && !google ? { max_completion_tokens: maxTokens, store: false } : { max_tokens: maxTokens }),
     ...(effort && effort !== 'none' ? { reasoning_effort: effort } : {}),
+    ...(options.thinking === false && model.provider !== 'openai' && !google ? { chat_template_kwargs: { enable_thinking: false } } : {}),
     ...(completion.tools.length ? { tools: completion.tools } : {}) } };
 }
 
@@ -187,7 +199,9 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   let body: ObjectValue, completion: Completion;
   try {
     body = await readJSON(request);
-    if (![body.runId, body.tenantId, body.sessionId].every(identifier) || typeof body.model !== 'string' || body.model.length > 256) return reject(400, 'INVALID_INPUT');
+    if (![body.runId, body.tenantId, body.sessionId].every(identifier) || typeof body.model !== 'string' || body.model.length > 256
+      || (body.thinking !== undefined && typeof body.thinking !== 'boolean')
+      || (body.maxTokens !== undefined && !(Number.isInteger(body.maxTokens) && body.maxTokens >= 1 && body.maxTokens <= 1_000_000))) return reject(400, 'INVALID_INPUT');
     completion = validateComputerCompletion(body.completion);
   } catch { return reject(400, 'INVALID_INPUT'); }
   if (response.destroyed) return;
@@ -217,7 +231,7 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   const observed = options.observe(model, request.headers.traceparent);
   let terminalObserved = false;
   try {
-    const provider = providerComputerRequest(completion, model, effort);
+    const provider = providerComputerRequest(completion, model, effort, { thinking: body.thinking, maxTokens: body.maxTokens });
     const upstream = await fetch(provider.url, { method: 'POST', headers: provider.headers, body: JSON.stringify(provider.body), redirect: 'error', signal: controller.signal });
     if (!upstream.ok || !upstream.body) { await upstream.body?.cancel(); return reject(502, 'PROVIDER_ERROR'); }
     const raw = await readJSON(upstream.body);
