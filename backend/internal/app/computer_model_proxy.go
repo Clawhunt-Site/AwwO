@@ -156,8 +156,15 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 	snap := lease.snapshot
 	facts := invocationMetadata(snap, nil)
 	facts.RequirePersonalConnection = a.cfg.UserCredentials
+	// The request's size is known before the reservation, which holds it.
+	facts.InputBytes = int64(len(raw))
 	invocationID := "c" + tokenHash(fmt.Sprintf("%s\x00%s\x00%d", lease.tenantID, lease.runID, index))[:40]
 	if e = a.reserveInvocation(ctx, lease.tenantID, lease.runID, invocationID, snap.Model, facts); e != nil {
+		if code := admissionRefusal(e); code != "" {
+			lease.mu.Lock()
+			lease.refusal = code
+			lease.mu.Unlock()
+		}
 		fail(w, 403, "computer_admission_denied", "Execution permission, model connection or quota is unavailable")
 		return
 	}
@@ -174,32 +181,50 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	completion["model"], _ = json.Marshal(snap.Model)
 	body, _ := json.Marshal(map[string]any{"runId": lease.runID, "tenantId": lease.tenantID, "sessionId": lease.sessionID, "model": snap.Model, "effort": snap.Effort, "completion": completion})
+	facts.InputBytes = int64(len(body))
+	// The failures before the request is sent leave nothing to pay for.
 	if a.cfg.UserCredentials {
 		body, e = a.personalAdmission(ctx, snap.Runtime, body)
 		if e != nil {
+			facts.Admission = "rejected_before_start"
 			fail(w, 403, "computer_connection_unavailable", "The selected personal model is unavailable")
 			return
 		}
 	}
 	endpoint, token, e := a.runtimeEndpoint(snap.Runtime)
 	if e != nil {
+		facts.Admission = "rejected_before_start"
 		fail(w, 503, "computer_model_unavailable", "Model runtime is unavailable")
 		return
 	}
 	req, e := http.NewRequestWithContext(ctx, "POST", endpoint+"/internal/computer-model", bytes.NewReader(body))
 	if e != nil {
+		facts.Admission = "rejected_before_start"
 		fail(w, 500, "computer_model_unavailable", "Model runtime is unavailable")
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+	// The call's time counts from here should its answer never come (plans.go creditCharge).
+	facts.Streamed = time.Now()
 	response, e := a.client.Do(req)
 	if e != nil {
+		facts.Ended = time.Now()
+		if dialFailed(e) {
+			facts.Admission = "rejected_before_start"
+		}
 		fail(w, 502, "computer_model_transport", "Model response is unavailable; the call will not be retried")
 		return
 	}
 	defer response.Body.Close()
+	switch response.StatusCode {
+	case 400, 401, 413, 422, 429, 503:
+		// The worker or the provider refused the call before any model work.
+		facts.Admission = "rejected_before_start"
+	}
 	data, e := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
+	facts.Ended = time.Now()
+	facts.OutputBytes = int64(len(data))
 	if e != nil || len(data) > 2<<20 || response.StatusCode != 200 {
 		fail(w, 502, "computer_model_failed", "The selected model could not complete this call")
 		return

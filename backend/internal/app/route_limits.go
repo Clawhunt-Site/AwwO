@@ -181,10 +181,11 @@ func (c Config) modelRoute(model string) string {
 // The same classification as checkRouteLimit, over the model ids the ledger stores ($1 is the route and
 // $2 the free list). A call that settled without reaching a provider (cost_status not_incurred, for
 // example a busy runtime) gives its allowance back; a running one always counts, so concurrent
-// admissions cannot pass the limit together.
+// admissions cannot pass the limit together. A call admitted under a paid plan (billed_user_id) spent
+// credits, not a route allowance, and counts towards neither a workspace's limit nor a ceiling.
 const routeInvocationFilter = `CASE WHEN $1='bedrock' THEN mi.model_id LIKE 'bedrock.%'
 	ELSE mi.model_id NOT LIKE 'bedrock.%' AND NOT (mi.model_id = ANY($2::text[])) END
-	AND NOT (mi.status<>'running' AND mi.cost_status='not_incurred')`
+	AND NOT (mi.status<>'running' AND mi.cost_status='not_incurred') AND mi.billed_user_id IS NULL`
 
 const todayUTC = `date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`
 
@@ -244,7 +245,7 @@ func (a *App) mediaRouteLimit(ctx context.Context, tx pgx.Tx, limits routeLimits
 	}
 	if ceiling, ok := a.cfg.RouteTotalsPerDay[routeMedia]; ok {
 		var used int
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM media_generations g JOIN tenants t ON t.id=g.tenant_id WHERE t.route_limits IS NOT NULL AND g.created_at>=`+todayUTC).Scan(&used); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM media_generations g JOIN tenants t ON t.id=g.tenant_id WHERE t.route_limits IS NOT NULL AND g.billed_user_id IS NULL AND g.created_at>=`+todayUTC).Scan(&used); err != nil {
 			return "", err
 		}
 		if used >= ceiling {

@@ -105,6 +105,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 25, "migrations/025_upgrade_interests.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 26, "migrations/026_paid_plans.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

@@ -592,7 +592,8 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	var concurrent int
 	var restricted bool
 	var allowed []string
-	e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}') FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&tenantStatus, &concurrent, &restricted, &allowed)
+	var needsPlan bool
+	e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),requires_plan FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&tenantStatus, &concurrent, &restricted, &allowed, &needsPlan)
 	if e != nil {
 		return e
 	}
@@ -616,12 +617,28 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if e != nil || roleLevel(role) < 2 {
 		return errors.New("execution_revoked")
 	}
+	// An entitled owner's plan runs its agents at once across the account's workspaces (plans.go); a workspace the
+	// plan does not cover runs nothing.
+	owner, e := ownerPlan(ctx, tx, tid, false)
+	if e != nil {
+		return e
+	}
+	if e = requiresPlan(ctx, tx, tid, needsPlan, owner); e != nil {
+		return e
+	}
 	var active int
 	if e = tx.QueryRow(ctx, "SELECT count(*) FROM runs WHERE tenant_id=$1 AND status IN ('queued','running')", tid).Scan(&active); e != nil {
 		return e
 	}
-	if active >= concurrent {
+	if owner == nil && active >= concurrent {
 		return errGraphCapacity
+	}
+	if owner != nil {
+		if e = a.planRunSlot(ctx, tx, tid, workspaceLimits{active, concurrent, 0, 1, needsPlan}); errors.Is(e, errPlanBusy) || errors.Is(e, errInvocationQuota) {
+			return errGraphCapacity
+		} else if e != nil {
+			return e
+		}
 	}
 	var sid, state string
 	var raw []byte

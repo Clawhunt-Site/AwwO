@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
@@ -70,6 +71,9 @@ type Config struct {
 	RouteFreeModels         []string
 	// Image and video generation through RunningHub (media_config.go); off unless configured.
 	mediaSettings
+	// BillingCheckoutEnabled opens the paid plans' checkout (billing.go). Off, the plans can be read but not
+	// bought; subscriptions already taken still count.
+	BillingCheckoutEnabled bool
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -106,6 +110,13 @@ func ConfigFromEnv() (Config, error) {
 		c.LLMGateOnly = true
 	default:
 		return c, errors.New("AWWO_LLMGATE_ONLY must be true or false")
+	}
+	switch os.Getenv("AWWO_BILLING_CHECKOUT_ENABLED") {
+	case "", "false":
+	case "true":
+		c.BillingCheckoutEnabled = true
+	default:
+		return c, errors.New("AWWO_BILLING_CHECKOUT_ENABLED must be true or false")
 	}
 	providers, err := parsePlatformProviders(os.Getenv("AWWO_PLATFORM_PROVIDERS"))
 	if err != nil {
@@ -203,6 +214,9 @@ func (c Config) Validate() error {
 	if err := c.validateRouteSettings(); err != nil {
 		return err
 	}
+	if err := c.validateBilling(); err != nil {
+		return err
+	}
 	if err := validateMediaExposure(c); err != nil {
 		return err
 	}
@@ -287,4 +301,33 @@ func parsePlatformProviders(raw string) ([]string, error) {
 		}
 	}
 	return providers, nil
+}
+
+// A paid plan charges every paid model at its catalogued price and refuses one without a price, so checkout cannot
+// open without ClawHunt to take the payment, on personal credentials (whose models are never priced), without the
+// free default models named, or with a paid model of the new-workspace list unpriced for either runtime.
+func (c Config) validateBilling() error {
+	if !c.BillingCheckoutEnabled {
+		return nil
+	}
+	// Plans apply to route-limited workspaces only, so new workspaces must get route limits.
+	if c.ClawHuntURL == "" || c.UserCredentials || len(c.RouteFreeModels) == 0 || c.NewWorkspaceRouteLimits == nil || strings.TrimSpace(c.ModelPricingJSON) == "" {
+		return errors.New("AWWO_BILLING_CHECKOUT_ENABLED=true requires ClawHunt sign-in, operator credentials, AWWO_ROUTE_FREE_MODELS, AWWO_NEW_WORKSPACE_ROUTE_LIMITS and AWWO_MODEL_PRICING_JSON")
+	}
+	pricing, err := ParseModelPricing(c.ModelPricingJSON)
+	if err != nil || pricing == nil {
+		return errors.New("AWWO_BILLING_CHECKOUT_ENABLED=true requires a valid AWWO_MODEL_PRICING_JSON")
+	}
+	models, _ := c.NewWorkspaceModels.column().([]string)
+	for _, model := range models {
+		if route := c.modelRoute(model); route == routeFree || route == routeMedia {
+			continue
+		}
+		for _, runtime := range []string{runtimePI, runtimeOpenAIAgents} {
+			if _, ok := pricing.Models[runtime+":"+model]; !ok {
+				return fmt.Errorf("AWWO_MODEL_PRICING_JSON has no %s price for the paid model %s", runtime, model)
+			}
+		}
+	}
+	return nil
 }

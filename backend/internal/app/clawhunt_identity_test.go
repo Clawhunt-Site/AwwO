@@ -65,6 +65,12 @@ type identityFixture struct {
 	invitesStatus  atomic.Int32  // the invites backchannel answers with this status; 0 means 200
 	invitesBody    atomic.Value  // its answer (map[string]any); unset means a member with three codes
 	invitesGrant   atomic.Value  // the grant token AwwO sent it
+	// The billing backchannel (plan, checkout, portal): a status per endpoint (int, 0 means 200), an answer per
+	// endpoint (map[string]any, unset means the defaults below), the last request each got, and a call count.
+	billingStatus  sync.Map
+	billingBody    sync.Map
+	billingRequest sync.Map
+	billingCalls   atomic.Int32
 	id             clawHuntIdentity
 	challenge      string
 }
@@ -128,6 +134,30 @@ func newIdentityFixture(t *testing.T, h *harness, email, subject string) *identi
 			}
 			writeJSON(w, 200, map[string]any{"active": f.active.Load(), "sub": f.id.Subject, "member": true, "limit": 3, "codes": []map[string]string{
 				{"code": "AWWO-AB12-CD34-EF56", "status": "unused"}, {"code": "AWWO-GH78-JK9M-NP0Q", "status": "used"}, {"code": "AWWO-RSTV-WXYZ-0123", "status": "revoked"}}})
+		case "/api/awwo/sso/plan", "/api/awwo/sso/checkout", "/api/awwo/sso/portal":
+			name := strings.TrimPrefix(r.URL.Path, "/api/awwo/sso/")
+			var b map[string]any
+			json.NewDecoder(r.Body).Decode(&b)
+			f.billingCalls.Add(1)
+			f.billingRequest.Store(name, b)
+			if status, ok := f.billingStatus.Load(name); ok && status.(int) != 0 {
+				w.WriteHeader(status.(int))
+				return
+			}
+			if body, ok := f.billingBody.Load(name); ok {
+				writeJSON(w, 200, body)
+				return
+			}
+			out := map[string]any{"active": f.active.Load(), "sub": f.id.Subject}
+			switch name {
+			case "plan":
+				out["plan"] = nil
+			case "checkout":
+				out["url"] = "https://checkout.stripe.com/c/pay/cs_test_fixture"
+			default:
+				out["url"] = "https://billing.stripe.com/p/session/test_fixture"
+			}
+			writeJSON(w, 200, out)
 		case "/api/awwo/sso/revoke":
 			if !f.active.Load() {
 				writeJSON(w, 200, map[string]string{"logout_url": h.cfg.PublicOrigin + "/"})

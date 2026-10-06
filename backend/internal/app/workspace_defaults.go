@@ -108,16 +108,29 @@ func (a *App) insertTenant(ctx context.Context, tx pgx.Tx, id, name string) erro
 // after the lock is granted, which is what makes a workspace the previous holder
 // just committed visible to it. Under REPEATABLE READ the snapshot would predate
 // the wait and the cap would fail open.
-func (a *App) workspaceLimitReached(ctx context.Context, tx pgx.Tx, u User) (bool, error) {
+//
+// An entitled plan allows more workspaces (plans.go). needsPlan says the next one exists only because of it: it is
+// marked requires_plan, and runs nothing while its owner has no plan.
+func (a *App) workspaceLimitReached(ctx context.Context, tx pgx.Tx, u User) (full, needsPlan bool, err error) {
 	if a.cfg.MaxOwnedWorkspaces == 0 || u.PlatformRole == "admin" {
-		return false, nil
+		return false, false, nil
 	}
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,84321004))", u.ID); err != nil {
-		return false, err
+		return false, false, err
 	}
 	var owned int
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM memberships WHERE user_id=$1 AND role='owner'", u.ID).Scan(&owned); err != nil {
-		return false, err
+		return false, false, err
 	}
-	return owned >= a.cfg.MaxOwnedWorkspaces, nil
+	if owned < a.cfg.MaxOwnedWorkspaces {
+		return false, false, nil
+	}
+	plan, err := accountPlan(ctx, tx, u.ID)
+	if err != nil {
+		return false, false, err
+	}
+	if plan == nil || owned >= plan.Limits.Workspaces {
+		return true, false, nil
+	}
+	return false, true, nil
 }

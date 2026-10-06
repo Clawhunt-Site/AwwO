@@ -31,7 +31,7 @@ func (a *App) createTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	full, e := a.workspaceLimitReached(r.Context(), tx, currentUser(r))
+	full, needsPlan, e := a.workspaceLimitReached(r.Context(), tx, currentUser(r))
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -44,6 +44,12 @@ func (a *App) createTenant(w http.ResponseWriter, r *http.Request) {
 	if e = a.insertTenant(r.Context(), tx, id, b.Name); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	if needsPlan {
+		if _, e = tx.Exec(r.Context(), "UPDATE tenants SET requires_plan=true WHERE id=$1", id); e != nil {
+			a.dbError(w, e)
+			return
+		}
 	}
 	if _, e = tx.Exec(r.Context(), "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,'owner')", id, currentUser(r).ID); e != nil {
 		a.dbError(w, e)

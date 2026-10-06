@@ -143,15 +143,22 @@ var errClawHuntUnreachable = errors.New("identity unavailable")
 // The provider is an explicit deployment origin. Never follow a redirect with
 // client credentials, and never expose upstream response bodies in diagnostics.
 func (a *App) clawHuntRequest(ctx context.Context, endpoint string, body any, result any) error {
+	_, err := a.clawHuntRequestStatus(ctx, endpoint, body, result)
+	return err
+}
+
+// clawHuntRequestStatus is clawHuntRequest that also reports a refusal's status, for the billing calls whose
+// refusals mean different things (409 already subscribed). Only a 200 is decoded.
+func (a *App) clawHuntRequestStatus(ctx context.Context, endpoint string, body any, result any) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", a.cfg.ClawHuntURL+"/api/awwo/sso/"+endpoint, bytes.NewReader(raw))
 	if err != nil {
-		return errors.New("identity unavailable")
+		return 0, errors.New("identity unavailable")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.SetBasicAuth(a.cfg.ClawHuntClientID, a.cfg.ClawHuntClientSecret)
@@ -159,19 +166,19 @@ func (a *App) clawHuntRequest(ctx context.Context, endpoint string, body any, re
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
-		return errClawHuntUnreachable
+		return 0, errClawHuntUnreachable
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
-		return errClawHuntUnreachable
+		return resp.StatusCode, errClawHuntUnreachable
 	}
 	if resp.StatusCode != http.StatusOK {
-		return errors.New("identity rejected")
+		return resp.StatusCode, errors.New("identity rejected")
 	}
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(result); err != nil {
-		return errors.New("invalid identity response")
+		return resp.StatusCode, errors.New("invalid identity response")
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 func (a *App) validClawHuntIdentity(id clawHuntIdentity) bool {
 	return id.Issuer == a.cfg.ClawHuntURL && id.Audience == a.cfg.ClawHuntClientID && len(id.Subject) > 0 && len(id.Subject) <= 200 && validEmail(id.Email) && len(id.Name) > 0 && len(id.Name) <= 200
@@ -236,7 +243,7 @@ func (a *App) clawHuntCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expires := time.Now().Add(time.Duration(grant.ExpiresIn) * time.Second)
-	_, session, collision, err := a.acceptClawHunt(r.Context(), grant.Identity, grant.Token, expires, "")
+	user, session, collision, err := a.acceptClawHunt(r.Context(), grant.Identity, grant.Token, expires, "")
 	if err != nil {
 		a.identityRedirect(w, r, "conflict", invite)
 		return
@@ -266,6 +273,8 @@ func (a *App) clawHuntCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	a.identityFlowCookie(w, "", -1)
 	a.sessionCookie(w, session, int(time.Until(expires).Seconds()))
+	// A sign-in also brings the account's plan up to date; the issuer being slow never holds the sign-in up.
+	a.syncPlanAfterSignIn(r.Context(), user.ID, grant.Identity.Subject, grant.Token)
 	http.Redirect(w, r, a.cfg.PublicOrigin+identityReturnURL(invite), http.StatusSeeOther)
 }
 
@@ -414,6 +423,7 @@ func (a *App) clawHuntLink(w http.ResponseWriter, r *http.Request) {
 	// Proof remains bound to the original pending account; profile changes
 	// since that claim are display-only and cannot retarget the password proof.
 	u.Name, u.Email = live.Name, live.Email
+	a.syncPlanAfterSignIn(r.Context(), u.ID, id.Subject, grant)
 	a.sessionCookie(w, token, int(time.Until(expires).Seconds()))
 	ctx := context.WithValue(r.Context(), clawHuntSessionKey{}, true)
 	ctx = context.WithValue(ctx, clawHuntReturnKey{}, identityReturnURL(invite))

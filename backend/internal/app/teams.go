@@ -257,6 +257,11 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 	if len(observations) > 0 {
 		facts = observations[0]
 	}
+	runtime := runtimePI
+	if facts != nil && facts.Runtime != "" {
+		runtime = facts.Runtime
+	}
+	wait := 40 * time.Millisecond
 	for {
 		tx, e := a.db.Begin(ctx)
 		if e != nil {
@@ -264,10 +269,15 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		}
 		var status, actor, runStatus string
 		var concurrent, daily int
-		var restricted bool
+		var restricted, needsPlan bool
 		var allowed []string
 		var routes []byte
-		e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&status, &concurrent, &daily, &restricted, &allowed, &routes)
+		e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits,requires_plan FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&status, &concurrent, &daily, &restricted, &allowed, &routes, &needsPlan)
+		// The owner's plan is read without a lock first; it is locked only once a slot is free (below).
+		var plan *activePlan
+		if e == nil {
+			plan, e = ownerPlan(ctx, tx, tid, false)
+		}
 		if e == nil {
 			e = tx.QueryRow(ctx, "SELECT COALESCE(actor_id,''),status FROM runs WHERE tenant_id=$1 AND id=$2", tid, rid).Scan(&actor, &runStatus)
 		}
@@ -296,44 +306,115 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		if e == nil && facts != nil && facts.RequirePersonalConnection {
 			e = a.requireWorkspacePersonalConnection(ctx, tx, actor, facts.Runtime, model)
 		}
-		var active, today int
 		if e == nil {
-			// Image and video generations spend the same daily run quota.
-			e = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='running'),count(*) FILTER(WHERE created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-				+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') FROM model_invocations WHERE tenant_id=$1`, tid).Scan(&active, &today)
+			e = requiresPlan(ctx, tx, tid, needsPlan, plan)
 		}
-		if e == nil && today >= daily {
-			e = errInvocationQuota
+		var reserve *int
+		if e == nil && plan != nil {
+			var size int64
+			if facts != nil {
+				size = facts.InputBytes
+			}
+			reserve, e = a.creditReserve(runtime, model, size)
 		}
 		if e != nil {
 			tx.Rollback(context.Background())
 			return e
 		}
-		if active < concurrent {
-			// Inside the daily allowance, a route-limited workspace also has a small allowance per
-			// paid model route; the free default model only spends the daily allowance. Checked only
-			// once a slot is free, so a waiting call does not hold the deployment-wide route lock.
-			if routes != nil {
-				if e = a.checkRouteLimit(ctx, tx, tid, model, readRouteLimits(routes)); e != nil {
-					tx.Rollback(context.Background())
-					return e
-				}
+		admitted, billed := false, (*activePlan)(nil)
+		if plan == nil {
+			admitted, e = a.admitFreeInvocation(ctx, tx, tid, model, concurrent, daily, routes)
+		} else {
+			billed, e = a.admitPlanInvocation(ctx, tx, tid, rid, reserve)
+			admitted = billed != nil
+		}
+		if e == nil && admitted {
+			if e = a.reserveInvocationFacts(ctx, tx, tid, rid, invID, facts, reserve, billed); e == nil {
+				return tx.Commit(ctx)
 			}
-			e = a.reserveInvocationFacts(ctx, tx, tid, rid, invID, facts)
-			if e == nil {
-				e = tx.Commit(ctx)
-			} else {
-				tx.Rollback(context.Background())
-			}
-			return e
 		}
 		tx.Rollback(context.Background())
+		if e != nil {
+			return e
+		}
+		// Waiting for a slot backs off from 40 ms to half a second, so a long wait does not keep the workspace
+		// row and the database busy.
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(40 * time.Millisecond):
+		case <-time.After(wait):
+		}
+		wait = min(wait*2, 500*time.Millisecond)
+	}
+}
+
+// admitFreeInvocation applies a free workspace's own allowances: its daily total (calls plus generations), its
+// concurrency, and inside those, for a route-limited workspace, the small daily allowance per paid model route.
+// It reports false while every slot is busy.
+func (a *App) admitFreeInvocation(ctx context.Context, tx pgx.Tx, tid, model string, concurrent, daily int, routes []byte) (bool, error) {
+	var active, today int
+	// Image and video generations spend the same daily run quota.
+	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='running'),count(*) FILTER(WHERE created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+		+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') FROM model_invocations WHERE tenant_id=$1`, tid).Scan(&active, &today); e != nil {
+		return false, e
+	}
+	if today >= daily {
+		return false, errInvocationQuota
+	}
+	if active >= concurrent {
+		return false, nil
+	}
+	// Checked only once a slot is free, so a waiting call does not hold the deployment-wide route lock.
+	if routes != nil {
+		if e := a.checkRouteLimit(ctx, tx, tid, model, readRouteLimits(routes)); e != nil {
+			return false, e
 		}
 	}
+	return true, nil
+}
+
+// admitPlanInvocation applies the owner's plan, whose allowances are the account's across all its workspaces:
+// the agents at once, today's free default-model calls, and for a paid route the period's credits. A run's first
+// call at a time takes the slot its run already holds (planRunSlot); a further call at once (a parallel team's
+// member) needs a free one. The account's numbers are counted without a lock while the call waits for a slot,
+// then again under the plan row's lock, which every admission of the account takes before it counts. It returns
+// the locked plan the call is charged to, or nil while no slot is free (or the plan lapsed meanwhile, and the
+// next try is free).
+func (a *App) admitPlanInvocation(ctx context.Context, tx pgx.Tx, tid, rid string, reserve *int) (*activePlan, error) {
+	check := func(plan *activePlan) (bool, error) {
+		usage, e := accountPlanUsage(ctx, tx, plan.UserID)
+		if e != nil {
+			return false, e
+		}
+		if reserve == nil && usage.FreeToday >= plan.Limits.Daily {
+			return false, errInvocationQuota
+		}
+		mine, e := runCallsRunning(ctx, tx, tid, rid)
+		if e != nil || mine == 0 {
+			return e == nil, e
+		}
+		used, e := accountSlotsUsed(ctx, tx, plan.UserID)
+		return used < plan.Limits.Concurrent, e
+	}
+	plan, e := ownerPlan(ctx, tx, tid, false)
+	if e != nil || plan == nil {
+		return nil, e
+	}
+	if free, e := check(plan); e != nil || !free {
+		return nil, e
+	}
+	if plan, e = ownerPlan(ctx, tx, tid, true); e != nil || plan == nil {
+		return nil, e
+	}
+	if free, e := check(plan); e != nil || !free {
+		return nil, e
+	}
+	if reserve != nil {
+		if e = checkCredits(ctx, tx, plan, *reserve); e != nil {
+			return nil, e
+		}
+	}
+	return plan, nil
 }
 
 type teamCall func(context.Context, teamMember, int, int, teamTurnInput) (string, error)
@@ -523,6 +604,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	}
 	facts := invocationMetadata(snap, &m)
 	facts.TurnID = id
+	facts.InputBytes = int64(len(body))
 	turnStart := time.Now()
 	traceCtx, endTurnTrace := a.startTeamTrace(ctx, input.Purpose, m.Runtime, round)
 	ctx = traceCtx
@@ -600,7 +682,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	admissionStart := time.Now()
 	resp, e := a.admitRuntime(ctx, m.Runtime, body)
 	facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
-	if errors.Is(e, errSessionBusy) {
+	if errors.Is(e, errSessionBusy) || errors.Is(e, errNotSent) {
 		facts.Admission = "rejected_before_start"
 	}
 	if e != nil {
@@ -629,6 +711,13 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		code = "runtime_rejected"
 		return "", errors.New(code)
 	}
+	facts.Streamed = time.Now()
+	// The stream's end, stamped before the cleanup and the commit that follow it, bounds its hidden time.
+	defer func() {
+		if facts.Ended.IsZero() {
+			facts.Ended = time.Now()
+		}
+	}()
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 4096), 2<<20)
 	// A member's scratchpad is removed from its turn output but still counted, so
@@ -650,6 +739,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			return "", errors.New(code)
 		}
 		if ev.Type == "completed" || ev.Type == "failed" || ev.Type == "cancelled" {
+			facts.Ended = time.Now()
 			facts.receive(ev.Observability, a.cfg.RunTimeout)
 		}
 		switch ev.Type {
@@ -659,6 +749,10 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 				return "", errors.New(code)
 			}
 			produced += len(ev.Delta)
+			facts.OutputBytes = int64(produced)
+			if facts.FirstOutput.IsZero() && ev.Delta != "" {
+				facts.FirstOutput = time.Now()
+			}
 			delta := reasoning.push(ev.Delta)
 			if delta == "" {
 				continue
@@ -674,6 +768,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 				return "", errors.New(code)
 			}
 		case "completed":
+			facts.OutputBytes = max(facts.OutputBytes, int64(len(ev.Text)))
 			answer, delivered := reasoningAnswer(ev.Text)
 			if len(ev.Text) > 2<<20 || !strings.HasPrefix(answer, output) {
 				code = "inconsistent_runtime_output"
@@ -695,6 +790,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		case "failed":
 			// Members deliver through their own turn and never carry a contract, so a
 			// contract refusal reported here stays the generic runtime failure.
+			facts.WorkerCode = ev.Code
 			code = runtimeFailureCode(ev.Code, false)
 			return "", errors.New(code)
 		default:

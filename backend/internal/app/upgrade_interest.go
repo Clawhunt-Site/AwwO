@@ -14,26 +14,39 @@ type routeAllowance struct {
 	Used  int `json:"used"`
 }
 
-// routeUsageToday counts today's use as admission counts it: the daily total (invocations plus
-// generations) and, for a route-limited workspace, each route it limits. routes is nil for a
-// workspace without route limits. The deployment-wide ceilings, the media caps and the model
-// allowlist are not counted, so admission can still refuse a call these numbers show room for.
-func (a *App) routeUsageToday(ctx context.Context, tid, uid string) (routeAllowance, map[string]routeAllowance, bool, error) {
+// routeUsageToday counts today's use as admission counts it. A free workspace has its daily total (invocations
+// plus generations) and, when route-limited, each route it limits; routes is nil for one without route limits.
+// A workspace whose owner has a paid plan reports the plan (plan is set, routes nil) with the account's daily
+// default-model calls across its workspaces. The deployment-wide ceilings, the media caps and the model allowlist
+// are not counted, so admission can still refuse a call these numbers show room for.
+func (a *App) routeUsageToday(ctx context.Context, tid, uid string) (routeAllowance, map[string]routeAllowance, bool, *activePlan, error) {
 	var daily routeAllowance
-	var invocations, media int
+	var invocations, media, freeMedia int
 	var raw []byte
 	var interested bool
 	if e := a.db.QueryRow(ctx, `SELECT t.max_runs_per_day,t.route_limits,
 		(SELECT count(*) FROM model_invocations WHERE tenant_id=t.id AND created_at>=`+todayUTC+`),
 		(SELECT count(*) FROM media_generations WHERE tenant_id=t.id AND created_at>=`+todayUTC+`),
+		(SELECT count(*) FROM media_generations WHERE tenant_id=t.id AND billed_user_id IS NULL AND created_at>=`+todayUTC+`),
 		EXISTS(SELECT 1 FROM upgrade_interests WHERE tenant_id=t.id AND user_id=$2)
-		FROM tenants t WHERE t.id=$1`, tid, uid).Scan(&daily.Limit, &raw, &invocations, &media, &interested); e != nil {
-		return daily, nil, false, e
+		FROM tenants t WHERE t.id=$1`, tid, uid).Scan(&daily.Limit, &raw, &invocations, &media, &freeMedia, &interested); e != nil {
+		return daily, nil, false, nil, e
 	}
 	daily.Used = invocations + media
+	plan, e := ownerPlan(ctx, a.db, tid, false)
+	if e != nil {
+		return daily, nil, false, nil, e
+	}
+	if plan != nil {
+		usage, e := accountPlanUsage(ctx, a.db, plan.UserID)
+		if e != nil {
+			return daily, nil, false, nil, e
+		}
+		return routeAllowance{Limit: plan.Limits.Daily, Used: usage.FreeToday}, nil, interested, plan, nil
+	}
 	limits := readRouteLimits(raw)
 	if limits == nil {
-		return daily, nil, interested, nil
+		return daily, nil, interested, nil, nil
 	}
 	free := a.cfg.RouteFreeModels
 	if free == nil {
@@ -47,28 +60,58 @@ func (a *App) routeUsageToday(ctx context.Context, tid, uid string) (routeAllowa
 		}
 		var used int
 		if e := a.db.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$3 AND mi.created_at>=`+todayUTC+` AND `+routeInvocationFilter, route, free, tid).Scan(&used); e != nil {
-			return daily, nil, false, e
+			return daily, nil, false, nil, e
 		}
 		routes[route] = routeAllowance{limit, used}
 	}
 	if limit, ok := limits[routeMedia]; ok {
-		routes[routeMedia] = routeAllowance{limit, media}
+		routes[routeMedia] = routeAllowance{limit, freeMedia}
 	}
-	return daily, routes, interested, nil
+	return daily, routes, interested, nil, nil
 }
 
 // routeUsageView answers GET /tenants/{tenantId}/route-usage for any member. A workspace without route
-// limits reports limited:false and only its daily allowance.
+// limits reports limited:false and only its daily allowance; one whose owner has a paid plan reports the
+// plan and this period's credits instead of routes. The credits are the account's, shared by everyone who
+// runs things in its workspaces; the renewal date and a pending cancellation are shown to the owner alone,
+// and a reader, who runs nothing, is not shown the plan.
 func (a *App) routeUsageView(w http.ResponseWriter, r *http.Request) {
-	daily, routes, interested, e := a.routeUsageToday(r.Context(), r.PathValue("tenantId"), currentUser(r).ID)
+	ctx := r.Context()
+	tid, uid := r.PathValue("tenantId"), currentUser(r).ID
+	daily, routes, interested, plan, e := a.routeUsageToday(ctx, tid, uid)
 	if e != nil {
 		a.dbError(w, e)
 		return
+	}
+	var role string
+	if e = a.db.QueryRow(ctx, "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2", tid, uid).Scan(&role); e != nil && !noRows(e) {
+		a.dbError(w, e)
+		return
+	}
+	if role == "reader" || role == "" {
+		plan = nil
 	}
 	out := map[string]any{"limited": routes != nil, "daily": daily, "interested": interested,
 		"resetsAt": time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)}
 	if routes != nil {
 		out["routes"] = routes
+	}
+	if plan != nil {
+		if e = withCarry(ctx, a.db, plan); e != nil {
+			a.dbError(w, e)
+			return
+		}
+		spent, e := creditsSpent(ctx, a.db, plan)
+		if e != nil {
+			a.dbError(w, e)
+			return
+		}
+		// owner tells the web who can change the plan: only the owner's own account can upgrade it.
+		view := map[string]any{"id": plan.Plan, "credits": creditsJSON(plan, spent), "owner": plan.UserID == uid}
+		if plan.UserID == uid {
+			view["periodEnd"], view["cancelAtPeriodEnd"] = plan.PeriodEnd, plan.CancelAtPeriodEnd
+		}
+		out["plan"] = view
 	}
 	writeJSON(w, 200, out)
 }
@@ -84,7 +127,7 @@ func (a *App) recordUpgradeInterest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tid, uid := r.PathValue("tenantId"), currentUser(r).ID
-	daily, routes, _, e := a.routeUsageToday(r.Context(), tid, uid)
+	daily, routes, _, _, e := a.routeUsageToday(r.Context(), tid, uid)
 	if e != nil {
 		a.dbError(w, e)
 		return

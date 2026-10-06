@@ -51,6 +51,8 @@ type App struct {
 	clawHuntSessions *clawHuntSessionCache
 	// inviteReads bounds each account's invite-code reads (clawhunt_invites.go).
 	inviteReads inviteReadLimiter
+	// billingCalls bounds each account's plan, checkout and portal calls to the issuer (billing.go).
+	billingCalls inviteReadLimiter
 	// capabilityNotes remembers which cleared worker capabilities were already logged,
 	// bounded by capabilityNoteLimit; capabilityNotesCapped marks the one-time notice.
 	capabilityNotes       sync.Map
@@ -136,7 +138,7 @@ func (a *App) Start(ctx context.Context) error {
 	if _, e = tx.Exec(ctx, "UPDATE run_turns SET status='interrupted',error='API restarted before completion',updated_at=now() WHERE status IN ('queued','running')"); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET status='interrupted',usage_status='unknown',usage_source='none',usage_reason='worker_lost',cost_status='unknown',failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=now() WHERE status='running'"); e != nil {
+	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET status='interrupted',usage_status='unknown',usage_source='none',usage_reason='worker_lost',cost_status='unknown',failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=now(),credit_charge="+abandonedCreditCharge+" WHERE status='running'"); e != nil {
 		return e
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -179,6 +181,7 @@ func (a *App) Start(ctx context.Context) error {
 	}()
 	a.resumeMedia(resume)
 	a.startMediaSweeper(watch)
+	a.startPlanSync(watch)
 	return a.recoverGraphs(ctx)
 }
 func (a *App) Close() {
@@ -235,6 +238,9 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/auth/clawhunt/pending", a.authRate(a.clawHuntPending))
 	m.HandleFunc("POST /api/v1/auth/clawhunt/link", a.authRate(a.clawHuntLink))
 	m.HandleFunc("POST /api/v1/auth/clawhunt/invites", a.auth(a.clawHuntInvites))
+	m.HandleFunc("GET /api/v1/billing", a.auth(a.billingView))
+	m.HandleFunc("POST /api/v1/billing/checkout", a.auth(a.billingCheckout))
+	m.HandleFunc("POST /api/v1/billing/portal", a.auth(a.billingPortal))
 	m.HandleFunc("GET /api/v1/auth/options", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"passwordRecovery": !a.clawHuntEnabled() && a.cfg.SMTPHost != "", "clawhuntSSO": a.clawHuntEnabled(), "localAuth": !a.clawHuntEnabled(), "clawhuntSiteURL": a.cfg.ClawHuntURL})
 	})

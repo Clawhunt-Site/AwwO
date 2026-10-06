@@ -281,6 +281,8 @@ type workspaceLease struct {
 	stopping                   bool
 	settleUntil                time.Time
 	changed                    chan struct{}
+	// refusal is an allowance or plan refusal of one of the run's model calls; the run fails with it.
+	refusal string
 }
 
 func (a *App) registerWorkspaceLease(ctx context.Context, tid, rid, sid string, snap executionSnapshot) (*workspaceLease, string, func()) {
@@ -402,6 +404,9 @@ func (a *App) workspaceCallback(w http.ResponseWriter, r *http.Request) {
 		f.RequirePersonalConnection = a.cfg.UserCredentials
 		id := "w" + tokenHash(fmt.Sprintf("%s\x00%s\x00%d", l.tenantID, l.runID, b.Index))[:40]
 		if err := a.reserveInvocation(ctx, l.tenantID, l.runID, id, l.snapshot.Model, f); err != nil {
+			if code := admissionRefusal(err); code != "" {
+				l.refusal = code
+			}
 			reject(403, "workspace_admission_denied", "Execution permission or quota is unavailable")
 			return
 		}
@@ -573,9 +578,17 @@ func storeWorkspaceSnapshot(ctx context.Context, tx pgx.Tx, tid, rid, sid string
 
 func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instructions, kind string, snap executionSnapshot) {
 	var closeWorkspace func()
+	var lease *workspaceLease
 	failRun := func(code string) {
 		if closeWorkspace != nil {
 			closeWorkspace()
+		}
+		if lease != nil {
+			lease.mu.Lock()
+			if lease.refusal != "" {
+				code = lease.refusal
+			}
+			lease.mu.Unlock()
 		}
 		status := "failed"
 		if s, c, ended := runContextOutcome(ctx); ended {

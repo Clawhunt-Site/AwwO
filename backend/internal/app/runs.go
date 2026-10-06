@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -287,12 +288,28 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	// The entitlement rides along with the quota read, so admission cannot resolve
 	// a model without having loaded the workspace's allowlist first.
 	var routes []byte
-	if e = tx.QueryRow(r.Context(), "SELECT max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits FROM tenants WHERE id=$1", tid).Scan(&concurrent, &daily, &restricted, &allowed, &routes); e != nil {
+	var needsPlan bool
+	if e = tx.QueryRow(r.Context(), "SELECT max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits,requires_plan FROM tenants WHERE id=$1", tid).Scan(&concurrent, &daily, &restricted, &allowed, &routes, &needsPlan); e != nil {
 		a.dbError(w, e)
 		return
 	}
 	entitlement, e := newModelEntitlement(restricted, allowed)
 	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	// An entitled owner's plan replaces the workspace's own allowances with the account's (plans.go); read here
+	// without its lock, which the paid generation below and every model call take when they count or spend them.
+	plan, e := ownerPlan(r.Context(), tx, tid, false)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	switch e = requiresPlan(r.Context(), tx, tid, needsPlan, plan); {
+	case errors.Is(e, errPlanRequired):
+		fail(w, 402, "plan_required", "This workspace needs its owner's paid plan")
+		return
+	case e != nil:
 		a.dbError(w, e)
 		return
 	}
@@ -334,7 +351,9 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if active >= concurrent || today >= daily {
+	// With a plan the runs at once and the daily calls are the account's: the runs are counted across its
+	// workspaces just before the run is stored (planRunSlot), and each call checks the daily default-model calls.
+	if plan == nil && (active >= concurrent || today >= daily) {
 		fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
 		return
 	}
@@ -369,7 +388,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		document, nodeID = []byte(`{}`), ""
 	} else if engine == agentEngineMedia {
 		// Image and video nodes run through the media provider, not a model worker.
-		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, model, entitlement, readRouteLimits(routes))
+		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, model, entitlement, readRouteLimits(routes), plan != nil, workspaceLimits{active, concurrent, today, daily, needsPlan})
 		return
 	}
 	team, e := savedNodeTeam(document, nodeID)
@@ -456,6 +475,22 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		snapshot.History, snapshot.HistoryAvailable = &history, available
+	}
+	if plan != nil {
+		switch e = a.planRunSlot(r.Context(), tx, tid, workspaceLimits{active, concurrent, today, daily, needsPlan}); {
+		case errors.Is(e, errPlanBusy):
+			fail(w, 429, "plan_busy", "This plan's agents at once are all running, in this or another workspace; try again when one finishes")
+			return
+		case errors.Is(e, errInvocationQuota):
+			fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
+			return
+		case errors.Is(e, errPlanRequired):
+			fail(w, 402, "plan_required", "This workspace needs its owner's paid plan")
+			return
+		case e != nil:
+			a.dbError(w, e)
+			return
+		}
 	}
 	id := randomID()
 	v, e := oneJSON(r.Context(), tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status) VALUES($1,$2,$3,$4,$5,$6,'queued') RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt)
@@ -604,11 +639,6 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	facts := invocationMetadata(snapshot, nil)
 	facts.Timing.QueueMs = int64ptr(queueDuration.Milliseconds())
-	if e = a.reserveInvocation(ctx, tid, id, id, snapshot.Model, facts); e != nil {
-		a.finish(tid, id, "failed", "", e.Error())
-		return
-	}
-	finish := func(status, output, code string) { a.finishWithFacts(tid, id, status, output, code, facts) }
 	var history []json.RawMessage
 	if snapshot.History != nil {
 		history = *snapshot.History
@@ -616,7 +646,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		history, e = rowsJSON(ctx, a.db, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND m.run_id<>$3 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid, id)
 	}
 	if e != nil {
-		finish("failed", "", "history_unavailable")
+		a.finish(tid, id, "failed", "", "history_unavailable")
 		return
 	}
 	if kind == "planner" || kind == "knowledge" || kind == "computer" {
@@ -635,8 +665,21 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	body, e := json.Marshal(request)
 	if e != nil {
-		finish("failed", "", "invalid_request")
+		a.finish(tid, id, "failed", "", "invalid_request")
 		return
+	}
+	// The whole request, history included, is what the call holds credits for under a plan.
+	facts.InputBytes = int64(len(body))
+	if e = a.reserveInvocation(ctx, tid, id, id, snapshot.Model, facts); e != nil {
+		a.finish(tid, id, "failed", "", e.Error())
+		return
+	}
+	finish := func(status, output, code string) {
+		// The stream's end, stamped before the commit and its retries, bounds its hidden time.
+		if facts.Ended.IsZero() && !facts.Streamed.IsZero() {
+			facts.Ended = time.Now()
+		}
+		a.finishWithFacts(tid, id, status, output, code, facts)
 	}
 	runtimeCompleted := false
 	defer func() {
@@ -662,7 +705,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	admissionStart := time.Now()
 	resp, e := a.admitRuntimeWith(ctx, defaultRuntime(snapshot.Runtime), body, activity)
 	facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
-	if errors.Is(e, errSessionBusy) {
+	if errors.Is(e, errSessionBusy) || errors.Is(e, errNotSent) {
 		facts.Admission = "rejected_before_start"
 	}
 	if e != nil {
@@ -701,6 +744,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		finish("failed", "", code)
 		return
 	}
+	facts.Streamed = time.Now()
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 4096), 2<<20)
 	var output strings.Builder
@@ -708,6 +752,9 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	// counted here, so the output cap stays a bound on what the provider actually
 	// produced and a model that reasons past it still fails instead of running on.
 	produced := 0
+	// Reasoning a planner run is told about but never sees counts towards what an unreported call is charged
+	// from, a token a character.
+	reasoned := 0
 	var reasoning reasoningStream
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -728,6 +775,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			return
 		}
 		if ev.Type == "completed" || ev.Type == "failed" || ev.Type == "cancelled" {
+			facts.Ended = time.Now()
 			facts.receive(ev.Observability, a.cfg.RunTimeout)
 		}
 		switch ev.Type {
@@ -737,6 +785,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				return
 			}
 			produced += len(ev.Delta)
+			facts.OutputBytes = int64(produced)
+			if facts.FirstOutput.IsZero() && ev.Delta != "" {
+				facts.FirstOutput = time.Now()
+			}
 			spanned := reasoning.inSpan()
 			delta := reasoning.push(ev.Delta)
 			output.WriteString(delta)
@@ -770,8 +822,11 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				return
 			}
 			progress.reasonReported(*ev.Characters)
+			reasoned = max(reasoned, *ev.Characters)
+			facts.HiddenTokens = int64(reasoned)
 			a.reportPlannerProgress(ctx, tid, id, progress)
 		case "completed":
+			facts.OutputBytes = max(facts.OutputBytes, int64(len(ev.Text)))
 			answer, delivered := reasoningAnswer(ev.Text)
 			if !strings.HasPrefix(answer, output.String()) {
 				finish("failed", output.String(), "inconsistent_runtime_output")
@@ -796,6 +851,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			finish("completed", output.String(), "")
 			return
 		case "failed":
+			facts.WorkerCode = ev.Code
 			finish("failed", output.String(), runtimeFailureCode(ev.Code, snapshot.OutputContract != nil))
 			return
 		case "cancelled":
@@ -1066,6 +1122,12 @@ func settleExecutionRecords(ctx context.Context, tx pgx.Tx, tid, id, status stri
 	// reconciliation after the execution goroutine has stopped calling providers.
 	if _, e := tx.Exec(ctx, "UPDATE run_turns SET status=$3,error=CASE WHEN $3='interrupted' THEN 'execution_interrupted' ELSE error END,updated_at=now() WHERE tenant_id=$1 AND run_id=$2 AND status IN ('queued','running')", tid, id, status); e != nil {
 		return e
+	}
+	// A completed generation was accepted by its provider even if recording its task failed (plans.go).
+	if status == "completed" {
+		if _, e := tx.Exec(ctx, "UPDATE media_generations SET provider_accepted=true WHERE tenant_id=$1 AND run_id=$2 AND provider_accepted IS NULL", tid, id); e != nil {
+			return e
+		}
 	}
 	return settleAbandonedInvocations(ctx, tx, tid, id, status)
 }
@@ -1391,15 +1453,27 @@ func (a *App) admitRuntime(ctx context.Context, runtime string, body []byte) (*h
 // admitRuntimeWith is admission with extra request headers. Headers, unlike body
 // fields, are not part of the worker's strict request schema, so an opt-in carried
 // here is ignored by a worker that predates it instead of rejecting the run.
+// errNotSent marks a runtime admission that failed before its request could reach the worker: nothing was sent to
+// a provider, so the call costs nothing.
+var errNotSent = errors.New("runtime request not sent")
+
+func notSent(err error) error { return fmt.Errorf("%w: %w", errNotSent, err) }
+
+// dialFailed reports a connection that was never made.
+func dialFailed(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial"
+}
+
 func (a *App) admitRuntimeWith(ctx context.Context, runtime string, body []byte, extra http.Header) (*http.Response, error) {
 	endpoint, token, err := a.runtimeEndpoint(runtime)
 	if err != nil {
-		return nil, err
+		return nil, notSent(err)
 	}
 	if a.cfg.UserCredentials {
 		body, err = a.personalAdmission(ctx, runtime, body)
 		if err != nil {
-			return nil, err
+			return nil, notSent(err)
 		}
 	}
 	deadline := time.Now().Add(a.cfg.PIAdmissionWait)
@@ -1418,7 +1492,7 @@ func (a *App) admitRuntimeWith(ctx context.Context, runtime string, body []byte,
 		req, e := http.NewRequestWithContext(requestCtx, "POST", endpoint+"/internal/runs", bytes.NewReader(body))
 		if e != nil {
 			observe("rejected_invalid")
-			return nil, e
+			return nil, notSent(e)
 		}
 		for key, values := range extra {
 			for _, value := range values {
@@ -1431,6 +1505,9 @@ func (a *App) admitRuntimeWith(ctx context.Context, runtime string, body []byte,
 		resp, e := a.client.Do(req)
 		if e != nil {
 			observe("transport_unknown")
+			if dialFailed(e) {
+				return nil, notSent(e)
+			}
 			return nil, e
 		}
 		if resp.StatusCode != 409 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {

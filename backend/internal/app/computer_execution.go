@@ -98,6 +98,8 @@ type computerLease struct {
 	snapshot                   executionSnapshot
 	calls                      int
 	busy, closed               bool
+	// refusal is an allowance or plan refusal of one of the run's model calls; the run fails with it.
+	refusal string
 }
 
 func validateComputerConfiguration(c Config) error {
@@ -521,7 +523,13 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			return
 		case "failed":
 			a.log.Warn("managed execution task failed", "run", rid, "code", computerWorkerCode(ev.Code))
-			a.finish(tid, rid, "failed", "", "computer_execution_failed")
+			code := "computer_execution_failed"
+			lease.mu.Lock()
+			if lease.refusal != "" {
+				code = lease.refusal
+			}
+			lease.mu.Unlock()
+			a.finish(tid, rid, "failed", "", code)
 			return
 		case "cancelled":
 			a.finish(tid, rid, "cancelled", "", "")

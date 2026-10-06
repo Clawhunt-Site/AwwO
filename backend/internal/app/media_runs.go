@@ -138,7 +138,11 @@ func (a *App) mediaAdmissionError(w http.ResponseWriter, err error) {
 // createMediaRun admits a run of an image or video node. It shares createRun's transaction, so the
 // workspace's concurrency limit, idempotency and session lock already apply; media adds its own
 // daily limit, counted from durable run rows.
-func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string, b runInput, hash string, document []byte, nodeID, model string, entitlement modelEntitlement, routes routeLimits) {
+// paid tells that the workspace's owner had an entitled plan when the run was read: the generation is then
+// admitted on the plan's daily generations across the account's workspaces and spends the period's credits,
+// instead of the workspace's own media allowance and the free plan's media route limit and ceiling.
+// own are the workspace's own run limits, which apply when the plan lapsed after createRun read it.
+func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string, b runInput, hash string, document []byte, nodeID, model string, entitlement modelEntitlement, routes routeLimits, paid bool, own workspaceLimits) {
 	ctx := r.Context()
 	if len(b.KnowledgeRevisionIDs) > 0 {
 		fail(w, 400, "media_knowledge_unsupported", "Image and video nodes do not take knowledge context")
@@ -160,21 +164,80 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		a.dbError(w, e)
 		return
 	}
+	// today counts this workspace's free generations only: paid ones never spend a free allowance.
 	var today, total int
-	if e = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1),count(*) FROM media_generations
+	if e = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1 AND billed_user_id IS NULL),count(*) FILTER (WHERE billed_user_id IS NULL) FROM media_generations
 		WHERE created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&today, &total); e != nil {
 		a.dbError(w, e)
 		return
 	}
-	if today >= a.cfg.MediaRunsPerDay {
+	// A paid plan's row is locked after the workspace row and the media lock, like every model call's.
+	var plan *activePlan
+	if paid {
+		if plan, e = ownerPlan(ctx, tx, tid, true); e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if plan == nil {
+			// The plan lapsed since createRun read it, which skipped the workspace's own run limits.
+			switch e = own.admit(ctx, tx, tid); {
+			case errors.Is(e, errPlanRequired):
+				fail(w, 402, "plan_required", "This workspace needs its owner's paid plan")
+				return
+			case errors.Is(e, errInvocationQuota):
+				fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
+				return
+			case e != nil:
+				a.dbError(w, e)
+				return
+			}
+		}
+	}
+	if plan != nil {
+		usage, e := accountPlanUsage(ctx, tx, plan.UserID)
+		if e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if usage.MediaToday >= plan.Limits.MediaPerDay {
+			fail(w, 429, "plan_media_quota_exceeded", "This plan's image and video generations for today are used up")
+			return
+		}
+		// A generation is a run: it takes one of the plan's agents at once (createRun leaves that count to here).
+		used, e := accountSlotsUsed(ctx, tx, plan.UserID)
+		if e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if used >= plan.Limits.Concurrent {
+			fail(w, 429, "plan_busy", "This plan's agents at once are all running, in this or another workspace; try again when one finishes")
+			return
+		}
+	} else if today >= a.cfg.MediaRunsPerDay {
 		fail(w, 429, "media_quota_exceeded", "This workspace has used today's image and video generations")
 		return
 	}
-	if total >= a.cfg.MediaTotalRunsPerDay {
+	if plan == nil && total >= a.cfg.MediaTotalRunsPerDay {
 		fail(w, 429, "media_capacity_exceeded", "Today's image and video generations are used up; try again tomorrow")
 		return
 	}
-	// A route-limited workspace also has its own media allowance and shares a deployment-wide
+	var credits *int
+	var billedUser *string
+	var billedPeriod *time.Time
+	if plan != nil {
+		n := mediaCreditsFor(snapshot.Model, snapshot.Media.Kind, snapshot.Media.Params)
+		credits, billedUser, billedPeriod = &n, &plan.UserID, &plan.PeriodStart
+		switch e = checkCredits(ctx, tx, plan, n); {
+		case errors.Is(e, errCreditsExhausted):
+			fail(w, 402, "credits_exhausted", "This plan's credits for the period are used up")
+			return
+		case e != nil:
+			a.dbError(w, e)
+			return
+		}
+		routes = nil
+	}
+	// A route-limited free workspace also has its own media allowance and shares a deployment-wide
 	// ceiling with the other route-limited workspaces.
 	switch code, e := a.mediaRouteLimit(ctx, tx, routes, today); {
 	case e != nil:
@@ -198,7 +261,7 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		a.dbError(w, e)
 		return
 	}
-	if _, e = tx.Exec(ctx, "INSERT INTO media_generations(run_id,tenant_id,model,created_at) VALUES($1,$2,$3,clock_timestamp())", id, tid, snapshot.Model); e != nil {
+	if _, e = tx.Exec(ctx, "INSERT INTO media_generations(run_id,tenant_id,model,created_at,credit_points,billed_user_id,billed_period_start) VALUES($1,$2,$3,clock_timestamp(),$4,$5,$6)", id, tid, snapshot.Model, credits, billedUser, billedPeriod); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -328,6 +391,11 @@ func (a *App) mediaStopped(ctx context.Context, id string, recorded bool) bool {
 func (a *App) recordMediaTask(ctx context.Context, tid, id, taskID string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
+	// The provider has the task and may bill it, so its generation is charged even if the run was cancelled
+	// while it was being submitted.
+	if _, e := a.db.Exec(ctx, "UPDATE media_generations SET provider_accepted=true WHERE tenant_id=$1 AND run_id=$2", tid, id); e != nil {
+		return e
+	}
 	tag, e := a.db.Exec(ctx, "UPDATE runs SET media_task=COALESCE(media_task,'{}'::jsonb)||jsonb_build_object('taskId',$3::text,'submittedAt',to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')) WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, taskID)
 	if e == nil && tag.RowsAffected() == 0 {
 		return errors.New("run is no longer running")

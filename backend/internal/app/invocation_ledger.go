@@ -45,6 +45,31 @@ type invocationFacts struct {
 	Terminal                                                           bool
 	Usage                                                              InvocationUsage
 	Timing                                                             InvocationTiming
+	// The bytes the call sent to its worker and the bytes it streamed back, and when its stream began, its
+	// first text arrived and its terminal event came: what a paid-route call is charged from when its usage is not
+	// reported (plans.go creditCharge). Zero where a path does not count them.
+	InputBytes, OutputBytes      int64
+	Streamed, FirstOutput, Ended time.Time
+	// HiddenTokens is the reasoning a run was told about but never streamed (a planner's), and WorkerCode the
+	// worker's own failure code: what settles an unreported or refused call's charge.
+	HiddenTokens int64
+	WorkerCode   string
+}
+
+// unseen is how long the call's stream ran before its first text, up to its terminal event (or now, without
+// one): a reasoning model's hidden work, never the time spent recording the call afterwards.
+func (f *invocationFacts) unseen(now time.Time) time.Duration {
+	if f.Streamed.IsZero() {
+		return 0
+	}
+	end := now
+	if !f.Ended.IsZero() {
+		end = f.Ended
+	}
+	if !f.FirstOutput.IsZero() {
+		end = f.FirstOutput
+	}
+	return max(0, end.Sub(f.Streamed))
 }
 
 func int64ptr(n int64) *int64 { return &n }
@@ -189,7 +214,9 @@ func invocationMetadata(s executionSnapshot, member *teamMember) *invocationFact
 	return f
 }
 
-func (a *App) reserveInvocationFacts(ctx context.Context, tx pgx.Tx, tid, rid, id string, f *invocationFacts) error {
+// billed is the plan the call is admitted under (plans.go), nil on the free plan; reserve is the credits a
+// paid-route call holds while it runs, nil for a free model and on the free plan.
+func (a *App) reserveInvocationFacts(ctx context.Context, tx pgx.Tx, tid, rid, id string, f *invocationFacts, reserve *int, billed *activePlan) error {
 	if f == nil {
 		f = &invocationFacts{Runtime: runtimePI, Admission: "not_attempted"}
 	}
@@ -198,8 +225,15 @@ func (a *App) reserveInvocationFacts(ctx context.Context, tx pgx.Tx, tid, rid, i
 	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
 		traceID = sc.TraceID().String()
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO model_invocations(id,tenant_id,run_id,status,turn_id,agent_id,runtime,provider,model_id,provider_model,protocol,admission_status,usage_status,usage_source,usage_reason,cost_status,pricing_version,price_snapshot,queue_ms,request_id,trace_id)
-	 VALUES($1,$2,$3,'running',NULLIF($4,''),COALESCE(NULLIF($5,''),(SELECT s.agent_id FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$2 AND r.id=$3)),$6,$7,$8,$9,$10,'not_attempted','unavailable','none','provider_missing','not_incurred',$11,$12,$13,$14,$15)`, id, tid, rid, f.TurnID, f.AgentID, f.Runtime, f.Provider, f.Model, f.ProviderModel, f.Protocol, version, snapshot, f.Timing.QueueMs, requestID, traceID)
+	var billedUser *string
+	var billedPeriod *time.Time
+	if billed != nil {
+		billedUser, billedPeriod = &billed.UserID, &billed.PeriodStart
+	} else {
+		reserve = nil
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO model_invocations(id,tenant_id,run_id,status,turn_id,agent_id,runtime,provider,model_id,provider_model,protocol,admission_status,usage_status,usage_source,usage_reason,cost_status,pricing_version,price_snapshot,queue_ms,request_id,trace_id,credit_reserve,billed_user_id,billed_period_start)
+	 VALUES($1,$2,$3,'running',NULLIF($4,''),COALESCE(NULLIF($5,''),(SELECT s.agent_id FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$2 AND r.id=$3)),$6,$7,$8,$9,$10,'not_attempted','unavailable','none','provider_missing','not_incurred',$11,$12,$13,$14,$15,$16,$17,$18)`, id, tid, rid, f.TurnID, f.AgentID, f.Runtime, f.Provider, f.Model, f.ProviderModel, f.Protocol, version, snapshot, f.Timing.QueueMs, requestID, traceID, reserve, billedUser, billedPeriod)
 	return err
 }
 
@@ -236,7 +270,7 @@ func invocationFailure(status, code string) string {
 		return "transport"
 	case "database_unavailable", "event_persistence_failed", "turn_persistence_failed", "accounting_commit_failed":
 		return "persistence"
-	case "quota_exceeded", "premium_quota_exceeded", "premium_capacity_exceeded":
+	case "quota_exceeded", "premium_quota_exceeded", "premium_capacity_exceeded", "credits_exhausted", "plan_required", "model_unpriced", "plan_busy":
 		return "quota"
 	default:
 		return "validation"
@@ -248,6 +282,11 @@ func invocationFailure(status, code string) string {
 func (a *App) settleInvocation(ctx context.Context, tx pgx.Tx, tid, id, status, code string, f *invocationFacts) (func(), error) {
 	if f == nil {
 		return nil, errors.New("missing invocation facts")
+	}
+	if f.Ended.IsZero() {
+		// A call that ended without a terminal event ended when it was first settled: a retried commit reuses
+		// that time, so recording the call never counts as hidden reasoning.
+		f.Ended = time.Now()
 	}
 	u := f.Usage
 	costStatus := "unavailable"
@@ -266,7 +305,8 @@ func (a *App) settleInvocation(ctx context.Context, tx pgx.Tx, tid, id, status, 
 		}
 	}
 	var price json.RawMessage
-	err := tx.QueryRow(ctx, `SELECT price_snapshot FROM model_invocations WHERE tenant_id=$1 AND id=$2 AND status='running' FOR UPDATE`, tid, id).Scan(&price)
+	var reserve *int
+	err := tx.QueryRow(ctx, `SELECT price_snapshot,credit_reserve FROM model_invocations WHERE tenant_id=$1 AND id=$2 AND status='running' FOR UPDATE`, tid, id).Scan(&price, &reserve)
 	if noRows(err) {
 		return nil, nil
 	}
@@ -284,12 +324,20 @@ func (a *App) settleInvocation(ctx context.Context, tx pgx.Tx, tid, id, status, 
 			costStatus = "estimated"
 		}
 	}
+	var charge *int
+	if reserve != nil {
+		// A call reached the provider once its stream began, even if it was cancelled while the model reasoned.
+		reached := f.Terminal || f.OutputBytes > 0 || !f.Streamed.IsZero()
+		unseen := f.unseen(time.Now())
+		n := creditCharge(*reserve, costStatus == "not_incurred", refusedBeforeOutput(code, f.WorkerCode, f.OutputBytes, unseen), reached, u, price, f.InputBytes, f.OutputBytes, f.HiddenTokens, unseen)
+		charge = &n
+	}
 	tm := f.Timing
 	tag, err := tx.Exec(ctx, `UPDATE model_invocations SET status=$3,admission_status=$4,usage_status=$5,usage_source=$6,usage_reason=$7,
 	 input_tokens=$8,output_tokens=$9,cached_input_tokens=$10,cache_write_tokens=$11,reasoning_tokens=$12,provider_total_tokens=$13,computed_total_tokens=$14,
 	 queue_ms=$15,admission_ms=$16,setup_ms=$17,provider_ms=$18,provider_ttft_ms=$19,worker_total_ms=$20,worker_first_delta_ms=$21,
-	 cost_status=$22,estimated_cost_microusd=$23,failure_class=$24,completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=clock_timestamp(),observability_version=$25
-	 WHERE tenant_id=$1 AND id=$2 AND status='running'`, tid, id, status, f.Admission, u.Status, u.Source, u.Reason, u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.CacheWriteTokens, u.ReasoningTokens, u.ProviderTotalTokens, u.ComputedTotalTokens, tm.QueueMs, tm.AdmissionMs, tm.SetupMs, tm.ProviderMs, tm.ProviderTtftMs, tm.WorkerTotalMs, tm.WorkerFirstDeltaMs, costStatus, cost, invocationFailure(status, code), f.Version)
+	 cost_status=$22,estimated_cost_microusd=$23,failure_class=$24,completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=clock_timestamp(),observability_version=$25,credit_charge=$26
+	 WHERE tenant_id=$1 AND id=$2 AND status='running'`, tid, id, status, f.Admission, u.Status, u.Source, u.Reason, u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.CacheWriteTokens, u.ReasoningTokens, u.ProviderTotalTokens, u.ComputedTotalTokens, tm.QueueMs, tm.AdmissionMs, tm.SetupMs, tm.ProviderMs, tm.ProviderTtftMs, tm.WorkerTotalMs, tm.WorkerFirstDeltaMs, costStatus, cost, invocationFailure(status, code), f.Version, charge)
 	if err != nil || tag.RowsAffected() == 0 {
 		return nil, err
 	}
@@ -298,10 +346,15 @@ func (a *App) settleInvocation(ctx context.Context, tx pgx.Tx, tid, id, status, 
 	}, nil
 }
 
+// abandonedCreditCharge settles a paid-route call whose worker was lost: its reserve once it may have reached the
+// provider, nothing when it never did.
+const abandonedCreditCharge = `CASE WHEN credit_reserve IS NULL THEN NULL WHEN admission_status IN ('accepted','unknown') THEN credit_reserve ELSE 0 END`
+
 func settleAbandonedInvocations(ctx context.Context, tx pgx.Tx, tid, rid, status string) error {
 	_, err := tx.Exec(ctx, `UPDATE model_invocations SET status=$3,usage_status=CASE WHEN admission_status IN ('accepted','unknown') THEN 'unknown' ELSE 'unavailable' END,
 	 usage_source='none',usage_reason=CASE WHEN admission_status IN ('accepted','unknown') THEN 'worker_lost' ELSE 'provider_missing' END,
-	 cost_status=CASE WHEN admission_status IN ('accepted','unknown') THEN 'unknown' ELSE 'not_incurred' END,failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=clock_timestamp()
+	 cost_status=CASE WHEN admission_status IN ('accepted','unknown') THEN 'unknown' ELSE 'not_incurred' END,failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=clock_timestamp(),
+	 credit_charge=`+abandonedCreditCharge+`
 	 WHERE tenant_id=$1 AND run_id=$2 AND status='running'`, tid, rid, status)
 	return err
 }

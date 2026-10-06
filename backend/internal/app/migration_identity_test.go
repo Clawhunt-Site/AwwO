@@ -126,8 +126,8 @@ func TestMigrationIdentityMatrix(t *testing.T) {
 				}
 			}
 			var count int
-			// One identity per identified migration: 12 (historical reconcile) through 25.
-			if e := db.QueryRow(ctx, "SELECT count(*) FROM awwo_schema_migration_identities").Scan(&count); e != nil || count != 14 {
+			// One identity per identified migration: 12 (historical reconcile) through 26.
+			if e := db.QueryRow(ctx, "SELECT count(*) FROM awwo_schema_migration_identities").Scan(&count); e != nil || count != 15 {
 				t.Fatal("missing migration identity", e, count)
 			}
 		})
