@@ -145,7 +145,7 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.ready)
         claude = resolve_model_config(config, "bedrock.claude-opus-5-5")
         self.assertEqual((claude.provider, claude.model, claude.region, claude.base_url, claude.protocol, claude.api_key),
-                         ("bedrock", "us.anthropic.claude-opus-5-5", "us-east-1", bridge_base_url("us-east-1"), "chat_completions", ""))
+                         ("bedrock", "global.anthropic.claude-opus-5-5", "us-east-1", bridge_base_url("us-east-1"), "chat_completions", ""))
         health = public_health(config)
         entry = next(model for model in health["models"] if model["id"] == "bedrock.claude-opus-5-5")
         self.assertEqual(entry["name"], "Claude Opus 5.5")

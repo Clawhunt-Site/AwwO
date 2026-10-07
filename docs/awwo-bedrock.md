@@ -1,6 +1,6 @@
 # AwwO 通过 Amazon Bedrock 提供模型
 
-状态：生产启用中。2026-10-03 开放 23 个区域内模型，2026-10-04 再开放 19 个经跨区域推理配置文件调用的模型（Claude 8 个、Grok 2 个、Kimi K3、DeepSeek R1、Pixtral Large、Llama 3 个、Nova 3 个），内置目录 `builtin` 共 42 个，三个 worker 都提供。凭证来自 AwwO 专用的 EC2 实例角色，只允许目录里的这些模型；实例凭证只对三个 worker 开放。Claude Sonnet 5.5 与 7 个 GPT 尚未开放：AWS Marketplace 以 `INVALID_PAYMENT_INSTRUMENT` 拒绝订阅，账号补上有效付款方式后才能订阅并验收（见文末 2026-10-04 记录）。
+状态：生产启用中。2026-10-03 开放 23 个区域内模型，2026-10-04 再开放 19 个经跨区域推理配置文件调用的模型（Claude 8 个、Grok 2 个、Kimi K3、DeepSeek R1、Pixtral Large、Llama 3 个、Nova 3 个），内置目录 `builtin` 共 42 个，三个 worker 都提供；2026-10-07 下架 Fable 5 与 5.1 后为 40 个（目录 48 项），Opus 5.5 改回 global 推理配置文件（见文末）。凭证来自 AwwO 专用的 EC2 实例角色，只允许目录里的这些模型；实例凭证只对三个 worker 开放。Claude Sonnet 5.5 与 7 个 GPT 尚未开放：AWS Marketplace 以 `INVALID_PAYMENT_INSTRUMENT` 拒绝订阅，账号补上有效付款方式后才能订阅并验收（见文末 2026-10-04 记录）。
 
 运营方在自己的 AWS 账号里调用 Bedrock，AwwO 的模型架子因此可以列出 Claude、GPT、Grok、Kimi、DeepSeek、Qwen、GLM、MiniMax、Mistral、Llama、Nova、Gemma、Nemotron 等约 50 个热门模型。LLM Gate 保持不变：Bedrock 上没有的模型（例如 Gemini）继续由 Gate 提供，个人连接仍只允许 Gate。
 
@@ -203,3 +203,9 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 - **Gate 的 GPT 与 Claude 放宽上限**：11 个条目从 32,768 / 4,096 改为 131,072 / 16,384（与默认模型在 JS、Pi 上的配置一致），Python worker 的单节点时限 `AWWO_OPENAI_AGENTS_TIMEOUT_MS` 从默认 120 s 改为 600 s（Pi 同值）。证据：经影子 API、正式 Python worker 与 Gate，gpt-5.5 一个节点写出 59,125 字符、385 s 完成；改前会在 4,096 token 或 120 s 处失败。
 - **新用户加入 Claude Opus 5.5 与 Fable 5.1**（Bedrock，`AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 增至 32 个 id，已有的同列表工作区一并更新）。Claude Sonnet 5.5 仍因 Marketplace 付款方式无法开通。
 - **Opus 5.5 改走 US 推理配置文件**：当天它的 global 配置文件对实例角色和管理员角色都答 `ServiceUnavailableException`（管理员连续 8/8），`us.anthropic.claude-opus-5-5` 8/8 在 1–3 s 内正常；目录目标改为 `us.`，实例角色的内联策略 `awwo-bedrock-cross-region-profiles` 加入该配置文件及其 us-east-2、us-west-2 目标（us-east-1 原已允许），worker 按目录单独发布 `ca2bd944`。其他 Claude 仍走 global。
+
+## 2026-10-07：下架 Fable，Opus 5.5 改回 global（AWS 架构建议）
+
+- **Fable 5 与 5.1 下架**：Bedrock 对 Fable 的全部流量保留最长 30 天，并对分类器标记的内容做人工审阅（模型卡要求账号使用 `aws_review` 数据保留设置）；用户内容不接受这种处理，AWS 顾问也建议下架。目录删去两项（48 项，40 个已核验），新工作区白名单去掉 `bedrock.claude-fable-5-1` 与 Gate 的 `claude-fable-5`（32 → 30 个 id），已有白名单里的 Fable 一并删除（审计记录各一条）。下架前生产里 0 个 Agent、0 个画布引用 Fable。
+- **Opus 5.5 改回 `global.anthropic.claude-opus-5-5`**：AWS 建议推理配置文件统一用 global、不用 us.；当天实例角色对 global 8/8 成功（约 1.3 s），10-05 的 `ServiceUnavailableException` 已消失。实例角色的内联策略原本就允许该 global 配置文件；us. 的授权保留，作回退。其余 7 个 `us.` 目标（DeepSeek R1、Pixtral Large、Llama 3 个、Nova Pro、Nova Micro）在账号里没有 global 配置文件，保持不变。
+- **免费层**：新工作区与 6 个已有免费工作区的路由额度改为 `gate=0,bedrock=0,media=1`（免费层只用默认模型和每天 1 次媒体）；付费套餐按点数使用 Claude / GPT / Bedrock，不受影响。
