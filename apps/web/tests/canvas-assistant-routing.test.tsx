@@ -22,13 +22,26 @@ const userRoutes = () => loadPlanningConversation().messages.filter(message => m
 const BUSY = '节点正在执行或连接，请结束后再修改画布。';
 const UNCONFIRMED = '没能确认任务是否已经开始。可以用下方的「核对上次提交」核对，不会多建一个任务；已经开始的任务也会列在这张画布的任务里。';
 const UNDONE = '已撤销最近一次 AI 更改。';
+const OPERATION = expect.stringMatching(/^execution-[0-9a-f-]{36}$/);
+const STORED_OP = 'execution-11111111-1111-4111-8111-111111111111';
+const LOST = '没能确认任务是否已经开始。如果它开始了，会列在这张画布之前的任务里；没有的话，可以重新发送。';
+const deleteTile = (id: string) => {
+  const tile = within(screen.getByTestId(`canvas-tile-${id}`));
+  fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+  fireEvent.click(tile.getByRole('button', { name: '删除', exact: true }));
+};
+const unconfirmedConversation = () => savePlanningConversation({ draft: '', messages: [
+  { id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
+  { id: 'turn-1-task', role: 'assistant', content: '（存下的说明）', status: 'unconfirmed', route: 'execute', operationId: STORED_OP }] });
 const KEPT = '上面的画布更改没有自动撤销：当时画布正忙、任务是否开始还没确认，或画布已有新的改动。';
 
-function fakeHost(overrides: Partial<AssistantExecutionHost> = {}) {
+// `waits`: like the real host after an unconfirmed start, it reports the submission it was last sent as waiting.
+function fakeHost(overrides: Partial<AssistantExecutionHost> = {}, { waits = false }: { waits?: boolean } = {}) {
   let ended = false;
+  let lastOperation: string | undefined;
+  const startImpl = overrides.start ?? (async () => 'task-1');
   const host: AssistantExecutionHost = {
     readOnly: false, ready: true, activate: vi.fn(), setVisible: vi.fn(),
-    start: vi.fn(async () => 'task-1'),
     stop: vi.fn(async () => {}),
     finished: () => ended,
     renderTask: id => <p>任务卡片 {id}</p>,
@@ -36,7 +49,9 @@ function fakeHost(overrides: Partial<AssistantExecutionHost> = {}) {
     renderNotices: () => <p>任务服务提示</p>,
     settings: <p>直接执行用的模型</p>,
     ...overrides,
+    start: vi.fn(async (prompt: string, operationId: string) => { lastOperation = operationId; return startImpl(prompt, operationId); }),
   };
+  if (waits) Object.defineProperty(host, 'pendingOperation', { get: () => lastOperation, enumerable: true });
   return { host, end: () => { ended = true; } };
 }
 function deferred<T>() {
@@ -72,7 +87,7 @@ describe('the canvas assistant’s one conversation', () => {
     fireEvent.click(toggle()!);
     send('写一封给客户的道歉邮件');
     await waitFor(() => expect(panel().getByText('任务卡片 task-1')).toBeVisible());
-    expect(host.start).toHaveBeenCalledExactlyOnceWith('写一封给客户的道歉邮件');
+    expect(host.start).toHaveBeenCalledExactlyOnceWith('写一封给客户的道歉邮件', OPERATION);
     const request = router.mock.calls[0][0];
     expect(request).toEqual({ message: '写一封给客户的道歉邮件', routes: ['plan', 'execute'],
       canvas: { nodes: 1, titles: ['已有节点'], results: false }, recent: [] });
@@ -212,7 +227,7 @@ describe('the canvas assistant’s one conversation', () => {
 
   it('records a start whose outcome is unknown as unconfirmed, never planned over or sent again', async () => {
     seedNode();
-    const { host } = fakeHost({ start: vi.fn(async () => { throw new TaskStartUnconfirmed('连接中断'); }) });
+    const { host } = fakeHost({ start: vi.fn(async () => { throw new TaskStartUnconfirmed('连接中断'); }) }, { waits: true });
     render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     fireEvent.click(toggle()!);
     send('写一封邮件');
@@ -232,7 +247,7 @@ describe('the canvas assistant’s one conversation', () => {
     fireEvent.click(toggle()!);
     expect(panel().getByText('暂时不能调整画布，消息会作为任务直接执行。')).toBeVisible();
     send('加一个审核节点');
-    await waitFor(() => expect(host.start).toHaveBeenCalledExactlyOnceWith('加一个审核节点'));
+    await waitFor(() => expect(host.start).toHaveBeenCalledExactlyOnceWith('加一个审核节点', OPERATION));
     expect(router).not.toHaveBeenCalled();
     expect(planRequest).not.toHaveBeenCalled();
     cleanup(); localStorage.clear(); seedNode();
@@ -255,7 +270,7 @@ describe('the canvas assistant’s one conversation', () => {
     send('写一份发布说明');
     await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
     fireEvent.click(await panel().findByRole('button', { name: '改为直接执行' }));
-    expect(host.start).toHaveBeenCalledExactlyOnceWith('写一份发布说明');
+    expect(host.start).toHaveBeenCalledExactlyOnceWith('写一份发布说明', OPERATION);
     // The plan stays until its task exists.
     expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2);
     expect(panel().getByText('正在创建任务')).toBeVisible();
@@ -423,7 +438,7 @@ describe('the canvas assistant’s one conversation', () => {
     expect(host.start).not.toHaveBeenCalled();
     expect(box()).toHaveValue(long);
     fireEvent.click(panel().getByRole('button', { name: '改为直接执行' }));
-    await waitFor(() => expect(host.start).toHaveBeenCalledExactlyOnceWith(long));
+    await waitFor(() => expect(host.start).toHaveBeenCalledExactlyOnceWith(long, OPERATION));
     // Handed over, it leaves the box, so Enter does not send it a second time.
     await waitFor(() => expect(box()).toHaveValue(''));
   });
@@ -498,7 +513,7 @@ describe('the canvas assistant’s one conversation', () => {
     await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
     fireEvent.click(panel().getByRole('button', { name: '改为直接执行' }));
     expect(await panel().findByText('任务卡片 task-1')).toBeVisible();
-    expect(host.start).toHaveBeenCalledExactlyOnceWith('写一份发布说明');
+    expect(host.start).toHaveBeenCalledExactlyOnceWith('写一份发布说明', OPERATION);
     expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1);
     expect(panel().queryByText(KEPT)).toBeNull();
     expect(panel().getAllByText(UNDONE)).toHaveLength(1);
@@ -563,14 +578,14 @@ describe('the canvas assistant’s one conversation', () => {
     await waitFor(() => expect(done).toHaveBeenCalled());
     await act(async () => { routing.resolve('execute'); });
     expect(await screen.findByText('任务卡片 task-1')).toBeVisible();
-    expect(host.start).toHaveBeenCalledExactlyOnceWith('做一个落地页');
+    expect(host.start).toHaveBeenCalledExactlyOnceWith('做一个落地页', OPERATION);
     expect(planRequest).not.toHaveBeenCalled();
     expect(userRoutes()).toEqual(['execute']);
   });
 
   it('says a plan stays on the canvas while the task handed it over is unconfirmed', async () => {
     seedNode();
-    const { host } = fakeHost({ start: vi.fn(async () => { throw new TaskStartUnconfirmed('连接中断'); }) });
+    const { host } = fakeHost({ start: vi.fn(async () => { throw new TaskStartUnconfirmed('连接中断'); }) }, { waits: true });
     render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
     fireEvent.click(toggle()!);
     send('写一份发布说明');
@@ -584,13 +599,15 @@ describe('the canvas assistant’s one conversation', () => {
 
   it('gives a start reconciled later its task, in place of the unconfirmed request', async () => {
     seedNode();
-    const { host } = fakeHost({ start: vi.fn(async () => { throw new TaskStartUnconfirmed('连接中断'); }) });
+    const { host } = fakeHost({ start: vi.fn(async () => { throw new TaskStartUnconfirmed('连接中断'); }) }, { waits: true });
     const router = routeTo('execute');
     const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     fireEvent.click(toggle()!);
     send('写一封邮件');
     expect(await panel().findByText(UNCONFIRMED)).toBeVisible();
-    rerender(<CanvasSurface assistantExecution={{ ...host, confirmedTask: 'task-7' }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    const operationId = vi.mocked(host.start).mock.calls[0][1];
+    expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'unconfirmed', operationId });
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTask: { taskId: 'task-7', operationId } }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     expect(await panel().findByText('任务卡片 task-7')).toBeVisible();
     expect(panel().queryByText(UNCONFIRMED)).toBeNull();
     expect(loadPlanningConversation().messages.at(-1)).toEqual({ id: expect.any(String), role: 'assistant', content: '', route: 'execute', taskId: 'task-7' });
@@ -609,6 +626,8 @@ describe('the canvas assistant’s one conversation', () => {
     unmount();
     const stored = loadPlanningConversation();
     expect(stored.draft).toBe('');
+    // Under the identity it was sent with, which the host keeps waiting for a reconcile.
+    expect(stored.messages[1].operationId).toBe(vi.mocked(host.start).mock.calls[0][1]);
     expect(stored.messages.map(({ role, content, route, status }) => ({ role, content, route, status }))).toEqual([
       { role: 'user', content: '写一封邮件', route: 'execute', status: undefined },
       { role: 'assistant', content: UNCONFIRMED, route: 'execute', status: 'unconfirmed' }]);
@@ -628,6 +647,293 @@ describe('the canvas assistant’s one conversation', () => {
     await act(async () => { starting.resolve('task-1'); });
     await waitFor(() => expect(box()).toHaveValue('请结合已选知识完成任务：'));
     expect(host.start).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a plan undone by hand undone through later canvas changes, and hands the request over untouched', async () => {
+    saveDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [
+      { ...createAgentTemplate('general', { x: 80, y: 60 }), id: 'node-a', title: '已有节点' },
+      { ...createAgentTemplate('general', { x: 700, y: 60 }), id: 'node-b', title: '另一个节点' }] });
+    const { host } = fakeHost();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
+    fireEvent.click(toggle()!);
+    send('写一份发布说明');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(3));
+    fireEvent.click(await panel().findByRole('button', { name: '撤销本次更改' }));
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    // An edit of the operator's own after the undo: the plan is still not on the canvas.
+    deleteTile('node-b');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes.map(node => node.id)).toEqual(['node-a']));
+    fireEvent.click(await panel().findByRole('button', { name: '改为直接执行' }));
+    expect(await panel().findByText('任务卡片 task-1')).toBeVisible();
+    expect(host.start).toHaveBeenCalledExactlyOnceWith('写一份发布说明', OPERATION);
+    expect(loadDocumentWithStatus().doc.nodes.map(node => node.id)).toEqual(['node-a']);
+    expect(panel().queryByText(KEPT)).toBeNull();
+  });
+
+  it('keeps a plan undone while a redo brings back another step, and drops that only for the plan’s own', async () => {
+    saveDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [
+      { ...createAgentTemplate('general', { x: 80, y: 60 }), id: 'node-a', title: '已有节点' },
+      { ...createAgentTemplate('general', { x: 700, y: 60 }), id: 'node-b', title: '另一个节点' }] });
+    const { host } = fakeHost();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
+    const redo = () => fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', shiftKey: true, ctrlKey: true, metaKey: true });
+    const undo = () => fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: true });
+    // The operator's own step first, then the plan, then both undone.
+    deleteTile('node-b');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    fireEvent.click(toggle()!);
+    send('写一份发布说明');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    fireEvent.click(await panel().findByRole('button', { name: '撤销本次更改' }));
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    undo();
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    // Redoing the operator's step leaves the plan undone: the hand-over is offered.
+    redo();
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes.map(node => node.id)).toEqual(['node-a']));
+    expect(await panel().findByRole('button', { name: '改为直接执行' })).toBeEnabled();
+    // Redoing the plan's own step brings it back, and the assistant can no longer undo it.
+    redo();
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    await waitFor(() => expect(panel().queryByRole('button', { name: '改为直接执行' })).toBeNull());
+  });
+
+  it('counts a plan undone by Ctrl+Z after other steps were undone first', async () => {
+    saveDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [
+      { ...createAgentTemplate('general', { x: 80, y: 60 }), id: 'node-a', title: '已有节点' },
+      { ...createAgentTemplate('general', { x: 700, y: 60 }), id: 'node-b', title: '另一个节点' }] });
+    const { host } = fakeHost();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
+    const undo = () => fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: true });
+    fireEvent.click(toggle()!);
+    send('写一份发布说明');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(3));
+    // An edit after the plan, then both undone: the edit first, the plan second.
+    deleteTile('node-b');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    undo();
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(3));
+    undo();
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes.map(node => node.id).sort()).toEqual(['node-a', 'node-b']));
+    fireEvent.click(await panel().findByRole('button', { name: '改为直接执行' }));
+    expect(await panel().findByText('任务卡片 task-1')).toBeVisible();
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2);
+    expect(panel().queryByText(KEPT)).toBeNull();
+  });
+
+  it('knows a plan that only renamed a node as undone by its undo step, however many steps came first', async () => {
+    saveDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [
+      { ...createAgentTemplate('general', { x: 80, y: 60 }), id: 'node-a', title: '已有节点' },
+      { ...createAgentTemplate('general', { x: 700, y: 60 }), id: 'node-b', title: '另一个节点' }] });
+    const rename: CanvasPlan = { version: 1, summary: '已改名。', operations: [{ type: 'update_node', nodeId: 'node-a', title: '新名字' }] };
+    const { host } = fakeHost();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(rename)} />);
+    const undo = () => fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: true });
+    const redo = () => fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', shiftKey: true, ctrlKey: true, metaKey: true });
+    const title = () => loadDocumentWithStatus().doc.nodes.find(node => node.id === 'node-a')?.title;
+    fireEvent.click(toggle()!);
+    send('把第一个节点改个名');
+    await waitFor(() => expect(title()).toBe('新名字'));
+    deleteTile('node-b');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    undo();
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    undo();
+    await waitFor(() => expect(title()).toBe('已有节点'));
+    expect(await panel().findByRole('button', { name: '改为直接执行' })).toBeEnabled();
+    // Its own redo has it back: the hand-over can no longer undo it, so it is not offered.
+    redo();
+    await waitFor(() => expect(title()).toBe('新名字'));
+    await waitFor(() => expect(panel().queryByRole('button', { name: '改为直接执行' })).toBeNull());
+    undo();
+    await waitFor(() => expect(title()).toBe('已有节点'));
+    fireEvent.click(await panel().findByRole('button', { name: '改为直接执行' }));
+    expect(await panel().findByText('任务卡片 task-1')).toBeVisible();
+    expect(title()).toBe('已有节点');
+    expect(panel().queryByText(KEPT)).toBeNull();
+  });
+
+  it('keeps a rename plan undone while a redo brings back an earlier step, until its own redo', async () => {
+    saveDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [
+      { ...createAgentTemplate('general', { x: 80, y: 60 }), id: 'node-a', title: '已有节点' },
+      { ...createAgentTemplate('general', { x: 700, y: 60 }), id: 'node-b', title: '另一个节点' }] });
+    const rename: CanvasPlan = { version: 1, summary: '已改名。', operations: [{ type: 'update_node', nodeId: 'node-a', title: '新名字' }] };
+    const { host } = fakeHost();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(rename)} />);
+    const undo = () => fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: true });
+    const redo = () => fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', shiftKey: true, ctrlKey: true, metaKey: true });
+    const title = () => loadDocumentWithStatus().doc.nodes.find(node => node.id === 'node-a')?.title;
+    // The operator's own step before the plan; the plan undone by its button, then the own step undone too.
+    deleteTile('node-b');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    fireEvent.click(toggle()!);
+    send('把第一个节点改个名');
+    await waitFor(() => expect(title()).toBe('新名字'));
+    fireEvent.click(await panel().findByRole('button', { name: '撤销本次更改' }));
+    await waitFor(() => expect(title()).toBe('已有节点'));
+    undo();
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    // Redoing the own step leaves the rename undone.
+    redo();
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    expect(await panel().findByRole('button', { name: '改为直接执行' })).toBeEnabled();
+    redo();
+    await waitFor(() => expect(title()).toBe('新名字'));
+    await waitFor(() => expect(panel().queryByRole('button', { name: '改为直接执行' })).toBeNull());
+  });
+
+  it('counts a plan whose nodes were deleted by hand as undone', async () => {
+    seedNode();
+    const { host } = fakeHost();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
+    fireEvent.click(toggle()!);
+    send('写一份发布说明');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    const added = loadDocumentWithStatus().doc.nodes.find(node => node.id !== 'node-a')!.id;
+    deleteTile(added);
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes.map(node => node.id)).toEqual(['node-a']));
+    fireEvent.click(await panel().findByRole('button', { name: '改为直接执行' }));
+    expect(await panel().findByText('任务卡片 task-1')).toBeVisible();
+    expect(loadDocumentWithStatus().doc.nodes.map(node => node.id)).toEqual(['node-a']);
+    expect(panel().queryByText(KEPT)).toBeNull();
+  });
+
+  it('keeps a plan that also removed a node on the canvas when its added node is deleted by hand', async () => {
+    saveDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [
+      { ...createAgentTemplate('general', { x: 80, y: 60 }), id: 'node-a', title: '已有节点' },
+      { ...createAgentTemplate('general', { x: 700, y: 60 }), id: 'node-b', title: '另一个节点' }] });
+    const swap: CanvasPlan = { version: 1, summary: '已换掉一个节点。', operations: [
+      { type: 'add_node', ref: 'x', templateId: 'general', title: '新节点' }, { type: 'remove_node', nodeId: 'node-b' }] };
+    const { host } = fakeHost();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(swap)} />);
+    const undo = () => fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: true });
+    const ids = () => loadDocumentWithStatus().doc.nodes.map(node => node.id).sort();
+    fireEvent.click(toggle()!);
+    send('换掉另一个节点');
+    await waitFor(() => expect(ids()).not.toContain('node-b'));
+    // Its reply keeps no nodes: their absence would not say the removal is gone.
+    await waitFor(() => expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'applied' }));
+    expect(loadPlanningConversation().messages.at(-1)?.nodes).toBeUndefined();
+    deleteTile(ids().find(id => id !== 'node-a')!);
+    await waitFor(() => expect(ids()).toEqual(['node-a']));
+    // node-b is still removed and the change can no longer be undone for a task, so the hand-over is not offered.
+    expect(panel().queryByRole('button', { name: '改为直接执行' })).toBeNull();
+    // Undone by its own step (after the deletion's), it is.
+    undo();
+    await waitFor(() => expect(ids()).toHaveLength(2));
+    undo();
+    await waitFor(() => expect(ids()).toEqual(['node-a', 'node-b']));
+    fireEvent.click(await panel().findByRole('button', { name: '改为直接执行' }));
+    expect(await panel().findByText('任务卡片 task-1')).toBeVisible();
+    expect(ids()).toEqual(['node-a', 'node-b']);
+    expect(panel().queryByText(KEPT)).toBeNull();
+  });
+
+  it('counts a plan undone with Ctrl+Z as undone too', async () => {
+    seedNode();
+    const { host } = fakeHost();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
+    fireEvent.click(toggle()!);
+    send('写一份发布说明');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
+    await panel().findByRole('button', { name: '改为直接执行' });
+    fireEvent.keyDown(document, { key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: true });
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    fireEvent.click(await panel().findByRole('button', { name: '改为直接执行' }));
+    expect(await panel().findByText('任务卡片 task-1')).toBeVisible();
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1);
+    expect(panel().queryByText(KEPT)).toBeNull();
+    expect(panel().queryByText(UNDONE)).toBeNull();
+  });
+
+  it('offers an unconfirmed request’s reconcile after a reload, and says where to look once there is none', () => {
+    seedNode();
+    unconfirmedConversation();
+    const waiting = fakeHost({ pendingOperation: STORED_OP });
+    const { unmount } = render(<CanvasSurface assistantExecution={waiting.host} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    expect(panel().getByText('（存下的说明）')).toBeVisible();
+    expect(panel().queryByText(LOST)).toBeNull();
+    unmount();
+    // No submission left to reconcile (another device, a cleared store): no button is pointed at.
+    const gone = fakeHost();
+    render(<CanvasSurface assistantExecution={gone.host} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    expect(panel().getByText(LOST)).toBeVisible();
+    expect(panel().queryByText('（存下的说明）')).toBeNull();
+    expect(panel().queryByRole('button', { name: '改为调整画布' })).toBeNull();
+    cleanup(); seedNode();
+    // A turn stored before identities were kept has no submission waiting for it: what this page waits on, and what it
+    // settles, is another request's (another tab's), so the turn says where to look and stays as it was.
+    savePlanningConversation({ draft: '', messages: [{ id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
+      { id: 'turn-1-task', role: 'assistant', content: '（旧的说明）', status: 'unconfirmed', route: 'execute' }] });
+    const other = fakeHost({ pendingOperation: STORED_OP }).host;
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={other} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    expect(panel().getByText(LOST)).toBeVisible();
+    rerender(<CanvasSurface assistantExecution={{ ...other, pendingOperation: undefined, startRefusal: { reason: '所选模型已不可用。', at: 1, operationId: STORED_OP } }}
+      routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    rerender(<CanvasSurface assistantExecution={{ ...other, pendingOperation: undefined, confirmedTask: { taskId: 'task-9', operationId: STORED_OP } }}
+      routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(panel().getByText(LOST)).toBeVisible();
+    expect(panel().queryByText('所选模型已不可用。')).toBeNull();
+    expect(panel().queryByText('任务卡片 task-9')).toBeNull();
+    expect(box()).toHaveValue('');
+    expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'unconfirmed', content: '（旧的说明）' });
+  });
+
+  it('settles a refused submission’s own request only, and once', async () => {
+    seedNode();
+    const OTHER_OP = 'execution-22222222-2222-4222-8222-222222222222';
+    savePlanningConversation({ draft: '', messages: [
+      { id: 'turn-1-user', role: 'user', content: '旧的请求', route: 'execute' },
+      { id: 'turn-1-task', role: 'assistant', content: '（甲）', status: 'unconfirmed', route: 'execute', operationId: STORED_OP },
+      { id: 'turn-2-user', role: 'user', content: '新的请求', route: 'execute' },
+      { id: 'turn-2-task', role: 'assistant', content: '（乙）', status: 'unconfirmed', route: 'execute', operationId: OTHER_OP }] });
+    const refused = { ...fakeHost({ pendingOperation: OTHER_OP }).host, startRefusal: { reason: '所选模型已不可用。', at: 1, operationId: STORED_OP } };
+    const { unmount } = render(<CanvasSurface assistantExecution={refused} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    expect(await panel().findByText('所选模型已不可用。')).toBeVisible();
+    expect(panel().getByText('（乙）')).toBeVisible();
+    unmount();
+    // Shown again (a remount) with the same refusal: the other request stays as it was.
+    render(<CanvasSurface assistantExecution={refused} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(loadPlanningConversation().messages.map(message => message.status ?? null)).toEqual([null, 'error', null, 'unconfirmed']);
+  });
+
+  it('settles an unconfirmed request the service refused: its reason, the request back in the box, the canvas offered', async () => {
+    seedNode();
+    unconfirmedConversation();
+    const { host } = fakeHost({ pendingOperation: STORED_OP });
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, startRefusal: { reason: '所选模型已不可用。', at: 1, operationId: STORED_OP } }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await panel().findByText('所选模型已不可用。')).toBeVisible();
+    expect(box()).toHaveValue('写一封邮件');
+    expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'error', content: '所选模型已不可用。', route: 'execute' });
+    expect(panel().getByRole('button', { name: '改为调整画布' })).toBeEnabled();
+  });
+
+  it('settles a given-up request without offering it again, and not while the same submission waits again', async () => {
+    seedNode();
+    unconfirmedConversation();
+    const { host } = fakeHost({ pendingOperation: STORED_OP });
+    const router = routeTo('execute');
+    const givenUp = { reason: '已放弃核对这次提交。', at: 1, operationId: STORED_OP, givenUp: true };
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    // Stored back (by the tab that sent it) while this page still holds its give-up: it is waited for, not settled.
+    rerender(<CanvasSurface assistantExecution={{ ...host, startRefusal: givenUp }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(panel().queryByText('已放弃核对这次提交。')).toBeNull();
+    expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'unconfirmed' });
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, startRefusal: givenUp }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await panel().findByText('已放弃核对这次提交。')).toBeVisible();
+    // Not back in the box: a task it started may be listed only once read, and sending it unread could start another.
+    expect(box()).toHaveValue('');
+    expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'error', content: '已放弃核对这次提交。', route: 'execute' });
+    expect(panel().getByRole('button', { name: '改为调整画布' })).toBeEnabled();
   });
 
   it('keeps the desktop canvas (no task host) as it was: planning only, nothing routed', async () => {

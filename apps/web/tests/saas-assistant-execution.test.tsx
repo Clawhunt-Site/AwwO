@@ -434,11 +434,11 @@ describe('the canvas assistant’s tasks', () => {
     act(() => result.current.activate());
     await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
     await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
-    expect(result.current.confirmedTask).toBe('');
+    expect(result.current.confirmedTask).toBeNull();
     expect(executionHost(result.current).confirmedTask).toBeUndefined();
     act(() => result.current.reconcile());
-    await waitFor(() => expect(result.current.confirmedTask).toBe('run-z'));
-    expect(executionHost(result.current).confirmedTask).toBe('run-z');
+    await waitFor(() => expect(result.current.confirmedTask).toEqual({ taskId: 'run-z', operationId: creations[0].operationId }));
+    expect(executionHost(result.current).confirmedTask).toEqual({ taskId: 'run-z', operationId: creations[0].operationId });
     // The same text sent again later is a new task, not a replay of the reconciled one.
     await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
     const operations = creations.map(body => body.operationId);
@@ -511,6 +511,241 @@ describe('the canvas assistant’s tasks', () => {
     expect(await screen.findByText(sentence)).toBeVisible();
   });
 
+  it('keeps an unconfirmed submission across a reload, and reconciles it there with its original identity', async () => {
+    const creations: Array<{ operationId: string; prompt: string }> = [];
+    let answer: 'unknown' | 'created' | 'refused' = 'unknown';
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/computer-runs') && init.method === 'POST') {
+        creations.push(JSON.parse(String(init.body)));
+        return answer === 'unknown' ? json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+          : answer === 'refused' ? json({ error: { code: 'model_unavailable', message: 'gone' } }, 400) : json({ id: 'run-r', status: 'running' }, 202);
+      }
+      return json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url));
+    }));
+    const page = () => renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    const first = page();
+    act(() => first.result.current.activate());
+    await waitFor(() => expect(first.result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await first.result.current.start('生成报告').catch(() => undefined); });
+    first.unmount();
+    // The next page (a reload) has it back, and starts nothing new until it is reconciled.
+    const second = page();
+    expect(second.result.current.pendingSubmission).toEqual(creations[0]);
+    act(() => second.result.current.activate());
+    await waitFor(() => expect(second.result.current.startBlockedReason).toBe('上一次提交的结果还没确认，请先核对。'));
+    answer = 'created';
+    act(() => second.result.current.reconcile());
+    await waitFor(() => expect(second.result.current.confirmedTask?.taskId).toBe('run-r'));
+    expect(creations[1]).toEqual(creations[0]);
+    second.unmount();
+    // Settled, nothing is left for the page after.
+    expect(page().result.current.pendingSubmission).toBeNull();
+  });
+
+  it('reads each canvas’s own waiting submission when one page moves between canvases', () => {
+    const waiting = (prompt: string, operationId: string) => JSON.stringify({ operationId, prompt, runtime: 'openai-agents', model: 'byok_model_a', knowledgeRevisionIds: [] });
+    localStorage.setItem('awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1', waiting('甲', 'execution-00000000-0000-4000-8000-00000000000a'));
+    localStorage.setItem('awwo.saas:user-a:tenant-a:canvas-b:awwo.execution.pending-submission.v1', waiting('乙', 'execution-00000000-0000-4000-8000-00000000000b'));
+    const { result, rerender } = renderHook(({ canvas }) => useManagedExecution('tenant-a', canvas, { userId: 'user-a' }),
+      { wrapper: SaaSPreferencesProvider, initialProps: { canvas: 'canvas-a' } });
+    expect(result.current.pendingSubmission?.prompt).toBe('甲');
+    rerender({ canvas: 'canvas-b' });
+    expect(result.current.pendingSubmission?.prompt).toBe('乙');
+    rerender({ canvas: 'canvas-c' });
+    expect(result.current.pendingSubmission).toBeNull();
+  });
+
+  it('keeps the identity of a submission whose page went while it was sent', async () => {
+    let sent: { operationId: string } | null = null;
+    vi.stubGlobal('fetch', vi.fn((url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/computer-runs') && init.method === 'POST') {
+        sent = JSON.parse(String(init.body));
+        return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }));
+      }
+      return Promise.resolve(json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url)));
+    }));
+    const first = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => first.result.current.activate());
+    await waitFor(() => expect(first.result.current.startBlockedReason).toBeUndefined());
+    act(() => { void first.result.current.start('生成报告').catch(() => undefined); });
+    await waitFor(() => expect(sent).not.toBeNull());
+    first.unmount();
+    const second = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    expect(second.result.current.pendingSubmission?.operationId).toBe(sent!.operationId);
+  });
+
+  it('settles a submission a reconcile was refused for, and says why', async () => {
+    let refuse = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? refuse ? json({ error: { code: 'model_unavailable', message: 'gone' } }, 400) : json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result, unmount } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    refuse = true;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.startRefusal?.reason).toBe('所选模型不可用，请重新选择服务端提供的模型。'));
+    expect(result.current.pendingSubmission).toBeNull();
+    expect(executionHost(result.current).pendingOperation).toBeUndefined();
+    expect(executionHost(result.current).startRefusal).toMatchObject({ reason: '所选模型不可用，请重新选择服务端提供的模型。', operationId: expect.stringMatching(/^execution-/) });
+    unmount();
+    const after = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    expect(after.result.current.pendingSubmission).toBeNull();
+  });
+
+  it.each([[403, 'forbidden'], [402, 'plan_required'], [400, 'invalid_computer_task']])('keeps waiting when a reconcile is refused with %s %s, which proves nothing about the first send', async (status, code) => {
+    let refuse = false;
+    const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? refuse ? json({ error: { code, message: 'refused' } }, status) : json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url)));
+    vi.stubGlobal('fetch', fetchMock);
+    const taskReads = () => fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/computer-runs') && init?.method !== 'POST').length;
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const waiting = result.current.pendingSubmission;
+    refuse = true;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(result.current.pendingSubmission).toEqual(waiting);
+    expect(result.current.startRefusal).toBeNull();
+    expect(JSON.parse(localStorage.getItem('awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1') || 'null')).toEqual(waiting);
+    // Given up by hand, it is gone, here and in the store, its request is settled as given up, and the canvas's tasks
+    // are read again so one it did start is listed.
+    const readsBefore = taskReads();
+    act(() => result.current.discardPending());
+    expect(result.current.pendingSubmission).toBeNull();
+    expect(localStorage.getItem('awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1')).toBeNull();
+    expect(executionHost(result.current).startRefusal).toMatchObject({ operationId: waiting!.operationId, givenUp: true,
+      reason: '已放弃核对这次提交。如果任务其实已经开始，会列在这张画布之前的任务里；确认没有开始后，可以复制上面的请求重新发送。' });
+    await waitFor(() => expect(taskReads()).toBe(readsBefore + 1));
+  });
+
+  it.each([[409, 'personal_engine_required'], [400, 'effort_unsupported'], [400, 'invalid_node_setup'], [400, 'invalid_knowledge'],
+    [413, 'knowledge_context_limit']])('settles a submission a reconcile was refused for with %s %s, given only once no task was found', async (status, code) => {
+    let refuse = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? refuse ? json({ error: { code, message: 'refused' } }, status) : json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const waiting = result.current.pendingSubmission!;
+    refuse = true;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.startRefusal?.operationId).toBe(waiting.operationId));
+    expect(result.current.pendingSubmission).toBeNull();
+    expect(localStorage.getItem('awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1')).toBeNull();
+  });
+
+  it('leaves another tab’s waiting submission alone: it waits for it, and only clears its own', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ error: { code: 'unknown', message: '连接中断' } }, 503) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const tab = () => renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    const a = tab(); const b = tab();
+    act(() => { a.result.current.activate(); b.result.current.activate(); });
+    await waitFor(() => expect(b.result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await a.result.current.start('甲的任务').catch(() => undefined); });
+    const waitingA = a.result.current.pendingSubmission!;
+    // Tab b has not seen it yet: its start keeps a's submission and waits for it instead of sending.
+    let refused: unknown;
+    await act(async () => { refused = await b.result.current.start('乙的任务').catch((error: unknown) => error); });
+    expect(String(refused)).toContain('另一个标签页');
+    expect(b.result.current.pendingSubmission).toEqual(waitingA);
+    const key = 'awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1';
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual(waitingA);
+    // a gives it up. A newer one stored meanwhile (a third tab's) is not b's to clear when b, unaware, gives up a's.
+    act(() => a.result.current.discardPending());
+    expect(localStorage.getItem(key)).toBeNull();
+    const newer = { ...waitingA, operationId: 'execution-33333333-3333-4333-8333-333333333333', prompt: '丙的任务' };
+    localStorage.setItem(key, JSON.stringify(newer));
+    act(() => b.result.current.discardPending());
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual(newer);
+    // b hears of what is stored.
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key })); });
+    expect(b.result.current.pendingSubmission).toEqual(newer);
+  });
+
+  it('stores a send again once its outcome is unknown, though another tab gave it up while it was in flight', async () => {
+    let answer: ((response: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? new Promise<Response>(resolve => { answer = resolve; }) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const tab = () => renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    const a = tab(); const b = tab();
+    act(() => a.result.current.activate());
+    await waitFor(() => expect(a.result.current.startBlockedReason).toBeUndefined());
+    let sent: Promise<unknown> = Promise.resolve();
+    act(() => { sent = a.result.current.start('甲的任务').catch((error: unknown) => error); });
+    const key = 'awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1';
+    const stored = JSON.parse(localStorage.getItem(key)!);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key })); });
+    expect(b.result.current.pendingSubmission).toEqual(stored);
+    // b gives it up while a is still sending it.
+    act(() => b.result.current.discardPending());
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(b.result.current.startRefusal).toMatchObject({ operationId: stored.operationId, givenUp: true });
+    // a's send then ends with its outcome unknown: it is stored again, and b waits for it again.
+    await waitFor(() => expect(answer).toBeDefined());
+    await act(async () => { answer!(json({ error: { code: 'unknown', message: '连接中断' } }, 503)); await sent; });
+    expect(a.result.current.pendingSubmission).toEqual(stored);
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual(stored);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key })); });
+    expect(b.result.current.pendingSubmission).toEqual(stored);
+    expect(b.result.current.startRefusal).toBeNull();
+  });
+
+  it('reads the canvas’s tasks again when another tab settles the submission this one waits on', async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ error: { code: 'unknown', message: '连接中断' } }, 503) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url)));
+    vi.stubGlobal('fetch', fetchMock);
+    const taskReads = () => fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/computer-runs') && init?.method !== 'POST').length;
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    expect(result.current.pendingSubmission).not.toBeNull();
+    const before = taskReads();
+    // Another tab settles it (its task, a refusal, given up): the store is cleared, this tab hears it and reads again.
+    localStorage.removeItem('awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1');
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: 'awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1' })); });
+    expect(result.current.pendingSubmission).toBeNull();
+    await waitFor(() => expect(taskReads()).toBe(before + 1));
+    // An event that changes nothing here reads nothing.
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: 'awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1' })); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(taskReads()).toBe(before + 1);
+  });
+
+  it('clears a submission from the store once its task exists', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ id: 'run-ok', status: 'running' }, 202) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告'); });
+    expect(localStorage.getItem('awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1')).toBeNull();
+    expect(result.current.pendingSubmission).toBeNull();
+  });
+
+  it('stores nothing for a refused start, for a viewer, or for another account', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ error: { code: 'model_unavailable', message: 'gone' } }, 400) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    expect(localStorage.getItem('awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1')).toBeNull();
+    // Another account's or a viewer's page never sees an account's waiting submission.
+    localStorage.setItem('awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1', JSON.stringify({ operationId: 'execution-00000000-0000-4000-8000-000000000000', prompt: '生成报告', runtime: 'openai-agents', model: 'byok_model_a', knowledgeRevisionIds: [] }));
+    expect(renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-b' }), { wrapper: SaaSPreferencesProvider }).result.current.pendingSubmission).toBeNull();
+    expect(renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a', readOnly: true }), { wrapper: SaaSPreferencesProvider }).result.current.pendingSubmission).toBeNull();
+    expect(renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider }).result.current.pendingSubmission?.operationId).toBe('execution-00000000-0000-4000-8000-000000000000');
+  });
+
   it('keeps a known service ready while it is read again', async () => {
     let hold = false;
     let release = () => {};
@@ -568,7 +803,7 @@ describe('the canvas assistant’s tasks', () => {
     vi.stubGlobal('fetch', fetcher); render(view()); await composerReady();
     fireEvent.change(task(), { target: { value: '生成报告' } });
     fireEvent.click(screen.getByRole('button', { name: '开始执行' }));
-    await screen.findByText('上一次提交的任务结果还没确认。核对会用原来的提交标识，不会多建一个任务。');
+    await screen.findByText('上一次提交的任务结果还没确认。核对会用原来的提交标识，不会多建一个任务；确定它没有开始时，也可以放弃这次提交。');
     expect(inputs).toHaveLength(1);
     // Until it is reconciled no task starts: the assistant's messages are planned meanwhile.
     expect(screen.getByRole('button', { name: '开始执行' })).toBeDisabled();

@@ -19,7 +19,8 @@ export type RouteAssistant = (request: AssistantRouteRequest, signal: AbortSigna
 
 /** What a message being handled waits for before it joins the conversation. */
 export type AssistantPendingPhase = 'routing' | 'starting' | 'stopping';
-export interface AssistantPending { id: string; prompt: string; phase: AssistantPendingPhase }
+/** `operationId`: the submission identity a task being started is sent under. */
+export interface AssistantPending { id: string; prompt: string; phase: AssistantPendingPhase; operationId?: string }
 
 /** Thrown by `start` when the service did not say whether the task was created: the host offers to reconcile it,
  *  and the message must not be sent again meanwhile. */
@@ -37,9 +38,9 @@ export interface AssistantExecutionHost {
   setVisible: (visible: boolean) => void;
   /** A task can start now (service ready, a model chosen, nothing unconfirmed in flight). */
   ready: boolean;
-  /** Starts a task with this text: resolves with its id; rejects with an error to show, or with
-   *  TaskStartUnconfirmed where the outcome is unknown. */
-  start: (prompt: string) => Promise<string>;
+  /** Starts a task with this text under the given submission identity: resolves with its id; rejects with an error to
+   *  show, or with TaskStartUnconfirmed where the outcome is unknown. */
+  start: (prompt: string, operationId: string) => Promise<string>;
   /** Stops a task this user started, unless it has ended; resolves once the stop is asked for. */
   stop: (taskId: string) => Promise<void>;
   /** Whether the task has ended, as far as the host has read. */
@@ -52,8 +53,13 @@ export interface AssistantExecutionHost {
   renderNotices: (planAvailable: boolean) => ReactNode;
   /** Under the composer: the model a direct task uses. */
   settings: ReactNode;
-  /** The task the last reconcile in this page confirmed, for the request recorded as unconfirmed. */
-  confirmedTask?: string;
+  /** The task the last reconcile in this page confirmed, with the submission it was. */
+  confirmedTask?: { taskId: string; operationId: string };
+  /** The submission whose outcome is unknown and waits to be reconciled (kept across reloads and tabs). */
+  pendingOperation?: string;
+  /** The last submission settled with no task: which one, and why. A reconcile refused in a way that proves the start
+   *  never happened offers its request again; one given up (`givenUp`) does not, as a task it started may be listed. */
+  startRefusal?: { reason: string; at: number; operationId: string; givenUp?: boolean };
 }
 
 const ROUTE_TITLES = 40;

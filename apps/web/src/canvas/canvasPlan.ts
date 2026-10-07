@@ -376,3 +376,11 @@ export function canvasPlanRevision(doc: CanvasDocument): string {
   for (let index = 0; index < serialized.length; index += 1) hash = BigInt.asUintN(64, (hash ^ BigInt(serialized.charCodeAt(index))) * 0x100000001b3n);
   return `cp1-${serialized.length}-${hash.toString(16).padStart(16, '0')}`;
 }
+
+/** Whether a plan changed nothing but the nodes it added: deleting them (and their edges) gives back the canvas it was
+ *  applied to. Only then does their absence say the plan is gone. */
+export function onlyAddedNodes(before: CanvasDocument, after: CanvasDocument, addedNodeIds: readonly string[]): boolean {
+  const added = new Set(addedNodeIds);
+  return added.size > 0 && canvasPlanRevision({ ...after, nodes: after.nodes.filter(node => !added.has(node.id)),
+    edges: after.edges.filter(edge => !added.has(edge.fromNode) && !added.has(edge.toNode)) }) === canvasPlanRevision(before);
+}

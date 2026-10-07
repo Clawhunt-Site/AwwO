@@ -19,6 +19,10 @@ export interface PlanningMessage {
   route?: 'plan' | 'execute';
   /** The task an executed turn started; the host draws it. */
   taskId?: string;
+  /** An unconfirmed turn's submission identity, which a reconcile settles. */
+  operationId?: string;
+  /** The nodes an applied plan added: while none of them is on the canvas, the plan counts as undone. */
+  nodes?: string[];
 }
 
 /** The turns the planner reads: an executed turn is the workspace's business, not the canvas's. */
@@ -124,7 +128,9 @@ export function loadPlanningConversation(): PlanningConversation {
         return typeof m.id === 'string' && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'
           && m.content.length <= 20_000 && (m.status === undefined || ['applied', 'error', 'stale', 'unconfirmed'].includes(m.status))
           && (m.route === undefined || m.route === 'plan' || m.route === 'execute')
-          && (m.taskId === undefined || (typeof m.taskId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(m.taskId)));
+          && (m.taskId === undefined || (typeof m.taskId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(m.taskId)))
+          && (m.operationId === undefined || (typeof m.operationId === 'string' && /^execution-[0-9a-f-]{36}$/.test(m.operationId)))
+          && (m.nodes === undefined || (Array.isArray(m.nodes) && m.nodes.length <= 200 && m.nodes.every(node => typeof node === 'string' && node.length <= 200)));
       }).slice(-60) : [],
     };
   } catch { return { draft: '', messages: [] }; }

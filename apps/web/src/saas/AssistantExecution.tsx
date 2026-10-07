@@ -71,6 +71,8 @@ export function executionHost(execution: ManagedExecution): AssistantExecutionHo
     renderNotices: planAvailable => <ExecutionNotices execution={execution} planAvailable={planAvailable} />,
     settings: <ExecutionSettings execution={execution} />,
     ...(execution.confirmedTask ? { confirmedTask: execution.confirmedTask } : {}),
+    ...(execution.pendingSubmission ? { pendingOperation: execution.pendingSubmission.operationId } : {}),
+    ...(execution.startRefusal ? { startRefusal: execution.startRefusal } : {}),
   };
 }
 
@@ -309,8 +311,11 @@ function ExecutionNotices({ execution, planAvailable }: { execution: ManagedExec
     {execution.notice && <p className={execution.noticeWarning ? 'awwo-execution-warning' : 'awwo-execution-notice'} role="status">{execution.notice}</p>}
     {execution.historyFailed && <HistoryFailed execution={execution} />}
     {execution.pendingSubmission && <div className="awwo-execution-warning" role="status">
-      <p>{t('上一次提交的任务结果还没确认。核对会用原来的提交标识，不会多建一个任务。', 'The last task submission is unconfirmed. Reconciling reuses its original identity and never creates a second task.')}</p>
-      <button type="button" disabled={execution.busy} onClick={execution.reconcile}>{t('核对上次提交', 'Reconcile the last submission')}</button>
+      <p>{t('上一次提交的任务结果还没确认。核对会用原来的提交标识，不会多建一个任务；确定它没有开始时，也可以放弃这次提交。', 'The last task submission is unconfirmed. Reconciling reuses its original identity and never creates a second task; if you are sure it did not start, you can give it up.')}</p>
+      <div className="awwo-assistant-composer-actions">
+        <button type="button" disabled={execution.busy} onClick={execution.reconcile}>{t('核对上次提交', 'Reconcile the last submission')}</button>
+        <button type="button" className="awwo-execution-discard" disabled={execution.busy} onClick={execution.discardPending}>{t('放弃这次提交', 'Give this submission up')}</button>
+      </div>
     </div>}
     {execution.activated && !execution.loading && !execution.ready && <div className="awwo-execution-unavailable" role="status">
       <p>{t('暂时不能直接执行任务。', 'Direct tasks are unavailable for now.')}{elsewhere ? ` ${elsewhere}` : ''} <span>{execution.serviceReason || t('执行服务尚未就绪。', 'The execution service is not ready.')}</span></p>

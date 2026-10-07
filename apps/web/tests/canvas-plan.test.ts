@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCanvasPlan, canvasPlanRevision, parseCanvasPlan, type CanvasPlan, type CanvasPlanOperation } from '../src/canvas/canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, parseCanvasPlan, type CanvasPlan, type CanvasPlanOperation } from '../src/canvas/canvasPlan';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createFormNode, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { edgeId, reconcileEdges } from '../src/canvas/ports';
@@ -289,4 +289,19 @@ it('creates a stable revision that detects edits and layout changes while ignori
   }
   const review = { ...doc, execution: { mode: 'review' as const, maxRounds: 3, reviewerNodeId: 'target', verdictFieldId: 'approved' } };
   expect(canvasPlanRevision({ ...review, execution: { ...review.execution, maxRounds: 4 } })).not.toBe(canvasPlanRevision(review));
+});
+
+it('knows a plan that changed nothing but the nodes it added', () => {
+  const doc = fixture();
+  const onlyAdds = (value: CanvasPlan) => { const applied = applyCanvasPlan(doc, value); return onlyAddedNodes(doc, applied.doc, applied.addedNodeIds); };
+  // New nodes only, one of them fed by an existing node: deleting them gives the canvas back.
+  expect(onlyAdds(plan({ type: 'add_node', ref: 'n', templateId: 'general', title: '新节点' }))).toBe(true);
+  expect(onlyAdds(plan({ type: 'add_node', ref: 'n', templateId: 'backend' },
+    { type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'n', toField: 'schema' }))).toBe(true);
+  // An existing node changed or removed stays so once the new nodes are gone.
+  expect(onlyAdds(plan({ type: 'add_node', ref: 'n', templateId: 'general' }, { type: 'update_node', nodeId: 'target', title: '改名' }))).toBe(false);
+  expect(onlyAdds(plan({ type: 'add_node', ref: 'n', templateId: 'general' }, { type: 'remove_node', nodeId: 'target' }))).toBe(false);
+  // Nothing added: no node can tell.
+  expect(onlyAdds(plan({ type: 'update_node', nodeId: 'target', title: '改名' }))).toBe(false);
+  expect(onlyAddedNodes(doc, doc, [])).toBe(false);
 });

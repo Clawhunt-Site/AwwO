@@ -401,7 +401,7 @@ function readCloudRuntimeStatus(value: unknown): CloudRuntimeStatus {
 function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
   const { locale, t } = useSaaSPreferences();
   // The canvas assistant's tasks; the canvas has the service read once it opens, so routing knows whether one can start.
-  const execution = useManagedExecution(tenant.id, canvasId);
+  const execution = useManagedExecution(tenant.id, canvasId, { userId: identity.user.id });
   // The server decides whether each assistant message arranges the canvas or becomes a task.
   const routeAssistant = useCallback<RouteAssistant>((request, signal) => routeAssistantMessage(tenant.id, canvasId, request, signal), [tenant.id, canvasId]);
   const resultsView = useMemo(() => canvasResultsOptions(tenant.id, canvasId), [tenant.id, canvasId]);
