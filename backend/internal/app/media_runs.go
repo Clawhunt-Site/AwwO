@@ -238,7 +238,7 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		routes = nil
 	}
 	// A route-limited free workspace also has its own media allowance and shares a deployment-wide
-	// ceiling with the other route-limited workspaces.
+	// ceiling with the other route-limited workspaces; one that limits no route (an empty object) has neither.
 	switch code, e := a.mediaRouteLimit(ctx, tx, routes, today); {
 	case e != nil:
 		a.dbError(w, e)

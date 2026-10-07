@@ -36,7 +36,11 @@ func TestRouteLimitsAdminGrammar(t *testing.T) {
 	if !set || err != nil || !reflect.DeepEqual(l, routeLimits{routeGate: 3, routeBedrock: 0}) || l.column() != `{"bedrock":0,"gate":3}` {
 		t.Fatal("object", l, set, err)
 	}
-	for _, bad := range []string{`[]`, `{}`, `"gate=3"`, `{"chat":1}`, `{"gate":-1}`, `{"gate":1.5}`, `{"gate":"3"}`, `{"gate":100001}`, `{"gate":1,"gate":2}`, `{`} {
+	// An empty object keeps the workspace route-limited, and so on plans, with no route limited.
+	if l, set, err := normalizeRouteLimits(json.RawMessage(` {} `)); !set || err != nil || l == nil || len(l) != 0 || l.column() != `{}` {
+		t.Fatal("empty object", l, set, err)
+	}
+	for _, bad := range []string{`[]`, `"gate=3"`, `{"chat":1}`, `{"gate":-1}`, `{"gate":1.5}`, `{"gate":"3"}`, `{"gate":100001}`, `{"gate":1,"gate":2}`, `{`} {
 		if _, _, err := normalizeRouteLimits(json.RawMessage(bad)); err == nil {
 			t.Fatal("accepted", bad)
 		}
@@ -53,6 +57,17 @@ func TestStoredRouteLimitsFailClosed(t *testing.T) {
 	}
 	if got := readRouteLimits([]byte(`{"gate":"x"}`)); !reflect.DeepEqual(got, routeLimits{routeGate: 0, routeBedrock: 0, routeMedia: 0}) {
 		t.Fatal("unreadable value", got)
+	}
+	// Only routes this build does not know (a typo, a newer build's route) would read as the empty object,
+	// unlimited and outside the ceilings: closed instead.
+	if got := readRouteLimits([]byte(`{"gaet":3}`)); !reflect.DeepEqual(got, routeLimits{routeGate: 0, routeBedrock: 0, routeMedia: 0}) {
+		t.Fatal("unknown routes only", got)
+	}
+	if got := readRouteLimits([]byte(`{}`)); got == nil || len(got) != 0 {
+		t.Fatal("the empty object", got)
+	}
+	if got := readRouteLimits([]byte(`null`)); !reflect.DeepEqual(got, routeLimits{routeGate: 0, routeBedrock: 0, routeMedia: 0}) {
+		t.Fatal("a JSON null", got)
 	}
 }
 
@@ -165,7 +180,7 @@ func TestPostgresRouteLimitsAdmitPremiumModelsSparingly(t *testing.T) {
 	if e := reserveModel(h, ta, ra, "bedrock.claude-fable-5-1"); !errors.Is(e, errRouteQuota) {
 		t.Fatal("second bedrock call admitted", e)
 	}
-	// The deployment-wide ceiling counts every route-limited workspace: three gate calls of A plus
+	// The deployment-wide ceiling counts every route-limited workspace but an empty object: three gate calls of A plus
 	// one of B reach 4, although B has used one of its own three.
 	if e := reserveModel(h, tb, rb, "claude-opus-4-8"); e != nil {
 		t.Fatal("B's first gate call", e)
@@ -199,6 +214,65 @@ func TestPostgresRouteLimitsAdmitPremiumModelsSparingly(t *testing.T) {
 	}
 }
 
+// A workspace that limits no route (an empty object: on plans, nothing limited) is outside the ceilings,
+// neither held by them nor counted. Any other route-limited workspace is held by every route's ceiling and
+// counted towards it, a route its object leaves out included.
+func TestPostgresRouteCeilingsLeaveOutOnlyWorkspacesThatLimitNoRoute(t *testing.T) {
+	provider := teamProvider(t, func(w http.ResponseWriter, r *http.Request, b observedPiCall) { completePi(w, "done") })
+	defer provider.Close()
+	h := newHarness(t, provider.URL)
+	h.a.cfg.RouteFreeModels = []string{"qwen3.8-27b-p6"}
+	h.a.cfg.RouteTotalsPerDay = routeLimits{routeGate: 2, routeBedrock: 1}
+	ca, ta, _ := h.register(t, "ceiling-a@example.test")
+	cb, tb, _ := h.register(t, "ceiling-b@example.test")
+	cc, tc, _ := h.register(t, "ceiling-c@example.test")
+	ra := routeHarnessRun(t, h, ca, ta, `{"gate":5,"bedrock":5}`)
+	rb := routeHarnessRun(t, h, cb, tb, `{}`)
+	rc := routeHarnessRun(t, h, cc, tc, `{"gate":5}`)
+	for i := 0; i < 4; i++ {
+		if e := reserveModel(h, tb, rb, "claude-opus-4-8"); e != nil {
+			t.Fatal("a workspace that limits no route held by the gate ceiling", i, e)
+		}
+		if e := reserveModel(h, tb, rb, "bedrock.claude-opus-5-5"); e != nil {
+			t.Fatal("a workspace that limits no route held by the bedrock ceiling", i, e)
+		}
+	}
+	// None of B's calls counted: A's bedrock allowance finds the whole bedrock ceiling, and fills it.
+	if e := reserveModel(h, ta, ra, "bedrock.claude-fable-5-1"); e != nil {
+		t.Fatal("the bedrock ceiling was spent by a workspace that limits no route", e)
+	}
+	if e := reserveModel(h, ta, ra, "bedrock.claude-fable-5-1"); !errors.Is(e, errRouteCapacity) {
+		t.Fatal("bedrock ceiling ignored", e)
+	}
+	// C leaves bedrock out of its object, so it has no bedrock allowance of its own, but the ceiling still holds it.
+	if e := reserveModel(h, tc, rc, "bedrock.claude-opus-5-5"); !errors.Is(e, errRouteCapacity) {
+		t.Fatal("a route the object leaves out escaped its ceiling", e)
+	}
+	// The gate ceiling counts A and C: one call of each fills it, and it holds both of them, but not B.
+	if e := reserveModel(h, tc, rc, "gpt-5.5"); e != nil {
+		t.Fatal("C's first gate call", e)
+	}
+	if e := reserveModel(h, ta, ra, "gpt-5.5"); e != nil {
+		t.Fatal("A's first gate call", e)
+	}
+	if e := reserveModel(h, ta, ra, "gpt-5.5"); !errors.Is(e, errRouteCapacity) {
+		t.Fatal("gate ceiling ignored for A", e)
+	}
+	if e := reserveModel(h, tc, rc, "gpt-5.5"); !errors.Is(e, errRouteCapacity) {
+		t.Fatal("gate ceiling ignored for C", e)
+	}
+	if e := reserveModel(h, tb, rb, "gpt-5.5"); e != nil {
+		t.Fatal("a workspace that limits no route held by a full gate ceiling", e)
+	}
+	// Without a plan such a workspace shows no meter, like one without route limits; C shows the route it limits.
+	if u := h.request(t, cb, "GET", "/tenants/"+tb+"/route-usage", nil, 200); u["limited"] != false || u["routes"] != nil {
+		t.Fatal("meter of a workspace that limits no route", u)
+	}
+	if u := h.request(t, cc, "GET", "/tenants/"+tc+"/route-usage", nil, 200); u["limited"] != true || len(u["routes"].(map[string]any)) != 1 {
+		t.Fatal("meter of a workspace that limits gate", u)
+	}
+}
+
 func TestPostgresRouteLimitsReachNewWorkspacesAndAdminEdits(t *testing.T) {
 	provider := teamProvider(t, func(w http.ResponseWriter, r *http.Request, b observedPiCall) { completePi(w, "done") })
 	defer provider.Close()
@@ -229,7 +303,13 @@ func TestPostgresRouteLimitsReachNewWorkspacesAndAdminEdits(t *testing.T) {
 	}()
 	// Without a free list a gate limit would count the default model itself, so the edit is refused.
 	h.request(t, admin0, "PATCH", "/admin/tenants/"+tid, map[string]any{"routeLimits": map[string]int{"gate": 10}}, 400)
-	h.request(t, admin0, "PATCH", "/admin/tenants/"+tid, map[string]any{"routeLimits": map[string]int{}}, 400)
+	// An empty object limits no route, so it needs no free list: the workspace stays on plans, unlimited.
+	if v := h.request(t, admin0, "PATCH", "/admin/tenants/"+tid, map[string]any{"routeLimits": map[string]int{}}, 200); !reflect.DeepEqual(v["routeLimits"], map[string]any{}) {
+		t.Fatal("admin edit to no limited route", v["routeLimits"])
+	}
+	if got := stored(); got == nil || len(got) != 0 {
+		t.Fatal("stored empty route limits", got)
+	}
 	h.a.cfg.RouteFreeModels = []string{"qwen3.8-27b-p6"}
 	if e := h.a.BootstrapAdmin(context.Background()); e != nil {
 		t.Fatal(e)
@@ -256,7 +336,9 @@ func TestPostgresMediaRouteLimits(t *testing.T) {
 	ca, ta, _ := h.register(t, "media-route-a@example.test")
 	cb, tb, _ := h.register(t, "media-route-b@example.test")
 	cc, tc, _ := h.register(t, "media-route-c@example.test")
-	for tid, routes := range map[string]string{ta: `{"media":1}`, tb: `{"media":5}`} {
+	cd, td, _ := h.register(t, "media-route-d@example.test")
+	ce, te, _ := h.register(t, "media-route-e@example.test")
+	for tid, routes := range map[string]string{ta: `{"media":1}`, tb: `{"media":5}`, td: `{}`, te: `{"gate":3}`} {
 		if _, e := h.db.Exec(context.Background(), "UPDATE tenants SET route_limits=$2::jsonb WHERE id=$1", tid, routes); e != nil {
 			t.Fatal(e)
 		}
@@ -265,7 +347,7 @@ func TestPostgresMediaRouteLimits(t *testing.T) {
 		_, canvas := mediaCanvas(t, h, c, tid, mediaNode("img", "image", "rh.seedream-v5-pro", nil))
 		return setupNodeAt(canvas, 0)["issueId"].(string)
 	}
-	a, b, free := node(ca, ta), node(cb, tb), node(cc, tc)
+	a, b, free, unlimited, gateOnly := node(ca, ta), node(cb, tb), node(cc, tc), node(cd, td), node(ce, te)
 	run := h.mediaRun(t, ca, ta, a, "a cat in a hat", 202)
 	awaitRunRow(t, h, ta, run["id"].(string), "completed")
 	if got := h.mediaRun(t, ca, ta, a, "a cat in a hat", 429); errorCode(got) != "media_quota_exceeded" {
@@ -281,6 +363,16 @@ func TestPostgresMediaRouteLimits(t *testing.T) {
 	awaitRunRow(t, h, tc, run["id"].(string), "completed")
 	if got := h.mediaRun(t, cb, tb, b, "a cat in a hat", 429); errorCode(got) != "media_capacity_exceeded" {
 		t.Fatal("an unrestricted workspace's generation changed the route ceiling", got)
+	}
+	// A workspace that limits no route is neither held by the full ceiling nor counted; one whose object leaves
+	// media out is still held.
+	run = h.mediaRun(t, cd, td, unlimited, "a cat in a hat", 202)
+	awaitRunRow(t, h, td, run["id"].(string), "completed")
+	if got := h.mediaRun(t, cb, tb, b, "a cat in a hat", 429); errorCode(got) != "media_capacity_exceeded" {
+		t.Fatal("a workspace that limits no route changed the route ceiling", got)
+	}
+	if got := h.mediaRun(t, ce, te, gateOnly, "a cat in a hat", 429); errorCode(got) != "media_capacity_exceeded" {
+		t.Fatal("a workspace that leaves media out of its object escaped the media ceiling", got)
 	}
 	h.a.cfg.RouteTotalsPerDay = routeLimits{routeMedia: 2}
 	run = h.mediaRun(t, cb, tb, b, "a cat in a hat", 202)

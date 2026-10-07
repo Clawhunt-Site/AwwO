@@ -624,6 +624,37 @@ func TestPostgresPlanRunsAtOnceAreTheAccounts(t *testing.T) {
 	}
 }
 
+// A workspace that limits no route (an empty object) is on its owner's plan, so the operator's own unlimited
+// workspaces can subscribe. Without a plan its paid calls are admitted on its own allowances, outside the
+// ceilings, and billed to no one; on the plan they hold the period's credits.
+func TestPostgresPlanAppliesToAWorkspaceThatLimitsNoRoute(t *testing.T) {
+	h := planHarness(t)
+	h.a.cfg.RouteTotalsPerDay = routeLimits{routeGate: 1}
+	c, tid, _ := h.register(t, "plan-no-route-limited@example.test")
+	rid := routeHarnessRun(t, h, c, tid, `{}`)
+	for i := 0; i < 3; i++ {
+		if e := reserveModel(h, tid, rid, "claude-sonnet-5"); e != nil {
+			t.Fatal("paid call without a plan", i, e)
+		}
+	}
+	var billed int
+	if e := h.db.QueryRow(context.Background(), "SELECT count(*) FROM model_invocations WHERE tenant_id=$1 AND billed_user_id IS NOT NULL", tid).Scan(&billed); e != nil || billed != 0 {
+		t.Fatal("calls billed without a plan", billed, e)
+	}
+	now := time.Now()
+	uid := givePlan(t, h, "plan-no-route-limited@example.test", "pro", "active", now.Add(-time.Hour), now.Add(30*24*time.Hour), 2000)
+	if p, e := ownerPlan(context.Background(), h.db, tid, false); e != nil || p == nil || p.UserID != uid {
+		t.Fatal("the workspace did not take its owner's plan", p, e)
+	}
+	if e := reserveModel(h, tid, rid, "claude-sonnet-5"); e != nil {
+		t.Fatal("paid call on the plan", e)
+	}
+	var reserve *int
+	if e := h.db.QueryRow(context.Background(), "SELECT credit_reserve FROM model_invocations WHERE tenant_id=$1 AND billed_user_id=$2", tid, uid).Scan(&reserve); e != nil || reserve == nil || *reserve <= 0 {
+		t.Fatal("the call on the plan holds no credits", reserve, e)
+	}
+}
+
 func givePlanUser(t *testing.T, h *harness, email string) string {
 	t.Helper()
 	var uid string

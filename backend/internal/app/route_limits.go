@@ -25,8 +25,11 @@ import (
 //   - gate: every other text model, except the free list (AWWO_ROUTE_FREE_MODELS)
 //
 // A workspace without route limits (NULL, every workspace created before the setting existed) is
-// never route-limited and is not counted against the deployment-wide route ceilings. Every count
-// starts at UTC midnight, like the daily allowance the limits sit inside.
+// never route-limited and is not counted against the deployment-wide route ceilings. An empty object
+// limits no route either and is not counted, but keeps the workspace on paid plans: the operator's own
+// unlimited workspaces. Every other route-limited workspace is held by every route's ceiling and counted
+// towards it, a route it does not limit included. Every count starts at UTC midnight, like the daily
+// allowance the limits sit inside.
 const (
 	routeFree    = "free"
 	routeGate    = "gate"
@@ -66,7 +69,8 @@ func parseRouteSetting(name, raw string, max int) (routeLimits, error) {
 func validRoute(r string) bool { return r == routeGate || r == routeBedrock || r == routeMedia }
 
 // normalizeRouteLimits is the admin PATCH grammar: absent leaves the column alone, null removes the
-// limits, and an object of route counts replaces them. Unknown routes, non-integers and values out
+// limits, and an object of route counts replaces them; an empty object keeps the workspace
+// route-limited, and so on plans, with no route limited. Unknown routes, non-integers and values out
 // of range are refused rather than dropped, so a typo cannot silently lift a limit.
 func normalizeRouteLimits(raw json.RawMessage) (routeLimits, bool, error) {
 	if len(raw) == 0 {
@@ -89,9 +93,6 @@ func normalizeRouteLimits(raw json.RawMessage) (routeLimits, bool, error) {
 		}
 		out[k] = n
 	}
-	if len(out) == 0 {
-		return nil, false, errors.New("routeLimits must name at least one route; use null to remove the limits")
-	}
 	return out, true, nil
 }
 
@@ -105,23 +106,34 @@ func (l routeLimits) column() any {
 }
 
 // readRouteLimits decodes a stored column. A stored value this build cannot read limits every route
-// to zero, so a damaged row costs a free workspace its premium calls rather than lifting its limits.
+// to zero, so a damaged row costs a free workspace its premium calls rather than lifting its limits;
+// so does an object that names routes but none this build knows, which would otherwise read as the
+// empty object, unlimited and outside the ceilings.
 func readRouteLimits(raw []byte) routeLimits {
 	if raw == nil {
 		return nil
 	}
+	closed := routeLimits{routeGate: 0, routeBedrock: 0, routeMedia: 0}
 	out := routeLimits{}
 	var in map[string]int
-	if json.Unmarshal(raw, &in) != nil {
-		return routeLimits{routeGate: 0, routeBedrock: 0, routeMedia: 0}
+	// A JSON null decodes to a nil map: closed too, never the empty object (the column's check refuses one anyway).
+	if json.Unmarshal(raw, &in) != nil || in == nil {
+		return closed
 	}
 	for k, v := range in {
 		if validRoute(k) {
 			out[k] = v
 		}
 	}
+	if len(in) > 0 && len(out) == 0 {
+		return closed
+	}
 	return out
 }
+
+// noRouteLimited is the SQL test for a stored empty object, the one route-limited value that no
+// ceiling holds or counts.
+const noRouteLimited = `t.route_limits = '{}'::jsonb`
 
 func (c *Config) routeSettingsFromEnv() error {
 	if raw := os.Getenv("AWWO_NEW_WORKSPACE_ROUTE_LIMITS"); raw != "" {
@@ -218,12 +230,13 @@ func (a *App) checkRouteLimit(ctx context.Context, tx pgx.Tx, tid, model string,
 			return errRouteQuota
 		}
 	}
-	if capped {
+	// A workspace that limits no route (the empty object) is outside the ceilings, held and counted by none.
+	if capped && len(limits) > 0 {
 		if _, e := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321011)"); e != nil {
 			return e
 		}
 		var used int
-		if e := tx.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi JOIN tenants t ON t.id=mi.tenant_id WHERE t.route_limits IS NOT NULL AND mi.created_at>=`+todayUTC+` AND `+routeInvocationFilter, route, free).Scan(&used); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi JOIN tenants t ON t.id=mi.tenant_id WHERE t.route_limits IS NOT NULL AND NOT `+noRouteLimited+` AND mi.created_at>=`+todayUTC+` AND `+routeInvocationFilter, route, free).Scan(&used); e != nil {
 			return e
 		}
 		if used >= ceiling {
@@ -234,10 +247,10 @@ func (a *App) checkRouteLimit(ctx context.Context, tx pgx.Tx, tid, model string,
 }
 
 // mediaRouteLimit applies a route-limited workspace's media allowance and the deployment-wide media
-// route ceiling. It runs under the media admission's own advisory lock, after the ordinary media
-// limits, and writes the refusal itself.
+// route ceiling, which a workspace that limits no route is outside of. It runs under the media
+// admission's own advisory lock, after the ordinary media limits, and writes the refusal itself.
 func (a *App) mediaRouteLimit(ctx context.Context, tx pgx.Tx, limits routeLimits, usedToday int) (code string, err error) {
-	if limits == nil {
+	if len(limits) == 0 {
 		return "", nil
 	}
 	if limit, ok := limits[routeMedia]; ok && usedToday >= limit {
@@ -245,7 +258,7 @@ func (a *App) mediaRouteLimit(ctx context.Context, tx pgx.Tx, limits routeLimits
 	}
 	if ceiling, ok := a.cfg.RouteTotalsPerDay[routeMedia]; ok {
 		var used int
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM media_generations g JOIN tenants t ON t.id=g.tenant_id WHERE t.route_limits IS NOT NULL AND g.billed_user_id IS NULL AND g.created_at>=`+todayUTC).Scan(&used); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM media_generations g JOIN tenants t ON t.id=g.tenant_id WHERE t.route_limits IS NOT NULL AND NOT `+noRouteLimited+` AND g.billed_user_id IS NULL AND g.created_at>=`+todayUTC).Scan(&used); err != nil {
 			return "", err
 		}
 		if used >= ceiling {

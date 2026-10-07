@@ -15,7 +15,8 @@ type routeAllowance struct {
 }
 
 // routeUsageToday counts today's use as admission counts it. A free workspace has its daily total (invocations
-// plus generations) and, when route-limited, each route it limits; routes is nil for one without route limits.
+// plus generations) and, when route-limited, each route it limits; routes is nil for one without route limits
+// and for one that limits no route (an empty object, on plans but unlimited), which shows no meter.
 // A workspace whose owner has a paid plan reports the plan (plan is set, routes nil) with the account's daily
 // default-model calls across its workspaces. The deployment-wide ceilings, the media caps and the model allowlist
 // are not counted, so admission can still refuse a call these numbers show room for.
@@ -45,7 +46,7 @@ func (a *App) routeUsageToday(ctx context.Context, tid, uid string) (routeAllowa
 		return routeAllowance{Limit: plan.Limits.Daily, Used: usage.FreeToday}, nil, interested, plan, nil
 	}
 	limits := readRouteLimits(raw)
-	if limits == nil {
+	if len(limits) == 0 {
 		return daily, nil, interested, nil, nil
 	}
 	free := a.cfg.RouteFreeModels
