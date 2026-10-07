@@ -194,10 +194,11 @@ func (c Config) modelRoute(model string) string {
 // $2 the free list). A call that settled without reaching a provider (cost_status not_incurred, for
 // example a busy runtime) gives its allowance back; a running one always counts, so concurrent
 // admissions cannot pass the limit together. A call admitted under a paid plan (billed_user_id) spent
-// credits, not a route allowance, and counts towards neither a workspace's limit nor a ceiling.
+// credits, not a route allowance, and counts towards neither a workspace's limit nor a ceiling; neither does a
+// canvas plan on the operator's planner model, which its own ceilings bound (planner_model.go).
 const routeInvocationFilter = `CASE WHEN $1='bedrock' THEN mi.model_id LIKE 'bedrock.%'
 	ELSE mi.model_id NOT LIKE 'bedrock.%' AND NOT (mi.model_id = ANY($2::text[])) END
-	AND NOT (mi.status<>'running' AND mi.cost_status='not_incurred') AND mi.billed_user_id IS NULL`
+	AND NOT (mi.status<>'running' AND mi.cost_status='not_incurred') AND mi.billed_user_id IS NULL AND NOT ` + operatorPaidRun
 
 const todayUTC = `date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`
 

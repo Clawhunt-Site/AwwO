@@ -55,6 +55,8 @@ type executionSnapshot struct {
 	Health           piHealth           `json:"health"`
 	History          *[]json.RawMessage `json:"history,omitempty"`
 	HistoryAvailable int                `json:"historyAvailable,omitempty"`
+	// OperatorPaid: a canvas plan admitted on the operator's planner model, which the workspace does not pay for.
+	OperatorPaid bool `json:"operatorPaid,omitempty"`
 }
 
 // Persisted snapshots predate the creation default: an absent runtime means Pi.
@@ -297,7 +299,10 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		// Ordered after the deliberate outcomes so a cancelled or revoked run keeps
 		// reporting its own cause, and before the quota so an unauthorized model is
 		// never described as a rate limit.
-		if e == nil {
+		// The operator's planner model is the operator's choice and cost, outside the workspace's allowlist,
+		// paid-route allowances and credits; it still counts towards the daily total (planner_model.go).
+		operatorPaid := a.operatorPaidCall(facts, model)
+		if e == nil && !operatorPaid {
 			entitlement, entitlementErr := newModelEntitlement(restricted, allowed)
 			if entitlementErr != nil || !entitlement.permits(model) {
 				e = errModelNotAllowed
@@ -310,7 +315,7 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 			e = requiresPlan(ctx, tx, tid, needsPlan, plan)
 		}
 		var reserve *int
-		if e == nil && plan != nil {
+		if e == nil && plan != nil && !operatorPaid {
 			var size int64
 			if facts != nil {
 				size = facts.InputBytes
@@ -323,6 +328,9 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		}
 		admitted, billed := false, (*activePlan)(nil)
 		if plan == nil {
+			if operatorPaid {
+				routes = nil
+			}
 			admitted, e = a.admitFreeInvocation(ctx, tx, tid, model, concurrent, daily, routes)
 		} else {
 			billed, e = a.admitPlanInvocation(ctx, tx, tid, rid, reserve)

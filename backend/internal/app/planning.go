@@ -82,7 +82,8 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, _ := json.Marshal(runInput{SessionID: sid, Prompt: prompt, OperationID: b.OperationID, KnowledgeRevisionIDs: b.KnowledgeRevisionIDs})
-	next := r.Clone(r.Context())
+	// Only this request may run on the operator's planner model (planner_model.go).
+	next := withPlannerRequest(r)
 	next.Body = io.NopCloser(bytes.NewReader(data))
 	next.ContentLength = int64(len(data))
 	next.Header.Set("Content-Type", "application/json")

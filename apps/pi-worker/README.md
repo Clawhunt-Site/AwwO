@@ -26,6 +26,7 @@ Run from this directory with environment variables already supplied using `npm s
 | `AWWO_PI_MAX_CONCURRENCY` | `4`; excess requests get HTTP 429 |
 | `AWWO_PI_MAX_OUTPUT_BYTES` | `1048576`; bounded streamed response size |
 | `AWWO_PI_CONTEXT_WINDOW` / `AWWO_PI_MAX_TOKENS` | Application limits `32768` / `4096`; adjust for the selected model |
+| `AWWO_PI_BEDROCK_THINKING_BUDGET` / `AWWO_PI_BEDROCK_THINKING_MODELS` | Empty: none. A budget of `1024`–`16000` extended-thinking tokens for the named Claude Bedrock catalog models only (the API's `AWWO_PLANNER_MODEL`); the worker refuses to start if a named model is not a Claude model it serves. Requests are tool-free, so a named model thinks for every caller |
 
 OpenAI-compatible providers use the chat completions protocol. Anthropic uses the messages protocol. Ollama uses its `/v1` compatibility endpoint. Provider compatibility and access to a particular model require a separate live acceptance check. Reasoning, images, tools, and provider-specific options are not part of this initial API. No mock mode exists in the production entrypoint.
 

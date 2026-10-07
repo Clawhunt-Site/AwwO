@@ -38,6 +38,7 @@ type InvocationTiming struct {
 type invocationFacts struct {
 	WorkspaceSnapshot         *workspaceFile // only a completed coding run; never provider telemetry
 	RequirePersonalConnection bool           // live admission check for each workbench model call
+	OperatorPaid              bool           // a planner call on the operator's planner model (planner_model.go)
 
 	Runtime, Model, Provider, ProviderModel, Protocol, TurnID, AgentID string
 	Admission                                                          string
@@ -199,6 +200,8 @@ func invocationMetadata(s executionSnapshot, member *teamMember) *invocationFact
 	f := &invocationFacts{Runtime: defaultRuntime(s.Runtime), Model: s.Model, Admission: "not_attempted", Usage: missingUsage("unavailable", "provider_missing")}
 	if member != nil {
 		f.Runtime, f.Model, f.AgentID = member.Runtime, member.Model, member.ID
+	} else {
+		f.OperatorPaid = s.OperatorPaid
 	}
 	if h, ok := s.memberHealth(f.Runtime); ok {
 		f.Provider = h.Provider

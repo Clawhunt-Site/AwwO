@@ -293,6 +293,34 @@ export function toConverseInput(body: unknown, modelId: string): Json {
   return input;
 }
 
+/** The thinking budgets an operator may give Claude through the bridge (Converse `budget_tokens`). */
+export const THINKING_BUDGET_MIN = 1024;
+export const THINKING_BUDGET_MAX = 16_000;
+export function validThinkingBudget(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= THINKING_BUDGET_MIN && (value as number) <= THINKING_BUDGET_MAX;
+}
+
+/**
+ * Turns on Claude's extended thinking for one Converse command, where the operator configured a budget for
+ * the profile. Only single-purpose conversations get it: a request that offers tools or replays tool turns
+ * stays as it was (Converse would need every earlier thinking block back with its signature), and so does a
+ * request whose output limit leaves no room beyond the budget. Thinking requires the default sampling, so
+ * temperature and top_p are dropped. The reasoning itself streams back as reasoning content, which the
+ * workers count and never show.
+ */
+export function withClaudeThinking(command: Json, budget: number): Json {
+  if (!validThinkingBudget(budget) || command.toolConfig !== undefined) return command;
+  const messages = Array.isArray(command.messages) ? command.messages as ConverseMessage[] : [];
+  if (messages.some(m => m.content.some(block => 'toolUse' in block || 'toolResult' in block))) return command;
+  const inference = plain(command.inferenceConfig) ? { ...command.inferenceConfig } : {};
+  if (typeof inference.maxTokens === 'number' && inference.maxTokens <= budget + 1024) return command;
+  delete inference.temperature;
+  delete inference.topP;
+  const out: Json = { ...command, additionalModelRequestFields: { thinking: { type: 'enabled', budget_tokens: budget } } };
+  if (Object.keys(inference).length) out.inferenceConfig = inference; else delete out.inferenceConfig;
+  return out;
+}
+
 const STOP_REASONS: Record<string, string> = {
   end_turn: 'stop', stop_sequence: 'stop', tool_use: 'tool_calls',
   max_tokens: 'length', model_context_window_exceeded: 'length',
@@ -480,15 +508,18 @@ export type BedrockFetchOptions = {
   sdk: BedrockSdk;
   /** Extra AWS SDK client settings for tests or an explicit request handler. Never credentials or endpoints. */
   clientOptions?: Record<string, unknown>;
+  /** Claude only: an operator-set extended-thinking budget (withClaudeThinking). Absent means no thinking. */
+  thinkingBudget?: number;
 };
 
 /**
  * A `fetch` that serves `POST <bridge base URL>/chat/completions` from Bedrock ConverseStream.
  * Any other URL or method is refused before a network call is made.
  */
-export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {} }: BedrockFetchOptions) {
+export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {}, thinkingBudget }: BedrockFetchOptions) {
   const endpoint = `${bedrockBridgeBaseURL(region)}/chat/completions`;
   if (!validBedrockAuth(auth)) throw new Error('Invalid Bedrock credentials');
+  if (thinkingBudget !== undefined && !validThinkingBudget(thinkingBudget)) throw new Error('Invalid Bedrock thinking budget');
   for (const key of ['credentials', 'token', 'endpoint', 'region', 'authSchemePreference']) {
     if (Object.hasOwn(clientOptions, key)) throw new Error('Bedrock client options cannot override the endpoint or credentials');
   }
@@ -505,6 +536,7 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
       let body: unknown;
       try { body = JSON.parse(raw); } catch { return reject('The request body is not JSON'); }
       command = toConverseInput(body, model);
+      if (thinkingBudget !== undefined) command = withClaudeThinking(command, thinkingBudget);
       singleToolCall = (body as Json).parallel_tool_calls === false;
     } catch (error) { return jsonError(bridgeFailure(error)); }
 

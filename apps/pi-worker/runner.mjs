@@ -141,7 +141,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       // A Bedrock key travels only inside its auth record, never as a provider API key.
       apiKey: modelConfig.provider === 'bedrock' ? '' : modelConfig.apiKey,
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
-      ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth } : {}),
+      ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth, ...(modelConfig.thinkingBudget ? { thinkingBudget: modelConfig.thinkingBudget } : {}) } : {}),
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };

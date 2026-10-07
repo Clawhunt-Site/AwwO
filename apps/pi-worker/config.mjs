@@ -1,6 +1,6 @@
 import { loadObservabilityConfig } from './observability.mjs';
 import { assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
-import { validBedrockRegion } from '../bedrock-bridge.ts';
+import { validBedrockRegion, validThinkingBudget } from '../bedrock-bridge.ts';
 const DEFAULTS = Object.freeze({
   llmgate: 'https://api.clawhunt.site/v1',
   openai: 'https://api.openai.com/v1',
@@ -81,8 +81,27 @@ function bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing) {
     value.region ?? bedrockRegion(env), apiKey));
 }
 
-function workerBedrockProfile(profile) {
-  return Object.freeze({ ...profile, protocol: 'chat_completions' });
+function workerBedrockProfile(profile, thinking = null) {
+  // An operator thinking budget reaches only the Claude models it names, and only where the output limit leaves
+  // room beyond it.
+  const budget = thinking !== null && thinking.models.has(profile.id) && profile.vendor === 'anthropic'
+    && profile.maxTokens > thinking.budget + 1024 ? thinking.budget : 0;
+  return Object.freeze({ ...profile, protocol: 'chat_completions', ...(budget ? { thinkingBudget: budget } : {}) });
+}
+
+// AWWO_PI_BEDROCK_THINKING_BUDGET (empty or 0: none) with AWWO_PI_BEDROCK_THINKING_MODELS: extended-thinking
+// tokens for the named Claude catalog models this worker serves through Bedrock — meant for the API's canvas
+// planner model (AWWO_PLANNER_MODEL). Every Pi request is tool-free, so a model users can also pick would think,
+// and spend, for them too: name only the planner's. Operator-set, never a per-request choice; the bridge applies
+// it only to requests without tools (withClaudeThinking).
+function thinkingSetting(env) {
+  const value = env.AWWO_PI_BEDROCK_THINKING_BUDGET;
+  if (value === undefined || value === '' || value === '0') return null;
+  const budget = Number(value);
+  if (!/^[0-9]+$/.test(String(value)) || !validThinkingBudget(budget)) throw new Error('AWWO_PI_BEDROCK_THINKING_BUDGET must be 0 or a whole number from 1024 to 16000');
+  const models = new Set((env.AWWO_PI_BEDROCK_THINKING_MODELS ?? '').split(',').map(id => id.trim()).filter(Boolean));
+  if (!models.size) throw new Error('AWWO_PI_BEDROCK_THINKING_BUDGET needs AWWO_PI_BEDROCK_THINKING_MODELS, the Claude catalog ids that may think');
+  return Object.freeze({ budget, models });
 }
 
 function loadProfiles(serialized, env, defaultProfile, missing) {
@@ -151,8 +170,14 @@ export function loadConfig(env = process.env) {
   if (maxTokens + 256 >= contextWindow) missing.push('AWWO_PI_MAX_TOKENS');
   const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens }), missing);
   let catalog;
-  try { catalog = bedrockCatalogProfiles('pi', env).map(workerBedrockProfile); }
+  const thinking = thinkingSetting(env);
+  try { catalog = bedrockCatalogProfiles('pi', env).map(profile => workerBedrockProfile(profile, thinking)); }
   catch (error) { throw new Error(`Bedrock catalog configuration is invalid: ${error.message}`); }
+  for (const id of thinking?.models ?? []) {
+    if (!catalog.some(profile => profile.id === id && profile.thinkingBudget)) {
+      throw new Error(`AWWO_PI_BEDROCK_THINKING_MODELS names ${id}, which is not a Claude model this worker serves through Bedrock with room for the budget`);
+    }
+  }
   if (catalog.some(profile => configured.some(item => item.id === profile.id)) || configured.length + catalog.length > MAX_CATALOG_MODELS) {
     throw new Error('Bedrock catalog models must have unique IDs and fit the 256-model catalog');
   }

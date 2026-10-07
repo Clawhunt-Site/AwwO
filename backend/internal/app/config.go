@@ -69,6 +69,9 @@ type Config struct {
 	NewWorkspaceRouteLimits routeLimits
 	RouteTotalsPerDay       routeLimits
 	RouteFreeModels         []string
+	// The canvas planner's operator-paid model and its daily ceilings (planner_model.go); empty keeps the default model.
+	PlannerModel                                                     string
+	PlannerPerWorkspaceDay, PlannerTotalPerDay, PlannerMaxInputBytes int
 	// Image and video generation through RunningHub (media_config.go); off unless configured.
 	mediaSettings
 	// BillingCheckoutEnabled opens the paid plans' checkout (billing.go). Off, the plans can be read but not
@@ -178,6 +181,9 @@ func ConfigFromEnv() (Config, error) {
 	if err := c.routeSettingsFromEnv(); err != nil {
 		return c, err
 	}
+	if err := c.plannerSettingsFromEnv(); err != nil {
+		return c, err
+	}
 	if err := c.observabilityFromEnv(); err != nil {
 		return c, err
 	}
@@ -212,6 +218,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.validateRouteSettings(); err != nil {
+		return err
+	}
+	if err := c.validatePlannerSettings(); err != nil {
 		return err
 	}
 	if err := c.validateBilling(); err != nil {

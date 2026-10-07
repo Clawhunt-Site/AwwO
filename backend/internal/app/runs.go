@@ -429,10 +429,36 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		}
 		effort = ""
 	}
-	snapshot, e := a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
-	if e != nil {
-		a.runtimeAdmissionError(w, e)
-		return
+	// A plan the canvas assistant requests runs on the operator's planner model where it may (planner_model.go);
+	// otherwise, and whenever that model cannot be snapshotted, on the runtime's default model as before.
+	var snapshot executionSnapshot
+	operatorPlanner := false
+	if kind == "planner" && isPlannerRequest(r) {
+		refusal, err := a.plannerModelRefusal(r.Context(), tx, tid, len(b.Prompt)+len(instructions))
+		if err != nil {
+			a.dbError(w, err)
+			return
+		}
+		if refusal == "" {
+			// Its own catalog: the unrestricted entitlement it is probed under must never be the one a fallback
+			// to the default model freezes for the workspace.
+			unrestricted, _ := newModelEntitlement(false, nil)
+			if s, err := a.runtimeSnapshot(r.Context(), unrestricted, runtimeCatalog{}, runtime, a.cfg.PlannerModel, "", instructions, team); err == nil {
+				snapshot, operatorPlanner = s, true
+				snapshot.OperatorPaid = true
+			} else {
+				a.log.Warn("planner model unavailable; planning on the default model", "runtime", defaultRuntime(runtime), "error_type", fmt.Sprintf("%T", err))
+			}
+		} else if refusal != plannerOff {
+			a.log.Info("planner model not admitted; planning on the default model", "reason", refusal)
+		}
+	}
+	if !operatorPlanner {
+		snapshot, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
+		if e != nil {
+			a.runtimeAdmissionError(w, e)
+			return
+		}
 	}
 	if kind == "planner" || kind == "knowledge" || kind == "computer" {
 		snapshot.Workspace = nil

@@ -50,6 +50,10 @@ services:
       AWWO_BEDROCK_REGION: ${AWWO_BEDROCK_REGION:-}
       AWWO_BEDROCK_MODELS: ${AWWO_PI_BEDROCK_MODELS:-}
       AWWO_BEDROCK_API_KEY: ${AWWO_BEDROCK_API_KEY:-}
+      # Optional extended thinking for the named Claude catalog models only (the API's AWWO_PLANNER_MODEL);
+      # empty: none. Every Pi request is tool-free, so never name a model users pick for their own nodes.
+      AWWO_PI_BEDROCK_THINKING_BUDGET: ${AWWO_PI_BEDROCK_THINKING_BUDGET:-}
+      AWWO_PI_BEDROCK_THINKING_MODELS: ${AWWO_PI_BEDROCK_THINKING_MODELS:-}
       AWWO_PLATFORM_PROVIDERS: ${AWWO_PLATFORM_PROVIDERS:-}
       AWWO_PI_MAX_CONCURRENCY: ${AWWO_PI_MAX_CONCURRENCY:-4}
       # A canvas plan is one long structured JSON answer, so the output cap is the binding limit,
@@ -190,6 +194,12 @@ services:
       AWWO_NEW_WORKSPACE_ALLOWED_MODELS: ${AWWO_NEW_WORKSPACE_ALLOWED_MODELS:-}
       AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY: ${AWWO_NEW_WORKSPACE_MAX_RUNS_PER_DAY:-}
       AWWO_MAX_OWNED_WORKSPACES: ${AWWO_MAX_OWNED_WORKSPACES:-}
+      # Optional operator-paid model for canvas plans (backend/internal/app/planner_model.go); empty keeps
+      # the planner on the Pi default model. Empty ceilings take the code defaults (30 / 2000 / 60000).
+      AWWO_PLANNER_MODEL: ${AWWO_PLANNER_MODEL:-}
+      AWWO_PLANNER_PER_WORKSPACE_PER_DAY: ${AWWO_PLANNER_PER_WORKSPACE_PER_DAY:-}
+      AWWO_PLANNER_TOTAL_PER_DAY: ${AWWO_PLANNER_TOTAL_PER_DAY:-}
+      AWWO_PLANNER_MAX_INPUT_BYTES: ${AWWO_PLANNER_MAX_INPUT_BYTES:-}
       # Separately sponsored planning; never forwarded to execution workers.
       AWWO_TYPESAFE_SPONSORED_PLANNING: ${AWWO_TYPESAFE_SPONSORED_PLANNING:-false}
       AWWO_TYPESAFE_API_KEY: ${AWWO_TYPESAFE_API_KEY:-}

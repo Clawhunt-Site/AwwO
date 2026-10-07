@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   BEDROCK_BRIDGE_API_KEY, BEDROCK_CREDENTIAL_REFRESH_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockOrigin, bridgeFailure, chatUsage,
   createBedrockAuthResolver, createBedrockFetch, createChunkMapper, toConverseInput, validBedrockAuth, validBedrockRegion,
-  type BedrockSdk,
+  validThinkingBudget, withClaudeThinking, type BedrockSdk,
 } from './bedrock-bridge.ts';
 
 const MODEL = 'global.anthropic.claude-opus-5-5';
@@ -412,4 +412,42 @@ test('cancellation aborts the provider request and the stream', async () => {
   already.abort();
   const before = fakeSdk([], { fail: Object.assign(new Error('aborted'), { name: 'AbortError' }) });
   await assert.rejects(createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: before.sdk })(ENDPOINT, post(request(), { signal: already.signal })));
+});
+
+test('an operator thinking budget turns on Claude thinking only for tool-free requests with room for it', () => {
+  const plain = toConverseInput(request({ max_tokens: 8000, temperature: 0.3, top_p: 0.9 }), MODEL);
+  const thinking = withClaudeThinking(plain, 2048);
+  assert.deepEqual(thinking.additionalModelRequestFields, { thinking: { type: 'enabled', budget_tokens: 2048 } });
+  // Thinking needs the default sampling: temperature and top_p go, the output limit stays.
+  assert.deepEqual(thinking.inferenceConfig, { maxTokens: 8000 });
+  assert.deepEqual(thinking.messages, plain.messages);
+  assert.equal(plain.additionalModelRequestFields, undefined, 'the input command is not mutated');
+  // Offered tools, replayed tool turns, a tight output limit or an invalid budget leave the request unchanged.
+  const tools = toConverseInput(request({ max_tokens: 8000, tools: [{ type: 'function', function: { name: 'current_time', parameters: { type: 'object', properties: {} } } }] }), MODEL);
+  assert.equal(withClaudeThinking(tools, 2048), tools);
+  const history = toConverseInput(request({ max_tokens: 8000, tools: [{ type: 'function', function: { name: 'current_time', parameters: { type: 'object', properties: {} } } }],
+    messages: [{ role: 'user', content: 'Time?' }, { role: 'assistant', content: '', tool_calls: [{ id: 'tooluse_1', type: 'function', function: { name: 'current_time', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'tooluse_1', content: 'noon' }] }), MODEL);
+  assert.equal(withClaudeThinking({ ...history, toolConfig: undefined }, 2048).additionalModelRequestFields, undefined);
+  const tight = toConverseInput(request({ max_tokens: 3000 }), MODEL);
+  assert.equal(withClaudeThinking(tight, 2048), tight);
+  for (const budget of [0, 1023, 16001, 2048.5, Number.NaN]) assert.equal(validThinkingBudget(budget), false);
+  assert.equal(withClaudeThinking(plain, 512), plain);
+});
+
+test('the fetch sends the thinking budget it was configured with, and refuses an invalid one', async () => {
+  const { sdk, sent } = fakeSdk([{ messageStart: { role: 'assistant' } }, { contentBlockDelta: { delta: { reasoningContent: { text: 'plan' } } } },
+    { contentBlockDelta: { delta: { text: 'OK' } } }, { messageStop: { stopReason: 'end_turn' } }, { metadata: { usage: { inputTokens: 3, outputTokens: 9 } } }]);
+  assert.throws(() => createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk, thinkingBudget: 100 }), /thinking budget/);
+  const fetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk, thinkingBudget: 2048 });
+  const response = await fetch(ENDPOINT, post(request({ max_tokens: 8000 })));
+  assert.equal(response.status, 200);
+  const chunks = frames(await response.text()).slice(0, -1).map(frame => JSON.parse(frame));
+  assert.ok(chunks.some(chunk => chunk.choices?.[0]?.delta?.reasoning_content === 'plan'), 'reasoning streams as reasoning content');
+  assert.ok(chunks.some(chunk => chunk.choices?.[0]?.delta?.content === 'OK'));
+  assert.deepEqual(sent[0].input.additionalModelRequestFields, { thinking: { type: 'enabled', budget_tokens: 2048 } });
+  // Without a budget the same request carries no thinking field.
+  const plainFetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk });
+  await (await plainFetch(ENDPOINT, post(request({ max_tokens: 8000 })))).text();
+  assert.equal(sent[1].input.additionalModelRequestFields, undefined);
 });
