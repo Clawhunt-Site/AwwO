@@ -108,7 +108,7 @@ export function PlansPage({ identity }: { identity: Identity }) {
         <p className="saas-plans-current-name">{planName(held.id)}</p>
         <p>{t('订阅还没有生效：付款没有完成或续费扣款失败。请在管理订阅中完成付款或更新付款方式，付款成功后点数会自动到账。', 'The subscription is not in effect yet: its payment has not gone through. Complete it or update the payment method in Manage subscription; the credits arrive once it is paid.')}</p>
         <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{busy === 'portal' ? t('正在打开…', 'Opening…') : t('管理订阅', 'Manage subscription')}</button>
-      </> : <p>{t('免费版：默认模型每天有固定次数，Claude / GPT、Bedrock 和图片视频每天各有少量免费次数，可以在工作区顶部的「今日额度」里查看。', 'Free: a daily number of default-model calls, and a few free Claude / GPT, Bedrock and image or video calls a day. See Today’s allowance at the top of a workspace.')}</p>}
+      </> : <p>{t('免费版：默认模型每天有固定次数；Claude / GPT、Bedrock 和图片视频的免费次数见工作区顶部的「今日额度」，标着「不含」的要用 Pro 或 Max。', 'Free: a daily number of default-model calls. Free Claude / GPT, Bedrock and image or video calls are shown in Today’s allowance at the top of a workspace; those marked Not included need Pro or Max.')}</p>}
     </section>
     <div className="saas-plans-grid">
       {billing.catalog.map(plan => {

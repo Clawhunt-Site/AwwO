@@ -65,9 +65,9 @@ const runErrors: Record<string, [string, string]> = {
   media_result_too_large: ['生成结果超过文件大小上限，未保存。', 'The result exceeds the file size limit and was not saved.'],
   media_storage_failed: ['生成结果保存失败，请重试。', 'The result could not be saved. Please try again.'],
   media_storage_full: ['媒体存储空间不足，生成结果未保存；请联系管理员。', 'Media storage is full, so the result was not saved. Contact an administrator.'],
-  // A route-limited workspace gets a few free premium calls a day inside its daily allowance; the
-  // default model keeps working, so the copy names that way forward before the paid one.
-  premium_quota_exceeded: ['今天高级模型（Claude、GPT、Bedrock）的免费次数已用完。可以把节点换成默认模型继续，UTC 次日重置；需要更多可以看看 Pro / Max 付费套餐（账号菜单 → 套餐与点数）。', 'Today’s free calls for premium models (Claude, GPT, Bedrock) are used up. Switch the node to the default model to keep going, or wait for the next UTC day. For more, see the Pro and Max plans (account menu → Plans and credits).'],
+  // A route-limited workspace's free allowance for a premium route is a few calls a day or none at all
+  // (0); the default model keeps working, so the copy names that way forward before the paid one.
+  premium_quota_exceeded: ['今天的免费额度里没有这个高级模型（Claude、GPT、Bedrock）的次数，或者已经用完。可以把节点换成默认模型继续；Pro / Max 付费套餐用点数调用这些模型（账号菜单 → 套餐与点数）。', 'Today’s free allowance includes no calls for this premium model (Claude, GPT, Bedrock), or they are used up. Switch the node to the default model to keep going; the Pro and Max plans use credits for these models (account menu → Plans and credits).'],
   premium_capacity_exceeded: ['今天全站的高级模型免费名额已用完。可以把节点换成默认模型继续，UTC 次日重置；Pro / Max 付费套餐不受这个名额限制（账号菜单 → 套餐与点数）。', 'Today’s free premium-model calls for the whole service are used up. Switch the node to the default model to keep going, or wait for the next UTC day. The Pro and Max plans are not limited by it (account menu → Plans and credits).'],
   // A paid plan's credits for the period are used up; the default model spends none.
   plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
