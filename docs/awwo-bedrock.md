@@ -209,3 +209,13 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 - **Fable 5 与 5.1 下架**：Bedrock 对 Fable 的全部流量保留最长 30 天，并对分类器标记的内容做人工审阅（模型卡要求账号使用 `aws_review` 数据保留设置）；用户内容不接受这种处理，AWS 顾问也建议下架。目录删去两项（48 项，40 个已核验），新工作区白名单去掉 `bedrock.claude-fable-5-1` 与 Gate 的 `claude-fable-5`（32 → 30 个 id），已有白名单里的 Fable 一并删除（审计记录各一条）。下架前生产里 0 个 Agent、0 个画布引用 Fable。
 - **Opus 5.5 改回 `global.anthropic.claude-opus-5-5`**：AWS 建议推理配置文件统一用 global、不用 us.；当天实例角色对 global 8/8 成功（约 1.3 s），10-05 的 `ServiceUnavailableException` 已消失。实例角色的内联策略原本就允许该 global 配置文件；us. 的授权保留，作回退。其余 7 个 `us.` 目标（DeepSeek R1、Pixtral Large、Llama 3 个、Nova Pro、Nova Micro）在账号里没有 global 配置文件，保持不变。
 - **免费层**：新工作区与 6 个已有免费工作区的路由额度改为 `gate=0,bedrock=0,media=1`（免费层只用默认模型和每天 1 次媒体）；付费套餐按点数使用 Claude / GPT / Bedrock，不受影响。
+
+## 数据留存、人工审阅与训练（2026-10-07 按 AWS 文档核对，供 AWS 逐项确认）
+
+AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来自 AWS 一手文档（Bedrock 用户指南的 abuse-detection、data-retention、data-protection、cross-region-inference 页、Bedrock FAQ、AWS 服务条款 §50、第三方模型条款），2026-10-07 读取：
+
+- **默认（下列例外以外的全部 40 个模型）**：Bedrock 默认不存储输入与输出；不提供给模型方（模型运行在模型方无权访问的 AWS 账号里，AWS 只与模型方共享不含客户内容的用量数据）；AWS 与模型方都不用这些输入输出训练模型。人工审阅仅限疑似儿童性虐待内容（CSAM）。Anthropic 与 xAI 的条款另外写明不用客户内容训练。
+- **推理配置文件的处理地域**：`us.` 只在美国区域处理；`global.` 可能被路由到任一商业区域处理，留存的数据（如有）只在发起区域。我们的隐私条款写明服务运行在 AWS 美国、模型方可能在其他国家处理请求，覆盖这一点。
+- **例外**：Claude Fable 5 / 5.1 对全部流量留存最长 30 天并对分类器标记内容做 AWS 人工审阅（模型卡要求账号使用 `aws_review` 留存设置）——已于 2026-10-07 下架。OpenAI 自有的 GPT-5.4 至 GPT-6 系列对标记流量留存最长 30 天：目前不在开放列表里（Marketplace 付款问题），开放前要先评估；Sonnet 5.5 与 GPT-6.1 Sol 不在例外列表上，留存情况待 AWS 确认。OpenAI 的 Bedrock 协议 §2.3 还限制向第三方提供「开放式或自动化的编码能力」，开放 GPT 前一并确认。
+- **账号留存设置**：Fable 能被调用，说明 us-east-1 的留存设置很可能是 `aws_review`。下架 Fable 后可以把它设为 `none`（零留存），Bedrock 会拒绝任何需要留存的模型，从而证明剩余模型都不留存；但这是账号级设置，研发在同一账号里自用的 Fable 5 也会被拒，需要运营方决定。该设置不跨区域传播。
+- **请 AWS 确认**：① 本账号 us-east-1 的当前留存设置，以及 2026-10-05 到 10-07 生产发往 Fable 5.1 的流量保存在哪、保存多久；② 40 个模型是否都允许 `none`；③ us-east-1 的设置是否覆盖被 `global.` / `us.` 路由到其他区域的调用；④ Bedrock 的提示缓存（最长 1 小时，Kimi K3 至少 30 分钟）是否算存储；⑤ Anthropic 是否从不接收 Claude 内容；⑥ 非例外模型的滥用检测具体检查并保留什么。
