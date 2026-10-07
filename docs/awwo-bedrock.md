@@ -134,9 +134,9 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 1. IAM：为 AwwO 实例角色附加上述策略，并先按“凭证边界”限制 IMDS（运营方操作）。
 2. 发布包含本变更的 API 与三个 worker（Python worker 的 venv 需安装 `boto3==1.43.75`），先 API 后 worker。
 3. API 环境：`AWWO_PLATFORM_PROVIDERS=llmgate,bedrock`。
-4. worker 环境（Pi、JS、Python 各自的 env 文件）：`AWWO_BEDROCK_CATALOG=builtin`（只开已核验的模型，2026-10-04 起 42 个）、`AWWO_PLATFORM_PROVIDERS=llmgate,bedrock`，可选 `AWWO_BEDROCK_REGION`、`AWWO_BEDROCK_MODELS`。实例角色获得跨区域推理权限后，对 Claude、GPT 等各做一次冒烟，再改为 `builtin-all`（或在 `AWWO_BEDROCK_MODELS` 中逐个列出），并把核验日期写回目录的 `verified`。
+4. worker 环境（Pi、JS、Python 各自的 env 文件）：`AWWO_BEDROCK_CATALOG=builtin`（只开已核验的模型，2026-10-04 起 42 个；2026-10-07 下架 Fable 后 40 个）、`AWWO_PLATFORM_PROVIDERS=llmgate,bedrock`，可选 `AWWO_BEDROCK_REGION`、`AWWO_BEDROCK_MODELS`。实例角色获得跨区域推理权限后，对 Claude、GPT 等各做一次冒烟，再改为 `builtin-all`（或在 `AWWO_BEDROCK_MODELS` 中逐个列出），并把核验日期写回目录的 `verified`。
 5. 读回每个 worker 的 `/health`：`platformOnly: true`、模型列表含 `bedrock.*`，且不含任何 URL 或密钥。
-6. **工作区模型权限**：新工作区按 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 写入 `tenants.allowed_models`。2026-10-05 起现网新工作区的 GPT 与 Claude 走 LLM Gate；Gate 没有的 Claude Opus 5.5 与 Fable 5.1 走 Bedrock（`bedrock.claude-opus-5-5`、`bedrock.claude-fable-5-1`，只在 OpenAI Agents 运行时），其余 Bedrock 模型只出现在没有白名单的旧工作区（见下方「2026-10-05 渠道选择」）。开放哪些模型（Opus 等高价模型的成本）由运营方决定，单个工作区用管理端 `PATCH /api/v1/admin/tenants/{id}` 调整。
+6. **工作区模型权限**：新工作区按 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 写入 `tenants.allowed_models`。2026-10-05 起现网新工作区的 GPT 与 Claude 走 LLM Gate；Gate 没有的 Claude Opus 5.5 走 Bedrock（`bedrock.claude-opus-5-5`，只在 OpenAI Agents 运行时；Fable 5.1 已于 2026-10-07 下架），其余 Bedrock 模型只出现在没有白名单的旧工作区（见下方「2026-10-05 渠道选择」）。2026-10-07 起免费层的路由额度为 `gate=0,bedrock=0,media=1`：白名单里的高级模型只对付费套餐开放。开放哪些模型（Opus 等高价模型的成本）由运营方决定，单个工作区用管理端 `PATCH /api/v1/admin/tenants/{id}` 调整。
 7. 用一个测试工作区对一到两个模型做真实冒烟（不在生产创建测试画布时可用 shadow-plan 流程）。
 
 ## 限制
