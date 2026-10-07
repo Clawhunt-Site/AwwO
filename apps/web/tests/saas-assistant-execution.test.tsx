@@ -12,6 +12,8 @@ import { clearSaaSCanvas, configureCanvasKnowledge, configureSaaSCanvas } from '
 const base = '/api/v1/tenants/tenant-a';
 const time = '2026-10-01T01:00:00Z';
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+const PENDING = 'awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1';
+const STARTED = 'awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.started-submission.v1';
 const runtime = { ready: true, capabilities: { workspace: true, approvals: true }, models: [{ id: 'byok_model_a', label: '已有模型连接', runtime: 'openai-agents', efforts: ['low', 'medium'] }] };
 const disabled = { ready: false, reason: '当前没有可用模型', capabilities: { workspace: false, approvals: false }, models: [] };
 const summary = { id: 'run-a', status: 'running', prompt: '整理项目文件', createdAt: time, updatedAt: time };
@@ -718,6 +720,359 @@ describe('the canvas assistant’s tasks', () => {
     act(() => { window.dispatchEvent(new StorageEvent('storage', { key: 'awwo.saas:user-a:tenant-a:canvas-a:awwo.execution.pending-submission.v1' })); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
     expect(taskReads()).toBe(before + 1);
+  });
+
+  it('announces a task its start made to the canvas’s other pages, before its submission is released', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ id: 'run-new', status: 'running' }, 202) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const writes: string[] = [];
+    const set = localStorage.setItem.bind(localStorage); const remove = localStorage.removeItem.bind(localStorage);
+    vi.spyOn(localStorage, 'setItem').mockImplementation((key: string, value: string) => { writes.push(`set ${key} ${value}`); set(key, value); });
+    vi.spyOn(localStorage, 'removeItem').mockImplementation((key: string) => { writes.push(`remove ${key}`); remove(key); });
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    writes.length = 0;
+    await act(async () => { await result.current.start('生成报告'); });
+    const ops = writes.map(line => line.split(' ').slice(0, 2).join(' '));
+    expect(ops).toEqual([`set ${PENDING}`, `set ${STARTED}`, `remove ${STARTED}`, `remove ${PENDING}`]);
+    expect(JSON.parse(writes[1].slice(`set ${STARTED} `.length))).toMatchObject({ taskId: 'run-new', operationId: expect.stringMatching(/^execution-/) });
+    expect(localStorage.getItem(STARTED)).toBeNull();
+  });
+
+  it('announces the task a reconcile confirmed, too', async () => {
+    let posts = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? ++posts === 1 ? json({ error: { code: 'unknown', message: '连接中断' } }, 503) : json({ id: 'run-r', status: 'running' }, 202)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const waiting = result.current.pendingSubmission!;
+    const said: string[] = [];
+    const set = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, 'setItem').mockImplementation((key: string, value: string) => { if (key === STARTED) said.push(value); set(key, value); });
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.confirmedTask?.taskId).toBe('run-r'));
+    expect(said.map(value => JSON.parse(value))).toEqual([expect.objectContaining({ operationId: waiting.operationId, taskId: 'run-r' })]);
+  });
+
+  it('links a task another page announces, stops waiting on its submission and reads the tasks again', async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => json(url.endsWith('/computer-runs') && init.method !== 'POST' ? { items: [] } : defaultResponse(url)));
+    vi.stubGlobal('fetch', fetchMock);
+    const taskReads = () => fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/computer-runs') && init?.method !== 'POST').length;
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    const op = 'execution-44444444-4444-4444-8444-444444444444';
+    localStorage.setItem(PENDING, JSON.stringify({ operationId: op, prompt: '生成报告', runtime: 'openai-agents', model: 'byok_model_a', knowledgeRevisionIds: [] }));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    expect(result.current.pendingSubmission?.operationId).toBe(op);
+    const before = taskReads();
+    // A malformed announcement, or one for another account's copy of the canvas, changes nothing.
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: '{"operationId":"nope","taskId":"run-x"}' })); });
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED.replace('user-a', 'user-b'), newValue: JSON.stringify({ operationId: op, taskId: 'run-x', at: 1 }) })); });
+    expect(result.current.confirmedTask).toBeNull();
+    expect(result.current.pendingSubmission?.operationId).toBe(op);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: op, taskId: 'run-x', at: 1 }) })); });
+    expect(executionHost(result.current).confirmedTask).toEqual({ taskId: 'run-x', operationId: op });
+    expect(result.current.pendingSubmission).toBeNull();
+    await waitFor(() => expect(taskReads()).toBe(before + 1));
+    // Given up here, then announced by the page that sent it: the give-up is over, the task is linked.
+    const later = 'execution-55555555-5555-4555-8555-555555555555';
+    localStorage.setItem(PENDING, JSON.stringify({ operationId: later, prompt: '再生成一份', runtime: 'openai-agents', model: 'byok_model_a', knowledgeRevisionIds: [] }));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    act(() => result.current.discardPending());
+    expect(result.current.startRefusal).toMatchObject({ operationId: later, givenUp: true });
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: later, taskId: 'run-y', at: 2 }) })); });
+    expect(result.current.startRefusal).toBeNull();
+    expect(result.current.confirmedTask).toEqual({ taskId: 'run-y', operationId: later });
+  });
+
+  it('stores a reconcile’s submission again when it ends unconfirmed, though another page gave it up meanwhile', async () => {
+    let posts = 0;
+    let answer: ((response: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? ++posts === 1 ? json({ error: { code: 'unknown', message: '连接中断' } }, 503) : new Promise<Response>(resolve => { answer = resolve; })
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const waiting = result.current.pendingSubmission!;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(answer).toBeDefined());
+    // Another page gives it up while the reconcile is in flight (this page hears it); the reconcile then ends unconfirmed.
+    localStorage.removeItem(PENDING);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    expect(result.current.pendingSubmission).toBeNull();
+    await act(async () => { answer!(json({ error: { code: 'unknown', message: '连接中断' } }, 503)); });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    // Stored again, and waited on here again.
+    expect(result.current.pendingSubmission).toEqual(waiting);
+    expect(JSON.parse(localStorage.getItem(PENDING)!)).toEqual(waiting);
+  });
+
+  it('takes a task another page announced over a reconcile that then ends unconfirmed: nothing stored, nothing said', async () => {
+    let posts = 0;
+    let answer: ((response: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? ++posts === 1 ? json({ error: { code: 'unknown', message: '连接中断' } }, 503) : new Promise<Response>(resolve => { answer = resolve; })
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const waiting = result.current.pendingSubmission!;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(answer).toBeDefined());
+    // Another page's reconcile found the task and announced it (and released the submission).
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: waiting.operationId, taskId: 'run-t', at: 3 }) })); });
+    localStorage.removeItem(PENDING);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    await act(async () => { answer!(json({ error: { code: 'execution_request_timeout', message: 'slow' } }, 408)); });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(localStorage.getItem(PENDING)).toBeNull();
+    expect(result.current.pendingSubmission).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(result.current.confirmedTask).toEqual({ taskId: 'run-t', operationId: waiting.operationId });
+  });
+
+  it('resolves a start whose send ends unconfirmed with the task another page announced for it meanwhile', async () => {
+    let answer: ((response: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? new Promise<Response>(resolve => { answer = resolve; }) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    let started: Promise<string> = Promise.resolve('');
+    act(() => { started = result.current.start('生成报告'); });
+    const operationId = (JSON.parse(localStorage.getItem(PENDING)!) as { operationId: string }).operationId;
+    await waitFor(() => expect(answer).toBeDefined());
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId, taskId: 'run-z', at: 4 }) })); });
+    let taskId = '';
+    await act(async () => { answer!(json({ error: { code: 'unknown', message: '连接中断' } }, 503)); taskId = await started; });
+    expect(taskId).toBe('run-z');
+    expect(result.current.pendingSubmission).toBeNull();
+    expect(result.current.selectedId).toBe('run-z');
+    expect(localStorage.getItem(PENDING)).toBeNull();
+  });
+
+  it('leaves a shown error through the reads this page makes on its own: a give-up’s late read, another page’s news', async () => {
+    let refuse = false;
+    const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ error: { code: 'unknown', message: refuse ? '仍然中断' : '连接中断' } }, 503)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url)));
+    vi.stubGlobal('fetch', fetchMock);
+    const taskReads = () => fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/computer-runs') && init?.method !== 'POST').length;
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const waiting = result.current.pendingSubmission!;
+    const flush = async () => { for (let i = 0; i < 12; i++) await act(async () => { await Promise.resolve(); }); };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    act(() => result.current.discardPending());
+    await flush();
+    // The page that sent it stores it again; a reconcile here fails, and its error is shown.
+    localStorage.setItem(PENDING, JSON.stringify(waiting));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    refuse = true;
+    act(() => result.current.reconcile());
+    await flush();
+    expect(result.current.error).not.toBeNull();
+    const before = taskReads();
+    await act(async () => { vi.advanceTimersByTime(20000); });
+    await flush();
+    expect(taskReads()).toBe(before + 1);
+    expect(result.current.error).not.toBeNull();
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: 'execution-66666666-6666-4666-8666-666666666666', taskId: 'run-o', at: 5 }) })); });
+    await flush();
+    expect(taskReads()).toBe(before + 2);
+    expect(result.current.error).not.toBeNull();
+    vi.useRealTimers();
+    // A read for the user (the conversation shown again) clears it, as before.
+    act(() => { result.current.setVisible(true); });
+    act(() => { result.current.setVisible(true); });
+    await waitFor(() => expect(result.current.error).toBeNull());
+  });
+
+  it('reads the tasks once more after a give-up, once a send another page may have in flight has ended', async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ error: { code: 'unknown', message: '连接中断' } }, 503) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url)));
+    vi.stubGlobal('fetch', fetchMock);
+    const taskReads = () => fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/computer-runs') && init?.method !== 'POST').length;
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    const before = taskReads();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    act(() => result.current.discardPending());
+    await act(async () => { await Promise.resolve(); });
+    expect(taskReads()).toBe(before + 1);
+    await act(async () => { vi.advanceTimersByTime(19000); await Promise.resolve(); });
+    expect(taskReads()).toBe(before + 1);
+    await act(async () => { vi.advanceTimersByTime(1000); await Promise.resolve(); });
+    expect(taskReads()).toBe(before + 2);
+    vi.useRealTimers();
+  });
+
+  it('releases, instead of waiting on, a submission whose task it knows, however it comes back', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ error: { code: 'unknown', message: '连接中断' } }, 503) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    const op = 'execution-77777777-7777-4777-8777-777777777777';
+    const submission = { operationId: op, prompt: '生成报告', runtime: 'openai-agents', model: 'byok_model_a', knowledgeRevisionIds: [] };
+    // Waiting on it here (this page's own copy), it hears the task announced: its copy is released.
+    localStorage.setItem(PENDING, JSON.stringify(submission));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    expect(result.current.pendingSubmission?.operationId).toBe(op);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: op, taskId: 'run-k', at: 6 }) })); });
+    expect(localStorage.getItem(PENDING)).toBeNull();
+    expect(result.current.pendingSubmission).toBeNull();
+    // Stored back by another page whose send ended unconfirmed before it heard of the task: released, not waited on.
+    localStorage.setItem(PENDING, JSON.stringify(submission));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    expect(localStorage.getItem(PENDING)).toBeNull();
+    expect(result.current.pendingSubmission).toBeNull();
+    // Taken up before its event arrives (a start refused for it), a reconcile that ends unconfirmed lets it go quietly.
+    localStorage.setItem(PENDING, JSON.stringify(submission));
+    await act(async () => { await result.current.start('另一个任务').catch(() => undefined); });
+    expect(result.current.pendingSubmission?.operationId).toBe(op);
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.pendingSubmission).toBeNull();
+    expect(localStorage.getItem(PENDING)).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it('still says a lost access when a reconcile of a submission whose task it knows is refused it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? json({ error: { code: 'forbidden', message: 'no access' } }, 403) : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    const op = 'execution-88888888-8888-4888-8888-888888888888';
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: op, taskId: 'run-l', at: 7 }) })); });
+    localStorage.setItem(PENDING, JSON.stringify({ operationId: op, prompt: '生成报告', runtime: 'openai-agents', model: 'byok_model_a', knowledgeRevisionIds: [] }));
+    await act(async () => { await result.current.start('另一个任务').catch(() => undefined); });
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(SaaSApiError));
+    expect((result.current.error as SaaSApiError).status).toBe(403);
+    expect(result.current.pendingSubmission).toBeNull();
+  });
+
+  it('clears a reconcile’s error once its submission settles in another page, and leaves any other', async () => {
+    let posts = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? ++posts === 4 ? json({ error: { code: 'forbidden', message: 'no access' } }, 403) : json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const first = result.current.pendingSubmission!;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    // Another submission's news leaves it; this submission settled in another page (released) clears it.
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: 'execution-99999999-9999-4999-8999-999999999999', taskId: 'run-o', at: 8 }) })); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(result.current.error).not.toBeNull();
+    localStorage.removeItem(PENDING);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    expect(result.current.error).toBeNull();
+    expect(result.current.pendingSubmission).toBeNull();
+    expect(first.operationId).toMatch(/^execution-/);
+    // A lost access said by a reconcile is no submission's: neither a read of this page's own nor that submission
+    // settling elsewhere clears it.
+    await act(async () => { await result.current.start('再生成一份').catch(() => undefined); });
+    const second = result.current.pendingSubmission!;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect((result.current.error as SaaSApiError | null)?.status).toBe(403));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: 'execution-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', taskId: 'run-p', at: 9 }) })); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect((result.current.error as SaaSApiError | null)?.status).toBe(403);
+    localStorage.removeItem(PENDING);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect((result.current.error as SaaSApiError | null)?.status).toBe(403);
+    expect(second.operationId).not.toBe(first.operationId);
+    // A third submission's reconcile error goes once that submission's task is announced.
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('第三份').catch(() => undefined); });
+    const third = result.current.pendingSubmission!;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: third.operationId, taskId: 'run-q', at: 10 }) })); });
+    expect(result.current.error).toBeNull();
+  });
+
+  it('counts a submission replaced in one step as settled, and shows no reconcile error over the one that replaced it', async () => {
+    let posts = 0;
+    let answer: ((response: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? [3, 4].includes(++posts) ? new Promise<Response>(resolve => { answer = resolve; }) : json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    const x = result.current.pendingSubmission!;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    // Another page settles X and stores its own Y, the two events heard as one: X settled here too, its error goes.
+    const y = { ...x, operationId: 'execution-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', prompt: '另一页的任务' };
+    localStorage.setItem(PENDING, JSON.stringify(y));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    expect(result.current.error).toBeNull();
+    expect(result.current.pendingSubmission).toEqual(y);
+    // A reconcile of Y ends unconfirmed after Y was replaced by Z: the page waits on Z, and Y's error is not shown over it.
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(answer).toBeDefined());
+    const z = { ...x, operationId: 'execution-cccccccc-cccc-4ccc-8ccc-cccccccccccc', prompt: '第三页的任务' };
+    localStorage.setItem(PENDING, JSON.stringify(z));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    await act(async () => { answer!(json({ error: { code: 'unknown', message: '连接中断' } }, 503)); });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.pendingSubmission).toEqual(z);
+    expect(result.current.error).toBeNull();
+    expect(JSON.parse(localStorage.getItem(PENDING)!)).toEqual(z);
+    // A lost access is said even so.
+    answer = undefined;
+    act(() => result.current.reconcile());
+    await waitFor(() => expect(answer).toBeDefined());
+    const w = { ...x, operationId: 'execution-dddddddd-dddd-4ddd-8ddd-dddddddddddd', prompt: '第四页的任务' };
+    localStorage.setItem(PENDING, JSON.stringify(w));
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    await act(async () => { answer!(json({ error: { code: 'forbidden', message: 'no access' } }, 403)); });
+    await waitFor(() => expect((result.current.error as SaaSApiError | null)?.status).toBe(403));
+    expect(result.current.pendingSubmission).toEqual(w);
+  });
+
+  it('drops a refused-access alert once a task of this page starts', async () => {
+    let posts = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? ++posts === 1 ? json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+        : posts === 2 ? json({ error: { code: 'forbidden', message: 'no access' } }, 403) : json({ id: 'run-b', status: 'running' }, 202)
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const { result } = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => result.current.activate());
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
+    act(() => result.current.reconcile());
+    await waitFor(() => expect((result.current.error as SaaSApiError | null)?.status).toBe(403));
+    // Settled in another page (access back there): this page's quiet read keeps the alert, and the service is back.
+    localStorage.removeItem(PENDING);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: PENDING })); });
+    await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
+    expect((result.current.error as SaaSApiError | null)?.status).toBe(403);
+    await act(async () => { await result.current.start('再生成一份'); });
+    expect(result.current.error).toBeNull();
   });
 
   it('clears a submission from the store once its task exists', async () => {

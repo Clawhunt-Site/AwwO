@@ -93,10 +93,10 @@ describe('the canvas assistant’s one conversation', () => {
       canvas: { nodes: 1, titles: ['已有节点'], results: false }, recent: [] });
     expect(planRequest).not.toHaveBeenCalled();
     expect(sidebar()!.querySelector('.awwo-assistant-route')).toHaveTextContent('直接执行');
-    const stored = loadPlanningConversation();
-    expect(stored.messages.map(({ role, route, taskId }) => ({ role, route, taskId }))).toEqual([
-      { role: 'user', route: 'execute', taskId: undefined }, { role: 'assistant', route: 'execute', taskId: 'task-1' }]);
-    expect(stored.draft).toBe('');
+    // Saved by an effect that can run a moment after the turn is drawn.
+    await waitFor(() => expect(loadPlanningConversation().messages.map(({ role, route, taskId }) => ({ role, route, taskId }))).toEqual([
+      { role: 'user', route: 'execute', taskId: undefined }, { role: 'assistant', route: 'execute', taskId: 'task-1' }]));
+    expect(loadPlanningConversation().draft).toBe('');
     expect(box()).toHaveValue('');
   });
 
@@ -934,6 +934,63 @@ describe('the canvas assistant’s one conversation', () => {
     expect(box()).toHaveValue('');
     expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'error', content: '已放弃核对这次提交。', route: 'execute' });
     expect(panel().getByRole('button', { name: '改为调整画布' })).toBeEnabled();
+  });
+
+  it('takes a settled request back to unconfirmed while its submission waits again, and out of the box', async () => {
+    seedNode();
+    // Refused here (its request back in the box), then stored again by the page that sent it.
+    savePlanningConversation({ draft: '写一封邮件', messages: [{ id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
+      { id: 'turn-1-task', role: 'assistant', content: '所选模型已不可用。', status: 'error', route: 'execute', operationId: STORED_OP }] });
+    const { host } = fakeHost();
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    expect(panel().getByText('所选模型已不可用。')).toBeVisible();
+    expect(panel().getByRole('button', { name: '改为调整画布' })).toBeEnabled();
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: STORED_OP }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await panel().findByText(UNCONFIRMED)).toBeVisible();
+    expect(panel().queryByText('所选模型已不可用。')).toBeNull();
+    expect(panel().queryByRole('button', { name: '改为调整画布' })).toBeNull();
+    expect(box()).toHaveValue('');
+    expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'unconfirmed', operationId: STORED_OP });
+    // Another submission waiting, or a request edited in the box, is left alone.
+    cleanup(); seedNode();
+    savePlanningConversation({ draft: '改过的请求', messages: [{ id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
+      { id: 'turn-1-task', role: 'assistant', content: '已放弃核对这次提交。', status: 'error', route: 'execute', operationId: STORED_OP }] });
+    const other = render(<CanvasSurface assistantExecution={{ ...host, pendingOperation: 'execution-22222222-2222-4222-8222-222222222222' }}
+      routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    expect(panel().getByText('已放弃核对这次提交。')).toBeVisible();
+    other.rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: STORED_OP }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await panel().findByText(UNCONFIRMED)).toBeVisible();
+    expect(box()).toHaveValue('改过的请求');
+  });
+
+  it('links a task another page announces to the request given up or refused here, and takes it out of the box', async () => {
+    seedNode();
+    savePlanningConversation({ draft: '写一封邮件', messages: [{ id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
+      { id: 'turn-1-task', role: 'assistant', content: '所选模型已不可用。', status: 'error', route: 'execute', operationId: STORED_OP }] });
+    const { host } = fakeHost();
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    rerender(<CanvasSurface assistantExecution={{ ...host, confirmedTask: { taskId: 'task-9', operationId: STORED_OP } }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await panel().findByText('任务卡片 task-9')).toBeVisible();
+    expect(panel().queryByText('所选模型已不可用。')).toBeNull();
+    expect(box()).toHaveValue('');
+    const linked = loadPlanningConversation().messages.at(-1)!;
+    expect(linked).toMatchObject({ taskId: 'task-9', route: 'execute', content: '' });
+    expect(linked.status).toBeUndefined();
+    expect(linked.operationId).toBeUndefined();
+    // Another submission's task links nothing.
+    cleanup(); seedNode();
+    savePlanningConversation({ draft: '', messages: [{ id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
+      { id: 'turn-1-task', role: 'assistant', content: '已放弃核对这次提交。', status: 'error', route: 'execute', operationId: STORED_OP }] });
+    render(<CanvasSurface assistantExecution={{ ...host, confirmedTask: { taskId: 'task-8', operationId: 'execution-22222222-2222-4222-8222-222222222222' } }}
+      routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    expect(panel().getByText('已放弃核对这次提交。')).toBeVisible();
+    expect(panel().queryByText('任务卡片 task-8')).toBeNull();
   });
 
   it('keeps the desktop canvas (no task host) as it was: planning only, nothing routed', async () => {

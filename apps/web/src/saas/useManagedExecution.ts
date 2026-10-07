@@ -25,8 +25,11 @@ const newOperationId = () => `execution-${crypto.randomUUID()}`;
 // while it is in flight, keeps its identity, so it can still be reconciled and never be sent a second time. The key
 // is the account's and this canvas's, in the canvas storage's own namespace.
 const PENDING_KEY = 'awwo.execution.pending-submission.v1';
-const pendingKey = (userId: string, tenantId: string, canvasId: string) =>
-  `awwo.saas:${[userId, tenantId, canvasId].map(encodeURIComponent).join(':')}:${PENDING_KEY}`;
+// A submission that made a task, here or in another page of this canvas, is announced under a sibling key, written and
+// removed at once so only the storage event carries it: the other pages list the task and link it to their request.
+const STARTED_KEY = 'awwo.execution.started-submission.v1';
+const canvasKey = (userId: string, tenantId: string, canvasId: string, name: string) =>
+  `awwo.saas:${[userId, tenantId, canvasId].map(encodeURIComponent).join(':')}:${name}`;
 function readPending(key: string | null): ExecutionInput | null {
   if (!key) return null;
   try {
@@ -53,6 +56,20 @@ function releasePending(key: string | null, operationId: string) {
   try { if (readPending(key)?.operationId === operationId) localStorage.removeItem(key); }
   catch { /* Nothing to remove. */ }
 }
+function announceStarted(key: string | null, operationId: string, taskId: string) {
+  if (!key) return;
+  try { localStorage.setItem(key, JSON.stringify({ operationId, taskId, at: Date.now() })); localStorage.removeItem(key); }
+  catch { /* The other pages list the task when they read the canvas's tasks again. */ }
+}
+function readStarted(value: string | null): { operationId: string; taskId: string } | null {
+  try {
+    const raw = JSON.parse(value || 'null') as { operationId?: unknown; taskId?: unknown } | null;
+    return raw && typeof raw.operationId === 'string' && /^execution-[0-9a-f-]{36}$/.test(raw.operationId)
+      && typeof raw.taskId === 'string' && raw.taskId !== '' && raw.taskId.length <= 200 ? { operationId: raw.operationId, taskId: raw.taskId } : null;
+  } catch { return null; }
+}
+// A send gives up after its 15 s request limit: past this, no send of a submission is still in flight anywhere.
+const SEND_SETTLED_MS = 20000;
 // The refusals the service gives only after it has looked a submission's identity up and found no task under it
 // (createRun, past its operation lookup): a reconcile refused with one of these proves the start never happened. A
 // lost session, access, a body or plan check made before the lookup says nothing about the first send.
@@ -191,28 +208,65 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   const [notice, setNotice] = useState('');
   const [noticeWarning, setNoticeWarning] = useState(false);
   // Only an account's own canvas keeps an unconfirmed submission across reloads; a viewer starts nothing.
-  const storeKey = !readOnly && userId ? pendingKey(userId, tenantId, canvasId) : null;
+  const storeKey = !readOnly && userId ? canvasKey(userId, tenantId, canvasId, PENDING_KEY) : null;
+  const startedKey = !readOnly && userId ? canvasKey(userId, tenantId, canvasId, STARTED_KEY) : null;
   const [pendingSubmission, setPendingSubmission] = useState<ExecutionInput | null>(() => readPending(storeKey));
   // The last submission settled with no task (a reconcile the service definitely refused, or one given up): the canvas
   // settles its request.
   const [startRefusal, setStartRefusal] = useState<{ reason: string; at: number; operationId: string; givenUp?: boolean } | null>(null);
   // Another page of this canvas (a second tab) waiting on a submission, or settling one, is seen here at once. One
   // settled there (its task, a refusal, given up) has this canvas's tasks read again, so a task it did start is listed
-  // here too; one stored again (its send ended unconfirmed after this page gave it up) is waited for again.
+  // here too; one stored again (its send ended unconfirmed after this page gave it up) is waited for again; a task it
+  // announces is linked to the request this page recorded for it, given up or not.
   const pendingNow = useRef(pendingSubmission);
   pendingNow.current = pendingSubmission;
+  // Reads this page makes on its own account (another page settled a submission, a give-up's late read) leave a shown
+  // error as it is: only the user's own actions clear it.
+  const quietRead = useRef(false);
+  const readTasksQuietly = useCallback(() => { quietRead.current = true; setCatalogueRevision(revision => revision + 1); }, []);
+  // The tasks this page knows its submissions made (its own sends, or announced by another page): a send of one that
+  // ends unconfirmed is that task, never a submission to wait on again.
+  const startedTasks = useRef(new Map<string, string>());
+  // The submission a shown error is about (a reconcile's that ended unconfirmed): it is cleared once that submission
+  // settles, here or in another page; any other error stays until the user moves on.
+  const errorAbout = useRef<string | null>(null);
+  const clearErrorAbout = useCallback((operationId: string) => {
+    if (errorAbout.current !== operationId) return;
+    errorAbout.current = null; setError(null);
+  }, []);
   useEffect(() => {
     if (!storeKey) return;
     const sync = (event: StorageEvent) => {
+      if (event.key === startedKey) {
+        const started = readStarted(event.newValue);
+        if (!started) return;
+        startedTasks.current.set(started.operationId, started.taskId);
+        // Stored back by a send here that ended unconfirmed just before this page heard of the task: released.
+        releasePending(storeKey, started.operationId);
+        setConfirmedTask(started);
+        setPendingSubmission(previous => previous?.operationId === started.operationId ? null : previous);
+        setStartRefusal(previous => previous?.operationId === started.operationId ? null : previous);
+        clearErrorAbout(started.operationId);
+        readTasksQuietly();
+        return;
+      }
       if (event.key !== storeKey && event.key !== null) return;
-      const waiting = readPending(storeKey);
-      if (pendingNow.current && !waiting) setCatalogueRevision(revision => revision + 1);
+      // One whose task this page knows (stored back by a send that ended unconfirmed just before its page heard of the
+      // task) is released, not waited on.
+      const stored = readPending(storeKey);
+      const waiting = stored && startedTasks.current.has(stored.operationId) ? null : stored;
+      if (stored && !waiting) releasePending(storeKey, stored.operationId);
+      // The submission waited on until now settled there if another (or none) waits instead.
+      const settled = pendingNow.current && pendingNow.current.operationId !== waiting?.operationId ? pendingNow.current.operationId : null;
+      if (settled) { clearErrorAbout(settled); readTasksQuietly(); }
       setPendingSubmission(waiting);
       if (waiting) setStartRefusal(previous => previous?.operationId === waiting.operationId ? null : previous);
     };
     window.addEventListener('storage', sync);
     return () => window.removeEventListener('storage', sync);
-  }, [storeKey]);
+  }, [storeKey, startedKey, readTasksQuietly, clearErrorAbout]);
+  // A give-up reads the canvas's tasks again once more after any send still in flight elsewhere has ended.
+  const settledRead = useRef<number | undefined>(undefined);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [uncertainResponses, setUncertainResponses] = useState<Record<string, ExecutionResponseInput>>({});
   const [pendingImport, setPendingImport] = useState<ExecutionArtifact | null>(null);
@@ -228,6 +282,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   useEffect(() => {
     if (lastScope.current === scope) return;
     lastScope.current = scope;
+    window.clearTimeout(settledRead.current); startedTasks.current.clear(); quietRead.current = false;
     controllers.current.forEach(controller => controller.abort()); controllers.current.clear();
     importOperations.current.clear(); lock.current = false; shownBefore.current = false;
     runtimeRef.current = null; setRuntime(null); setHistory({ items: [] }); chooseKey(''); setStaleLabel(''); setEffort('');
@@ -235,7 +290,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     setError(null); setNotice(''); setNoticeWarning(false); setPendingSubmission(readPending(storeKey)); setStartRefusal(null); setAnswers({}); setUncertainResponses({});
     setPendingImport(null); setImportTitle(''); setKnowledgeCount(0); setHistoryFailed(false); setConfirmedTask(null);
   }, [scope, chooseKey]);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; controllers.current.forEach(controller => controller.abort()); controllers.current.clear(); }; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; window.clearTimeout(settledRead.current); controllers.current.forEach(controller => controller.abort()); controllers.current.clear(); }; }, []);
 
   // A lost session or access forgets what was read; handleError also shows the error, while the canvas shows a
   // start's or a stop's itself.
@@ -244,13 +299,18 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
       setRun(null); setSelectedId(''); setHistory({ items: [] }); setRuntime(null); setPendingImport(null); setPreview(null);
     }
   }, []);
-  const handleError = useCallback((cause: unknown) => { setError(cause); forgetIfDenied(cause); }, [forgetIfDenied]);
+  const handleError = useCallback((cause: unknown, about: string | null = null) => {
+    setError(cause); errorAbout.current = about; forgetIfDenied(cause);
+  }, [forgetIfDenied]);
 
   // The service and this canvas's tasks, read once the canvas activates them, when they are shown again, and on
   // every explicit refresh.
   useEffect(() => {
+    const quiet = quietRead.current;
+    quietRead.current = false;
     if (!activated) return;
-    const controller = new AbortController(); setLoading(true); setError(null);
+    const controller = new AbortController(); setLoading(true);
+    if (!quiet) setError(null);
     void Promise.allSettled([readExecutionRuntime(tenantId, controller.signal), readExecutionRuns(tenantId, canvasId, controller.signal)]).then(([service, runs]) => {
       if (controller.signal.aborted) return;
       const denied = [service, runs].find(result => result.status === 'rejected' && result.reason instanceof SaaSApiError && [401, 403].includes(result.reason.status));
@@ -343,13 +403,15 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
             : pendingSubmission ? t('上一次提交的结果还没确认，请先核对。', 'The last submission is unconfirmed. Reconcile it first.')
               : knowledgeCount > 8 ? t('知识引用最多 8 份。', 'Use at most eight knowledge references.') : undefined;
 
-  // Lists a created task at once as the open one, before its first read answers (or fails).
+  // Lists a created task at once as the open one, before its first read answers (or fails). A task made proves this
+  // page may start tasks: an alert that access was refused no longer holds.
   const created = (id: string, status: string, text: string) => {
     const now = new Date().toISOString();
     setHistory(previous => ({ ...previous, items: [{ id, status, prompt: text, createdAt: now, updatedAt: now },
       ...previous.items.filter(item => item.id !== id)] }));
     setSelectedId(id); setRun(null); setPendingImport(null); setPreview(null); setDetailRevision(value => value + 1);
     setPendingSubmission(null);
+    setError((previous: unknown) => previous instanceof SaaSApiError && previous.status === 403 ? null : previous);
   };
   // The canvas names each request's submission, so the conversation knows which turn a reconcile settles.
   const start = async (text: string, operationId: string = newOperationId()): Promise<string> => {
@@ -371,10 +433,17 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     try {
       const run = await createExecutionRun(tenantId, canvasId, input, controller.signal);
       created(run.id, run.status, prompt);
+      startedTasks.current.set(operationId, run.id);
+      // Announced before it is released, so another page links the task before it would call the request lost.
+      announceStarted(startedKey, operationId, run.id);
       releasePending(storeKey, operationId);
       return run.id;
     } catch (cause) {
       const unconfirmed = !controller.signal.aborted && isUncertain(cause);
+      // Another page announced this submission's task while the send was in flight (its reconcile found it; hearing it
+      // released the stored copy): started.
+      const announced = unconfirmed ? startedTasks.current.get(operationId) : undefined;
+      if (announced) { created(announced, 'queued', prompt); return announced; }
       // Stored again: another page may have given it up while it was in flight, before its outcome was unknown.
       if (unconfirmed) { claimPending(storeKey, input); setPendingSubmission(input); }
       // A refused first send settles it: nothing exists under a new identity. An abort (the page going away) leaves
@@ -394,28 +463,49 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     try {
       const run = await createExecutionRun(tenantId, canvasId, input, signal);
       if (!signal.aborted) {
-        created(run.id, run.status, input.prompt); releasePending(storeKey, input.operationId);
+        created(run.id, run.status, input.prompt); startedTasks.current.set(input.operationId, run.id);
+        announceStarted(startedKey, input.operationId, run.id); releasePending(storeKey, input.operationId);
         setConfirmedTask({ taskId: run.id, operationId: input.operationId });
       }
     } catch (cause) {
+      if (signal.aborted) throw cause;
+      // Its task announced by another page while this reconcile was in flight: settled there and linked here, so it is
+      // neither waited on nor stored; only a lost session or access is still said.
+      if (startedTasks.current.has(input.operationId)) {
+        setPendingSubmission(previous => previous?.operationId === input.operationId ? null : previous);
+        releasePending(storeKey, input.operationId);
+        if (cause instanceof SaaSApiError && [401, 403].includes(cause.status)) throw cause;
+        return;
+      }
       // Only a refusal that proves the start never happened settles it; any other keeps it waiting for another
-      // reconcile (or to be given up on by hand), as the first send may have started the task.
-      if (!signal.aborted && cause instanceof SaaSApiError && NEVER_STARTED.has(cause.code)) {
+      // reconcile (or to be given up on by hand), as the first send may have started the task. Kept waiting, it is
+      // stored again (another page may have given it up while this reconcile was in flight), and this page waits on
+      // what the store then holds.
+      if (cause instanceof SaaSApiError && NEVER_STARTED.has(cause.code)) {
         setPendingSubmission(null); releasePending(storeKey, input.operationId);
         setStartRefusal({ reason: saasErrorMessage(cause, locale), at: Date.now(), operationId: input.operationId });
+        throw cause;
       }
-      throw cause;
+      const kept = claimPending(storeKey, input);
+      setPendingSubmission(kept ? input : readPending(storeKey));
+      // Its error is this submission's, cleared once the submission settles; with another one waiting instead it would
+      // only stand over that one, so it is not shown. A lost session or access is said either way, as no submission's.
+      const denial = cause instanceof SaaSApiError && [401, 403].includes(cause.status);
+      if (alive.current && (kept || denial)) handleError(cause, kept && !denial ? input.operationId : null);
     }
   });
   // Gives the waiting submission up without knowing its outcome: it is neither reconciled nor sent again from here. The
   // canvas's tasks are read again, so one it did start is listed, and its request is settled as given up (not put back
-  // in the box: sending it again unread could start a second task).
+  // in the box: sending it again unread could start a second task). They are read once more after a send that another
+  // page may still have in flight has ended, in case that page goes away before it announces a task.
   const discardPending = () => {
     const input = pendingSubmission;
     if (!input || lock.current) return;
     releasePending(storeKey, input.operationId);
     setPendingSubmission(null);
     setCatalogueRevision(revision => revision + 1);
+    window.clearTimeout(settledRead.current);
+    settledRead.current = window.setTimeout(() => { if (alive.current) readTasksQuietly(); }, SEND_SETTLED_MS);
     setStartRefusal({ reason: t('已放弃核对这次提交。如果任务其实已经开始，会列在这张画布之前的任务里；确认没有开始后，可以复制上面的请求重新发送。',
       'This submission was given up unconfirmed. If its task did start, it is listed among this canvas’s earlier tasks; once you are sure it did not, copy the request above and send it again.'),
     at: Date.now(), operationId: input.operationId, givenUp: true });

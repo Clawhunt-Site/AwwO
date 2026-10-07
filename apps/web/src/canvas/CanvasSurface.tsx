@@ -2215,12 +2215,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // tab's submission), and a turn without one (saved before identities were kept) has no submission waiting for it.
   const unconfirmedTurn = (messages: PlanningMessage[], operationId: string) =>
     messages.findIndex(message => message.status === 'unconfirmed' && message.operationId === operationId);
+  // The request a reply answers.
+  const requestBefore = (messages: PlanningMessage[], index: number) =>
+    messages.slice(0, index).reverse().find(message => message.role === 'user')?.content ?? '';
   // A submission settled with no task (a reconcile refused in a way that proves the start never happened, or given up)
   // settles its request: it says why, and a refused one is offered again in the box (a given-up one is not: the task it
   // may have started is listed only once read). Settled once: the turn is no longer unconfirmed, and never while the
   // same submission waits again (another tab stored it back).
   const startRefusal = assistantExecution?.startRefusal;
-  const waitingAgain = startRefusal !== undefined && assistantExecution?.pendingOperation === startRefusal.operationId;
+  const waitingOperation = assistantExecution?.pendingOperation;
+  const waitingAgain = startRefusal !== undefined && waitingOperation === startRefusal.operationId;
   useLayoutEffect(() => {
     if (!startRefusal || readOnly || waitingAgain) return;
     setPlanning(previous => {
@@ -2228,22 +2232,37 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (index < 0) return previous;
       const messages = [...previous.messages];
       messages[index] = { ...messages[index], status: 'error', content: startRefusal.reason };
-      const request = messages.slice(0, index).reverse().find(message => message.role === 'user');
-      return { draft: previous.draft || (startRefusal.givenUp ? '' : request?.content || ''), messages };
+      return { draft: previous.draft || (startRefusal.givenUp ? '' : requestBefore(messages, index)), messages };
     });
   }, [startRefusal, readOnly, waitingAgain]);
-  // A start reconciled in this page names its task, and its unconfirmed request becomes that task's turn.
+  // A settled submission waiting again (the page that sent it stored it back: its send ended unconfirmed after it was
+  // given up here) is unconfirmed again: its request is reconciled, never handed to the canvas or sent from the box.
+  useLayoutEffect(() => {
+    if (!waitingOperation || readOnly) return;
+    setPlanning(previous => {
+      const index = previous.messages.findIndex(message => message.status === 'error' && message.operationId === waitingOperation);
+      if (index < 0) return previous;
+      const messages = [...previous.messages];
+      messages[index] = { ...messages[index], status: 'unconfirmed', content: t('assistant.startUnconfirmed') };
+      const request = requestBefore(messages, index);
+      return { draft: request && previous.draft.trim() === request ? '' : previous.draft, messages };
+    });
+  }, [waitingOperation, readOnly]);
+  // A start confirmed by a reconcile here, or announced by another page of this canvas, names its task: the request
+  // recorded for it, unconfirmed or settled with no task (given up), becomes that task's turn, and leaves the box.
   const confirmedTask = assistantExecution?.confirmedTask;
   useLayoutEffect(() => {
     if (!confirmedTask || readOnly) return;
     setPlanning(previous => {
       if (previous.messages.some(message => message.taskId === confirmedTask.taskId)) return previous;
-      const index = unconfirmedTurn(previous.messages, confirmedTask.operationId);
+      const index = previous.messages.findIndex(message => (message.status === 'unconfirmed' || message.status === 'error')
+        && message.operationId === confirmedTask.operationId);
       if (index < 0) return previous;
-      const { status: _status, operationId: _operation, ...reply } = previous.messages[index];
+      const { status, operationId: _operation, ...reply } = previous.messages[index];
       const messages = [...previous.messages];
       messages[index] = { ...reply, content: '', taskId: confirmedTask.taskId };
-      return { ...previous, messages };
+      const request = status === 'error' ? requestBefore(messages, index) : '';
+      return { draft: request && previous.draft.trim() === request ? '' : previous.draft, messages };
     });
   }, [confirmedTask, readOnly]);
   useEffect(() => () => { pendingRef.current?.controller?.abort(); pendingRef.current = null; }, []);
@@ -2365,7 +2384,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   // Only the latest unconfirmed request can still be reconciled, and only while the host keeps its submission (it
   // survives a reload); any other says where to look instead of pointing at a button that is not there.
-  const waitingOperation = assistantExecution?.pendingOperation;
   const reconcilable = waitingOperation ? unconfirmedTurn(planning.messages, waitingOperation) : -1;
   const shownMessages = assistantExecution ? planning.messages.map((message, index) => message.status === 'unconfirmed' && index !== reconcilable
     ? { ...message, content: t('assistant.startUnconfirmedLost') } : message) : planning.messages;
