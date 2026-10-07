@@ -219,3 +219,13 @@ AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来�
 - **例外**：Claude Fable 5 / 5.1 对全部流量留存最长 30 天并对分类器标记内容做 AWS 人工审阅（模型卡要求账号使用 `aws_review` 留存设置）——已于 2026-10-07 下架。OpenAI 自有的 GPT-5.4 至 GPT-6 系列对标记流量留存最长 30 天：目前不在开放列表里（Marketplace 付款问题），开放前要先评估；Sonnet 5.5 与 GPT-6.1 Sol 不在例外列表上，留存情况待 AWS 确认。OpenAI 的 Bedrock 协议 §2.3 还限制向第三方提供「开放式或自动化的编码能力」，开放 GPT 前一并确认。
 - **账号留存设置**：Fable 能被调用，说明 us-east-1 的留存设置很可能是 `aws_review`。下架 Fable 后可以把它设为 `none`（零留存），Bedrock 会拒绝任何需要留存的模型，从而证明剩余模型都不留存；但这是账号级设置，研发在同一账号里自用的 Fable 5 也会被拒，需要运营方决定。该设置不跨区域传播。
 - **请 AWS 确认**：① 本账号 us-east-1 的当前留存设置，以及 2026-10-05 到 10-07 生产发往 Fable 5.1 的流量保存在哪、保存多久；② 40 个模型是否都允许 `none`；③ us-east-1 的设置是否覆盖被 `global.` / `us.` 路由到其他区域的调用；④ Bedrock 的提示缓存（最长 1 小时，Kimi K3 至少 30 分钟）是否算存储；⑤ Anthropic 是否从不接收 Claude 内容；⑥ 非例外模型的滥用检测具体检查并保留什么。
+
+
+## 2026-10-07 晚：零留存已生效；前沿模型被拒与零留存无关
+
+- **零留存有两个设置**：AWS 文档写明，`bedrock-runtime`（我们的 Converse 桥走这条）的留存模式由**控制面**的账号设置决定（`aws bedrock get-/put-account-data-retention`），`bedrock-mantle` 端点的 `PUT /v1/data_retention` 只管 Messages / Chat Completions / Responses 接口。两者分开存储。
+  - 11:44Z（业主决定零留存，「我不用 fable」）只改了 mantle：us-east-1、us-east-2、us-west-2 从 `inherit` 设为 `none`。控制面没动：us-east-1 仍是 `provider_data_share`（2026-08-21 起），us-east-2、us-west-2 是 `inherit`。所以 11:45Z 经 Converse 调用 Fable 仍有应答，上文「很可能是 `aws_review`」实际是 `provider_data_share`。
+  - 14:51Z 把控制面的三个美国区域都设为 `none`，读回均为 `none`。改回：`aws bedrock put-account-data-retention --mode provider_data_share --region us-east-1`（us-east-2、us-west-2 用 `--mode inherit`），mantle 用 `PUT {"mode":"inherit"}`，都立即可逆。
+  - 同时（11:46Z）从实例角色的 `awwo-bedrock-cross-region-profiles` 删去 6 个 Fable 资源（91 → 85）。
+- **前沿模型被拒**：约 12:09Z 起，Claude Opus 5.5、Opus 5、Sonnet 5、Opus 4.8，Grok 4.7、4.6 返回 `AccessDeniedException: … is not available for this account … contact AWS Sales`。这发生在控制面仍是最宽松的 `provider_data_share` 的时候：14:4xZ 在 us-east-1 对 40 个已核验模型各发一次 8-token 调用，33 个应答，被拒的正是这 6 个（Kimi K3 是探针的 maxTokens 低于它的下限）；Opus 5.5 在 eu-west-1（未设置）也被拒得一模一样；`GetFoundationModelAvailability` 对 Opus 5.5、Sonnet 5 仍报 `AUTHORIZED` / `AVAILABLE`。AWS 文档列出的需要留存的模型只有 Fable 5 / 5.1 与 GPT-5.4 至 GPT-6 系列。结论：**拒绝来自账号层面的模型访问，与零留存无关**，改回留存设置不会恢复。设为 `none` 后立即复测，应答的仍是同样的 33 个。
+- **请 AWS 确认**（接上面的列表）：⑦ 本账号自 2026-10-07 12:09Z 起调用 Opus 5.5 等前沿模型返回 “not available for this account”，而可用性接口仍报已授权，原因是什么、怎样恢复；⑧ 零留存下 40 个已核验模型是否都可调用（14:51Z 设置后复测 33 个应答，与设置前相同）。
