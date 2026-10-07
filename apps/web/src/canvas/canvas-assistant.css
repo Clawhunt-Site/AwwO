@@ -91,6 +91,8 @@
 .awwo-assistant-readonly { margin: 0; color: var(--awwo-muted, #68736d); font-size: 12px; line-height: 1.55; }
 .awwo-assistant-message.is-pending { opacity: .62; }
 .awwo-assistant-route-notice { margin: 0 0 10px; color: var(--awwo-muted, #68736d); font-size: 12px; line-height: 1.55; }
+/* A standing notice under the composer: no personal or sensitive data; AI output can be wrong. */
+.awwo-composer-disclaimer { display: block; margin-top: 6px; color: var(--awwo-muted, #68736d); font-size: 11px; line-height: 1.45; }
 .awwo-assistant-undo { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 4px 1px; border: 0; border-radius: 3px; color: var(--awwo-muted, #68736d); background: transparent; font-size: 11px !important; }
 .awwo-assistant-undo:hover:not(:disabled) { color: var(--awwo-accent, #286454); }
 :root[data-theme='dark'] .awwo-canvas-assistant { --assistant-on-accent: #142a20; }

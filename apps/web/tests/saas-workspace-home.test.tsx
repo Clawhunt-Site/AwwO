@@ -70,7 +70,7 @@ it('creates one canvas named after the request, hands the request to it and open
   expect(box()).not.toHaveFocus();
   expect(box()).toHaveAttribute('maxlength', '8000');
   expect(box()).toHaveAttribute('enterkeyhint', 'send');
-  expect(box()).toHaveAccessibleDescription('Enter 发送 · Shift+Enter 换行');
+  expect(box()).toHaveAccessibleDescription('Enter 发送 · Shift+Enter 换行 请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。');
   fireEvent.change(box(), { target: { value: '  请帮我搭建销售周报流程：先统一口径\n再汇总  ' } });
   expect(readHomeDraft(draftScope)).toBe('  请帮我搭建销售周报流程：先统一口径\n再汇总  ');
   fireEvent.keyDown(box(), { key: 'Enter' });
@@ -291,4 +291,9 @@ it('quick starters only fill a draft and let the user restore their own words be
   expect(box()).toHaveValue('我的原始任务');
   expect(readHomeDraft(draftScope)).toBe('我的原始任务');
   expect(posts).toHaveLength(0);
+});
+it('tells everyone not to enter personal or sensitive information before the first request', () => {
+  server();
+  view();
+  expect(screen.getByText('请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。')).toBeVisible();
 });

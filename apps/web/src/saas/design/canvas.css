@@ -506,7 +506,7 @@ html:root .saas-canvas-shell {
       &:not(:disabled):active { transform: scale(.94); }
       &:disabled { opacity: .3; }
     }
-    & .awwo-node :is(.canvas-composer-notice, .canvas-composer-blocked) { padding-inline: 4px; color: var(--saas-subtle); font-size: 11px; line-height: 1.5; }
+    & .awwo-node :is(.canvas-composer-notice, .canvas-composer-disclaimer, .canvas-composer-blocked) { padding-inline: 4px; color: var(--saas-subtle); font-size: 11px; line-height: 1.5; }
     & .awwo-node .awwo-node-empty strong { color: var(--saas-text); font-size: 15px; font-weight: 600; letter-spacing: 0; }
     & .awwo-node .awwo-node-empty > span:not(.awwo-node-empty-glyph) { color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.7; }
     & .awwo-starter-prompts button {
@@ -801,6 +801,7 @@ html:root .saas-canvas-shell {
     &:hover:not(:disabled) { background: var(--saas-field); color: var(--saas-text); text-decoration: none; box-shadow: 0 0 0 1px var(--saas-border-strong) inset; translate: 0 -1px; }
   }
   .awwo-assistant-undo { color: var(--saas-muted); font-size: var(--saas-text-xs) !important; }
+  .awwo-composer-disclaimer { color: var(--saas-subtle); font-size: var(--saas-text-xs); }
   .awwo-assistant-undo:hover:not(:disabled) { color: var(--saas-text); }
   .awwo-planner-connection { color: var(--saas-muted); font-size: var(--saas-text-xs); }
   .awwo-planner-connection > span { background: var(--saas-warning-dot); }
@@ -909,6 +910,7 @@ html:root .saas-canvas-shell {
 .awwo-workspace .canvas-root .awwo-node .canvas-composer-send:not(:disabled):active { transform: scale(.94); }
 .awwo-workspace .canvas-root .awwo-node .canvas-composer-send:disabled { opacity: .35; }
 .awwo-workspace .canvas-root .awwo-node .canvas-composer-notice,
+.awwo-workspace .canvas-root .awwo-node .canvas-composer-disclaimer,
 .awwo-workspace .canvas-root .awwo-node .canvas-composer-blocked { padding-inline: 4px; font-size: 11px; line-height: 1.5; }
 .awwo-workspace .canvas-root .awwo-node .canvas-composer-blocked { color: var(--saas-muted); }
 .awwo-workspace .canvas-root .awwo-node .awwo-node-empty strong { font-size: 15px; font-weight: 600; letter-spacing: -.2px; }

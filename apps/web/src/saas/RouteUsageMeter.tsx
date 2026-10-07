@@ -39,7 +39,7 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
   if (!usage) return null;
   if (usage.plan) return <PaidMeter usage={usage} plan={usage.plan} open={open} setOpen={setOpen} reload={reload.current} />;
   if (!usage.limited) return null;
-  const names: Record<RouteName, string> = { gate: t('Claude / GPT 等', 'Claude / GPT and others'), bedrock: t('Bedrock（Opus 5.5、Fable 5.1 等）', 'Bedrock (Opus 5.5, Fable 5.1 and others)'), media: t('图片 / 视频', 'Images / video') };
+  const names: Record<RouteName, string> = { gate: t('Claude / GPT 等', 'Claude / GPT and others'), bedrock: t('Bedrock（Opus 5.5 等）', 'Bedrock (Opus 5.5 and others)'), media: t('图片 / 视频', 'Images / video') };
   const short: Record<RouteName, string> = { gate: 'Claude / GPT', bedrock: 'Bedrock', media: t('图片视频', 'images / video') };
   const state = meterState(usage);
   const left = state.left;

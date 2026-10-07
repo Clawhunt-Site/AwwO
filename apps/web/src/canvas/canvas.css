@@ -539,6 +539,13 @@
   line-height: 1.5;
   color: var(--muted);
 }
+/* A standing notice under the input: no personal or sensitive data; AI output can be wrong. */
+.canvas-root .canvas-composer-disclaimer {
+  display: block;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--muted);
+}
 .canvas-root .canvas-composer-blocked {
   font-size: var(--fs-meta);
   font-weight: var(--fw-med);

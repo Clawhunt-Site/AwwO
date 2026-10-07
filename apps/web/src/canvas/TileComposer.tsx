@@ -44,6 +44,7 @@ export interface TileComposerProps {
 export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
+  const disclaimerId = useId();
   const [localInput, setLocalInput] = useState('');
   const input = draft ?? localInput;
   const setInput = (value: string) => { setLocalInput(value); onDraftChange?.(value); };
@@ -84,6 +85,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
           rows={2}
           placeholder={t('composer.placeholder')}
           aria-label={t('composer.placeholder')}
+          aria-describedby={blocked ? undefined : disclaimerId}
           disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
@@ -102,6 +104,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
           <span>{t(streaming ? 'composer.sending' : 'composer.send')}</span>
         </button>
       </div>
+      {blocked ? null : <small id={disclaimerId} className="canvas-composer-disclaimer">{t('composer.disclaimer')}</small>}
     </div>
   );
 }

@@ -81,6 +81,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const errorId = useId();
   const noteId = useId();
   const examplesId = useId();
+  const disclaimerId = useId();
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // Planning needs a ready engine. Knowing that before sending lets the page say so honestly;
@@ -207,7 +208,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     && !runtime.reason && Array.isArray(runtime.models) && runtime.models.length > 0;
   const plannerIssue = runtime === null || executionReady ? ''
     : (runtime.reason ? saasErrorMessage(runtime.reason, locale) : t('执行引擎尚未就绪', 'the execution engine is not ready')).replace(/[。.]\s*$/u, '');
-  const describedBy = [hintId, error !== null ? errorId : '', plannerIssue ? noteId : ''].filter(Boolean).join(' ');
+  const describedBy = [hintId, error !== null ? errorId : '', plannerIssue ? noteId : '', disclaimerId].filter(Boolean).join(' ');
 
   return <>
     <section className="saas-home-hero" aria-labelledby={titleId}>
@@ -226,6 +227,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
           <button type="submit" className="saas-primary saas-home-send" disabled={busy || !draft.trim()}><span>{busy ? t('正在创建…', 'Creating…') : text('assistant.generate')}</span><ArrowUp size={15} aria-hidden="true" /></button>
         </div>
       </form>
+      <small id={disclaimerId} className="saas-home-disclaimer">{text('composer.disclaimer')}</small>
       <div className="saas-home-quick-starts" role="group" aria-label={t('快速填写需求', 'Start with a prompt')}>
         {['product-site-trial', 'weekly-sales-report', 'competitor-research'].map(id => {
           const item = STARTER_CASES.find(candidate => candidate.id === id)!;

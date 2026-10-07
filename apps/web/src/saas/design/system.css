@@ -499,6 +499,7 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-home-composer textarea[aria-busy='true'] { opacity: .7; }
 .saas-home-composer-actions { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .saas-home-hint { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.saas-home-disclaimer { display: block; margin-top: 8px; color: var(--saas-subtle); font-size: var(--saas-text-xs); line-height: 1.5; text-align: center; }
 /* While you type, the keyboard shortcut shows beside the send button. */
 @media (min-width: 761px) and (hover: hover) {
   .saas-home-composer:focus-within .saas-home-hint { position: static; width: auto; height: auto; overflow: visible; clip-path: none; margin-left: auto; color: var(--saas-subtle); font-size: var(--saas-text-xs); }

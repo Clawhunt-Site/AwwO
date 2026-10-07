@@ -54,8 +54,8 @@ it('names the one route that ran out instead of saying every premium call is gon
   const chip = await screen.findByRole('button', { name: '剩 18 次 · Bedrock 已用完' });
   expect(chip).not.toHaveClass('is-out');
   fireEvent.click(chip);
-  expect(await screen.findByText('Bedrock（Opus 5.5、Fable 5.1 等）')).toBeVisible();
-  expect(row('Bedrock（Opus 5.5、Fable 5.1 等）')).toHaveClass('is-out');
+  expect(await screen.findByText('Bedrock（Opus 5.5 等）')).toBeVisible();
+  expect(row('Bedrock（Opus 5.5 等）')).toHaveClass('is-out');
   expect(row('Claude / GPT 等')).not.toHaveClass('is-out');
   expect(row('总次数').textContent).toBe('总次数12 / 30');
 });
@@ -67,7 +67,7 @@ it('does not call premium used up while a route without a limit of its own can s
   expect(chip).not.toHaveClass('is-out');
   fireEvent.click(chip);
   expect(await screen.findAllByText('不单独限次')).toHaveLength(2);
-  expect(row('Bedrock（Opus 5.5、Fable 5.1 等）').textContent).toBe('Bedrock（Opus 5.5、Fable 5.1 等）不单独限次');
+  expect(row('Bedrock（Opus 5.5 等）').textContent).toBe('Bedrock（Opus 5.5 等）不单独限次');
   expect(row('Claude / GPT 等')).toHaveClass('is-out');
 });
 
@@ -84,7 +84,7 @@ it('warns once every route that offers calls is used up, and shows a closed rout
   expect(chip).toHaveClass('is-out');
   fireEvent.click(chip);
   expect(await screen.findByText('不含')).toBeVisible();
-  expect(row('Bedrock（Opus 5.5、Fable 5.1 等）')).not.toHaveClass('is-out');
+  expect(row('Bedrock（Opus 5.5 等）')).not.toHaveClass('is-out');
   // A closed route is never "used up", so it alone does not turn the chip into a warning.
   cleanup();
   showing(usage({ gate: { limit: 3, used: 0 }, bedrock: { limit: 0, used: 0 } }));

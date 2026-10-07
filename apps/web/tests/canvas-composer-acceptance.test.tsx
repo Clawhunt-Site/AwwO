@@ -15,3 +15,12 @@ it('retains the draft until the host confirms durable acceptance', () => {
   act(() => accepted?.());
   expect(input).toHaveValue('');
 });
+it('shows the standing notice against personal or sensitive information under the input', () => {
+  render(<TileComposer streaming={false} onSend={vi.fn()} />);
+  expect(screen.getByText(/Don’t enter personal or sensitive data|请勿输入身份证号/)).toBeVisible();
+  expect(screen.getByTestId('composer-input')).toHaveAccessibleDescription(/Don’t enter personal or sensitive data|请勿输入身份证号/);
+});
+it('leaves the notice out of a composer that is blocked, as for a view-only reader', () => {
+  render(<TileComposer blocked streaming={false} onSend={vi.fn()} />);
+  expect(screen.queryByText(/Don’t enter personal or sensitive data|请勿输入身份证号/)).toBeNull();
+});

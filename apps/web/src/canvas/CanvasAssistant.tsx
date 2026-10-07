@@ -152,6 +152,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const routing = Boolean(pending);
   const sendLabel = submitLabel || t(unified ? 'assistant.send' : welcome ? 'assistant.generate' : 'assistant.modify');
   const errorId = useId();
+  const disclaimerId = useId();
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const canSend = !busy && !routing && !recovery && !submitDisabled && Boolean(draft.trim());
@@ -284,7 +285,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       {unified?.notice ? <p className="awwo-assistant-route-notice" role="status">{unified.notice}</p> : null}
       {unified?.notices}
       <form className="awwo-assistant-composer" aria-label={t('assistant.form')} onSubmit={event => { event.preventDefault(); send(); }}>
-        <textarea ref={input} aria-label={t('assistant.input')} aria-describedby={error ? errorId : undefined}
+        <textarea ref={input} aria-label={t('assistant.input')} aria-describedby={error ? errorId : disclaimerId}
           placeholder={t(unified ? (welcome ? 'assistant.unifiedWelcomePlaceholder' : 'assistant.unifiedPlaceholder')
             : welcome ? 'assistant.welcomePlaceholder' : 'assistant.panelPlaceholder')}
           value={draft} disabled={waiting} rows={3} maxLength={8000}
@@ -295,6 +296,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
           <button type="submit" className="awwo-assistant-send" disabled={!canSend}><span>{sendLabel}</span><ArrowUp size={15} aria-hidden="true" /></button>
         </div>
       </form>
+      <small id={disclaimerId} className="awwo-composer-disclaimer">{t('composer.disclaimer')}</small>
       {unified?.settings}
       {onUndo ? <button type="button" className="awwo-assistant-undo" disabled={waiting || !canUndo} onClick={onUndo}>
         <Undo2 size={14} aria-hidden="true" />{t('assistant.undo')}

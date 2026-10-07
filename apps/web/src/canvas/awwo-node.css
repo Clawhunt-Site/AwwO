@@ -54,6 +54,7 @@
 .canvas-root .awwo-node .canvas-transcript-notice { font-size: 12px; padding: 8px 16px; }
 .canvas-root .awwo-node .canvas-composer { padding: 8px 16px 12px; border: 0; gap: 6px; background: var(--awwo-card); flex-shrink: 0; }
 .canvas-root .awwo-node .canvas-composer-notice,
+.canvas-root .awwo-node .canvas-composer-disclaimer,
 .canvas-root .awwo-node .canvas-composer-blocked { color: var(--awwo-muted); font-size: 11px; line-height: 1.45; }
 .canvas-root .awwo-node .canvas-composer-row { position: relative; align-items: stretch; gap: 8px; }
 .canvas-root .awwo-node .canvas-composer-input { min-height: 56px; max-height: 120px; width: 100%; padding: 8px 12px; font-size: 13px; line-height: 1.55; color: var(--awwo-ink); background: var(--awwo-soft); border: 1px solid var(--awwo-line); border-radius: 10px; resize: vertical; }
@@ -166,7 +167,7 @@
 .canvas-root .awwo-node .canvas-composer-input { min-height: 80px; padding: 10px 12px 28px; border-radius: 12px; background: var(--awwo-soft); font-size: 12px; resize: none; }
 .canvas-root .awwo-node .canvas-composer-send { position: absolute; right: 7px; bottom: 7px; padding: 5px; min-height: 26px; width: 26px; height: 26px; border-radius: 50%; background: var(--awwo-ink); color: var(--awwo-card); }
 .canvas-root .awwo-node .canvas-composer-send span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.canvas-root .awwo-node .canvas-composer-blocked, .canvas-root .awwo-node .canvas-composer-notice { font-size: 10px; line-height: 1.4; }
+.canvas-root .awwo-node .canvas-composer-blocked, .canvas-root .awwo-node .canvas-composer-notice, .canvas-root .awwo-node .canvas-composer-disclaimer { font-size: 10px; line-height: 1.4; }
 /* Width mirrors DELIVERY_DRAWER_WIDTH in nodePresentation.ts. */
 .canvas-root .awwo-node-delivery-drawer { width: 320px; flex: 0 0 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--awwo-line); background: var(--awwo-card); }
 .canvas-root .awwo-node-delivery-drawer > header { min-height: 37px; padding: 5px 10px; border-bottom: 1px solid var(--awwo-line); display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
