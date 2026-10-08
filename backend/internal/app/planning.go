@@ -97,14 +97,7 @@ var planFieldTypes = []string{"text", "markdown", "html", "number", "boolean", "
 // This gate validates the transport schema. Frontend applyCanvasPlan separately
 // validates references, field compatibility, cycles and the currently loaded graph.
 func validatePlan(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if strings.HasPrefix(raw, "```json") {
-		raw = strings.TrimPrefix(raw, "```json")
-		raw = strings.TrimSuffix(strings.TrimSpace(raw), "```")
-	} else if strings.HasPrefix(raw, "```") {
-		raw = strings.TrimPrefix(raw, "```")
-		raw = strings.TrimSuffix(strings.TrimSpace(raw), "```")
-	}
+	raw = planJSONBody(raw)
 	if utf8.RuneCountInString(raw) > 120000 {
 		return false
 	}
@@ -269,15 +262,31 @@ func oneOf(v any, values ...string) bool {
 	return false
 }
 
-func normalizePlanJSON(raw string) string {
+// planJSONBody is the plan's JSON text inside the planner's answer: the whole answer, or the body of a ```json (or
+// bare ```) block. Some models (Claude Haiku 4.5 on 2026-10-08) close the block and then add a note after it. The
+// note is not part of the plan, so the block ends at its closing fence, found after the first JSON value so a fence
+// inside a string cannot end it early. Only whitespace may separate that value from the closing fence, and an
+// answer without a fence is returned whole, so anything else after the plan still fails the schema gate.
+func planJSONBody(raw string) string {
 	raw = strings.TrimSpace(raw)
-	if strings.HasPrefix(raw, "```json") {
-		raw = strings.TrimPrefix(raw, "```json")
-		raw = strings.TrimSuffix(strings.TrimSpace(raw), "```")
-	} else if strings.HasPrefix(raw, "```") {
-		raw = strings.TrimPrefix(raw, "```")
-		raw = strings.TrimSuffix(strings.TrimSpace(raw), "```")
+	if !strings.HasPrefix(raw, "```") {
+		return raw
 	}
+	body := strings.TrimPrefix(strings.TrimPrefix(raw, "```"), "json")
+	d := json.NewDecoder(strings.NewReader(body))
+	var value json.RawMessage
+	if d.Decode(&value) != nil {
+		return body
+	}
+	end := int(d.InputOffset())
+	if rest := strings.TrimSpace(body[end:]); rest == "" || strings.HasPrefix(rest, "```") {
+		return body[:end]
+	}
+	return body
+}
+
+func normalizePlanJSON(raw string) string {
+	raw = planJSONBody(raw)
 	var buffer bytes.Buffer
 	if json.Compact(&buffer, []byte(raw)) == nil {
 		return buffer.String()

@@ -56,6 +56,7 @@ The format is based on Keep a Changelog, with project-specific notes for enginee
 
 ### Fixed
 
+- Accept a canvas plan that the model follows with a note. Claude Haiku 4.5 answers with a ```json block and then a sentence after its closing fence, which the plan gate read as part of the JSON, so every such plan failed as `invalid_canvas_plan`. The block now ends at its closing fence (found after the JSON value, so a fence inside a string cannot end it) and the note is dropped; text between the plan and the fence, a second value, an unfenced plan with a note and a preamble are still refused.
 - Accept html fields in canvas plans. The planner is told it may add html fields (a page deliverable), but the server's plan gate refused the type, so any such plan failed as `invalid_canvas_plan`. The gate's field types are now pinned to the canvas's own list.
 - Say why a task ended without its result: computer_busy (the workspace runs one task at a time), computer_unavailable, computer_rejected and the other task errors read as a sentence instead of a code.
 - Keep the camera where it is on undo and redo. Each undo step is a copy of the canvas as it was, and restoring one also put back the camera saved at that moment, while the screen stayed where it was: the canvas saved a camera you could not see and reopened on it. The camera is not part of the history, so an undo or a redo now keeps the camera the canvas has.
