@@ -281,3 +281,16 @@ func TestPostgresTaskFrameBudgetRejectsBeforeInvocation(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskFrameKeepsExactQuantifiersAndAllowsExplicitUserRevision(t *testing.T) {
+	frame := &taskFrame{Version: 1, Source: "manual", Constraints: []string{"6人，2小时，300元，3条注意事项"}, AcceptanceCriteria: []string{}}
+	system := taskFrameSystemPrompt("Review the draft", frame)
+	for _, rule := range []string{"exactly", "at least", "at most", "explicit user revision", "node's assigned responsibility"} {
+		if !strings.Contains(system, rule) {
+			t.Errorf("missing requirement policy %q", rule)
+		}
+	}
+	if !strings.Contains(system, "6人，2小时，300元，3条注意事项") {
+		t.Fatal("original requirement lost")
+	}
+}

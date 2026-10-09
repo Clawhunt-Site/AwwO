@@ -305,3 +305,34 @@ it('knows a plan that changed nothing but the nodes it added', () => {
   expect(onlyAdds(plan({ type: 'update_node', nodeId: 'target', title: '改名' }))).toBe(false);
   expect(onlyAddedNodes(doc, doc, [])).toBe(false);
 });
+
+describe('original user requirements survive planning', () => {
+  it('keeps exact requirements on both the author and final reviewer even when the model relaxes them', () => {
+    const request = '6人读书会，2小时，预算300元，最终包含3条注意事项。不要联网。';
+    const proposal = plan(
+      { type: 'add_node', ref: 'author', templateId: 'general', persona: '写活动方案' },
+      { type: 'add_node', ref: 'final', templateId: 'review', persona: '检查至少3条注意事项' },
+    );
+    const applied = applyCanvasPlan(emptyDocument(), proposal, 'zh', request);
+    for (const node of applied.doc.nodes) {
+      expect((node as SessionNode).taskFrame).toEqual({ version: 1, source: 'manual', constraints: [request], acceptanceCriteria: [] });
+    }
+  });
+
+  it('preserves existing human requirements and does not attach a new request to unrelated nodes', () => {
+    const before = fixture();
+    (before.nodes[0] as SessionNode).taskFrame = { version: 1, source: 'manual', constraints: ['Original requirement'], acceptanceCriteria: [] };
+    const applied = applyCanvasPlan(before, plan({ type: 'add_node', ref: 'extra', templateId: 'review' }), 'en', 'At least 3 notes; no more than $240.');
+    expect(applied.doc.nodes.find(node => node.id === 'source')).toEqual(before.nodes[0]);
+    expect((applied.doc.nodes.find(node => node.id === 'target') as SessionNode).taskFrame).toBeUndefined();
+    expect((applied.doc.nodes.find(node => !['source', 'target'].includes(node.id)) as SessionNode).taskFrame).toMatchObject({ constraints: ['At least 3 notes; no more than $240.'] });
+  });
+
+  it('preserves Unicode in bounded chunks without truncating a long request', () => {
+    const request = '界🙂'.repeat(2000);
+    const applied = applyCanvasPlan(emptyDocument(), plan({ type: 'add_node', ref: 'n', templateId: 'general' }), 'zh', request);
+    const frame = (applied.doc.nodes[0] as SessionNode).taskFrame as { constraints: string[] };
+    expect(frame.constraints.join('')).toBe(request);
+    expect(frame.constraints.every(chunk => Array.from(chunk).length <= 2000)).toBe(true);
+  });
+});

@@ -2081,7 +2081,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const applied = jev ? applyJevPlan(before, jev, locale) : applyCanvasPlan(before, plan, locale);
+      const applied = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt);
       if (plan.operations.length) {
         fitted.current = true;
         patchDoc(() => applied.doc, { label: `ai:${id}` });

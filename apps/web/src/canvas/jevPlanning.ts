@@ -250,7 +250,7 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
 }
 
 /** Accept only this request's untouched, bounded compilation. Existing nodes are never assigned a model. */
-export function applyJevPlan(doc: CanvasDocument, result: JevPlanResult, locale: UiLocale = 'zh'): AppliedCanvasPlan {
+export function applyJevPlan(doc: CanvasDocument, result: JevPlanResult, locale: UiLocale = 'zh', originalRequest = ''): AppliedCanvasPlan {
   const scope = currentSaaSCanvas();
   const provenance = admitted.get(result);
   if (!scope || scope.tenant.id !== result.tenantId || scope.canvasId !== result.canvasId || canvasPlanRevision(doc) !== result.sourceRevision
@@ -258,7 +258,7 @@ export function applyJevPlan(doc: CanvasDocument, result: JevPlanResult, locale:
     || provenance?.scope !== scope || provenance?.signature !== seal(result)) fail(locale, 'Jev 方案已失效或被修改，请重新编排；画布未修改。', 'The Jev proposal is stale or changed. Plan again; the canvas was not modified.');
   const added = result.plan.operations.filter(operation => operation.type === 'add_node');
   if (added.length > 3 || added.length !== result.modelAssignments.length) fail(locale, 'Jev 节点模型分配无效。', 'Invalid Jev node model assignments.');
-  const applied = applyCanvasPlan(doc, result.plan, locale);
+  const applied = applyCanvasPlan(doc, result.plan, locale, originalRequest);
   const assignments = new Map(added.map((operation, index) => [applied.addedNodeIds[index], result.modelAssignments.find(assignment => assignment.ref === operation.ref)!]));
   applied.doc.nodes = applied.doc.nodes.map(node => {
     const assignment = assignments.get(node.id);
