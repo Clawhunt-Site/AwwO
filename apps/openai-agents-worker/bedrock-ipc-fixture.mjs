@@ -8,6 +8,7 @@ process.on('message', message => {
     provider: config.provider, model: config.model, region: config.region, baseURL: config.baseURL, protocol: config.protocol,
     apiKey: config.apiKey, authKinds: auth ? Object.keys(auth) : [],
     credentialFields: auth?.credentials ? Object.keys(auth.credentials).sort() : [],
+    ...(config.promptCache !== undefined ? { promptCache: config.promptCache } : {}),
   };
   process.send({ type: 'completed', text: JSON.stringify(summary) }, () => process.disconnect());
 });

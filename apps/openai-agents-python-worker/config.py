@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from bedrock_bridge import bridge_base_url, valid_region
 from bedrock_catalog import (
     OPERATOR_ONLY_BEDROCK, CatalogError, bedrock_api_key, bedrock_region, catalog_selection, parse_platform_providers, platform_health,
-    platform_providers_in_use,
+    platform_providers_in_use, prompt_cache_models,
 )
 from tools import tool_metadata
 
@@ -45,6 +45,8 @@ class ModelProfile:
     name: str = ""
     # Bedrock runtime region; set only for provider "bedrock".
     region: str = ""
+    # Claude Bedrock catalog models only: explicit prompt-cache checkpoints (AWWO_BEDROCK_PROMPT_CACHE_MODELS).
+    prompt_cache: bool = False
 
     def to_health(self) -> dict:
         return {
@@ -295,9 +297,11 @@ def load_config(env: dict | None = None) -> Config:
         region = bedrock_region(env) if selected else ""
         catalog_key = bedrock_api_key(env) if selected else ""
         platform_providers = parse_platform_providers(env.get("AWWO_PLATFORM_PROVIDERS"))
+        cached = prompt_cache_models(env, selected)
     except CatalogError as e:
         raise ConfigError(f"Bedrock catalog configuration is invalid: {e}")
-    catalog = [_bedrock_profile(entry["id"], entry["name"], entry["target"], region, catalog_key, entry["contextWindow"], entry["maxTokens"])
+    catalog = [replace(_bedrock_profile(entry["id"], entry["name"], entry["target"], region, catalog_key, entry["contextWindow"], entry["maxTokens"]),
+                       prompt_cache=entry["id"] in cached)
                for entry in selected]
     if any(p.id in {c.id for c in configured} for p in catalog) or len(configured) + len(catalog) > MAX_CATALOG_MODELS:
         raise ConfigError("Bedrock catalog models must have unique IDs and fit the 256-model catalog")

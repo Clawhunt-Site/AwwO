@@ -2,7 +2,7 @@ import { loadWorkspaceConfig, validateWorkspaceRequest } from './workspace-proto
 import { loadObservabilityConfig } from './observability.mjs';
 import { toolMetadata, toolDefinitionBytes, validateToolNames } from './tools.mjs';
 import { deliverySchemaBytes, validateOutputContract } from './delivery-contract.mjs';
-import { assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
+import { applyBedrockPromptCache, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
 import { validBedrockRegion } from '../bedrock-bridge.ts';
 const DEFAULTS = Object.freeze({ openai: 'https://api.openai.com/v1', llmgate: 'https://api.clawhunt.site/v1' });
 const PROTOCOLS = new Set(['chat_completions', 'responses']);
@@ -215,7 +215,7 @@ export function loadConfig(env = process.env) {
   const disableThinking = parseDisableThinking(env.AWWO_OPENAI_AGENTS_DISABLE_THINKING);
   const configured = loadProfiles(env.AWWO_OPENAI_AGENTS_MODELS_JSON, env, Object.freeze({ id: model, provider, model, name: model, apiKey, baseURL, contextWindow, maxTokens, protocol, ...efforts, structuredOutput, disableThinking }), missing);
   let catalog;
-  try { catalog = bedrockCatalogProfiles('openai-agents', env).map(workerBedrockProfile); }
+  try { catalog = applyBedrockPromptCache(bedrockCatalogProfiles('openai-agents', env).map(workerBedrockProfile), bedrockPromptCacheModels(env)); }
   catch (error) { throw new Error(`Bedrock catalog configuration is invalid: ${error.message}`); }
   if (catalog.some(profile => configured.some(item => item.id === profile.id)) || configured.length + catalog.length > MAX_CATALOG_MODELS) {
     throw new Error('Bedrock catalog models must have unique IDs and fit the 256-model catalog');

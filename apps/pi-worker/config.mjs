@@ -1,5 +1,5 @@
 import { loadObservabilityConfig } from './observability.mjs';
-import { assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
+import { applyBedrockPromptCache, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
 import { validBedrockRegion, validThinkingBudget } from '../bedrock-bridge.ts';
 const DEFAULTS = Object.freeze({
   llmgate: 'https://api.clawhunt.site/v1',
@@ -171,7 +171,9 @@ export function loadConfig(env = process.env) {
   const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens }), missing);
   let catalog;
   const thinking = thinkingSetting(env);
-  try { catalog = bedrockCatalogProfiles('pi', env).map(profile => workerBedrockProfile(profile, thinking)); }
+  try {
+    catalog = applyBedrockPromptCache(bedrockCatalogProfiles('pi', env).map(profile => workerBedrockProfile(profile, thinking)), bedrockPromptCacheModels(env));
+  }
   catch (error) { throw new Error(`Bedrock catalog configuration is invalid: ${error.message}`); }
   for (const id of thinking?.models ?? []) {
     if (!catalog.some(profile => profile.id === id && profile.thinkingBudget)) {

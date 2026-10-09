@@ -15,7 +15,7 @@ from botocore.exceptions import ClientError, EventStreamError
 
 from bedrock_bridge import (
     BRIDGE_API_KEY, BedrockConverseTransport, BridgeError, ChunkMapper, bridge_base_url, bridge_failure, default_client,
-    to_converse_input, valid_auth,
+    to_converse_input, valid_auth, with_claude_prompt_cache,
 )
 from bedrock_catalog import (
     catalog_selection, parse_catalog, parse_catalog_file, parse_platform_providers, platform_health, platform_providers_in_use, read_catalog,
@@ -452,3 +452,73 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+CACHE_POINT = {"cachePoint": {"type": "default"}}
+TIME_TOOL = [{"type": "function", "function": {"name": "current_time", "parameters": {"type": "object", "properties": {}}}}]
+TOOL_LOOP = [{"role": "system", "content": "Use tools."}, {"role": "user", "content": "Time?"},
+             {"role": "assistant", "content": "", "tool_calls": [{"id": "tooluse_1", "type": "function", "function": {"name": "current_time", "arguments": "{}"}}]},
+             {"role": "tool", "tool_call_id": "tooluse_1", "content": "noon"}]
+CLAUDE = "global.anthropic.claude-opus-5-5"
+
+
+def chat_body(**overrides):
+    return {"model": CLAUDE, "stream": True, "max_tokens": 512, "messages": [{"role": "user", "content": "Hello"}], **overrides}
+
+
+class PromptCacheTests(unittest.IsolatedAsyncioTestCase):
+    """with_claude_prompt_cache matches withClaudePromptCache in apps/bedrock-bridge.ts."""
+
+    def test_a_re_sent_prefix_gets_three_checkpoints_and_a_single_message_none(self):
+        loop = to_converse_input(chat_body(tools=TIME_TOOL, messages=TOOL_LOOP), CLAUDE)
+        snapshot = json.dumps(loop, sort_keys=True)
+        cached = with_claude_prompt_cache(loop)
+        self.assertEqual(cached["toolConfig"]["tools"], [*loop["toolConfig"]["tools"], CACHE_POINT])
+        self.assertEqual(cached["system"], [{"text": "Use tools."}, CACHE_POINT])
+        self.assertEqual(cached["messages"][:-1], loop["messages"][:-1])
+        self.assertEqual(cached["messages"][-1]["content"], [*loop["messages"][-1]["content"], CACHE_POINT])
+        self.assertEqual(json.dumps(cached).count('"cachePoint"'), 3)
+        self.assertEqual(json.dumps(loop, sort_keys=True), snapshot, "the input command is not mutated")
+        chat = to_converse_input(chat_body(messages=[{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}, {"role": "user", "content": "More"}]), CLAUDE)
+        chat_cached = with_claude_prompt_cache(chat)
+        self.assertNotIn("system", chat_cached)
+        self.assertNotIn("toolConfig", chat_cached)
+        self.assertEqual(chat_cached["messages"][-1]["content"], [{"text": "More"}, CACHE_POINT])
+        single = to_converse_input(chat_body(tools=TIME_TOOL), CLAUDE)
+        self.assertIs(with_claude_prompt_cache(single), single)
+
+    def test_the_setting_marks_only_named_claude_catalog_models(self):
+        self.assertFalse(any(p.prompt_cache for p in catalog_config().models))
+        self.assertFalse(any(p.prompt_cache for p in catalog_config(AWWO_BEDROCK_PROMPT_CACHE_MODELS="").models))
+        config = catalog_config(AWWO_BEDROCK_PROMPT_CACHE_MODELS="bedrock.claude-opus-5-5")
+        self.assertEqual([p.id for p in config.models if p.prompt_cache], ["bedrock.claude-opus-5-5"])
+        self.assertEqual(public_health(config), public_health(catalog_config()))
+        for value in ("bedrock.glm-5", "bedrock.claude-opus-5-5,", "opus", "bedrock.claude-opus-5-5,bedrock.claude-opus-5-5", "bedrock.unknown"):
+            with self.subTest(value=value), self.assertRaises(ConfigError):
+                catalog_config(AWWO_BEDROCK_PROMPT_CACHE_MODELS=value)
+        with self.assertRaises(ConfigError):
+            load_config({**GATE, "AWWO_BEDROCK_PROMPT_CACHE_MODELS": "bedrock.claude-opus-5-5"})
+
+    async def test_the_transport_sends_checkpoints_only_when_turned_on(self):
+        usage = {"inputTokens": 3, "outputTokens": 2, "cacheReadInputTokens": 2000, "cacheWriteInputTokens": 40}
+        events = [{"messageStart": {"role": "assistant"}}, {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "OK"}}},
+                  {"messageStop": {"stopReason": "end_turn"}}, {"metadata": {"usage": usage}}]
+        with self.assertRaises(ValueError):
+            BedrockConverseTransport(region="us-east-1", model=CLAUDE, auth={"aws": True}, prompt_cache="yes")
+        body = chat_body(tools=TIME_TOOL, messages=TOOL_LOOP)
+        for enabled in (True, False, None):
+            record: dict = {}
+            options = {} if enabled is None else {"prompt_cache": enabled}
+            transport = BedrockConverseTransport(region="us-east-1", model=CLAUDE, auth={"aws": True},
+                                                 client_factory=lambda *args: FakeClient(record, events), **options)
+            async with httpx2.AsyncClient(transport=transport) as client:
+                async with client.stream("POST", bridge_base_url("us-east-1") + "/chat/completions", json=body) as response:
+                    frames = [line async for line in response.aiter_lines() if line]
+            sent = json.dumps(record["input"])
+            if enabled:
+                self.assertEqual(sent.count('"cachePoint"'), 3)
+                usage_frame = json.loads(frames[-2][len("data: "):])
+                self.assertEqual(usage_frame["usage"], {"prompt_tokens": 2043, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": 2000}})
+            else:
+                self.assertEqual(record["input"], to_converse_input(body, CLAUDE), "off sends exactly the request the bridge sent before")

@@ -321,6 +321,30 @@ export function withClaudeThinking(command: Json, budget: number): Json {
   return out;
 }
 
+/**
+ * Claude explicit prompt caching for one Converse command, where the operator turned it on for the profile
+ * (AWWO_BEDROCK_PROMPT_CACHE_MODELS). Only a request that re-sends an earlier exchange — a conversation with
+ * history, or a tool loop — gets cache checkpoints, because only its prefix is sent again: after the tool
+ * definitions, after the system prompt and at the end of the last message, three of Claude's four. A
+ * single-message request stays as it was, so a one-off call never pays the cache-write premium for a prefix
+ * nothing reads. A prefix shorter than the model's minimum is simply not cached; the call still succeeds. The
+ * default five-minute TTL applies. Prices are untouched: usage still reports every prompt token (cache reads
+ * and writes included) as prompt tokens, with the reads as cached tokens.
+ */
+export function withClaudePromptCache(command: Json): Json {
+  const messages = Array.isArray(command.messages) ? command.messages as ConverseMessage[] : [];
+  if (messages.length < 2) return command;
+  const point = () => ({ cachePoint: { type: 'default' } });
+  const out: Json = { ...command };
+  if (plain(command.toolConfig) && Array.isArray(command.toolConfig.tools) && command.toolConfig.tools.length) {
+    out.toolConfig = { ...command.toolConfig, tools: [...command.toolConfig.tools, point()] };
+  }
+  if (Array.isArray(command.system) && command.system.length) out.system = [...command.system, point()];
+  const last = messages.at(-1)!;
+  out.messages = [...messages.slice(0, -1), { ...last, content: [...last.content, point()] }];
+  return out;
+}
+
 const STOP_REASONS: Record<string, string> = {
   end_turn: 'stop', stop_sequence: 'stop', tool_use: 'tool_calls',
   max_tokens: 'length', model_context_window_exceeded: 'length',
@@ -510,16 +534,19 @@ export type BedrockFetchOptions = {
   clientOptions?: Record<string, unknown>;
   /** Claude only: an operator-set extended-thinking budget (withClaudeThinking). Absent means no thinking. */
   thinkingBudget?: number;
+  /** Claude only: operator-enabled explicit prompt caching (withClaudePromptCache). Absent or false means none. */
+  promptCache?: boolean;
 };
 
 /**
  * A `fetch` that serves `POST <bridge base URL>/chat/completions` from Bedrock ConverseStream.
  * Any other URL or method is refused before a network call is made.
  */
-export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {}, thinkingBudget }: BedrockFetchOptions) {
+export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {}, thinkingBudget, promptCache = false }: BedrockFetchOptions) {
   const endpoint = `${bedrockBridgeBaseURL(region)}/chat/completions`;
   if (!validBedrockAuth(auth)) throw new Error('Invalid Bedrock credentials');
   if (thinkingBudget !== undefined && !validThinkingBudget(thinkingBudget)) throw new Error('Invalid Bedrock thinking budget');
+  if (typeof promptCache !== 'boolean') throw new Error('Invalid Bedrock prompt cache setting');
   for (const key of ['credentials', 'token', 'endpoint', 'region', 'authSchemePreference']) {
     if (Object.hasOwn(clientOptions, key)) throw new Error('Bedrock client options cannot override the endpoint or credentials');
   }
@@ -537,6 +564,7 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
       try { body = JSON.parse(raw); } catch { return reject('The request body is not JSON'); }
       command = toConverseInput(body, model);
       if (thinkingBudget !== undefined) command = withClaudeThinking(command, thinkingBudget);
+      if (promptCache) command = withClaudePromptCache(command);
       singleToolCall = (body as Json).parallel_tool_calls === false;
     } catch (error) { return jsonError(bridgeFailure(error)); }
 

@@ -166,3 +166,21 @@ def catalog_selection(runtime: str, env: dict, entries: tuple | None = None, reg
         if runtime == "openai-agents" and not by_id[item]["tools"]:
             raise CatalogError("AWWO_BEDROCK_MODELS names a model without tool support for the OpenAI Agents runtime")
     return [entry for entry in entries if entry["id"] in ids]
+
+
+
+def prompt_cache_models(env: dict, selected: list) -> frozenset:
+    """AWWO_BEDROCK_PROMPT_CACHE_MODELS (see bedrockPromptCacheModels in apps/bedrock-catalog.ts): the catalog's
+    Claude models this worker sends with explicit prompt-cache checkpoints. Empty or unset: none. Every named
+    id must be an Anthropic entry this worker serves from the catalog, so a typo stops the worker."""
+    raw = (env.get("AWWO_BEDROCK_PROMPT_CACHE_MODELS") or "").strip()
+    if not raw:
+        return frozenset()
+    ids = [item.strip() for item in raw.split(",")]
+    if any(not CATALOG_ID.fullmatch(item) for item in ids) or len(set(ids)) != len(ids):
+        raise CatalogError("AWWO_BEDROCK_PROMPT_CACHE_MODELS must be a comma list of distinct Bedrock catalog ids")
+    served = {entry["id"] for entry in selected if entry["vendor"] == "anthropic"}
+    for item in ids:
+        if item not in served:
+            raise CatalogError(f"AWWO_BEDROCK_PROMPT_CACHE_MODELS names {item}, which is not a Claude model this worker serves from the Bedrock catalog")
+    return frozenset(ids)

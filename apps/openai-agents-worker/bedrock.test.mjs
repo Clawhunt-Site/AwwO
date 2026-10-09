@@ -246,3 +246,25 @@ test('the HTTP worker reports an unresolvable Bedrock credential as an authentic
   assert.equal(events.at(-1).type, 'failed');
   assert.equal(events.at(-1).code, 'MODEL_AUTHENTICATION');
 });
+
+
+test('the prompt cache reaches only the Claude models it names, through the runner, and never the health', { timeout: 15_000 }, async () => {
+  const off = withCatalog({ AWWO_BEDROCK_API_KEY: BEDROCK_KEY });
+  const on = withCatalog({ AWWO_BEDROCK_API_KEY: BEDROCK_KEY, AWWO_BEDROCK_PROMPT_CACHE_MODELS: 'bedrock.claude-opus-5-5' });
+  assert.deepEqual(on.models.filter(profile => profile.promptCache === true).map(profile => profile.id), ['bedrock.claude-opus-5-5']);
+  assert.equal(off.models.some(profile => 'promptCache' in profile), false);
+  assert.deepEqual(publicHealth(on), publicHealth(off));
+  for (const models of ['bedrock.glm-5', 'bedrock.claude-opus-5-5,bedrock.claude-opus-5-5', 'opus']) {
+    assert.throws(() => withCatalog({ AWWO_BEDROCK_PROMPT_CACHE_MODELS: models }), /AWWO_BEDROCK_PROMPT_CACHE_MODELS/, models);
+  }
+  const taskURL = new URL('./bedrock-ipc-fixture.mjs', import.meta.url);
+  const runOnce = async (c, model) => {
+    const events = [];
+    const handle = await startIsolatedRun({ config: c, request: request({ model }), onEvent: event => events.push(event) }, { taskURL, bedrockAuth: async key => ({ bearerToken: key }) });
+    await handle.done;
+    return JSON.parse(events.at(-1).text);
+  };
+  assert.equal((await runOnce(on, 'bedrock.claude-opus-5-5')).promptCache, true);
+  assert.equal('promptCache' in (await runOnce(on, 'bedrock.glm-5')), false);
+  assert.equal('promptCache' in (await runOnce(off, 'bedrock.claude-opus-5-5')), false);
+});

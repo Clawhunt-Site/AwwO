@@ -304,6 +304,30 @@ def to_converse_input(body: Any, model_id: str) -> dict:
     return result
 
 
+def with_claude_prompt_cache(command: dict) -> dict:
+    """Claude explicit prompt caching for one Converse command (see withClaudePromptCache in
+    apps/bedrock-bridge.ts). Only a request that re-sends an earlier exchange, a conversation with
+    history or a tool loop, gets checkpoints: after the tool definitions, after the system prompt
+    and at the end of the last message. A single-message request is returned unchanged."""
+    messages = command.get("messages")
+    if not isinstance(messages, list) or len(messages) < 2:
+        return command
+
+    def point() -> dict:
+        return {"cachePoint": {"type": "default"}}
+
+    out = dict(command)
+    tool_config = command.get("toolConfig")
+    if isinstance(tool_config, dict) and isinstance(tool_config.get("tools"), list) and tool_config["tools"]:
+        out["toolConfig"] = {**tool_config, "tools": [*tool_config["tools"], point()]}
+    system = command.get("system")
+    if isinstance(system, list) and system:
+        out["system"] = [*system, point()]
+    last = messages[-1]
+    out["messages"] = [*messages[:-1], {**last, "content": [*last["content"], point()]}]
+    return out
+
+
 def _non_negative(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
@@ -569,15 +593,19 @@ class BedrockConverseTransport(AsyncBaseTransport):
     """Serves ``POST <bridge base URL>/chat/completions`` from Bedrock ConverseStream."""
 
     def __init__(self, *, region: str, model: str, auth: dict, read_timeout: float = 120.0,
-                 client_factory: Callable[[str, dict, float], Any] = default_client):
+                 client_factory: Callable[[str, dict, float], Any] = default_client, prompt_cache: bool = False):
         if not valid_auth(auth):
             raise ValueError("Invalid Bedrock credentials")
+        if not isinstance(prompt_cache, bool):
+            raise ValueError("Invalid Bedrock prompt cache setting")
         self.endpoint = bridge_base_url(region) + "/chat/completions"
         self.region = region
         self.model = model
         self.auth = auth
         self.read_timeout = read_timeout
         self.client_factory = client_factory
+        # Claude only, operator-enabled (AWWO_BEDROCK_PROMPT_CACHE_MODELS): see with_claude_prompt_cache.
+        self.prompt_cache = prompt_cache
 
     @staticmethod
     def _json_error(error: BridgeError) -> Response:
@@ -595,6 +623,8 @@ class BedrockConverseTransport(AsyncBaseTransport):
             except (json.JSONDecodeError, UnicodeDecodeError):
                 _reject("The request body is not JSON")
             command = to_converse_input(body, self.model)
+            if self.prompt_cache:
+                command = with_claude_prompt_cache(command)
             single_tool_call = body.get("parallel_tool_calls") is False
         except BridgeError as error:
             return self._json_error(error)

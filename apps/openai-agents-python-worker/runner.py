@@ -223,7 +223,7 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         if profile.provider == "bedrock":
             bridge = BedrockConverseTransport(region=profile.region, model=profile.model,
                                               auth={"bearer_token": profile.api_key} if profile.api_key else {"aws": True},
-                                              read_timeout=config.timeout_ms / 1000)
+                                              read_timeout=config.timeout_ms / 1000, prompt_cache=profile.prompt_cache)
         http_client = DefaultAsyncHttpxClient(event_hooks={
             "request": [observation.on_request], "response": [observation.on_response],
         }, **({"transport": bridge} if bridge else {}))

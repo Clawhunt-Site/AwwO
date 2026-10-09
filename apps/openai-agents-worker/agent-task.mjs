@@ -26,7 +26,8 @@ process.on('message', async message => {
       // Chat Completions URL itself; the OpenAI SDK key is only a placeholder.
       // Loaded only for Bedrock runs, so other children never load the AWS SDK.
       const [{ BEDROCK_BRIDGE_API_KEY, createBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
-      modelFetch = createBedrockFetch({ region: modelConfig.region, model: modelConfig.model, auth: modelConfig.bedrockAuth, sdk });
+      modelFetch = createBedrockFetch({ region: modelConfig.region, model: modelConfig.model, auth: modelConfig.bedrockAuth, sdk,
+        ...(modelConfig.promptCache === true ? { promptCache: true } : {}) });
       modelConfig = { ...modelConfig, apiKey: BEDROCK_BRIDGE_API_KEY, bedrockAuth: undefined };
       observer = createProviderObserver(modelConfig.protocol, { acceptedAtNs: message.acceptedAtNs, fetchImpl: modelFetch });
     }

@@ -194,7 +194,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
       apiKey: modelConfig.provider === 'bedrock' ? '' : modelConfig.apiKey,
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
       disableThinking: modelConfig.disableThinking === true,
-      ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth } : {}),
+      ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth, ...(modelConfig.promptCache === true ? { promptCache: true } : {}) } : {}),
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };

@@ -45,7 +45,8 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
       // only for Bedrock runs, so other children never pay for the TypeScript module.
       const [{ BEDROCK_BRIDGE_API_KEY, createBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
       const fetchImpl = createBedrockFetch({ region: modelConfig.region, model: modelConfig.model, auth: modelConfig.bedrockAuth, sdk,
-        ...(modelConfig.thinkingBudget ? { thinkingBudget: modelConfig.thinkingBudget } : {}) });
+        ...(modelConfig.thinkingBudget ? { thinkingBudget: modelConfig.thinkingBudget } : {}),
+        ...(modelConfig.promptCache === true ? { promptCache: true } : {}) });
       observer = createProviderObserver('chat_completions', { acceptedAtNs, fetchImpl });
       bridgeKey = BEDROCK_BRIDGE_API_KEY;
     }

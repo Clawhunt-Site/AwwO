@@ -174,3 +174,33 @@ export function bedrockCatalogProfiles(runtime: BedrockRuntime, env: Record<stri
   }
   return Object.freeze(selected.map(entry => bedrockProfile(entry, region, apiKey)));
 }
+
+
+/**
+ * AWWO_BEDROCK_PROMPT_CACHE_MODELS: the built-in catalog's Claude models a worker sends with explicit prompt-cache
+ * checkpoints (withClaudePromptCache in bedrock-bridge.ts). Empty or unset: none, so requests stay exactly as they
+ * were. Each worker reads its own environment; the ids are catalog ids, not Bedrock model ids.
+ */
+export function bedrockPromptCacheModels(env: Record<string, string | undefined>): ReadonlySet<string> {
+  const raw = (env.AWWO_BEDROCK_PROMPT_CACHE_MODELS ?? '').trim();
+  if (!raw) return new Set();
+  const ids = raw.split(',').map(id => id.trim());
+  if (ids.some(id => !CATALOG_ID.test(id)) || new Set(ids).size !== ids.length) {
+    throw new Error('AWWO_BEDROCK_PROMPT_CACHE_MODELS must be a comma list of distinct Bedrock catalog ids');
+  }
+  return new Set(ids);
+}
+
+/**
+ * Marks the named catalog profiles `promptCache: true`. Every name must be an Anthropic model this worker serves from
+ * its Bedrock catalog: a typo, a model the worker does not serve or one without Converse caching stops the worker
+ * instead of silently caching nothing.
+ */
+export function applyBedrockPromptCache<T extends BedrockProfile>(profiles: readonly T[], models: ReadonlySet<string>): readonly T[] {
+  for (const id of models) {
+    if (!profiles.some(profile => profile.id === id && profile.vendor === 'anthropic')) {
+      throw new Error(`AWWO_BEDROCK_PROMPT_CACHE_MODELS names ${id}, which is not a Claude model this worker serves from the Bedrock catalog`);
+    }
+  }
+  return Object.freeze(profiles.map(profile => models.has(profile.id) ? Object.freeze({ ...profile, promptCache: true as const }) : profile));
+}

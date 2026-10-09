@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { bedrockBridgeBaseURL } from './bedrock-bridge.ts';
 import {
-  assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockRegion, parseBedrockCatalog, parseBedrockCatalogFile, parsePlatformProviders,
-  platformHealth, platformProvidersInUse, readBedrockCatalog, readBedrockCatalogRegions, type BedrockCatalogEntry,
+  applyBedrockPromptCache, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockPromptCacheModels, bedrockRegion, parseBedrockCatalog,
+  parseBedrockCatalogFile, parsePlatformProviders, platformHealth, platformProvidersInUse, readBedrockCatalog, readBedrockCatalogRegions, type BedrockCatalogEntry,
 } from './bedrock-catalog.ts';
 
 const raw = JSON.parse(readFileSync(new URL('./bedrock-models.json', import.meta.url), 'utf8'));
@@ -136,4 +136,28 @@ test('catalog entries cannot be mutated through the loaded copy', () => {
   const first = readBedrockCatalog()[0] as BedrockCatalogEntry & { name: string };
   assert.throws(() => { (first as { name: string }).name = 'changed'; });
   assert.equal(readBedrockCatalog()[0].name, raw.models[0].name);
+});
+
+
+test('AWWO_BEDROCK_PROMPT_CACHE_MODELS marks only the named Claude catalog models, and refuses anything else', () => {
+  const env = { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_MODELS: 'bedrock.claude-opus-5-5,bedrock.claude-haiku-4-5,bedrock.kimi-k3' };
+  const profiles = bedrockCatalogProfiles('openai-agents', env);
+  // Unset or blank: nothing changes, the profiles are the very same objects.
+  for (const value of [undefined, '', '  ']) {
+    assert.equal(bedrockPromptCacheModels({ AWWO_BEDROCK_PROMPT_CACHE_MODELS: value }).size, 0);
+    assert.deepEqual(applyBedrockPromptCache(profiles, bedrockPromptCacheModels({ AWWO_BEDROCK_PROMPT_CACHE_MODELS: value })), profiles);
+  }
+  const marked = applyBedrockPromptCache(profiles, bedrockPromptCacheModels({ AWWO_BEDROCK_PROMPT_CACHE_MODELS: ' bedrock.claude-haiku-4-5 ' }));
+  assert.deepEqual(marked.map(profile => [profile.id, (profile as { promptCache?: boolean }).promptCache ?? false]),
+    [['bedrock.claude-opus-5-5', false], ['bedrock.claude-haiku-4-5', true], ['bedrock.kimi-k3', false]]);
+  assert.ok(Object.isFrozen(marked) && marked.every(Object.isFrozen));
+  // Malformed lists, duplicates, a non-Claude model and a Claude model this worker does not serve all stop the worker.
+  for (const value of ['bedrock.claude-opus-5-5,', 'claude-opus-5-5', 'bedrock.claude-opus-5-5,bedrock.claude-opus-5-5']) {
+    assert.throws(() => bedrockPromptCacheModels({ AWWO_BEDROCK_PROMPT_CACHE_MODELS: value }), /comma list of distinct Bedrock catalog ids/);
+  }
+  for (const value of ['bedrock.kimi-k3', 'bedrock.claude-sonnet-4-6', 'bedrock.not-in-catalog']) {
+    assert.throws(() => applyBedrockPromptCache(profiles, bedrockPromptCacheModels({ AWWO_BEDROCK_PROMPT_CACHE_MODELS: value })), /not a Claude model this worker serves/);
+  }
+  // With the catalog off there is nothing to cache, so naming a model is a configuration error.
+  assert.throws(() => applyBedrockPromptCache(bedrockCatalogProfiles('openai-agents', {}), bedrockPromptCacheModels({ AWWO_BEDROCK_PROMPT_CACHE_MODELS: 'bedrock.claude-opus-5-5' })));
 });

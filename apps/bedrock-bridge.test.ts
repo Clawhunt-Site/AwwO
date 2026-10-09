@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   BEDROCK_BRIDGE_API_KEY, BEDROCK_CREDENTIAL_REFRESH_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockOrigin, bridgeFailure, chatUsage,
   createBedrockAuthResolver, createBedrockFetch, createChunkMapper, toConverseInput, validBedrockAuth, validBedrockRegion,
-  validThinkingBudget, withClaudeThinking, type BedrockSdk,
+  validThinkingBudget, withClaudePromptCache, withClaudeThinking, type BedrockSdk,
 } from './bedrock-bridge.ts';
 
 const MODEL = 'global.anthropic.claude-opus-5-5';
@@ -450,4 +450,61 @@ test('the fetch sends the thinking budget it was configured with, and refuses an
   const plainFetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk });
   await (await plainFetch(ENDPOINT, post(request({ max_tokens: 8000 })))).text();
   assert.equal(sent[1].input.additionalModelRequestFields, undefined);
+});
+
+
+const CACHE_POINT = { cachePoint: { type: 'default' } };
+const TIME_TOOL = [{ type: 'function', function: { name: 'current_time', parameters: { type: 'object', properties: {} } } }];
+const TOOL_LOOP = [{ role: 'system', content: 'Use tools.' }, { role: 'user', content: 'Time?' },
+  { role: 'assistant', content: '', tool_calls: [{ id: 'tooluse_1', type: 'function', function: { name: 'current_time', arguments: '{}' } }] },
+  { role: 'tool', tool_call_id: 'tooluse_1', content: 'noon' }];
+
+test('the prompt cache marks a re-sent prefix after the tools, the system prompt and the last message', () => {
+  const loop = toConverseInput(request({ tools: TIME_TOOL, messages: TOOL_LOOP }), MODEL);
+  const cached = withClaudePromptCache(loop);
+  assert.deepEqual((cached.toolConfig as { tools: unknown[] }).tools, [...(loop.toolConfig as { tools: unknown[] }).tools, CACHE_POINT]);
+  assert.deepEqual(cached.system, [{ text: 'Use tools.' }, CACHE_POINT]);
+  const messages = cached.messages as { role: string; content: unknown[] }[];
+  assert.deepEqual(messages.slice(0, -1), (loop.messages as unknown[]).slice(0, -1), 'earlier turns are unchanged');
+  assert.deepEqual(messages.at(-1)!.content, [...(loop.messages as { content: unknown[] }[]).at(-1)!.content, CACHE_POINT]);
+  // At most three of Claude's four checkpoints, and the input command is not mutated.
+  assert.equal(JSON.stringify(cached).split('"cachePoint"').length - 1, 3);
+  assert.equal(JSON.stringify(loop).includes('cachePoint'), false);
+  // A conversation without tools or system prompt gets only the message checkpoint.
+  const chat = toConverseInput(request({ messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'More' }] }), MODEL);
+  const chatCached = withClaudePromptCache(chat);
+  assert.equal(chatCached.system, undefined);
+  assert.equal(chatCached.toolConfig, undefined);
+  assert.deepEqual((chatCached.messages as { content: unknown[] }[]).at(-1)!.content, [{ text: 'More' }, CACHE_POINT]);
+});
+
+test('a single-message request is left as it was, so a one-off call never pays for a cache write', () => {
+  const single = toConverseInput(request({ tools: TIME_TOOL }), MODEL);
+  assert.equal(withClaudePromptCache(single), single);
+  // Thinking and caching compose: the thinking request (tool-free, with history) keeps its thinking field.
+  const thought = withClaudeThinking(toConverseInput(request({ max_tokens: 8000,
+    messages: [{ role: 'user', content: 'Plan' }, { role: 'assistant', content: 'Draft' }, { role: 'user', content: 'Again' }] }), MODEL), 2048);
+  const both = withClaudePromptCache(thought);
+  assert.deepEqual(both.additionalModelRequestFields, { thinking: { type: 'enabled', budget_tokens: 2048 } });
+  assert.deepEqual((both.messages as { content: unknown[] }[]).at(-1)!.content, [{ text: 'Again' }, CACHE_POINT]);
+});
+
+test('the fetch sends cache checkpoints only when the operator turned the cache on', async () => {
+  const events = [{ messageStart: { role: 'assistant' } }, { contentBlockDelta: { delta: { text: 'OK' } } }, { messageStop: { stopReason: 'end_turn' } },
+    { metadata: { usage: { inputTokens: 3, outputTokens: 2, cacheReadInputTokens: 2000, cacheWriteInputTokens: 40 } } }];
+  const { sdk, sent } = fakeSdk(events);
+  assert.throws(() => createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk, promptCache: 'yes' as unknown as boolean }), /prompt cache/);
+  const body = request({ tools: TIME_TOOL, messages: TOOL_LOOP });
+  const cachedFetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk, promptCache: true });
+  const response = await cachedFetch(ENDPOINT, post(body));
+  const chunks = frames(await response.text()).slice(0, -1).map(frame => JSON.parse(frame));
+  assert.equal(JSON.stringify(sent[0].input).split('"cachePoint"').length - 1, 3);
+  // Usage keeps counting every prompt token, reads and writes included, with the reads as cached tokens.
+  assert.deepEqual(chunks.at(-1).usage, { prompt_tokens: 2043, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 2000 } });
+  // Off (the default) and false send exactly the request the bridge sent before.
+  for (const options of [{}, { promptCache: false }]) {
+    const plainFetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk, ...options });
+    await (await plainFetch(ENDPOINT, post(body))).text();
+    assert.deepEqual(sent.at(-1)!.input, toConverseInput(body, MODEL));
+  }
 });
