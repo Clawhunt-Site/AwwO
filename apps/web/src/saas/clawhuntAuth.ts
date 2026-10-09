@@ -9,8 +9,9 @@ export type AuthOptions = {
 
 export type SSOReturn =
   | { kind: 'link' }
-  | { kind: 'error'; reason: 'waitlisted' | 'expired' | 'unavailable' | 'conflict' | 'invalid_identity' };
+  | { kind: 'error'; reason: 'waitlisted' | 'expired' | 'unavailable' | 'conflict' | 'invalid_identity' | 'signup_limited' | 'email_unverified' };
 export type SSOFailureReason = Exclude<SSOReturn, { kind: 'link' }>['reason'];
+const ssoFailureReasons: readonly SSOFailureReason[] = ['waitlisted', 'expired', 'unavailable', 'conflict', 'invalid_identity', 'signup_limited', 'email_unverified'];
 
 const inviteToken = (value: string | null): value is string => Boolean(value && /^[A-Za-z0-9_-]{32,256}$/.test(value));
 export function clawHuntStartURL(search: string, { signup = false }: { signup?: boolean } = {}): string {
@@ -38,9 +39,9 @@ export function readSSOReturn(search: string): SSOReturn | null {
   if (query.get('sso') === 'link') return { kind: 'link' };
   if (query.get('sso') !== 'error') return null;
   const reason = query.get('reason');
-  if (reason === 'waitlisted' || reason === 'expired' || reason === 'unavailable' || reason === 'conflict' || reason === 'invalid_identity') {
-    return { kind: 'error', reason };
-  }
+  // A first sign-in the server's sign-up limits refused (signup_limited, email_unverified) created no account.
+  const known = ssoFailureReasons.find(value => value === reason);
+  if (known) return { kind: 'error', reason: known };
   return { kind: 'error', reason: 'unavailable' };
 }
 

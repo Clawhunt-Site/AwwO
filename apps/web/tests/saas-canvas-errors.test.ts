@@ -70,6 +70,30 @@ it('points a free workspace at the default model and the paid plans when its pre
   expect(saasErrorMessage(new SaaSApiError(403, 'checkout_closed', 'x'), 'zh')).toContain('即将开放');
   expect(saasErrorMessage(new SaaSApiError(409, 'already_subscribed', 'x'), 'en')).toContain('Manage subscription');
 });
+it('says the free default model is full for the whole service today, and offers only the next UTC day or a plan', () => {
+  const zh = saasErrorMessage(new SaaSApiError(500, 'free_capacity_exceeded', 'Model execution failed'), 'zh');
+  const en = saasErrorMessage(new SaaSApiError(500, 'free_capacity_exceeded', 'Model execution failed'), 'en');
+  for (const text of [zh, runErrorText('free_capacity_exceeded', 'zh')]) {
+    expect(text).toContain('默认模型');
+    expect(text).toContain('UTC 次日');
+    expect(text).toContain('Pro / Max 付费套餐');
+    expect(text).toContain('套餐与点数');
+  }
+  for (const text of [en, runErrorText('free_capacity_exceeded', 'en')]) {
+    expect(text).toContain('whole service');
+    expect(text).toContain('next UTC day');
+    expect(text).toContain('Pro or Max plan');
+    expect(text).toContain('Plans and credits');
+    // There is no free model left to switch to, so the copy must not send the reader to "the default model".
+    expect(text).not.toContain('Switch the node');
+  }
+  // A failed run carries the code; the node shows the same words in the reader's language.
+  document.documentElement.lang = 'zh-CN';
+  expect(canvasErrorMessage('Model execution failed', 'free_capacity_exceeded')).toBe(zh);
+  document.documentElement.lang = 'en';
+  expect(canvasErrorMessage('Model execution failed', 'free_capacity_exceeded')).toBe(en);
+  expect(en).not.toBe(runErrorText('premium_capacity_exceeded', 'en'));
+});
 it('names the worker failures the API maps instead of showing the generic runtime failure', () => {
   // These are the run codes Go derives from the worker's failed-event codes. Each asks
   // for a different action, so none may fall back to "check the runtime configuration",

@@ -69,6 +69,14 @@ export const runtimeUnavailableMessages: [string, string] = [
   'The execution engine is not ready. Check the model connection and the engine and model settings of nodes in this run. If it remains unavailable, contact an administrator.',
 ];
 
+/** The deployment-wide daily ceiling on free default-model calls (free_capacity_exceeded) is full for today. It is
+ *  the service's limit, not this workspace's, and the paid plans are outside it, so the copy says so and offers
+ *  only what works: the next UTC day or a plan. */
+export const freeCapacityMessages: [string, string] = [
+  '今天全站免费使用默认模型的名额已满。免费调用在 UTC 次日恢复；想现在继续，可以升级到 Pro / Max 付费套餐（账号菜单 → 套餐与点数），套餐不受这个名额限制。',
+  'The free default model is at its daily capacity for the whole service today. Free calls come back after the next UTC day; to keep going now, upgrade to the Pro or Max plan (account menu → Plans and credits), which this limit does not apply to.',
+];
+
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
 export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
   const codes: Record<string, [string, string]> = {
@@ -103,6 +111,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     context_limit: ['输入超出模型上下文限制，请缩短输入或减少历史内容。', 'The input exceeds the model context limit. Shorten it or reduce the history.'],
     rate_limited: ['请求过于频繁，请稍后重试。', 'Too many requests. Please try again later.'],
     quota_exceeded: ['工作区运行额度已满（并发或每日调用上限）。请在运行记录中检查进行中的任务；若已用完当日额度，请联系平台管理员或等待 UTC 次日重置。', 'The workspace run quota has been reached (concurrent or daily calls). Check active tasks in Run history. If the daily limit is used up, contact a platform administrator or wait for the next UTC day.'],
+    free_capacity_exceeded: freeCapacityMessages,
     personal_engine_required: ['请先到「我的引擎」添加并验证你自己的 API Key。', 'Add and verify your API key in My engines before running.'],
     model_unavailable: ['所选模型不可用，请重新选择服务端提供的模型。', 'The selected model is unavailable. Choose a model offered by the server.'],
     computer_model_unsupported: ['托管执行暂不支持该模型，请选择列表中提供的模型。', 'Managed execution does not support this model. Choose one from the list.'],

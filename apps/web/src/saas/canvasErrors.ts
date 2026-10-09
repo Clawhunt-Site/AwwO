@@ -1,5 +1,5 @@
 import { readInitialLocale, type UiLocale } from '../locale';
-import { SaaSApiError, runtimeUnavailableMessages, saasErrorMessage } from './api';
+import { SaaSApiError, freeCapacityMessages, runtimeUnavailableMessages, saasErrorMessage } from './api';
 
 export function canvasLocale(): UiLocale {
   const language = document.documentElement.lang;
@@ -69,6 +69,9 @@ const runErrors: Record<string, [string, string]> = {
   // (0); the default model keeps working, so the copy names that way forward before the paid one.
   premium_quota_exceeded: ['今天的免费额度里没有这个高级模型（Claude、GPT、Bedrock）的次数，或者已经用完。可以把节点换成默认模型继续；Pro / Max 付费套餐用点数调用这些模型（账号菜单 → 套餐与点数）。', 'Today’s free allowance includes no calls for this premium model (Claude, GPT, Bedrock), or they are used up. Switch the node to the default model to keep going; the Pro and Max plans use credits for these models (account menu → Plans and credits).'],
   premium_capacity_exceeded: ['今天全站的高级模型免费名额已用完。可以把节点换成默认模型继续，UTC 次日重置；Pro / Max 付费套餐不受这个名额限制（账号菜单 → 套餐与点数）。', 'Today’s free premium-model calls for the whole service are used up. Switch the node to the default model to keep going, or wait for the next UTC day. The Pro and Max plans are not limited by it (account menu → Plans and credits).'],
+  // The default model's own deployment-wide daily ceiling: there is no free model to switch to, so only the next
+  // UTC day or a plan.
+  free_capacity_exceeded: freeCapacityMessages,
   // A paid plan's credits for the period are used up; the default model spends none.
   plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
   model_unpriced: ['这个模型还不能按点数计费，请把节点换成其他模型。', 'This model cannot be billed in credits yet. Switch the node to another model.'],

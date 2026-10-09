@@ -74,6 +74,39 @@ it('offers invite-code redemption in both languages on the waitlisted result, cl
   expect(fetch.mock.calls.some(([url]) => url.endsWith('/auth/login') || url.endsWith('/auth/register'))).toBe(false);
 });
 
+it('explains in both languages that a sign-up limit created no account and that existing accounts still sign in', async () => {
+  history.replaceState(null, '', `/?sso=error&reason=signup_limited&invite=${invite}`);
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? unauthorized() : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' })));
+  render(<SaaSApp />);
+  expect(await screen.findByRole('heading', { name: '今天无法创建新账号' })).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('没有创建账号');
+  expect(screen.getByRole('alert')).toHaveTextContent('已有的 AwwO 账号不受影响');
+  expect(screen.getByRole('alert')).toHaveTextContent('UTC 次日');
+  // The invitation stays bound to the retry, as for every other refusal.
+  await waitFor(() => expect(screen.getByRole('link', { name: '重新使用 ClawHunt 账号继续' })).toHaveAttribute('href', `/api/v1/auth/clawhunt/start?invite=${invite}`));
+  expect(screen.queryByRole('link', { name: '输入邀请码进入 AwwO' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));
+  expect(screen.getByRole('heading', { name: 'No new account today' })).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('no account was created');
+  expect(screen.getByRole('alert')).toHaveTextContent('Existing AwwO accounts are not affected');
+});
+
+it('sends an unverified email to ClawHunt to verify it before a new account is created', async () => {
+  history.replaceState(null, '', '/?sso=error&reason=email_unverified');
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? unauthorized() : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' })));
+  render(<SaaSApp />);
+  expect(await screen.findByRole('heading', { name: '请先验证邮箱' })).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('邮箱还没有验证');
+  await waitFor(() => expect(screen.getByRole('link', { name: '到 ClawHunt 验证邮箱' })).toHaveAttribute('href', 'https://clawhunt.example/account'));
+  expect(screen.getByRole('link', { name: '重新使用 ClawHunt 账号继续' })).toHaveAttribute('href', '/api/v1/auth/clawhunt/start');
+  fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('is not verified yet, so no AwwO account was created');
+  expect(screen.getByRole('link', { name: 'Verify your email on ClawHunt' })).toHaveAttribute('href', 'https://clawhunt.example/account');
+  expect(readSSOReturn('?sso=error&reason=signup_limited')).toEqual({ kind: 'error', reason: 'signup_limited' });
+  expect(readSSOReturn('?sso=error&reason=email_unverified')).toEqual({ kind: 'error', reason: 'email_unverified' });
+  expect(readSSOReturn('?sso=error&reason=made_up')).toEqual({ kind: 'error', reason: 'unavailable' });
+});
+
 it('requires the original AwwO password before linking the verified ClawHunt subject', async () => {
   history.replaceState(null, '', '/?sso=link');
   const fetch = vi.fn(async (url: string, init: RequestInit = {}) => {

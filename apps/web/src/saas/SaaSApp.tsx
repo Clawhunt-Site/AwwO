@@ -163,15 +163,27 @@ const ssoFailureCopy: Record<SSOFailureReason, [string, string]> = {
   unavailable: ['暂时无法完成统一登录。请稍后重试。', 'Unified sign-in is temporarily unavailable. Please try again.'],
   conflict: ['此账号关联存在冲突，尚未访问任何 AwwO 工作区。请联系管理员处理。', 'This account has a linking conflict. No AwwO workspace was opened. Contact an administrator.'],
   invalid_identity: ['无法验证 ClawHunt 账号身份。请返回主站确认账号状态后重试。', 'We could not verify your ClawHunt identity. Check your account on the main site and try again.'],
+  // The server's opt-in sign-up limits refused a first sign-in: no account was created, and existing accounts are
+  // never held by either limit.
+  signup_limited: ['今天从你所在的网络新建的 AwwO 账号已达上限，这次没有创建账号。已有的 AwwO 账号不受影响，可以照常登录；新账号请在 UTC 次日再试。', 'Today’s limit on new AwwO accounts from your network has been reached, so no account was created. Existing AwwO accounts are not affected and can sign in as usual; try a new account again after the next UTC day.'],
+  email_unverified: ['你的 ClawHunt 账号邮箱还没有验证，所以这次没有创建 AwwO 账号。请先在 ClawHunt 账号里验证邮箱，再回来用 ClawHunt 账号继续。', 'The email address of your ClawHunt account is not verified yet, so no AwwO account was created. Verify it in your ClawHunt account first, then continue with ClawHunt again.'],
 };
+function ssoFailureHeading(reason: SSOFailureReason, t: (zh: string, en: string) => string): string {
+  if (reason === 'waitlisted') return t('用邀请码开通 AwwO', 'Unlock AwwO with an invite code');
+  if (reason === 'signup_limited') return t('今天无法创建新账号', 'No new account today');
+  if (reason === 'email_unverified') return t('请先验证邮箱', 'Verify your email first');
+  return t('请检查登录状态', 'Check your sign-in');
+}
 function SSOFailure({ reason, signedIn = false }: { reason: SSOFailureReason; signedIn?: boolean }) {
   const { t, locale } = useSaaSPreferences();
   const { options } = useAuthOptions();
   const redeemURL = clawHuntRedeemURL(options?.clawhuntSiteURL);
+  const accountURL = reason === 'email_unverified' ? clawHuntAccountURL(options?.clawhuntSiteURL) : null;
   return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('账号连接未完成', 'Account connection not completed')}</h1></div>
-    <section className="saas-card"><h2>{reason === 'waitlisted' ? t('用邀请码开通 AwwO', 'Unlock AwwO with an invite code') : t('请检查登录状态', 'Check your sign-in')}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
+    <section className="saas-card"><h2>{ssoFailureHeading(reason, t)}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
       {reason === 'waitlisted' && redeemURL && <a className="saas-primary saas-sso-action" href={redeemURL}>{t('输入邀请码进入 AwwO', 'Enter your invite code')}</a>}
-      {reason !== 'waitlisted' && <a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('重新使用 ClawHunt 账号继续', 'Continue with ClawHunt again')}</a>}
+      {accountURL && <a className="saas-primary saas-sso-action" href={accountURL}>{t('到 ClawHunt 验证邮箱', 'Verify your email on ClawHunt')}</a>}
+      {reason !== 'waitlisted' && <a className={accountURL ? 'saas-sso-action' : 'saas-primary saas-sso-action'} href={clawHuntStartURL(location.search)}>{t('重新使用 ClawHunt 账号继续', 'Continue with ClawHunt again')}</a>}
       <a href="/">{signedIn ? t('返回工作区', 'Back to workspace') : t('返回登录', 'Back to sign in')}</a>
     </section></main>;
 }
