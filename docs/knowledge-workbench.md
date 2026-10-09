@@ -62,7 +62,7 @@ reader 可以查看知识、执行历史和产物，不能导入、审核、恢�
 
 ## 交付物预览
 
-画布的「成果」视图是成果区：它放大展示画布的成果（最远一步交付的网页、媒体或文件，没有时是最远一步的交付；验收类节点只作为 Agent 的检查意见显示），旁边按顺序列出每一步，点开就看到那一步的交付，另附运行回执（只写明“最近一次完成这一步的整图运行”）。部分结果、手动发布和后续步骤尚未交付的情况都会标明。工作区首页的「最近的成果」按最新交付列出这些画布，网页以不运行脚本的静态预览显示，点开直接进入该画布的成果视图。此外，节点的「交付物」和直接执行任务交付的文件都在原处按实际格式打开对应的查看器。节点还没有交付物时，交付物里会说明这四类文件可以直接预览。预览只读取任务交付物，不提供本地上传或示例文件。
+画布的「成果」视图是成果区：它放大展示画布的成果（最远一步交付的网页、媒体或文件，没有时是最远一步的交付；验收类节点只作为 Agent 的检查意见显示），旁边按顺序列出每一步，点开就看到那一步的交付，另附运行回执（只写明“最近一次完成这一步的整图运行”）。部分结果、手动发布和后续步骤尚未交付的情况都会标明。工作区首页的「最近的成果」按最新交付列出这些画布，网页以不运行脚本的静态预览显示，点开直接进入该画布的成果视图。每张卡片右上角的「⋯」可以「从最近的成果中移除」（只改自己在这个浏览器里看到的列表，按人和工作区分开保存，画布和交付都不动，可以撤销，画布交付新成果后会重新出现；页头的「已移除 N 项 · 全部恢复」一次找回），成员还可以「删除画布」（连同会话和运行历史，确认后才删，正在运行的画布会被拒绝并说明原因）；「管理」可以多选后批量移除或删除，删除时逐张进行，被拒绝的画布留在对话框里并写明原因。此外，节点的「交付物」和直接执行任务交付的文件都在原处按实际格式打开对应的查看器。节点还没有交付物时，交付物里会说明这四类文件可以直接预览。预览只读取任务交付物，不提供本地上传或示例文件。
 
 | 类型 | 支持内容与交互 | 主要边界 |
 | --- | --- | --- |
@@ -148,7 +148,7 @@ flowchart LR
 | 知识持久化 | `backend/internal/app/knowledge.go`、`migrations/019_knowledge.sql`、`migrations/021_knowledge_source_origins.sql` | 租户隔离、原件、不可变修订、追加来源、当前关系、提案、幂等操作和审计 |
 | 执行证据 | `knowledge_context.go`、`wiki_compiler.go`、`runs.go`、`team_context.go`、`graph_runs.go` | 固定版本上下文、编译输出校验、配额和预算、各运行路径的证据传递 |
 | 直接执行（画布助手） | `useManagedExecution.ts`、`AssistantExecution.tsx`、`managedExecutionApi.ts`、`assistantRouteApi.ts`；`canvas/assistantRouting.ts` 与 `CanvasSurface.tsx` 的统一对话；服务端路由 `backend/internal/app/assistant_route.go` | 同一模型目录、按消息自动路由、任务对话与历史、审批和问题、停止、产物预览与归档、刷新 |
-| 成果区 | `canvas/canvasResultModel.ts`、`canvas/CanvasResults.tsx`、`CanvasRunReceipt.tsx`、`ResultsGallery.tsx` | 从画布文档选出成果与步骤（文档、首页同一规则）、成果视图、运行回执、首页「最近的成果」 |
+| 成果区 | `canvas/canvasResultModel.ts`、`canvas/CanvasResults.tsx`、`CanvasRunReceipt.tsx`、`ResultsGallery.tsx`、`resultsGalleryHidden.ts` | 从画布文档选出成果与步骤（文档、首页同一规则）、成果视图、运行回执、首页「最近的成果」及其移除（本机按人和工作区保存）与删除画布 |
 | 内置执行后端 | `computer_execution.go`、`computer_model_proxy.go`、`migrations/022_computer_execution.sql` | 运行授权、持久审批、幂等回执、个人模型代理、产物与配额 |
 | 托管核心与沙箱 | `apps/openmaus-worker/`、`apps/computer-model.ts`、`workspace-sandbox.ts` | 固定上游核心、原生工具审批、隔离工作区、模型协议转换和资源清理 |
 | 外部兼容 API | `openmaus_bridge.go`、`migrations/020_openmaus_dispatch.sql`、`OpenMausBridgePanel.tsx` | 旧外部实例的租户绑定、显式发送、回执查询、消息入库 |

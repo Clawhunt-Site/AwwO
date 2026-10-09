@@ -52,4 +52,36 @@
   margin: 0; padding: 22px 20px; border: 1px dashed var(--saas-border); border-radius: var(--saas-radius-lg);
   color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.6;
 }
+
+/* Each card's options sit beside its link (a link cannot hold buttons), over the print's corner. */
+.saas-results-list > li { position: relative; min-width: 0; }
+.saas-result-actions { position: absolute; top: 8px; right: 8px; z-index: 1; }
+.saas-result-actions .saas-action-menu-trigger {
+  border-radius: var(--saas-radius-pill); background: color-mix(in srgb, var(--saas-card) 90%, transparent);
+  box-shadow: 0 0 0 1px var(--saas-hairline); backdrop-filter: blur(6px);
+}
+
+/* 管理: the header's tools, and cards that tick instead of opening. */
+.saas-results-tools { flex-wrap: wrap; justify-content: flex-end; }
+.saas-results-count { font-variant-numeric: tabular-nums; }
+.saas-dashboard .saas-results-tools button.saas-results-tool {
+  display: inline-flex; align-items: center; min-height: 36px; margin: 0; padding: 0 14px;
+  border-color: var(--saas-border); box-shadow: none; background: transparent; color: var(--saas-muted);
+}
+.saas-dashboard .saas-results-tools button.saas-results-tool:not(:disabled):hover { background: var(--saas-soft); color: var(--saas-text); }
+.saas-dashboard .saas-results-tools button.saas-results-tool.is-danger:not(:disabled) {
+  color: var(--saas-danger); border-color: color-mix(in srgb, var(--saas-danger) 45%, var(--saas-border));
+}
+.saas-result-card.is-selectable { cursor: pointer; }
+.saas-result-check { position: absolute; top: 12px; left: 12px; z-index: 1; width: 18px; height: 18px; margin: 0; accent-color: var(--saas-accent); }
+.saas-results-list > li.is-selected .saas-result-card {
+  border-color: var(--saas-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--saas-accent) 35%, transparent);
+}
+.saas-result-card.is-selectable:focus-within { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
+
+/* What was just removed or deleted, with 撤销; it takes room only while it says something. */
+.saas-results-notice { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.6; }
+.saas-results-notice:not(:empty) { margin: 0 0 12px; }
+.saas-results-confirm-list { max-height: 180px; margin: 8px 0 0; padding-left: 20px; overflow: auto; overflow-wrap: anywhere; }
+.saas-results-confirm-hint { color: var(--saas-muted); font-size: var(--saas-text-sm); }
 @media (prefers-reduced-motion: reduce) { .saas-result-card { transition: none; } }

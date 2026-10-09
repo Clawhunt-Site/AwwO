@@ -16,13 +16,15 @@ const byRecentUpdate = (items: ReadonlyArray<CanvasRecord>) => [...items].sort((
  * matches only the loaded page; paging stays explicit, and clearing a search returns recent mode. */
 type CanvasListProps = { tenant: Tenant; onOpen: (canvasId: string) => void; recentLimit?: number; userId?: string;
   /** The newest canvases as loaded (the first page), for views built from the same list (the home's 最近的成果). */
-  onFirstPage?: (canvases: ReadonlyArray<CanvasRecord>) => void };
+  onFirstPage?: (canvases: ReadonlyArray<CanvasRecord>) => void;
+  /** Changing it reloads the list: a view built from it (最近的成果) deleted canvases. */
+  reloadSignal?: number };
 export function CanvasList(props: CanvasListProps) {
   // A changed identity must never inherit another account's search or in-flight list request.
   return <ScopedCanvasList key={JSON.stringify([props.userId ?? null, props.tenant.id])} {...props} />;
 }
 
-function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage }: CanvasListProps) {
+function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, reloadSignal }: CanvasListProps) {
   const { locale, t } = useSaaSPreferences();
   const path = tenantPath(tenant.id, '/canvases');
   const listing = usePagedList<CanvasRecord>(path);
@@ -51,6 +53,13 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage }: 
     window.addEventListener('pageshow', restored);
     return () => window.removeEventListener('pageshow', restored);
   }, []);
+  // Only a change reloads: the first page is already being read.
+  const reloadedFor = useRef(reloadSignal);
+  useEffect(() => {
+    if (reloadSignal === reloadedFor.current) return;
+    reloadedFor.current = reloadSignal;
+    refresh.current();
+  }, [reloadSignal]);
 
   const items = listing.page ? byRecentUpdate(listing.page.items) : [];
   const firstPage = useRef(onFirstPage);

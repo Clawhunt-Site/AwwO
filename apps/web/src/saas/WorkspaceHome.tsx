@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, Plus } from 'lucide-react';
 import { api, tenantPath, saasErrorMessage, SaaSApiError, type CanvasRecord, type Identity, type Tenant } from './api';
 import { emptyDocument } from '../canvas/canvasDoc';
@@ -35,6 +35,19 @@ function exampleTitle(prompt: string): string | undefined {
 const isExamplePrompt = (text: string) => exampleTitle(text.trim()) !== undefined;
 const prefersReducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/** The home's newest canvases, shared by the canvas list and 最近的成果. A canvas 最近的成果 deletes leaves
+ * both at once, and the list reads the server again. The callback is stable for the memoised gallery. */
+function useHomeCanvases() {
+  const [canvases, setCanvases] = useState<ReadonlyArray<CanvasRecord> | null>(null);
+  const [reloadSignal, setReloadSignal] = useState(0);
+  const onCanvasesDeleted = useCallback((canvasIds: ReadonlyArray<string>) => {
+    const gone = new Set(canvasIds);
+    setCanvases(value => value && value.filter(canvas => !gone.has(canvas.id)));
+    setReloadSignal(value => value + 1);
+  }, []);
+  return { canvases, setCanvases, reloadSignal, onCanvasesDeleted };
+}
+
 /** The workspace landing page: a prompt box that starts a planned canvas, the most recently updated
  * canvases, and examples to start from. Readers, who cannot create canvases, get the list only. */
 export function WorkspaceHome(props: HomeProps) {
@@ -43,11 +56,11 @@ export function WorkspaceHome(props: HomeProps) {
 
 function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
   const { t } = useSaaSPreferences();
-  const [canvases, setCanvases] = useState<ReadonlyArray<CanvasRecord> | null>(null);
+  const { canvases, setCanvases, reloadSignal, onCanvasesDeleted } = useHomeCanvases();
   return <>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
-    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onFirstPage={setCanvases} />
-    <ResultsGallery tenant={tenant} canvases={canvases} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onFirstPage={setCanvases} reloadSignal={reloadSignal} />
+    <ResultsGallery tenant={tenant} canvases={canvases} userId={identity.user.id} onCanvasesDeleted={onCanvasesDeleted} />
     <ProductionCases compact />
     <OfficialExamples compact readOnly />
   </>;
@@ -55,7 +68,7 @@ function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
 
 function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const { locale, t } = useSaaSPreferences();
-  const [canvases, setCanvases] = useState<ReadonlyArray<CanvasRecord> | null>(null);
+  const { canvases, setCanvases, reloadSignal, onCanvasesDeleted } = useHomeCanvases();
   const { t: text } = useCanvasI18n();
   const scope = useMemo(() => ({ user: identity.user.id, tenant: tenant.id }), [identity.user.id, tenant.id]);
   const [draft, setDraft] = useState(() => readHomeDraft(scope));
@@ -250,8 +263,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     <section id={examplesId} className="saas-home-prompt-ideas" aria-label={t('案例灵感', 'Example ideas')} hidden={!examplesOpen}>
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
-    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onFirstPage={setCanvases} />
-    <ResultsGallery tenant={tenant} canvases={canvases} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onFirstPage={setCanvases} reloadSignal={reloadSignal} />
+    <ResultsGallery tenant={tenant} canvases={canvases} userId={identity.user.id} onCanvasesDeleted={onCanvasesDeleted} />
     <ProductionCases compact onReuse={copyProduction} />
     <OfficialExamples compact onReuse={copyOfficial} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}
