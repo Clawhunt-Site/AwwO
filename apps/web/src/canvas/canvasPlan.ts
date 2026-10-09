@@ -6,6 +6,7 @@ import { arrangeNodePositions } from './nodePresentation';
 import { canConnect, edgeId, portsFor } from './ports';
 import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
+import { TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH } from './taskFrame';
 
 export type CanvasPlanFieldChanges = Partial<Pick<ContractField, 'label' | 'type' | 'required' | 'help' | 'placeholder'>>;
 export type CanvasPlanOperation =
@@ -255,8 +256,16 @@ function setInput(node: CanvasNode, fieldId: string, value: string): void {
 }
 
 /** Validate against a private clone, then return one complete document. No partial writes. */
-export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh'): AppliedCanvasPlan {
+export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = ''): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
+  const requestCharacters = Array.from(originalRequest);
+  if (requestCharacters.length > TASK_FRAME_MAX_TOTAL_LENGTH) fail('原始请求超过任务要求的长度限制。');
+  const constraints: string[] = [];
+  if (originalRequest.trim()) {
+    for (let start = 0; start < requestCharacters.length; start += TASK_FRAME_MAX_ENTRY_LENGTH) {
+      constraints.push(requestCharacters.slice(start, start + TASK_FRAME_MAX_ENTRY_LENGTH).join(''));
+    }
+  }
   const draft = structuredClone(doc);
   const originalIds = new Set(doc.nodes.map(node => node.id));
   const refs = new Map<string, string>();
@@ -271,6 +280,9 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
       case 'add_node': {
         if (originalIds.has(op.ref) || draft.nodes.some(node => node.id === op.ref)) fail(`新增引用「${op.ref}」与已有节点 ID 冲突。`);
         const node = createAgentTemplate(op.templateId, { x: 0, y: 0 }, locale);
+        // Carry the human's exact request separately from the model-authored persona.
+        // Every new downstream reviewer receives it even if an upstream draft drifts.
+        if (constraints.length) node.taskFrame = { version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [] };
         if (op.title !== undefined) node.title = op.title;
         if (op.persona !== undefined) node.persona = op.persona;
         for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value);

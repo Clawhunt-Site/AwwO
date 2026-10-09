@@ -5,6 +5,7 @@ import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { createSessionNode, emptyDocument, loadDocumentWithStatus, saveDocument, type CanvasEdge, type CanvasNode, type NodeOutput, type SessionNode } from '../src/canvas/canvasDoc';
 import type { requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import { resetAllSessions } from '../src/canvas/sessions';
+import { createAgentTemplate } from '../src/canvas/agentTemplates';
 
 const now = Date.now();
 const page = '<!doctype html><html><head><title>狐狸邮差</title></head><body><h1>Saved game page</h1></body></html>';
@@ -25,6 +26,19 @@ beforeEach(() => { cleanup(); localStorage.clear(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('the 成果 view', () => {
+  it('opens the finalized plan by default and returns to it after reading the draft', () => {
+    const draft = step('draft', '活动方案拟定', 'markdown', '初稿内容');
+    const final = { ...createAgentTemplate('review', { x: 0, y: 0 }), id: 'final', title: '方案检查与最终化',
+      lastOutput: { text: JSON.stringify({ report: '完整的最终活动方案' }), at: now, source: 'run' as const } };
+    view({ nodes: [draft, final], edges: [wire('draft', 'final')] });
+    expect(within(screen.getByRole('article', { name: '方案检查与最终化' })).getByText('完整的最终活动方案')).toBeVisible();
+    expect(screen.getByRole('button', { name: '查看「方案检查与最终化」的交付（成果 · 运行交付）' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '查看「活动方案拟定」的交付（运行交付）' }));
+    expect(screen.getByText('初稿内容')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '回到成果' }));
+    expect(screen.getByRole('article', { name: '方案检查与最终化' })).toBeVisible();
+  });
+
   it('shows the result large in the sandboxed viewer, with where it came from and the steps that made it', () => {
     const receipt = vi.fn(() => <p>回执内容</p>);
     view({ receipt });

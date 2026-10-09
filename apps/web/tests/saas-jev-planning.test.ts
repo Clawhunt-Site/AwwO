@@ -114,6 +114,20 @@ it.each(['zh', 'en'] as const)('keeps the original goal while giving each new ro
   expect(result.modelAssignments).toHaveLength(3);
 });
 
+it('preserves exact user constraints on every newly planned Jev role', async () => {
+  mock();
+  const goal = '6个人，2小时，预算不超过240元，恰好3条注意事项；审查时不得扩展数量。';
+  const old = createSessionNode('llm', { x: 0, y: 0 });
+  const doc = { ...emptyDocument(), nodes: [old] };
+  const result = await requestJevPlan(goal, doc, [], signal());
+  const applied = applyJevPlan(doc, result, 'zh', goal);
+  expect(applied.doc.nodes[0]).toEqual(old);
+  for (const node of applied.doc.nodes.slice(1) as SessionNode[]) {
+    expect(node.taskFrame?.source).toBe('manual');
+    expect(node.taskFrame?.constraints.join('')).toBe(goal);
+  }
+});
+
 it.each(['unsupported', 'clarify', 'omit'])('does not apply an unsupported or missing-role decision (%s), or spend a second call', async decision => {
   const fake = mock({ first: decision === 'omit' ? { role_1: 'omit' } : { intent: decision } });
   const doc = emptyDocument();

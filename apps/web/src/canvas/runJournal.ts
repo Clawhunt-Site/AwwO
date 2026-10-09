@@ -32,13 +32,16 @@ export interface CanvasRunJournal {
   scope: string[];
   inputFingerprint?: string;
   /** Accepted cloud graphs continue scheduling while all observers are detached. */
-  serverGraph?: { id?: string; tenantId: string; canvasId: string; cancelRequested?: boolean; status?: GraphRunSnapshot['status'] };
+  serverGraph?: { id?: string; tenantId: string; canvasId: string; cancelRequested?: boolean; documentVersion?: number; status?: GraphRunSnapshot['status'] };
   /** Run-level collaboration never rewrites the native document execution policy. */
   collaboration?: GraphCollaborationSnapshot;
-  /** Manual replies remain transcript evidence until explicitly published. */
+  /** Ordinary replies remain transcript evidence; complete keyed outputs can revise a delivery. */
   manual?: boolean;
   /** Exact operator turn needed to reconstruct a detached manual conversation. */
   manualMessage?: string;
+  /** Acknowledged cloud version immediately before publishing; preserved across recovery retries. */
+  supersedesThroughGraphVersion?: number;
+  supersedesGraphCanvasId?: string;
   /** Review rounds never imply convergence until the gate verdict has been checked. */
   review?: {
     round: number;
@@ -101,8 +104,9 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage
     review = r;
   }
   return { version: 1, id: text(value.id)!, startedAt: Number(value.startedAt), scope, nodes, ...(review ? { review } : {}),
-    ...(graph ? { serverGraph: { tenantId: String(graph.tenantId), canvasId: String(graph.canvasId), ...(graph.id ? { id: String(graph.id) } : {}), ...(graph.cancelRequested === true ? { cancelRequested: true } : {}), ...(graph.status ? { status: graph.status as GraphRunSnapshot['status'] } : {}) } } : {}),
+    ...(graph ? { serverGraph: { tenantId: String(graph.tenantId), canvasId: String(graph.canvasId), ...(graph.id ? { id: String(graph.id) } : {}), ...(Number.isSafeInteger(graph.documentVersion) && Number(graph.documentVersion) >= 1 ? { documentVersion: Number(graph.documentVersion) } : {}), ...(graph.cancelRequested === true ? { cancelRequested: true } : {}), ...(graph.status ? { status: graph.status as GraphRunSnapshot['status'] } : {}) } } : {}),
     ...(value.collaboration != null ? { collaboration: value.collaboration as GraphCollaborationSnapshot } : {}),
+    ...(value.manual === true && text(value.supersedesGraphCanvasId) && String(value.supersedesGraphCanvasId).length <= 200 && Number.isSafeInteger(value.supersedesThroughGraphVersion) && Number(value.supersedesThroughGraphVersion) >= 1 ? { supersedesThroughGraphVersion: Number(value.supersedesThroughGraphVersion), supersedesGraphCanvasId: String(value.supersedesGraphCanvasId) } : {}),
     ...(typeof value.inputFingerprint === 'string' ? { inputFingerprint: value.inputFingerprint } : {}), ...(value.manual === true ? { manual: true } : {}), ...(value.manual === true && text(value.manualMessage) ? { manualMessage: String(value.manualMessage) } : {}) };
 }
 

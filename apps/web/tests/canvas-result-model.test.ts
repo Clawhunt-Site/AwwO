@@ -14,8 +14,58 @@ function step(title: string, type: 'markdown' | 'html' | 'text' | 'file', output
 }
 const wire = (from: CanvasNode, to: CanvasNode, kind?: CanvasEdge['kind']): CanvasEdge =>
   ({ id: `${from.id}-${to.id}`, fromNode: from.id, fromPort: 'out:result', toNode: to.id, toPort: 'in:brief', dataType: 'text', ...(kind ? { kind } : {}) });
+const finalizer = (output?: string, extra: Partial<NodeOutput> = {}): SessionNode => ({
+  ...createAgentTemplate('review', { x: 0, y: 0 }), id: `n${++ids}`, title: '方案检查与最终化',
+  lastOutput: output === undefined ? null : { text: JSON.stringify({ report: output }), at: at + ids, source: 'run', ...extra },
+});
 
 describe('the canvas result model', () => {
+  it.each([false, true])('selects the final plan produced by a review role regardless of document order (reverse=%s)', reverse => {
+    const draft = step('活动方案拟定', 'text', '初稿');
+    const final = finalizer('完整的最终活动方案');
+    const nodes = reverse ? [final, draft] : [draft, final];
+    const result = canvasResult({ nodes, edges: [wire(draft, final)] });
+    expect(result.final?.node.id).toBe(final.id);
+    expect(result.final?.text).toBe('完整的最终活动方案');
+    expect(result).toMatchObject({ review: null, pending: [], complete: true });
+  });
+
+  it.each([undefined, '未写完的最终稿'])('keeps an unfinished finalization pending instead of calling the draft complete (%s)', output => {
+    const draft = step('活动方案拟定', 'markdown', '初稿');
+    const final = finalizer(output, { partial: true });
+    const result = canvasResult({ nodes: [draft, final], edges: [wire(draft, final)] });
+    expect(result.final?.node.id).toBe(draft.id);
+    expect(result.pending.map(item => item.node.id)).toEqual([final.id]);
+    expect(result.complete).toBe(false);
+  });
+
+  it('uses explicit final delivery fields over a review template and an earlier richer draft', () => {
+    const draft = step('页面草稿', 'html', '<!doctype html><html><head><title>draft</title></head><body></body></html>');
+    const final = { ...step('编辑检查', 'markdown', '最终活动方案', {}, { templateId: 'review' }),
+      contract: { version: 1 as const, inputs: [], outputs: [{ id: 'finalMarkdown', label: '最终方案', type: 'markdown' as const, required: true, value: '' }] },
+      lastOutput: { text: JSON.stringify({ finalMarkdown: '最终活动方案' }), at, source: 'run' as const } };
+    expect(canvasResult({ nodes: [draft, final], edges: [wire(draft, final)] }).final?.node.id).toBe(final.id);
+  });
+
+  it('keeps an explicit policy reviewer as a check even when it is named a final report', () => {
+    const draft = step('交付正文', 'markdown', '正文');
+    const check = step('Final report', 'markdown', '检查通过');
+    const result = canvasResult({ nodes: [draft, check], edges: [wire(draft, check)],
+      execution: { mode: 'review', maxRounds: 1, reviewerNodeId: check.id, verdictFieldId: 'result' } });
+    expect(result.final?.node.id).toBe(draft.id);
+    expect(result.review?.node.id).toBe(check.id);
+  });
+
+  it('chooses consistently between equally recent final sinks and ignores dangling and feedback edges', () => {
+    const draft = step('草稿', 'text', '草稿');
+    const alpha = { ...finalizer('甲版'), id: 'final-a' };
+    const beta = { ...finalizer('乙版'), id: 'final-b', lastOutput: { ...alpha.lastOutput!, text: '{"report":"乙版"}' } };
+    const missing = { ...draft, id: 'missing' };
+    const edges = [wire(draft, alpha), wire(draft, beta), wire(beta, missing), wire(beta, draft, 'feedback')];
+    expect(canvasResult({ nodes: [draft, alpha, beta], edges }).final?.node.id).toBe('final-b');
+    expect(canvasResult({ nodes: [beta, alpha, draft], edges }).final?.node.id).toBe('final-b');
+  });
+
   it('orders steps by depth, side-by-side steps sharing one, and ignores a review sent back', () => {
     const design = step('玩法与数值', 'markdown', '规格'); const art = step('像素美术', 'markdown', '精灵'); const sound = step('音效', 'markdown', '音效');
     const build = step('可玩试玩关', 'html', '<!doctype html><html><head><title>game</title></head><body></body></html>'); const review = step('试玩验收', 'markdown', '通过');

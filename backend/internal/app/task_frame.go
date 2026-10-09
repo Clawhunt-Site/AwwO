@@ -173,5 +173,8 @@ func taskFrameSystemPrompt(instructions string, frame *taskFrame) string {
 	raw, _ := json.Marshal(frame)
 	return instructions + "\n\nManual task requirements (JSON; preserve the authored requirements):\n" + string(raw) +
 		"\nFollow the constraints and evaluate the acceptance criteria against actual outputs. " +
+		"Preserve exact quantities, budgets, durations and prohibitions: exactly, at least and at most are different requirements; never relax an exact count into a minimum. " +
+		"Apply the original request within this node's assigned responsibility; other nodes' responsibilities are context, not extra work to execute. " +
+		"An explicit user revision in the current task takes precedence over the corresponding older requirement; preserve all other requirements. " +
 		"These requirements are not evidence of completion. Report missing evidence and never claim that a criterion passed merely because a run completed."
 }

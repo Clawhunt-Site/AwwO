@@ -8,7 +8,6 @@ import { SaaSApp } from '../src/saas/SaaSApp';
 import { saveHomeDraft, readHomeDraft } from '../src/saas/homePrompt';
 import { PLAN_HANDOFF_PREFIX } from '../src/saas/planHandoff';
 import { rememberOfficialSelection, readOfficialSelection, officialSignInURL } from '../src/saas/examples/officialSelection';
-import { clawHuntStartURL } from '../src/saas/clawhuntAuth';
 import type { Identity, Tenant } from '../src/saas/api';
 
 const first = OFFICIAL_WORKFLOWS[0];
@@ -133,9 +132,33 @@ it('preserves a valid invitation through case sign-in without carrying arbitrary
   view({ initialId: first.id });
   const link = screen.getByRole('link', { name: '登录并复用' });
   const href = link.getAttribute('href')!;
-  expect(href).toBe(`/?official=${first.id}&invite=${invite}`);
-  expect(clawHuntStartURL(href.slice(1))).toBe(`/api/v1/auth/clawhunt/start?invite=${invite}`);
-  expect(officialSignInURL(first.id, '?invite=https://untrusted.example/')).toBe(`/?official=${first.id}`);
+  expect(href).toBe(`/api/v1/auth/clawhunt/start?invite=${invite}`);
+  expect(screen.getByRole('link', { name: /独立打开此案例/ })).toHaveAttribute('href', `/?official=${first.id}&invite=${invite}&examples=1`);
+  expect(officialSignInURL(first.id, '?invite=https://untrusted.example/')).toBe('/api/v1/auth/clawhunt/start');
+  expect(officialSignInURL('https://untrusted.example/', '')).toBe('/');
+});
+
+it('starts the real sign-in flow from a public example and restores that example after returning', () => {
+  history.replaceState({}, '', '/?examples=1&official=interaction-page');
+  const mounted = view({ initialId: 'interaction-page' });
+  const link = screen.getByRole('link', { name: '登录并复用' });
+  expect(link).toHaveAttribute('href', '/api/v1/auth/clawhunt/start');
+  expect(screen.getByRole('link', { name: /独立打开此案例/ })).toHaveAttribute('href', '/?official=interaction-page&examples=1');
+  link.addEventListener('click', event => event.preventDefault());
+  fireEvent.click(link);
+  expect(readOfficialSelection()).toBe('interaction-page');
+  mounted.unmount();
+
+  history.replaceState({}, '', '/');
+  const posts: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (init.method === 'POST') posts.push(url);
+    return json(url.endsWith('/runtime') ? { available: false } : { items: [], nextCursor: null });
+  }));
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+  expect(screen.getByLabelText('Orbit / 团队套餐配置器')).toBeVisible();
+  expect(screen.getByRole('button', { name: '复制到我的画布' })).toBeVisible();
+  expect(posts).toEqual([]);
 });
 
 

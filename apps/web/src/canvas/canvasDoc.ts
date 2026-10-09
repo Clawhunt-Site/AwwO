@@ -137,6 +137,9 @@ export interface NodeOutput {
    * delivery, copied in with its canvas: it is real, but it did not run in this workspace.
    */
   source: 'run' | 'manual' | 'case';
+  /** Graphs admitted through this cloud version did not see the conversation revision. */
+  supersedesThroughGraphVersion?: number;
+  supersedesGraphCanvasId?: string;
   /** True when the run that produced this did not succeed — the text is evidence, not a result. */
   partial?: boolean;
   /** For a case recording, the model that produced it (the copy may run another one). */
@@ -299,6 +302,9 @@ function sanitizeOutput(raw: unknown): NodeOutput | null {
     at,
     source,
     ...(r.partial === true ? { partial: true } : {}),
+    ...(source === 'run' && typeof r.supersedesGraphCanvasId === 'string' && r.supersedesGraphCanvasId.trim() && r.supersedesGraphCanvasId.length <= 200
+      && Number.isSafeInteger(r.supersedesThroughGraphVersion) && Number(r.supersedesThroughGraphVersion) >= 1
+      ? { supersedesThroughGraphVersion: Number(r.supersedesThroughGraphVersion), supersedesGraphCanvasId: r.supersedesGraphCanvasId } : {}),
     ...(source === 'case' && typeof r.model === 'string' && r.model && r.model.length <= 200 ? { model: r.model } : {}),
   };
 }

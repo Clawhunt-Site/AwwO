@@ -267,7 +267,7 @@ export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRun
       node.detail = snapshot.error || snapshot.status;
     }
   }
-  return { ...journal, serverGraph: { ...journal.serverGraph, id: snapshot.id, ...(collaboration ? { status: snapshot.status } : {}) }, nodes,
+  return { ...journal, serverGraph: { ...journal.serverGraph, id: snapshot.id, documentVersion: snapshot.documentVersion, ...(collaboration ? { status: snapshot.status } : {}) }, nodes,
     ...(collaboration ? { collaboration: structuredClone(collaboration) } : {}) };
 }
 
