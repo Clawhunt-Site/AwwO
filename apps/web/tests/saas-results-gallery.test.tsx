@@ -7,6 +7,7 @@ import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { publishGraphRuns, type GraphRunSnapshot } from '../src/saas/graphRuns';
 import { createSessionNode, type CanvasNode, type NodeOutput, type SessionNode } from '../src/canvas/canvasDoc';
 import type { CanvasRecord, Tenant } from '../src/saas/api';
+import { createAgentTemplate } from '../src/canvas/agentTemplates';
 
 const tenant: Tenant = { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const now = Date.now();
@@ -23,6 +24,16 @@ beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale'
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('the home’s 最近的成果', () => {
+  it('shows the finalized plan instead of the draft when the final author uses a review template', () => {
+    const final = { ...createAgentTemplate('review', { x: 0, y: 0 }), id: 'final', title: '方案检查与最终化',
+      lastOutput: { text: JSON.stringify({ report: '完整的最终活动方案' }), at: now, source: 'run' as const } };
+    gallery([canvas('c-plan', '活动方案', [step('draft', '活动方案拟定', 'markdown', '初稿内容'), final])]);
+    const card = screen.getByRole('link', { name: /活动方案/ });
+    expect(within(card).getByText('方案检查与最终化')).toBeVisible();
+    expect(within(card).getByText('完整的最终活动方案')).toBeVisible();
+    expect(within(card).queryByText('初稿内容')).toBeNull();
+  });
+
   it('shows each delivering canvas by its result, newest first, opening straight into its results', () => {
     gallery([
       canvas('c-old', '旧画布', [step('a', '需求整理', 'markdown', '需求', { at: now - 86_400_000 })]),

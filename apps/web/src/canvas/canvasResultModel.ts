@@ -40,8 +40,8 @@ export interface StepDelivery {
 export interface CanvasResult {
   /** Steps grouped by depth, in order. Feedback wires (a review sent back) do not count as order. */
   stages: StepDelivery[][];
-  /** The canvas's result: the furthest product (page, media, file) delivered, otherwise the furthest working
-   *  step delivered; complete deliveries are preferred over a failed run's capture. */
+  /** The canvas's result: an explicit final delivery at the end of the work, otherwise the furthest product
+   *  (page, media, file) or working step; complete deliveries are preferred over a failed run's capture. */
   final: StepDelivery | null;
   /** An acceptance step fed by the result that has reported on it. */
   review: StepDelivery | null;
@@ -58,10 +58,20 @@ const KIND_RANK: Record<DeliveryKind, number> = { html: 4, media: 3, file: 2, ma
 const PRODUCT_KINDS: ReadonlySet<DeliveryKind> = new Set(['html', 'media', 'file']);
 /** An acceptance step by the name people give one (试玩验收, 体验与实现核对, 玩法回归, Code review). */
 const ACCEPTANCE_TITLE = /验收|评审|审查|复核|核对|回归(?:测试|检查|验证)|(?:玩法|功能|界面|视觉|体验)回归|\b(?:review|qa|acceptance)\b/i;
+/** Final authors can use review guidance too. Read their declared responsibility, never words inside the
+ *  generated output: a final review/verdict alone is still an acceptance check. */
+const FINAL_DELIVERY = /最终(?:化|方案|成果|交付|版本|正文|报告|文稿|文案|文件|页面)|定稿|终稿|\bfinali[sz](?:e|ed|ing|ation)\b|\bfinal[\s_-]+(?:result|deliverable|output|draft|plan|report|document|markdown|html|file|page)\b/i;
+function finalDelivery(node: CanvasNode): boolean {
+  if (node.kind !== 'session') return false;
+  return FINAL_DELIVERY.test(node.title) || Boolean(node.contract?.outputs.some(field =>
+    field.type !== 'boolean' && field.type !== 'number'
+    && FINAL_DELIVERY.test(`${field.id.replace(/([a-z])([A-Z])/g, '$1 $2')} ${field.label}`)));
+}
 
 export function stepDelivery(node: CanvasNode, depth: number, reviewer = false): StepDelivery {
   const input = node.kind === 'form';
-  const review = node.kind === 'session' && (reviewer || getAgentTemplateForNode(node)?.id === 'review' || ACCEPTANCE_TITLE.test(node.title));
+  const review = node.kind === 'session' && (reviewer || (!finalDelivery(node)
+    && (getAgentTemplateForNode(node)?.id === 'review' || ACCEPTANCE_TITLE.test(node.title))));
   const output = node.kind === 'session' ? node.lastOutput ?? null : null;
   const base = { node, depth, output, input, review };
   if (!output || !output.text.trim()) return { ...base, output: null, state: 'none', kind: null };
@@ -83,9 +93,10 @@ export function stepDelivery(node: CanvasNode, depth: number, reviewer = false):
     ...(prose ? { text: String(parsed.values[prose.id]) } : {}) };
 }
 
-/** Among the candidates, the furthest step wins; at the same step, the richer kind, then the newer. */
+/** Among the candidates, the furthest step wins; at the same step, the richer kind, then the newer.
+ *  Equal deliveries use their stable ID so changing document order cannot change the result. */
 const better = (a: StepDelivery, b: StepDelivery) => a.depth - b.depth
-  || KIND_RANK[a.kind!] - KIND_RANK[b.kind!] || (a.output!.at - b.output!.at);
+  || KIND_RANK[a.kind!] - KIND_RANK[b.kind!] || (a.output!.at - b.output!.at) || a.node.id.localeCompare(b.node.id);
 const best = (steps: StepDelivery[]) => steps.reduce<StepDelivery | null>((top, step) => !top || better(step, top) > 0 ? step : top, null);
 const delivered = (step: StepDelivery) => step.state === 'run' || step.state === 'manual' || step.state === 'case';
 
@@ -110,9 +121,16 @@ export function canvasResult(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Part
   const outputs = steps.filter(step => !step.input && step.output);
   const working = outputs.filter(step => !step.review);
   const products = working.filter(step => PRODUCT_KINDS.has(step.kind!));
-  // A complete product, then any complete working step; a failed run's capture only when nothing complete
-  // exists; an acceptance report only on a canvas that produced nothing else.
-  const final = best(products.filter(delivered)) ?? best(working.filter(delivered)) ?? best(products) ?? best(working) ?? best(outputs);
+  const finalizers = working.filter(step => {
+    if (!finalDelivery(step.node)) return false;
+    const after = downstream(doc, step.node.id);
+    return !steps.some(next => next !== step && !next.input && !next.review && after.has(next.node.id));
+  });
+  // An explicit final delivery outranks a richer intermediate draft. Otherwise keep the product-first
+  // fallback; a failed run's capture is used only when nothing complete exists, and a pure acceptance
+  // report only on a canvas that produced nothing else.
+  const final = best(finalizers.filter(delivered)) ?? best(products.filter(delivered)) ?? best(working.filter(delivered))
+    ?? best(finalizers) ?? best(products) ?? best(working) ?? best(outputs);
   if (!final) return { stages, final: null, review: null, pending: [], complete: false };
   const after = downstream(doc, final.node.id);
   const reviews = outputs.filter(step => step.review && step !== final && after.has(step.node.id));
