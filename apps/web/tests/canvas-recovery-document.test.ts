@@ -627,3 +627,70 @@ describe('what a recovery publishes', () => {
       ['cached', 'old result'], ['done', ''], ['failed', undefined]] as const) expect(recoverableOutput({}, step(state, output))).toBeNull();
   });
 });
+
+
+describe('structured follow-up delivery recovery', () => {
+  const revised = '{"result":"## Revised book club\\nBudget: 240 yuan"}';
+  it('publishes a confirmed revision and invalidates downstream results once', () => {
+    const original = graph();
+    const saved = journal(original, true);
+    saved.scope = ['a']; saved.inputFingerprint = runInputFingerprint(original, ['a']);
+    saved.nodes = { a: { ...saved.nodes.a, output: revised } };
+    const recovered = applyRecoveredDocument(original, saved);
+    expect(recovered.nodes.map(node => node.lastOutput?.text ?? null)).toEqual([revised, null, null]);
+    expect(applyRecoveredDocument(recovered, saved)).toEqual(recovered);
+  });
+
+  it.each(['failed', 'cancelled', 'running', 'invalid', 'changed'] as const)('keeps the prior publication for a %s revision', state => {
+    const original = graph();
+    const saved = journal(original, true);
+    saved.scope = ['a']; saved.inputFingerprint = runInputFingerprint(original, ['a']);
+    saved.nodes = { a: { ...saved.nodes.a, output: state === 'invalid' ? '{"result":3}' : revised,
+      state: state === 'invalid' || state === 'changed' ? 'done' : state } };
+    if (state === 'changed') (original.nodes[0] as SessionNode).persona = 'Changed after admission';
+    expect(applyRecoveredDocument(original, saved).nodes.map(node => node.lastOutput)).toEqual(original.nodes.map(node => node.lastOutput));
+  });
+});
+
+
+it('protects a follow-up from its superseded graph and allows a newly admitted graph to replace it', () => {
+  const original = graph();
+  original.nodes[1].lastOutput = { text: 'Revision', source: 'run', at: 1, supersedesThroughGraphVersion: 12, supersedesGraphCanvasId: 'canvas' };
+  const old = journal(original);
+  old.serverGraph = { tenantId: 'company-1', canvasId: 'canvas', id: 'old-graph', documentVersion: 12 };
+  const recovered = applyRecoveredDocument(original, old);
+  expect(recovered.nodes[0].lastOutput?.text).toBe('new-a');
+  expect(recovered.nodes[1].lastOutput?.text).toBe('Revision');
+  const next = { ...old, serverGraph: { ...old.serverGraph, id: 'new-graph', documentVersion: 13 } };
+  expect(applyRecoveredDocument(original, next).nodes[1].lastOutput?.text).toBe('new-b');
+});
+
+it('does not resurrect stale downstream results from a graph superseded by an upstream revision', () => {
+  const original = graph();
+  original.nodes[0].lastOutput = { text: 'Revised upstream', source: 'run', at: 1, supersedesThroughGraphVersion: 12, supersedesGraphCanvasId: 'canvas' };
+  original.nodes[1].lastOutput = null;
+  original.nodes[2].lastOutput = null;
+  const old = journal(original);
+  old.serverGraph = { tenantId: 'company-1', canvasId: 'canvas', id: 'old-graph', documentVersion: 12 };
+  expect(applyRecoveredDocument(original, old).nodes.map(node => node.lastOutput?.text ?? null)).toEqual(['Revised upstream', null, null]);
+});
+
+it('preserves a revision from any graph admitted on its prior cloud version while allowing a graph that saw the revision', () => {
+  const original = graph();
+  original.nodes[1].lastOutput = { text: 'Concurrent-safe revision', source: 'run', at: 1, supersedesThroughGraphVersion: 12, supersedesGraphCanvasId: 'canvas' };
+  const stale = journal(original);
+  stale.serverGraph = { tenantId: 'company-1', canvasId: 'canvas', id: 'different-graph-admitted-during-chat', documentVersion: 12 };
+  expect(applyRecoveredDocument(original, stale).nodes[1].lastOutput?.text).toBe('Concurrent-safe revision');
+  const later = { ...stale, serverGraph: { ...stale.serverGraph, id: 'graph-after-revision', documentVersion: 13 } };
+  expect(applyRecoveredDocument(original, later).nodes[1].lastOutput?.text).toBe('new-b');
+});
+
+
+it('does not suppress graphs from another canvas when copying a document with a revision', () => {
+  const original = graph();
+  original.nodes[1].lastOutput = { text: 'Copied revision', source: 'run', at: 1,
+    supersedesThroughGraphVersion: 12, supersedesGraphCanvasId: 'original-canvas' };
+  const copied = journal(original);
+  copied.serverGraph = { tenantId: 'company-1', canvasId: 'new-canvas', id: 'new-canvas-graph', documentVersion: 1 };
+  expect(applyRecoveredDocument(original, copied).nodes[1].lastOutput?.text).toBe('new-b');
+});

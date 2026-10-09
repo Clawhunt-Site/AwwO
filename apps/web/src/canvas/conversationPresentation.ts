@@ -122,7 +122,7 @@ export function beginConversationPresentation(
 
 export function updateConversationPresentation(
   node: SessionNode, operationId: string,
-  patch: { issueId?: string | null; runId?: string | null; outputText?: string; outputState?: TurnPresentation['outputState'] },
+  patch: { issueId?: string | null; runId?: string | null; outputText?: string; outputState?: TurnPresentation['outputState']; outputContract?: TurnPresentation['outputContract'] },
   store?: Store,
 ): boolean {
   const resolved = store ?? browserStorage();
@@ -133,7 +133,8 @@ export function updateConversationPresentation(
     ...(patch.issueId !== undefined ? { issueId: patch.issueId } : {}),
     ...(patch.runId !== undefined ? { runId: patch.runId } : {}),
     ...(patch.outputText !== undefined ? { outputText: patch.outputText } : {}),
-    presentation: { ...record.presentation, ...(patch.outputState ? { outputState: patch.outputState } : {}) },
+    presentation: { ...record.presentation, ...(patch.outputState ? { outputState: patch.outputState } : {}),
+      ...(patch.outputContract ? { outputContract: patch.outputContract } : {}) },
   }), resolved);
 }
 

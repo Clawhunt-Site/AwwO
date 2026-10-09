@@ -12,6 +12,7 @@ import { CanvasRunReceipt } from './CanvasRunReceipt';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
 import { withCanvasRunOwnership } from '../canvas/runOwnership';
+import { supersededGraphNodes } from '../canvas/followupDelivery';
 import { recoverableOutput, runInputFingerprint } from '../canvas/runRecoveryDocument';
 import { graphPath, graphIsActive, graphRecoveryJournal, type GraphRunSnapshot } from './graphRuns';
 import { GraphRunPanel } from './GraphRunPanel';
@@ -518,10 +519,14 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
               // Only a result the recovery would publish counts. Outside a collaboration the server records every
               // waiting, blocked or reused step with an empty output; counting that as missing re-recovered an
               // applied run on every open.
+              const superseded = supersededGraphNodes(document, latest);
               const unpublished = recovered.scope.some(id => {
                 const item = recovered.nodes[id];
                 const output = item ? recoverableOutput(recovered, item) : null;
-                return output !== null && document.nodes.find(node => node.id === id)?.lastOutput?.text !== output;
+                const shown = document.nodes.find(node => node.id === id)?.lastOutput;
+                // This graph was admitted from a version that did not include the revision.
+                if (superseded.has(id)) return false;
+                return output !== null && shown?.text !== output;
               });
               if (graphIsActive(latest) || (inputsMatch && unpublished)) {
                 await withCanvasRunOwnership(async () => {

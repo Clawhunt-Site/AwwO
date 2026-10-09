@@ -3,6 +3,7 @@ import { nodeTeamFingerprint } from './nodeTeam';
 import { taskFrameFingerprint } from './taskFrame';
 import type { CanvasDocument, CanvasEdge, CanvasNode, NodeOutput, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
+import { followupDeliveryContract, supersededGraphNodes } from './followupDelivery';
 import type { CanvasRunJournal } from './runJournal';
 import { activeThreadId, updateThreadIssueId } from './nodeThreads';
 import { reconcileEdges } from './ports';
@@ -482,7 +483,12 @@ function recoveredDelivery(
   const item = journal.nodes[node.id];
   // A node id/thread id can survive rebinding. Output from the old Agent must never be merged
   // into the replacement Agent's session.
-  if (!item || !belongsToJournalBinding(node, item) || journal.manual || !inputsMatch || !selected.has(node.id)) return null;
+  if (!item || !belongsToJournalBinding(node, item) || !inputsMatch || !selected.has(node.id)) return null;
+  if (journal.manual) {
+    if (item.state !== 'done' || item.partial || !item.output || !followupDeliveryContract(node, item.output)) return null;
+    return { text: item.output, at: journal.startedAt, source: 'run',
+      ...(journal.supersedesThroughGraphVersion ? { supersedesThroughGraphVersion: journal.supersedesThroughGraphVersion, supersedesGraphCanvasId: journal.supersedesGraphCanvasId } : {}) };
+  }
   const currentOutput = recoverableOutput(journal, item) ? item : null;
   // A later interrupted round must not hide the last inspectable attempt. Retain it only
   // for the exact same Session/binding, always as partial evidence, never as approval.
@@ -502,7 +508,9 @@ function recoveredDelivery(
 
 /** Whether a node already shows this delivery: the same text from a run, with the same standing. */
 const showsDelivery = (shown: NodeOutput | null | undefined, delivery: NodeOutput) =>
-  Boolean(shown && shown.source === 'run' && shown.text === delivery.text && (shown.partial === true) === (delivery.partial === true));
+  Boolean(shown && shown.source === 'run' && shown.text === delivery.text && (shown.partial === true) === (delivery.partial === true)
+    && shown.supersedesThroughGraphVersion === delivery.supersedesThroughGraphVersion
+    && shown.supersedesGraphCanvasId === delivery.supersedesGraphCanvasId);
 
 /**
  * Merge one confirmed recovery batch without letting normal freshness invalidation erase a
@@ -515,7 +523,8 @@ export function applyRecoveredDocument(
 ): CanvasDocument {
   const inputsMatch = journal.inputFingerprint === runInputFingerprint(doc, journal.scope);
   const selected = new Set(journal.scope);
-  const deliveries = new Map(doc.nodes.map(node => [node.id, recoveredDelivery(node, journal, inputsMatch, selected)]));
+  const revised = supersededGraphNodes(doc, journal.serverGraph);
+  const deliveries = new Map(doc.nodes.map(node => [node.id, revised.has(node.id) ? null : recoveredDelivery(node, journal, inputsMatch, selected)]));
   // A delivery the canvas already shows is kept as it is, its time included, and is not a change downstream. A
   // journal rebuilt from the server starts at the server's clock while the browser that ran the step stamped its
   // own, so re-stamping the same result changed (and saved) the canvas, and clearing it again erased what was
@@ -526,16 +535,21 @@ export function applyRecoveredDocument(
   }).map(node => node.id));
 
   // First apply ordinary freshness rules. This clears old scope results and anything downstream,
-  // including nodes outside a partial-run scope. Manual conversation recovery does not touch the
-  // publication graph at all.
-  const cleared = journal.manual ? doc : {
+  // including nodes outside a partial-run scope. A conversation clears only a confirmed
+  // structured revision; failed/cancelled replies and ordinary answers retain prior deliveries.
+  const cleared = {
     ...doc,
-    nodes: doc.nodes.map(node => selected.has(node.id) && !kept.has(node.id) && belongsToJournalThread(node, journal.nodes[node.id]?.threadId ?? '')
+    nodes: doc.nodes.map(node => selected.has(node.id) && !revised.has(node.id) && (!journal.manual || Boolean(deliveries.get(node.id))) && !kept.has(node.id) && belongsToJournalThread(node, journal.nodes[node.id]?.threadId ?? '')
       && node.lastOutput != null ? { ...node, lastOutput: null } : node),
   };
-  const invalidated = journal.manual ? doc : invalidateOutputs(doc, cleared);
+  const invalidated = invalidateOutputs(doc, cleared);
 
   const nodes = invalidated.nodes.map(node => {
+    // Recovering a sibling must not roll this revision back to the graph it replaced.
+    if (revised.has(node.id)) {
+      const shown = doc.nodes.find(original => original.id === node.id)!.lastOutput;
+      return node.lastOutput === shown ? node : { ...node, lastOutput: shown };
+    }
     const item = journal.nodes[node.id];
     // Server identities from the old Agent must never be merged into the replacement Agent's session.
     if (!item || !belongsToJournalBinding(node, item)) return node;

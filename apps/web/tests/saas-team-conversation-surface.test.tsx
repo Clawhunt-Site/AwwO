@@ -7,8 +7,9 @@ import { createNodeTeam } from '../src/canvas/nodeTeam';
 import { activeNodeThread, sessionStoreKey } from '../src/canvas/nodeThreads';
 import { getSnapshot, resetAllSessions } from '../src/canvas/sessions';
 import { forgetNode } from '../src/canvas/sessionTransport';
-import { loadRunJournal, saveRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
+import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
 import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
+import { beginConversationPresentation } from '../src/canvas/conversationPresentation';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasInitialize, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 
@@ -23,6 +24,8 @@ let runs: FixtureRun[];
 let submittedJournals: CanvasRunJournal[];
 let fetcher: ReturnType<typeof vi.fn>;
 let initialize: ReturnType<typeof vi.fn>;
+let nextOutput: string;
+let nextStatus: string;
 
 function makeNode(id: string, requiredValue = ''): SessionNode {
   const node: SessionNode = {
@@ -75,6 +78,7 @@ beforeEach(() => {
   localStorage.clear(); localStorage.setItem('superclaw_locale', 'en');
   configureCanvasStorage('conversation-user', tenant.id, 'conversation-canvas');
   resetConversationMemory(); runs = []; submittedJournals = [];
+  nextOutput = 'Both members considered your question.'; nextStatus = 'completed';
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   configureSaaSCanvas({ tenant, canvasId: 'conversation-canvas' });
   configureSaaSCanvasSave(async () => 9);
@@ -91,13 +95,13 @@ beforeEach(() => {
       expect(journal).not.toBeNull();
       submittedJournals.push(structuredClone(journal!));
       const run: FixtureRun = { id: `conversation-run-${runs.length + 1}`, tenantId: tenant.id, sessionId: body.sessionId,
-        status: 'completed', terminal: true, prompt: body.prompt, output: 'Both members considered your question.', operationId: body.operationId };
+        status: nextStatus, terminal: true, prompt: body.prompt, output: nextOutput, operationId: body.operationId };
       runs.push(run);
       return response(run, 202);
     }
     if (url.startsWith(`${base}/runs?operationId=`)) {
       const operationId = new URL(url, 'http://fixture.local').searchParams.get('operationId');
-      return response({ items: runs.filter(run => run.operationId === operationId) });
+      return response({ items: runs.filter(run => run.operationId === operationId).map(run => ({ ...run, outputAvailable: Boolean(run.output) })) });
     }
     if (url.startsWith(`${base}/sessions?`)) return response({ items: [{ id: 'session-conversation-node', agentId: 'agent-conversation-node', title: 'Poetry team', createdAt: '2026-09-08T00:00:00Z' }] });
     if (url === `${base}/sessions/session-conversation-node/messages`) return response({ items: runs.flatMap(run => [
@@ -108,7 +112,7 @@ beforeEach(() => {
     if (match) {
       const run = runs.find(item => item.id === match[1]);
       if (!run) return response({ error: { code: 'not_found', message: 'Unknown fixture run' } }, 404);
-      if (match[2] === '/events') return new Response(`data: ${JSON.stringify({ type: 'completed', text: run.output })}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
+      if (match[2] === '/events') return new Response(`data: ${JSON.stringify({ type: run.status, text: run.output })}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
       if (match[2] === '/turns') return response({ items: [{ id: `member-${run.id}`, memberId: 'poet', memberName: `Poet ${run.id}`,
         role: 'member', round: 1, ordinal: 1, status: 'completed', model: 'profile-main', runtime: 'pi', output: `Member evidence for ${run.id}` }] });
       return response(run);
@@ -315,4 +319,133 @@ it('preserves a newer SaaS draft while ownership and canonical initialization ad
   expect(activeNodeThread(loadDocumentWithStatus().doc.nodes[0] as SessionNode).draft).toBe('My next question');
   expect(initialize).toHaveBeenCalledOnce();
   expect(writes()).toHaveLength(1);
+});
+
+const revision = JSON.stringify({ result: '## Revised book club\nBudget: 240 yuan\n1. First\n2. Second\n3. Third', approved: true });
+
+it('publishes a complete structured follow-up and restores its readable report after reload', async () => {
+  const original = seed('Create a structured report');
+  (original.nodes[0] as SessionNode).contract!.outputs[0].type = 'markdown';
+  canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(original));
+  nextOutput = revision;
+  let view = renderCanvas(); openChat(); send('Revise the budget to 240 yuan and update the complete deliverable.');
+  await finished();
+  const saved = loadDocumentWithStatus().doc;
+  expect(saved.nodes[0].lastOutput).toMatchObject({ text: revision, source: 'run', supersedesThroughGraphVersion: 9, supersedesGraphCanvasId: 'conversation-canvas' });
+  expect(saved.nodes[0].lastOutput?.partial).toBeUndefined();
+  const transcript = document.querySelector('.canvas-transcript') as HTMLElement;
+  expect(within(transcript).getByRole('heading', { name: 'Revised book club' })).toBeVisible();
+  expect(within(transcript).getByText('View original response')).toBeInTheDocument();
+  view.unmount(); resetConversationMemory();
+  view = renderCanvas(); openChat();
+  await waitFor(() => expect(getSnapshot('conversation-node').turns.filter(turn => turn.role === 'agent')).toHaveLength(1));
+  expect(loadDocumentWithStatus().doc.nodes[0].lastOutput?.text).toBe(revision);
+  expect(getSnapshot('conversation-node').turns.find(turn => turn.role === 'agent')?.presentation?.outputContract?.outputs[0].id).toBe('result');
+  expect(runs).toHaveLength(1);
+  const blobs: Blob[] = [];
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:revised-report'; });
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Expand deliverables' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download .md' }));
+  expect(blobs).toHaveLength(1);
+  const downloaded = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsText(blobs[0]);
+  });
+  expect(downloaded).toBe('## Revised book club\nBudget: 240 yuan\n1. First\n2. Second\n3. Third');
+});
+
+it.each(['failed', 'cancelled', 'invalid'] as const)('preserves the prior delivery when a follow-up is %s', async outcome => {
+  const original = seed('Create a structured report', true);
+  nextOutput = outcome === 'invalid' ? JSON.stringify({ result: 'Incomplete revision', approved: 'yes' }) : revision;
+  nextStatus = outcome === 'invalid' ? 'completed' : outcome;
+  renderCanvas(); openChat(); send('Revise the report.'); await finished();
+  expect(loadDocumentWithStatus().doc.nodes.map(node => node.lastOutput)).toEqual(original.nodes.map(node => node.lastOutput));
+});
+
+
+it.each([undefined, 9])('recovers a structured revision with a stable publication version %s without another model request', async savedVersion => {
+  const original = seed('Create a structured report');
+  const node = original.nodes[0] as SessionNode;
+  const prompt = 'Revise the report to 240 yuan';
+  expect(beginConversationPresentation(node, 'detached-revision', prompt, { inputKind: 'manual', outputState: 'streaming' }, canvasStorage())).toBe(true);
+  runs.push({ id: 'detached-revision-run', tenantId: tenant.id, sessionId: node.issueId!, status: 'completed', terminal: true,
+    prompt, output: revision, operationId: 'detached-revision' });
+  expect(saveRunJournal({ version: 1, id: 'detached-revision-journal', startedAt: 500, scope: [node.id], manual: true,
+    manualMessage: prompt, ...(savedVersion === undefined ? {} : { supersedesThroughGraphVersion: savedVersion, supersedesGraphCanvasId: 'conversation-canvas' }), inputFingerprint: runInputFingerprint(original, [node.id]), nodes: {
+      [node.id]: { nodeId: node.id, threadId: 'default', companyId: tenant.id, agentId: node.binding!.agentId,
+        issueId: node.issueId, runId: runs[0].id, operationId: runs[0].operationId, state: 'running' },
+    } })).toBe(true);
+  configureSaaSCanvasSave(async () => 12);
+  renderCanvas(); openChat();
+  await waitFor(() => expect(loadRunJournal()).toBeNull());
+  expect(loadDocumentWithStatus().doc.nodes[0].lastOutput).toMatchObject({ text: revision, source: 'run', supersedesThroughGraphVersion: savedVersion ?? 12 });
+  const reply = getSnapshot(node.id).turns.find(turn => turn.role === 'agent');
+  expect(reply?.presentation).toMatchObject({ outputState: 'final', outputContract: { outputs: [{ id: 'result' }, { id: 'approved' }] } });
+  expect(writes()).toEqual([]);
+});
+
+it('keeps revision recovery until the cloud save is acknowledged', async () => {
+  seed('Create a structured report'); nextOutput = revision;
+  let acknowledge: (() => void) | undefined;
+  configureSaaSCanvasSave(async () => {
+    if (loadDocumentWithStatus().doc.nodes[0].lastOutput?.text === revision) {
+      await new Promise<void>(resolve => { acknowledge = resolve; });
+    }
+    return 10;
+  });
+  renderCanvas(); openChat(); send('Revise the complete report.');
+  await waitFor(() => expect(acknowledge).toBeTypeOf('function'));
+  expect(loadRunJournal()?.manual).toBe(true);
+  expect(screen.getByTestId('composer-input')).toBeDisabled();
+  await act(async () => acknowledge!());
+  await finished();
+  expect(loadDocumentWithStatus().doc.nodes[0].lastOutput?.text).toBe(revision);
+});
+
+it('captures the latest acknowledged cloud version immediately before publishing, after interim autosaves', async () => {
+  seed('Create a structured report'); nextOutput = revision;
+  configureSaaSCanvasSave(async () => runs.length ? 12 : 9);
+  renderCanvas(); openChat(); send('Revise the report.'); await finished();
+  expect(loadDocumentWithStatus().doc.nodes[0].lastOutput).toMatchObject({ text: revision, supersedesThroughGraphVersion: 12 });
+});
+
+
+it('retains the durable publication boundary after a cloud CAS failure and replays it without advancing the cutoff', async () => {
+  seed('Create a structured report'); nextOutput = revision;
+  let failedSaves = 0;
+  configureSaaSCanvasSave(async () => {
+    if (loadDocumentWithStatus().doc.nodes[0].lastOutput?.text === revision) {
+      expect(loadRunJournal()?.supersedesThroughGraphVersion).toBe(12);
+      failedSaves += 1;
+      throw new Error('version_conflict');
+    }
+    return 12;
+  });
+  const view = renderCanvas(); openChat(); send('Revise the report.');
+  await waitFor(() => expect(failedSaves).toBeGreaterThan(0));
+  expect(loadRunJournal()).toMatchObject({ manual: true, supersedesThroughGraphVersion: 12 });
+  expect(screen.getByTestId('composer-input')).toBeDisabled();
+  view.unmount(); resetConversationMemory();
+  configureSaaSCanvasSave(async () => 19);
+  renderCanvas(); openChat(); await finished();
+  expect(loadDocumentWithStatus().doc.nodes[0].lastOutput).toMatchObject({ text: revision, supersedesThroughGraphVersion: 12 });
+  expect(runs).toHaveLength(1);
+});
+
+
+it('does not publish a revision when its causal boundary cannot be written to recovery storage', async () => {
+  const original = seed('Create a structured report'); nextOutput = revision;
+  const setItem = localStorage.setItem;
+  let rejected = 0;
+  vi.spyOn(localStorage, 'setItem').mockImplementation((key: string, value: string) => {
+    if (key.includes(CANVAS_RUN_JOURNAL_KEY) && JSON.parse(value).supersedesThroughGraphVersion) {
+      rejected += 1; throw new Error('Storage full');
+    }
+    setItem.call(localStorage, key, value);
+  });
+  renderCanvas(); openChat(); send('Revise the report.');
+  await waitFor(() => expect(rejected).toBeGreaterThan(0));
+  expect(loadRunJournal()?.manual).toBe(true);
+  expect(loadDocumentWithStatus().doc.nodes[0].lastOutput).toEqual(original.nodes[0].lastOutput);
 });

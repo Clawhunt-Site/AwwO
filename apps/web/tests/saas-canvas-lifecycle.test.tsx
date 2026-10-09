@@ -301,7 +301,7 @@ it('preserves a newer operation journal created while background graph discovery
   // its older graph-list response remains in flight. Use the actual scoped journal store.
   const newer: CanvasRunJournal = { version: 1, id: 'new-operation', startedAt: Date.now(), scope: [form.id],
     inputFingerprint: runInputFingerprint(document, [form.id]),
-    serverGraph: { tenantId: tenant.id, canvasId: cloud.id, id: 'graph-new-operation' },
+    serverGraph: { tenantId: tenant.id, canvasId: cloud.id, id: 'graph-new-operation', documentVersion: cloud.version },
     nodes: { [form.id]: { nodeId: form.id, threadId: 'form', companyId: tenant.id, agentId: null, issueId: null, runId: null, state: 'waiting' } },
   };
   expect(saveRunJournal(newer, storage)).toBe(true);
@@ -468,6 +468,21 @@ describe('opening a canvas after its latest run', () => {
       expect(view.writes).toEqual([]);
       expect(screen.queryByText('已从后台恢复运行结果。')).toBeNull();
       expect(view.shown()[0].lastOutput).toEqual({ text: 'Partial page', at: browserStamp, source: 'run', partial: true });
+    } finally { view.restore(); }
+  });
+
+  it.each([false, true])('preserves a follow-up while discovering its superseded graph (missing sibling: %s)', async missing => {
+    const revised = { text: 'Revised budget: 240 yuan, exactly three notes', at: 1, source: 'run' as const, supersedesThroughGraphVersion: 12, supersedesGraphCanvasId: 'canvas-0' };
+    const document = sanitizeDocument({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 },
+      nodes: [step('a', 0, missing ? undefined : { text: 'Draft', at: browserStamp, source: 'run' }), step('b', 500, revised)] });
+    const view = open(document, { status: 'completed', createdAt: serverStart, updatedAt: '2026-10-03T08:31:47Z',
+      nodes: [{ nodeId: 'a', state: 'done', output: 'Draft' }, { nodeId: 'b', state: 'done', output: 'Old budget: 300 yuan, five notes' }] });
+    try {
+      await screen.findByTestId('canvas-tile-a'); await settle();
+      expect(view.discovered()).toBe(true);
+      expect(view.shown()[1].lastOutput).toEqual(revised);
+      if (missing) expect(view.shown()[0].lastOutput?.text).toBe('Draft');
+      else { expect(view.journalWrites).toEqual([]); expect(view.writes).toEqual([]); }
     } finally { view.restore(); }
   });
 

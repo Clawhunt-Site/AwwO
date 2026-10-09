@@ -8,7 +8,7 @@ import { saasErrorMessage } from '../saas/api';
 import { canonicalCanvasDocumentJSON } from '../saas/canvasDraft';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
-import { currentSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
+import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
 import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, type GraphCollaborationPolicy } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
@@ -45,6 +45,7 @@ import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversatio
   readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
+import { followupDeliveryContract } from './followupDelivery';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
 import { CanvasViewport } from './CanvasViewport';
 import { SessionTile, type SelectMode } from './SessionTile';
@@ -924,16 +925,33 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (!canWriteRecovery()) return;
       const recoveredJournal = recoveryJournalForDocument(docRef.current, reconciled);
       // SaaS runs are settled durably by Go; only native gateway runs own a native hold.
-      const next = cloudScope || recoveredJournal.serverGraph ? recoveredJournal
+      let next = cloudScope || recoveredJournal.serverGraph ? recoveredJournal
         : await settleRecoveredJournal(gatewayApiBase(), recoveredJournal, controller.signal);
+      // A graph admitted on this acknowledged version cannot have seen this revision.
+      // Keep the boundary stable across retries, including retries after a rejected cloud CAS.
+      if (next.manual && cloudScope && next.supersedesThroughGraphVersion === undefined
+          && !Object.values(next.nodes).some(node => node.state === 'running' || node.state === 'waiting')) {
+        try {
+          const version = await flushSaaSCanvas();
+          if (!Number.isSafeInteger(version) || Number(version) < 1) throw new Error('Cloud version unavailable');
+          next = { ...next, supersedesThroughGraphVersion: Number(version), supersedesGraphCanvasId: cloudScope.canvasId };
+        } catch {
+          if (!observerIsActive()) return;
+          setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
+          timer = setTimeout(() => void poll(), 2500); return;
+        }
+      }
       if (!observerIsActive()) return;
       if (journal.current !== observed || JSON.stringify(loadRunJournal()) !== JSON.stringify(observed)) {
         timer = setTimeout(() => void poll(), 2500);
         return;
       }
       if (!canWriteRecovery()) return;
+      if (!saveRunJournal(next)) {
+        setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
+        timer = setTimeout(() => void poll(), 2500); return;
+      }
       journal.current = next;
-      saveRunJournal(next);
       setRuns(next.nodes);
       setReviewRound(next.review?.round ?? 0);
       setRunStartedAt(next.startedAt);
@@ -966,6 +984,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             if (entry.operationId) updateConversationPresentation(node, entry.operationId, {
               issueId: node.issueId, runId: entry.runId, outputText: entry.output ?? '',
               outputState: entry.state === 'done' ? 'final' : 'failed',
+              ...(next.manual && entry.state === 'done' && !entry.partial
+                && next.inputFingerprint === runInputFingerprint(docRef.current, next.scope)
+                ? { outputContract: followupDeliveryContract(node, entry.output ?? '') } : {}),
             }, storage);
             if (next.manual && !await persistManualHistoryWithNativeProof(gatewayApiBase(), node, next, controller.signal)) {
               if (controller.signal.aborted) return;
@@ -984,6 +1005,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           }
         }
         if (!stillCurrent()) return;
+        if (next.manual && cloudScope) {
+          try { await flushSaaSCanvas(); }
+          catch {
+            if (!stillCurrent()) return;
+            setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
+            timer = setTimeout(() => void poll(), 2500); return;
+          }
+          if (!stillCurrent()) return;
+        }
         clearRunJournal(next.id); journal.current = null;
         setRecovering(false); setRunning(false);
         setRunSummary(journalSummary(next));
@@ -1248,13 +1278,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const settled = cloud ? result : await settleExecutionResult(gatewayApiBase(), entry, result);
       const operationId = entry?.operationId;
       const outputState = settled.ok && !settled.unconfirmed ? 'final' : 'failed';
+      const outputContract = manualMessage && outputState === 'final' ? followupDeliveryContract(node, settled.output) : undefined;
       if (operationId) {
         updateConversationPresentation(node, operationId, { issueId: entry?.issueId, runId: entry?.runId,
-          outputText: settled.output, outputState }, storage);
+          outputText: settled.output, outputState, ...(outputContract ? { outputContract } : {}) }, storage);
         const key = sessionStoreKey(node);
         for (const turn of getSessionSnapshot(key).turns) {
           if (turn.role === 'agent' && turn.recoveryOperationId === operationId && turn.text === settled.output) {
-            patchPresentation(key, turn.id, { ...turn.presentation, outputState });
+            patchPresentation(key, turn.id, { ...turn.presentation, outputState, ...(outputContract ? { outputContract } : {}) });
           }
         }
       }
@@ -1319,9 +1350,25 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setRecovering(true);
         return;
       }
+      if (cloud && manualMessage && journal.current && journal.current.supersedesThroughGraphVersion === undefined) {
+        try {
+          // Flush interim identity/transcript autosaves before choosing the causal boundary.
+          // Admission and canvas PUT both lock the cloud document version. Persist the boundary
+          // before publishing so a reload after a failed final CAS cannot advance it.
+          const version = await flushSaaSCanvas();
+          if (!mounted.current || currentSaaSCanvas() !== cloud) return;
+          if (!Number.isSafeInteger(version) || Number(version) < 1) throw new Error('Cloud version unavailable');
+          const publication = { ...journal.current, supersedesThroughGraphVersion: Number(version), supersedesGraphCanvasId: cloud.canvasId };
+          if (!saveRunJournal(publication)) throw new Error('Recovery storage unavailable');
+          journal.current = publication;
+        } catch {
+          if (!mounted.current || currentSaaSCanvas() !== cloud) return;
+          setHandoffNote(surfaceNotice(t, 'storage_write_failed')); setRecovering(true); return;
+        }
+      }
       const persistedCanvas = loadDocumentWithStatus();
       let finalSummary = summary;
-      if (reviewPolicy && journal.current) {
+      if ((reviewPolicy || manualMessage) && journal.current) {
         // Publish one coherent batch; intermediate review outputs cannot invalidate each other around a loop.
         docRef.current = applyRecoveredDocument(docRef.current, { ...journal.current, inputFingerprint: pending.inputFingerprint! });
         setDoc(docRef.current);
@@ -1342,6 +1389,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             setRecovering(true); return;
           }
         }
+      }
+      if (cloud && manualMessage) {
+        try { await flushSaaSCanvas(); }
+        catch {
+          if (currentSaaSCanvas() !== cloud) return;
+          setHandoffNote(surfaceNotice(t, 'storage_write_failed')); setRecovering(true); return;
+        }
+        if (currentSaaSCanvas() !== cloud) return;
       }
       clearRunJournal(pending.id); journal.current = null;
       setRunning(false);
