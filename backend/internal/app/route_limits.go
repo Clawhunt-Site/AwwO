@@ -30,6 +30,10 @@ import (
 // unlimited workspaces. Every other route-limited workspace is held by every route's ceiling and counted
 // towards it, a route it does not limit included. Every count starts at UTC midnight, like the daily
 // allowance the limits sit inside.
+//
+// The free default models have no route of their own and no per-workspace limit besides the daily allowance,
+// but AWWO_FREE_MODEL_TOTAL_PER_DAY can give them a deployment-wide daily ceiling across the same workspaces the
+// route ceilings hold (checkFreeModelCeiling). Unset or 0 sets none.
 const (
 	routeFree    = "free"
 	routeGate    = "gate"
@@ -39,6 +43,7 @@ const (
 
 var errRouteQuota = errors.New("premium_quota_exceeded")
 var errRouteCapacity = errors.New("premium_capacity_exceeded")
+var errFreeCapacity = errors.New("free_capacity_exceeded")
 
 // routeLimits maps a route to its daily allowance. A route that is absent is not limited; 0 closes it.
 type routeLimits map[string]int
@@ -150,6 +155,13 @@ func (c *Config) routeSettingsFromEnv() error {
 		}
 		c.RouteTotalsPerDay = l
 	}
+	if raw := os.Getenv("AWWO_FREE_MODEL_TOTAL_PER_DAY"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > maxRouteTotal {
+			return fmt.Errorf("AWWO_FREE_MODEL_TOTAL_PER_DAY must be a whole number from 0 (no ceiling) to %d", maxRouteTotal)
+		}
+		c.FreeModelTotalPerDay = n
+	}
 	if raw := os.Getenv("AWWO_ROUTE_FREE_MODELS"); raw != "" {
 		models, err := newWorkspaceModels(raw)
 		if err != nil {
@@ -172,6 +184,13 @@ func (c Config) validateRouteSettings() error {
 	_, capped := c.RouteTotalsPerDay[routeGate]
 	if (gated || capped) && len(c.RouteFreeModels) == 0 {
 		return errors.New("a gate route limit or ceiling needs AWWO_ROUTE_FREE_MODELS to name the default model(s) it exempts")
+	}
+	// The free-model ceiling counts the models of the free list, so without one it would never hold anything.
+	if c.FreeModelTotalPerDay > 0 && c.UserCredentials {
+		return errors.New("AWWO_FREE_MODEL_TOTAL_PER_DAY requires AWWO_CREDENTIAL_MODE=operator")
+	}
+	if c.FreeModelTotalPerDay > 0 && len(c.RouteFreeModels) == 0 {
+		return errors.New("AWWO_FREE_MODEL_TOTAL_PER_DAY needs AWWO_ROUTE_FREE_MODELS to name the default model(s) it counts")
 	}
 	return nil
 }
@@ -210,7 +229,7 @@ const todayUTC = `date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME
 func (a *App) checkRouteLimit(ctx context.Context, tx pgx.Tx, tid, model string, limits routeLimits) error {
 	route := a.cfg.modelRoute(model)
 	if route == routeFree {
-		return nil
+		return a.checkFreeModelCeiling(ctx, tx, limits)
 	}
 	if route == routeMedia {
 		// Generations are admitted on their own path; a text call with such an id is still paid.
@@ -243,6 +262,40 @@ func (a *App) checkRouteLimit(ctx context.Context, tx pgx.Tx, tid, model string,
 		if used >= ceiling {
 			return errRouteCapacity
 		}
+	}
+	return nil
+}
+
+// The free default models' calls the free-model ceiling counts ($1 is the free list): the same rules as
+// routeInvocationFilter, so a call settled without reaching a provider gives its place back, a call admitted under
+// a paid plan (billed_user_id) is the plan's, and a canvas plan on the operator's planner model is the operator's.
+const freeInvocationFilter = `mi.model_id = ANY($1::text[])
+	AND NOT (mi.status<>'running' AND mi.cost_status='not_incurred') AND mi.billed_user_id IS NULL AND NOT ` + operatorPaidRun
+
+// checkFreeModelCeiling applies AWWO_FREE_MODEL_TOTAL_PER_DAY, the deployment-wide daily ceiling on calls of the free
+// default models (0: none). It holds and counts the workspaces the route ceilings hold: every route-limited one but
+// the empty object (the operator's own unlimited workspaces); a workspace without route limits is neither. Only free
+// admissions reach it: a paid plan's calls take admitPlanInvocation, and the operator's planner calls are admitted
+// without route limits (reserveInvocation). It runs where checkRouteLimit runs, under the workspace row lock and once
+// a slot is free, and takes the route ceilings' advisory lock, so concurrent calls of different workspaces cannot
+// each see room for one more.
+func (a *App) checkFreeModelCeiling(ctx context.Context, tx pgx.Tx, limits routeLimits) error {
+	if a.cfg.FreeModelTotalPerDay <= 0 || len(limits) == 0 {
+		return nil
+	}
+	free := a.cfg.RouteFreeModels
+	if free == nil {
+		free = []string{}
+	}
+	if _, e := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321011)"); e != nil {
+		return e
+	}
+	var used int
+	if e := tx.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi JOIN tenants t ON t.id=mi.tenant_id WHERE t.route_limits IS NOT NULL AND NOT `+noRouteLimited+` AND mi.created_at>=`+todayUTC+` AND `+freeInvocationFilter, free).Scan(&used); e != nil {
+		return e
+	}
+	if used >= a.cfg.FreeModelTotalPerDay {
+		return errFreeCapacity
 	}
 	return nil
 }

@@ -69,6 +69,9 @@ type Config struct {
 	NewWorkspaceRouteLimits routeLimits
 	RouteTotalsPerDay       routeLimits
 	RouteFreeModels         []string
+	// FreeModelTotalPerDay is the deployment-wide daily ceiling on free default-model calls across route-limited
+	// workspaces (checkFreeModelCeiling); 0 sets none.
+	FreeModelTotalPerDay int
 	// The canvas planner's operator-paid model and its daily ceilings (planner_model.go); empty keeps the default model.
 	PlannerModel                                                     string
 	PlannerPerWorkspaceDay, PlannerTotalPerDay, PlannerMaxInputBytes int

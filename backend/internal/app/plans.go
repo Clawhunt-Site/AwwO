@@ -453,7 +453,7 @@ func admissionRefusal(err error) string {
 		return ""
 	}
 	switch code := err.Error(); code {
-	case "quota_exceeded", "premium_quota_exceeded", "premium_capacity_exceeded", "credits_exhausted", "plan_required", "model_unpriced", "plan_busy":
+	case "quota_exceeded", "premium_quota_exceeded", "premium_capacity_exceeded", "free_capacity_exceeded", "credits_exhausted", "plan_required", "model_unpriced", "plan_busy":
 		return code
 	}
 	return ""
