@@ -17,8 +17,6 @@
 .saas-team-error { color: var(--saas-danger, var(--err)); }
 .saas-team-error button { padding: 4px 7px; border: 1px solid currentColor; border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .saas-team-error button:disabled { opacity: .5; cursor: default; }
-.saas-plan-upsell { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--saas-border, var(--line)); border-radius: 9px; background: var(--saas-soft, transparent); }
-.saas-plan-upsell p { margin: 0; color: var(--saas-muted, var(--muted)); }
 .saas-workspace-latest > span { color: var(--saas-muted, var(--muted)); }
 .saas-workspace-operations { margin-block: 10px; }
 .saas-workspace-operations summary { cursor: pointer; color: var(--saas-muted, var(--muted)); }

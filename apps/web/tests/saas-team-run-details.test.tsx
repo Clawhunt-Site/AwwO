@@ -104,7 +104,7 @@ describe('durable team run details', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === path ? record('running')
       : { items: [turn({ status: 'failed', error: 'premium_quota_exceeded' })] })));
     render(view({ defaultOpen: true }));
-    await screen.findByText(/Today’s free allowance includes no calls/);
+    await screen.findByText(/The free plan’s daily calls are for the default model only/);
     expect(screen.queryByRole('link', { name: /Upgrade to Pro or Max/ })).toBeNull();
   });
 

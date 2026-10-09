@@ -1,6 +1,7 @@
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
 import { recordUpgradeInterest } from './routeUsage';
+import './plan-upsell.css';
 
 /** Run failures that only a paid plan lifts: the workspace's free premium allowance, and the service-wide one.
  * The default model keeps working on the free plan, which the error copy itself says. */

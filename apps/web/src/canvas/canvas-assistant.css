@@ -111,3 +111,13 @@
   .awwo-assistant-status-headline svg, .awwo-assistant-status-dot, .awwo-assistant-step.is-active i::after { animation: none; }
   .awwo-assistant-step.is-active i::after { width: 100%; opacity: .45; }
 }
+/* What to do next, offered unasked above the composer. */
+.awwo-assistant-next { margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 12px; background: var(--awwo-surface, #fff); text-align: left; }
+.awwo-assistant-next > p { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0 0 8px; color: var(--awwo-muted, #68736d); font-size: 12px; line-height: 1.55; }
+.awwo-assistant-next > p strong { color: var(--awwo-ink, #232c29); font-weight: 600; }
+.awwo-assistant-next-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.awwo-assistant-next-actions :is(button, a) { display: inline-flex; align-items: center; min-height: 30px; padding: 4px 11px; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 999px; background: transparent; color: var(--awwo-ink, #232c29); font-size: 12px; line-height: 1.4; text-decoration: none; cursor: pointer; }
+.awwo-assistant-next-actions :is(button, a):hover { border-color: var(--awwo-accent, #286454); }
+.awwo-assistant-next-actions :is(button, a).is-primary { border-color: var(--awwo-accent, #286454); background: var(--awwo-accent, #286454); color: var(--assistant-on-accent); }
+.awwo-assistant-next-actions :is(button, a).is-primary:hover { filter: brightness(.95); }
+.awwo-assistant-next-actions a:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 3px; }

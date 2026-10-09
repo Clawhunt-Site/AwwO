@@ -11,6 +11,7 @@ import { ARTIFACT_REF_PREFIX } from './canvasBridge';
 import { renderInertMarkdown } from './inertMarkdown';
 import { saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
+import { PlanUpsell, planUpsellCode } from './PlanUpsell';
 import type { UiLocale } from '../locale';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
@@ -140,6 +141,23 @@ function TaskSummary({ execution, task }: { execution: ManagedExecution; task: E
   </button>;
 }
 
+/** A direct task refused by the free premium allowance: the paid plans first, then the free way on — the model the
+ * service lists first, which is the one a new canvas's direct tasks start on (the default model). Switching changes
+ * only the choice; the request is sent again by the reader, never re-sent here. */
+function PremiumTaskActions({ execution }: { execution: ManagedExecution }) {
+  const { t } = useSaaSPreferences();
+  const fallback = execution.runtime?.models[0];
+  const key = fallback ? executionModelKey(fallback.runtime, fallback.id) : '';
+  const label = fallback ? fallback.label || fallback.id : '';
+  return <div className="awwo-execution-premium">
+    <PlanUpsell tenantId={execution.tenantId} />
+    {fallback && execution.choice.key !== key
+      ? <button type="button" className="awwo-execution-switch" disabled={execution.busy || !!execution.pendingSubmission} onClick={() => execution.chooseModel(key)}>
+        {t(`改用默认模型 ${label}（免费）`, `Use the default model ${label} (free)`)}</button>
+      : fallback ? <p className="awwo-execution-note" role="status">{t(`直接执行已改用 ${label}，重新发送这条请求即可免费继续。`, `Direct tasks now use ${label}; send the request again to continue for free.`)}</p> : null}
+  </div>;
+}
+
 function TaskDetail({ execution }: { execution: ManagedExecution }) {
   const { t, locale } = useSaaSPreferences();
   const run = execution.run;
@@ -165,6 +183,7 @@ function TaskDetail({ execution }: { execution: ManagedExecution }) {
       <button type="button" onClick={execution.refreshDetail}>{t('继续读取', 'Keep reading')}</button></p>}
     {run.truncated && <p className="awwo-execution-note">{t('记录超过显示上限，部分过程未展示。', 'The record exceeds the display limit; part of the process is not shown.')}</p>}
     {run.error && <p className="awwo-execution-error" role="alert">{taskErrorText(t, locale, run.error)}</p>}
+    {run.error && planUpsellCode([run.error]) ? <PremiumTaskActions execution={execution} /> : null}
     {pending.map(approval => <RequestCard key={approval.id} execution={execution} run={run} approval={approval} />)}
     {run.output && <section className="awwo-execution-result" aria-label={t('任务结果', 'Task result')}>
       <div className="awwo-execution-markdown">{renderInertMarkdown(run.output)}</div>

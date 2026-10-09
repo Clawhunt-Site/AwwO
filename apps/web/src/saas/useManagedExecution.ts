@@ -93,6 +93,8 @@ function pause(signal: AbortSignal): Promise<void> {
 export interface ExecutionModelChoice { key: string; model?: ExecutionModel; unavailableLabel?: string }
 
 export interface ManagedExecution {
+  /** The workspace the tasks run in. */
+  tenantId: string;
   activated: boolean;
   activate: () => void;
   /** The conversation is on screen; a task is read only while it is (set by the view). */
@@ -570,6 +572,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   });
 
   return {
+    tenantId,
     activated, activate: () => setActivatedScope(scope), setVisible, readOnly, loading, runtime, ready, serviceReason, needsModel,
     choice: { key: modelKey, model: choiceModel, ...(staleLabel ? { unavailableLabel: staleLabel } : {}) },
     // Effort belongs to one model: choosing another starts again from the model's default.
