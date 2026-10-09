@@ -472,6 +472,19 @@ func (a *App) deleteObject(w http.ResponseWriter, r *http.Request, table, action
 		fail(w, 409, "resource_in_use", "Resource has linked sessions or active runs")
 		return
 	}
+	if table == "canvases" {
+		// graph_run_nodes and graph_collaboration_turns point at this canvas's
+		// node sessions and runs through foreign keys without an ON DELETE
+		// action. In a single DELETE FROM canvases, PostgreSQL checks those
+		// references when the cascade removes the sessions, before the cascade
+		// through graph_runs has removed the rows that hold them, and the whole
+		// delete fails (23503). Removing the finished graph runs first (their
+		// nodes and turns cascade) leaves nothing pointing at the sessions.
+		if _, e = tx.Exec(r.Context(), "DELETE FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2", tid, id); e != nil {
+			a.dbError(w, e)
+			return
+		}
+	}
 	if _, e = tx.Exec(r.Context(), "DELETE FROM "+table+" WHERE tenant_id=$1 AND id=$2", tid, id); e != nil {
 		a.dbError(w, e)
 		return
