@@ -51,6 +51,16 @@ it('translates HTTP and recovered error codes using the current locale while pre
   expect(canvasErrorMessage('Model execution failed', 'output_contract_invalid')).toContain('delivery format');
   expect(canvasErrorMessage('Model execution failed', 'output_contract_invalid')).not.toContain('Check the runtime configuration');
 });
+it('points a free workspace at the paid plans first when its run allowance is full, and still says how to wait', () => {
+  for (const [locale, plans, wait] of [['zh', '升级 Pro / Max 付费套餐', 'UTC 0 点'], ['en', 'Upgrade to the Pro or Max plan', '00:00 UTC']] as const) {
+    const text = runErrorText('quota_exceeded', locale)!;
+    expect(text).toContain(plans); expect(text).toContain(wait);
+    expect(text.indexOf(plans)).toBeLessThan(text.indexOf(wait));
+    // The API's own message and a node's both read the same copy; nobody is sent to an administrator.
+    expect(saasErrorMessage(new SaaSApiError(429, 'quota_exceeded', 'Workspace run quota exceeded'), locale)).toBe(text);
+    expect(text).not.toMatch(/管理员|administrator/);
+  }
+});
 it('points a free workspace at the default model and the paid plans when its premium calls run out', () => {
   for (const code of ['premium_quota_exceeded', 'premium_capacity_exceeded']) {
     document.documentElement.lang = 'zh-CN';

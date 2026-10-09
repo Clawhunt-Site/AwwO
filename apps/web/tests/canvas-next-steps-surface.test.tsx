@@ -34,8 +34,14 @@ describe('the assistant’s next steps on the canvas', () => {
     expect(toggle()).toHaveAttribute('title', '助手有建议');
     fireEvent.click(toggle());
     const next = within(sidebar().getByRole('group', { name: '接下来' }));
-    expect(next.getByText(/「已有节点」还缺 任务要求，补全后画布才能运行。/)).toBeVisible();
-    fireEvent.click(next.getByRole('button', { name: '去补全「已有节点」' }));
+    expect(next.getByText('运行前还需要你来定 1 项：')).toBeVisible();
+    const row = within(next.getByRole('listitem'));
+    expect(row.getByText('「已有节点」')).toBeVisible();
+    expect(row.getByText('任务要求')).toBeVisible();
+    // A local canvas counts no calls, so nothing is said about them.
+    expect(next.getByText('填好后就能运行整张画布。')).toBeVisible();
+    expect(next.queryByText('本地检查，不用次数')).toBeNull();
+    fireEvent.click(row.getByRole('button', { name: '去补全「已有节点」' }));
     await waitFor(() => expect(screen.getByRole('dialog', { name: /已有节点/ })).toBeVisible());
   });
 
@@ -47,5 +53,20 @@ describe('the assistant’s next steps on the canvas', () => {
     const next = within(sidebar().getByRole('group', { name: '接下来' }));
     expect(next.getByText('画布已经搭好，还没有运行过。')).toBeVisible();
     expect(next.getByRole('button', { name: '运行整张画布' })).toHaveClass('is-primary');
+  });
+
+  it('answers “what is missing?” from the canvas without sending anything', async () => {
+    seed('');
+    render(<CanvasSurface />);
+    fireEvent.click(toggle());
+    const requests = vi.mocked(fetch).mock.calls.length;
+    const box = sidebar().getByRole('textbox', { name: '画布需求' });
+    fireEvent.change(box, { target: { value: '现在缺什么？' } });
+    fireEvent.click(sidebar().getByRole('button', { name: '修改画布' }));
+    const log = within(sidebar().getByRole('log', { name: '画布对话' }));
+    await waitFor(() => expect(log.getByText('现在缺什么？')).toBeVisible());
+    expect(log.getByText('运行前还需要你来定 1 项：「已有节点」的任务要求。填好后就能运行整张画布。')).toBeVisible();
+    expect(box).toHaveValue('');
+    expect(vi.mocked(fetch).mock.calls.length).toBe(requests);
   });
 });

@@ -35,6 +35,26 @@ describe('the assistant offers what to do next without being asked', () => {
     expect(recorded).toHaveBeenCalledOnce();
   });
 
+  it('lists what the canvas still needs, one row per node with its own step, and says the advice cost nothing', () => {
+    const fillPlan = vi.fn(); const fillCover = vi.fn();
+    render(panel({ nextSteps: { lead: '运行前还需要你来定 3 项：', actions: [], note: '本地检查，不用次数', footnote: '填好后就能运行整张画布（至少 4 次）。', items: [
+      { id: 'plan', title: '「选题策划」', detail: '主题、目标读者', action: { id: 'fill-plan', label: '去填写', ariaLabel: '去补全「选题策划」', primary: true, onSelect: fillPlan } },
+      { id: 'cover', title: '「封面设计」', detail: '画面风格', action: { id: 'fill-cover', label: '去填写', ariaLabel: '去补全「封面设计」', onSelect: fillCover } },
+    ] }, costNote: '提问会用掉今天的次数：改画布约 1 次，直接执行任务最多 16 次。' }));
+    const next = within(screen.getByRole('group', { name: '接下来' }));
+    expect(next.getByText('运行前还需要你来定 3 项：')).toBeVisible();
+    expect(next.getByText('本地检查，不用次数')).toBeVisible();
+    const rows = next.getAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[1]).getByText('画面风格')).toBeVisible();
+    expect(next.getByText('填好后就能运行整张画布（至少 4 次）。')).toBeVisible();
+    fireEvent.click(next.getByRole('button', { name: '去补全「封面设计」' }));
+    expect(fillCover).toHaveBeenCalledOnce(); expect(fillPlan).not.toHaveBeenCalled();
+    expect(next.getByRole('button', { name: '去补全「选题策划」' })).toHaveClass('is-primary');
+    // What a message costs is said under the composer, outside the advice.
+    expect(screen.getByText('提问会用掉今天的次数：改画布约 1 次，直接执行任务最多 16 次。')).toBeVisible();
+  });
+
   it('steps aside while a message is handled, on the welcome screen, and when there is nothing to offer', () => {
     const steps = { lead: 'x', actions: [{ id: 'run-all', label: '运行整张画布', onSelect: () => {} }] };
     const { rerender } = render(panel({ busy: true, nextSteps: steps }));

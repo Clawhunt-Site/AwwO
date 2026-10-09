@@ -121,3 +121,16 @@
 .awwo-assistant-next-actions :is(button, a).is-primary { border-color: var(--awwo-accent, #286454); background: var(--awwo-accent, #286454); color: var(--assistant-on-accent); }
 .awwo-assistant-next-actions :is(button, a).is-primary:hover { filter: brightness(.95); }
 .awwo-assistant-next-actions a:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 3px; }
+.awwo-assistant-next > p .awwo-assistant-next-free { margin-left: auto; padding: 0 7px; border-radius: 999px; background: var(--awwo-soft, #f4f6f2); color: var(--awwo-muted, #68736d); font-size: 11px; font-style: normal; }
+/* Everything a run still needs, one row per node with the step that settles it. */
+.awwo-assistant-next-items { display: grid; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+.awwo-assistant-next-items li { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding: 6px 8px; border-radius: 9px; background: var(--awwo-soft, #f4f6f2); font-size: 12px; line-height: 1.45; }
+.awwo-assistant-next-item-title { color: var(--awwo-ink, #232c29); font-weight: 600; overflow-wrap: anywhere; }
+.awwo-assistant-next-item-detail { color: var(--awwo-muted, #68736d); overflow-wrap: anywhere; }
+.awwo-assistant-next-items :is(button, a) { min-height: 28px; padding: 3px 10px; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 999px; background: var(--awwo-surface, #fff); color: var(--awwo-ink, #232c29); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.awwo-assistant-next-items :is(button, a):hover { border-color: var(--awwo-accent, #286454); }
+.awwo-assistant-next-items :is(button, a).is-primary { border-color: var(--awwo-accent, #286454); background: var(--awwo-accent, #286454); color: var(--assistant-on-accent); }
+.awwo-assistant-next-footnote { margin: 0; color: var(--awwo-muted, #68736d); font-size: 12px; line-height: 1.5; }
+.awwo-assistant-next-footnote + .awwo-assistant-next-actions { margin-top: 8px; }
+/* What a message costs where calls are counted, and which questions cost nothing. */
+.awwo-assistant-cost { display: block; margin-top: 4px; color: var(--awwo-muted, #68736d); font-size: 11px; line-height: 1.45; }

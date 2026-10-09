@@ -1,5 +1,5 @@
 import { readInitialLocale, type UiLocale } from '../locale';
-import { SaaSApiError, freeCapacityMessages, runtimeUnavailableMessages, saasErrorMessage } from './api';
+import { SaaSApiError, freeCapacityMessages, quotaExceededMessages, runtimeUnavailableMessages, saasErrorMessage } from './api';
 
 export function canvasLocale(): UiLocale {
   const language = document.documentElement.lang;
@@ -74,6 +74,9 @@ const runErrors: Record<string, [string, string]> = {
   // The default model's own deployment-wide daily ceiling: there is no free model to switch to, so only the next
   // UTC day or a plan.
   free_capacity_exceeded: freeCapacityMessages,
+  // The workspace's own allowance (today's calls, or runs at once) without a plan. Run details showed the bare code;
+  // a node read the API's copy. Both now read this one, which offers the plans first.
+  quota_exceeded: quotaExceededMessages,
   // A paid plan's credits for the period are used up; the default model spends none.
   plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
   model_unpriced: ['这个模型还不能按点数计费，请把节点换成其他模型。', 'This model cannot be billed in credits yet. Switch the node to another model.'],

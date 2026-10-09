@@ -33,7 +33,7 @@ import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePoint
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
-import { nextSteps as canvasNextSteps, type NextStep, type NextSteps } from './nextSteps';
+import { nextSteps as canvasNextSteps, isNextStepsQuestion, type NextStep, type NextSteps } from './nextSteps';
 import { runErrorText } from '../saas/canvasErrors';
 import { recordUpgradeInterest } from '../saas/routeUsage';
 import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHost, type AssistantPending, type AssistantRoute,
@@ -108,8 +108,11 @@ import './canvas.css';
 import './node-view-styles.css';
 import { nodeViewRootProps, useNodeViewPreference } from './nodeViewStyle';
 /** A node failure refused by the free premium allowance reads as that error's own copy, in either language. */
-const PREMIUM_REFUSALS = ['premium_quota_exceeded', 'premium_capacity_exceeded']
+const refusalTexts = (codes: ReadonlyArray<string>) => codes
   .flatMap(code => (['zh', 'en'] as const).map(language => runErrorText(code, language) ?? '')).filter(Boolean);
+const PREMIUM_REFUSALS = refusalTexts(['premium_quota_exceeded', 'premium_capacity_exceeded']);
+/** And one refused because the workspace's own run allowance is full (today's calls, or runs at once). */
+const QUOTA_REFUSALS = refusalTexts(['quota_exceeded']);
 
 /** How long patches sharing a label keep collapsing into one undo step (one drag = one step). */
 const COALESCE_MS = 900;
@@ -2376,6 +2379,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     void assistantLatest.current!.sendPlanningMessage(prompt);
   };
   const sendAssistantMessage = async () => {
+    // A question about what the canvas still needs is answered here, from the canvas, before it could cost a call.
+    if (!readOnlyRef.current && !pendingRef.current && !planningRequest.current && answerLocally(planning.draft.trim())) return;
     if (!unifiedHost || !routeAssistant) { void sendPlanningMessage(); return; }
     if (readOnlyRef.current || pendingRef.current || planningRequest.current) return;
     const prompt = planning.draft.trim();
@@ -2454,7 +2459,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     nodes, edges, runs, running, canRun: !runUnavailableReason, resultsAvailable: Boolean(results), upgradeAvailable: Boolean(cloudScope),
     // A refusal's text is the run error's own copy (canvasErrors), in whichever language the run was read in.
     isPremiumRefusal: detail => PREMIUM_REFUSALS.some(text => detail.includes(text)),
+    isQuotaRefusal: detail => QUOTA_REFUSALS.some(text => detail.includes(text)),
   });
+  // Only the hosted app counts calls, so only it says what a step costs (and that this advice cost none).
+  const countsCalls = Boolean(cloudScope);
+  const withCalls = (label: string, calls: number) => countsCalls ? t('assistant.nextWithCalls', { label, calls }) : label;
+  const listSeparator = locale === 'zh' ? '、' : ', ';
   const titleOf = (id: string) => nodes.find(node => node.id === id)?.title ?? '';
   const configureNode = (id: string) => { if (!inspectorCloseLocked.current) { focusNode(id, { configure: true }); setInspectorId(id); } };
   const nextAction = (step: NextStep, primary: boolean): AssistantNextSteps['actions'][number] => {
@@ -2464,29 +2474,71 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       case 'switch-model': return { id: `switch-${step.nodeId}`, primary, label: t('assistant.nextSwitchModel'), onSelect: () => configureNode(step.nodeId) };
       case 'open-failed': return { id: `open-${step.nodeId}`, primary, label: t('assistant.nextOpenFailed'), onSelect: () => focusNode(step.nodeId) };
       case 'rerun-failed': return { id: 'rerun-failed', primary, label: t('assistant.nextRerunFailed'), onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
-      case 'fill-inputs': return { id: `fill-${step.nodeId}`, primary, label: t('assistant.nextFill', { node: titleOf(step.nodeId) }), onSelect: () => configureNode(step.nodeId) };
-      case 'run-all': return { id: 'run-all', primary, label: t('assistant.nextRunAll'), onSelect: () => void startRun() };
-      case 'run-rest': return { id: 'run-rest', primary, label: t('assistant.nextRunRest', { count: step.nodeIds.length }), onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
+      case 'fill-inputs': return { id: `fill-${step.nodeId}`, primary, label: t('assistant.nextFillShort'), ariaLabel: t('assistant.nextFill', { node: titleOf(step.nodeId) }),
+        onSelect: () => configureNode(step.nodeId) };
+      case 'run-all': return { id: 'run-all', primary, label: withCalls(t('assistant.nextRunAll'), step.calls), onSelect: () => void startRun() };
+      // One node, alone: an out-of-scope upstream would contribute what it produced earlier, and a first node has none.
+      case 'try-first': return { id: `try-${step.nodeId}`, primary, label: withCalls(t('assistant.nextTryFirst', { node: titleOf(step.nodeId) }), step.calls),
+        onSelect: () => void startRun([step.nodeId]) };
+      case 'run-rest': return { id: 'run-rest', primary, label: withCalls(t('assistant.nextRunRest', { count: step.nodeIds.length }), step.calls),
+        onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
       case 'results': return { id: 'results', primary, label: t('assistant.nextResults'), onSelect: () => changeStageView('results') };
     }
   };
-  const nextLead = (situation: NextSteps['situation']): string => {
+  const nextLead = (situation: NextSteps['situation'], tryFirst: boolean): string => {
     switch (situation.kind) {
+      case 'quota': return t('assistant.nextLeadQuota', { node: situation.nodeTitle });
       case 'premium': return t('assistant.nextLeadPremium', { node: situation.nodeTitle });
       case 'failed': return situation.count > 1 ? t('assistant.nextLeadFailedMany', { node: situation.nodeTitle, count: situation.count })
         : t('assistant.nextLeadFailed', { node: situation.nodeTitle });
-      case 'inputs': return t('assistant.nextLeadInputs', { node: situation.nodeTitle, fields: situation.fields.join(locale === 'zh' ? '、' : ', ') });
-      case 'fresh': return t('assistant.nextLeadFresh');
+      case 'inputs': return t('assistant.nextLeadInputs', { count: situation.fields });
+      case 'fresh': return t(tryFirst ? 'assistant.nextLeadFreshTry' : 'assistant.nextLeadFresh');
       case 'partial': return t('assistant.nextLeadPartial', { count: situation.count });
       case 'complete': return t('assistant.nextLeadComplete');
     }
   };
-  const assistantNextSteps: AssistantNextSteps | undefined = suggested
-    ? { lead: nextLead(suggested.situation), actions: suggested.steps.map((step, index) => nextAction(step, index === 0)) } : undefined;
+  const fillSteps = suggested?.steps.flatMap(step => step.kind === 'fill-inputs' ? [step] : []) ?? [];
+  const assistantNextSteps: AssistantNextSteps | undefined = suggested ? {
+    lead: nextLead(suggested.situation, suggested.steps.some(step => step.kind === 'try-first')),
+    // What a run still needs is a checklist with a step per node; every other situation is a few buttons.
+    actions: suggested.situation.kind === 'inputs' ? [] : suggested.steps.map((step, index) => nextAction(step, index === 0)),
+    ...(fillSteps.length ? {
+      items: fillSteps.map((step, index) => ({ id: step.nodeId, title: t('assistant.nextItemNode', { node: titleOf(step.nodeId) }),
+        detail: step.fields.join(listSeparator), action: nextAction(step, index === 0) })),
+      footnote: suggested.situation.kind === 'inputs' && countsCalls
+        ? t('assistant.nextAfterInputsCalls', { calls: suggested.situation.calls }) : t('assistant.nextAfterInputs'),
+    } : {}),
+    ...(countsCalls ? { note: t('assistant.nextFree') } : {}),
+  } : undefined;
   // A problem the assistant can help with marks its closed toggle; a canvas that merely has not run does not.
-  const assistantHint = Boolean(suggested && ['premium', 'failed', 'inputs'].includes(suggested.situation.kind));
+  const assistantHint = Boolean(suggested && ['quota', 'premium', 'failed', 'inputs'].includes(suggested.situation.kind));
+  // "What's missing?", "what now?": answered here from the same advice, so the question costs no call. The reply
+  // says so; the 「接下来」 block under it has the buttons.
+  const localAnswer = (): string => {
+    const free = countsCalls ? t('assistant.answerFree') : '';
+    if (running) return t('assistant.answerRunning') + free;
+    if (!nodes.length) return t('assistant.answerEmpty') + free;
+    if (!suggested || !assistantNextSteps) return t('assistant.answerNothing') + free;
+    if (fillSteps.length) {
+      const rows = fillSteps.map(step => t('assistant.answerRow', { node: titleOf(step.nodeId), fields: step.fields.join(listSeparator) }));
+      return `${assistantNextSteps.lead}${locale === 'zh' ? '' : ' '}${rows.join(locale === 'zh' ? '；' : '; ')}${locale === 'zh' ? '。' : '. '}${assistantNextSteps.footnote ?? ''}${free}`;
+    }
+    const first = assistantNextSteps.actions[0]?.label;
+    return `${assistantNextSteps.lead}${first ? t('assistant.answerSuggest', { action: first }) : ''}${free}`;
+  };
+  const answerLocally = (prompt: string): boolean => {
+    if (!isNextStepsQuestion(prompt)) return false;
+    const id = `turn-${Date.now()}-${++planningSequence.current}`;
+    const content = localAnswer();
+    setPlanningError('');
+    setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
+      { id: `${id}-user`, role: 'user' as const, content: prompt }, { id: `${id}-assistant`, role: 'assistant' as const, content }].slice(-60) }));
+    if (nodes.length) setAssistantOpen(true);
+    return true;
+  };
   const assistantProps = {
     nextSteps: assistantNextSteps,
+    ...(countsCalls ? { costNote: t(unifiedHost ? 'assistant.costNoteUnified' : 'assistant.costNotePlan') } : {}),
     // A message being handled shows pending in the conversation; the box keeps it, out of sight, until it is.
     messages: shownMessages, draft: assistantPending && planning.draft.trim() === assistantPending.prompt ? '' : planning.draft,
     busy: planningBusy, error: planningError,

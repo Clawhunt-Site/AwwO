@@ -77,6 +77,14 @@ export const freeCapacityMessages: [string, string] = [
   'The free default model is at its daily capacity for the whole service today. Free calls come back after the next UTC day; to keep going now, upgrade to the Pro or Max plan (account menu → Plans and credits), which this limit does not apply to.',
 ];
 
+/** The workspace's own run allowance is full (quota_exceeded): today's calls are used up, or as many runs as it may
+ *  have at once are going. Admission refuses it only without a plan, and the paid plans have more of both, so the copy
+ *  leads with them; waiting is the free way on. */
+export const quotaExceededMessages: [string, string] = [
+  '工作区运行额度已满：今天的调用次数用完了，或同时运行的任务到了上限。升级 Pro / Max 付费套餐，每天的次数多得多、能同时运行更多任务，马上就能继续（账号菜单 → 套餐与点数）；不升级的话，等进行中的任务结束，或等 UTC 0 点（北京时间早上 8 点）次数重置。',
+  'The workspace run quota has been reached: today’s calls are used up, or too many runs are going at once. Upgrade to the Pro or Max plan for many more calls a day and more runs at once, and continue right away (account menu → Plans and credits); otherwise wait for active runs to finish, or for the calls to reset at 00:00 UTC.',
+];
+
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
 export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
   const codes: Record<string, [string, string]> = {
@@ -110,7 +118,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     session_busy: ['此会话正在运行，请稍后重试。', 'This session is running. Try again when it finishes.'],
     context_limit: ['输入超出模型上下文限制，请缩短输入或减少历史内容。', 'The input exceeds the model context limit. Shorten it or reduce the history.'],
     rate_limited: ['请求过于频繁，请稍后重试。', 'Too many requests. Please try again later.'],
-    quota_exceeded: ['工作区运行额度已满（并发或每日调用上限）。请在运行记录中检查进行中的任务；若已用完当日额度，请联系平台管理员或等待 UTC 次日重置。', 'The workspace run quota has been reached (concurrent or daily calls). Check active tasks in Run history. If the daily limit is used up, contact a platform administrator or wait for the next UTC day.'],
+    quota_exceeded: quotaExceededMessages,
     free_capacity_exceeded: freeCapacityMessages,
     personal_engine_required: ['请先到「我的引擎」添加并验证你自己的 API Key。', 'Add and verify your API key in My engines before running.'],
     model_unavailable: ['所选模型不可用，请重新选择服务端提供的模型。', 'The selected model is unavailable. Choose a model offered by the server.'],

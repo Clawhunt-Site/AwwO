@@ -94,6 +94,16 @@ describe('durable team run details', () => {
     await waitFor(() => expect(fetcher.mock.calls.some(([url, init]) => url === '/api/v1/tenants/tenant-a/upgrade-interest' && init?.method === 'POST')).toBe(true));
   });
 
+  it('offers the plans for a full daily allowance too, worded for more calls, and names the refusal instead of its code', async () => {
+    const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url === path ? { ...record('failed'), error: 'quota_exceeded' } : { items: [] }));
+    vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true }));
+    const upgrade = await screen.findByRole('link', { name: 'Upgrade to Pro or Max to continue today' });
+    expect(upgrade.getAttribute('href')).toContain('account=plans');
+    expect(screen.getByText(/The workspace run quota has been reached: today’s calls are used up/)).toBeInTheDocument();
+    expect(screen.getByText(/Pro and Max have many more calls a day and more runs at once, and include premium models/)).toBeInTheDocument();
+    expect(screen.queryByText('quota_exceeded')).toBeNull();
+  });
+
   it('offers no upgrade while a run is active or when a plan would not lift its failure', async () => {
     const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url === path
       ? { ...record('failed'), error: 'provider_auth_failed' } : { items: [turn({ status: 'failed', error: 'model_refused' })] }));

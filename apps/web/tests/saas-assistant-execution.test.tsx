@@ -118,6 +118,17 @@ describe('the canvas assistant’s tasks', () => {
     expect(posts(fetcher).filter(([url]) => String(url).endsWith('/computer-runs'))).toHaveLength(0);
   });
 
+  it('offers only the paid plans when a direct task is refused because today’s calls are used up', async () => {
+    const refused = { ...detail, status: 'failed', error: 'quota_exceeded', canRespond: false, canCancel: false, approvals: [], messages: [] };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? runtime
+      : url.endsWith('/computer-runs') ? { items: [{ ...summary, status: 'failed' }] } : refused)));
+    render(view());
+    expect(await screen.findByText(/今天的调用次数用完了，任务没有开始。升级 Pro \/ Max/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '升级 Pro / Max，今天就能继续' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+    // The default model is counted too, so switching to it would not help.
+    expect(screen.queryByRole('button', { name: /改用默认模型/ })).toBeNull();
+  });
+
   it('explains an unavailable service with the existing engine entry and never asks for a second connection', async () => {
     const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url.endsWith('/computer-runtime') ? disabled : { items: [] }));
     vi.stubGlobal('fetch', fetcher); render(view());

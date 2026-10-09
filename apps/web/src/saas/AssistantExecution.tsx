@@ -11,7 +11,7 @@ import { ARTIFACT_REF_PREFIX } from './canvasBridge';
 import { renderInertMarkdown } from './inertMarkdown';
 import { saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
-import { PlanUpsell, planUpsellCode } from './PlanUpsell';
+import { PlanUpsell, planUpsellCode, upsellReason } from './PlanUpsell';
 import type { UiLocale } from '../locale';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
@@ -50,7 +50,7 @@ function taskErrorText(t: T, locale: UiLocale, code: string): string {
     computer_model_failed: ['模型调用失败，任务没有完成。', 'A model call failed, so the task did not finish.'],
     computer_admission_denied: ['模型额度或权限不足，任务停在了这里。', 'The model allowance or permission ran out, so the task stopped here.'],
     computer_output_limit: ['任务的输出超过了上限。', 'The task produced more output than allowed.'],
-    quota_exceeded: ['今天的调用次数已用完，任务没有开始。', 'Today’s calls are used up, so the task did not start.'],
+    quota_exceeded: ['今天的调用次数用完了，任务没有开始。升级 Pro / Max 每天的次数多得多，马上就能继续；不升级的话，等 UTC 0 点（北京时间早上 8 点）次数重置。', 'Today’s calls are used up, so the task did not start. Pro and Max have many more calls a day, so upgrading lets you continue now; otherwise the calls reset at 00:00 UTC.'],
   };
   const text = known[code];
   // The run errors every run shares (the paid plan's and the daily allowances') read as they do on a node.
@@ -141,14 +141,16 @@ function TaskSummary({ execution, task }: { execution: ManagedExecution; task: E
   </button>;
 }
 
-/** A direct task refused by the free premium allowance: the paid plans first, then the free way on — the model the
- * service lists first, which is the one a new canvas's direct tasks start on (the default model). Switching changes
- * only the choice; the request is sent again by the reader, never re-sent here. */
-function PremiumTaskActions({ execution }: { execution: ManagedExecution }) {
+/** A direct task refused for want of a plan. A premium refusal gets the paid plans first, then the free way on — the
+ * model the service lists first, which is the one a new canvas's direct tasks start on (the default model). A full
+ * daily allowance counts the default model too, so it gets the plans alone. Switching changes only the choice; the
+ * request is sent again by the reader, never re-sent here. */
+function PremiumTaskActions({ execution, code }: { execution: ManagedExecution; code: string }) {
   const { t } = useSaaSPreferences();
   const fallback = execution.runtime?.models[0];
   const key = fallback ? executionModelKey(fallback.runtime, fallback.id) : '';
   const label = fallback ? fallback.label || fallback.id : '';
+  if (upsellReason(code) === 'daily') return <div className="awwo-execution-premium"><PlanUpsell tenantId={execution.tenantId} reason="daily" /></div>;
   return <div className="awwo-execution-premium">
     <PlanUpsell tenantId={execution.tenantId} />
     {fallback && execution.choice.key !== key
@@ -183,7 +185,7 @@ function TaskDetail({ execution }: { execution: ManagedExecution }) {
       <button type="button" onClick={execution.refreshDetail}>{t('继续读取', 'Keep reading')}</button></p>}
     {run.truncated && <p className="awwo-execution-note">{t('记录超过显示上限，部分过程未展示。', 'The record exceeds the display limit; part of the process is not shown.')}</p>}
     {run.error && <p className="awwo-execution-error" role="alert">{taskErrorText(t, locale, run.error)}</p>}
-    {run.error && planUpsellCode([run.error]) ? <PremiumTaskActions execution={execution} /> : null}
+    {run.error && planUpsellCode([run.error]) ? <PremiumTaskActions execution={execution} code={run.error} /> : null}
     {pending.map(approval => <RequestCard key={approval.id} execution={execution} run={run} approval={approval} />)}
     {run.output && <section className="awwo-execution-result" aria-label={t('任务结果', 'Task result')}>
       <div className="awwo-execution-markdown">{renderInertMarkdown(run.output)}</div>
