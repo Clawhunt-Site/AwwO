@@ -131,9 +131,49 @@ export function createNodeTeam(node: { title: string; persona: string; model: st
   const zh = locale === 'zh';
   return { version: 1, mode: 'sequential', runtime: NODE_TEAM_RUNTIMES.includes(node.runtime as NodeTeamRuntime) ? node.runtime as NodeTeamRuntime : 'pi', maxRounds: 2, maxTurns: 8, timeoutSeconds: 300,
     members: [
-      createNodeTeamMember({ name: node.title || (zh ? '执行者' : 'Worker'), role: zh ? '执行者' : 'Worker', instructions: node.persona, model: node.model }),
+      // The worker inherits the node's model (empty) rather than a copy of it. A copy froze the model the node had
+      // when the team was enabled, so switching the node to another model afterwards — the default model after a
+      // premium-quota failure, say — left every run on the old one.
+      createNodeTeamMember({ name: node.title || (zh ? '执行者' : 'Worker'), role: zh ? '执行者' : 'Worker', instructions: node.persona }),
       createNodeTeamMember({ name: zh ? '复核与汇总' : 'Reviewer and summarizer', role: zh ? '复核与汇总' : 'Reviewer and summarizer',
         instructions: zh ? '检查已有结果，指出遗漏，汇总为符合节点输出要求的最终结果。' : 'Check the available results, identify omissions, and produce a final result that satisfies the node output requirements.' }),
     ],
   };
+}
+
+/** A member with an empty model inherits the node's model only on the node's runtime; this is the runtime the team
+ * editor offers "inherit the bound node model" for. */
+const inheritingRuntime = (node: { runtime?: string }): string => node.runtime || 'pi';
+/** Point a member back at the node's model. Its own effort goes too: an explicit effort needs an explicit model, and an
+ * inheriting member takes the node's effort with the node's model. */
+const followingNode = (member: NodeTeamMember): NodeTeamMember => {
+  const next: NodeTeamMember = { ...member, model: '' };
+  delete next.effort;
+  return next;
+};
+export interface NodeTeamModelOverride { index: number; member: NodeTeamMember }
+/** Members on the node's runtime whose own model is not the node's. A change of the node's model never reaches them,
+ * so "switch the node to the default model" leaves their calls on their own model. */
+export function nodeTeamModelOverrides(node: { runtime?: string; model: string; team?: NodeTeam }): NodeTeamModelOverride[] {
+  const team = node.team;
+  if (!team) return [];
+  const runtime = inheritingRuntime(node);
+  return team.members.flatMap((member, index) => (member.runtime || team.runtime) === runtime && member.model && member.model !== node.model
+    ? [{ index, member }] : []);
+}
+/** The given members inherit the node's model from now on; every other member is unchanged. */
+export function inheritNodeModel(team: NodeTeam, indexes: readonly number[]): NodeTeam {
+  const chosen = new Set(indexes);
+  return { ...team, members: team.members.map((member, index) => chosen.has(index) ? followingNode(member) : member) };
+}
+/** Carry a change of the node's model to the members that held the node's previous model as their own — every team
+ * created before members inherited it copied the node's model into its first member. They inherit from now on. A
+ * member with another model or its own effort keeps its choice, and a runtime change leaves the team to its own
+ * runtime selector. Returns the same team when nothing follows. */
+export function followNodeModel(team: NodeTeam, previous: { runtime?: string; model: string; effort?: string }, next: { runtime?: string }): NodeTeam {
+  const runtime = inheritingRuntime(previous);
+  if (!previous.model || runtime !== inheritingRuntime(next)) return team;
+  const following = team.members.flatMap((member, index) => (member.runtime || team.runtime) === runtime && member.model === previous.model
+    && (!member.effort || member.effort === (previous.effort || '')) ? [index] : []);
+  return following.length ? inheritNodeModel(team, following) : team;
 }

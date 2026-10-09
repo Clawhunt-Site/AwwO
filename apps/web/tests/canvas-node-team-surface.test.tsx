@@ -79,7 +79,8 @@ describe('CanvasSurface team configuration persistence', () => {
     const initial = seed(); const page = render(<CanvasSurface runtimeReadJson={runtimeReadJson} />);
     await openInspector(); fireEvent.click(screen.getByRole('checkbox', { name: '启用多 Agent 协作' }));
     await save();
-    expect(stored().team).toMatchObject({ mode: 'sequential', runtime: 'pi', members: [expect.objectContaining({ model: 'model-a' }), expect.objectContaining({ model: '' })] });
+    // Both members inherit the node's model (empty) so a later switch of the node model reaches the whole team.
+    expect(stored().team).toMatchObject({ mode: 'sequential', runtime: 'pi', members: [expect.objectContaining({ model: '' }), expect.objectContaining({ model: '' })] });
     unchangedSession(initial); invalidatedOnlyDependents();
     page.unmount(); render(<CanvasSurface runtimeReadJson={runtimeReadJson} />); await openInspector();
     expect(screen.getByRole('checkbox', { name: '启用多 Agent 协作' })).toBeChecked();

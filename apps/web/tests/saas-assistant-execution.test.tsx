@@ -98,6 +98,26 @@ describe('the canvas assistant’s tasks', () => {
     expect(screen.getByText('确认输出格式')).toBeVisible();
   });
 
+  it('offers the paid plans and the free default model when a direct task is refused for premium', async () => {
+    const models = { ...runtime, models: [{ id: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6', runtime: 'pi', efforts: [] }, { id: 'claude-opus-5', label: 'Claude Opus 5', runtime: 'pi', efforts: [] }] };
+    const refused = { ...detail, status: 'failed', error: 'premium_quota_exceeded', canRespond: false, canCancel: false, approvals: [], messages: [] };
+    const fetcher = vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? models
+      : url.endsWith('/computer-runs') ? { items: [{ ...summary, status: 'failed' }] }
+        : url.endsWith('/upgrade-interest') ? { recorded: true, clicks: 1 } : refused));
+    vi.stubGlobal('fetch', fetcher);
+    render(view());
+    await screen.findByText('直接执行用：qwen3.8-27b-p6');
+    // The reader had picked a premium model for direct tasks.
+    fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('pi', 'claude-opus-5') } });
+    expect(await screen.findByText(/免费版每天的次数只能用于默认模型/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+    fireEvent.click(screen.getByRole('button', { name: '改用默认模型 qwen3.8-27b-p6（免费）' }));
+    expect(await screen.findByText('直接执行已改用 qwen3.8-27b-p6，重新发送这条请求即可免费继续。')).toBeInTheDocument();
+    expect(screen.getByText('直接执行用：qwen3.8-27b-p6')).toBeInTheDocument();
+    // Switching re-sends nothing: the request is the reader's to send again.
+    expect(posts(fetcher).filter(([url]) => String(url).endsWith('/computer-runs'))).toHaveLength(0);
+  });
+
   it('explains an unavailable service with the existing engine entry and never asks for a second connection', async () => {
     const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url.endsWith('/computer-runtime') ? disabled : { items: [] }));
     vi.stubGlobal('fetch', fetcher); render(view());

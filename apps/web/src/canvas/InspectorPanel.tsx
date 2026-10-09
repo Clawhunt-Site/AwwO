@@ -29,7 +29,7 @@ import { NodeTeamEditor } from './NodeTeamEditor';
 import { PersonaPicker } from './PersonaPicker';
 import { TaskFrameEditor } from './TaskFrameEditor';
 import { cleanTaskFrame, isTaskFrame, taskFrameError } from './taskFrame';
-import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
+import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, followNodeModel, inheritNodeModel, nodeTeamModelOverrides, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
@@ -246,6 +246,9 @@ export function InspectorPanel({
   const mediaDraft = Boolean(onInitialize && sessionDraft && mediaKindOf(sessionDraft.agentKind));
   const mediaBlocked = mediaDraft && mediaSetupProblem(sessionDraft!, mediaCatalogue) !== null;
   const taskFrameInvalid = sessionDraft ? taskFrameError(sessionDraft.taskFrame) !== null : false;
+  // Team members whose own model the node's model does not reach: shown under the model picker, where a reader
+  // switching models after a premium-quota failure looks, because those members keep calling their model.
+  const teamModelOverrides = sessionDraft && !sessionDraft.agentRef ? nodeTeamModelOverrides(sessionDraft) : [];
   const boundCompany = useMemo(
     () => (sessionDraft?.binding ? liveCompanies.find((c) => c.id === sessionDraft.binding?.companyId) : undefined),
     [sessionDraft?.binding, liveCompanies],
@@ -472,7 +475,8 @@ export function InspectorPanel({
                   runtimeLabels={Object.fromEntries(NODE_TEAM_RUNTIMES.map(runtime => [runtime, nodeTeamRuntimeLabel(runtime)]))}
                   value={{ backend: sessionDraft.runtime || (onInitialize ? 'pi' : ''), model: sessionDraft.model, effort: sessionDraft.effort }}
                   onChange={(v: RuntimeValue) =>
-                    editDraft({ ...sessionDraft, runtime: v.backend, model: v.model, effort: v.effort })
+                    editDraft({ ...sessionDraft, runtime: v.backend, model: v.model, effort: v.effort,
+                      ...(sessionDraft.team && v.model !== sessionDraft.model ? { team: followNodeModel(sessionDraft.team, sessionDraft, { runtime: v.backend }) } : {}) })
                   }
                   readJson={readJson}
                   lang={locale}
@@ -481,6 +485,16 @@ export function InspectorPanel({
                 {runtimesError ? (
                   <div className="canvas-inspector-outcome canvas-inspector-outcome--err">
                     {t('inspector.runtimeLoadFailed')}
+                  </div>
+                ) : null}
+                {teamModelOverrides.length ? (
+                  <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" role="group" aria-label={t('inspector.teamModelOverrideLabel')}>
+                    <div>{t('inspector.teamModelOverride', { count: teamModelOverrides.length })}</div>
+                    <ul>{teamModelOverrides.map(({ index, member }) => <li key={member.id}>{t('inspector.teamModelOverrideMember', { index: index + 1, name: member.name, model: member.model })}</li>)}</ul>
+                    <button type="button" disabled={busy}
+                      onClick={() => { if (sessionDraft.team) editDraft({ ...sessionDraft, team: inheritNodeModel(sessionDraft.team, teamModelOverrides.map(item => item.index)) }); }}>
+                      {t('inspector.teamModelFollow')}
+                    </button>
                   </div>
                 ) : null}
               </div>

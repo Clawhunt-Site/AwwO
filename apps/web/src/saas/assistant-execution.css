@@ -97,6 +97,9 @@ html:root .saas-canvas-shell .awwo-canvas-assistant {
   .awwo-execution-unavailable { margin-bottom: 10px; font-size: var(--saas-text-sm); }
   .awwo-execution-unavailable a { background: var(--saas-primary); box-shadow: none; color: var(--saas-on-primary); &:hover { background: var(--saas-primary-hover); } }
   .awwo-execution-error { margin: 0; padding: 9px 12px; border-radius: var(--saas-radius-sm); background: var(--saas-danger-bg); color: var(--saas-danger); font-size: var(--saas-text-xs); line-height: 1.55; }
+  .awwo-execution-premium { display: grid; gap: 6px; }
+  .awwo-execution-premium .saas-plan-upsell { margin: 0; }
+  .awwo-execution-switch { justify-self: start; padding: 5px 11px; border: 1px solid var(--saas-hairline); border-radius: 999px; background: transparent; color: var(--saas-text); font-size: var(--saas-text-xs); cursor: pointer; &:hover:not(:disabled) { border-color: var(--saas-primary); } }
   .awwo-execution-notice { margin: 0 0 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
 
   /* A permission or a question: answered only by your choice. */

@@ -60,7 +60,21 @@ export interface CanvasAssistantProps {
   expectedSeconds?: number;
   /** A host that can also do tasks (the hosted app): there is no mode to pick, the server routes each message. */
   unified?: UnifiedAssistant;
+  /** What to do next, offered without being asked: the host works it out from the canvas (nextSteps.ts) and acts on
+   *  a choice itself. Shown above the composer while nothing is being handled. */
+  nextSteps?: AssistantNextSteps;
 }
+
+export interface AssistantNextAction {
+  id: string;
+  label: string;
+  /** The one step the situation most calls for, drawn as the main button. */
+  primary?: boolean;
+  /** A link instead of a button (it opens in a new tab); onSelect may still record the choice. */
+  href?: string;
+  onSelect?: () => void;
+}
+export interface AssistantNextSteps { lead: string; actions: ReadonlyArray<AssistantNextAction> }
 
 // What a message being handled is waiting for, said in the composer.
 const PENDING_HEADLINE: Record<AssistantPendingPhase, CanvasTextKey> = {
@@ -144,7 +158,7 @@ function progressSignature(progress: PlanProgress | undefined): string {
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
 export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
-  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery, unified }: CanvasAssistantProps) {
+  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery, unified, nextSteps }: CanvasAssistantProps) {
   const { locale, t } = useCanvasI18n();
   const examples = [t('assistant.exampleSaas'), t('assistant.exampleData'), t('assistant.exampleContent')];
   const welcome = mode === 'welcome';
@@ -284,6 +298,16 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       {runtimeControls ? <div className="awwo-assistant-runtime">{runtimeControls}</div> : null}
       {unified?.notice ? <p className="awwo-assistant-route-notice" role="status">{unified.notice}</p> : null}
       {unified?.notices}
+      {/* Offered unasked once the canvas has something to do next, and never while a message or a plan is handled. */}
+      {nextSteps && nextSteps.actions.length > 0 && !welcome && !waiting && !recovery ? <div className="awwo-assistant-next" role="group" aria-label={t('assistant.nextTitle')}>
+        <p><strong>{t('assistant.nextTitle')}</strong><span>{nextSteps.lead}</span></p>
+        <div className="awwo-assistant-next-actions">
+          {nextSteps.actions.map(action => action.href
+            ? <a key={action.id} className={action.primary ? 'is-primary' : undefined} href={action.href} target="_blank" rel="noopener noreferrer"
+              onClick={() => action.onSelect?.()}>{action.label}</a>
+            : <button key={action.id} type="button" className={action.primary ? 'is-primary' : undefined} onClick={() => action.onSelect?.()}>{action.label}</button>)}
+        </div>
+      </div> : null}
       <form className="awwo-assistant-composer" aria-label={t('assistant.form')} onSubmit={event => { event.preventDefault(); send(); }}>
         <textarea ref={input} aria-label={t('assistant.input')} aria-describedby={error ? errorId : disclaimerId}
           placeholder={t(unified ? (welcome ? 'assistant.unifiedWelcomePlaceholder' : 'assistant.unifiedPlaceholder')

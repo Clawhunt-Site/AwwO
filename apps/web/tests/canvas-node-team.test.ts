@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CANVAS_BACKUP_KEY, CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithStatus, sanitizeDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { createNodeTeam, nodeTeamFingerprint, nodeTeamTurnEstimate, sanitizeNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
+import { createNodeTeam, followNodeModel, inheritNodeModel, nodeTeamFingerprint, nodeTeamModelOverrides, nodeTeamTurnEstimate, sanitizeNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
 import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 function node(): SessionNode {
@@ -39,7 +39,7 @@ describe('node team persistence and execution freshness', () => {
     expect(validateNodeTeam(invalid).length).toBeGreaterThan(0); expect(sanitizeNodeTeam(invalid)).toBeNull();
   });
   it('rejects duplicate identities, unsupported tools and unknown catalog models', () => {
-    const team = node().team!; team.members[1].id = team.members[0].id; (team.members[0] as any).tools = ['shell'];
+    const team = node().team!; team.members[0].model = 'catalog-model'; team.members[1].id = team.members[0].id; (team.members[0] as any).tools = ['shell'];
     expect(validateNodeTeam(team, ['other-model']).map(issue => issue.path)).toEqual(expect.arrayContaining(['members.1.id', 'members.0.tools', 'members.0.model']));
     expect(sanitizeNodeTeam(team)).toBeNull();
   });
@@ -112,6 +112,7 @@ describe('node team persistence and execution freshness', () => {
 
 it('round-trips OpenAI Agents JS models and allowlisted tools with the node and thread runtime', () => {
   const original = node(); original.runtime = 'openai-agents'; original.model = 'agents-model'; original.team = createNodeTeam(original);
+  original.team.members[0].model = 'agents-model';
   original.team.members[0].tools = ['calculator', 'current_time'];
   original.team.members[1] = { ...original.team.members[1], runtime: 'pi', model: 'catalog-model' };
   const restored = sanitizeDocument(JSON.parse(JSON.stringify({ ...emptyDocument(), nodes: [original] }))).nodes[0] as SessionNode;
@@ -133,4 +134,44 @@ it('invalidates execution outputs when the runtime or tool authorization changes
   expect(runInputFingerprint(after, ['team-node'])).not.toBe(runInputFingerprint(before, ['team-node']));
   const withTools = structuredClone(after); (after.nodes[0] as SessionNode).team!.members[0].tools = [];
   expect(runInputFingerprint(after, ['team-node'])).not.toBe(runInputFingerprint(withTools, ['team-node']));
+});
+
+
+describe('the node model reaches its team', () => {
+  it('lets a new team inherit the node model instead of freezing a copy of it', () => {
+    const team = createNodeTeam({ title: '游戏化学习系统规划', persona: 'p', model: 'claude-opus-5', runtime: 'pi' });
+    expect(team.members.map(member => member.model)).toEqual(['', '']);
+    expect(nodeTeamModelOverrides({ runtime: 'pi', model: 'qwen3.8-27b-p6', team })).toEqual([]);
+  });
+  it('lists members whose own model the node model does not reach, and points them back at it', () => {
+    // The reported canvas: the team was enabled while the node used claude-opus-5, then the node moved to qwen.
+    const team = createNodeTeam({ title: '游戏化学习系统规划', persona: '', model: '', runtime: 'pi' });
+    team.members[0] = { ...team.members[0], model: 'claude-opus-5' };
+    const other = { ...team, members: [...team.members, { ...team.members[1], id: 'agents', runtime: 'openai-agents' as const, model: 'agents-model' }] };
+    const node = { runtime: 'pi', model: 'qwen3.8-27b-p6', team: other };
+    // A member on another runtime never inherits the node model, so it is not an override of it.
+    expect(nodeTeamModelOverrides(node).map(({ index, member }) => [index, member.model])).toEqual([[0, 'claude-opus-5']]);
+    const fixed = inheritNodeModel(other, [0]);
+    expect(fixed.members[0].model).toBe(''); expect(fixed.members[0]).not.toHaveProperty('effort');
+    expect(fixed.members.slice(1)).toEqual(other.members.slice(1));
+    expect(nodeTeamModelOverrides({ ...node, team: fixed })).toEqual([]);
+    expect(validateNodeTeam(fixed)).toEqual([]);
+    // An own effort needs an own model, so it goes with it.
+    const withEffort = structuredClone(other); withEffort.members[0].effort = 'high';
+    expect(inheritNodeModel(withEffort, [0]).members[0]).not.toHaveProperty('effort');
+  });
+  it('carries a node model change to members that held the previous node model, and only to them', () => {
+    const legacy = createNodeTeam({ title: 'Plan', persona: '', model: '', runtime: 'pi' });
+    legacy.members[0].model = 'claude-opus-5'; // what a team enabled before inheritance stored
+    legacy.members[1] = { ...legacy.members[1], model: 'model-b' }; // a deliberate other choice is kept
+    const followed = followNodeModel(legacy, { runtime: 'pi', model: 'claude-opus-5', effort: '' }, { runtime: 'pi' });
+    expect(followed.members.map(member => member.model)).toEqual(['', 'model-b']);
+    expect(nodeTeamModelOverrides({ runtime: 'pi', model: 'qwen3.8-27b-p6', team: followed }).map(item => item.index)).toEqual([1]);
+    // An own effort, a runtime change, or nothing that held the previous model leaves the team as it was.
+    const withEffort = structuredClone(legacy); withEffort.members[0].effort = 'high';
+    expect(followNodeModel(withEffort, { runtime: 'pi', model: 'claude-opus-5' }, { runtime: 'pi' })).toBe(withEffort);
+    expect(followNodeModel(legacy, { runtime: 'pi', model: 'claude-opus-5' }, { runtime: 'openai-agents' })).toBe(legacy);
+    expect(followNodeModel(legacy, { runtime: 'pi', model: 'other-model' }, { runtime: 'pi' })).toBe(legacy);
+    expect(followNodeModel(legacy, { runtime: 'pi', model: '' }, { runtime: 'pi' })).toBe(legacy);
+  });
 });

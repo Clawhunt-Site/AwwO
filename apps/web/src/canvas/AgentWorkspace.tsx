@@ -51,6 +51,8 @@ export interface AgentWorkspaceProps {
   assistantOpen?: boolean;
   /** Offer the assistant toggle even on an empty canvas (a viewer's task history needs no steps). */
   assistantAvailable?: boolean;
+  /** The assistant has a next step about a problem (a failure, missing input): a dot on its closed toggle. */
+  assistantHint?: boolean;
   onToggleAssistant?: () => void;
   /** Fired after a side rail collapses or expands, so the host can refit the stage. */
   onRailsChange?: () => void;
@@ -65,7 +67,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, canvasTools, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, assistantAvailable = false, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, view = 'canvas', onViewChange, results, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, canvasTools, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, assistantAvailable = false, assistantHint = false, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, view = 'canvas', onViewChange, results, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -286,7 +288,7 @@ export function AgentWorkspace({ workspaceName, workspaceCaption, storageMode = 
       <div className="awwo-canvas-bar">{onViewChange && nodes.length > 0 ? <div className="awwo-view-switch" role="group" aria-label={t('results.view')}>
         {(['canvas', 'results'] as const).map(item => <button type="button" key={item} aria-pressed={view === item}
           onClick={() => { if (view !== item) onViewChange(item); }}>{t(item === 'canvas' ? 'results.viewCanvas' : 'results.viewResults')}</button>)}
-      </div> : null}{onToggleAssistant && (nodes.length > 0 || assistantOpen || assistantAvailable) ? <button className="awwo-assistant-toggle" type="button" aria-label={t('workspace.assistant')} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span></button> : null}{canvasTools}{!headerTitle && <div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div>}<div className="awwo-run-slot">{toolbar}</div></div>
+      </div> : null}{onToggleAssistant && (nodes.length > 0 || assistantOpen || assistantAvailable) ? <button className={`awwo-assistant-toggle${assistantHint && !assistantOpen ? ' has-hint' : ''}`} type="button" aria-label={t('workspace.assistant')} title={assistantHint && !assistantOpen ? t('workspace.assistantHint') : undefined} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span>{assistantHint && !assistantOpen ? <i className="awwo-assistant-toggle-dot" aria-hidden="true" /> : null}</button> : null}{canvasTools}{!headerTitle && <div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div>}<div className="awwo-run-slot">{toolbar}</div></div>
       <section className="awwo-stage" aria-label={t('workspace.stage')}>
         {assistant ? <aside className="awwo-planner-sidebar" aria-label={t('workspace.assistant')}>{assistant}</aside> : null}
         <div data-onboarding="canvas-stage" className="awwo-stage-canvas" onDragOver={onModelDragOver} onDrop={onModelDrop}>{children}

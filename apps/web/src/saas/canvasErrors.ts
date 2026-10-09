@@ -66,9 +66,11 @@ const runErrors: Record<string, [string, string]> = {
   media_storage_failed: ['生成结果保存失败，请重试。', 'The result could not be saved. Please try again.'],
   media_storage_full: ['媒体存储空间不足，生成结果未保存；请联系管理员。', 'Media storage is full, so the result was not saved. Contact an administrator.'],
   // A route-limited workspace's free allowance for a premium route is a few calls a day or none at all
-  // (0); the default model keeps working, so the copy names that way forward before the paid one.
-  premium_quota_exceeded: ['今天的免费额度里没有这个高级模型（Claude、GPT、Bedrock）的次数，或者已经用完。可以把节点换成默认模型继续；Pro / Max 付费套餐用点数调用这些模型（账号菜单 → 套餐与点数）。', 'Today’s free allowance includes no calls for this premium model (Claude, GPT, Bedrock), or they are used up. Switch the node to the default model to keep going; the Pro and Max plans use credits for these models (account menu → Plans and credits).'],
-  premium_capacity_exceeded: ['今天全站的高级模型免费名额已用完。可以把节点换成默认模型继续，UTC 次日重置；Pro / Max 付费套餐不受这个名额限制（账号菜单 → 套餐与点数）。', 'Today’s free premium-model calls for the whole service are used up. Switch the node to the default model to keep going, or wait for the next UTC day. The Pro and Max plans are not limited by it (account menu → Plans and credits).'],
+  // (0). A paid plan is what lifts it, so the copy offers that first (the run details add an upgrade
+  // button); the free way forward is the default model on the node AND on any team member that chose
+  // its own model, since a member's own model is not replaced by the node's.
+  premium_quota_exceeded: ['免费版每天的次数只能用于默认模型，不含 Claude、GPT、Bedrock 这类高级模型（或今天的高级模型次数已经用完）。升级 Pro / Max 付费套餐，就能用点数继续使用这些模型（账号菜单 → 套餐与点数）；不升级的话，把节点和单独指定了模型的团队成员都换成默认模型，也能免费继续。', 'The free plan’s daily calls are for the default model only and include no premium model such as Claude, GPT or Bedrock (or today’s premium calls are used up). Upgrade to the Pro and Max plans to keep using these models on credits (account menu → Plans and credits); to continue for free, switch the node, and any team member that chose its own model, to the default model.'],
+  premium_capacity_exceeded: ['今天全站的高级模型免费名额已用完。Pro / Max 付费套餐不受这个名额限制，升级后马上就能继续（账号菜单 → 套餐与点数）；也可以把节点和单独指定了模型的团队成员都换成默认模型继续，免费名额 UTC 次日重置。', 'Today’s free premium-model calls for the whole service are used up. The Pro and Max plans are not limited by it, so upgrading lets you continue now (account menu → Plans and credits); or switch the node, and any team member that chose its own model, to the default model. Free calls reset after the next UTC day.'],
   // The default model's own deployment-wide daily ceiling: there is no free model to switch to, so only the next
   // UTC day or a plan.
   free_capacity_exceeded: freeCapacityMessages,

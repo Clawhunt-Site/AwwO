@@ -19,3 +19,6 @@
 .saas-route-usage p.saas-route-usage-recorded, .saas-route-usage p.saas-route-usage-out { color:var(--saas-text); }
 .saas-route-usage a.saas-route-usage-plans { display:block; margin-top:10px; text-align:center; font-size:13px; font-weight:600; color:var(--saas-link); text-decoration:none; }
 .saas-route-usage a.saas-route-usage-plans:hover { color:var(--saas-link-hover); text-decoration:underline; text-underline-offset:3px; }
+.saas-route-usage button.saas-route-usage-ask { display:block; width:100%; margin-top:10px; padding:4px 0; border:0; background:transparent; text-align:center; font:600 13px/1.4 var(--saas-font, inherit); color:var(--saas-link); cursor:pointer; }
+.saas-route-usage button.saas-route-usage-ask:not(:disabled):hover { color:var(--saas-link-hover); text-decoration:underline; text-underline-offset:3px; }
+.saas-route-usage button.saas-route-usage-ask:disabled { opacity:.5; cursor:default; }

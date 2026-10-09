@@ -32,7 +32,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2 } from 'lucide-react';
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
-import { CanvasAssistant, type UnifiedAssistant } from './CanvasAssistant';
+import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
+import { nextSteps as canvasNextSteps, type NextStep, type NextSteps } from './nextSteps';
+import { runErrorText } from '../saas/canvasErrors';
+import { recordUpgradeInterest } from '../saas/routeUsage';
 import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHost, type AssistantPending, type AssistantRoute,
   type RouteAssistant } from './assistantRouting';
 import { CanvasResults } from './CanvasResults';
@@ -104,6 +107,9 @@ import { gatewayApiBase } from '../chatAutomations';
 import './canvas.css';
 import './node-view-styles.css';
 import { nodeViewRootProps, useNodeViewPreference } from './nodeViewStyle';
+/** A node failure refused by the free premium allowance reads as that error's own copy, in either language. */
+const PREMIUM_REFUSALS = ['premium_quota_exceeded', 'premium_capacity_exceeded']
+  .flatMap(code => (['zh', 'en'] as const).map(language => runErrorText(code, language) ?? '')).filter(Boolean);
 
 /** How long patches sharing a label keep collapsing into one undo step (one drag = one step). */
 const COALESCE_MS = 900;
@@ -2442,7 +2448,45 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const reconcilable = waitingOperation ? unconfirmedTurn(planning.messages, waitingOperation) : -1;
   const shownMessages = assistantExecution ? planning.messages.map((message, index) => message.status === 'unconfirmed' && index !== reconcilable
     ? { ...message, content: t('assistant.startUnconfirmedLost') } : message) : planning.messages;
+  // What to do next, offered by the assistant unasked: worked out from the canvas and the latest run, and carried out
+  // here with the same controls the canvas already has (the run button, a node's settings, the results view).
+  const suggested: NextSteps | null = readOnly || initializing || bindingLocked ? null : canvasNextSteps({
+    nodes, edges, runs, running, canRun: !runUnavailableReason, resultsAvailable: Boolean(results), upgradeAvailable: Boolean(cloudScope),
+    // A refusal's text is the run error's own copy (canvasErrors), in whichever language the run was read in.
+    isPremiumRefusal: detail => PREMIUM_REFUSALS.some(text => detail.includes(text)),
+  });
+  const titleOf = (id: string) => nodes.find(node => node.id === id)?.title ?? '';
+  const configureNode = (id: string) => { if (!inspectorCloseLocked.current) { focusNode(id, { configure: true }); setInspectorId(id); } };
+  const nextAction = (step: NextStep, primary: boolean): AssistantNextSteps['actions'][number] => {
+    switch (step.kind) {
+      case 'upgrade': return { id: 'upgrade', primary, label: t('assistant.nextUpgrade'), href: accountURL('plans'),
+        onSelect: () => { if (cloudScope) void recordUpgradeInterest(cloudScope.tenant.id).catch(() => {}); } };
+      case 'switch-model': return { id: `switch-${step.nodeId}`, primary, label: t('assistant.nextSwitchModel'), onSelect: () => configureNode(step.nodeId) };
+      case 'open-failed': return { id: `open-${step.nodeId}`, primary, label: t('assistant.nextOpenFailed'), onSelect: () => focusNode(step.nodeId) };
+      case 'rerun-failed': return { id: 'rerun-failed', primary, label: t('assistant.nextRerunFailed'), onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
+      case 'fill-inputs': return { id: `fill-${step.nodeId}`, primary, label: t('assistant.nextFill', { node: titleOf(step.nodeId) }), onSelect: () => configureNode(step.nodeId) };
+      case 'run-all': return { id: 'run-all', primary, label: t('assistant.nextRunAll'), onSelect: () => void startRun() };
+      case 'run-rest': return { id: 'run-rest', primary, label: t('assistant.nextRunRest', { count: step.nodeIds.length }), onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
+      case 'results': return { id: 'results', primary, label: t('assistant.nextResults'), onSelect: () => changeStageView('results') };
+    }
+  };
+  const nextLead = (situation: NextSteps['situation']): string => {
+    switch (situation.kind) {
+      case 'premium': return t('assistant.nextLeadPremium', { node: situation.nodeTitle });
+      case 'failed': return situation.count > 1 ? t('assistant.nextLeadFailedMany', { node: situation.nodeTitle, count: situation.count })
+        : t('assistant.nextLeadFailed', { node: situation.nodeTitle });
+      case 'inputs': return t('assistant.nextLeadInputs', { node: situation.nodeTitle, fields: situation.fields.join(locale === 'zh' ? '、' : ', ') });
+      case 'fresh': return t('assistant.nextLeadFresh');
+      case 'partial': return t('assistant.nextLeadPartial', { count: situation.count });
+      case 'complete': return t('assistant.nextLeadComplete');
+    }
+  };
+  const assistantNextSteps: AssistantNextSteps | undefined = suggested
+    ? { lead: nextLead(suggested.situation), actions: suggested.steps.map((step, index) => nextAction(step, index === 0)) } : undefined;
+  // A problem the assistant can help with marks its closed toggle; a canvas that merely has not run does not.
+  const assistantHint = Boolean(suggested && ['premium', 'failed', 'inputs'].includes(suggested.situation.kind));
   const assistantProps = {
+    nextSteps: assistantNextSteps,
     // A message being handled shows pending in the conversation; the box keeps it, out of sight, until it is.
     messages: shownMessages, draft: assistantPending && planning.draft.trim() === assistantPending.prompt ? '' : planning.draft,
     busy: planningBusy, error: planningError,
@@ -2661,7 +2705,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // One composer at a time: on an empty canvas whose conversation is in the side panel, the welcome steps aside.
       welcome={readOnly || assistantPanel ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} unified={unified} />}
       // The toggle reports the panel as it is drawn; tasks need no canvas, so it is offered on an empty one with them.
-      assistantOpen={panelShown} assistantAvailable={viewerTasks || mentionedTasks.size > 0}
+      assistantOpen={panelShown} assistantAvailable={viewerTasks || mentionedTasks.size > 0} assistantHint={assistantHint}
       onToggleAssistant={readOnly && !assistantExecution ? undefined : () => { if (assistantPanel) closeAssistant(); else setAssistantOpen(true); }}
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
