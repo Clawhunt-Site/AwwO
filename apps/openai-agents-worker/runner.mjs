@@ -29,7 +29,9 @@ export function workerEnvironment(directory, executable = process.execPath) {
   };
 }
 
-export async function startIsolatedRun({ config, request, onEvent, onExit, onDiagnostic = (_diagnostic) => {} }, { taskURL = TASK_URL, bedrockAuth = resolveBedrockAuth } = {}) {
+// createSandbox defaults to the Docker workspace. Another host (the AgentCore trial kit in
+// deploy/agentcore-trial) passes a factory with the same signature and WorkspaceSandbox contract.
+export async function startIsolatedRun({ config, request, onEvent, onExit, onDiagnostic = (_diagnostic) => {} }, { taskURL = TASK_URL, bedrockAuth = resolveBedrockAuth, createSandbox = createWorkspaceSandbox } = {}) {
   validateRequest(request);
   authorizeTools(config, request);
   authorizeWorkspace(config.workspace, request);
@@ -52,7 +54,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
   const sandboxAbort = new AbortController();
   const maxOutput = request.workspace ? WORKSPACE_BODY_BYTES : config.maxOutputBytes;
   try {
-    if (request.workspace) sandbox = await createWorkspaceSandbox(config.workspace, { workspaceId: request.workspace.id, runId: request.runId, inputs: request.workspace.inputs, snapshot: request.workspace.snapshot }, sandboxAbort.signal);
+    if (request.workspace) sandbox = await createSandbox(config.workspace, { workspaceId: request.workspace.id, runId: request.runId, inputs: request.workspace.inputs, snapshot: request.workspace.snapshot }, sandboxAbort.signal);
     const provenance = `# Temporary OpenAI Agents execution directory\n\nCreated by AWWO OpenAI Agents worker on ${new Date().toISOString()}.\nScope: one isolated agent run; deleted after the child exits.\n`;
     await writeFile(join(directory, 'creator.md'), provenance, { mode: 0o600 });
     child = fork(taskURL, [], {
