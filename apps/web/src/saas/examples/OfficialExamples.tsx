@@ -3,7 +3,7 @@ import { ArrowDownToLine, ArrowUpRight, Check, ChevronLeft, Copy, GitBranch, Pla
 import { useSaaSPreferences, PreferenceControls } from '../preferences';
 import { OFFICIAL_WORKFLOWS, createOfficialDocument, getOfficialWorkflow, type OfficialWorkflow } from './officialWorkflows';
 import type { UiLocale } from '../../locale';
-import { rememberOfficialSelection, officialSignInURL } from './officialSelection';
+import { rememberOfficialSelection, officialSignInURL, officialExampleURL } from './officialSelection';
 import { CREATIVE_CASE_IDS, INTELLIGENCE_CASE_IDS, OPERATIONS_CASE_IDS } from './advanced/catalog';
 import { AdvancedCover } from './advanced/AdvancedCover';
 import { OFFICIAL_CATEGORY_LABELS, workflowShape } from './advanced/industryWorkflow';
@@ -134,7 +134,7 @@ export function OfficialExamples({ onReuse, disabled = false, readOnly = false, 
     <div className="showcase-featured showcase-generated-picks" role="group" aria-label={t('模型生成实例', 'Model-generated examples')}><span>{t('已实测模型产物', 'BROWSER-CHECKED MODEL OUTPUT')}</span>{Object.keys(OFFICIAL_GENERATED_RECORDS).map(id => { const example = getOfficialWorkflow(id)!; return <button key={id} type="button" aria-pressed={selected === id} onClick={event => open(example, event.currentTarget)}><b>{example.title[locale].split(/ \/ | · /)[0]}</b>{t('运行过程 + 成果', 'Run + result')}<ArrowUpRight size={12} /></button>; })}</div>
     </>}
     {item && <div key={item.id} className="official-detail" ref={detail} tabIndex={-1} aria-label={item.title[locale]} style={{ '--case-accent': item.accent } as CSSProperties}>
-      <div className="official-detail-heading"><button type="button" onClick={close} className="official-back"><ChevronLeft size={16} />{t('收起作品', 'Close example')}</button><a className="official-permalink" href={`${officialSignInURL(item.id, window.location.search)}&examples=1`}>{t('独立打开此案例', 'Open this example directly')} ↗</a></div>
+      <div className="official-detail-heading"><button type="button" onClick={close} className="official-back"><ChevronLeft size={16} />{t('收起作品', 'Close example')}</button><a className="official-permalink" href={officialExampleURL(item.id, window.location.search)}>{t('独立打开此案例', 'Open this example directly')} ↗</a></div>
       <div className="official-detail-title"><div><h3>{item.title[locale]}</h3><p>{item.description[locale]}</p></div>
         {onReuse ? <button type="button" className="official-primary" disabled={disabled || readOnly} onClick={() => onReuse(item)}><Copy size={16} />{disabled ? t('正在创建…', 'Creating…') : t('复制到我的画布', 'Copy to my canvases')}</button>
           : !readOnly && <a className="official-primary" href={officialSignInURL(item.id, window.location.search)} onClick={() => rememberOfficialSelection(item.id)}><Copy size={16} />{t('登录并复用', 'Sign in to reuse')}</a>}

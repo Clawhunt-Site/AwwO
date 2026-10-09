@@ -4,20 +4,28 @@ import { clawHuntStartURL } from '../clawhuntAuth';
 const KEY = 'awwo.official-selection.v1';
 const MAX_AGE = 30 * 60 * 1000;
 
-export function officialSignInURL(id: string, search: string): string {
-  if (!getOfficialWorkflow(id)) return '/';
+export function officialExampleURL(id: string, search: string): string {
+  if (!getOfficialWorkflow(id)) return '/?examples=1';
   const query = new URLSearchParams({ official: id });
-  // Reuse the auth flow's bounded invitation validation; never carry arbitrary return URLs.
   const invite = new URLSearchParams(clawHuntStartURL(search).split('?')[1]).get('invite');
   if (invite) query.set('invite', invite);
+  query.set('examples', '1');
   return `/?${query}`;
 }
 
-/** The OAuth redirect intentionally carries no arbitrary return URL. Only a curated public id
- * crosses sign-in, using tab-local storage with a short expiry. It never triggers a create. */
+export function officialSignInURL(id: string, search: string): string {
+  if (!getOfficialWorkflow(id)) return '/';
+  // Enter the same first-party SSO flow as the main sign-in action. Returning to
+  // /?official=... only reopens and focuses the guest example, hiding sign-in again.
+  // Selection stays tab-local; the auth URL carries only a validated invitation.
+  return clawHuntStartURL(search);
+}
+
+/** The OAuth redirect intentionally carries no arbitrary return URL. The curated public id
+ * stays in tab-local storage with a short expiry. It never triggers a create. */
 export function rememberOfficialSelection(id: string): void {
   if (!getOfficialWorkflow(id)) return;
-  try { sessionStorage.setItem(KEY, JSON.stringify({ id, at: Date.now() })); } catch { /* The URL still works for local sign-in. */ }
+  try { sessionStorage.setItem(KEY, JSON.stringify({ id, at: Date.now() })); } catch { /* Sign-in still works; reopening the example requires storage. */ }
 }
 
 export function readOfficialSelection(): string | undefined {
