@@ -4,6 +4,7 @@ import { api, SaaSApiError, saasErrorMessage, tenantPath } from './api';
 import type { TeamRunRecord, TeamTurn } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
 import { runErrorText } from './canvasErrors';
+import { PlanUpsell, planUpsellCode } from './PlanUpsell';
 import { RunEvidence } from './RunEvidence';
 import { readRunExecutionMetadata, workspaceToolLabel, type WorkspaceActivity } from './workspaceActivity';
 import './team-run-details.css';
@@ -106,6 +107,8 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
   const project = record?.executionKind === 'workspace';
   const activity = record?.workspaceActivity;
   const latestOperation = activity?.items.at(-1);
+  // Once per run, at the run's own error: a team run fails with its member's code, so the two would repeat it.
+  const upsell = record && !isActive(record.status) ? planUpsellCode([record.error, ...turns.map(turn => turn.error)]) : undefined;
   return <section className="saas-team-run-details" aria-label={t('运行过程', 'Run process')}>
     <button type="button" className="saas-team-run-toggle" aria-expanded={expanded} onClick={() => { setManuallyOpened(!expanded); setOpen(!expanded); }}>
       <ChevronRight size={13} aria-hidden="true" className="saas-team-run-chevron" />
@@ -119,6 +122,7 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
         ? t(' · 读取已暂停，请重试恢复', ' · Reading paused; retry to resume')
         : isActive(record.status) ? t(' · 自动更新中', ' · Updating automatically') : ''}</p>}
       {record?.error && <p className="saas-team-error" role="alert">{runErrorText(record.error, locale) ?? record.error}</p>}
+      {upsell && <PlanUpsell tenantId={tenantId} />}
       {error !== null && turns.length > 0 && <p>{t('成员记录未能刷新，下方为上次成功读取的旧记录。', 'Member records could not be refreshed. The records below are from the last successful read.')}</p>}
       {project && latestOperation && <p className="saas-workspace-latest">{runReadFailed ? t('上次记录：', 'Last observed: ') : t('最近开始：', 'Last started: ')}<strong>{workspaceToolLabel(latestOperation.tool, locale)}</strong><span> · {t('第', 'Step ')}{latestOperation.step}{t('步', '')}</span></p>}
       {project && activity && activity.items.length > 0 && <WorkspaceOperationHistory activity={activity} />}

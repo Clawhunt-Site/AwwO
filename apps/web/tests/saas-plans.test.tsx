@@ -211,5 +211,5 @@ it('links a free workspace’s allowance to the plans', async () => {
   serve(() => response({ limited: true, interested: false, daily: { limit: 30, used: 2 }, routes: { gate: { limit: 3, used: 1 } } }));
   meter();
   fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 28 次' }));
-  expect(await screen.findByRole('link', { name: '查看 Pro / Max 付费套餐' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+  expect(await screen.findByRole('link', { name: '升级 Pro / Max' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
 });

@@ -51,6 +51,8 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
     ok: t(`今日额度 · 剩 ${left} 次`, `Today · ${left} calls left`),
   }[state.kind];
   const warn = state.kind === 'daily-out' || state.kind === 'premium-out';
+  // A premium text route closed with 0 never offered a call: the free plan simply does not include it.
+  const premiumClosed = (['gate', 'bedrock'] as const).some(route => usage.routes?.[route]?.limit === 0);
   const interested = recorded || usage.interested;
   const ask = async () => {
     setBusy(true); setError(null);
@@ -73,9 +75,13 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
         })}
       </dl>
       {state.kind === 'daily-out' && <p className="saas-route-usage-out">{t('今天的总次数已用完，所有模型都要等到 UTC 0 点后才能再运行。', 'Today’s calls are used up; no model can run again until 00:00 UTC.')}</p>}
-      {interested && <p role="status" className="saas-route-usage-recorded">{t('已记录，付费套餐上线时第一时间通知你。', 'Noted. We’ll tell you first when paid plans launch.')}</p>}
-      <button type="button" className="saas-primary" disabled={busy} onClick={ask}>{busy ? t('正在记录…', 'Recording…') : interested ? t('我还需要更多次数', 'I still need more calls') : t('想要更多次数', 'I want more calls')}</button>
-      <a className="saas-route-usage-plans" href={accountURL('plans')}>{t('查看 Pro / Max 付费套餐', 'See the Pro and Max plans')}</a>
+      {premiumClosed && <p className="saas-route-usage-out">{t('免费版只含默认模型；Claude、GPT、Bedrock 需要 Pro / Max 套餐，按点数使用。', 'The free plan includes the default model only; Claude, GPT and Bedrock need the Pro or Max plan and run on credits.')}</p>}
+      {interested && <p role="status" className="saas-route-usage-recorded">{t('已记录你的需求。现在就能升级 Pro / Max，用点数继续使用高级模型。', 'Noted. You can upgrade to Pro or Max now and keep using premium models on credits.')}</p>}
+      {/* Paid plans are on sale, so upgrading is the way to more calls; a click still records the interest the
+          admin panel lists, without waiting for it before the plans open. */}
+      <a className="saas-primary" href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
+        onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{t('升级 Pro / Max', 'Upgrade to Pro or Max')}</a>
+      <button type="button" className="saas-route-usage-ask" disabled={busy} onClick={ask}>{busy ? t('正在记录…', 'Recording…') : interested ? t('我还需要更多次数', 'I still need more calls') : t('想要更多次数', 'I want more calls')}</button>
       {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
     </Popover>
   </>;

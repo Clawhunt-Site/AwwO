@@ -22,7 +22,10 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe('node team configuration', () => {
   it('seeds two members and preserves single-Agent settings on disable', async () => {
     const save = vi.fn(); const initial = session(); render(<Harness initial={initial} onChange={save} />); await enable();
-    expect(member(1).getByLabelText('专属指令')).toHaveValue('Check the source.'); expect(member(1).getByLabelText('模型')).toHaveValue('model-a');
+    expect(member(1).getByLabelText('专属指令')).toHaveValue('Check the source.');
+    // The worker follows the node's model rather than a copy of it, so a later node switch reaches it.
+    expect(member(1).getByLabelText('模型')).toHaveValue('');
+    expect(member(1).getByRole('option', { name: '继承节点已绑定模型' })).toHaveValue('');
     expect(member(2).getByLabelText('模型')).toHaveValue('');
     expect(member(2).getByRole('option', { name: '继承节点已绑定模型' })).toHaveValue('');
     expect(screen.getByText(/工具、文件读写和 Shell 尚不可用/)).toBeInTheDocument();
@@ -37,7 +40,7 @@ describe('node team configuration', () => {
     fireEvent.change(member(2).getByLabelText('职责'), { target: { value: '独立审稿' } });
     fireEvent.change(member(2).getByLabelText('可见上下文'), { target: { value: 'task' } });
     expect(save.mock.lastCall![0].members[1]).toMatchObject({ model: 'model-b', role: '独立审稿', context: 'task' });
-    expect(member(1).getByLabelText('模型')).toHaveValue('model-a');
+    expect(member(1).getByLabelText('模型')).toHaveValue('');
     fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'pi' } }); expect(member(2).getByLabelText('模型')).toHaveValue('');
   });
   it('offers member reasoning effort only for an explicit model that advertises levels and resets it with the model or harness', async () => {
@@ -126,6 +129,35 @@ describe('node team configuration', () => {
     fireEvent.change(member(1).getByLabelText('职责'), { target: { value: 'Should not save' } });
     fireEvent.click(screen.getByRole('button', { name: '添加 Agent' })); expect(save).not.toHaveBeenCalled();
     rerender(<Harness initial={initial} disabled={false} onChange={save} />); expect(member(1).getByLabelText('职责')).toHaveValue('执行者');
+  });
+  it('shows team members the node model does not reach and makes them follow it in one click', async () => {
+    // The reported canvas: the team was enabled while the node ran a premium model, and only the node was switched after.
+    const initial = session(); initial.team = createNodeTeam(initial); initial.team.members[0].model = 'model-b'; const save = vi.fn();
+    render(<InspectorPanel node={initial} liveCompanies={[]} apiBase="/api" readJson={readJson} onSave={save} onClose={vi.fn()} />);
+    const warning = within(screen.getByRole('group', { name: '单独指定模型的团队成员' }));
+    expect(warning.getByText(/1 位成员单独指定了模型/)).toBeInTheDocument();
+    expect(warning.getByText('Agent 1 · 研究 · model-b')).toBeInTheDocument();
+    fireEvent.click(warning.getByRole('button', { name: '改为跟随节点模型' }));
+    expect(screen.queryByRole('group', { name: '单独指定模型的团队成员' })).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(save).toHaveBeenCalledOnce();
+    expect(save.mock.lastCall![0]).toMatchObject({ model: 'model-a', team: { members: [expect.objectContaining({ model: '' }), expect.objectContaining({ model: '' })] } });
+  });
+  it('carries a node model switch to a member that held the previous node model', async () => {
+    // Teams enabled before members inherited stored the node's model in their first member.
+    const initial = session(); initial.team = createNodeTeam(initial); initial.team.members[0].model = 'model-a'; const save = vi.fn();
+    render(<InspectorPanel node={initial} liveCompanies={[]} apiBase="/api" readJson={readJson} onSave={save} onClose={vi.fn()} />);
+    expect(screen.queryByRole('group', { name: '单独指定模型的团队成员' })).toBeNull();
+    const nodeModel = await waitFor(() => {
+      const input = screen.getAllByLabelText('模型').find(element => element.tagName === 'INPUT');
+      expect(input).toBeDefined(); return input!;
+    });
+    fireEvent.change(nodeModel, { target: { value: 'model-b' } });
+    expect(screen.queryByRole('group', { name: '单独指定模型的团队成员' })).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(save.mock.lastCall![0]).toMatchObject({ model: 'model-b', team: { members: [expect.objectContaining({ model: '' }), expect.anything()] } });
   });
   it('does not enable teams when the host lacks Pi', () => {
     render(<Harness available={false} />); expect(screen.getByRole('checkbox')).toBeDisabled(); expect(screen.getByText(/当前运行环境未提供团队/)).toBeInTheDocument();

@@ -118,6 +118,29 @@ it('records an ask without naming routes, since the server counts what ran out, 
   expect(screen.getByRole('button', { name: '我还需要更多次数' })).toBeEnabled();
 });
 
+it('tells a free workspace its plan includes no premium model and makes upgrading the first action', async () => {
+  // The reported popover: 2 / 30 used, Claude / GPT and Bedrock 不含, images 0 / 1.
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    requests.push({ url, init });
+    return init.method === 'POST' ? response({ recorded: true, clicks: 1 })
+      : response(usage({ gate: { limit: 0, used: 0 }, bedrock: { limit: 0, used: 0 }, media: { limit: 1, used: 0 } }, { limit: 30, used: 2 }));
+  }));
+  meter();
+  fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 28 次' }));
+  expect(await screen.findByText('免费版只含默认模型；Claude、GPT、Bedrock 需要 Pro / Max 套餐，按点数使用。')).toBeVisible();
+  const upgrade = screen.getByRole('link', { name: '升级 Pro / Max' });
+  expect(upgrade).toHaveClass('saas-primary');
+  expect(upgrade.getAttribute('href')).toContain('account=plans');
+  expect(upgrade).toHaveAttribute('target', '_blank');
+  // The interest ask stays, as the secondary action.
+  expect(screen.getByRole('button', { name: '想要更多次数' })).not.toHaveClass('saas-primary');
+  const stay = (event: Event) => event.preventDefault(); document.addEventListener('click', stay);
+  try { fireEvent.click(upgrade); } finally { document.removeEventListener('click', stay); }
+  await waitFor(() => expect(requests.some(request => request.init.method === 'POST' && request.url === '/api/v1/tenants/t-a/upgrade-interest')).toBe(true));
+  expect(screen.queryByText(/付费套餐上线时/)).toBeNull();
+});
+
 it('remembers an earlier ask from the server', async () => {
   showing(usage(allOut, undefined, true));
   meter();
