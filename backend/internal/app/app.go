@@ -55,6 +55,8 @@ type App struct {
 	billingCalls inviteReadLimiter
 	// routeLimiter bounds each account's assistant router model calls (assistant_route.go).
 	routeLimiter assistantRouteLimiter
+	// signupClock is the clock of the per-address sign-up count's UTC day (clawhunt_signup.go); nil is time.Now.
+	signupClock func() time.Time
 	// capabilityNotes remembers which cleared worker capabilities were already logged,
 	// bounded by capabilityNoteLimit; capabilityNotesCapped marks the one-time notice.
 	capabilityNotes       sync.Map

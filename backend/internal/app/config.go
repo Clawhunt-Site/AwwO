@@ -72,6 +72,10 @@ type Config struct {
 	// FreeModelTotalPerDay is the deployment-wide daily ceiling on free default-model calls across route-limited
 	// workspaces (checkFreeModelCeiling); 0 sets none.
 	FreeModelTotalPerDay int
+	// First ClawHunt sign-ins (clawhunt_signup.go): accounts a client address may create per UTC day (0: no limit),
+	// and whether a new account needs the issuer to report its email verified. Existing accounts are never held.
+	NewAccountsPerIPPerDay int
+	RequireVerifiedEmail   bool
 	// The canvas planner's operator-paid model and its daily ceilings (planner_model.go); empty keeps the default model.
 	PlannerModel                                                     string
 	PlannerPerWorkspaceDay, PlannerTotalPerDay, PlannerMaxInputBytes int
@@ -184,6 +188,9 @@ func ConfigFromEnv() (Config, error) {
 	if err := c.routeSettingsFromEnv(); err != nil {
 		return c, err
 	}
+	if err := c.signupSettingsFromEnv(); err != nil {
+		return c, err
+	}
 	if err := c.plannerSettingsFromEnv(); err != nil {
 		return c, err
 	}
@@ -221,6 +228,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.validateRouteSettings(); err != nil {
+		return err
+	}
+	if err := c.validateSignupSettings(); err != nil {
 		return err
 	}
 	if err := c.validatePlannerSettings(); err != nil {

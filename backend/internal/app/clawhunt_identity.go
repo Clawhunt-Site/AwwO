@@ -111,6 +111,10 @@ func (a *App) clawHuntStart(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
+	if _, err = tx.Exec(r.Context(), pruneSignupCounts, signupCountDays); err != nil {
+		a.dbError(w, err)
+		return
+	}
 	if old, e := r.Cookie(identityCookie); e == nil && len(old.Value) <= 256 {
 		if _, err = tx.Exec(r.Context(), "DELETE FROM identity_flows WHERE browser_hash=$1", tokenHash(old.Value)); err != nil {
 			a.dbError(w, err)
@@ -243,9 +247,14 @@ func (a *App) clawHuntCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expires := time.Now().Add(time.Duration(grant.ExpiresIn) * time.Second)
-	user, session, collision, err := a.acceptClawHunt(r.Context(), grant.Identity, grant.Token, expires, "")
+	user, session, collision, err := a.acceptClawHunt(r.Context(), grant.Identity, grant.Token, expires, "", a.clientIP(r))
 	if err != nil {
-		a.identityRedirect(w, r, "conflict", invite)
+		reason := signupRefusal(err)
+		if reason != "conflict" {
+			// Neither the address nor the email is logged; the reason is enough to see how often a limit holds.
+			a.log.Info("first ClawHunt sign-in created no account", "reason", reason)
+		}
+		a.identityRedirect(w, r, reason, invite)
 		return
 	}
 	if collision {
@@ -280,7 +289,9 @@ func (a *App) clawHuntCallback(w http.ResponseWriter, r *http.Request) {
 
 // Stable provider subject is the identity key. Matching email never proves
 // ownership of an existing AwwO user, including an unverified provider email.
-func (a *App) acceptClawHunt(ctx context.Context, id clawHuntIdentity, grant string, expires time.Time, proof string) (User, string, bool, error) {
+// ip is the client address of a first sign-in, which only the creation of a new
+// account counts (admitNewAccount); a link with proof creates none.
+func (a *App) acceptClawHunt(ctx context.Context, id clawHuntIdentity, grant string, expires time.Time, proof, ip string) (User, string, bool, error) {
 	var u User
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
@@ -306,6 +317,9 @@ func (a *App) acceptClawHunt(ctx context.Context, id clawHuntIdentity, grant str
 		} else if noRows(err) {
 			if proof != "" {
 				return User{}, "", false, errors.New("account changed")
+			}
+			if err = a.admitNewAccount(ctx, tx, id, ip); err != nil {
+				return User{}, "", false, err
 			}
 			u = User{randomID(), email, id.Name, "user"}
 			if _, err = tx.Exec(ctx, "INSERT INTO users(id,email,name,password_hash) VALUES($1,$2,$3,'!clawhunt')", u.ID, u.Email, u.Name); err != nil {
@@ -415,7 +429,7 @@ func (a *App) clawHuntLink(w http.ResponseWriter, r *http.Request) {
 	}
 	a.identityFlowCookie(w, "", -1)
 	expires = grantExpiry
-	u, token, _, err := a.acceptClawHunt(r.Context(), id, grant, expires, b.Password)
+	u, token, _, err := a.acceptClawHunt(r.Context(), id, grant, expires, b.Password, "")
 	if err != nil {
 		fail(w, 401, "sso_link_failed", "Account proof failed; continue with ClawHunt again")
 		return
