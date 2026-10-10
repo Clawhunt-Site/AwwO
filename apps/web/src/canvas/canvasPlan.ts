@@ -1,9 +1,9 @@
 import { AGENT_TEMPLATES, createAgentTemplate, type AgentTemplateId } from './agentTemplates';
 import type { CanvasDocument, CanvasNode, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
-import { normalizeContract, validateContractFields, type ContractField } from './nodeContracts';
+import { normalizeContract, validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
 import { arrangeNodePositions } from './nodePresentation';
-import { canConnect, edgeId, portsFor } from './ports';
+import { canConnect, edgeId, portsFor, type PortSpec } from './ports';
 import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
 import { TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH } from './taskFrame';
@@ -36,7 +36,9 @@ export const CANVAS_PLAN_NODE_OPERATION_TYPES: ReadonlySet<string> = new Set(['a
   'update_field', 'remove_field', 'remove_node'] satisfies CanvasPlanOperationType[]);
 
 export interface CanvasPlan { version: 1; summary: string; operations: CanvasPlanOperation[] }
-export interface AppliedCanvasPlan { doc: CanvasDocument; addedNodeIds: string[]; summary: string }
+/** `adjustments` says, in the request's language, what was applied differently from how the plan wrote it
+ *  (a connection given its own input, a link a field change broke) or left out (a connection that would loop). */
+export interface AppliedCanvasPlan { doc: CanvasDocument; addedNodeIds: string[]; summary: string; adjustments: string[] }
 
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
@@ -53,10 +55,10 @@ set_edge_kind: {type:"set_edge_kind",edgeId:string,kind:"data"|"feedback"}
 set_execution: {type:"set_execution",mode:"workflow"} 或 {type:"set_execution",mode:"review",maxRounds:1到5的整数,reviewerNodeId:string,verdictFieldId:string}
 disconnect: {type:"disconnect",edgeId:string}
 nodeId/fromNode/toNode/reviewerNodeId 必须为当前画布中提供的真实节点ID，或前面 add_node 的唯一 ref；不允许前向引用。ref 不得与既有ID重名。
-connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源。kind默认data，本轮data连线不得成环。feedback将上一轮反馈传回上游，可构成跨轮闭环；workflow模式保留但不执行feedback。
+connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源；一个节点要接收多个上游交付时，先用 add_field 为每个来源新增独立输入字段再分别连接。kind默认data，本轮data连线不得成环。feedback将上一轮反馈传回上游，可构成跨轮闭环；workflow模式保留但不执行feedback。
 互审Graph使用set_execution mode:review，maxRounds/reviewerNodeId/verdictFieldId必填；最终评审节点必须已存在且verdictFieldId指向其boolean输出，true通过、false继续。先创建节点和判定字段，再设置互审。工作流模式禁止携带互审额外字段。反馈环路和Agent绑定在用户启动时校验，此协议仅编辑结构，不启动运行。
 新增节点完整使用对应角色模板。字段值都是字符串；布尔值用"true"/"false"，数字用数字字符串，file为引用字符串。add_field.value必须为空；输入内容通过set_input填写。严禁生成或填写任何输出值。
-改变已连接字段类型或删除字段前必须显式disconnect；不会静默丢弃连线。remove_node 明确删除该节点及其关联连线。
+改变已连接字段类型或删除字段前应先显式disconnect；遗漏时应用会断开失效的连线并在结果中逐条说明。remove_node 明确删除该节点及其关联连线。
 只能修改白名单：禁止binding/runtime/model/effort/threads/issueId/preview/lastOutput/templateId等执行状态修改；禁止命令执行、创建真实Agent、发消息、运行节点、文件写入、部署、付款等副作用。布局由应用安排新增节点，不能提交x/y/w/h。
 最多100个操作、JSON最多120000字符、summary最多1000字符；ID/ref最多128字符，title/label最多200字符，persona最多8000字符，输入value最多16000字符，help/placeholder最多2000字符；每个节点每侧最多64字段。`;
 
@@ -244,20 +246,151 @@ function checkExecution(doc: CanvasDocument): void {
   }
 }
 
-function setInput(node: CanvasNode, fieldId: string, value: string): void {
-  const fields = node.kind === 'form' ? node.fields : node.contract?.inputs;
-  const field = fields?.find(item => item.id === fieldId);
-  if (!field) fail(`节点「${node.title}」没有输入字段「${fieldId}」。`);
-  if (node.kind === 'session') {
-    const errors = validateContractFields([{ ...field as ContractField, required: false, value }]);
-    if (errors.length) fail(errors.join(' '));
-  }
-  field.value = value;
+/** Records one thing applied differently from how the plan wrote it, in the request's language. */
+type Adjust = (zh: string, en: string) => void;
+const titleOf = (node: CanvasNode): string => node.title.trim() || node.id;
+const NEW_FIELD_ID = /^[A-Za-z0-9_-]{1,48}$/;
+
+/** A field a plan named, read the way models name fields: its exact id, the id with its port prefix, the id in
+ *  another case, or the field's label. */
+function namedField<T extends { id: string; label: string }>(fields: ReadonlyArray<T>, reference: string, prefix: 'in:' | 'out:'): T | undefined {
+  const id = reference.startsWith(prefix) ? reference.slice(prefix.length) : reference;
+  const folded = id.trim().toLowerCase();
+  return fields.find(field => field.id === id) ?? fields.find(field => field.id.toLowerCase() === folded)
+    ?? fields.find(field => field.label.trim().toLowerCase() === folded);
 }
 
-/** Validate against a private clone, then return one complete document. No partial writes. */
+/** The output a connection starts from. A node with a single output (a form, a legacy session) has only one. */
+function plannedOutput(node: CanvasNode, reference: string): PortSpec | undefined {
+  const outputs = portsFor(node).filter(port => port.side === 'output');
+  if (node.kind === 'session' && node.contract) {
+    const field = namedField(node.contract.outputs, reference, 'out:');
+    return field && outputs.find(port => port.id === `out:${field.id}`);
+  }
+  return outputs.find(port => port.id === reference) ?? (outputs.length === 1 ? outputs[0] : undefined);
+}
+
+function plannedInput(node: CanvasNode, reference: string): PortSpec | undefined {
+  const inputs = portsFor(node).filter(port => port.side === 'input');
+  if (node.kind === 'session' && node.contract) {
+    const field = namedField(node.contract.inputs, reference, 'in:');
+    return field && inputs.find(port => port.id === `in:${field.id}`);
+  }
+  return inputs.find(port => port.id === reference);
+}
+
+/** Fill one input, or say why it was left alone: a field that is not there, or a value its type does not take,
+ *  costs that one value rather than the whole plan. Outputs are never reached from here. */
+function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adjust): void {
+  const fields: ReadonlyArray<{ id: string; label: string; value: string }> | undefined = node.kind === 'form' ? node.fields : node.contract?.inputs;
+  const field = fields && namedField(fields, fieldId, 'in:');
+  if (!field) {
+    adjust(`没有填写「${titleOf(node)}」的「${fieldId}」：它没有这个输入`, `Left “${fieldId}” on “${titleOf(node)}” unfilled: it has no such input`);
+    return;
+  }
+  if (node.kind === 'session') {
+    const errors = validateContractFields([{ ...field as ContractField, required: false, value }]);
+    if (errors.length) {
+      const name = field.label || field.id;
+      adjust(`没有填写「${titleOf(node)}」的「${name}」：${errors.join(' ')}`, `Left “${name}” on “${titleOf(node)}” unfilled: ${errors.join(' ')}`);
+      return;
+    }
+  }
+  (field as { value: string }).value = value;
+}
+
+/** The contract type a new input needs to take a delivery from this output. */
+function inputTypeFor(from: CanvasNode, output: PortSpec): ContractFieldType | null {
+  if (from.kind === 'session' && from.contract) return from.contract.outputs.find(field => `out:${field.id}` === output.id)?.type ?? null;
+  if (output.dataType === 'text') return 'markdown';
+  return output.dataType === 'number' || output.dataType === 'boolean' || output.dataType === 'file' ? output.dataType : null;
+}
+
+/**
+ * Make the connection a plan asked for. Models often wire a second source into an input that already has one,
+ * point at an input of another type, or name an input the node does not have; each of those used to fail the
+ * whole plan after its call was spent. Here the target gets an input of its own for that delivery instead, and
+ * the change is said. A connection that cannot be made at all (no such output, a loop) is left out and said.
+ */
+function connectPlanned(draft: CanvasDocument, from: CanvasNode, to: CanvasNode, op: Extract<CanvasPlanOperation, { type: 'connect' }>, locale: UiLocale, adjust: Adjust): void {
+  const fromTitle = titleOf(from); const toTitle = titleOf(to);
+  if (from.id === to.id) { adjust(`跳过了「${fromTitle}」连到自己的连线`, `Skipped a connection from “${fromTitle}” to itself`); return; }
+  const output = plannedOutput(from, op.fromField);
+  if (!output) {
+    adjust(`跳过了一条连线：「${fromTitle}」没有输出「${op.fromField}」`, `Skipped a connection: “${fromTitle}” has no output “${op.fromField}”`);
+    return;
+  }
+  const start = { nodeId: from.id, portId: output.id };
+  const loops = () => findCycle(draft.nodes, draft.edges.filter(edge => edge.kind !== 'feedback')).length > 0;
+  const link = (portId: string): boolean => {
+    const end = { nodeId: to.id, portId };
+    draft.edges.push({ id: edgeId(start, end), fromNode: from.id, fromPort: output.id, toNode: to.id, toPort: portId, dataType: output.dataType,
+      ...(op.kind ? { kind: op.kind } : {}) });
+    if (op.kind !== 'feedback' && loops()) { draft.edges.pop(); return false; }
+    return true;
+  };
+  const skipLoop = () => adjust(`跳过了「${fromTitle}」→「${toTitle}」：这条连线会形成回环`, `Skipped “${fromTitle}” → “${toTitle}”: it would form a loop`);
+  const wanted = plannedInput(to, op.toField);
+  if (wanted) {
+    // The same wire again changes nothing.
+    if (draft.edges.some(edge => edge.fromNode === from.id && edge.fromPort === output.id && edge.toNode === to.id && edge.toPort === wanted.id)) return;
+    if (canConnect(draft.nodes, draft.edges, start, { nodeId: to.id, portId: wanted.id })) { if (!link(wanted.id)) skipLoop(); return; }
+  }
+  const type = inputTypeFor(from, output);
+  if (to.kind !== 'session' || !to.contract || !type || to.contract.inputs.length >= LIMITS.fields) {
+    adjust(`跳过了一条连线：「${toTitle}」不能新增输入来接收「${fromTitle}」的交付`, `Skipped a connection: “${toTitle}” cannot take a new input for the delivery from “${fromTitle}”`);
+    return;
+  }
+  const contract = to.contract;
+  const sourceField = from.kind === 'session' ? from.contract?.outputs.find(field => `out:${field.id}` === output.id) : undefined;
+  const sourceLabel = sourceField?.label.trim() || sourceField?.id || (locale === 'en' ? 'Delivery' : '交付');
+  const requested = op.toField.replace(/^in:/, '');
+  const taken = (id: string) => contract.inputs.some(field => field.id === id);
+  const base = !wanted && NEW_FIELD_ID.test(requested) && !taken(requested) ? requested
+    : NEW_FIELD_ID.test(sourceField?.id ?? '') ? sourceField!.id : 'input';
+  let id = base;
+  for (let n = 2; taken(id); n++) id = `${base}-${n}`;
+  // A label the plan wrote in words (not an id) names the new input; otherwise it says what it receives.
+  const label = (!wanted && !NEW_FIELD_ID.test(requested) && requested.trim() ? requested.trim()
+    : locale === 'en' ? `${sourceLabel} (from ${fromTitle})` : `${sourceLabel}（来自${fromTitle}）`).slice(0, LIMITS.title);
+  const help = (locale === 'en' ? `Added for a connection: receives “${sourceLabel}” from “${fromTitle}”.` : `连线时新增：接收「${fromTitle}」的「${sourceLabel}」。`).slice(0, LIMITS.help);
+  contract.inputs.push({ id, label, type, required: false, value: '', help });
+  if (!normalizeContract(contract) || !canConnect(draft.nodes, draft.edges, start, { nodeId: to.id, portId: `in:${id}` })) {
+    contract.inputs.pop();
+    adjust(`跳过了一条连线：「${toTitle}」不能新增输入来接收「${fromTitle}」的交付`, `Skipped a connection: “${toTitle}” cannot take a new input for the delivery from “${fromTitle}”`);
+    return;
+  }
+  if (!link(`in:${id}`)) { contract.inputs.pop(); skipLoop(); return; }
+  const wantedField = wanted && namedField(contract.inputs, wanted.id, 'in:');
+  const wantedName = wantedField?.label || wantedField?.id || op.toField;
+  const occupied = Boolean(wanted && !wanted.multi && draft.edges.some(edge => edge.toNode === to.id && edge.toPort === wanted.id));
+  const reason = !wanted ? [`「${toTitle}」原来没有输入「${op.toField}」`, `“${toTitle}” had no input “${op.toField}”`]
+    : occupied ? [`「${toTitle}」的「${wantedName}」已经接了别的来源`, `“${wantedName}” on “${toTitle}” already had a source`]
+      : [`「${toTitle}」的「${wantedName}」类型不同`, `“${wantedName}” on “${toTitle}” takes another type`];
+  adjust(`${reason[0]}，已新增输入「${label}」接收「${fromTitle}」的「${sourceLabel}」`, `${reason[1]}, so a new input “${label}” receives “${sourceLabel}” from “${fromTitle}”`);
+}
+
+/** Drop the links a field change left without a matching pair of ports, saying each one. */
+function disconnectBroken(draft: CanvasDocument, nodeId: string, adjust: Adjust): void {
+  const byId = new Map(draft.nodes.map(node => [node.id, node]));
+  draft.edges = draft.edges.filter(edge => {
+    if (edge.fromNode !== nodeId && edge.toNode !== nodeId) return true;
+    const from = byId.get(edge.fromNode); const to = byId.get(edge.toNode);
+    const output = from && portsFor(from).find(port => port.side === 'output' && port.id === edge.fromPort);
+    const input = to && portsFor(to).find(port => port.side === 'input' && port.id === edge.toPort);
+    if (output && input && output.dataType === input.dataType && output.dataType === edge.dataType) return true;
+    const left = from ? titleOf(from) : edge.fromNode; const right = to ? titleOf(to) : edge.toNode;
+    adjust(`已断开「${left}」→「${right}」：相连的字段被删除或改了类型`, `Disconnected “${left}” → “${right}”: a field it used was removed or changed type`);
+    return false;
+  });
+}
+
+/** Validate against a private clone, then return one complete document. No partial writes: an operation that
+ *  cannot apply as written is either repaired or left out, and each such case is listed in `adjustments`. */
 export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = ''): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
+  const adjustments: string[] = [];
+  const adjust: Adjust = (zh, en) => { if (adjustments.length < LIMITS.operations) adjustments.push(locale === 'en' ? en : zh); };
   const requestCharacters = Array.from(originalRequest);
   if (requestCharacters.length > TASK_FRAME_MAX_TOTAL_LENGTH) fail('原始请求超过任务要求的长度限制。');
   const constraints: string[] = [];
@@ -285,7 +418,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (constraints.length) node.taskFrame = { version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [] };
         if (op.title !== undefined) node.title = op.title;
         if (op.persona !== undefined) node.persona = op.persona;
-        for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value);
+        for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust);
         draft.nodes.push(node); refs.set(op.ref, node.id); addedNodeIds.push(node.id);
         break;
       }
@@ -296,7 +429,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (op.persona !== undefined && node.kind === 'session') node.persona = op.persona;
         break;
       }
-      case 'set_input': setInput(resolve(op.nodeId), op.fieldId, op.value); break;
+      case 'set_input': setInput(resolve(op.nodeId), op.fieldId, op.value, adjust); break;
       case 'add_field':
       case 'update_field':
       case 'remove_field': {
@@ -304,21 +437,43 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (node.kind !== 'session') fail('输入输出结构编辑仅适用于 Agent 节点。');
         node.contract ??= { version: 1, inputs: [], outputs: [] };
         const fields = op.side === 'input' ? node.contract.inputs : node.contract.outputs;
+        const sideName = op.side === 'input' ? ['输入', 'input'] : ['输出', 'output'];
         if (op.type === 'add_field') {
-          if (fields.length >= LIMITS.fields) fail(`每侧最多 ${LIMITS.fields} 个字段。`);
-          if (fields.some(field => field.id === op.field.id)) fail(`字段 ID「${op.field.id}」重复。`);
-          fields.push({ ...op.field });
+          const existing = fields.find(field => field.id === op.field.id);
+          if (existing) {
+            // A field the node already has, added again (often a template field the model did not see): the plan's
+            // definition of it is what it wants, so the field is updated to it rather than the plan refused.
+            const { id: _id, value: _value, ...definition } = op.field;
+            const next = { ...existing, ...definition };
+            const same = (['label', 'type', 'required', 'help', 'placeholder'] as const).every(key => next[key] === existing[key]);
+            const errors = validateContractFields([{ ...next, required: false }]);
+            if (errors.length) adjust(`没有改动「${titleOf(node)}」已有的${sideName[0]}「${existing.label || existing.id}」：${errors.join(' ')}`,
+              `Left the existing ${sideName[1]} “${existing.label || existing.id}” on “${titleOf(node)}” as it was: ${errors.join(' ')}`);
+            else if (!same) {
+              Object.assign(existing, next);
+              adjust(`「${titleOf(node)}」已有${sideName[0]}「${existing.label || existing.id}」，已按方案更新它`, `“${titleOf(node)}” already had the ${sideName[1]} “${existing.label || existing.id}”; it was updated as planned`);
+            }
+          } else {
+            if (fields.length >= LIMITS.fields) fail(`每侧最多 ${LIMITS.fields} 个字段。`);
+            fields.push({ ...op.field });
+          }
         } else {
-          const index = fields.findIndex(field => field.id === op.fieldId);
-          if (index < 0) fail(`节点「${node.title}」没有${op.side === 'input' ? '输入' : '输出'}字段「${op.fieldId}」。`);
-          if (op.type === 'remove_field') fields.splice(index, 1);
+          const field = namedField(fields, op.fieldId, op.side === 'input' ? 'in:' : 'out:');
+          const index = field ? fields.indexOf(field) : -1;
+          if (index < 0) {
+            adjust(`跳过了对「${titleOf(node)}」${sideName[0]}「${op.fieldId}」的${op.type === 'remove_field' ? '删除' : '修改'}：没有这个字段`,
+              `Skipped ${op.type === 'remove_field' ? 'removing' : 'changing'} the ${sideName[1]} “${op.fieldId}” on “${titleOf(node)}”: there is no such field`);
+          } else if (op.type === 'remove_field') fields.splice(index, 1);
           else {
-            fields[index] = { ...fields[index], ...op.changes };
-            const errors = validateContractFields([{ ...fields[index], required: false }]);
-            if (errors.length) fail(`已有字段值与新类型不兼容：${errors.join(' ')}`);
+            const next = { ...fields[index], ...op.changes };
+            const errors = validateContractFields([{ ...next, required: false }]);
+            if (errors.length) adjust(`没有改动「${titleOf(node)}」的「${fields[index].label || fields[index].id}」：已有内容与新类型不兼容（${errors.join(' ')}）`,
+              `Left “${fields[index].label || fields[index].id}” on “${titleOf(node)}” as it was: its content does not fit the new type (${errors.join(' ')})`);
+            else fields[index] = next;
           }
         }
         if (!normalizeContract(node.contract)) fail('输入输出结构无效。');
+        disconnectBroken(draft, node.id, adjust);
         checkGraph(draft);
         break;
       }
@@ -329,7 +484,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         break;
       }
       case 'disconnect': {
-        if (!draft.edges.some(edge => edge.id === op.edgeId)) fail(`连线「${op.edgeId}」不在当前画布。`);
+        // Nothing to remove is not a reason to throw the rest of the plan away.
+        if (!draft.edges.some(edge => edge.id === op.edgeId)) { adjust(`连线「${op.edgeId}」不在画布上，无需断开`, `The connection “${op.edgeId}” is not on the canvas; nothing to disconnect`); break; }
         draft.edges = draft.edges.filter(edge => edge.id !== op.edgeId);
         break;
       }
@@ -350,13 +506,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         break;
       }
       case 'connect': {
-        const from = resolve(op.fromNode); const to = resolve(op.toNode);
-        const fromPort = from.kind === 'session' && from.contract ? `out:${op.fromField}` : op.fromField;
-        const toPort = to.kind === 'session' && to.contract ? `in:${op.toField}` : op.toField;
-        if (!canConnect(draft.nodes, draft.edges, { nodeId: from.id, portId: fromPort }, { nodeId: to.id, portId: toPort })) fail('无法连接：字段不存在、类型不匹配、输入已占用或连线重复。');
-        const output = portsFor(from).find(port => port.id === fromPort && port.side === 'output')!;
-        draft.edges.push({ id: edgeId({ nodeId: from.id, portId: fromPort }, { nodeId: to.id, portId: toPort }), fromNode: from.id, fromPort, toNode: to.id, toPort, dataType: output.dataType,
-          ...(op.kind ? { kind: op.kind } : {}) });
+        connectPlanned(draft, resolve(op.fromNode), resolve(op.toNode), op, locale, adjust);
         checkGraph(draft);
         break;
       }
@@ -372,7 +522,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   const positions = new Map(arranged.map(node => [node.id, { x: node.x + right - 80, y: node.y }]));
   draft.nodes = draft.nodes.map(node => positions.has(node.id) ? { ...node, ...positions.get(node.id)! } : node);
   draft.updatedAt = Date.now();
-  return { doc: invalidateOutputs(doc, draft), addedNodeIds: survivors.map(node => node.id), summary: plan.summary };
+  return { doc: invalidateOutputs(doc, draft), addedNodeIds: survivors.map(node => node.id), summary: plan.summary, adjustments };
 }
 
 function canonical(value: unknown): string {

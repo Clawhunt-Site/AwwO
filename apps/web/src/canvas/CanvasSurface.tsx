@@ -2173,7 +2173,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setPlanningFitId(id);
       }
       // A plan that changed nothing else keeps the nodes it added, which tell whether it is still on the canvas.
-      appendPlanningMessage(`${id}-assistant`, applied.summary, plan.operations.length ? 'applied' : undefined, route,
+      // What was applied differently from how the plan wrote it is said with its summary, never hidden.
+      const shownAdjustments = applied.adjustments.slice(0, 6);
+      const reply = applied.adjustments.length ? [applied.summary, t('planning.adjusted', { count: applied.adjustments.length }),
+        ...shownAdjustments.map(item => `· ${item}`),
+        ...(applied.adjustments.length > shownAdjustments.length ? [t('planning.adjustedMore', { count: applied.adjustments.length - shownAdjustments.length })] : [])].join('\n')
+        : applied.summary;
+      appendPlanningMessage(`${id}-assistant`, reply, plan.operations.length ? 'applied' : undefined, route,
         plan.operations.length && applied.addedNodeIds.length <= 200 && onlyAddedNodes(before, applied.doc, applied.addedNodeIds)
           ? applied.addedNodeIds : undefined);
       if (!jev) setPlannerStatus(previous => ({ available: true, provider: previous?.provider || 'AI' }));

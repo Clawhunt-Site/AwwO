@@ -106,7 +106,7 @@ function planningProtocol(saas: boolean): string {
   return CANVAS_PLAN_PROTOCOL.split('\n').filter(line =>
     !/^(set_edge_kind:|set_execution:|互审Graph使用)/.test(line),
   ).map(line => line.startsWith('connect 使用')
-    ? 'connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源，全图不得成环。'
+    ? 'connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源；一个节点要接收多个上游交付时，先用 add_field 为每个来源新增独立输入字段再分别连接；全图不得成环。'
     : line.replace(',kind?:"data"|"feedback"', '').replace('/reviewerNodeId', '')).join('\n');
 }
 

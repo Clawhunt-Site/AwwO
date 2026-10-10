@@ -73,7 +73,9 @@ describe('strict canvas plan protocol', () => {
   it('requires empty new field values and rejects output value edits through every schema path', () => {
     expect(() => parseCanvasPlan(plan({ type: 'add_field', nodeId: 'source', side: 'output', field: { ...emptyField, value: 'Invented output' } }))).toThrow('禁止生成输出值');
     expect(() => parseCanvasPlan({ ...plan(), operations: [{ type: 'update_field', nodeId: 'source', side: 'output', fieldId: 'schema', changes: { value: 'Invented output' } }] })).toThrow('value');
-    expect(() => applyCanvasPlan(fixture(), plan({ type: 'set_input', nodeId: 'source', fieldId: 'schema', value: 'Invented output' }))).toThrow('没有输入字段');
+    const outputAttempt = applyCanvasPlan(fixture(), plan({ type: 'set_input', nodeId: 'source', fieldId: 'schema', value: 'Invented output' }));
+    expect((outputAttempt.doc.nodes[0] as SessionNode).contract!.outputs.find(field => field.id === 'schema')?.value).toBe('');
+    expect(outputAttempt.adjustments).toEqual([expect.stringContaining('没有这个输入')]);
     expect(() => parseCanvasPlan({ ...plan(), operations: [{ type: 'add_node', ref: 'new', templateId: 'data', outputValues: { schema: 'Invented' } }] })).toThrow('outputValues');
   });
 });
@@ -208,18 +210,52 @@ describe('atomic graph application', () => {
     expect(() => applyCanvasPlan(doc, { ...plan(), operations: [{ type: 'update_node', nodeId: 'source', binding: null } as unknown as CanvasPlanOperation] })).toThrow('binding');
   });
 
-  it('rejects cycles, duplicate connections and occupied single input fields', () => {
+  it('repairs connections a plan cannot make as written and leaves out the ones it cannot make at all', () => {
     const doc = fixture();
-    expect(() => applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'target', fromField: 'api', toNode: 'source', toField: 'brief' }))).toThrow('回环');
-    expect(() => applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'target', toField: 'schema' }))).toThrow('重复');
-    expect(() => applyCanvasPlan(doc, plan({ type: 'add_node', ref: 'second-source', templateId: 'data' }, { type: 'connect', fromNode: 'second-source', fromField: 'schema', toNode: 'target', toField: 'schema' }))).toThrow('占用');
-    expect(() => applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'source', fromField: 'missing', toNode: 'target', toField: 'rules' }))).toThrow('不存在');
+    const loop = applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'target', fromField: 'api', toNode: 'source', toField: 'brief' }));
+    expect(loop.doc.edges).toEqual(doc.edges);
+    expect(loop.adjustments).toEqual([expect.stringContaining('回环')]);
+    const again = applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'target', toField: 'schema' }));
+    expect(again.doc.edges).toEqual(doc.edges);
+    expect(again.adjustments).toEqual([]);
+    // A second source for an occupied input gets an input of its own on the target; the change is said.
+    const second = applyCanvasPlan(doc, plan({ type: 'add_node', ref: 'second-source', templateId: 'data' },
+      { type: 'connect', fromNode: 'second-source', fromField: 'schema', toNode: 'target', toField: 'schema' }));
+    const target = second.doc.nodes.find(node => node.id === 'target') as SessionNode;
+    expect(target.contract!.inputs.find(field => field.id === 'schema-2')).toMatchObject({ type: 'markdown', required: false, value: '', label: '数据字典（来自数据治理）' });
+    expect(second.doc.edges.at(-1)).toMatchObject({ fromNode: second.addedNodeIds[0], fromPort: 'out:schema', toNode: 'target', toPort: 'in:schema-2', dataType: 'text' });
+    expect(second.adjustments).toEqual([expect.stringContaining('已经接了别的来源，已新增输入「数据字典（来自数据治理）」')]);
+    expect(reconcileEdges(second.doc.nodes, second.doc.edges)).toEqual(second.doc.edges);
+    // A delivery of another type (a file into a Markdown input) also gets its own input, of the delivery's type.
+    const typed = applyCanvasPlan(doc, plan({ type: 'add_node', ref: 'front', templateId: 'frontend' },
+      { type: 'connect', fromNode: 'front', fromField: 'preview', toNode: 'target', toField: 'rules' }));
+    expect((typed.doc.nodes.find(node => node.id === 'target') as SessionNode).contract!.inputs.find(field => field.id === 'preview')).toMatchObject({ type: 'file' });
+    expect(typed.doc.edges.at(-1)).toMatchObject({ toNode: 'target', toPort: 'in:preview', dataType: 'file' });
+    expect(typed.adjustments).toEqual([expect.stringContaining('类型不同')]);
+    // An input the node does not have is created under the name the plan used.
+    const named = applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'target', toField: 'gameDesign' }));
+    expect((named.doc.nodes[1] as SessionNode).contract!.inputs.at(-1)).toMatchObject({ id: 'gameDesign', type: 'markdown' });
+    expect(named.doc.edges.at(-1)).toMatchObject({ toPort: 'in:gameDesign' });
+    expect(named.adjustments).toEqual([expect.stringContaining('原来没有输入「gameDesign」')]);
+    // Fields are found the way models name them: with the port prefix, in another case, or by label.
+    const fuzzy = applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'source', fromField: 'out:Schema', toNode: 'target', toField: '业务规则' }));
+    expect(fuzzy.doc.edges.at(-1)).toMatchObject({ fromPort: 'out:schema', toPort: 'in:rules' });
+    expect(fuzzy.adjustments).toEqual([]);
+    const missing = applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'source', fromField: 'missing', toNode: 'target', toField: 'rules' }));
+    expect(missing.doc.edges).toEqual(doc.edges);
+    expect(missing.adjustments).toEqual([expect.stringContaining('没有输出「missing」')]);
+    expect(applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'source', fromField: 'missing', toNode: 'target', toField: 'rules' }), 'en').adjustments)
+      .toEqual([expect.stringContaining('has no output “missing”')]);
   });
 
-  it('requires explicit disconnection before a linked field is removed or made incompatible', () => {
+  it('disconnects the links a field change breaks, and says so', () => {
     const doc = fixture();
-    expect(() => applyCanvasPlan(doc, plan({ type: 'remove_field', nodeId: 'source', side: 'output', fieldId: 'schema' }))).toThrow('显式 disconnect');
-    expect(() => applyCanvasPlan(doc, plan({ type: 'update_field', nodeId: 'source', side: 'output', fieldId: 'schema', changes: { type: 'number' } }))).toThrow('类型不匹配');
+    const removed = applyCanvasPlan(doc, plan({ type: 'remove_field', nodeId: 'source', side: 'output', fieldId: 'schema' }));
+    expect(removed.doc.edges).toEqual([]);
+    expect(removed.adjustments).toEqual([expect.stringContaining('已断开')]);
+    const retyped = applyCanvasPlan(doc, plan({ type: 'update_field', nodeId: 'source', side: 'output', fieldId: 'schema', changes: { type: 'number' } }));
+    expect(retyped.doc.edges).toEqual([]);
+    expect(retyped.adjustments).toEqual([expect.stringContaining('已断开')]);
     const applied = applyCanvasPlan(doc, plan(
       { type: 'disconnect', edgeId: doc.edges[0].id },
       { type: 'update_field', nodeId: 'source', side: 'output', fieldId: 'schema', changes: { type: 'number', label: 'Count' } },
@@ -227,6 +263,7 @@ describe('atomic graph application', () => {
       { type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'target', toField: 'schema' },
     ));
     expect(applied.doc.edges[0].dataType).toBe('number');
+    expect(applied.adjustments).toEqual([]);
     expect(doc.edges[0].dataType).toBe('text');
   });
 
@@ -243,24 +280,33 @@ describe('atomic graph application', () => {
     expect(node.contract!.inputs.find(field => field.id === 'count')?.value).toBe('12');
     expect(node.contract!.inputs.some(field => field.id === 'sources')).toBe(false);
     expect(node.contract!.outputs.find(field => field.id === 'extra')).toMatchObject({ value: '', label: 'Requested extra report', placeholder: 'Evidence:' });
-    expect(() => applyCanvasPlan(applied.doc, plan({ type: 'set_input', nodeId: 'source', fieldId: 'count', value: 'not a number' }))).toThrow('有效数字');
-    expect(() => applyCanvasPlan(applied.doc, plan({ type: 'add_field', nodeId: 'source', side: 'input', field: { ...emptyField, id: 'count' } }))).toThrow('重复');
+    const notNumber = applyCanvasPlan(applied.doc, plan({ type: 'set_input', nodeId: 'source', fieldId: 'count', value: 'not a number' }));
+    expect((notNumber.doc.nodes[0] as SessionNode).contract!.inputs.find(field => field.id === 'count')?.value).toBe('12');
+    expect(notNumber.adjustments).toEqual([expect.stringContaining('有效数字')]);
+    // A field added again is the plan's definition of it: the existing field takes it, keeping its value.
+    const again = applyCanvasPlan(applied.doc, plan({ type: 'add_field', nodeId: 'source', side: 'input', field: { ...emptyField, id: 'count' } }));
+    expect((again.doc.nodes[0] as SessionNode).contract!.inputs.filter(field => field.id === 'count')).toMatchObject([{ type: 'markdown', label: '辅助字段', value: '12' }]);
+    expect(again.adjustments).toEqual([expect.stringContaining('已按方案更新')]);
   });
 
-  it('allows explicit node deletion with incident edges but rejects nonexistent disconnects', () => {
+  it('allows explicit node deletion with incident edges and treats a missing disconnect as nothing to do', () => {
     const doc = fixture();
     const applied = applyCanvasPlan(doc, plan({ type: 'remove_node', nodeId: 'source' }));
     expect(applied.doc.nodes.map(node => node.id)).toEqual(['target']);
     expect(applied.doc.edges).toEqual([]);
     expect(applied.doc.nodes[0].lastOutput).toBeNull();
-    expect(() => applyCanvasPlan(doc, plan({ type: 'disconnect', edgeId: 'foreign-edge' }))).toThrow('不在当前画布');
+    const foreign = applyCanvasPlan(doc, plan({ type: 'disconnect', edgeId: 'foreign-edge' }));
+    expect(foreign.doc.edges).toEqual(doc.edges);
+    expect(foreign.adjustments).toEqual([expect.stringContaining('不在画布上')]);
   });
 
-  it('does not silently discard legacy ports while adding a new contract', () => {
+  it('says so when a new contract replaces the legacy ports a link used', () => {
     const first = { ...createSessionNode('coding', { x: 0, y: 0 }), id: 'legacy' };
     const target = { ...createSessionNode('coding', { x: 800, y: 0 }), id: 'legacy-target' };
     const doc = { ...emptyDocument(), nodes: [first, target], edges: [{ id: 'legacy-edge', fromNode: first.id, fromPort: 'result', toNode: target.id, toPort: 'context', dataType: 'text' as const }] };
-    expect(() => applyCanvasPlan(doc, plan({ type: 'add_field', nodeId: first.id, side: 'output', field: emptyField }))).toThrow('显式 disconnect');
+    const contracted = applyCanvasPlan(doc, plan({ type: 'add_field', nodeId: first.id, side: 'output', field: emptyField }));
+    expect(contracted.doc.edges).toEqual([]);
+    expect(contracted.adjustments).toEqual([expect.stringContaining('已断开')]);
     const form = createFormNode({ x: 0, y: 0 });
     const formDoc = { ...emptyDocument(), nodes: [form] };
     expect(applyCanvasPlan(formDoc, plan({ type: 'set_input', nodeId: form.id, fieldId: 'f1', value: 'New requirement' })).doc.nodes[0]).toMatchObject({ fields: [{ ...form.fields[0], value: 'New requirement' }, form.fields[1]] });
