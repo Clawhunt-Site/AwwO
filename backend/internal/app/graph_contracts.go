@@ -475,7 +475,10 @@ func graphOutputPolicy(n graphNode) string {
 	if hasFileOutput(n) {
 		policy += fmt.Sprintf("\nFor a `file` output, return {\"name\":\"<filename>\",\"content\":\"<the complete file text>\"}"+
 			" — content is the actual file body, which is stored and becomes downloadable. Keep it under %d KiB,"+
-			" at most %d files, and never claim a file exists without supplying its content. Do not return a path.",
+			" at most %d files, and never claim a file exists without supplying its content. Do not return a path."+
+			" A field label, help or placeholder that mentions a path, link or entry point still means this object:"+
+			" a web page, prototype or browser game is delivered as {\"name\":\"index.html\",\"content\":\"<!doctype html>…\"},"+
+			" one self-contained file the reader can open and run, and any instructions that name a file must name one supplied this way.",
 			maxArtifactBytes/1024, maxArtifactsPerNode)
 	}
 	return policy
