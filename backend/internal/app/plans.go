@@ -160,17 +160,18 @@ func accountPlan(ctx context.Context, q querier, userID string) (*activePlan, er
 }
 
 // planUsage is what the account has admitted under its plan: model calls running now, today's free default-model
-// calls (UTC), and today's generations.
+// calls (UTC) apart from the operator's planner calls (planner_model.go), and today's generations.
 type planUsage struct {
 	Running, FreeToday, MediaToday int
 }
 
-func accountPlanUsage(ctx context.Context, q querier, userID string) (planUsage, error) {
+// accountPlanUsage counts it; plannerModel is the operator's planner model, or "" when there is none.
+func accountPlanUsage(ctx context.Context, q querier, userID, plannerModel string) (planUsage, error) {
 	var u planUsage
 	err := q.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM model_invocations WHERE billed_user_id=$1 AND status='running'),
-		(SELECT count(*) FROM model_invocations WHERE billed_user_id=$1 AND credit_reserve IS NULL AND created_at>=`+todayUTC+`),
-		(SELECT count(*) FROM media_generations WHERE billed_user_id=$1 AND created_at>=`+todayUTC+`)`, userID).Scan(&u.Running, &u.FreeToday, &u.MediaToday)
+		(SELECT count(*) FROM model_invocations mi WHERE mi.billed_user_id=$1 AND mi.credit_reserve IS NULL AND mi.created_at>=`+todayUTC+` AND `+countsTowardsDaily("$2")+`),
+		(SELECT count(*) FROM media_generations WHERE billed_user_id=$1 AND created_at>=`+todayUTC+`)`, userID, plannerModel).Scan(&u.Running, &u.FreeToday, &u.MediaToday)
 	return u, err
 }
 

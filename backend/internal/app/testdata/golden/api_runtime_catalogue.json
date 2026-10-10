@@ -13,6 +13,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "pi"
         },
         {
@@ -21,6 +22,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "pi"
         },
         {
@@ -29,6 +31,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "pi"
         },
         {
@@ -40,6 +43,7 @@
             "low",
             "high"
           ],
+          "route": "gate",
           "runtime": "openai-agents"
         },
         {
@@ -48,6 +52,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "openai-agents"
         },
         {
@@ -56,6 +61,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "openai-agents"
         }
       ],
@@ -142,6 +148,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "pi"
         },
         {
@@ -150,6 +157,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "pi"
         },
         {
@@ -158,6 +166,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "pi"
         }
       ],
@@ -202,6 +211,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "pi"
         },
         {
@@ -210,6 +220,7 @@
           "name": "",
           "provider": "",
           "reasoningEfforts": [],
+          "route": "gate",
           "runtime": "openai-agents"
         }
       ],

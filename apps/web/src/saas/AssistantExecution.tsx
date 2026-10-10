@@ -12,6 +12,7 @@ import { renderInertMarkdown } from './inertMarkdown';
 import { saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
 import { PlanUpsell, planUpsellCode, upsellReason } from './PlanUpsell';
+import { withPlanTag } from './runtimeCatalog';
 import type { UiLocale } from '../locale';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
@@ -354,8 +355,10 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
   const { t } = useSaaSPreferences();
   const models = execution.runtime?.models ?? [];
   const labelCounts = models.reduce<Record<string, number>>((counts, model) => ({ ...counts, [model.label || model.id]: (counts[model.label || model.id] ?? 0) + 1 }), {});
-  const optionLabel = (model: typeof models[number]) => labelCounts[model.label || model.id] > 1 ? `${model.label || model.id} · ${model.runtime}` : (model.label || model.id);
+  const optionLabel = (model: typeof models[number]) => withPlanTag(labelCounts[model.label || model.id] > 1 ? `${model.label || model.id} · ${model.runtime}` : (model.label || model.id), model);
   const chosen = execution.choice.model;
+  // A model the workspace's plan does not include is refused when the task starts; say so while it can still be changed.
+  const needsPlan = chosen?.requiresUpgrade === true;
   const settingsSummary = execution.choice.unavailableLabel ? t(`直接执行用：${execution.choice.unavailableLabel}（已不可用）`, `Direct tasks use: ${execution.choice.unavailableLabel} (unavailable)`)
     : chosen ? `${t('直接执行用', 'Direct tasks use')}：${optionLabel(chosen)}${execution.effort ? ` · ${execution.effort}` : ''}` : t('选择直接执行的模型', 'Choose a model for direct tasks');
   if (execution.readOnly || (!models.length && !execution.choice.unavailableLabel && execution.knowledgeCount === 0)) return null;
@@ -381,6 +384,11 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
         <button type="button" disabled={execution.loading || execution.busy} onClick={execution.refreshAll}>{execution.loading ? t('正在读取…', 'Reading…') : t('刷新模型列表', 'Refresh the model list')}</button>
       </div>
     </details>}
+    {needsPlan && <div className="awwo-execution-plan-needed" role="note">
+      <p>{t('这个模型需要 Pro / Max：免费版只含默认模型，直接执行会被拒绝。可以先换成默认模型免费执行。',
+        'This model needs Pro or Max: the free plan includes the default model only, so a direct task on it is refused. Choose the default model to run it free.')}</p>
+      <PlanUpsell tenantId={execution.tenantId} />
+    </div>}
     {execution.knowledgeCount > 0 && <p className="awwo-execution-knowledge">{t(`将带上 ${execution.knowledgeCount} 份已选知识`, `Takes ${execution.knowledgeCount} selected knowledge items`)}</p>}
   </div>;
 }

@@ -300,7 +300,7 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		// reporting its own cause, and before the quota so an unauthorized model is
 		// never described as a rate limit.
 		// The operator's planner model is the operator's choice and cost, outside the workspace's allowlist,
-		// paid-route allowances and credits; it still counts towards the daily total (planner_model.go).
+		// paid-route allowances, credits and daily calls; only the planner ceilings count it (planner_model.go).
 		operatorPaid := a.operatorPaidCall(facts, model)
 		if e == nil && !operatorPaid {
 			entitlement, entitlementErr := newModelEntitlement(restricted, allowed)
@@ -331,9 +331,9 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 			if operatorPaid {
 				routes = nil
 			}
-			admitted, e = a.admitFreeInvocation(ctx, tx, tid, model, concurrent, daily, routes)
+			admitted, e = a.admitFreeInvocation(ctx, tx, tid, model, concurrent, daily, routes, operatorPaid)
 		} else {
-			billed, e = a.admitPlanInvocation(ctx, tx, tid, rid, reserve)
+			billed, e = a.admitPlanInvocation(ctx, tx, tid, rid, reserve, operatorPaid)
 			admitted = billed != nil
 		}
 		if e == nil && admitted {
@@ -358,15 +358,17 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 
 // admitFreeInvocation applies a free workspace's own allowances: its daily total (calls plus generations), its
 // concurrency, and inside those, for a route-limited workspace, the small daily allowance per paid model route.
-// It reports false while every slot is busy.
-func (a *App) admitFreeInvocation(ctx context.Context, tx pgx.Tx, tid, model string, concurrent, daily int, routes []byte) (bool, error) {
+// The operator's planner calls neither count towards the daily total nor are held by it (operatorPaid); the planner
+// ceilings bound them instead (planner_model.go). Concurrency holds every call. It reports false while every slot
+// is busy.
+func (a *App) admitFreeInvocation(ctx context.Context, tx pgx.Tx, tid, model string, concurrent, daily int, routes []byte, operatorPaid bool) (bool, error) {
 	var active, today int
 	// Image and video generations spend the same daily run quota.
-	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='running'),count(*) FILTER(WHERE created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-		+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') FROM model_invocations WHERE tenant_id=$1`, tid).Scan(&active, &today); e != nil {
+	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE mi.status='running'),count(*) FILTER(WHERE mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND `+countsTowardsDaily("$2")+`)
+		+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') FROM model_invocations mi WHERE mi.tenant_id=$1`, tid, a.cfg.PlannerModel).Scan(&active, &today); e != nil {
 		return false, e
 	}
-	if today >= daily {
+	if today >= daily && !operatorPaid {
 		return false, errInvocationQuota
 	}
 	if active >= concurrent {
@@ -384,17 +386,18 @@ func (a *App) admitFreeInvocation(ctx context.Context, tx pgx.Tx, tid, model str
 // admitPlanInvocation applies the owner's plan, whose allowances are the account's across all its workspaces:
 // the agents at once, today's free default-model calls, and for a paid route the period's credits. A run's first
 // call at a time takes the slot its run already holds (planRunSlot); a further call at once (a parallel team's
-// member) needs a free one. The account's numbers are counted without a lock while the call waits for a slot,
+// member) needs a free one. The operator's planner calls are not held by the daily calls (operatorPaid), as on the
+// free plan. The account's numbers are counted without a lock while the call waits for a slot,
 // then again under the plan row's lock, which every admission of the account takes before it counts. It returns
 // the locked plan the call is charged to, or nil while no slot is free (or the plan lapsed meanwhile, and the
 // next try is free).
-func (a *App) admitPlanInvocation(ctx context.Context, tx pgx.Tx, tid, rid string, reserve *int) (*activePlan, error) {
+func (a *App) admitPlanInvocation(ctx context.Context, tx pgx.Tx, tid, rid string, reserve *int, operatorPaid bool) (*activePlan, error) {
 	check := func(plan *activePlan) (bool, error) {
-		usage, e := accountPlanUsage(ctx, tx, plan.UserID)
+		usage, e := accountPlanUsage(ctx, tx, plan.UserID, a.cfg.PlannerModel)
 		if e != nil {
 			return false, e
 		}
-		if reserve == nil && usage.FreeToday >= plan.Limits.Daily {
+		if reserve == nil && !operatorPaid && usage.FreeToday >= plan.Limits.Daily {
 			return false, errInvocationQuota
 		}
 		mine, e := runCallsRunning(ctx, tx, tid, rid)

@@ -1,6 +1,7 @@
 import { API_BASE, api, SaaSApiError, tenantPath } from './api';
 
-export interface ExecutionModel { id: string; label: string; runtime: string; efforts?: string[] }
+/** requiresUpgrade: this workspace's plan does not include the model (the free plan has no Claude, GPT or Bedrock calls). */
+export interface ExecutionModel { id: string; label: string; runtime: string; efforts?: string[]; route?: string; requiresUpgrade?: boolean }
 export interface ExecutionRuntime { ready: boolean; reason?: string; capabilities: { workspace: boolean; approvals: boolean }; models: ExecutionModel[] }
 export interface ExecutionRunSummary { id: string; status: string; prompt: string; createdAt: string; updatedAt: string }
 export interface ExecutionRuns { items: ExecutionRunSummary[]; truncated?: boolean }
@@ -51,7 +52,8 @@ export async function readExecutionRuntime(tenantId: string, signal: AbortSignal
     && bool(value.ready) && (value.reason === undefined || string(value.reason)) && object(value.capabilities)
     && bool(value.capabilities.workspace) && bool(value.capabilities.approvals) && Array.isArray(value.models)
     && value.models.every(model => object(model) && nonempty(model.id) && string(model.label) && nonempty(model.runtime)
-      && (model.efforts === undefined || (Array.isArray(model.efforts) && model.efforts.every(string))))
+      && (model.efforts === undefined || (Array.isArray(model.efforts) && model.efforts.every(string)))
+      && (model.route === undefined || string(model.route)) && (model.requiresUpgrade === undefined || bool(model.requiresUpgrade)))
     && new Set(value.models.map(model => `${model.runtime}/${model.id}`)).size === value.models.length);
 }
 export async function readExecutionRuns(tenantId: string, canvasId: string, signal: AbortSignal): Promise<ExecutionRuns> {

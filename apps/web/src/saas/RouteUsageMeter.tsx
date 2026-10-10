@@ -68,6 +68,7 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
       <p>{t('每天 UTC 0 点重置。默认模型不单独限次，只占总次数。', 'Resets at 00:00 UTC. The default model has no limit of its own and only uses the daily total.')}</p>
       <dl>
         <div className={state.kind === 'daily-out' ? 'is-out' : undefined}><dt>{t('总次数', 'All calls')}</dt><dd>{Math.min(usage.daily.used, usage.daily.limit)} / {usage.daily.limit}</dd></div>
+        {usage.planner && <PlannerRow allowance={usage.planner} />}
         {routeOrder.map(route => {
           const allowance = usage.routes?.[route];
           return <div key={route} className={routeUsedUp(allowance) ? 'is-out' : undefined}><dt>{names[route]}</dt>
@@ -85,6 +86,15 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
       {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
     </Popover>
   </>;
+}
+
+/** The canvas assistant's free changes today: their own daily number, outside the calls counted above. */
+function PlannerRow({ allowance }: { allowance: NonNullable<RouteUsage['planner']> }) {
+  const { t } = useSaaSPreferences();
+  return <div className={allowance.used >= allowance.limit ? 'is-out' : undefined}>
+    <dt>{t('助手改画布（免费，不占总次数）', 'Assistant canvas changes (free, outside the daily calls)')}</dt>
+    <dd>{Math.min(allowance.used, allowance.limit)} / {allowance.limit}</dd>
+  </div>;
 }
 
 /** The chip of a workspace on a paid plan: the owner's credits left this period and today's calls. */
@@ -110,6 +120,7 @@ function PaidMeter({ usage, plan, open, setOpen, reload }: { usage: RouteUsage; 
       <dl>
         <div className={empty ? 'is-out' : undefined}><dt>{t('本期剩余点数', 'Credits left this period')}</dt><dd>{formatCredits(credits.remaining, locale)} / {formatCredits(credits.granted, locale)}</dd></div>
         <div className={dailyOut ? 'is-out' : undefined}><dt>{t('默认模型今日次数', 'Default-model calls today')}</dt><dd>{Math.min(usage.daily.used, usage.daily.limit)} / {usage.daily.limit}</dd></div>
+        {usage.planner && <PlannerRow allowance={usage.planner} />}
         {(credits.carried ?? 0) > 0 && <div><dt>{t('上期超支（本期扣除）', 'Carried from last period')}</dt><dd>{formatCredits(credits.carried ?? 0, locale)}</dd></div>}
       </dl>
       {empty && <p className="saas-route-usage-out">{!plan.owner ? t('本期点数已用完：可以把节点换成默认模型继续；需要更多点数请联系工作区所有者。', 'This period’s credits are used up: switch nodes to the default model to keep going; ask the workspace’s owner for more.')

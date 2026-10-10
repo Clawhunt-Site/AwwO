@@ -15,7 +15,8 @@ type routeAllowance struct {
 }
 
 // routeUsageToday counts today's use as admission counts it. A free workspace has its daily total (invocations
-// plus generations) and, when route-limited, each route it limits; routes is nil for one without route limits
+// plus generations, apart from the operator's planner calls, which the daily total does not hold) and, when
+// route-limited, each route it limits; routes is nil for one without route limits
 // and for one that limits no route (an empty object, on plans but unlimited), which shows no meter.
 // A workspace whose owner has a paid plan reports the plan (plan is set, routes nil) with the account's daily
 // default-model calls across its workspaces. The deployment-wide ceilings, the media caps and the model allowlist
@@ -26,11 +27,11 @@ func (a *App) routeUsageToday(ctx context.Context, tid, uid string) (routeAllowa
 	var raw []byte
 	var interested bool
 	if e := a.db.QueryRow(ctx, `SELECT t.max_runs_per_day,t.route_limits,
-		(SELECT count(*) FROM model_invocations WHERE tenant_id=t.id AND created_at>=`+todayUTC+`),
+		(SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=t.id AND mi.created_at>=`+todayUTC+` AND `+countsTowardsDaily("$3")+`),
 		(SELECT count(*) FROM media_generations WHERE tenant_id=t.id AND created_at>=`+todayUTC+`),
 		(SELECT count(*) FROM media_generations WHERE tenant_id=t.id AND billed_user_id IS NULL AND created_at>=`+todayUTC+`),
 		EXISTS(SELECT 1 FROM upgrade_interests WHERE tenant_id=t.id AND user_id=$2)
-		FROM tenants t WHERE t.id=$1`, tid, uid).Scan(&daily.Limit, &raw, &invocations, &media, &freeMedia, &interested); e != nil {
+		FROM tenants t WHERE t.id=$1`, tid, uid, a.cfg.PlannerModel).Scan(&daily.Limit, &raw, &invocations, &media, &freeMedia, &interested); e != nil {
 		return daily, nil, false, nil, e
 	}
 	daily.Used = invocations + media
@@ -39,7 +40,7 @@ func (a *App) routeUsageToday(ctx context.Context, tid, uid string) (routeAllowa
 		return daily, nil, false, nil, e
 	}
 	if plan != nil {
-		usage, e := accountPlanUsage(ctx, a.db, plan.UserID)
+		usage, e := accountPlanUsage(ctx, a.db, plan.UserID, a.cfg.PlannerModel)
 		if e != nil {
 			return daily, nil, false, nil, e
 		}
@@ -94,6 +95,15 @@ func (a *App) routeUsageView(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{"limited": routes != nil, "daily": daily, "interested": interested,
 		"resetsAt": time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)}
+	// The canvas assistant's plans on the operator's model: outside the daily calls, inside their own ceiling.
+	planner, ok, e := a.plannerAllowanceToday(ctx, a.db, tid)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if ok {
+		out["planner"] = planner
+	}
 	if routes != nil {
 		out["routes"] = routes
 	}

@@ -143,17 +143,61 @@ func (a *App) probePI(ctx context.Context) (piHealth, error) { return a.probeRun
 // which is what lets one workspace hold a private model while others are
 // restricted away from it.
 func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
-	entitlement, e := tenantModelEntitlement(r.Context(), a.db, r.PathValue("tenantId"))
+	tid := r.PathValue("tenantId")
+	entitlement, e := tenantModelEntitlement(r.Context(), a.db, tid)
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
-	a.runtimeCatalogue(w, r, entitlement)
+	closed, e := a.closedRoutes(r.Context(), tid)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	a.runtimeCatalogue(w, r, entitlement, closed)
+}
+
+// closedRoutes are the paid model routes this workspace cannot call on its current plan: a free workspace's routes
+// limited to 0 (route_limits.go). The catalogue marks their models requiresUpgrade, so a picker can say that Pro or
+// Max is needed before a run is refused with premium_quota_exceeded. A workspace whose owner has an entitled plan,
+// or that has no route limits (the operator's own), has none; a route with a small allowance left is not closed.
+func (a *App) closedRoutes(ctx context.Context, tid string) (map[string]bool, error) {
+	var raw []byte
+	if e := a.db.QueryRow(ctx, "SELECT route_limits FROM tenants WHERE id=$1", tid).Scan(&raw); e != nil {
+		if noRows(e) {
+			return nil, nil
+		}
+		return nil, e
+	}
+	limits := readRouteLimits(raw)
+	if len(limits) == 0 {
+		return nil, nil
+	}
+	if plan, e := ownerPlan(ctx, a.db, tid, false); e != nil || plan != nil {
+		return nil, e
+	}
+	closed := map[string]bool{}
+	for _, route := range []string{routeGate, routeBedrock} {
+		if limit, ok := limits[route]; ok && limit == 0 {
+			closed[route] = true
+		}
+	}
+	return closed, nil
+}
+
+// catalogueModel is one advertised model: its route, and requiresUpgrade when that route is closed to the workspace.
+func (a *App) catalogueModel(model map[string]any, id string, closed map[string]bool) map[string]any {
+	route := a.cfg.modelRoute(id)
+	model["route"] = route
+	if closed[route] {
+		model["requiresUpgrade"] = true
+	}
+	return model
 }
 
 // Worker discovery is separated from resolving whose entitlement applies so the
 // two concerns stay independently testable.
-func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitlement modelEntitlement) {
+func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitlement modelEntitlement, closed map[string]bool) {
 	type discovery struct {
 		h   piHealth
 		err error
@@ -206,13 +250,13 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 				if m.Label != "" {
 					model["label"] = m.Label
 				}
-				models = append(models, model)
+				models = append(models, a.catalogueModel(model, m.ID, closed))
 				seen[m.ID] = true
 			}
 			// A legacy catalog may omit its own default. Offer it only when the
 			// entitlement still resolves to it, never as an unfiltered fallback.
 			if fallback := h.defaultModel(); fallback != "" && !seen[fallback] {
-				models = append(models, map[string]any{"id": fallback, "name": fallback, "provider": h.Provider, "runtime": id, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""})
+				models = append(models, a.catalogueModel(map[string]any{"id": fallback, "name": fallback, "provider": h.Provider, "runtime": id, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""}, fallback, closed))
 			}
 		}
 		available = available || result.err == nil
@@ -356,13 +400,16 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if e = tx.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM model_invocations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')", tid).Scan(&today); e != nil {
+	if e = tx.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$1 AND mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+countsTowardsDaily("$2")+")+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')", tid, a.cfg.PlannerModel).Scan(&today); e != nil {
 		a.dbError(w, e)
 		return
 	}
 	// With a plan the runs at once and the daily calls are the account's: the runs are counted across its
 	// workspaces just before the run is stored (planRunSlot), and each call checks the daily default-model calls.
-	if plan == nil && (active >= concurrent || today >= daily) {
+	// A plan the canvas assistant requests may run on the operator's planner model, which the daily calls do not
+	// hold, so its daily check waits until that is decided (below).
+	plannerRequest := isPlannerRequest(r)
+	if plan == nil && (active >= concurrent || (today >= daily && !plannerRequest)) {
 		fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
 		return
 	}
@@ -453,6 +500,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			a.log.Info("planner model not admitted; planning on the default model", "reason", refusal)
 		}
 	}
+	// A plan that stays on the default model is an ordinary call: the daily check deferred for it above.
+	if plan == nil && plannerRequest && !operatorPlanner && today >= daily {
+		fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
+		return
+	}
 	if !operatorPlanner {
 		snapshot, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
 		if e != nil {
@@ -518,7 +570,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		snapshot.History, snapshot.HistoryAvailable = &history, available
 	}
 	if plan != nil {
-		switch e = a.planRunSlot(r.Context(), tx, tid, workspaceLimits{active, concurrent, today, daily, needsPlan}); {
+		own := workspaceLimits{active, concurrent, today, daily, needsPlan}
+		if operatorPlanner {
+			own.today = 0 // the daily calls never hold the operator's planner call (planner_model.go)
+		}
+		switch e = a.planRunSlot(r.Context(), tx, tid, own); {
 		case errors.Is(e, errPlanBusy):
 			fail(w, 429, "plan_busy", "This plan's agents at once are all running, in this or another workspace; try again when one finishes")
 			return

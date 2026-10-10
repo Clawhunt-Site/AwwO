@@ -22,7 +22,7 @@ func TestPlannerSettingsFromEnv(t *testing.T) {
 		t.Setenv(name, "")
 	}
 	var c Config
-	if err := c.plannerSettingsFromEnv(); err != nil || c.PlannerModel != "" || c.PlannerPerWorkspaceDay != 30 || c.PlannerTotalPerDay != 2000 || c.PlannerMaxInputBytes != 60000 {
+	if err := c.plannerSettingsFromEnv(); err != nil || c.PlannerModel != "" || c.PlannerPerWorkspaceDay != 20 || c.PlannerTotalPerDay != 2000 || c.PlannerMaxInputBytes != 60000 {
 		t.Fatalf("defaults: model %q, %d/%d/%d, %v", c.PlannerModel, c.PlannerPerWorkspaceDay, c.PlannerTotalPerDay, c.PlannerMaxInputBytes, err)
 	}
 	for i, value := range []string{testPlannerModel, "5", "0", "4096"} {

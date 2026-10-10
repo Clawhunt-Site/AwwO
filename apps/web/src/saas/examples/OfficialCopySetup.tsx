@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { api, SaaSApiError, saasErrorMessage, tenantPath } from '../api';
-import { runtimeDefinitions, runtimeModels, type SaaSRuntimeStatus } from '../runtimeCatalog';
+import { runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeStatus } from '../runtimeCatalog';
 import type { CanvasDocument } from '../../canvas/canvasDoc';
 import type { UiLocale } from '../../locale';
 import { createOfficialDocument, type OfficialWorkflow } from './officialWorkflows';
@@ -26,7 +26,7 @@ export async function readOfficialCopyModels(tenantId: string, signal?: AbortSig
   try {
     return runtimeDefinitions(status).filter(runtime => runtime.available && runtime.configured).flatMap(runtime =>
       runtimeModels(status, runtime.id).map(model => {
-        const value = { runtime: runtime.id, model: model.id, label: `${runtime.name} · ${model.label || model.name || model.id}` };
+        const value = { runtime: runtime.id, model: model.id, label: withPlanTag(`${runtime.name} · ${model.label || model.name || model.id}`, model) };
         const key = modelKey(value);
         if (seen.has(key)) throw invalid();
         seen.add(key);

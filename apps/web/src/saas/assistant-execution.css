@@ -94,6 +94,12 @@ html:root .saas-canvas-shell .awwo-canvas-assistant {
     & .awwo-assistant-composer-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 8px; }
   }
   p.awwo-execution-warning { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  /* A chosen model the plan does not include: said before the task is sent, with the upgrade beside it. */
+  .awwo-execution-plan-needed {
+    display: grid; gap: 8px; padding: 10px 12px; border-radius: var(--saas-radius-sm); background: var(--saas-warning-bg);
+    color: var(--saas-text); font-size: var(--saas-text-xs); line-height: 1.55;
+    & > p { margin: 0; }
+  }
   .awwo-execution-unavailable { margin-bottom: 10px; font-size: var(--saas-text-sm); }
   .awwo-execution-unavailable a { background: var(--saas-primary); box-shadow: none; color: var(--saas-on-primary); &:hover { background: var(--saas-primary-hover); } }
   .awwo-execution-error { margin: 0; padding: 9px 12px; border-radius: var(--saas-radius-sm); background: var(--saas-danger-bg); color: var(--saas-danger); font-size: var(--saas-text-xs); line-height: 1.55; }

@@ -67,6 +67,20 @@ beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale'
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearSaaSCanvas(); });
 
 describe('the canvas assistant’s tasks', () => {
+  it('tags a model the plan does not include and offers the upgrade before the task is sent', async () => {
+    const premium = { ready: true, capabilities: { workspace: true, approvals: true }, models: [
+      { id: 'claude-opus-5', label: 'Claude Opus 5', runtime: 'openai-agents', route: 'gate', requiresUpgrade: true },
+      { id: 'qwen3.8-27b-p6', label: '默认模型', runtime: 'openai-agents', route: 'free' }] };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? premium : url.endsWith('/computer-runs') ? { items: [] } : detail)));
+    render(view());
+    expect(await screen.findByText('直接执行用：Claude Opus 5 · Pro')).toBeInTheDocument();
+    expect(screen.getByText(/这个模型需要 Pro \/ Max/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toHaveAttribute('target', '_blank');
+    fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('openai-agents', 'qwen3.8-27b-p6') } });
+    expect(await screen.findByText('直接执行用：默认模型')).toBeInTheDocument();
+    expect(screen.queryByText(/这个模型需要 Pro \/ Max/)).toBeNull();
+  });
+
   it('reads nothing until the canvas activates it', async () => {
     const fetcher = vi.fn(async (url: string) => json(defaultResponse(url)));
     vi.stubGlobal('fetch', fetcher);

@@ -8,6 +8,9 @@ export type RouteAllowance = { limit: number; used: number };
  * is present only for a route-limited workspace and lists only the routes it limits; a route it leaves
  * out has no limit of its own. */
 export type RouteUsage = { limited: boolean; daily: RouteAllowance; routes?: Partial<Record<RouteName, RouteAllowance>>; interested: boolean; resetsAt?: string;
+  /** The canvas assistant's changes on the operator's model today: outside the daily calls, up to their own daily
+   * number. Absent when changes run on the default model, which then counts like any call. */
+  planner?: RouteAllowance;
   /** Set when the workspace's owner has a paid plan: its paid routes spend the owner's credits instead of route limits. */
   // The renewal date and a pending cancellation are shown to the workspace's owner alone; owner says the plan is
   // the viewer's own (only its owner can upgrade it).

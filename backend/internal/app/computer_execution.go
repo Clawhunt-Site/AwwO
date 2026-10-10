@@ -178,10 +178,18 @@ func (a *App) computerRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// A fixed order, Pi first: the probes answer in any order, and the panel preselects the first model.
+	closed, e := a.closedRoutes(r.Context(), r.PathValue("tenantId"))
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
 	models := []map[string]any{}
 	for _, runtime := range []string{runtimePI, runtimeOpenAIAgents} {
 		if h, ok := healths[runtime]; ok {
-			models = append(models, computerModelChoices(runtime, entitlement.apply(h))...)
+			for _, model := range computerModelChoices(runtime, entitlement.apply(h)) {
+				id, _ := model["id"].(string)
+				models = append(models, a.catalogueModel(model, id, closed))
+			}
 		}
 	}
 	reason := ""

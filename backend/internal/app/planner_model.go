@@ -12,17 +12,19 @@ import (
 
 // The canvas planner may run on an operator-chosen model instead of its runtime's default (AWWO_PLANNER_MODEL,
 // e.g. a Claude model on Bedrock). Such a call is the operator's cost, not the workspace's: it is admitted outside
-// the workspace's model allowlist, its paid-route allowances and its plan credits, and counts only towards its
-// daily total like the free default model. Only a plan the canvas assistant requests (planCanvas) qualifies; a run
-// posted straight to a planner session keeps the default model, so the operator's model cannot be used as a free
-// general-purpose endpoint. Each workspace and the whole deployment have a daily ceiling of such calls, and a
-// request too large for it, a ceiling reached or a worker that does not offer the model all fall back to the
-// default model rather than failing.
+// the workspace's model allowlist, its paid-route allowances and its plan credits, and since 2026-10-10 (owner
+// decision) outside its daily calls too, a free workspace's and a plan's alike: arranging the canvas no longer uses
+// up the calls a newcomer needs to run it, and a workspace whose calls are used up can still have its canvas
+// arranged. Only a plan the canvas assistant requests (planCanvas) qualifies; a run posted straight to a planner
+// session keeps the default model, so the operator's model cannot be used as a free general-purpose endpoint. Each
+// workspace and the whole deployment have a daily ceiling of such calls instead, and a request too large for it, a
+// ceiling reached or a worker that does not offer the model all fall back to the default model rather than failing;
+// such a fallback plan is an ordinary call and counts towards the daily calls like any other.
 //
 // AWWO_PLANNER_PER_WORKSPACE_PER_DAY and AWWO_PLANNER_TOTAL_PER_DAY count planner-model calls per UTC day (0: none,
 // like a route allowance of 0); AWWO_PLANNER_MAX_INPUT_BYTES bounds the prompt plus the planner instructions.
 const (
-	defaultPlannerPerWorkspaceDay = 30
+	defaultPlannerPerWorkspaceDay = 20
 	defaultPlannerTotalPerDay     = 2000
 	defaultPlannerMaxInputBytes   = 60000
 )
@@ -82,6 +84,28 @@ func (c Config) validatePlannerSettings() error {
 // execution snapshot createRun froze says so, and nothing a workspace sends can set it. Such calls are counted by
 // the planner ceilings below and by nothing that measures a workspace's own route allowances (route_limits.go).
 const operatorPaidRun = `EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=mi.tenant_id AND r.id=mi.run_id AND r.execution_snapshot @> '{"operatorPaid":true}'::jsonb)`
+
+// countsTowardsDaily matches a ledger row (alias mi) that spends a daily allowance: every call except the operator's
+// planner-model calls, which only the planner ceilings below count. p is the query parameter holding the planner
+// model; with none configured it is ” and every row matches. A fallback plan on the default model is an ordinary
+// call and counts.
+func countsTowardsDaily(p string) string {
+	return `NOT (mi.model_id=` + p + ` AND ` + operatorPaidRun + `)`
+}
+
+// plannerAllowanceToday is the workspace's operator-paid planner calls today against its ceiling, for the usage meter;
+// ok is false when plans do not run on an operator model (they then count like any call).
+func (a *App) plannerAllowanceToday(ctx context.Context, q querier, tid string) (routeAllowance, bool, error) {
+	if a.cfg.PlannerModel == "" || a.cfg.UserCredentials {
+		return routeAllowance{}, false, nil
+	}
+	var used int
+	if e := q.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$2 AND mi.model_id=$1 AND mi.created_at>=`+todayUTC+` AND `+operatorPaidRun,
+		a.cfg.PlannerModel, tid).Scan(&used); e != nil {
+		return routeAllowance{}, false, e
+	}
+	return routeAllowance{Limit: a.cfg.PlannerPerWorkspaceDay, Used: used}, true, nil
+}
 
 // Why a plan the canvas assistant requested stays on the default model ("" when it may use the planner model).
 const (

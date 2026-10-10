@@ -42,6 +42,14 @@ it('shows nothing for a workspace without route limits, and stops asking about i
   }
 });
 
+it('shows the assistant’s free canvas changes as their own row, outside the daily total', async () => {
+  showing({ ...usage({ gate: { limit: 0, used: 0 }, bedrock: { limit: 0, used: 0 }, media: { limit: 1, used: 0 } }, { limit: 30, used: 4 }), planner: { limit: 20, used: 7 } });
+  meter();
+  fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 26 次' }));
+  expect(row('助手改画布（免费，不占总次数）')).toHaveTextContent('7 / 20');
+  expect(row('总次数')).toHaveTextContent('4 / 30');
+});
+
 it('counts down the daily total while every route still has room', async () => {
   showing(usage({ gate: { limit: 3, used: 1 } }));
   meter();

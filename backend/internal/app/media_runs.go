@@ -194,7 +194,7 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		}
 	}
 	if plan != nil {
-		usage, e := accountPlanUsage(ctx, tx, plan.UserID)
+		usage, e := accountPlanUsage(ctx, tx, plan.UserID, a.cfg.PlannerModel)
 		if e != nil {
 			a.dbError(w, e)
 			return

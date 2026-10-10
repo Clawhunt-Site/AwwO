@@ -35,7 +35,8 @@ import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
 import { nextSteps as canvasNextSteps, isNextStepsQuestion, type NextStep, type NextSteps } from './nextSteps';
 import { runErrorText } from '../saas/canvasErrors';
-import { recordUpgradeInterest } from '../saas/routeUsage';
+import { fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
+import { assistantCostNote } from './assistantCost';
 import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHost, type AssistantPending, type AssistantRoute,
   type RouteAssistant } from './assistantRouting';
 import { CanvasResults } from './CanvasResults';
@@ -1979,6 +1980,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [taskDraft, readOnly, assistantPending]);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [planningBusy, setPlanningBusy] = useState(false);
+  // The assistant's canvas changes on the operator's model are outside today's calls up to a daily number (the server's
+  // route usage says how many are left); read again whenever a plan settles, so the composer's note stays true.
+  const [plannerAllowance, setPlannerAllowance] = useState<RouteAllowance | null>(null);
+  const cloudTenantId = cloudScope?.tenant.id;
+  useEffect(() => {
+    if (!cloudTenantId || planningBusy) return;
+    const controller = new AbortController();
+    fetchRouteUsage(cloudTenantId, controller.signal)
+      .then(usage => { if (!controller.signal.aborted) setPlannerAllowance(usage.planner ?? null); })
+      .catch(() => { /* The note then keeps its general wording. */ });
+    return () => controller.abort();
+  }, [cloudTenantId, planningBusy]);
   const [planningError, setPlanningError] = useState('');
   const [planningRecovery, setPlanningRecovery] = useState<Awaited<ReturnType<typeof readCanvasPlanRecovery>> | null>(null);
   const [recoveryLoaded, setRecoveryLoaded] = useState(!canInitialize);
@@ -2536,9 +2549,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (nodes.length) setAssistantOpen(true);
     return true;
   };
+  const costNote = assistantCostNote(t, countsCalls, Boolean(unifiedHost), plannerAllowance);
   const assistantProps = {
     nextSteps: assistantNextSteps,
-    ...(countsCalls ? { costNote: t(unifiedHost ? 'assistant.costNoteUnified' : 'assistant.costNotePlan') } : {}),
+    ...(costNote ? { costNote } : {}),
     // A message being handled shows pending in the conversation; the box keeps it, out of sight, until it is.
     messages: shownMessages, draft: assistantPending && planning.draft.trim() === assistantPending.prompt ? '' : planning.draft,
     busy: planningBusy, error: planningError,

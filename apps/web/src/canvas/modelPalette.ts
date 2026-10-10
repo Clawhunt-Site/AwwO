@@ -1,7 +1,7 @@
 import type { UiLocale } from '../locale';
 import { api, tenantPath } from '../saas/api';
 import { currentSaaSCanvas } from '../saas/canvasBridge';
-import { runtimeDefinitions, runtimeModels, type SaaSRuntimeModel, type SaaSRuntimeStatus } from '../saas/runtimeCatalog';
+import { runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeModel, type SaaSRuntimeStatus } from '../saas/runtimeCatalog';
 import type { NodeTeamRuntime } from './nodeTeam';
 
 export type ModelProviderGroup = 'codex' | 'claude' | 'grok' | 'gemini' | 'deepseek' | 'qwen' | 'kimi' | 'glm'
@@ -99,7 +99,7 @@ export function groupModels(status: SaaSRuntimeStatus | null, locale: UiLocale =
       seen.set(key, signature);
       const group = providerGroup(model);
       const available = runtime.available && runtime.configured && runtime.workspace?.available !== false;
-      groups.find(item => item.id === group)!.models.push({ key, label: clean(model.label) || clean(model.name) || model.id,
+      groups.find(item => item.id === group)!.models.push({ key, label: withPlanTag(clean(model.label) || clean(model.name) || model.id, model),
         displayName: clean(model.name) || clean(model.label) || model.id,
         providerGroup: group, runtime: runtime.id, model: model.id, available,
         execution: runtime.workspace ? (runtime.workspace.available ? 'workspace' : 'workspace-unavailable') : 'text',
