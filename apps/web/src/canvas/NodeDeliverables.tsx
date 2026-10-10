@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { ArrowUpFromLine, Check, Copy, FileText } from 'lucide-react';
+import { AlertTriangle, ArrowUpFromLine, Check, Copy, FileCode2, FileDown, FileText, RotateCcw } from 'lucide-react';
 import { caseRunLabel, type SessionNode } from './canvasDoc';
 import { ContractFields } from './ContractFields';
 import { emptyContract, parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
@@ -78,10 +78,34 @@ export interface NodeDeliverablesProps {
   /** 'result' shows only what the node published, as the canvas's 成果 view does: no editors, and not an
    *  earlier conversation's result. The tile drawer is 'drawer'. */
   presentation?: 'drawer' | 'result';
+  /** Open with the deliverable form's editor expanded (the template guide's "edit deliverables"). */
+  editorOpen?: boolean;
+  /** Run the node's task again: offered where a file field came back as a name with no file behind it. */
+  onRerun?: () => void;
+  /** The field to show first (the 成果 view opens the deliverable a reader picked from its index). */
+  initialFieldId?: string;
+}
+
+/** What a published `file` field holds: bytes the server keeps, or (in a cloud workspace) only words — a name,
+ *  a path or a link that no file stands behind, which is said rather than shown as if it were a delivery. */
+function fileState(field: ContractField, value: string): 'stored' | 'missing' | null {
+  if (field.type !== 'file' || !currentSaaSCanvas()) return null;
+  if (storedArtifactUrl(value)) return 'stored';
+  return value.trim() ? 'missing' : null;
+}
+
+function MissingFile({ value, onRerun, readOnly }: { value: string; onRerun?: () => void; readOnly: boolean }) {
+  const { t } = useCanvasI18n();
+  const name = value.trim().length > 120 ? `${value.trim().slice(0, 120)}…` : value.trim();
+  return <div className="awwo-deliverable-missing-file" role="note">
+    <p><AlertTriangle size={14} aria-hidden="true" /><span>{t('deliverable.fileMissing', { name })}</span></p>
+    <p className="awwo-field-hint">{t(onRerun && !readOnly ? 'deliverable.fileMissingRerunHint' : 'deliverable.fileMissingHint')}</p>
+    {onRerun && !readOnly ? <button type="button" onClick={onRerun}><RotateCcw size={13} aria-hidden="true" />{t('deliverable.fileMissingRerun')}</button> : null}
+  </div>;
 }
 
 /** Only published output is a deliverable. Editing a form never creates one implicitly. */
-export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 'drawer' }: NodeDeliverablesProps) {
+export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 'drawer', editorOpen = false, onRerun, initialFieldId }: NodeDeliverablesProps) {
   const { locale, t } = useCanvasI18n();
   const [publishErrors, setPublishErrors] = useState<string[]>([]);
   const [selection, setSelection] = useState<{ identity: string; fieldId: string } | null>(null);
@@ -99,7 +123,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
   const outputIdentity = `${node.id}:${activeNodeThread(node).id}:${output?.at ?? ''}`;
   // A selection belongs to one publication. New Sessions/results and removed fields fall
   // back synchronously, so no render exposes a previous file while effects catch up.
-  const selectedField = (selection?.identity === outputIdentity && publishedFields.find(field => field.id === selection.fieldId)) || publishedFields[0];
+  const selectedField = (selection?.identity === outputIdentity && publishedFields.find(field => field.id === selection.fieldId))
+    || (initialFieldId ? publishedFields.find(field => field.id === initialFieldId) : undefined) || publishedFields[0];
   // An image or video node's result names stored files; it is shown as them, not as its record.
   const media = output && !contract.outputs.length && mediaKindOf(node.agentKind) ? parseMediaOutput(output.text) : null;
   // A malformed or legacy result remains visible as evidence, without manufacturing fields.
@@ -186,12 +211,39 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
           <DeliverableMarkdown>{parsed!.displaySource}</DeliverableMarkdown>
         </div>
       </article> : <div data-testid={`canvas-tile-output-${node.id}`}>
+        {/* Where the files are, said first: a page or a stored file is the delivery people look for, and its tab name
+            ("预览入口") does not say that a file is behind it. A file field that holds only a name is said too. */}
+        {(() => {
+          const files = publishedFields.map(field => {
+            const value = String(parsed!.values[field.id] ?? '');
+            const state = field.type === 'html' && value.trim() ? 'page' : fileState(field, value);
+            return state ? { field, state } : null;
+          }).filter((item): item is { field: ContractField; state: 'page' | 'stored' | 'missing' } => item !== null);
+          if (!files.length || publishedFields.length < 2) return null;
+          return <div className="awwo-deliverable-filelist" role="group" aria-label={t('deliverable.filesTitle')}>
+            <span className="awwo-deliverable-filelist-lead">{(() => {
+              const count = files.filter(item => item.state !== 'missing').length;
+              return t(count ? 'deliverable.filesLead' : 'deliverable.filesNone', { count });
+            })()}</span>
+            {files.map(({ field, state }) => <button key={field.id} type="button" className={state === 'missing' ? 'is-missing' : undefined}
+              aria-controls={selectedPanelId} onClick={() => setSelection({ identity: outputIdentity, fieldId: field.id })}>
+              {state === 'missing' ? <AlertTriangle size={13} aria-hidden="true" /> : state === 'page' ? <FileCode2 size={13} aria-hidden="true" /> : <FileDown size={13} aria-hidden="true" />}
+              <span>{field.label || field.id}</span>
+              <small>{t(state === 'missing' ? 'deliverable.fileOnlyName' : state === 'page' ? 'deliverable.filePage' : 'deliverable.fileOpen')}</small>
+            </button>)}
+          </div>;
+        })()}
         {publishedFields.length > 1 && <div className="awwo-deliverable-files" role="group" aria-label={t('deliverable.defaultTitle')}>
-          {publishedFields.map(field => <button key={field.id} type="button" aria-pressed={field.id === selectedField?.id}
-            aria-controls={selectedPanelId} title={field.label || field.id}
-            onClick={() => setSelection({ identity: outputIdentity, fieldId: field.id })}>
-            <FileText size={13} aria-hidden="true" /><span>{field.label || field.id}</span>
-          </button>)}
+          {publishedFields.map(field => {
+            const value = String(parsed!.values[field.id] ?? '');
+            const state = field.type === 'html' && value.trim() ? 'page' : fileState(field, value);
+            return <button key={field.id} type="button" aria-pressed={field.id === selectedField?.id}
+              aria-controls={selectedPanelId} title={field.label || field.id}
+              onClick={() => setSelection({ identity: outputIdentity, fieldId: field.id })}>
+              {state === 'missing' ? <AlertTriangle size={13} aria-hidden="true" /> : state === 'page' ? <FileCode2 size={13} aria-hidden="true" />
+                : state === 'stored' ? <FileDown size={13} aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />}<span>{field.label || field.id}</span>
+            </button>;
+          })}
         </div>}
         {selectedField && [selectedField].map(field => {
           const value = parsed!.values[field.id] ?? '';
@@ -218,6 +270,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
               : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}
                   identity={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}`}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
+              : fileState(field, String(value)) === 'missing' ? <MissingFile value={String(value)} onRerun={onRerun} readOnly={readOnly} />
               : filePath ? <LocalFileReference key={filePath} path={filePath} />
               : <span style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</span>}
           </div>
@@ -225,7 +278,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
         })}
       </div>}
     </>}
-    {!result && <details className="awwo-deliverables-editor">
+    {!result && <details className="awwo-deliverables-editor" open={editorOpen || undefined}>
       <summary>{t('deliverable.editForm')}</summary>
       <ContractFields fields={contract.outputs} label={t('deliverable.outputLabel')} readOnly={locked} onChange={updateFields} />
       <div className="awwo-output-publish">

@@ -10,6 +10,9 @@
   position: absolute; inset: 0; z-index: 60; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin;
   padding: 22px 24px 32px; background: var(--saas-canvas); color: var(--saas-text); font-family: var(--saas-font);
   -webkit-font-smoothing: antialiased;
+  /* The view's own width decides its layout: with the assistant panel and the Bots list open, a wide window
+     leaves it a fraction of the screen, and a window-width breakpoint kept two columns that no longer fit. */
+  container: awwo-results / inline-size;
 }
 .awwo-results *, .awwo-results *::before, .awwo-results *::after { box-sizing: border-box; }
 .awwo-results button { font: inherit; cursor: pointer; }
@@ -22,6 +25,11 @@
 }
 .awwo-results-main { display: grid; gap: 16px; min-width: 0; }
 .awwo-results-aside { position: sticky; top: 0; display: grid; gap: 14px; min-width: 0; }
+/* Nothing inside the result may be wider than its column: an overflowing preview slid under the steps beside it. */
+.awwo-results-main > *, .awwo-results-body, .awwo-results-body :is(.awwo-deliverables, .awwo-deliverable, .awwo-artifact-preview) { min-width: 0; max-width: 100%; }
+/* Every file of the result stays reachable as a tab: they wrap instead of scrolling out of sight. */
+.awwo-results .awwo-results-body .awwo-deliverable-files { flex-wrap: wrap; overflow-x: visible; }
+.awwo-results .awwo-results-body .awwo-deliverable-files button { max-width: 100%; }
 
 /* ── The result ─────────────────────────────────────────────────────────────────────────────── */
 .awwo-results-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; margin-bottom: 14px; }
@@ -105,6 +113,38 @@
 }
 @keyframes awwo-results-spin { to { rotate: 360deg; } }
 
+/* ── Everything this canvas made ───────────────────────────────────────────────────────────── */
+.awwo-results-index {
+  padding: 14px 16px 12px; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset;
+  & header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin-bottom: 10px; }
+  & h3 { margin: 0; font: 650 var(--saas-text-md)/1.3 var(--saas-font); }
+  & header p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.5; }
+  & ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+  & li { position: relative; display: flex; min-width: 0; }
+  & li > button {
+    display: flex; flex: 1; align-items: center; gap: 9px; min-width: 0; min-height: 52px; padding: 8px 40px 8px 11px; border: 0; border-radius: var(--saas-radius);
+    background: var(--saas-field); box-shadow: 0 0 0 1px var(--saas-hairline) inset; color: var(--saas-text); text-align: left;
+    transition: background var(--saas-dur-1), box-shadow var(--saas-dur-1);
+    &:hover { background: var(--saas-soft); }
+    &[aria-pressed='true'] { background: var(--saas-soft-strong); box-shadow: 0 0 0 1.5px var(--saas-primary) inset; }
+    & > svg { flex: none; color: var(--saas-muted); }
+  }
+  & li.is-page > button > svg, & li.is-model > button > svg, & li.is-file > button > svg { color: var(--saas-primary); }
+  & li.is-missing > button > svg { color: var(--saas-warning); }
+  & .awwo-results-index-text { display: grid; flex: 1; min-width: 0; gap: 1px; }
+  & .awwo-results-index-text :is(strong, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .awwo-results-index-text strong { font: 600 var(--saas-text-sm)/1.35 var(--saas-font); }
+  & .awwo-results-index-text small { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+  & .awwo-results-index-kind { flex: none; padding: 1px 8px; border-radius: var(--saas-radius-pill); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-border) inset; color: var(--saas-muted); font: 600 11px/1.5 var(--saas-font); white-space: nowrap; }
+  & li.is-missing .awwo-results-index-kind { background: var(--saas-warning-bg); box-shadow: none; color: var(--saas-warning); }
+  & .awwo-results-index-download {
+    position: absolute; top: 50%; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; translate: 0 -50%;
+    border-radius: 50%; color: var(--saas-muted);
+    &:hover { background: var(--saas-card); color: var(--saas-text); }
+  }
+}
+@container awwo-results (max-width: 520px) { .awwo-results-index .awwo-results-index-kind { display: none; } }
+
 /* ── How it was made ───────────────────────────────────────────────────────────────────────── */
 .awwo-results-stages {
   padding: 16px 12px 8px 16px; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset;
@@ -152,6 +192,14 @@
   .awwo-results-layout { grid-template-columns: minmax(0, 1fr); }
   .awwo-results-aside { position: static; }
 }
+@container awwo-results (max-width: 940px) {
+  .awwo-results-layout { grid-template-columns: minmax(0, 1fr); }
+  .awwo-results-aside { position: static; }
+}
+/* While the 成果 view is open it shows the run's outcome and progress itself; the board's floating run note would
+   only repeat them over the view's header and steps. A note about a problem stays, out of the way at the bottom. */
+:is(.awwo-main):has(.awwo-stage-canvas > .awwo-results) .awwo-run-slot .canvas-run-note:not(.canvas-run-note--err) { display: none; }
+:is(.awwo-main):has(.awwo-stage-canvas > .awwo-results) .awwo-run-slot .canvas-run-note--err { top: auto; bottom: 24px; }
 @media (max-width: 760px) {
   .awwo-results { padding: 14px 12px 24px; }
   .awwo-results-empty { min-height: 0; padding: 28px 22px; }

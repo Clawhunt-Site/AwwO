@@ -139,3 +139,64 @@ export function canvasResult(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Part
     && ((step.state === 'none' && step.depth >= final.depth) || (step.state === 'partial' && after.has(step.node.id))));
   return { stages, final, review, pending, complete: final.state !== 'partial' && !pending.length };
 }
+
+
+/** One thing a canvas made, as the 成果 view lists it: a page that runs, a stored file, a generated image, video
+ *  or 3D model, a document, or a file field that came back as a name with no file behind it. */
+export type DeliveredItemKind = 'page' | 'file' | 'image' | 'video' | 'model' | 'document' | 'missing';
+export interface DeliveredItem {
+  key: string;
+  nodeId: string;
+  nodeTitle: string;
+  /** The field to open in the deliverable viewer; absent for a media node, which shows all its files at once. */
+  fieldId?: string;
+  label: string;
+  kind: DeliveredItemKind;
+  /** A stored file's reference (awwo-file:…) or a media item's artifact id, for its download. */
+  reference?: string;
+  artifactId?: string;
+  name?: string;
+  /** What a missing file field said instead of the file. */
+  claimed?: string;
+}
+
+/**
+ * Everything the canvas's steps have published, step by step in canvas order: what the 成果 view shows all at once
+ * so nothing a run made has to be hunted for behind a step or a tab. Read from published outputs only, like the
+ * rest of this model; an acceptance report and an input form are not things made, and are left to their steps.
+ */
+export function deliveredItems(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Partial<Pick<CanvasDocument, 'execution'>>): DeliveredItem[] {
+  const result = canvasResult(doc);
+  const items: DeliveredItem[] = [];
+  for (const step of result.stages.flat()) {
+    const node = step.node;
+    if (step.input || !step.output || node.kind !== 'session') continue;
+    const nodeTitle = node.title.trim() || node.id;
+    const contract = node.contract || emptyContract();
+    if (!contract.outputs.length && mediaKindOf(node.agentKind)) {
+      const media = parseMediaOutput(step.output.text);
+      for (const item of media?.items ?? []) {
+        const kind: DeliveredItemKind = item.contentType.startsWith('video/') ? 'video' : item.contentType.startsWith('model/') ? 'model' : 'image';
+        items.push({ key: `${node.id}:${item.artifactId}`, nodeId: node.id, nodeTitle, label: item.name, kind, artifactId: item.artifactId, name: item.name });
+      }
+      continue;
+    }
+    if (step.review) continue;
+    const parsed = deliveryPresentation(contract, step.output.text);
+    if (parsed.errors.length) continue;
+    for (const field of contract.outputs) {
+      const label = field.label.trim() || field.id;
+      const base = { nodeId: node.id, nodeTitle, fieldId: field.id, label, key: `${node.id}:${field.id}` };
+      if (parsed.pendingFiles.has(field.id)) { items.push({ ...base, kind: 'file', name: parsed.pendingFiles.get(field.id)!.name }); continue; }
+      const value = parsed.values[field.id];
+      if (value === undefined || String(value).trim() === '') continue;
+      const text = String(value).trim();
+      if (field.type === 'html') items.push({ ...base, kind: 'page' });
+      else if (field.type === 'file') {
+        if (text.startsWith('awwo-file:')) items.push({ ...base, kind: 'file', reference: text });
+        else items.push({ ...base, kind: 'missing', claimed: text.slice(0, 200) });
+      } else if (field.type === 'markdown' || field.type === 'text') items.push({ ...base, kind: 'document' });
+    }
+  }
+  return items;
+}

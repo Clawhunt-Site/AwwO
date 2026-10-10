@@ -23,6 +23,8 @@ export interface ContractFieldsProps {
   readOnly?: boolean;
   /** Task entry starts with values; contract customization remains available on demand. */
   valuesFirst?: boolean;
+  /** With valuesFirst: open with the field structure editable (rename, retype, add, remove). */
+  initialEditingSchema?: boolean;
   label: string;
 }
 
@@ -75,10 +77,10 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
   </div>;
 }
 
-export function ContractFields({ fields, resolvedFields, sources, recorded, onChange, readOnly = false, valuesFirst = false, label }: ContractFieldsProps) {
+export function ContractFields({ fields, resolvedFields, sources, recorded, onChange, readOnly = false, valuesFirst = false, initialEditingSchema = false, label }: ContractFieldsProps) {
   const { locale, t } = useCanvasI18n();
   const instanceId = useId();
-  const [editingSchema, setEditingSchema] = useState(false);
+  const [editingSchema, setEditingSchema] = useState(initialEditingSchema && !readOnly);
   const showSchema = !valuesFirst || editingSchema;
   const nextField = useRef(0);
   const errors = validateContractFields(resolvedFields ?? fields);

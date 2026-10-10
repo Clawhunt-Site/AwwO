@@ -250,6 +250,12 @@
 .awwo-template-contract section > div > span { border: 1px solid var(--awwo-border); border-radius: 5px; padding: 5px 7px; font-size: 11px; line-height: 1.35; }
 .awwo-template-contract section:last-child > div > span { color: var(--template-accent); background: var(--template-soft); border-color: transparent; }
 .awwo-template-contract i { font-style: normal; color: var(--template-accent); padding-left: 3px; }
+/* The guide's inputs and deliverables are the node's own: each side opens its editor. */
+.awwo-template-details h4 { display: flex; align-items: center; gap: 6px; }
+.awwo-template-edit { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; min-height: 24px; padding: 2px 8px; border: 1px solid var(--awwo-border); border-radius: 999px; background: transparent; color: var(--awwo-ink); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.awwo-template-edit:hover { border-color: var(--template-accent, var(--awwo-border)); color: var(--template-accent, var(--awwo-ink)); }
+.awwo-template-edit:focus-visible { outline: 2px solid var(--template-accent, #286454); outline-offset: 2px; }
+.awwo-template-edit-hint { margin: -12px 0 18px; color: var(--awwo-muted); font-size: 11px; line-height: 1.55; }
 .awwo-template-workflow ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 11px; }
 .awwo-template-workflow li { display: flex; gap: 11px; align-items: flex-start; }
 .awwo-template-workflow li > span { flex-shrink: 0; font: 10px/1.7 ui-monospace, monospace; color: var(--template-accent); background: var(--template-soft); padding: 2px 5px; border-radius: 4px; }

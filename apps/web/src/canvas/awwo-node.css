@@ -184,6 +184,21 @@
 :is(.canvas-root, .awwo-results) .awwo-deliverable-files button[aria-pressed="true"] { border-color: var(--awwo-line); background: var(--awwo-soft); color: var(--awwo-ink); }
 :is(.canvas-root, .awwo-results) .awwo-deliverable-files button:hover { color: var(--awwo-ink); background: var(--awwo-soft); }
 :is(.canvas-root, .awwo-results) .awwo-deliverable-files button:focus-visible { outline: 2px solid var(--awwo-teal); outline-offset: -2px; }
+/* Where the files are: a quiet strip above the tabs, one chip per page or stored file, and a warning chip for a
+   file field that came back as a name only. */
+:is(.canvas-root, .awwo-results) .awwo-deliverable-filelist { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--awwo-line); border-radius: 8px; background: var(--awwo-tint, var(--awwo-soft)); font-size: 11px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-filelist-lead { color: var(--awwo-muted); font-weight: 600; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-filelist button { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-height: 28px; padding: 3px 9px; border: 1px solid var(--awwo-line); border-radius: 999px; background: var(--awwo-card, #fff); color: var(--awwo-ink); font: inherit; font-size: 11px; cursor: pointer; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-filelist button span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-filelist button small { color: var(--awwo-teal); font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-filelist button.is-missing { border-color: color-mix(in srgb, #b7791f 45%, var(--awwo-line)); }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-filelist button.is-missing small, :is(.canvas-root, .awwo-results) .awwo-deliverable-filelist button.is-missing svg { color: #9a6416; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-filelist button:focus-visible { outline: 2px solid var(--awwo-teal); outline-offset: 1px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-missing-file { display: grid; gap: 6px; padding: 12px; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-missing-file p { display: flex; align-items: flex-start; gap: 6px; margin: 0; overflow-wrap: anywhere; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-missing-file p svg { flex: none; margin-top: 2px; color: #9a6416; }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-missing-file button { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 30px; padding: 4px 12px; border: 1px solid var(--awwo-line); border-radius: 999px; background: var(--awwo-card, #fff); color: var(--awwo-ink); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+:root[data-theme='dark'] :is(.canvas-root, .awwo-results) :is(.awwo-deliverable-filelist button.is-missing small, .awwo-deliverable-filelist button.is-missing svg, .awwo-deliverable-missing-file p svg) { color: #dbba73; }
 /* A stored file deliverable: the body is a download action, not previewable text. */
 :is(.canvas-root, .awwo-results) .awwo-deliverable-file { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--awwo-accent, #286454); text-decoration: underline; text-underline-offset: 3px; }
 :is(.canvas-root, .awwo-results) .awwo-deliverable-body { padding: 10px 12px; overflow-wrap: anywhere; white-space: pre-wrap; }

@@ -3,12 +3,13 @@
 // nothing here runs, publishes or edits on its own. A host opts in (the hosted app); the canvas stays as
 // it is elsewhere.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, Loader2, Play, SquareArrowOutUpRight, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Box, Download, FileCode2, FileDown, FileText, Film, Image as ImageIcon, Loader2, Play, SquareArrowOutUpRight, X } from 'lucide-react';
 import { caseRunLabel, type CanvasEdge, type CanvasNode, type ReviewGraphPolicy } from './canvasDoc';
-import { canvasResult, type StepDelivery } from './canvasResultModel';
+import { canvasResult, deliveredItems, type DeliveredItem, type StepDelivery } from './canvasResultModel';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { DeliverableMarkdown, NodeDeliverables } from './NodeDeliverables';
 import type { RunNodeStatus } from './runGraph';
+import { storedArtifactUrl } from '../saas/canvasBridge';
 import './canvas-results.css';
 
 /** A notice the board would show (why a run did not start, what it is preparing): here, so it is seen. */
@@ -60,7 +61,10 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
   const { t } = useCanvasI18n();
   const result = useMemo(() => canvasResult({ nodes: [...nodes], edges: [...edges], execution }), [nodes, edges, execution]);
   const steps = useMemo(() => result.stages.flat(), [result]);
+  const items = useMemo(() => deliveredItems({ nodes: [...nodes], edges: [...edges], execution }), [nodes, edges, execution]);
   const [chosen, setChosen] = useState<string | null>(null);
+  // The field picked from the index of everything made, shown first in that step's viewer.
+  const [chosenField, setChosenField] = useState<string | undefined>(undefined);
   const root = useRef<HTMLElement>(null);
   // 回到成果 and the review's link remove themselves; focus goes to the step now shown in the list.
   const show = (id: string | null) => {
@@ -91,9 +95,13 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
       <span>{t('results.running', { done, total: tracked.length || steps.length })}</span><small>{t('results.runningHint')}</small></p>}
     <div className="awwo-results-layout">
       <div className="awwo-results-main">
+        {items.length > 0 && <DeliveredIndex items={items} activeNodeId={chosen ?? result.final?.node.id} activeFieldId={chosenField} onOpen={item => {
+          setChosenField(item.fieldId);
+          show(result.final && item.nodeId === result.final.node.id ? null : item.nodeId);
+        }} />}
         {selected ? <SelectedStep step={selected} final={showingFinal} complete={result.complete} pending={showingFinal ? result.pending.length : 0}
-          stage={stageOf(selected)} total={result.stages.length} onBackToResult={result.final && !showingFinal ? () => show(null) : undefined}
-          onOpenNode={() => onOpenNode(selected.node.id)} />
+          stage={stageOf(selected)} total={result.stages.length} onBackToResult={result.final && !showingFinal ? () => { setChosenField(undefined); show(null); } : undefined}
+          onOpenNode={() => onOpenNode(selected.node.id)} fieldId={chosenField} />
           : <div className="awwo-results-empty">
             <h2>{t('results.emptyTitle')}</h2>
             <p>{t(readOnly ? 'results.emptyReadOnly' : 'results.emptyBody')}</p>
@@ -118,7 +126,7 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
               return <li key={step.node.id}>
                 {/* The name keeps what the row shows: which step, whether it is the result, how it stands. */}
                 <button type="button" aria-pressed={selected?.node.id === step.node.id} aria-label={t('results.openStepState', { title: step.node.title || '—', state })}
-                  onClick={() => setChosen(isFinal ? null : step.node.id)}>
+                  onClick={() => { setChosenField(undefined); setChosen(isFinal ? null : step.node.id); }}>
                   <span className="awwo-results-step-title">{step.node.title || '—'}</span>
                   {isFinal && <span className="awwo-results-final">{badge}</span>}
                   <span className={`awwo-results-chip is-${chip.tone}`}>{chip.label}</span>
@@ -133,8 +141,8 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
   </section>;
 }
 
-function SelectedStep({ step, final, complete, pending, stage, total, onBackToResult, onOpenNode }: {
-  step: StepDelivery; final: boolean; complete: boolean; pending: number; stage: number; total: number; onBackToResult?: () => void; onOpenNode: () => void;
+function SelectedStep({ step, final, complete, pending, stage, total, onBackToResult, onOpenNode, fieldId }: {
+  step: StepDelivery; final: boolean; complete: boolean; pending: number; stage: number; total: number; onBackToResult?: () => void; onOpenNode: () => void; fieldId?: string;
 }) {
   const { t } = useCanvasI18n();
   // A case recording is named with the model and day it ran, not when this canvas received it.
@@ -167,7 +175,7 @@ function SelectedStep({ step, final, complete, pending, stage, total, onBackToRe
         {step.node.fields.some(field => field.value.trim()) ? <dl>{step.node.fields.filter(field => field.value.trim()).map(field => <div key={field.id}>
           <dt>{field.label || field.id}</dt><dd>{field.value}</dd></div>)}</dl> : <p>{t('results.inputEmpty')}</p>}
       </section>
-        : step.output ? <NodeDeliverables key={`${step.node.id}:${step.output.at}`} node={step.node} readOnly presentation="result" />
+        : step.output ? <NodeDeliverables key={`${step.node.id}:${step.output.at}:${fieldId ?? ''}`} node={step.node} readOnly presentation="result" initialFieldId={fieldId} />
           : <p className="awwo-results-nothing">{t('results.noStepDelivery')}</p>}
     </div>
   </article>;
@@ -184,5 +192,40 @@ function ReviewNote({ step, onOpen }: { step: StepDelivery; onOpen: () => void }
     <header><h3>{t('results.reviewTitle')}</h3><p>{t(note, { title })}</p></header>
     {step.text && step.state !== 'partial' ? <div className="awwo-results-review-text"><DeliverableMarkdown>{step.text.length > 900 ? `${step.text.slice(0, 900)}…` : step.text}</DeliverableMarkdown></div> : null}
     <button type="button" className="awwo-results-link" onClick={onOpen}>{t('results.openStep', { title })}</button>
+  </section>;
+}
+
+
+const ITEM_ICON = { page: FileCode2, file: FileDown, image: ImageIcon, video: Film, model: Box, document: FileText, missing: AlertTriangle } as const;
+const ITEM_KIND: Record<DeliveredItem['kind'], CanvasTextKey> = {
+  page: 'results.itemPage', file: 'results.itemFile', image: 'results.itemImage', video: 'results.itemVideo', model: 'results.itemModel',
+  document: 'results.itemDocument', missing: 'results.itemMissing',
+};
+
+/** Everything the canvas made, at once: each page, file, picture, video, 3D model and document of every step, so
+ *  nothing a run produced has to be found behind a step or a tab. Picking one opens it in the viewer below; a stored
+ *  file also downloads from here. A file field that came back as a name with no file is listed as what it is. */
+function DeliveredIndex({ items, activeNodeId, activeFieldId, onOpen }: {
+  items: DeliveredItem[]; activeNodeId?: string; activeFieldId?: string; onOpen: (item: DeliveredItem) => void;
+}) {
+  const { t } = useCanvasI18n();
+  const made = items.filter(item => item.kind !== 'missing' && item.kind !== 'document').length;
+  return <section className="awwo-results-index" aria-label={t('results.indexTitle')}>
+    <header><h3>{t('results.indexTitle')}</h3><p>{t('results.indexLead', { count: items.length, made })}</p></header>
+    <ul>{items.map(item => {
+      const Icon = ITEM_ICON[item.kind];
+      const download = item.reference ? storedArtifactUrl(item.reference) : item.artifactId ? storedArtifactUrl(`awwo-file:${item.artifactId}`) : null;
+      const active = item.nodeId === activeNodeId && (item.fieldId === undefined || item.fieldId === activeFieldId);
+      return <li key={item.key} className={`is-${item.kind}${active ? ' is-active' : ''}`}>
+        <button type="button" aria-pressed={active} onClick={() => onOpen(item)}
+          aria-label={t('results.indexOpen', { title: item.label, step: item.nodeTitle, kind: t(ITEM_KIND[item.kind]) })}>
+          <Icon size={16} aria-hidden="true" />
+          <span className="awwo-results-index-text"><strong>{item.label}</strong><small>{item.nodeTitle}</small></span>
+          <span className="awwo-results-index-kind">{t(ITEM_KIND[item.kind])}</span>
+        </button>
+        {download ? <a className="awwo-results-index-download" href={download} download={item.name || true} rel="noreferrer"
+          aria-label={t('results.indexDownload', { title: item.label })} title={t('results.indexDownload', { title: item.label })}><Download size={14} aria-hidden="true" /></a> : null}
+      </li>;
+    })}</ul>
   </section>;
 }

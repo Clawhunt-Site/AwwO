@@ -361,6 +361,10 @@ export const SessionTile = memo(function SessionTile({
   // A copied case node not yet set up has said and run nothing: open, it leads with what it was asked and received.
   const [inputOpen, setInputOpen] = useState(node.kind === 'session' && node.lastOutput?.source === 'case' && !node.binding);
   const [templateOpen, setTemplateOpen] = useState(false);
+  // Opened from the template guide's 编辑: the input drawer starts on its field structure, the deliverables drawer on
+  // its form editor. Each resets when its drawer closes, so opening it the ordinary way shows values as before.
+  const [inputSchemaOpen, setInputSchemaOpen] = useState(false);
+  const [deliverablesEditorOpen, setDeliverablesEditorOpen] = useState(false);
   const template = node.kind === 'session' ? getAgentTemplateForNode(node, locale) : undefined;
   const [deliverablesOpen, setDeliverablesOpen] = useState(node.kind === 'session' && Boolean(node.deliverablesOpen));
   useEffect(() => { setDeliverablesOpen(node.kind === 'session' && Boolean(node.deliverablesOpen)); }, [node.kind, node.kind === 'session' && node.deliverablesOpen]);
@@ -643,12 +647,20 @@ export const SessionTile = memo(function SessionTile({
     if (node.kind !== 'session') return;
     const next = !deliverablesOpen;
     setDeliverablesOpen(next);
+    if (!next) setDeliverablesEditorOpen(false);
     // Reading a prior delivery does not alter execution. During a run, keep disclosure
     // local so opening the drawer cannot write the locked document or resize its node.
     if (busy || viewOnlyRef.current) return;
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
+  const editInputStructure = () => { setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); };
+  const editDeliverableForm = () => {
+    setTemplateOpen(false);
+    setDeliverablesEditorOpen(true);
+    if (!deliverablesOpen) toggleDeliverables();
+  };
+  const closeInput = () => { setInputOpen(false); setInputSchemaOpen(false); };
   const emptyConversation = session.turns.length === 0 && !currentRunDetails && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming;
   // A copied case node with nothing said or run yet opens on its inputs (what it was asked and received).
   const caseIntro = node.kind === 'session' && node.lastOutput?.source === 'case' && emptyConversation && !(templateOpen && template);
@@ -782,7 +794,7 @@ export const SessionTile = memo(function SessionTile({
                   disabled={busy || (!viewOnly && !onUpdateNode)} onClick={() => changeThread(thread.id)} title={thread.preview || thread.title}>
                   <MessageSquare size={13} /><span>{thread.title}</span>
                 </button>)}</div>
-                <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setTemplateOpen(false); }}><ArrowDownToLine size={14} />{t('tile.input')}</button>
+                <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} />{t('tile.input')}</button>
               </nav> : null}
               <div className="awwo-node-chat">
                 {expanded ? <div className="awwo-chat-heading">
@@ -790,16 +802,17 @@ export const SessionTile = memo(function SessionTile({
                   <span>{currentThread?.title || 'Session 1'}</span>
                   {freeConversation && onRunNode ? <button type="button" className="awwo-chat-task-action" disabled={viewOnly || busy || interactionLocked} onClick={() => onRunNode(nodeId)}><Play size={13} />{t('conversation.executeTask')}</button> : null}
                   {template ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
-                  {!sessionsOpen ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setTemplateOpen(false); }}><ArrowDownToLine size={14} /></button> : null}
+                  {!sessionsOpen ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} /></button> : null}
                 </div> : null}
                 {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
-                  <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={() => setInputOpen(false)}><X size={14} /></button></header>
-                  <ContractFields valuesFirst fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
+                  <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={closeInput}><X size={14} /></button></header>
+                  <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className="awwo-node-panel awwo-node-panel--conversation">
                   {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
                     <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
-                    <AgentTemplateDetails template={template} contract={contract} />
+                    <AgentTemplateDetails template={template} contract={contract}
+                      onEditInputs={readOnly ? undefined : editInputStructure} onEditOutputs={readOnly ? undefined : editDeliverableForm} />
                   </section> : emptyConversation ?
                     <div className="awwo-node-empty" data-template={template?.id}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
@@ -817,7 +830,9 @@ export const SessionTile = memo(function SessionTile({
                 </div>
               </div>
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
-                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span><button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode} /></>}
+                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span><button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode}
+                  editorOpen={deliverablesEditorOpen}
+                  onRerun={onRunNode && !viewOnly && !busy && (node.kind !== 'session' || Boolean(node.binding) || initializeOnSend) ? () => { if (!viewOnlyRef.current) onRunNode(nodeId); } : undefined} /></>}
               </section> : null}
             </div>
           )}
