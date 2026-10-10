@@ -278,9 +278,15 @@ func (c Config) mediaProviderConfigured(provider string) bool {
 	return false
 }
 
+// isMediaModelID reports whether a model id names a media generator: RunningHub's "rh." or Tripo's "tripo." ids.
+func isMediaModelID(id string) bool {
+	return strings.HasPrefix(id, "rh.") || strings.HasPrefix(id, "tripo.")
+}
+
 // validateMediaExposure runs once every setting is read. Generations are paid from the operator's
-// key, so offering media to every unrestricted or every new workspace is refused unless the number
-// of workspaces an account may own is capped: otherwise each new workspace is a fresh daily limit.
+// key, so offering media to every unrestricted, every new or (for 3D) every workspace is refused
+// unless the number of workspaces an account may own is capped: otherwise each new workspace is a
+// fresh daily limit.
 func validateMediaExposure(c Config) error {
 	if !c.mediaConfigured() || c.MaxOwnedWorkspaces > 0 {
 		return nil
@@ -288,9 +294,12 @@ func validateMediaExposure(c Config) error {
 	if c.MediaUnrestrictedWorkspaces {
 		return errors.New("AWWO_MEDIA_UNRESTRICTED_WORKSPACES requires AWWO_MAX_OWNED_WORKSPACES")
 	}
+	if c.TripoAllWorkspaces && c.tripoConfigured() {
+		return errors.New("AWWO_TRIPO_ALL_WORKSPACES requires AWWO_MAX_OWNED_WORKSPACES")
+	}
 	if c.NewWorkspaceModels.allowed != nil {
 		for _, id := range *c.NewWorkspaceModels.allowed {
-			if strings.HasPrefix(id, "rh.") {
+			if isMediaModelID(id) {
 				return errors.New("AWWO_NEW_WORKSPACE_ALLOWED_MODELS may name media models only with AWWO_MAX_OWNED_WORKSPACES")
 			}
 		}

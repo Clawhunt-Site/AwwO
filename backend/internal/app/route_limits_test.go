@@ -76,7 +76,7 @@ func TestModelRoutes(t *testing.T) {
 	for model, want := range map[string]string{
 		"qwen3.8-27b-p6": routeFree, "qwen3.8-27b": routeFree, "qwen3.8-max": routeGate,
 		"claude-sonnet-5": routeGate, "gpt-5.5": routeGate, "bedrock.claude-opus-5-5": routeBedrock,
-		"rh.seedance-2": routeMedia, "": routeGate,
+		"rh.seedance-2": routeMedia, "tripo.p1": routeMedia, "": routeGate,
 	} {
 		if got := c.modelRoute(model); got != want {
 			t.Fatalf("%s routed to %s, want %s", model, got, want)

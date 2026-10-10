@@ -389,13 +389,12 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 	// One admitted run is one provider task: a submission that may or may not have reached the
 	// provider is never retried, because a retry could pay for the same generation twice. Nor is it
 	// abandoned by a cancel or a shutdown: once sent it may be billed, so its task id is awaited
-	// and recorded (the API client's own timeout bounds the wait).
+	// and recorded (the API client's own timeout bounds the wait). The one answer that is sent
+	// again is one saying no task was created (submitMedia).
 	if a.mediaStopped(ctx, id, false) {
 		return
 	}
-	submitCtx, cancelSubmit := context.WithTimeout(context.WithoutCancel(ctx), rhSubmitTimeout)
-	task, err := hub.submit(submitCtx, m.Endpoint, body)
-	cancelSubmit()
+	task, err := submitMedia(ctx, hub, m.Endpoint, body, func() { a.mediaStatus(ctx, tid, id, "queued") })
 	if err != nil {
 		if a.mediaStopped(ctx, id, false) {
 			return
@@ -456,6 +455,44 @@ func (a *App) mediaStopped(ctx context.Context, id string, recorded bool) bool {
 	return true
 }
 
+// submitMedia sends a run's one provider task. Every answer is final except one that says no task was created
+// (rhError.RetryAfter: Tripo's full concurrency pool or rate limit, which one operator account meets as soon as a
+// few workspaces generate at once): that is waited out as the provider asked, with the run shown as queued
+// (waiting is called once), until the task is accepted, refused otherwise, or the run is cancelled or past its
+// deadline. Each send has its own timeout and is never abandoned midway, like the single send it replaces.
+func submitMedia(ctx context.Context, hub mediaProvider, endpoint string, body map[string]any, waiting func()) (rhTask, error) {
+	notified := false
+	for {
+		submitCtx, cancelSubmit := context.WithTimeout(context.WithoutCancel(ctx), rhSubmitTimeout)
+		task, err := hub.submit(submitCtx, endpoint, body)
+		cancelSubmit()
+		e, ok := asRHError(err)
+		if !ok || e.RetryAfter <= 0 {
+			return task, err
+		}
+		if !notified {
+			notified = true
+			waiting()
+		}
+		select {
+		case <-ctx.Done():
+			return task, err
+		case <-time.After(e.RetryAfter):
+		}
+	}
+}
+
+// unbillMedia records that the provider returned a generation's frozen credits (Tripo does for a task that failed
+// or was cancelled on its side), so the generation costs its paid plan nothing (creditsSpentSQL). A free
+// allowance stays spent, like every other failure's.
+func (a *App) unbillMedia(ctx context.Context, tid, id string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, e := a.db.Exec(ctx, "UPDATE media_generations SET provider_accepted=false WHERE tenant_id=$1 AND run_id=$2", tid, id); e != nil {
+		a.log.Warn("unbilled generation not recorded", "event", "media_unbill_unrecorded")
+	}
+}
+
 func (a *App) recordMediaTask(ctx context.Context, tid, id, taskID string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
@@ -513,6 +550,9 @@ func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid s
 					return
 				}
 				continue
+			}
+			if e, ok := asRHError(err); ok && e.Unbilled {
+				a.unbillMedia(ctx, tid, id)
 			}
 			a.finish(tid, id, "failed", "", mediaFailureCode(err))
 			return

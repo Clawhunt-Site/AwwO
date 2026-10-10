@@ -45,6 +45,11 @@ type rhTask struct {
 type rhError struct {
 	Code      string
 	Transient bool
+	// RetryAfter is set only on a submission the provider refused before creating any task (Tripo's full
+	// concurrency pool or rate limit), which is therefore safe to send again after this wait.
+	RetryAfter time.Duration
+	// Unbilled marks a task the provider ended on its side without charging for it (Tripo: failed, cancelled).
+	Unbilled bool
 }
 
 func (e *rhError) Error() string { return e.Code }

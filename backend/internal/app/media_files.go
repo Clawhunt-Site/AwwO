@@ -43,13 +43,22 @@ func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id,
 	}
 	items := []mediaItem{}
 	for i, result := range results {
-		release, ok := a.reserveMediaSpace(hub.fileLimit())
-		if !ok {
-			return "", &rhError{Code: "media_storage_full"}
+		var item mediaItem
+		var err error
+		if release, ok := a.reserveMediaSpace(hub.fileLimit()); !ok {
+			err = &rhError{Code: "media_storage_full"}
+		} else {
+			item, err = a.storeMediaResult(ctx, hub, tmp, tid, id, canvasID, nodeID, m, i+1, result)
+			release()
 		}
-		item, err := a.storeMediaResult(ctx, hub, tmp, tid, id, canvasID, nodeID, m, i+1, result)
-		release()
 		if err != nil {
+			// A 3D node's rendered preview is a convenience beside its model: once the model (the first
+			// file) is stored, a preview that cannot be fetched, stored or recognised as an image leaves
+			// the paid run with its model alone.
+			if m.Kind == mediaKindModel3D && len(items) > 0 && ctx.Err() == nil {
+				a.log.Warn("3D preview not stored", "event", "media_preview_skipped", "code", mediaFailureCode(err))
+				continue
+			}
 			return "", err
 		}
 		items = append(items, item)

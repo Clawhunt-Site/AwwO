@@ -380,8 +380,17 @@ var mediaBaseCredits = map[string]int{
 	"rh.qwen-image-3-pro": 30, "rh.nano-banana-pro": 60, "rh.gpt-image-2": 60, "rh.midjourney-v7": 60,
 	"rh.vidu-q3-pro": 100, "rh.wan-2-7": 100, "rh.grok-imagine-video": 100, "rh.pixverse-v6": 100,
 	"rh.kling-v3-pro": 200, "rh.seedance-2": 200, "rh.veo-3-1-fast": 200, "rh.sora-2": 200, "rh.hailuo-2-3-pro": 200,
-	// Tripo 3D models: 20 Tripo credits ($0.20) for a textured text-to-3D task, held at three times that.
-	"tripo.v3-1": 60, "tripo.p1": 60,
+	// Tripo 3D models at their default (textured) settings; model3DCredits holds the rest of each price.
+	"tripo.v3-1": 60, "tripo.p1": 120,
+}
+
+// model3DCredits prices a Tripo text-to-3D task at three times Tripo's own credits (one Tripo credit and one AwwO
+// credit are both $0.01): with texture, without, and what detailed texture and detailed geometry add. Tripo's
+// tables (2026-10): H3.1 20 textured, 10 untextured, +10 detailed texture, +20 detailed geometry; P1 40, 30,
+// +10 detailed texture, and no geometry option.
+var model3DCredits = map[string]struct{ textured, untextured, detailedTexture, detailedGeometry int }{
+	"tripo.v3-1": {textured: 60, untextured: 30, detailedTexture: 30, detailedGeometry: 60},
+	"tripo.p1":   {textured: 120, untextured: 90, detailedTexture: 30},
 }
 
 // mediaCreditsFor prices a generation from its model and resolved settings. Settings that raise RunningHub's
@@ -430,18 +439,24 @@ func mediaCreditsFor(model, kind string, params map[string]any) int {
 	}
 	credits := float64(base)
 	if kind == mediaKindModel3D {
-		// Tripo (1 credit = $0.01): text to 3D 20 with texture, 10 without; HD texture +10, detailed geometry +20.
-		// Priced at three times that, like the other media models until measured.
-		if text("texture") == "false" && text("pbr") == "false" {
-			credits = float64(base) / 2
+		price, ok := model3DCredits[model]
+		if !ok {
+			// A 3D model without its own table pays the highest of every option.
+			price.textured, price.untextured, price.detailedTexture, price.detailedGeometry = base, base, base, base
 		}
-		if text("textureQuality") == "detailed" {
-			credits += 30
+		// PBR materials force a texture on, so a model is untextured only with both off; detailed texture is
+		// then not generated and not charged.
+		n := price.untextured
+		if text("texture") != "false" || text("pbr") != "false" {
+			n = price.textured
+			if text("textureQuality") == "detailed" {
+				n += price.detailedTexture
+			}
 		}
 		if text("geometryQuality") == "detailed" {
-			credits += 60
+			n += price.detailedGeometry
 		}
-		return int(math.Ceil(credits))
+		return n
 	}
 	if kind == mediaKindVideo {
 		credits *= max(1, number("duration", 5)/5)

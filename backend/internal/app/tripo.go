@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -138,18 +139,20 @@ func (t *tripoClient) download(ctx context.Context, raw string, w io.Writer) (in
 	return downloadResult(ctx, t.files, t.hosts, t.maxFile, raw, w)
 }
 
-// submit creates the task. Tripo freezes the task's credits at creation and charges them only on success.
+// submit creates the task. Tripo freezes the task's credits at creation and charges them only on success. Its busy
+// answers (a full concurrency pool for the model's series, or its rate limit) create no task, so they carry the
+// wait Tripo asked for and the caller may send the same body again (submitMedia).
 func (t *tripoClient) submit(ctx context.Context, endpoint string, body map[string]any) (rhTask, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return rhTask{}, &rhError{Code: "media_request_invalid"}
 	}
-	data, status, err := t.do(ctx, http.MethodPost, endpoint, raw)
+	data, status, wait, err := t.do(ctx, http.MethodPost, endpoint, raw)
 	if err != nil {
 		return rhTask{}, err
 	}
 	if status != 200 {
-		return rhTask{}, tripoHTTPError(status, data)
+		return rhTask{}, tripoRefusal(tripoHTTPError(status, data), wait)
 	}
 	var v struct {
 		Code json.RawMessage `json:"code"`
@@ -161,7 +164,7 @@ func (t *tripoClient) submit(ctx context.Context, endpoint string, body map[stri
 		return rhTask{}, &rhError{Code: "media_provider_unavailable", Transient: true}
 	}
 	if code := numericCode(v.Code); code != "" && code != "0" {
-		return rhTask{}, tripoCodeError(code)
+		return rhTask{}, tripoRefusal(tripoCodeError(code), wait)
 	}
 	id := strings.TrimSpace(v.Data.TaskID)
 	if !tripoTaskID.MatchString(id) {
@@ -176,7 +179,7 @@ func (t *tripoClient) query(ctx context.Context, taskID string) (rhTask, error) 
 	if !tripoTaskID.MatchString(taskID) {
 		return rhTask{}, &rhError{Code: "media_task_missing"}
 	}
-	data, status, err := t.do(ctx, http.MethodGet, "/tasks/"+url.PathEscape(taskID), nil)
+	data, status, _, err := t.do(ctx, http.MethodGet, "/tasks/"+url.PathEscape(taskID), nil)
 	if err != nil {
 		return rhTask{}, err
 	}
@@ -190,9 +193,10 @@ func parseTripoTask(data []byte, taskID string) (rhTask, error) {
 	var v struct {
 		Code json.RawMessage `json:"code"`
 		Data struct {
-			TaskID string `json:"task_id"`
-			Status string `json:"status"`
-			Output struct {
+			TaskID    string          `json:"task_id"`
+			Status    string          `json:"status"`
+			ErrorCode json.RawMessage `json:"error_code"`
+			Output    struct {
 				ModelURL         string `json:"model_url"`
 				PBRModelURL      string `json:"pbr_model_url"`
 				BaseModelURL     string `json:"base_model_url"`
@@ -235,16 +239,26 @@ func parseTripoTask(data []byte, taskID string) (rhTask, error) {
 	case "expired":
 		return task, &rhError{Code: "media_result_unavailable"}
 	case "failed", "cancelled":
-		return task, &rhError{Code: "media_failed"}
+		// Tripo returns a failed or cancelled task's frozen credits, so the run costs its plan nothing
+		// (followMedia). A documented failure reason, such as a content refusal, is kept; a busy code
+		// is not a reason here, since the task already ended.
+		failure := &rhError{Code: "media_failed", Unbilled: true}
+		if code := numericCode(v.Data.ErrorCode); code != "" {
+			if known, ok := tripoCodes[code]; ok && !known.Transient {
+				failure.Code = known.Code
+			}
+		}
+		return task, failure
 	default:
 		return task, &rhError{Code: "media_provider_unavailable", Transient: true}
 	}
 	return task, nil
 }
 
-func (t *tripoClient) do(ctx context.Context, method, path string, body []byte) ([]byte, int, error) {
+// do sends one API request. wait is how long a refused (429) request was asked to wait, and 0 otherwise.
+func (t *tripoClient) do(ctx context.Context, method, path string, body []byte) (data []byte, status int, wait time.Duration, err error) {
 	if ctx.Err() != nil {
-		return nil, 0, ctx.Err()
+		return nil, 0, 0, ctx.Err()
 	}
 	var reader io.Reader
 	if body != nil {
@@ -252,7 +266,7 @@ func (t *tripoClient) do(ctx context.Context, method, path string, body []byte) 
 	}
 	req, err := http.NewRequestWithContext(ctx, method, t.base+path, reader)
 	if err != nil {
-		return nil, 0, &rhError{Code: "media_request_invalid"}
+		return nil, 0, 0, &rhError{Code: "media_request_invalid"}
 	}
 	req.Header.Set("Authorization", "Bearer "+t.key)
 	if body != nil {
@@ -261,16 +275,52 @@ func (t *tripoClient) do(ctx context.Context, method, path string, body []byte) 
 	resp, err := t.api.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, 0, ctx.Err()
+			return nil, 0, 0, ctx.Err()
 		}
-		return nil, 0, &rhError{Code: "media_provider_unavailable", Transient: true}
+		return nil, 0, 0, &rhError{Code: "media_provider_unavailable", Transient: true}
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, tripoResponseLimit+1))
+	data, err = io.ReadAll(io.LimitReader(resp.Body, tripoResponseLimit+1))
 	if err != nil || len(data) > tripoResponseLimit {
-		return nil, 0, &rhError{Code: "media_provider_unavailable", Transient: true}
+		return nil, 0, 0, &rhError{Code: "media_provider_unavailable", Transient: true}
 	}
-	return data, resp.StatusCode, nil
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait = tripoRetryAfter(resp.Header, time.Now())
+	}
+	return data, resp.StatusCode, wait, nil
+}
+
+// Tripo's busy answers are waited out for at least a second and at most half a minute at a time; the run's own
+// deadline bounds the whole wait.
+const (
+	tripoBusyWait    = 5 * time.Second
+	tripoBusyWaitMin = time.Second
+	tripoBusyWaitMax = 30 * time.Second
+)
+
+// tripoRetryAfter reads how long Tripo asked a refused request to wait: Retry-After in seconds (its concurrency
+// answer) or X-RateLimit-Reset as a Unix time (its rate limit), bounded to 1-30 s, and 5 s when neither is given.
+func tripoRetryAfter(h http.Header, now time.Time) time.Duration {
+	wait := tripoBusyWait
+	if n, err := strconv.Atoi(strings.TrimSpace(h.Get("Retry-After"))); err == nil {
+		wait = time.Duration(n) * time.Second
+	} else if n, err := strconv.ParseInt(strings.TrimSpace(h.Get("X-RateLimit-Reset")), 10, 64); err == nil {
+		wait = time.Unix(n, 0).Sub(now)
+	}
+	return min(max(wait, tripoBusyWaitMin), tripoBusyWaitMax)
+}
+
+// tripoRefusal marks Tripo's busy answer to a submission -- the model series' concurrency pool is full (2000) or
+// the key's rate limit is reached (1007, or a bare 429) -- as safe to send again: Tripo created no task, so nothing
+// was frozen or billed. Every other error is returned unchanged and is never resent.
+func tripoRefusal(err error, wait time.Duration) error {
+	if e, ok := asRHError(err); ok && e.Code == "media_provider_busy" {
+		if wait <= 0 {
+			wait = tripoBusyWait
+		}
+		e.RetryAfter = wait
+	}
+	return err
 }
 
 // tripoHTTPError reduces an error answer to a closed code, reading Tripo's documented error code first.
@@ -280,8 +330,8 @@ func tripoHTTPError(status int, data []byte) error {
 	}
 	_ = json.Unmarshal(data, &v)
 	if code := numericCode(v.Code); code != "" && code != "0" {
-		if err := tripoCodeError(code); !errors.Is(err, errTripoUnknownCode) {
-			return err
+		if _, known := tripoCodes[code]; known {
+			return tripoCodeError(code)
 		}
 	}
 	switch {
@@ -299,24 +349,22 @@ func tripoHTTPError(status int, data []byte) error {
 	return &rhError{Code: "media_failed"}
 }
 
-var errTripoUnknownCode = &rhError{Code: "media_failed"}
+// tripoCodes maps Tripo's documented error codes onto closed AwwO codes. 2010 is the operator's balance: the
+// account needs topping up, which the failure says without naming the account.
+var tripoCodes = map[string]rhError{
+	"1000": {Code: "media_provider_unauthorized"}, "1001": {Code: "media_provider_unauthorized"},
+	"2010": {Code: "media_provider_balance"},
+	"2008": {Code: "media_content_rejected"},
+	"1007": {Code: "media_provider_busy", Transient: true}, "2000": {Code: "media_provider_busy", Transient: true},
+	"2002": {Code: "media_params_invalid"}, "2003": {Code: "media_params_invalid"}, "2004": {Code: "media_params_invalid"},
+	"1004": {Code: "media_params_invalid"},
+	"2015": {Code: "media_failed"}, "2018": {Code: "media_failed"},
+}
 
-// tripoCodeError maps Tripo's documented error codes onto closed AwwO codes. 2010 is the operator's balance:
-// the account needs topping up, which the failure says without naming the account.
+// tripoCodeError returns a fresh error for a Tripo code; an undocumented code is a plain failure.
 func tripoCodeError(code string) error {
-	switch code {
-	case "1000", "1001":
-		return &rhError{Code: "media_provider_unauthorized"}
-	case "2010":
-		return &rhError{Code: "media_provider_balance"}
-	case "2008":
-		return &rhError{Code: "media_content_rejected"}
-	case "1007", "2000":
-		return &rhError{Code: "media_provider_busy", Transient: true}
-	case "2002", "2003", "2004", "1004":
-		return &rhError{Code: "media_params_invalid"}
-	case "2015", "2018":
-		return &rhError{Code: "media_failed"}
+	if e, ok := tripoCodes[code]; ok {
+		return &e
 	}
-	return errTripoUnknownCode
+	return &rhError{Code: "media_failed"}
 }

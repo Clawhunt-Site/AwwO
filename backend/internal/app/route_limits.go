@@ -197,7 +197,7 @@ func (c Config) validateRouteSettings() error {
 
 func (c Config) modelRoute(model string) string {
 	switch {
-	case strings.HasPrefix(model, "rh."):
+	case isMediaModelID(model):
 		return routeMedia
 	case strings.HasPrefix(model, "bedrock."):
 		return routeBedrock
