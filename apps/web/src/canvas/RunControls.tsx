@@ -45,6 +45,10 @@ export interface RunControlsProps {
   onConfigureNode?: (nodeId: string) => void;
   /** Open an actual completed delivery; never starts or retries a run. */
   onViewOutput?: (nodeId: string) => void;
+  /** Said after the summary when a review found the delivery wanting: every node succeeding is not the whole story. */
+  reviewNote?: string;
+  /** Opens the assistant's next steps beside that note. */
+  onReviewNext?: () => void;
   /** Called after local preflight, or directly when initializeOnRun is enabled. */
   onStart: () => void;
   onStop: () => void;
@@ -97,6 +101,8 @@ export function RunControls({
   runUnavailableReason,
   onConfigureNode,
   onViewOutput,
+  reviewNote,
+  onReviewNext,
   onStart,
   onStop,
   onToggleTimeline,
@@ -216,7 +222,8 @@ export function RunControls({
         </div>
       ) : summary && summaryKey !== dismissedSummary ? (
         <div className="canvas-run-note" role="status"><div className="canvas-run-note-head">
-          <span>{summaryNote(summary, stopped, locale)}</span>
+          <span>{summaryNote(summary, stopped, locale)}{reviewNote ? `${locale === 'zh' ? '' : ' '}${reviewNote}` : ''}</span>
+          {reviewNote && onReviewNext && <button type="button" className="canvas-run-note-action" onClick={onReviewNext}>{t('run.reviewNext')}</button>}
           {deliveries.length === 1 && <button type="button" className="canvas-run-note-action"
             onClick={() => onViewOutput?.(deliveries[0].id)}>{t('run.viewOutput')}</button>}
           {deliveries.length > 1 && <details className="canvas-run-deliveries"><summary>{t('run.viewOutputs', { count: deliveries.length })}</summary>

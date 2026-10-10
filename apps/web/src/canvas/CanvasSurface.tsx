@@ -33,7 +33,8 @@ import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePoint
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
-import { nextSteps as canvasNextSteps, isNextStepsQuestion, type NextStep, type NextSteps } from './nextSteps';
+import { nextSteps as canvasNextSteps, isNextStepsQuestion, isOutcomeQuestion, type NextStep, type NextSteps } from './nextSteps';
+import { reviewVerdict, reworkRequirements } from './reviewVerdict';
 import { runErrorText } from '../saas/canvasErrors';
 import { fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
 import { assistantCostNote } from './assistantCost';
@@ -2473,6 +2474,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // A refusal's text is the run error's own copy (canvasErrors), in whichever language the run was read in.
     isPremiumRefusal: detail => PREMIUM_REFUSALS.some(text => detail.includes(text)),
     isQuotaRefusal: detail => QUOTA_REFUSALS.some(text => detail.includes(text)),
+    // Only the hosted workspace puts a node's task requirements into its prompt, which is how a rework carries the
+    // review's findings.
+    reworkAvailable: Boolean(cloudScope),
   });
   // Only the hosted app counts calls, so only it says what a step costs (and that this advice cost none).
   const countsCalls = Boolean(cloudScope);
@@ -2480,6 +2484,23 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const listSeparator = locale === 'zh' ? '、' : ', ';
   const titleOf = (id: string) => nodes.find(node => node.id === id)?.title ?? '';
   const configureNode = (id: string) => { if (!inspectorCloseLocked.current) { focusNode(id, { configure: true }); setInspectorId(id); } };
+  // A review that found the delivery wanting is acted on in one click: its findings become one of the reviewed Agent's
+  // task requirements (shown, and editable, in that node's settings), then the Agent and everything it feeds run
+  // again, the review included. A later rework from the same review replaces that requirement instead of adding one.
+  const reworkFromReview = (producerId: string, reviewerId: string) => {
+    if (!canEditStructure()) return;
+    const current = docRef.current;
+    const producer = current.nodes.find((node): node is SessionNode => node.id === producerId && node.kind === 'session');
+    const reviewer = current.nodes.find((node): node is SessionNode => node.id === reviewerId && node.kind === 'session');
+    const verdict = reviewer ? reviewVerdict(reviewer) : null;
+    if (!producer || !reviewer || !verdict || verdict.approved) return;
+    const frame = reworkRequirements(producer.taskFrame, t('assistant.reworkMarker', { node: reviewer.title }),
+      t('assistant.reworkHeader', { verdict: verdict.verdict || t('assistant.nextVerdictRejected') }), verdict.findings);
+    if (!frame) { setHandoffNote(t('assistant.reworkNoRoom', { node: producer.title })); configureNode(producerId); return; }
+    patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === producerId && node.kind === 'session' ? { ...node, taskFrame: frame } : node) }),
+      { label: 'rework' });
+    void startRun(downstreamClosure([producerId]));
+  };
   const nextAction = (step: NextStep, primary: boolean): AssistantNextSteps['actions'][number] => {
     switch (step.kind) {
       case 'upgrade': return { id: 'upgrade', primary, label: t('assistant.nextUpgrade'), href: accountURL('plans'),
@@ -2495,6 +2516,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         onSelect: () => void startRun([step.nodeId]) };
       case 'run-rest': return { id: 'run-rest', primary, label: withCalls(t('assistant.nextRunRest', { count: step.nodeIds.length }), step.calls),
         onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
+      case 'rework': return { id: `rework-${step.nodeId}`, primary, label: withCalls(t('assistant.nextRework', { node: titleOf(step.nodeId) }), step.calls),
+        onSelect: () => reworkFromReview(step.nodeId, step.reviewerId) };
+      case 'open-review': return { id: `review-${step.nodeId}`, primary, label: t('assistant.nextOpenReview'),
+        onSelect: () => { toggleDeliverables(step.nodeId, true); focusNode(step.nodeId); setTimelineOpen(false); } };
       case 'results': return { id: 'results', primary, label: t('assistant.nextResults'), onSelect: () => changeStageView('results') };
     }
   };
@@ -2505,9 +2530,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       case 'failed': return situation.count > 1 ? t('assistant.nextLeadFailedMany', { node: situation.nodeTitle, count: situation.count })
         : t('assistant.nextLeadFailed', { node: situation.nodeTitle });
       case 'inputs': return t('assistant.nextLeadInputs', { count: situation.fields });
+      case 'rejected': {
+        const verdict = situation.verdict || t('assistant.nextVerdictRejected');
+        return situation.reason ? t('assistant.nextLeadRejected', { node: situation.nodeTitle, verdict, reason: situation.reason })
+          : t('assistant.nextLeadRejectedBare', { node: situation.nodeTitle, verdict });
+      }
       case 'fresh': return t(tryFirst ? 'assistant.nextLeadFreshTry' : 'assistant.nextLeadFresh');
       case 'partial': return t('assistant.nextLeadPartial', { count: situation.count });
-      case 'complete': return t('assistant.nextLeadComplete');
+      case 'complete': return situation.approvedBy ? t('assistant.nextLeadCompleteApproved', { node: situation.approvedBy }) : t('assistant.nextLeadComplete');
     }
   };
   const fillSteps = suggested?.steps.flatMap(step => step.kind === 'fill-inputs' ? [step] : []) ?? [];
@@ -2524,7 +2554,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     ...(countsCalls ? { note: t('assistant.nextFree') } : {}),
   } : undefined;
   // A problem the assistant can help with marks its closed toggle; a canvas that merely has not run does not.
-  const assistantHint = Boolean(suggested && ['quota', 'premium', 'failed', 'inputs'].includes(suggested.situation.kind));
+  const assistantHint = Boolean(suggested && ['quota', 'premium', 'failed', 'rejected', 'inputs'].includes(suggested.situation.kind));
+  // The run's own summary says "7/7 succeeded"; when a review found the delivery wanting it says that too.
+  const situation = suggested?.situation;
+  const reviewNote = situation?.kind === 'rejected'
+    ? t('run.reviewRejected', { node: situation.nodeTitle, verdict: situation.verdict || t('assistant.nextVerdictRejected') }) : undefined;
   // "What's missing?", "what now?": answered here from the same advice, so the question costs no call. The reply
   // says so; the 「接下来」 block under it has the buttons.
   const localAnswer = (): string => {
@@ -2537,10 +2571,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       return `${assistantNextSteps.lead}${locale === 'zh' ? '' : ' '}${rows.join(locale === 'zh' ? '；' : '; ')}${locale === 'zh' ? '。' : '. '}${assistantNextSteps.footnote ?? ''}${free}`;
     }
     const first = assistantNextSteps.actions[0]?.label;
-    return `${assistantNextSteps.lead}${first ? t('assistant.answerSuggest', { action: first }) : ''}${free}`;
+    const lead = suggested.steps[0];
+    const rework = lead?.kind === 'rework' ? t('assistant.answerRework', { node: titleOf(lead.nodeId), reviewer: titleOf(lead.reviewerId) }) : '';
+    return `${assistantNextSteps.lead}${first ? t('assistant.answerSuggest', { action: first }) : ''}${rework}${free}`;
   };
   const answerLocally = (prompt: string): boolean => {
-    if (!isNextStepsQuestion(prompt)) return false;
+    // "What now?" at any time; "the review failed, what do I do?" while the canvas has such an outcome to act on.
+    const outcome = Boolean(suggested && ['rejected', 'failed', 'premium', 'quota'].includes(suggested.situation.kind)) && isOutcomeQuestion(prompt);
+    if (!isNextStepsQuestion(prompt) && !outcome) return false;
     const id = `turn-${Date.now()}-${++planningSequence.current}`;
     const content = localAnswer();
     setPlanningError('');
@@ -2794,6 +2832,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         }} />}
       <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id, { configure: true }); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
         onViewOutput={id => { toggleDeliverables(id, true); focusNode(id); setTimelineOpen(false); }}
+        reviewNote={reviewNote} onReviewNext={() => setAssistantOpen(true)}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => { const fromResults = stageViewRef.current === 'results'; changeStageView('canvas'); setTimelineOpen(o => fromResults || !o); }} timelineOpen={timelineOpen && !showingResults}
         timelineUnavailableReason={focusedId ? t('run.timelineWhileOpen') : undefined}
