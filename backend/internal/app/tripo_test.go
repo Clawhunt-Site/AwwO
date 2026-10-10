@@ -28,9 +28,10 @@ func TestTripoModelsAreInTheCatalogAndClosed(t *testing.T) {
 			t.Fatal("prompt bounds", id)
 		}
 	}
-	// RunningHub's models keep their provider; the combined list is RunningHub's then the 3D models.
+	// Each model keeps its provider; the combined list is X-tasy's, RunningHub's, then the 3D models.
 	list := builtinMediaCatalog.List()
-	if len(list) != len(builtinMediaCatalog.Models)+2 || list[0].Provider != mediaProviderRunningHub || list[len(list)-1].Provider != mediaProviderTripo {
+	if len(list) != len(xtasyModels())+len(builtinMediaCatalog.Models)+2 || list[0].Provider != mediaProviderXtasy ||
+		list[len(xtasyModels())].Provider != mediaProviderRunningHub || list[len(list)-1].Provider != mediaProviderTripo {
 		t.Fatal("catalog order", len(list))
 	}
 	bad := tripoModels()[0]

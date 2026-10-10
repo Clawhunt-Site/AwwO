@@ -47,10 +47,12 @@ func (a *App) mediaSetupAllowed(kind, model string, entitlement modelEntitlement
 // mediaEntitled grants a media model only explicitly: the workspace's model allowlist names it, or
 // the operator opted unrestricted workspaces in. Generations are paid from the operator's key, so
 // "no allowlist" does not mean "every paid generator" unless the operator says so. The 3D models may be
-// offered to every workspace (AWWO_TRIPO_ALL_WORKSPACES), their free generations bounded by their own caps.
+// offered to every workspace (AWWO_TRIPO_ALL_WORKSPACES), their free generations bounded by their own caps, and so
+// may X-tasy's image and video models (AWWO_XTASY_ALL_WORKSPACES), within the media daily limits.
 func (a *App) mediaEntitled(entitlement modelEntitlement, model string) bool {
-	if a.cfg.TripoAllWorkspaces {
-		if m, ok := builtinMediaCatalog.model(model); ok && m.Provider == mediaProviderTripo {
+	if a.cfg.TripoAllWorkspaces || a.cfg.XtasyAllWorkspaces {
+		if m, ok := builtinMediaCatalog.model(model); ok &&
+			(m.Provider == mediaProviderTripo && a.cfg.TripoAllWorkspaces || m.Provider == mediaProviderXtasy && a.cfg.XtasyAllWorkspaces) {
 			return true
 		}
 	}

@@ -76,8 +76,21 @@ func (a *App) tripoHub() *tripoClient {
 	return a.tripo
 }
 
-// mediaProvider is a media generation backend: RunningHub for images and video, Tripo for 3D models. A task is
-// submitted once, queried until it ends, and its result files are downloaded through an allowlisted client.
+// xtasyHub is the configured X-tasy client, or nil when its image and video generation is off.
+func (a *App) xtasyHub() *xtasyClient {
+	if !a.cfg.xtasyConfigured() {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.xtasy == nil {
+		a.xtasy = newXtasy(a.cfg)
+	}
+	return a.xtasy
+}
+
+// mediaProvider is a media generation backend: X-tasy or RunningHub for images and video, Tripo for 3D models. A
+// task is submitted once, queried until it ends, and its result files are downloaded through an allowlisted client.
 type mediaProvider interface {
 	submit(ctx context.Context, endpoint string, body map[string]any) (rhTask, error)
 	query(ctx context.Context, taskID string) (rhTask, error)
@@ -94,6 +107,10 @@ func (a *App) mediaProviderFor(provider string) mediaProvider {
 		}
 	case mediaProviderTripo:
 		if hub := a.tripoHub(); hub != nil {
+			return hub
+		}
+	case mediaProviderXtasy:
+		if hub := a.xtasyHub(); hub != nil {
 			return hub
 		}
 	}
@@ -156,8 +173,11 @@ func (a *App) mediaSnapshot(document []byte, nodeID, model, prompt string, entit
 		return executionSnapshot{}, setupError{"media_prompt_invalid", fmt.Sprintf("The prompt must be %d-%d characters for this model", m.Prompt.MinLength, m.Prompt.MaxLength)}
 	}
 	runtime := runtimeRunningHub
-	if m.Provider == mediaProviderTripo {
+	switch m.Provider {
+	case mediaProviderTripo:
 		runtime = runtimeTripo
+	case mediaProviderXtasy:
+		runtime = runtimeXtasy
 	}
 	return executionSnapshot{Runtime: runtime, Model: m.ID, Media: &mediaPlan{Version: 1, Provider: m.Provider, Model: m.ID, Kind: m.Kind, Params: params}}, nil
 }
@@ -378,9 +398,12 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 		return
 	}
 	var body map[string]any
-	if m.Provider == mediaProviderTripo {
+	switch m.Provider {
+	case mediaProviderTripo:
 		body = tripoRequest(m, prompt, plan.Params)
-	} else {
+	case mediaProviderXtasy:
+		body = xtasyRequest(m, prompt, plan.Params, id)
+	default:
 		body = map[string]any{"prompt": strings.TrimSpace(prompt)}
 		for name, value := range plan.Params {
 			body[name] = value

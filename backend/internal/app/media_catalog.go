@@ -29,6 +29,7 @@ const (
 
 	mediaProviderRunningHub = "runninghub"
 	mediaProviderTripo      = "tripo"
+	mediaProviderXtasy      = "xtasy"
 )
 
 type mediaPrompt struct {
@@ -198,7 +199,7 @@ func cleanCatalogText(s string, max int) bool {
 	return true
 }
 
-var builtinMediaCatalog = withTripoModels(mustMediaCatalog(mediaCatalogJSON))
+var builtinMediaCatalog = withProviderModels(mustMediaCatalog(mediaCatalogJSON))
 
 func mustMediaCatalog(raw []byte) *mediaCatalog {
 	c, err := parseMediaCatalog(raw)
@@ -208,27 +209,35 @@ func mustMediaCatalog(raw []byte) *mediaCatalog {
 	return c
 }
 
-// withTripoModels adds the 3D models (tripo.go) to a parsed catalog, refusing to start on one that does not
-// validate or that collides with an existing id, as the embedded catalog itself is refused.
-func withTripoModels(c *mediaCatalog) *mediaCatalog {
+// withProviderModels adds the X-tasy image and video models (xtasy.go) and the 3D models (tripo.go) to a parsed
+// catalog, refusing to start on one that does not validate or that collides with an existing id, as the embedded
+// catalog itself is refused. X-tasy's come first, so a new image or video node starts on one wherever X-tasy is
+// configured.
+func withProviderModels(c *mediaCatalog) *mediaCatalog {
 	c.list = nil
-	for i := range c.Models {
-		c.list = append(c.list, &c.Models[i])
-	}
-	for _, m := range tripoModels() {
-		if err := validTripoModel(m); err != nil {
-			panic(fmt.Errorf("tripo model %q is invalid: %w", m.ID, err))
+	add := func(m *mediaModel, err error) {
+		if err != nil {
+			panic(fmt.Errorf("%s model %q is invalid: %w", m.Provider, m.ID, err))
 		}
 		if c.byID[m.ID] != nil {
-			panic(fmt.Errorf("tripo model %q collides with a catalog id", m.ID))
+			panic(fmt.Errorf("%s model %q collides with a catalog id", m.Provider, m.ID))
 		}
 		c.byID[m.ID] = m
 		c.list = append(c.list, m)
 	}
+	for _, m := range xtasyModels() {
+		add(m, validXtasyModel(m))
+	}
+	for i := range c.Models {
+		c.list = append(c.list, &c.Models[i])
+	}
+	for _, m := range tripoModels() {
+		add(m, validTripoModel(m))
+	}
 	return c
 }
 
-// List is every model in catalog order: RunningHub's, then the 3D models.
+// List is every model in catalog order: X-tasy's, RunningHub's, then the 3D models.
 func (c *mediaCatalog) List() []*mediaModel { return c.list }
 
 func (c *mediaCatalog) model(id string) (*mediaModel, bool) {

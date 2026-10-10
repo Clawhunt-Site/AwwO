@@ -48,6 +48,12 @@ type mediaSettings struct {
 	// TripoAllWorkspaces offers the 3D models to every workspace, whatever its model allowlist names
 	// (the daily caps above still bound what free generations cost the operator).
 	TripoAllWorkspaces bool
+	// X-tasy (image and video nodes, the operator's own platform) runs on its own key and stores its files in the
+	// same AWWO_MEDIA_DIR; its outputs are downloaded from its API origin. XtasyAllWorkspaces offers its models to
+	// every workspace, whatever its model allowlist names, within the media daily limits.
+	XtasyAPIKey        string
+	XtasyBaseURL       string
+	XtasyAllWorkspaces bool
 }
 
 const (
@@ -55,7 +61,11 @@ const (
 	defaultMediaResultHosts  = ".runninghub.ai,.runninghub.cn,rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com,rh-images-1252422369.cos.ap-beijing.myqcloud.com"
 	defaultTripoBaseURL      = "https://openapi.tripo3d.ai/v3"
 	defaultTripoResultHosts  = ".tripo3d.ai,.tripo3d.com"
+	defaultXtasyBaseURL      = "https://service.xtasyart.com"
 )
+
+// The X-tasy API origin. The key is sent only there, and its outputs are downloaded from there.
+var xtasyOrigins = map[string]bool{"https://service.xtasyart.com": true}
 
 // The official Tripo API origin. The key is sent only there.
 var tripoOrigins = map[string]bool{"https://openapi.tripo3d.ai/v3": true}
@@ -149,21 +159,38 @@ func (c *Config) mediaFromEnv() error {
 	default:
 		return errors.New("AWWO_TRIPO_ALL_WORKSPACES must be true or false")
 	}
+	c.XtasyAPIKey = strings.TrimSpace(os.Getenv("AWWO_XTASY_API_KEY"))
+	c.XtasyBaseURL = strings.TrimRight(env("AWWO_XTASY_BASE_URL", defaultXtasyBaseURL), "/")
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AWWO_XTASY_ALL_WORKSPACES"))) {
+	case "", "false":
+	case "true":
+		c.XtasyAllWorkspaces = true
+	default:
+		return errors.New("AWWO_XTASY_ALL_WORKSPACES must be true or false")
+	}
 	return validateMediaConfig(*c)
 }
 
 func validateMediaConfig(c Config) error {
-	if c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.MediaDir == "" {
+	if c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.XtasyAPIKey == "" && c.MediaDir == "" {
 		return nil
 	}
-	if c.MediaDir == "" || (c.RunningHubAPIKey == "" && c.TripoAPIKey == "") {
-		if c.TripoAPIKey != "" {
+	if c.MediaDir == "" || (c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.XtasyAPIKey == "") {
+		switch {
+		case c.TripoAPIKey != "":
 			return errors.New("AWWO_TRIPO_API_KEY needs AWWO_MEDIA_DIR: generated models are stored there")
+		case c.XtasyAPIKey != "":
+			return errors.New("AWWO_XTASY_API_KEY needs AWWO_MEDIA_DIR: generated images and videos are stored there")
 		}
 		return errors.New("AWWO_RUNNINGHUB_API_KEY and AWWO_MEDIA_DIR must be set together")
 	}
 	if c.TripoAPIKey != "" {
 		if err := validateTripoConfig(c); err != nil {
+			return err
+		}
+	}
+	if c.XtasyAPIKey != "" {
+		if err := validateXtasyConfig(c); err != nil {
 			return err
 		}
 	}
@@ -216,6 +243,23 @@ func validateTripoConfig(c Config) error {
 	return nil
 }
 
+// validateXtasyConfig checks the X-tasy key's shape and its single API origin, where the key is sent and where
+// outputs are downloaded from.
+func validateXtasyConfig(c Config) error {
+	if len(c.XtasyAPIKey) < 16 || len(c.XtasyAPIKey) > 512 {
+		return errors.New("invalid AWWO_XTASY_API_KEY")
+	}
+	for _, ch := range c.XtasyAPIKey {
+		if ch < 33 || ch > 126 {
+			return errors.New("invalid AWWO_XTASY_API_KEY")
+		}
+	}
+	if !xtasyOrigins[c.XtasyBaseURL] && !(c.Env == "development" && loopbackOrigin(c.XtasyBaseURL)) {
+		return errors.New("AWWO_XTASY_BASE_URL must be https://service.xtasyart.com")
+	}
+	return nil
+}
+
 // validateMediaStorage checks what every media provider shares: where files are kept and how runs are bounded.
 func validateMediaStorage(c Config) error {
 	if c.MediaDevProxy != "" && (c.Env != "development" || !loopbackOrigin(c.MediaDevProxy)) {
@@ -263,9 +307,12 @@ func loopbackOrigin(raw string) bool {
 
 func (c Config) runningHubConfigured() bool { return c.RunningHubAPIKey != "" && c.MediaDir != "" }
 func (c Config) tripoConfigured() bool      { return c.TripoAPIKey != "" && c.MediaDir != "" }
+func (c Config) xtasyConfigured() bool      { return c.XtasyAPIKey != "" && c.MediaDir != "" }
 
 // mediaConfigured: some media provider (image and video, or 3D) can run.
-func (c Config) mediaConfigured() bool { return c.runningHubConfigured() || c.tripoConfigured() }
+func (c Config) mediaConfigured() bool {
+	return c.runningHubConfigured() || c.tripoConfigured() || c.xtasyConfigured()
+}
 
 // mediaProviderConfigured: the provider a catalog model names has its key and storage.
 func (c Config) mediaProviderConfigured(provider string) bool {
@@ -274,13 +321,16 @@ func (c Config) mediaProviderConfigured(provider string) bool {
 		return c.runningHubConfigured()
 	case mediaProviderTripo:
 		return c.tripoConfigured()
+	case mediaProviderXtasy:
+		return c.xtasyConfigured()
 	}
 	return false
 }
 
-// isMediaModelID reports whether a model id names a media generator: RunningHub's "rh." or Tripo's "tripo." ids.
+// isMediaModelID reports whether a model id names a media generator: RunningHub's "rh.", Tripo's "tripo." or
+// X-tasy's "xt." ids.
 func isMediaModelID(id string) bool {
-	return strings.HasPrefix(id, "rh.") || strings.HasPrefix(id, "tripo.")
+	return strings.HasPrefix(id, "rh.") || strings.HasPrefix(id, "tripo.") || strings.HasPrefix(id, "xt.")
 }
 
 // validateMediaExposure runs once every setting is read. Generations are paid from the operator's
@@ -296,6 +346,9 @@ func validateMediaExposure(c Config) error {
 	}
 	if c.TripoAllWorkspaces && c.tripoConfigured() {
 		return errors.New("AWWO_TRIPO_ALL_WORKSPACES requires AWWO_MAX_OWNED_WORKSPACES")
+	}
+	if c.XtasyAllWorkspaces && c.xtasyConfigured() {
+		return errors.New("AWWO_XTASY_ALL_WORKSPACES requires AWWO_MAX_OWNED_WORKSPACES")
 	}
 	if c.NewWorkspaceModels.allowed != nil {
 		for _, id := range *c.NewWorkspaceModels.allowed {

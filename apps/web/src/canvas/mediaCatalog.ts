@@ -41,7 +41,7 @@ export interface MediaCatalogue {
 }
 
 const PARAM_NAME = /^[A-Za-z][A-Za-z0-9]{0,40}$/;
-const MODEL_ID = /^(?:rh|tripo)\.[a-z0-9][a-z0-9-]{0,62}$/;
+const MODEL_ID = /^(?:rh|tripo|xt)\.[a-z0-9][a-z0-9-]{0,62}$/;
 const MEDIA_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'model3d']);
 const PARAM_TYPES: ReadonlySet<string> = new Set(['enum', 'integer', 'number', 'boolean', 'text']);
 
@@ -174,7 +174,7 @@ export function withMediaParam(params: MediaParams | undefined, param: MediaPara
 const VENDORS: Record<string, [string, string]> = {
   bytedance: ['字节跳动', 'ByteDance'], google: ['Google', 'Google'], openai: ['OpenAI', 'OpenAI'], alibaba: ['阿里巴巴', 'Alibaba'],
   midjourney: ['Midjourney', 'Midjourney'], xai: ['xAI', 'xAI'], kuaishou: ['快手', 'Kuaishou'], minimax: ['MiniMax', 'MiniMax'],
-  shengshu: ['生数科技', 'Shengshu'], pixverse: ['PixVerse', 'PixVerse'], tripo: ['Tripo 3D', 'Tripo 3D'],
+  shengshu: ['生数科技', 'Shengshu'], pixverse: ['PixVerse', 'PixVerse'], tripo: ['Tripo 3D', 'Tripo 3D'], xtasy: ['X-tasy', 'X-tasy'],
 };
 
 /** A display name for a vendor slug; an unknown slug is shown as it is. */

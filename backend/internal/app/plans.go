@@ -382,6 +382,13 @@ var mediaBaseCredits = map[string]int{
 	"rh.kling-v3-pro": 200, "rh.seedance-2": 200, "rh.veo-3-1-fast": 200, "rh.sora-2": 200, "rh.hailuo-2-3-pro": 200,
 	// Tripo 3D models at their default (textured) settings; model3DCredits holds the rest of each price.
 	"tripo.v3-1": 60, "tripo.p1": 120,
+	// X-tasy, three times what it charged at each model's defaults in the verification of 2026-10-10 (one X-tasy credit
+	// taken as $0.01), images never below RunningHub's 30: Nano Banana 2 1K 12.3, Seedream 5.0 Pro 2K 12, 全能图片 5.0
+	// Pro 2K 12, Xtasy 3.0 Pro 1K 12, Xtasy 3.0 1K 9.6, GPT Image 2 / 2.5 1.3; videos for five seconds at 720p with
+	// sound: Xtasy V3 66, 全能视频 91.5, 全能视频 v2.5 139.8. Videos are priced per five seconds.
+	"xt.seedream-5-pro": 40, "xt.gemini-3-1-flash-image": 40, "xt.omni-image-5-pro": 40, "xt.xtasy-3-pro": 40,
+	"xt.xtasy-3": 30, "xt.gpt-image-2": 30, "xt.gpt-image-2-5": 30,
+	"xt.xtasy-v3": 200, "xt.omni-video": 280, "xt.omni-video-2-5": 420,
 }
 
 // model3DCredits prices a Tripo text-to-3D task at three times Tripo's own credits (one Tripo credit and one AwwO

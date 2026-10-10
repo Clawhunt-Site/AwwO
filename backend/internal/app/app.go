@@ -66,6 +66,7 @@ type App struct {
 	// resumable holds media runs left running at shutdown for the next start to resume.
 	media         *runningHub
 	tripo         *tripoClient
+	xtasy         *xtasyClient
 	resumable     map[string]bool
 	mediaReserved int64
 }
