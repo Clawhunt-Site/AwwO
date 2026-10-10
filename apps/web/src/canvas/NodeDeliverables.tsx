@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpFromLine, Check, Copy, FileCode2, FileDown, FileText, RotateCcw } from 'lucide-react';
 import { caseRunLabel, type SessionNode } from './canvasDoc';
 import { ContractFields } from './ContractFields';
@@ -80,6 +80,8 @@ export interface NodeDeliverablesProps {
   presentation?: 'drawer' | 'result';
   /** Open with the deliverable form's editor expanded (the template guide's "edit deliverables"). */
   editorOpen?: boolean;
+  /** Counts the presses of that edit button: each one opens the editor again, also after it was collapsed. */
+  editorRequest?: number;
   /** Run the node's task again: offered where a file field came back as a name with no file behind it. */
   onRerun?: () => void;
   /** The field to show first (the 成果 view opens the deliverable a reader picked from its index). */
@@ -87,11 +89,12 @@ export interface NodeDeliverablesProps {
 }
 
 /** What a published `file` field holds: bytes the server keeps, or (in a cloud workspace) only words — a name,
- *  a path or a link that no file stands behind, which is said rather than shown as if it were a delivery. */
-function fileState(field: ContractField, value: string): 'stored' | 'missing' | null {
+ *  a path or a link that no file stands behind, which is said rather than shown as if it were a delivery. A value a
+ *  person published by hand is their own reference (the field invites a path or an https:// link) and is shown as it is. */
+function fileState(field: ContractField, value: string, manual: boolean): 'stored' | 'missing' | null {
   if (field.type !== 'file' || !currentSaaSCanvas()) return null;
   if (storedArtifactUrl(value)) return 'stored';
-  return value.trim() ? 'missing' : null;
+  return value.trim() && !manual ? 'missing' : null;
 }
 
 function MissingFile({ value, onRerun, readOnly }: { value: string; onRerun?: () => void; readOnly: boolean }) {
@@ -105,8 +108,11 @@ function MissingFile({ value, onRerun, readOnly }: { value: string; onRerun?: ()
 }
 
 /** Only published output is a deliverable. Editing a form never creates one implicitly. */
-export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 'drawer', editorOpen = false, onRerun, initialFieldId }: NodeDeliverablesProps) {
+export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 'drawer', editorOpen = false, editorRequest = 0, onRerun, initialFieldId }: NodeDeliverablesProps) {
   const { locale, t } = useCanvasI18n();
+  const editor = useRef<HTMLDetailsElement>(null);
+  // A collapsed <details> keeps its own state; each edit request opens it again.
+  useEffect(() => { if (editorOpen && editor.current) editor.current.open = true; }, [editorOpen, editorRequest]);
   const [publishErrors, setPublishErrors] = useState<string[]>([]);
   const [selection, setSelection] = useState<{ identity: string; fieldId: string } | null>(null);
   const [deliveryProfile, setDeliveryProfile] = useState<DeliveryProfileId>('web');
@@ -216,7 +222,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
         {(() => {
           const files = publishedFields.map(field => {
             const value = String(parsed!.values[field.id] ?? '');
-            const state = field.type === 'html' && value.trim() ? 'page' : fileState(field, value);
+            const state = field.type === 'html' && value.trim() ? 'page' : fileState(field, value, output.source === 'manual');
             return state ? { field, state } : null;
           }).filter((item): item is { field: ContractField; state: 'page' | 'stored' | 'missing' } => item !== null);
           if (!files.length || publishedFields.length < 2) return null;
@@ -236,7 +242,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
         {publishedFields.length > 1 && <div className="awwo-deliverable-files" role="group" aria-label={t('deliverable.defaultTitle')}>
           {publishedFields.map(field => {
             const value = String(parsed!.values[field.id] ?? '');
-            const state = field.type === 'html' && value.trim() ? 'page' : fileState(field, value);
+            const state = field.type === 'html' && value.trim() ? 'page' : fileState(field, value, output.source === 'manual');
             return <button key={field.id} type="button" aria-pressed={field.id === selectedField?.id}
               aria-controls={selectedPanelId} title={field.label || field.id}
               onClick={() => setSelection({ identity: outputIdentity, fieldId: field.id })}>
@@ -270,7 +276,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
               : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}
                   identity={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}`}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
-              : fileState(field, String(value)) === 'missing' ? <MissingFile value={String(value)} onRerun={onRerun} readOnly={readOnly} />
+              : fileState(field, String(value), output.source === 'manual') === 'missing' ? <MissingFile value={String(value)} onRerun={onRerun} readOnly={readOnly} />
               : filePath ? <LocalFileReference key={filePath} path={filePath} />
               : <span style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</span>}
           </div>
@@ -278,7 +284,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
         })}
       </div>}
     </>}
-    {!result && <details className="awwo-deliverables-editor" open={editorOpen || undefined}>
+    {!result && <details ref={editor} className="awwo-deliverables-editor" open={editorOpen || undefined}>
       <summary>{t('deliverable.editForm')}</summary>
       <ContractFields fields={contract.outputs} label={t('deliverable.outputLabel')} readOnly={locked} onChange={updateFields} />
       <div className="awwo-output-publish">

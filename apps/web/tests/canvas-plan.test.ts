@@ -248,6 +248,62 @@ describe('atomic graph application', () => {
       .toEqual([expect.stringContaining('has no output “missing”')]);
   });
 
+  it('applies a repaired connection once, however often a plan sends it', () => {
+    const doc = fixture();
+    const twice = applyCanvasPlan(doc, plan({ type: 'add_node', ref: 'second-source', templateId: 'data' },
+      { type: 'connect', fromNode: 'second-source', fromField: 'schema', toNode: 'target', toField: 'schema' },
+      { type: 'connect', fromNode: 'second-source', fromField: 'schema', toNode: 'target', toField: 'schema' }));
+    const schemaInputs = (d: CanvasDocument) => (d.nodes.find(node => node.id === 'target') as SessionNode).contract!.inputs
+      .map(field => field.id).filter(id => id.startsWith('schema'));
+    expect(schemaInputs(twice.doc)).toEqual(['schema', 'schema-2']);
+    expect(twice.adjustments).toHaveLength(1);
+    // Sent again later (planners re-send the wiring they see), the same connections change nothing.
+    const again = applyCanvasPlan(twice.doc, plan(
+      { type: 'connect', fromNode: twice.addedNodeIds[0], fromField: 'schema', toNode: 'target', toField: 'schema' },
+      { type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'target', toField: 'schema' }));
+    expect(canvasPlanRevision(again.doc)).toBe(canvasPlanRevision(twice.doc));
+    expect(again.adjustments).toEqual([]);
+    // An input the plan names that the node lacks is created once, then reused.
+    const named = applyCanvasPlan(doc, plan({ type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'target', toField: 'gameDesign' },
+      { type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'target', toField: 'gameDesign' }));
+    expect((named.doc.nodes[1] as SessionNode).contract!.inputs.filter(field => field.id.startsWith('gameDesign'))).toHaveLength(1);
+  });
+
+  it('drops a wire a hand edit left behind instead of failing the plan', () => {
+    const doc = fixture();
+    // The target's "schema" input was deleted by hand: its wire is no longer drawn, so nobody can disconnect it.
+    const target = doc.nodes[1] as SessionNode;
+    target.contract = { ...target.contract!, inputs: target.contract!.inputs.filter(field => field.id !== 'schema') };
+    const applied = applyCanvasPlan(doc, plan({ type: 'update_node', nodeId: 'target', title: 'API' }));
+    expect(applied.doc.edges).toEqual([]);
+    expect((applied.doc.nodes[1] as SessionNode).title).toBe('API');
+    expect(applied.adjustments).toEqual([expect.stringContaining('已失效的连线')]);
+    expect(applyCanvasPlan(doc, plan({ type: 'update_node', nodeId: 'target', title: 'API' }), 'en').adjustments)
+      .toEqual([expect.stringContaining('stale connection')]);
+  });
+
+  it('makes a connection to a node created further on, and skips one to a node that is not there', () => {
+    const doc = fixture();
+    const forward = applyCanvasPlan(doc, plan(
+      { type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'later', toField: 'schema' },
+      { type: 'add_node', ref: 'later', templateId: 'backend' }));
+    expect(forward.doc.edges.at(-1)).toMatchObject({ fromNode: 'source', fromPort: 'out:schema', toNode: forward.addedNodeIds[0], toPort: 'in:schema' });
+    expect(forward.adjustments).toEqual([]);
+    const missing = applyCanvasPlan(doc, plan({ type: 'update_node', nodeId: 'target', title: 'API' },
+      { type: 'connect', fromNode: 'source', fromField: 'schema', toNode: 'nowhere', toField: 'schema' }));
+    expect(missing.doc.edges).toEqual(doc.edges);
+    expect((missing.doc.nodes[1] as SessionNode).title).toBe('API');
+    expect(missing.adjustments).toEqual([expect.stringContaining('节点「nowhere」不在画布上')]);
+  });
+
+  it('keeps the fixed ports of image, video and 3D nodes when a plan edits fields', () => {
+    const hero = { ...createSessionNode('model3d', { x: 0, y: 0 }), id: 'hero' };
+    const doc = { ...emptyDocument(), nodes: [hero] };
+    const applied = applyCanvasPlan(doc, plan({ type: 'add_field', nodeId: 'hero', side: 'input', field: emptyField }));
+    expect((applied.doc.nodes[0] as SessionNode).contract).toBeUndefined();
+    expect(applied.adjustments).toEqual([expect.stringContaining('输入输出是固定的')]);
+  });
+
   it('disconnects the links a field change breaks, and says so', () => {
     const doc = fixture();
     const removed = applyCanvasPlan(doc, plan({ type: 'remove_field', nodeId: 'source', side: 'output', fieldId: 'schema' }));

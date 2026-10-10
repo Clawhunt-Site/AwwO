@@ -194,6 +194,8 @@ export function deliveredItems(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Pa
       if (field.type === 'html') items.push({ ...base, kind: 'page' });
       else if (field.type === 'file') {
         if (text.startsWith('awwo-file:')) items.push({ ...base, kind: 'file', reference: text });
+        // A path or link a person published by hand is their reference, not a file an agent failed to hand over.
+        else if (step.output.source === 'manual') items.push({ ...base, kind: 'document' });
         else items.push({ ...base, kind: 'missing', claimed: text.slice(0, 200) });
       } else if (field.type === 'markdown' || field.type === 'text') items.push({ ...base, kind: 'document' });
     }

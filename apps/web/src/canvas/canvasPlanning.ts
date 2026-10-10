@@ -110,11 +110,18 @@ function planningProtocol(saas: boolean): string {
     : line.replace(',kind?:"data"|"feedback"', '').replace('/reviewerNodeId', '')).join('\n');
 }
 
-function assertSaaSPlan(plan: CanvasPlan, locale: UiLocale): void {
+/** The plan a SaaS workspace can apply. `kind: "data"` on a connect is the default kind, which models add although
+ *  the protocol leaves it out; it is dropped rather than the whole plan refused. Review loops are not supported. */
+function saasPlan(plan: CanvasPlan, locale: UiLocale): CanvasPlan {
   if (plan.operations.some(operation => operation.type === 'set_execution' || operation.type === 'set_edge_kind'
-    || (operation.type === 'connect' && operation.kind !== undefined))) {
+    || (operation.type === 'connect' && operation.kind !== undefined && operation.kind !== 'data'))) {
     throw new Error(canvasText(locale, 'planning.unsupportedSaaS'));
   }
+  return { ...plan, operations: plan.operations.map(operation => {
+    if (operation.type !== 'connect' || operation.kind === undefined) return operation;
+    const { kind: _kind, ...plain } = operation;
+    return plain;
+  }) };
 }
 
 export function loadPlanningConversation(): PlanningConversation {
@@ -268,7 +275,7 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
   // A capability violation is deliberately NOT retryable. The plan is well formed; the model chose an
   // operation this workspace does not support, which the prompt already rules out, so it is a decision
   // rather than a slip and asking again would spend another run to be told the same thing.
-  if (saas) assertSaaSPlan(plan, locale);
+  if (saas) plan = saasPlan(plan, locale);
   return plan;
 }
 

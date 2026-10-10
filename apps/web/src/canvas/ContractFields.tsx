@@ -102,10 +102,17 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, onCh
       const displayed = resolvedFields?.find(item => item.id === field.id) ?? (source ? { ...field, value: '' } : field);
       const valueReadOnly = readOnly || Boolean(source);
       const helpId = field.help ? `${instanceId}-field-${index}-help` : undefined;
+      // The assistant finds fields by name, so an empty name or one another field already has is said (not refused:
+      // the name is edited a keystroke at a time).
+      const folded = field.label.trim().toLowerCase();
+      const twin = folded ? fields.findIndex((other, at) => at < index && other.label.trim().toLowerCase() === folded) : -1;
+      const nameProblem = !showSchema || readOnly ? '' : !folded ? t('contract.nameEmpty') : twin >= 0 ? t('contract.nameRepeated', { count: twin + 1 }) : '';
+      const nameProblemId = nameProblem ? `${instanceId}-field-${index}-name-problem` : undefined;
       return <div key={field.id} className="awwo-contract-field">
         {showSchema ? <><div className="awwo-field-header">
           <input className="awwo-field-name" aria-label={t('contract.fieldName', { count: index + 1 })} value={field.label} placeholder={t('contract.fieldNamePlaceholder')}
-            disabled={readOnly} onChange={(event) => patch(field.id, { label: event.target.value })} />
+            disabled={readOnly} aria-invalid={nameProblem ? true : undefined} aria-describedby={nameProblemId}
+            onChange={(event) => patch(field.id, { label: event.target.value })} />
           <select aria-label={t('contract.fieldType', { name })} value={field.type} disabled={readOnly}
             onChange={(event) => patch(field.id, { type: event.target.value as ContractFieldType })}>
             {FIELD_TYPES.map((type) => <option key={type.value} value={type.value}>{t(type.label)}</option>)}
@@ -115,6 +122,7 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, onCh
             <Trash2 size={15} aria-hidden="true" />
           </button>
         </div>
+        {nameProblemId ? <p className="awwo-field-hint awwo-field-name-problem" id={nameProblemId}>{nameProblem}</p> : null}
         <label className="awwo-field-required"><input type="checkbox" aria-label={locale === 'zh' ? `${name}${t('contract.required')}` : `${name} ${t('contract.required')}`} checked={field.required}
           disabled={readOnly} onChange={(event) => patch(field.id, { required: event.target.checked })} />{t('contract.required')}</label></> : <div className="awwo-field-value-label"><strong>{name}</strong>{field.required && <span>{t('contract.required')}</span>}</div>}
         {helpId ? <p className="awwo-field-help" id={helpId}>{field.help}</p> : null}

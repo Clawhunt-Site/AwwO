@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Object3D, Material, Texture } from 'three';
+import { useCanvasI18n } from './i18n';
 import { validateModel, type PreviewFile } from './previewData';
 
 /** Real WebGL renderer. A failed context produces an error, never a substitute picture. */
 export function ModelPreview({ file }: { file: PreviewFile }) {
+  const { locale, t } = useCanvasI18n();
   const host = useRef<HTMLDivElement>(null);
   const reset = useRef<() => void>(() => undefined);
-  const [status, setStatus] = useState('正在加载 3D 模型…');
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  // The checks' own wording is Chinese; an English reader is told the same thing in general terms.
+  const [error, setError] = useState<{ detail: string } | null>(null);
+  const label = useRef(t('model.label', { name: file.name }));
+  label.current = t('model.label', { name: file.name });
   useEffect(() => {
     let disposed = false; let cleanup = () => undefined; let object: Object3D | undefined;
     const disposeObject = (root?: Object3D) => {
@@ -23,7 +28,7 @@ export function ModelPreview({ file }: { file: PreviewFile }) {
       for (const texture of textures) { (texture.image as { close?: () => void } | undefined)?.close?.(); texture.dispose(); }
       for (const material of materials) material.dispose();
     };
-    setStatus('正在加载 3D 模型…'); setError('');
+    setLoading(true); setError(null);
     void (async () => {
       try {
         const content = validateModel(file);
@@ -46,9 +51,9 @@ export function ModelPreview({ file }: { file: PreviewFile }) {
           renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); renderer.setSize(width, height);
           camera.aspect = width / height; camera.updateProjectionMatrix(); paint();
         };
-        const lost = (event: Event) => { event.preventDefault(); if (!disposed) setError('WebGL 上下文已丢失，请重新选择文件'); };
+        const lost = (event: Event) => { event.preventDefault(); if (!disposed) setError({ detail: 'context-lost' }); };
         renderer.domElement.addEventListener('webglcontextlost', lost);
-        renderer.domElement.setAttribute('aria-label', `${file.name} 3D 模型，拖动旋转、滚轮缩放`);
+        renderer.domElement.setAttribute('aria-label', label.current);
         renderer.domElement.setAttribute('role', 'img');
         target.appendChild(renderer.domElement);
         const observer = new ResizeObserver(resize); observer.observe(target);
@@ -81,18 +86,20 @@ export function ModelPreview({ file }: { file: PreviewFile }) {
         const normalized = new THREE.Group();
         object.position.sub(center); normalized.add(object); normalized.scale.setScalar(2 / extent); scene.add(normalized);
         const home = () => { camera.position.set(3.2, 2.4, 3.8); controls.target.set(0, 0, 0); controls.update(); paint(); };
-        reset.current = home; home(); setStatus('');
+        reset.current = home; home(); setLoading(false);
       } catch (reason) {
         cleanup();
-        if (!disposed) { setError(reason instanceof Error ? reason.message : '3D 渲染失败'); setStatus(''); }
+        if (!disposed) { setError({ detail: reason instanceof Error ? reason.message : '' }); setLoading(false); }
       }
     })();
     return () => { disposed = true; cleanup(); };
   }, [file]);
+  const reason = !error ? '' : error.detail === 'context-lost' ? t('model.contextLost')
+    : locale === 'zh' && error.detail ? error.detail : t('model.unreadable');
   return <div className="awwo-model-preview">
-    <div className="awwo-preview-controls"><span>拖动旋转 · 滚轮缩放</span><button type="button" onClick={() => reset.current()} disabled={!!status || !!error}>重置视角</button></div>
+    <div className="awwo-preview-controls"><span>{t('model.hint')}</span><button type="button" onClick={() => reset.current()} disabled={loading || !!error}>{t('model.reset')}</button></div>
     <div className="awwo-model-stage" ref={host} />
-    {status && <p role="status" className="awwo-preview-overlay">{status}</p>}
-    {error && <p role="alert" className="awwo-preview-overlay">无法渲染：{error}</p>}
+    {loading && !error && <p role="status" className="awwo-preview-overlay">{t('model.loading')}</p>}
+    {error && <p role="alert" className="awwo-preview-overlay">{t('model.failed', { reason })}</p>}
   </div>;
 }

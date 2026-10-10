@@ -16,6 +16,11 @@ export function mediaOutputSummaryKey(output: MediaOutput) {
   return output.kind === 'video' ? 'media.generatedVideos' as const : output.kind === 'model3d' ? 'media.generatedModels' as const : 'media.generatedImages' as const;
 }
 
+/** How many results a summary counts: a 3D result's rendered preview picture is part of its model, not another one. */
+export function mediaOutputCount(output: MediaOutput): number {
+  return output.kind === 'model3d' ? output.items.filter(item => item.contentType === 'model/gltf-binary').length : output.items.length;
+}
+
 function MediaItem({ item, kind }: { item: MediaOutputItem; kind: MediaOutput['kind'] }) {
   const { t } = useCanvasI18n();
   const [broken, setBroken] = useState(false);

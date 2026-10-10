@@ -61,6 +61,7 @@ import { AddNodeMenu, type AddNodeKind } from './AddNodeMenu';
 import { InspectorPanel } from './InspectorPanel';
 import { mediaCatalogueOf, type MediaCatalogueState } from './MediaNodeSettings';
 import { mediaKindOf, mediaModelsOf, readMediaCatalogue } from './mediaCatalog';
+import { inspectorSavedNode } from './inspectorSave';
 import { RunControls } from './RunControls';
 import { GraphSettings } from './GraphSettings';
 import { addReviewPartner } from './reviewPartner';
@@ -1649,9 +1650,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         const errors = validateNodeOutput(next, next.lastOutput!.text);
         if (errors.length) { setHandoffNote(errors.join('；')); return; }
       }
-      patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(n => n.id === next.id
-        ? { ...next, x: n.x, y: n.y, w: n.w, h: n.h }
-        : n) }), { label: `config:${next.id}` });
+      patchDoc(prev => {
+        const nodes = prev.nodes.map(n => n.id === next.id ? { ...next, x: n.x, y: n.y, w: n.w, h: n.h } : n);
+        // A field deleted or retyped here takes its wires with it, as the board already shows: a wire left in the
+        // document is not drawn, cannot be disconnected, and would make every later plan fail.
+        return { ...prev, nodes, edges: reconcileEdges(nodes, prev.edges) };
+      }, { label: `config:${next.id}` });
       if (current?.kind === 'session' && next.kind === 'session' && (JSON.stringify(current.team) !== JSON.stringify(next.team)
         || JSON.stringify(current.taskFrame) !== JSON.stringify(next.taskFrame))) {
         const affected = new Set(downstreamClosure([next.id]));
@@ -1677,11 +1681,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // the UI promises.
       const rebound = bindingChanged ? rebindNodeThread(live, draft.binding)
         : configChanged ? rebindNodeThread(live, null) : { ...live, threads: getNodeThreads(live) };
-      saveNode({ ...rebound, title: draft.title, agentKind: draft.agentKind, runtime: draft.runtime,
-        model: draft.model, effort: draft.effort, persona: draft.persona, team: draft.team, agentRef: draft.agentRef,
-        ...(Object.hasOwn(draft, 'taskFrame') ? { taskFrame: draft.taskFrame } : {}),
-        binding: configChanged ? null : draft.binding, bindAttempt: configChanged ? null : draft.bindAttempt,
-        issueId: bindingChanged || configChanged ? null : live.issueId }, true);
+      saveNode(inspectorSavedNode(rebound, draft, live, { binding: bindingChanged, config: configChanged }), true);
       if (configChanged) setHandoffNote(surfaceNotice(t, 'config_forked'));
     } else if (live.kind === 'form' && draft.kind === 'form') {
       saveNode({ ...live, title: draft.title, fields: draft.fields });
@@ -2160,7 +2160,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }
       const before = docRef.current;
       const applied = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt);
-      if (plan.operations.length) {
+      // Every step skipped (each one said in the adjustments) leaves the canvas as it was: nothing to patch, undo
+      // or select, and the reply says so instead of calling it applied.
+      const changed = canvasPlanRevision(applied.doc) !== canvasPlanRevision(before);
+      if (changed) {
         fitted.current = true;
         patchDoc(() => applied.doc, { label: `ai:${id}` });
         planUndoEntry.current = undoStack.current.at(-1) ?? null;
@@ -2175,12 +2178,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // A plan that changed nothing else keeps the nodes it added, which tell whether it is still on the canvas.
       // What was applied differently from how the plan wrote it is said with its summary, never hidden.
       const shownAdjustments = applied.adjustments.slice(0, 6);
-      const reply = applied.adjustments.length ? [applied.summary, t('planning.adjusted', { count: applied.adjustments.length }),
+      const lead = !changed && plan.operations.length ? [applied.summary, t('planning.nothingApplied')] : [applied.summary];
+      const reply = applied.adjustments.length ? [...lead, ...(changed ? [t('planning.adjusted', { count: applied.adjustments.length })] : []),
         ...shownAdjustments.map(item => `· ${item}`),
         ...(applied.adjustments.length > shownAdjustments.length ? [t('planning.adjustedMore', { count: applied.adjustments.length - shownAdjustments.length })] : [])].join('\n')
-        : applied.summary;
-      appendPlanningMessage(`${id}-assistant`, reply, plan.operations.length ? 'applied' : undefined, route,
-        plan.operations.length && applied.addedNodeIds.length <= 200 && onlyAddedNodes(before, applied.doc, applied.addedNodeIds)
+        : lead.join('\n');
+      appendPlanningMessage(`${id}-assistant`, reply, changed ? 'applied' : undefined, route,
+        changed && applied.addedNodeIds.length <= 200 && onlyAddedNodes(before, applied.doc, applied.addedNodeIds)
           ? applied.addedNodeIds : undefined);
       if (!jev) setPlannerStatus(previous => ({ available: true, provider: previous?.provider || 'AI' }));
       // Only a plan that arrived and was accepted is a measurement worth setting expectations with,

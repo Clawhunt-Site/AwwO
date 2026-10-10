@@ -3,7 +3,8 @@ import type { CanvasDocument, CanvasNode, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
 import { normalizeContract, validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
 import { arrangeNodePositions } from './nodePresentation';
-import { canConnect, edgeId, portsFor, type PortSpec } from './ports';
+import { mediaKindOf } from './mediaCatalog';
+import { canConnect, edgeId, portsFor, reconcileEdges, type PortSpec } from './ports';
 import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
 import { TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH } from './taskFrame';
@@ -292,7 +293,7 @@ function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adju
     const errors = validateContractFields([{ ...field as ContractField, required: false, value }]);
     if (errors.length) {
       const name = field.label || field.id;
-      adjust(`没有填写「${titleOf(node)}」的「${name}」：${errors.join(' ')}`, `Left “${name}” on “${titleOf(node)}” unfilled: ${errors.join(' ')}`);
+      adjust(`没有填写「${titleOf(node)}」的「${name}」：${errors.join(' ')}`, `Left “${name}” on “${titleOf(node)}” unfilled: the value does not fit this field`);
       return;
     }
   }
@@ -336,6 +337,10 @@ function connectPlanned(draft: CanvasDocument, from: CanvasNode, to: CanvasNode,
     if (draft.edges.some(edge => edge.fromNode === from.id && edge.fromPort === output.id && edge.toNode === to.id && edge.toPort === wanted.id)) return;
     if (canConnect(draft.nodes, draft.edges, start, { nodeId: to.id, portId: wanted.id })) { if (!link(wanted.id)) skipLoop(); return; }
   }
+  // The plan named an input that already has another source, and this delivery already reaches the node through an
+  // input of its own (an earlier repair, or the same plan sent again): nothing to add, rather than another copy of
+  // that input. An input the plan names that the node lacks is still created under that name.
+  if (wanted && draft.edges.some(edge => edge.fromNode === from.id && edge.fromPort === output.id && edge.toNode === to.id)) return;
   const type = inputTypeFor(from, output);
   if (to.kind !== 'session' || !to.contract || !type || to.contract.inputs.length >= LIMITS.fields) {
     adjust(`跳过了一条连线：「${toTitle}」不能新增输入来接收「${fromTitle}」的交付`, `Skipped a connection: “${toTitle}” cannot take a new input for the delivery from “${fromTitle}”`);
@@ -400,14 +405,23 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
     }
   }
   const draft = structuredClone(doc);
+  // A wire whose field was deleted or retyped by hand is not drawn, so it cannot be disconnected; it is dropped
+  // here as the board drops it, instead of failing every later plan.
+  const base = { ...doc, edges: reconcileEdges(doc.nodes, doc.edges) };
+  const stale = draft.edges.length - base.edges.length;
+  if (stale > 0) adjust(`清理了 ${stale} 条已失效的连线：相连的字段已被删除或改了类型`, `Removed ${stale} stale connection(s) whose field was removed or changed type`);
+  draft.edges = structuredClone(base.edges);
   const originalIds = new Set(doc.nodes.map(node => node.id));
   const refs = new Map<string, string>();
   const addedNodeIds: string[] = [];
+  const find = (reference: string): CanvasNode | undefined => draft.nodes.find(item => item.id === (refs.get(reference) ?? reference));
   const resolve = (reference: string): CanvasNode => {
-    const node = draft.nodes.find(item => item.id === (refs.get(reference) ?? reference));
+    const node = find(reference);
     if (!node) fail(`节点引用「${reference}」不在当前画布，或尚未创建 / 已删除。`);
     return node;
   };
+  // A connection to a node the plan only creates further on is made once every other step has run.
+  const later: Array<Extract<CanvasPlanOperation, { type: 'connect' }>> = [];
   for (const op of plan.operations) {
     switch (op.type) {
       case 'add_node': {
@@ -435,6 +449,12 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
       case 'remove_field': {
         const node = resolve(op.nodeId);
         if (node.kind !== 'session') fail('输入输出结构编辑仅适用于 Agent 节点。');
+        if (mediaKindOf(node.agentKind)) {
+          // An image, video or 3D node's ports are its generator's; a contract would replace them and its result.
+          adjust(`没有改动「${titleOf(node)}」的输入输出：图片、视频和 3D 节点的输入输出是固定的`,
+            `Left the inputs and outputs of “${titleOf(node)}” as they are: image, video and 3D nodes have fixed ones`);
+          break;
+        }
         node.contract ??= { version: 1, inputs: [], outputs: [] };
         const fields = op.side === 'input' ? node.contract.inputs : node.contract.outputs;
         const sideName = op.side === 'input' ? ['输入', 'input'] : ['输出', 'output'];
@@ -448,7 +468,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
             const same = (['label', 'type', 'required', 'help', 'placeholder'] as const).every(key => next[key] === existing[key]);
             const errors = validateContractFields([{ ...next, required: false }]);
             if (errors.length) adjust(`没有改动「${titleOf(node)}」已有的${sideName[0]}「${existing.label || existing.id}」：${errors.join(' ')}`,
-              `Left the existing ${sideName[1]} “${existing.label || existing.id}” on “${titleOf(node)}” as it was: ${errors.join(' ')}`);
+              `Left the existing ${sideName[1]} “${existing.label || existing.id}” on “${titleOf(node)}” as it was: the planned definition is not valid`);
             else if (!same) {
               Object.assign(existing, next);
               adjust(`「${titleOf(node)}」已有${sideName[0]}「${existing.label || existing.id}」，已按方案更新它`, `“${titleOf(node)}” already had the ${sideName[1]} “${existing.label || existing.id}”; it was updated as planned`);
@@ -468,7 +488,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
             const next = { ...fields[index], ...op.changes };
             const errors = validateContractFields([{ ...next, required: false }]);
             if (errors.length) adjust(`没有改动「${titleOf(node)}」的「${fields[index].label || fields[index].id}」：已有内容与新类型不兼容（${errors.join(' ')}）`,
-              `Left “${fields[index].label || fields[index].id}” on “${titleOf(node)}” as it was: its content does not fit the new type (${errors.join(' ')})`);
+              `Left “${fields[index].label || fields[index].id}” on “${titleOf(node)}” as it was: its content does not fit the new type`);
             else fields[index] = next;
           }
         }
@@ -506,11 +526,22 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         break;
       }
       case 'connect': {
-        connectPlanned(draft, resolve(op.fromNode), resolve(op.toNode), op, locale, adjust);
+        const from = find(op.fromNode); const to = find(op.toNode);
+        if (!from || !to) { later.push(op); break; }
+        connectPlanned(draft, from, to, op, locale, adjust);
         checkGraph(draft);
         break;
       }
     }
+  }
+  for (const op of later) {
+    const from = find(op.fromNode); const to = find(op.toNode);
+    if (!from || !to) {
+      const missing = !from ? op.fromNode : op.toNode;
+      adjust(`跳过了一条连线：节点「${missing}」不在画布上`, `Skipped a connection: the node “${missing}” is not on the canvas`);
+      continue;
+    }
+    connectPlanned(draft, from, to, op, locale, adjust);
   }
   checkGraph(draft);
   checkExecution(draft);
@@ -522,7 +553,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   const positions = new Map(arranged.map(node => [node.id, { x: node.x + right - 80, y: node.y }]));
   draft.nodes = draft.nodes.map(node => positions.has(node.id) ? { ...node, ...positions.get(node.id)! } : node);
   draft.updatedAt = Date.now();
-  return { doc: invalidateOutputs(doc, draft), addedNodeIds: survivors.map(node => node.id), summary: plan.summary, adjustments };
+  return { doc: invalidateOutputs(base, draft), addedNodeIds: survivors.map(node => node.id), summary: plan.summary, adjustments };
 }
 
 function canonical(value: unknown): string {

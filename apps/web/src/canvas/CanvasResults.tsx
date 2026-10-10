@@ -63,8 +63,9 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
   const steps = useMemo(() => result.stages.flat(), [result]);
   const items = useMemo(() => deliveredItems({ nodes: [...nodes], edges: [...edges], execution }), [nodes, edges, execution]);
   const [chosen, setChosen] = useState<string | null>(null);
-  // The field picked from the index of everything made, shown first in that step's viewer.
-  const [chosenField, setChosenField] = useState<string | undefined>(undefined);
+  // The field picked from the index of everything made, shown first in that step's viewer. It belongs to its node:
+  // once another step is shown (the node went away, or the final result changed), it applies to nothing.
+  const [chosenField, setChosenField] = useState<{ nodeId: string; fieldId: string } | undefined>(undefined);
   const root = useRef<HTMLElement>(null);
   // 回到成果 and the review's link remove themselves; focus goes to the step now shown in the list.
   const show = (id: string | null) => {
@@ -95,13 +96,14 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
       <span>{t('results.running', { done, total: tracked.length || steps.length })}</span><small>{t('results.runningHint')}</small></p>}
     <div className="awwo-results-layout">
       <div className="awwo-results-main">
-        {items.length > 0 && <DeliveredIndex items={items} activeNodeId={chosen ?? result.final?.node.id} activeFieldId={chosenField} onOpen={item => {
-          setChosenField(item.fieldId);
+        {items.length > 0 && <DeliveredIndex items={items} activeNodeId={chosen ?? result.final?.node.id}
+          activeFieldId={chosenField && chosenField.nodeId === (chosen ?? result.final?.node.id) ? chosenField.fieldId : undefined} onOpen={item => {
+          setChosenField(item.fieldId ? { nodeId: item.nodeId, fieldId: item.fieldId } : undefined);
           show(result.final && item.nodeId === result.final.node.id ? null : item.nodeId);
         }} />}
         {selected ? <SelectedStep step={selected} final={showingFinal} complete={result.complete} pending={showingFinal ? result.pending.length : 0}
           stage={stageOf(selected)} total={result.stages.length} onBackToResult={result.final && !showingFinal ? () => { setChosenField(undefined); show(null); } : undefined}
-          onOpenNode={() => onOpenNode(selected.node.id)} fieldId={chosenField} />
+          onOpenNode={() => onOpenNode(selected.node.id)} fieldId={chosenField && chosenField.nodeId === selected.node.id ? chosenField.fieldId : undefined} />
           : <div className="awwo-results-empty">
             <h2>{t('results.emptyTitle')}</h2>
             <p>{t(readOnly ? 'results.emptyReadOnly' : 'results.emptyBody')}</p>

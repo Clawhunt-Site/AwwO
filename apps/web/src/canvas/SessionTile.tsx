@@ -30,9 +30,9 @@
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ArrowDownToLine, BookOpen, Bot, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Trash2, Video, X } from 'lucide-react';
+import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Trash2, Video, X } from 'lucide-react';
 import { parseMediaOutput } from './mediaOutput';
-import { mediaOutputSummaryKey } from './MediaResult';
+import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
 import { mediaKindOf } from './mediaCatalog';
 import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
@@ -145,7 +145,7 @@ export function runBadgeText(
 /** An image or video result reads as what it is, in the reader's language. */
 function mediaPreview(raw: string, locale: UiLocale): string | null {
   const media = parseMediaOutput(raw);
-  return media ? canvasText(locale, mediaOutputSummaryKey(media), { count: media.items.length }) : null;
+  return media ? canvasText(locale, mediaOutputSummaryKey(media), { count: mediaOutputCount(media) }) : null;
 }
 
 /** Summarize declared JSON delivery values; ordinary transcript text keeps its last line. A media
@@ -365,9 +365,15 @@ export const SessionTile = memo(function SessionTile({
   // its form editor. Each resets when its drawer closes, so opening it the ordinary way shows values as before.
   const [inputSchemaOpen, setInputSchemaOpen] = useState(false);
   const [deliverablesEditorOpen, setDeliverablesEditorOpen] = useState(false);
+  // Each press of the template guide's 编辑 opens the editor, also after the reader collapsed it.
+  const [deliverablesEditorRequest, setDeliverablesEditorRequest] = useState(0);
   const template = node.kind === 'session' ? getAgentTemplateForNode(node, locale) : undefined;
   const [deliverablesOpen, setDeliverablesOpen] = useState(node.kind === 'session' && Boolean(node.deliverablesOpen));
-  useEffect(() => { setDeliverablesOpen(node.kind === 'session' && Boolean(node.deliverablesOpen)); }, [node.kind, node.kind === 'session' && node.deliverablesOpen]);
+  useEffect(() => {
+    const open = node.kind === 'session' && Boolean(node.deliverablesOpen);
+    setDeliverablesOpen(open);
+    if (!open) setDeliverablesEditorOpen(false);
+  }, [node.kind, node.kind === 'session' && node.deliverablesOpen]);
   // The Session list starts collapsed so an opened node leads with its conversation; the chat
   // heading keeps the expand control and the list keeps its collapse control.
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -628,7 +634,8 @@ export const SessionTile = memo(function SessionTile({
   const busy = interactionLocked || session.streaming || run?.state === 'running' || run?.state === 'waiting';
   const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
-  const NodeIcon = node.kind === 'form' ? FileText : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video : Bot;
+  const NodeIcon = node.kind === 'form' ? FileText : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
+    : node.agentKind === 'model3d' ? Box : Bot;
   const updateFields = (fields: ContractField[]) => {
     if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
     onUpdateNode?.({ ...node, contract: { ...contract, inputs: fields } });
@@ -658,6 +665,7 @@ export const SessionTile = memo(function SessionTile({
   const editDeliverableForm = () => {
     setTemplateOpen(false);
     setDeliverablesEditorOpen(true);
+    setDeliverablesEditorRequest(count => count + 1);
     if (!deliverablesOpen) toggleDeliverables();
   };
   const closeInput = () => { setInputOpen(false); setInputSchemaOpen(false); };
@@ -832,6 +840,7 @@ export const SessionTile = memo(function SessionTile({
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
                 {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span><button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode}
                   editorOpen={deliverablesEditorOpen}
+                  editorRequest={deliverablesEditorRequest}
                   onRerun={onRunNode && !viewOnly && !busy && (node.kind !== 'session' || Boolean(node.binding) || initializeOnSend) ? () => { if (!viewOnlyRef.current) onRunNode(nodeId); } : undefined} /></>}
               </section> : null}
             </div>

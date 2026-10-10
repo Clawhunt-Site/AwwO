@@ -99,7 +99,7 @@ function embeddedData(uri: string): Uint8Array {
 
 /** Validate the JSON before Three can resolve any URL or allocate accessor arrays. */
 export function validateModel(file: PreviewFile): { format: 'obj' | 'gltf'; source: string | ArrayBuffer } {
-  if (!file.bytes.length || file.bytes.length > PREVIEW_LIMITS.model) throw new Error('3D 文件为空或超过 20 MiB');
+  if (!file.bytes.length || file.bytes.length > PREVIEW_LIMITS.model) throw new Error(`3D 文件为空或超过 ${PREVIEW_LIMITS.model / MiB} MiB`);
   if (/\.obj$/i.test(file.name)) {
     const source = new TextDecoder('utf-8', { fatal: true }).decode(file.bytes);
     if (/\u0000/.test(source) || !/^v\s+[-\d.]/m.test(source) || !/^f\s+\d/m.test(source)) throw new Error('OBJ 需要有效顶点与面');
@@ -176,11 +176,13 @@ export function validateModel(file: PreviewFile): { format: 'obj' | 'gltf'; sour
   list('materials', 256); list('textures', 32);
   const accessors = list('accessors', 2048);
   let vertices = 0;
+  // Sized for what the file limit admits (a textured model from a 3D generator: up to about 2M triangles); the
+  // buffer cap below bounds the memory either way.
   for (const accessor of accessors) {
-    if (!Number.isSafeInteger(accessor.count) || Number(accessor.count) < 0 || Number(accessor.count) > 1_000_000) throw new Error('glTF accessor 数量无效');
+    if (!Number.isSafeInteger(accessor.count) || Number(accessor.count) < 0 || Number(accessor.count) > 6_000_000) throw new Error('glTF accessor 数量无效');
     vertices += Number(accessor.count);
   }
-  if (vertices > 3_000_000) throw new Error('glTF 顶点总量超过预览上限');
+  if (vertices > 16_000_000) throw new Error('glTF 顶点总量超过预览上限');
   const accessorCount = (index: unknown) => {
     if (!Number.isSafeInteger(index) || Number(index) < 0 || !accessors[Number(index)]) throw new Error('glTF accessor 引用无效');
     return Number(accessors[Number(index)].count);
@@ -202,7 +204,7 @@ export function validateModel(file: PreviewFile): { format: 'obj' | 'gltf'; sour
     }
     expandedVertices += meshCosts[Number(node.mesh)] * instances;
     expandedPrimitives += (meshes[Number(node.mesh)].primitives as unknown[]).length;
-    if (expandedVertices > 3_000_000 || expandedPrimitives > 2048) throw new Error('glTF 实例展开后的几何体超过预览上限');
+    if (expandedVertices > 8_000_000 || expandedPrimitives > 2048) throw new Error('glTF 实例展开后的几何体超过预览上限');
   }
   for (const scene of list('scenes', 16)) {
     const roots = scene.nodes ?? [];
@@ -212,7 +214,7 @@ export function validateModel(file: PreviewFile): { format: 'obj' | 'gltf'; sour
   let bufferTotal = 0;
   const buffers = list('buffers', 32).map((buffer, index) => {
     const size = Number(buffer.byteLength);
-    if (!Number.isSafeInteger(size) || size < 0 || (bufferTotal += size) > 32 * MiB) throw new Error('glTF buffer 超过预览上限');
+    if (!Number.isSafeInteger(size) || size < 0 || (bufferTotal += size) > PREVIEW_LIMITS.model) throw new Error('glTF buffer 超过预览上限');
     const data = typeof buffer.uri === 'string' ? embeddedData(buffer.uri) : index === 0 ? binary : undefined;
     if (!data || data.length < size) throw new Error('glTF 缺少内嵌 buffer');
     return data;

@@ -34,7 +34,6 @@ describe('planner host capability boundary after online integration', () => {
     { type: 'set_execution', mode: 'review', maxRounds: 3, reviewerNodeId: 'reviewer', verdictFieldId: 'approved' },
     { type: 'set_edge_kind', edgeId: 'edge', kind: 'feedback' },
     { type: 'connect', fromNode: 'a', fromField: 'result', toNode: 'b', toField: 'context', kind: 'feedback' },
-    { type: 'connect', fromNode: 'a', fromField: 'result', toNode: 'b', toField: 'context', kind: 'data' },
   ];
   it.each<CanvasPlanOperation>([
     { type: 'add_field', nodeId: 'a', side: 'output', field: { id: 'page', label: 'Page', type: 'html', required: true, value: '' } },
@@ -62,6 +61,9 @@ describe('planner host capability boundary after online integration', () => {
     activate();
     const operation: CanvasPlanOperation = { type: 'connect', fromNode: 'a', fromField: 'result', toNode: 'b', toField: 'context' };
     reply(operation);
+    await expect(requestCanvasPlan('Connect', emptyDocument(), [], new AbortController().signal)).resolves.toEqual(proposal(operation));
+    // "data" is the default kind that models add anyway: it is dropped, not a reason to refuse the plan.
+    reply({ ...operation, kind: 'data' });
     await expect(requestCanvasPlan('Connect', emptyDocument(), [], new AbortController().signal)).resolves.toEqual(proposal(operation));
   });
 

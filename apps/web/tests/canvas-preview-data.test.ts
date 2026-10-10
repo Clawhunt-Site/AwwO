@@ -51,8 +51,9 @@ describe('bounded preview data', () => {
   });
   it('bounds actual repeated and instanced geometry rather than unique accessor counts alone', () => {
     const mesh = { primitives: [{ attributes: { POSITION: 0 } }] };
-    expect(() => validateModel(gltf({ asset: { version: '2.0' }, accessors: [{ count: 1_000_000 }], meshes: [mesh], nodes: Array.from({ length: 4 }, () => ({ mesh: 0 })) }))).toThrow('实例展开');
-    expect(() => validateModel(gltf({ asset: { version: '2.0' }, accessors: [{ count: 1_000_000 }, { count: 4 }], meshes: [mesh], nodes: [{ mesh: 0, extensions: { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: 1 } } } }] }))).toThrow('实例展开');
+    // 3M vertices fit every per-accessor and total cap; four copies of them (12M) exceed the 8M expanded cap.
+    expect(() => validateModel(gltf({ asset: { version: '2.0' }, accessors: [{ count: 3_000_000 }], meshes: [mesh], nodes: Array.from({ length: 4 }, () => ({ mesh: 0 })) }))).toThrow('实例展开');
+    expect(() => validateModel(gltf({ asset: { version: '2.0' }, accessors: [{ count: 3_000_000 }, { count: 4 }], meshes: [mesh], nodes: [{ mesh: 0, extensions: { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: 1 } } } }] }))).toThrow('实例展开');
     expect(() => validateModel(gltf({ asset: { version: '2.0' }, nodes: [{}], scenes: [{ nodes: [0, 0] }] }))).toThrow('根节点');
   });
   it('bounds OBJ polygon triangulation before geometry allocation', () => {
