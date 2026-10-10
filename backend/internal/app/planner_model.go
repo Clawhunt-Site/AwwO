@@ -87,7 +87,7 @@ const operatorPaidRun = `EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=mi.tenant
 
 // countsTowardsDaily matches a ledger row (alias mi) that spends a daily allowance: every call except the operator's
 // planner-model calls, which only the planner ceilings below count. p is the query parameter holding the planner
-// model; with none configured it is ” and every row matches. A fallback plan on the default model is an ordinary
+// model; with none configured it is the empty string and every row matches. A fallback plan on the default model is an ordinary
 // call and counts.
 func countsTowardsDaily(p string) string {
 	return `NOT (mi.model_id=` + p + ` AND ` + operatorPaidRun + `)`
