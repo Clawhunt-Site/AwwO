@@ -131,6 +131,8 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     media_storage_full: ['媒体存储空间不足，暂停新的图像与视频生成；请联系管理员。', 'Media storage is full, so new image and video generations are paused. Contact an administrator.'],
     media_storage_unavailable: ['暂时无法保存生成的媒体，请联系管理员。', 'Generated media cannot be stored right now. Contact an administrator.'],
     media_capacity_exceeded: ['今日平台的图像与视频生成额度已用完，请在 UTC 次日重试。', 'Today’s image and video generations for the service are used up. Try again after the next UTC day.'],
+    model3d_quota_exceeded: ['本工作区今天的免费 3D 模型生成次数已用完，请在 UTC 次日重试；Pro / Max 付费套餐可以用点数继续生成（账号菜单 → 套餐与点数）。', 'This workspace has used today’s free 3D model generations. Try again after the next UTC day; the Pro and Max plans keep generating on credits (account menu → Plans and credits).'],
+    model3d_capacity_exceeded: ['今天全站的免费 3D 模型生成名额已用完，请在 UTC 次日重试；Pro / Max 付费套餐不受这个名额限制。', 'Today’s free 3D model generations for the whole service are used up. Try again after the next UTC day; the Pro and Max plans are not limited by it.'],
     media_quota_exceeded: ['本工作区今日的图像与视频生成次数已用完，请在 UTC 次日重试；需要更多次数可以看看 Pro / Max 付费套餐（账号菜单 → 套餐与点数）。', 'This workspace has used today’s image and video generations. Try again after the next UTC day; for more, see the Pro and Max plans (account menu → Plans and credits).'],
     plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
     model_unpriced: ['这个模型还不能按点数计费，请换用其他模型。', 'This model cannot be billed in credits yet. Choose another model.'],

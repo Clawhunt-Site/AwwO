@@ -131,15 +131,16 @@ describe('media node configuration', () => {
     const retry = vi.fn();
     const image: SessionNode = { ...createSessionNode('image', { x: 0, y: 0 }), id: 'node-c' };
     const view = render(<InspectorPanel {...props({ node: image, media: { status: 'error' }, onRetryMedia: retry })} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('无法读取图像与视频模型。');
+    expect(screen.getByRole('alert')).toHaveTextContent('无法读取图像、视频与 3D 模型。');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(retry).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('radio', { name: '视频 Agent' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '3D 模型 Agent' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '保存并准备运行' })).toBeDisabled();
     view.rerender(<InspectorPanel {...props({ node: image, media: { status: 'loading' } })} />);
-    expect(screen.getByText('正在读取图像与视频模型…')).toBeInTheDocument();
+    expect(screen.getByText('正在读取图像、视频与 3D 模型…')).toBeInTheDocument();
     view.rerender(<InspectorPanel {...props({ node: image, media: { status: 'ready', catalogue: parseMediaCatalogue({ configured: false }) } })} />);
-    expect(screen.getByText('本工作区暂未开放图像与视频生成。')).toBeInTheDocument();
+    expect(screen.getByText('本工作区暂未开放图像、视频与 3D 生成。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存并准备运行' })).toBeDisabled();
   });
 

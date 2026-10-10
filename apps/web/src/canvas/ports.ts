@@ -77,7 +77,8 @@ export function portsFor(node: CanvasNode): PortSpec[] {
   }
   const ports: PortSpec[] = [{ id: 'context', side: 'input', dataType: 'text', multi: true }];
   if (node.agentKind === 'image') ports.push({ id: 'reference', side: 'input', dataType: 'image' });
-  ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' ? node.agentKind : 'text' });
+  ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' ? node.agentKind
+    : node.agentKind === 'model3d' ? 'file' : 'text' });
   return ports;
 }
 

@@ -8,7 +8,7 @@ import type { MediaParams, MediaParamValue } from './canvasDoc';
 // than repaired, and a parameter's default is only ever displayed — an untouched parameter stays
 // absent from the node, and the server applies the model's default when the run is admitted.
 
-export type MediaKind = 'image' | 'video';
+export type MediaKind = 'image' | 'video' | 'model3d';
 export type MediaParamType = 'enum' | 'integer' | 'number' | 'boolean' | 'text';
 
 export interface MediaParam {
@@ -41,7 +41,8 @@ export interface MediaCatalogue {
 }
 
 const PARAM_NAME = /^[A-Za-z][A-Za-z0-9]{0,40}$/;
-const MODEL_ID = /^rh\.[a-z0-9][a-z0-9-]{0,62}$/;
+const MODEL_ID = /^(?:rh|tripo)\.[a-z0-9][a-z0-9-]{0,62}$/;
+const MEDIA_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'model3d']);
 const PARAM_TYPES: ReadonlySet<string> = new Set(['enum', 'integer', 'number', 'boolean', 'text']);
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -88,7 +89,7 @@ function parseModel(raw: unknown): MediaModel | null {
   const r = raw as Record<string, unknown>;
   const prompt = r.prompt as Record<string, unknown> | undefined;
   if (typeof r.id !== 'string' || !MODEL_ID.test(r.id) || typeof r.name !== 'string' || !r.name || r.name.length > 80
-    || typeof r.vendor !== 'string' || !r.vendor || (r.kind !== 'image' && r.kind !== 'video')
+    || typeof r.vendor !== 'string' || !r.vendor || typeof r.kind !== 'string' || !MEDIA_KINDS.has(r.kind)
     || !prompt || !finite(prompt.minLength) || !finite(prompt.maxLength) || !Array.isArray(r.params)) return null;
   const params: MediaParam[] = [];
   for (const entry of r.params) {
@@ -97,7 +98,7 @@ function parseModel(raw: unknown): MediaModel | null {
     if (!param) return null;
     params.push(param);
   }
-  return { id: r.id, name: r.name, vendor: r.vendor, kind: r.kind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params };
+  return { id: r.id, name: r.name, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params };
 }
 
 export function parseMediaCatalogue(raw: unknown): MediaCatalogue {
@@ -125,7 +126,8 @@ export async function readMediaCatalogue(signal?: AbortSignal): Promise<MediaCat
   return parseMediaCatalogue(raw);
 }
 
-export const mediaKindOf = (agentKind: string): MediaKind | null => agentKind === 'image' || agentKind === 'video' ? agentKind : null;
+export const mediaKindOf = (agentKind: string): MediaKind | null =>
+  agentKind === 'image' || agentKind === 'video' || agentKind === 'model3d' ? agentKind : null;
 
 export function mediaModelsOf(catalogue: MediaCatalogue | null | undefined, kind: MediaKind): MediaModel[] {
   return catalogue?.available ? catalogue.models.filter(model => model.kind === kind) : [];
@@ -172,7 +174,7 @@ export function withMediaParam(params: MediaParams | undefined, param: MediaPara
 const VENDORS: Record<string, [string, string]> = {
   bytedance: ['字节跳动', 'ByteDance'], google: ['Google', 'Google'], openai: ['OpenAI', 'OpenAI'], alibaba: ['阿里巴巴', 'Alibaba'],
   midjourney: ['Midjourney', 'Midjourney'], xai: ['xAI', 'xAI'], kuaishou: ['快手', 'Kuaishou'], minimax: ['MiniMax', 'MiniMax'],
-  shengshu: ['生数科技', 'Shengshu'], pixverse: ['PixVerse', 'PixVerse'],
+  shengshu: ['生数科技', 'Shengshu'], pixverse: ['PixVerse', 'PixVerse'], tripo: ['Tripo 3D', 'Tripo 3D'],
 };
 
 /** A display name for a vendor slug; an unknown slug is shown as it is. */

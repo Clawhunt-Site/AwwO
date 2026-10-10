@@ -80,10 +80,10 @@ export interface InspectorPanelProps {
 }
 
 const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image'];
-/** Video nodes exist only where a host runs them: the SaaS media generation service. */
-const HOSTED_AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video'];
+/** Video and 3D model nodes exist only where a host runs them: the SaaS media generation service. */
+const HOSTED_AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video', 'model3d'];
 const kindKey = (kind: AgentKind) => kind === 'coding' ? 'node.coding' as const : kind === 'image' ? 'node.image' as const
-  : kind === 'video' ? 'node.video' as const : 'node.llm' as const;
+  : kind === 'video' ? 'node.video' as const : kind === 'model3d' ? 'node.model3d' as const : 'node.llm' as const;
 
 /** Agent kind → the hire path's coarse mission-role bucket (canvasHire maps it to AGENT_ROLES). */
 const KIND_TO_MISSION_ROLE: Record<AgentKind, string> = {
@@ -91,6 +91,7 @@ const KIND_TO_MISSION_ROLE: Record<AgentKind, string> = {
   coding: 'implement',
   image: 'review',
   video: 'review',
+  model3d: 'review',
 };
 
 type PersonaResult = 'synced' | 'failed' | 'not-written' | 'none';

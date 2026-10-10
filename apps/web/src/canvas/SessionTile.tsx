@@ -237,7 +237,7 @@ function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField
 function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass: string; label: string } {
   if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: canvasText(locale, 'tile.form') };
   const meta = AGENT_KIND_META[node.agentKind];
-  const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : node.agentKind === 'video' ? 'node.video' : 'node.llm');
+  const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : node.agentKind === 'video' ? 'node.video' : node.agentKind === 'model3d' ? 'node.model3d' : 'node.llm');
   return { glyph: meta.glyph, kindClass: node.agentKind, label };
 }
 

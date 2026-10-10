@@ -2,7 +2,7 @@
 // answers the run with a small record naming them; this reads that record strictly, so any other
 // text, however similar, stays ordinary text.
 
-export type MediaOutputKind = 'image' | 'video';
+export type MediaOutputKind = 'image' | 'video' | 'model3d';
 
 export interface MediaOutputItem {
   artifactId: string;
@@ -20,9 +20,12 @@ export interface MediaOutput {
 export const MEDIA_OUTPUT_TYPE = 'awwo.media';
 // Server artifact ids are "a" + base64url; anything else never becomes part of a URL.
 const ARTIFACT_ID = /^a[A-Za-z0-9_-]{8,128}$/;
+const IMAGE_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const TYPES: Record<MediaOutputKind, ReadonlySet<string>> = {
-  image: new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+  image: IMAGE_TYPES,
   video: new Set(['video/mp4', 'video/webm', 'video/quicktime']),
+  // A 3D node stores its model and the provider's rendered preview picture.
+  model3d: new Set(['model/gltf-binary', ...IMAGE_TYPES]),
 };
 
 export function parseMediaOutput(text: unknown): MediaOutput | null {
@@ -32,7 +35,7 @@ export function parseMediaOutput(text: unknown): MediaOutput | null {
   try { value = JSON.parse(trimmed); } catch { return null; }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  if (record.type !== MEDIA_OUTPUT_TYPE || record.version !== 1 || (record.kind !== 'image' && record.kind !== 'video')
+  if (record.type !== MEDIA_OUTPUT_TYPE || record.version !== 1 || (record.kind !== 'image' && record.kind !== 'video' && record.kind !== 'model3d')
     || typeof record.model !== 'string' || !Array.isArray(record.items) || !record.items.length || record.items.length > 8) return null;
   const kind = record.kind;
   const items: MediaOutputItem[] = [];

@@ -5,7 +5,7 @@ export type PreviewKind = 'html' | 'model' | 'pdf' | 'ide';
 export interface PreviewFile { name: string; bytes: Uint8Array }
 export interface SourceFile { path: string; source: string }
 const MiB = 1024 * 1024;
-export const PREVIEW_LIMITS = { html: 2 * MiB, model: 20 * MiB, pdf: 20 * MiB, ide: 8 * MiB } as const;
+export const PREVIEW_LIMITS = { html: 2 * MiB, model: 64 * MiB, pdf: 20 * MiB, ide: 8 * MiB } as const;
 export const SOURCE_FILE_LIMIT = 2 * MiB;
 export const SOURCE_TOTAL_LIMIT = 16 * MiB;
 export const SOURCE_COUNT_LIMIT = 200;

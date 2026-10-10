@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -47,11 +48,11 @@ type mediaItem struct {
 
 // Server-generated identifiers only; anything else never becomes part of a path.
 var mediaPathPart = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-var mediaFileName = regexp.MustCompile(`^[0-9a-f]{64}\.(png|jpg|webp|gif|mp4|webm|mov)$`)
+var mediaFileName = regexp.MustCompile(`^[0-9a-f]{64}\.(png|jpg|webp|gif|mp4|webm|mov|glb)$`)
 
-// mediaHub is the configured provider client, or nil when media generation is off.
+// mediaHub is the configured RunningHub client, or nil when image and video generation is off.
 func (a *App) mediaHub() *runningHub {
-	if !a.cfg.mediaConfigured() {
+	if !a.cfg.runningHubConfigured() {
 		return nil
 	}
 	a.mu.Lock()
@@ -60,6 +61,43 @@ func (a *App) mediaHub() *runningHub {
 		a.media = newRunningHub(a.cfg)
 	}
 	return a.media
+}
+
+// tripoHub is the configured Tripo client, or nil when 3D generation is off.
+func (a *App) tripoHub() *tripoClient {
+	if !a.cfg.tripoConfigured() {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.tripo == nil {
+		a.tripo = newTripo(a.cfg)
+	}
+	return a.tripo
+}
+
+// mediaProvider is a media generation backend: RunningHub for images and video, Tripo for 3D models. A task is
+// submitted once, queried until it ends, and its result files are downloaded through an allowlisted client.
+type mediaProvider interface {
+	submit(ctx context.Context, endpoint string, body map[string]any) (rhTask, error)
+	query(ctx context.Context, taskID string) (rhTask, error)
+	download(ctx context.Context, raw string, w io.Writer) (int64, error)
+	fileLimit() int64
+}
+
+// mediaProviderFor returns the configured client for a catalog provider, or nil (never a typed nil).
+func (a *App) mediaProviderFor(provider string) mediaProvider {
+	switch provider {
+	case mediaProviderRunningHub:
+		if hub := a.mediaHub(); hub != nil {
+			return hub
+		}
+	case mediaProviderTripo:
+		if hub := a.tripoHub(); hub != nil {
+			return hub
+		}
+	}
+	return nil
 }
 
 // savedMediaNode reads an image or video node's kind, model and parameter choices from the saved
@@ -97,6 +135,9 @@ func (a *App) mediaSnapshot(document []byte, nodeID, model, prompt string, entit
 	if !ok {
 		return executionSnapshot{}, setupError{"model_unavailable", "Node model is unavailable for its runtime or this workspace"}
 	}
+	if !a.cfg.mediaProviderConfigured(m.Provider) {
+		return executionSnapshot{}, setupError{"media_unavailable", "This node's generation provider is not configured"}
+	}
 	if !a.mediaEntitled(entitlement, model) {
 		return executionSnapshot{}, setupError{"model_not_allowed", "This workspace may not use the selected model"}
 	}
@@ -114,7 +155,11 @@ func (a *App) mediaSnapshot(document []byte, nodeID, model, prompt string, entit
 	if !m.validMediaPrompt(prompt) {
 		return executionSnapshot{}, setupError{"media_prompt_invalid", fmt.Sprintf("The prompt must be %d-%d characters for this model", m.Prompt.MinLength, m.Prompt.MaxLength)}
 	}
-	return executionSnapshot{Runtime: runtimeRunningHub, Model: m.ID, Media: &mediaPlan{Version: 1, Provider: "runninghub", Model: m.ID, Kind: m.Kind, Params: params}}, nil
+	runtime := runtimeRunningHub
+	if m.Provider == mediaProviderTripo {
+		runtime = runtimeTripo
+	}
+	return executionSnapshot{Runtime: runtime, Model: m.ID, Media: &mediaPlan{Version: 1, Provider: m.Provider, Model: m.ID, Kind: m.Kind, Params: params}}, nil
 }
 
 func (a *App) mediaAdmissionError(w http.ResponseWriter, err error) {
@@ -221,6 +266,24 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		fail(w, 429, "media_capacity_exceeded", "Today's image and video generations are used up; try again tomorrow")
 		return
 	}
+	// A 3D generation is paid from the operator's Tripo balance: free ones have their own, smaller caps, for the
+	// workspace and across every workspace, counted from durable rows under the same lock.
+	if plan == nil && snapshot.Media.Provider == mediaProviderTripo {
+		var mine, all int
+		if e = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1),count(*) FROM media_generations
+			WHERE billed_user_id IS NULL AND model LIKE 'tripo.%' AND created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&mine, &all); e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if mine >= a.cfg.TripoFreeRunsPerDay {
+			fail(w, 429, "model3d_quota_exceeded", "This workspace has used today's free 3D generations")
+			return
+		}
+		if all >= a.cfg.TripoFreeTotalPerDay {
+			fail(w, 429, "model3d_capacity_exceeded", "Today's free 3D generations are used up; try again tomorrow")
+			return
+		}
+	}
 	var credits *int
 	var billedUser *string
 	var billedPeriod *time.Time
@@ -251,7 +314,7 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		return
 	}
 	id := randomID()
-	task, _ := json.Marshal(map[string]string{"provider": "runninghub", "model": snapshot.Model})
+	task, _ := json.Marshal(map[string]string{"provider": snapshot.Media.Provider, "model": snapshot.Model})
 	v, e := oneJSON(ctx, tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status,media_task) VALUES($1,$2,$3,$4,$5,$6,'queued',$7) RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt, task)
 	if e != nil {
 		a.dbError(w, e)
@@ -305,18 +368,23 @@ func mediaFailureCode(err error) string {
 func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, snapshot executionSnapshot) {
 	plan := snapshot.Media
 	m, ok := builtinMediaCatalog.model(plan.Model)
-	if !ok || m.Kind != plan.Kind || plan.Provider != "runninghub" {
+	if !ok || m.Kind != plan.Kind || plan.Provider != m.Provider {
 		a.finish(tid, id, "failed", "", "snapshot_invalid")
 		return
 	}
-	hub := a.mediaHub()
+	hub := a.mediaProviderFor(m.Provider)
 	if hub == nil {
 		a.finish(tid, id, "failed", "", "media_unavailable")
 		return
 	}
-	body := map[string]any{"prompt": strings.TrimSpace(prompt)}
-	for name, value := range plan.Params {
-		body[name] = value
+	var body map[string]any
+	if m.Provider == mediaProviderTripo {
+		body = tripoRequest(m, prompt, plan.Params)
+	} else {
+		body = map[string]any{"prompt": strings.TrimSpace(prompt)}
+		for name, value := range plan.Params {
+			body[name] = value
+		}
 	}
 	// One admitted run is one provider task: a submission that may or may not have reached the
 	// provider is never retried, because a retry could pay for the same generation twice. Nor is it
@@ -413,7 +481,7 @@ func (a *App) mediaStatus(ctx context.Context, tid, id, status string) {
 // followMedia polls a submitted task until it succeeds, fails or the run's deadline passes, then
 // stores the results. recorded says whether the task id is durable, so a shutdown can leave the
 // run for the next start instead of settling it.
-func (a *App) followMedia(ctx context.Context, hub *runningHub, tid, id, sid string, m *mediaModel, task rhTask, recorded bool) {
+func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, task rhTask, recorded bool) {
 	reported, failures := "", 0
 	for task.Status != "SUCCESS" {
 		if state := strings.ToLower(task.Status); state != reported && (state == "queued" || state == "running") {
@@ -517,7 +585,10 @@ func (a *App) resumeMedia(items []resumableMedia) {
 				return
 			}
 			m, ok := builtinMediaCatalog.model(snapshot.Media.Model)
-			hub := a.mediaHub()
+			var hub mediaProvider
+			if ok {
+				hub = a.mediaProviderFor(m.Provider)
+			}
 			if !ok || hub == nil {
 				a.finish(item.tenant, item.run, "failed", "", "media_unavailable")
 				return

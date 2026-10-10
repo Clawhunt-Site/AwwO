@@ -65,6 +65,7 @@ type App struct {
 	// media is the RunningHub client, built on first use when media generation is configured;
 	// resumable holds media runs left running at shutdown for the next start to resume.
 	media         *runningHub
+	tripo         *tripoClient
 	resumable     map[string]bool
 	mediaReserved int64
 }

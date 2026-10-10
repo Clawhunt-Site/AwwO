@@ -143,12 +143,14 @@ func publicAddress(addr netip.Addr) bool {
 
 // allowedResultURL accepts https on the default port, without credentials, on an allowed host:
 // an entry starting with a dot allows that domain's subdomains, any other entry exactly one host.
-func (h *runningHub) allowedResultURL(u *url.URL) bool {
+func (h *runningHub) allowedResultURL(u *url.URL) bool { return resultURLAllowed(h.hosts, u) }
+
+func resultURLAllowed(hosts []string, u *url.URL) bool {
 	if u == nil || u.Scheme != "https" || u.User != nil || u.Port() != "" && u.Port() != "443" {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	for _, entry := range h.hosts {
+	for _, entry := range hosts {
 		if strings.HasPrefix(entry, ".") && strings.HasSuffix(host, entry) && len(host) > len(entry) || host == entry {
 			return true
 		}
@@ -311,15 +313,21 @@ func rhCodeError(code string) error {
 // download streams one result file into w, refusing a host outside the allowlist, a non-public
 // address, or a body larger than the configured limit.
 func (h *runningHub) download(ctx context.Context, raw string, w io.Writer) (int64, error) {
+	return downloadResult(ctx, h.files, h.hosts, h.maxFile, raw, w)
+}
+
+func (h *runningHub) fileLimit() int64 { return h.maxFile }
+
+func downloadResult(ctx context.Context, client *http.Client, hosts []string, maxFile int64, raw string, w io.Writer) (int64, error) {
 	u, err := url.Parse(raw)
-	if err != nil || !h.allowedResultURL(u) {
+	if err != nil || !resultURLAllowed(hosts, u) {
 		return 0, &rhError{Code: "media_result_refused"}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return 0, &rhError{Code: "media_result_refused"}
 	}
-	resp, err := h.files.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0, ctx.Err()
@@ -330,14 +338,14 @@ func (h *runningHub) download(ctx context.Context, raw string, w io.Writer) (int
 	if resp.StatusCode != 200 {
 		return 0, &rhError{Code: "media_result_unavailable", Transient: resp.StatusCode >= 500}
 	}
-	if resp.ContentLength > h.maxFile {
+	if resp.ContentLength > maxFile {
 		return 0, &rhError{Code: "media_result_too_large"}
 	}
-	n, err := io.Copy(w, io.LimitReader(resp.Body, h.maxFile+1))
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxFile+1))
 	if err != nil {
 		return n, &rhError{Code: "media_result_unavailable", Transient: true}
 	}
-	if n > h.maxFile {
+	if n > maxFile {
 		return n, &rhError{Code: "media_result_too_large"}
 	}
 	return n, nil

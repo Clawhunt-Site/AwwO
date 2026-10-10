@@ -14,7 +14,9 @@ const (
 	agentEngineMedia  = "media"
 )
 
-func mediaAgentKind(kind string) bool { return kind == mediaKindImage || kind == mediaKindVideo }
+func mediaAgentKind(kind string) bool {
+	return kind == mediaKindImage || kind == mediaKindVideo || kind == mediaKindModel3D
+}
 
 func (c setupConfiguration) engine() string {
 	if mediaAgentKind(c.AgentKind) {
@@ -23,16 +25,18 @@ func (c setupConfiguration) engine() string {
 	return agentEngineWorker
 }
 
-// mediaSetupAllowed checks an image or video node's model before its Agent is written: media
-// generation must be configured, and the model must be in the catalog, of the node's kind, and
-// allowed for the workspace.
+// mediaSetupAllowed checks an image, video or 3D node's model before its Agent is written: its provider must be
+// configured, and the model must be in the catalog, of the node's kind, and allowed for the workspace.
 func (a *App) mediaSetupAllowed(kind, model string, entitlement modelEntitlement) error {
 	if !a.cfg.mediaConfigured() {
 		return setupError{"media_unavailable", "Image and video generation is not configured"}
 	}
 	m, ok := builtinMediaCatalog.model(model)
 	if !ok || m.Kind != kind {
-		return setupError{"model_unavailable", "Choose an image or video model for this node"}
+		return setupError{"model_unavailable", "Choose an image, video or 3D model for this node"}
+	}
+	if !a.cfg.mediaProviderConfigured(m.Provider) {
+		return setupError{"media_unavailable", "This node's generation provider is not configured"}
 	}
 	if !a.mediaEntitled(entitlement, m.ID) {
 		return setupError{"model_not_allowed", "This workspace may not use the selected model"}
@@ -42,8 +46,14 @@ func (a *App) mediaSetupAllowed(kind, model string, entitlement modelEntitlement
 
 // mediaEntitled grants a media model only explicitly: the workspace's model allowlist names it, or
 // the operator opted unrestricted workspaces in. Generations are paid from the operator's key, so
-// "no allowlist" does not mean "every paid generator" unless the operator says so.
+// "no allowlist" does not mean "every paid generator" unless the operator says so. The 3D models may be
+// offered to every workspace (AWWO_TRIPO_ALL_WORKSPACES), their free generations bounded by their own caps.
 func (a *App) mediaEntitled(entitlement modelEntitlement, model string) bool {
+	if a.cfg.TripoAllWorkspaces {
+		if m, ok := builtinMediaCatalog.model(model); ok && m.Provider == mediaProviderTripo {
+			return true
+		}
+	}
 	if entitlement.unrestricted() {
 		return a.cfg.MediaUnrestrictedWorkspaces
 	}

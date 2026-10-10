@@ -62,3 +62,30 @@
   font-size: 12px;
   color: var(--awwo-muted, var(--faint));
 }
+
+
+/* Generated 3D models: Tripo's rendered picture with a button to turn the model in the WebGL viewer, and its GLB. */
+:is(.canvas-root, .awwo-results) .canvas-media-grid--model3d { grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+:is(.canvas-root, .awwo-results) .canvas-media-model { gap: 6px; }
+:is(.canvas-root, .awwo-results) .canvas-media-model-poster {
+  position: relative; display: grid; place-items: center; min-height: 200px; padding: 10px;
+  border: 1px solid var(--awwo-line, var(--line)); border-radius: 8px; background: var(--awwo-soft, var(--soft)); color: var(--awwo-muted, var(--faint));
+}
+:is(.canvas-root, .awwo-results) .canvas-media-model-poster .canvas-media-image { border: 0; background: transparent; max-height: 300px; }
+:is(.canvas-root, .awwo-results) .canvas-media-model-poster p { margin: 6px 0 0; font-size: 12px; text-align: center; }
+:is(.canvas-root, .awwo-results) .canvas-media-model-open {
+  position: absolute; left: 50%; bottom: 12px; translate: -50% 0; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 14px;
+  border: 0; border-radius: 999px; background: var(--awwo-teal, var(--accent)); color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+}
+:is(.canvas-root, .awwo-results) .canvas-media-model-open:disabled { opacity: .7; cursor: progress; }
+:is(.canvas-root, .awwo-results) .canvas-media-model-open:focus-visible { outline: 2px solid var(--awwo-teal, var(--accent)); outline-offset: 2px; }
+:is(.canvas-root, .awwo-results) .canvas-media-model figcaption a { display: inline-flex; align-items: center; gap: 4px; }
+/* The 成果 view shows media too, framed like the rest of the result. */
+.awwo-results .canvas-media-result { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+.awwo-results .canvas-media-summary { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.awwo-results .canvas-media-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
+.awwo-results .canvas-media-item { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
+.awwo-results :is(.canvas-media-image, .canvas-media-video) { display: block; width: 100%; max-height: 520px; object-fit: contain; border-radius: 8px; background: var(--saas-field); }
+.awwo-results .canvas-media-item figcaption { font-size: var(--saas-text-xs); }
+.awwo-results .canvas-media-item figcaption a { color: var(--saas-link); }

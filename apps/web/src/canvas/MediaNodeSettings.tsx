@@ -67,8 +67,8 @@ export function MediaNodeSettings({ node, state, disabled, onChange, onRetry }: 
   onRetry?: () => void;
 }) {
   const { locale, t } = useCanvasI18n();
-  const kind: MediaKind = node.agentKind === 'video' ? 'video' : 'image';
-  const kindLabel = t(kind === 'video' ? 'media.kindVideo' : 'media.kindImage');
+  const kind: MediaKind = node.agentKind === 'video' ? 'video' : node.agentKind === 'model3d' ? 'model3d' : 'image';
+  const kindLabel = t(kind === 'video' ? 'media.kindVideo' : kind === 'model3d' ? 'media.kindModel3d' : 'media.kindImage');
   if (!state || state.status === 'loading') return <div className="canvas-inspector-hint" role="status">{t('media.loading')}</div>;
   if (state.status === 'error') return <div className="canvas-inspector-outcome canvas-inspector-outcome--err" role="alert">
     {t('media.loadFailed')}

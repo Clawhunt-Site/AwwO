@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -21,8 +22,9 @@ import (
 
 // storeMediaResults downloads each result file into AWWO_MEDIA_DIR/<tenant>/<run>/<sha256>.<ext>
 // and records it as an artifact of the run's canvas node. A file whose bytes are not an image (for
-// an image node) or a video (for a video node) is refused, whatever the provider called it.
-func (a *App) storeMediaResults(ctx context.Context, hub *runningHub, tid, id, sid string, m *mediaModel, results []rhResult) (string, error) {
+// an image node), a video (for a video node) or a binary glTF model (first, for a 3D node, beside its
+// rendered preview image) is refused, whatever the provider called it.
+func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, results []rhResult) (string, error) {
 	results = mediaFileResults(results)
 	if len(results) == 0 {
 		return "", &rhError{Code: "media_no_output"}
@@ -41,7 +43,7 @@ func (a *App) storeMediaResults(ctx context.Context, hub *runningHub, tid, id, s
 	}
 	items := []mediaItem{}
 	for i, result := range results {
-		release, ok := a.reserveMediaSpace(hub.maxFile)
+		release, ok := a.reserveMediaSpace(hub.fileLimit())
 		if !ok {
 			return "", &rhError{Code: "media_storage_full"}
 		}
@@ -70,7 +72,7 @@ func mediaFileResults(results []rhResult) []rhResult {
 	return files
 }
 
-func (a *App) storeMediaResult(ctx context.Context, hub *runningHub, tmp, tid, id, canvasID, nodeID string, m *mediaModel, index int, result rhResult) (mediaItem, error) {
+func (a *App) storeMediaResult(ctx context.Context, hub mediaProvider, tmp, tid, id, canvasID, nodeID string, m *mediaModel, index int, result rhResult) (mediaItem, error) {
 	file, err := os.CreateTemp(tmp, "download-*")
 	if err != nil {
 		return mediaItem{}, &rhError{Code: "media_storage_failed"}
@@ -91,7 +93,7 @@ func (a *App) storeMediaResult(ctx context.Context, hub *runningHub, tmp, tid, i
 		return mediaItem{}, err
 	}
 	contentType, ext, kind := sniffMedia(head.Bytes())
-	if kind != m.Kind || size == 0 {
+	if !mediaResultFits(m.Kind, kind, index) || size == 0 {
 		return mediaItem{}, &rhError{Code: "media_result_invalid"}
 	}
 	sum := hex.EncodeToString(hash.Sum(nil))
@@ -106,7 +108,14 @@ func (a *App) storeMediaResult(ctx context.Context, hub *runningHub, tmp, tid, i
 	keep = true
 	_ = os.Chmod(final, 0o640)
 	field := fmt.Sprintf("media-%d", index)
-	item := mediaItem{ArtifactID: artifactID(tid, id, nodeID, field), Name: fmt.Sprintf("%s-%d.%s", m.Kind, index, ext), ContentType: contentType, Size: size}
+	name := fmt.Sprintf("%s-%d.%s", m.Kind, index, ext)
+	if m.Kind == mediaKindModel3D {
+		name = fmt.Sprintf("model-%d.%s", index, ext)
+		if kind != mediaKindModel3D {
+			name = fmt.Sprintf("preview-%d.%s", index, ext)
+		}
+	}
+	item := mediaItem{ArtifactID: artifactID(tid, id, nodeID, field), Name: name, ContentType: contentType, Size: size}
 	insert, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if _, e := a.db.Exec(insert, `INSERT INTO artifacts(id,tenant_id,canvas_id,run_id,node_id,field_id,name,size,sha256,content,storage_path,content_type)
@@ -135,9 +144,12 @@ func (h *headBuffer) Write(p []byte) (int, error) {
 }
 func (h *headBuffer) Bytes() []byte { return h.buf.Bytes() }
 
-// sniffMedia identifies the closed set of image and video formats a media node stores.
+// sniffMedia identifies the closed set of image, video and 3D model formats a media node stores.
 func sniffMedia(head []byte) (contentType, ext, kind string) {
 	switch {
+	case len(head) >= 12 && bytes.Equal(head[0:4], []byte("glTF")) && binary.LittleEndian.Uint32(head[4:8]) == 2:
+		// Binary glTF 2.0 (GLB): magic "glTF", version 2.
+		return "model/gltf-binary", "glb", mediaKindModel3D
 	case bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n")):
 		return "image/png", "png", mediaKindImage
 	case len(head) >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF:
@@ -158,6 +170,15 @@ func sniffMedia(head []byte) (contentType, ext, kind string) {
 }
 
 var inlineMediaTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true, "video/mp4": true, "video/webm": true, "video/quicktime": true}
+
+// mediaResultFits says whether a stored file is what the node generates: its own kind, or for a 3D node, its
+// model first and then the provider's rendered preview picture.
+func mediaResultFits(nodeKind, fileKind string, index int) bool {
+	if nodeKind == mediaKindModel3D && index > 1 {
+		return fileKind == mediaKindModel3D || fileKind == mediaKindImage
+	}
+	return fileKind != "" && fileKind == nodeKind
+}
 
 // mediaFile resolves a stored relative path inside AWWO_MEDIA_DIR, refusing anything that is not
 // exactly <tenant>/<run>/<sha256>.<ext> for this tenant.

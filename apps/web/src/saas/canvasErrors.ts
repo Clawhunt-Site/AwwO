@@ -47,9 +47,9 @@ const runErrors: Record<string, [string, string]> = {
   output_contract_invalid: ['模型输出不符合该节点的交付格式，请重试或换一个模型。', 'The model output did not match this node’s delivery format. Retry or choose another model.'],
   // Image and video generation (RunningHub). The provider's own message is never shown: it can
   // echo the prompt or account details, so each failure maps to what the reader can do about it.
-  media_unavailable: ['图像与视频生成尚未配置，请联系管理员。', 'Image and video generation is not configured. Contact an administrator.'],
+  media_unavailable: ['图像、视频与 3D 生成尚未配置，请联系管理员。', 'Image, video and 3D generation is not configured. Contact an administrator.'],
   media_provider_unauthorized: ['媒体生成服务拒绝了平台密钥，请联系管理员。', 'The media generation service rejected the platform key. Contact an administrator.'],
-  media_provider_balance: ['媒体生成服务余额不足，请联系管理员。', 'The media generation account is out of balance. Contact an administrator.'],
+  media_provider_balance: ['媒体生成服务余额不足，请联系管理员充值。', 'The media generation account is out of balance. Contact an administrator to top it up.'],
   media_provider_busy: ['媒体生成服务繁忙，请稍后重试。', 'The media generation service is busy. Please try again later.'],
   media_provider_unavailable: ['媒体生成服务暂时不可用，请稍后重试。', 'The media generation service is unavailable. Please try again later.'],
   media_content_rejected: ['内容未通过生成服务的审核，请修改描述后重试。', 'The content did not pass the generation service’s review. Change the description and try again.'],
@@ -59,7 +59,7 @@ const runErrors: Record<string, [string, string]> = {
   media_task_missing: ['生成任务已不存在，请重新运行。', 'The generation task no longer exists. Run the node again.'],
   media_failed: ['生成失败，请调整描述或换一个模型后重试。', 'The generation failed. Adjust the description or choose another model, then try again.'],
   media_no_output: ['生成服务没有返回结果，请重试。', 'The generation service returned no result. Please try again.'],
-  media_result_invalid: ['生成结果不是有效的图像或视频，已拒绝保存。', 'The result was not a valid image or video and was not saved.'],
+  media_result_invalid: ['生成结果不是有效的图像、视频或 3D 模型，已拒绝保存。', 'The result was not a valid image, video or 3D model and was not saved.'],
   media_result_refused: ['生成结果来自未允许的地址，已拒绝下载。', 'The result came from an address that is not allowed and was not downloaded.'],
   media_result_unavailable: ['暂时无法下载生成结果，请重试。', 'The result could not be downloaded. Please try again.'],
   media_result_too_large: ['生成结果超过文件大小上限，未保存。', 'The result exceeds the file size limit and was not saved.'],

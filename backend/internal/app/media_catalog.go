@@ -22,9 +22,13 @@ import (
 var mediaCatalogJSON []byte
 
 const (
-	mediaKindImage = "image"
-	mediaKindVideo = "video"
-	maxMediaParams = 16
+	mediaKindImage   = "image"
+	mediaKindVideo   = "video"
+	mediaKindModel3D = "model3d"
+	maxMediaParams   = 16
+
+	mediaProviderRunningHub = "runninghub"
+	mediaProviderTripo      = "tripo"
 )
 
 type mediaPrompt struct {
@@ -56,6 +60,10 @@ type mediaModel struct {
 	Params   []mediaParam `json:"params"`
 	Docs     string       `json:"docs"`
 	Verified string       `json:"verified"`
+	// Provider runs the model: RunningHub for the embedded catalog, Tripo for the 3D models (tripo.go).
+	Provider string `json:"-"`
+	// Version is the provider's own pinned model version, sent with every request (Tripo).
+	Version string `json:"-"`
 }
 
 type mediaCatalog struct {
@@ -65,6 +73,7 @@ type mediaCatalog struct {
 	Notes    []string     `json:"notes"`
 	Models   []mediaModel `json:"models"`
 	byID     map[string]*mediaModel
+	list     []*mediaModel
 }
 
 var (
@@ -97,6 +106,7 @@ func parseMediaCatalog(raw []byte) (*mediaCatalog, error) {
 		if c.byID[m.ID] != nil || endpoints[m.Endpoint] {
 			return nil, errors.New("media catalog ids and endpoints must be unique")
 		}
+		m.Provider = mediaProviderRunningHub
 		c.byID[m.ID] = m
 		endpoints[m.Endpoint] = true
 	}
@@ -188,7 +198,7 @@ func cleanCatalogText(s string, max int) bool {
 	return true
 }
 
-var builtinMediaCatalog = mustMediaCatalog(mediaCatalogJSON)
+var builtinMediaCatalog = withTripoModels(mustMediaCatalog(mediaCatalogJSON))
 
 func mustMediaCatalog(raw []byte) *mediaCatalog {
 	c, err := parseMediaCatalog(raw)
@@ -197,6 +207,29 @@ func mustMediaCatalog(raw []byte) *mediaCatalog {
 	}
 	return c
 }
+
+// withTripoModels adds the 3D models (tripo.go) to a parsed catalog, refusing to start on one that does not
+// validate or that collides with an existing id, as the embedded catalog itself is refused.
+func withTripoModels(c *mediaCatalog) *mediaCatalog {
+	c.list = nil
+	for i := range c.Models {
+		c.list = append(c.list, &c.Models[i])
+	}
+	for _, m := range tripoModels() {
+		if err := validTripoModel(m); err != nil {
+			panic(fmt.Errorf("tripo model %q is invalid: %w", m.ID, err))
+		}
+		if c.byID[m.ID] != nil {
+			panic(fmt.Errorf("tripo model %q collides with a catalog id", m.ID))
+		}
+		c.byID[m.ID] = m
+		c.list = append(c.list, m)
+	}
+	return c
+}
+
+// List is every model in catalog order: RunningHub's, then the 3D models.
+func (c *mediaCatalog) List() []*mediaModel { return c.list }
 
 func (c *mediaCatalog) model(id string) (*mediaModel, bool) {
 	m, ok := c.byID[id]
@@ -303,13 +336,12 @@ func (a *App) mediaCatalogue(w http.ResponseWriter, r *http.Request) {
 	configured := a.cfg.mediaConfigured()
 	models := []map[string]any{}
 	if configured {
-		for i := range builtinMediaCatalog.Models {
-			m := &builtinMediaCatalog.Models[i]
-			if !a.mediaEntitled(entitlement, m.ID) {
+		for _, m := range builtinMediaCatalog.List() {
+			if !a.cfg.mediaProviderConfigured(m.Provider) || !a.mediaEntitled(entitlement, m.ID) {
 				continue
 			}
 			models = append(models, map[string]any{"id": m.ID, "name": m.Name, "vendor": m.Vendor, "kind": m.Kind, "mode": m.Mode,
-				"prompt": m.Prompt, "params": m.Params, "verified": m.Verified})
+				"prompt": m.Prompt, "params": m.Params, "verified": m.Verified, "provider": m.Provider})
 		}
 	}
 	writeJSON(w, 200, map[string]any{"provider": "runninghub", "configured": configured, "available": configured && len(models) > 0, "models": models,

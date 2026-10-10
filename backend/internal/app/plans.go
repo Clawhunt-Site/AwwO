@@ -380,6 +380,8 @@ var mediaBaseCredits = map[string]int{
 	"rh.qwen-image-3-pro": 30, "rh.nano-banana-pro": 60, "rh.gpt-image-2": 60, "rh.midjourney-v7": 60,
 	"rh.vidu-q3-pro": 100, "rh.wan-2-7": 100, "rh.grok-imagine-video": 100, "rh.pixverse-v6": 100,
 	"rh.kling-v3-pro": 200, "rh.seedance-2": 200, "rh.veo-3-1-fast": 200, "rh.sora-2": 200, "rh.hailuo-2-3-pro": 200,
+	// Tripo 3D models: 20 Tripo credits ($0.20) for a textured text-to-3D task, held at three times that.
+	"tripo.v3-1": 60, "tripo.p1": 60,
 }
 
 // mediaCreditsFor prices a generation from its model and resolved settings. Settings that raise RunningHub's
@@ -427,6 +429,20 @@ func mediaCreditsFor(model, kind string, params map[string]any) int {
 		return false
 	}
 	credits := float64(base)
+	if kind == mediaKindModel3D {
+		// Tripo (1 credit = $0.01): text to 3D 20 with texture, 10 without; HD texture +10, detailed geometry +20.
+		// Priced at three times that, like the other media models until measured.
+		if text("texture") == "false" && text("pbr") == "false" {
+			credits = float64(base) / 2
+		}
+		if text("textureQuality") == "detailed" {
+			credits += 30
+		}
+		if text("geometryQuality") == "detailed" {
+			credits += 60
+		}
+		return int(math.Ceil(credits))
+	}
 	if kind == mediaKindVideo {
 		credits *= max(1, number("duration", 5)/5)
 		switch res := text("resolution"); {

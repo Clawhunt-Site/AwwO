@@ -327,7 +327,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     });
     return () => controller.abort();
   }, [canInitialize, cloudScope, readOnly, mediaRefresh]);
-  const mediaKinds = useMemo(() => (['image', 'video'] as const).filter(kind => mediaModelsOf(mediaCatalogueOf(mediaState), kind).length > 0), [mediaState]);
+  const mediaKinds = useMemo(() => (['image', 'video', 'model3d'] as const).filter(kind => mediaModelsOf(mediaCatalogueOf(mediaState), kind).length > 0), [mediaState]);
   const inspectorCloseLocked = useRef(false);
   const [bindingLocked, setBindingLocked] = useState(false);
   const onInspectorLockChange = useCallback((locked: boolean) => {
@@ -1541,9 +1541,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // A cloud image or video node is a plain generator: no role template, delivery format or
       // team. The first catalog model is shown, and runs only once the operator saves it.
       const node = kind === 'form' ? createFormNode(world)
-        : media ? { ...createSessionNode(media, world), title: t(media === 'video' ? 'node.video' : 'node.image'),
+        : media ? { ...createSessionNode(media, world), title: t(media === 'video' ? 'node.video' : media === 'model3d' ? 'node.model3d' : 'node.image'),
           model: mediaModelsOf(mediaCatalogueOf(mediaState), media)[0]?.id ?? '' }
-        : kind === 'llm' || kind === 'coding' || kind === 'image' || kind === 'video'
+        : kind === 'llm' || kind === 'coding' || kind === 'image' || kind === 'video' || kind === 'model3d'
           ? { ...createAgentTemplate('general', world, locale), agentKind: kind }
           : createAgentTemplate(kind, world, locale);
       patchDoc((prev) => ({ ...prev, nodes: [...prev.nodes, node] }), { label: `add:${node.id}` });

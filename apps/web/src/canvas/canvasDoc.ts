@@ -25,7 +25,7 @@ import { normalizeContract, type NodeContract } from './nodeContracts';
 import type { AgentTemplateId } from './agentTemplates';
 import { sanitizeNodeTeam, type NodeTeam } from './nodeTeam';
 
-export type AgentKind = 'llm' | 'coding' | 'image' | 'video';
+export type AgentKind = 'llm' | 'coding' | 'image' | 'video' | 'model3d';
 
 /** An image or video node's parameter choices. An absent key takes the model's default on the server. */
 export type MediaParamValue = string | number | boolean;
@@ -216,13 +216,14 @@ export const AGENT_KIND_META: Record<AgentKind, { label: string; glyph: string }
   coding: { label: '编码', glyph: 'C' },
   image: { label: '图像', glyph: 'I' },
   video: { label: '视频', glyph: 'V' },
+  model3d: { label: '3D 模型', glyph: '3D' },
 };
 
 /** Default tile sizes. Sessions are taller because they render a live transcript. */
 export const SESSION_NODE_SIZE = { w: 340, h: 260 } as const;
 export const FORM_NODE_SIZE = { w: 300, h: 200 } as const;
 
-const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video'];
+const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video', 'model3d'];
 const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review'];
 /** Waypoint slots are the number-row keys; anything outside is clamped into range. */
 export const WAYPOINT_MIN_SLOT = 1;

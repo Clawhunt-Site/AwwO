@@ -36,12 +36,29 @@ type mediaSettings struct {
 	// and its Tencent COS buckets: a real runninghub.ai generation (2026-10-03) came from the Hong
 	// Kong bucket; the Beijing one is the bucket RunningHub's documentation names.
 	MediaResultHosts []string
+	// Tripo (3D model nodes) runs on its own key, paid from the operator's Tripo balance, and stores its
+	// files in the same AWWO_MEDIA_DIR. TripoResultHosts are where its model and preview files come from.
+	TripoAPIKey      string
+	TripoBaseURL     string
+	TripoResultHosts []string
+	// TripoFreeRunsPerDay caps one workspace's free 3D generations per UTC day; TripoFreeTotalPerDay caps
+	// free 3D generations across every workspace. Paid plans spend their own credits instead.
+	TripoFreeRunsPerDay  int
+	TripoFreeTotalPerDay int
+	// TripoAllWorkspaces offers the 3D models to every workspace, whatever its model allowlist names
+	// (the daily caps above still bound what free generations cost the operator).
+	TripoAllWorkspaces bool
 }
 
 const (
 	defaultRunningHubBaseURL = "https://www.runninghub.ai"
 	defaultMediaResultHosts  = ".runninghub.ai,.runninghub.cn,rh-hk-images-1252422369.cos.ap-hongkong.myqcloud.com,rh-images-1252422369.cos.ap-beijing.myqcloud.com"
+	defaultTripoBaseURL      = "https://openapi.tripo3d.ai/v3"
+	defaultTripoResultHosts  = ".tripo3d.ai,.tripo3d.com"
 )
+
+// The official Tripo API origin. The key is sent only there.
+var tripoOrigins = map[string]bool{"https://openapi.tripo3d.ai/v3": true}
 
 // The two official RunningHub API origins. The key is sent only to one of them.
 var runningHubOrigins = map[string]bool{"https://www.runninghub.ai": true, "https://www.runninghub.cn": true}
@@ -107,15 +124,51 @@ func (c *Config) mediaFromEnv() error {
 			c.MediaResultHosts = append(c.MediaResultHosts, host)
 		}
 	}
+	c.TripoAPIKey = strings.TrimSpace(os.Getenv("AWWO_TRIPO_API_KEY"))
+	c.TripoBaseURL = strings.TrimRight(env("AWWO_TRIPO_BASE_URL", defaultTripoBaseURL), "/")
+	c.TripoResultHosts = nil
+	for _, host := range strings.Split(env("AWWO_TRIPO_RESULT_HOSTS", defaultTripoResultHosts), ",") {
+		if host = strings.ToLower(strings.TrimSpace(host)); host != "" {
+			c.TripoResultHosts = append(c.TripoResultHosts, host)
+		}
+	}
+	c.TripoFreeRunsPerDay, c.TripoFreeTotalPerDay = 2, 40
+	for key, dst := range map[string]*int{"AWWO_TRIPO_FREE_RUNS_PER_DAY": &c.TripoFreeRunsPerDay, "AWWO_TRIPO_FREE_TOTAL_PER_DAY": &c.TripoFreeTotalPerDay} {
+		if s := os.Getenv(key); s != "" {
+			n, e := strconv.Atoi(s)
+			if e != nil {
+				return errors.New(key + " must be a whole number")
+			}
+			*dst = n
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AWWO_TRIPO_ALL_WORKSPACES"))) {
+	case "", "false":
+	case "true":
+		c.TripoAllWorkspaces = true
+	default:
+		return errors.New("AWWO_TRIPO_ALL_WORKSPACES must be true or false")
+	}
 	return validateMediaConfig(*c)
 }
 
 func validateMediaConfig(c Config) error {
-	if c.RunningHubAPIKey == "" && c.MediaDir == "" {
+	if c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.MediaDir == "" {
 		return nil
 	}
-	if (c.RunningHubAPIKey == "") != (c.MediaDir == "") {
+	if c.MediaDir == "" || (c.RunningHubAPIKey == "" && c.TripoAPIKey == "") {
+		if c.TripoAPIKey != "" {
+			return errors.New("AWWO_TRIPO_API_KEY needs AWWO_MEDIA_DIR: generated models are stored there")
+		}
 		return errors.New("AWWO_RUNNINGHUB_API_KEY and AWWO_MEDIA_DIR must be set together")
+	}
+	if c.TripoAPIKey != "" {
+		if err := validateTripoConfig(c); err != nil {
+			return err
+		}
+	}
+	if c.RunningHubAPIKey == "" {
+		return validateMediaStorage(c)
 	}
 	if len(c.RunningHubAPIKey) < 16 || len(c.RunningHubAPIKey) > 512 {
 		return errors.New("invalid AWWO_RUNNINGHUB_API_KEY")
@@ -128,6 +181,43 @@ func validateMediaConfig(c Config) error {
 	if !runningHubOrigins[c.RunningHubBaseURL] && !(c.Env == "development" && loopbackOrigin(c.RunningHubBaseURL)) {
 		return errors.New("AWWO_RUNNINGHUB_BASE_URL must be https://www.runninghub.ai or https://www.runninghub.cn")
 	}
+	return validateMediaStorage(c)
+}
+
+// validateTripoConfig checks the 3D provider's own settings: the key's shape, its single API origin, where
+// its files may come from, and the free-generation caps that bound what the operator's balance pays.
+func validateTripoConfig(c Config) error {
+	if len(c.TripoAPIKey) < 16 || len(c.TripoAPIKey) > 512 {
+		return errors.New("invalid AWWO_TRIPO_API_KEY")
+	}
+	for _, ch := range c.TripoAPIKey {
+		if ch < 33 || ch > 126 {
+			return errors.New("invalid AWWO_TRIPO_API_KEY")
+		}
+	}
+	if !tripoOrigins[c.TripoBaseURL] && !(c.Env == "development" && loopbackOrigin(c.TripoBaseURL)) {
+		return errors.New("AWWO_TRIPO_BASE_URL must be https://openapi.tripo3d.ai/v3")
+	}
+	if c.TripoFreeRunsPerDay < 0 || c.TripoFreeRunsPerDay > 1000 {
+		return errors.New("AWWO_TRIPO_FREE_RUNS_PER_DAY must be between 0 and 1000")
+	}
+	if c.TripoFreeTotalPerDay < 0 || c.TripoFreeTotalPerDay > 100000 {
+		return errors.New("AWWO_TRIPO_FREE_TOTAL_PER_DAY must be between 0 and 100000")
+	}
+	if len(c.TripoResultHosts) == 0 || len(c.TripoResultHosts) > 16 {
+		return errors.New("AWWO_TRIPO_RESULT_HOSTS must list 1-16 host suffixes")
+	}
+	for _, host := range c.TripoResultHosts {
+		name := strings.TrimPrefix(host, ".")
+		if !resultHostName.MatchString(name) || (strings.HasPrefix(host, ".") && strings.Count(host, ".") < 2) {
+			return errors.New("AWWO_TRIPO_RESULT_HOSTS entries must be host names or domain suffixes such as .tripo3d.ai")
+		}
+	}
+	return nil
+}
+
+// validateMediaStorage checks what every media provider shares: where files are kept and how runs are bounded.
+func validateMediaStorage(c Config) error {
 	if c.MediaDevProxy != "" && (c.Env != "development" || !loopbackOrigin(c.MediaDevProxy)) {
 		return errors.New("AWWO_MEDIA_DEV_PROXY is a development setting and must be http://127.0.0.1:<port>")
 	}
@@ -171,7 +261,22 @@ func loopbackOrigin(raw string) bool {
 		u.Path == "" && u.RawQuery == "" && u.Fragment == "" && !strings.HasSuffix(raw, "?") && !strings.HasSuffix(raw, "#")
 }
 
-func (c Config) mediaConfigured() bool { return c.RunningHubAPIKey != "" && c.MediaDir != "" }
+func (c Config) runningHubConfigured() bool { return c.RunningHubAPIKey != "" && c.MediaDir != "" }
+func (c Config) tripoConfigured() bool      { return c.TripoAPIKey != "" && c.MediaDir != "" }
+
+// mediaConfigured: some media provider (image and video, or 3D) can run.
+func (c Config) mediaConfigured() bool { return c.runningHubConfigured() || c.tripoConfigured() }
+
+// mediaProviderConfigured: the provider a catalog model names has its key and storage.
+func (c Config) mediaProviderConfigured(provider string) bool {
+	switch provider {
+	case mediaProviderRunningHub:
+		return c.runningHubConfigured()
+	case mediaProviderTripo:
+		return c.tripoConfigured()
+	}
+	return false
+}
 
 // validateMediaExposure runs once every setting is read. Generations are paid from the operator's
 // key, so offering media to every unrestricted or every new workspace is refused unless the number

@@ -123,6 +123,9 @@ func nodePort(n graphNode, id string, input bool) (string, bool) {
 		if n.AgentKind == "image" || n.AgentKind == "video" {
 			return n.AgentKind, true
 		}
+		if n.AgentKind == mediaKindModel3D {
+			return "file", true
+		}
 		return "text", true
 	}
 	return "", false
