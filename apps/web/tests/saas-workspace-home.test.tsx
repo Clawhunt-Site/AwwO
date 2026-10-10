@@ -295,5 +295,8 @@ it('quick starters only fill a draft and let the user restore their own words be
 it('tells everyone not to enter personal or sensitive information before the first request', () => {
   server();
   view();
-  expect(screen.getByText('请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。')).toBeVisible();
+  // A single short line under the box; the full notice is its tooltip and the box's description.
+  expect(screen.getByText('AI 内容仅供参考 · 勿输入敏感信息')).toBeVisible();
+  expect(screen.getByText('AI 内容仅供参考 · 勿输入敏感信息').closest('small')).toHaveAttribute('title', '请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。');
+  expect(screen.getByText('请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。')).toHaveClass('sr-only');
 });

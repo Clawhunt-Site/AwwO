@@ -104,7 +104,9 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
           <span>{t(streaming ? 'composer.sending' : 'composer.send')}</span>
         </button>
       </div>
-      {blocked ? null : <small id={disclaimerId} className="canvas-composer-disclaimer">{t('composer.disclaimer')}</small>}
+      {blocked ? null : <small id={disclaimerId} className="canvas-composer-disclaimer" title={t('composer.disclaimerFull')}>
+        <span aria-hidden="true">{t('composer.disclaimer')}</span><span className="sr-only">{t('composer.disclaimerFull')}</span>
+      </small>}
     </div>
   );
 }

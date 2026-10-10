@@ -17,7 +17,11 @@ it('retains the draft until the host confirms durable acceptance', () => {
 });
 it('shows the standing notice against personal or sensitive information under the input', () => {
   render(<TileComposer streaming={false} onSend={vi.fn()} />);
-  expect(screen.getByText(/Don’t enter personal or sensitive data|请勿输入身份证号/)).toBeVisible();
+  // One short visible line; the full notice is its tooltip and the input's accessible description.
+  const notice = screen.getByText(/AI can be wrong · Don’t share sensitive data|AI 内容仅供参考 · 勿输入敏感信息/);
+  expect(notice).toBeVisible();
+  expect(notice).toHaveAttribute('aria-hidden', 'true');
+  expect(notice.closest('small')).toHaveAttribute('title', expect.stringMatching(/Don’t enter personal or sensitive data|请勿输入身份证号/));
   expect(screen.getByTestId('composer-input')).toHaveAccessibleDescription(/Don’t enter personal or sensitive data|请勿输入身份证号/);
 });
 it('leaves the notice out of a composer that is blocked, as for a view-only reader', () => {

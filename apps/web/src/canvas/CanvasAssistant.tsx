@@ -348,7 +348,9 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
           <button type="submit" className="awwo-assistant-send" disabled={!canSend}><span>{sendLabel}</span><ArrowUp size={15} aria-hidden="true" /></button>
         </div>
       </form>
-      <small id={disclaimerId} className="awwo-composer-disclaimer">{t('composer.disclaimer')}</small>
+      <small id={disclaimerId} className="awwo-composer-disclaimer" title={t('composer.disclaimerFull')}>
+        <span aria-hidden="true">{t('composer.disclaimer')}</span><span className="sr-only">{t('composer.disclaimerFull')}</span>
+      </small>
       {costNote ? <small className="awwo-assistant-cost">{costNote}</small> : null}
       {unified?.settings}
       {onUndo ? <button type="button" className="awwo-assistant-undo" disabled={waiting || !canUndo} onClick={onUndo}>

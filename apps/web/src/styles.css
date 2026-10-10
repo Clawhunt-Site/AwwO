@@ -328,6 +328,17 @@ select:where(:not(.company-board-root *, [data-slot], [data-slot] *, [data-board
   border: 0;
 }
 
+/* The standing notice under each composer stays one quiet line; its full text is the tooltip and the
+   composer's accessible description (a visually hidden copy inside it). */
+:is(.awwo-composer-disclaimer, .canvas-composer-disclaimer, .saas-home-disclaimer) {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .workbench-shell {
   height: 100vh;
   min-height: 0;

@@ -240,7 +240,9 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
           <button type="submit" className="saas-primary saas-home-send" disabled={busy || !draft.trim()}><span>{busy ? t('正在创建…', 'Creating…') : text('assistant.generate')}</span><ArrowUp size={15} aria-hidden="true" /></button>
         </div>
       </form>
-      <small id={disclaimerId} className="saas-home-disclaimer">{text('composer.disclaimer')}</small>
+      <small id={disclaimerId} className="saas-home-disclaimer" title={text('composer.disclaimerFull')}>
+        <span aria-hidden="true">{text('composer.disclaimer')}</span><span className="sr-only">{text('composer.disclaimerFull')}</span>
+      </small>
       <div className="saas-home-quick-starts" role="group" aria-label={t('快速填写需求', 'Start with a prompt')}>
         {['product-site-trial', 'weekly-sales-report', 'competitor-research'].map(id => {
           const item = STARTER_CASES.find(candidate => candidate.id === id)!;
