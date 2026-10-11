@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ArtifactPreview, artifactFilename, readArtifactPreview, StoredArtifactPreview } from '../src/canvas/ArtifactPreview';
 import { htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from '../src/canvas/htmlDeliverable';
+import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, PREVIEW_LIBRARIES, previewScriptNeeds } from '../src/canvas/previewLibraries';
 import { ARTIFACT_REF_PREFIX, clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { createSessionNode } from '../src/canvas/canvasDoc';
@@ -32,7 +34,7 @@ describe('isolated HTML rendition', () => {
     fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
     const running = screen.getByTitle('游戏 · HTML 预览');
     expect(running).not.toBe(initial);
-    expect(running).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(running).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     expect(running.getAttribute('srcdoc')).toContain('dataset.ready');
     expect(running.getAttribute('srcdoc')).toContain('<canvas id="board">');
     expect(running.getAttribute('srcdoc')).toContain('onclick=');
@@ -78,7 +80,7 @@ describe('isolated HTML rendition', () => {
     expect(frames).toHaveLength(2);
     expect(frames.every(frame => frame.getAttribute('sandbox') === '')).toBe(true);
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '运行交互' }));
-    expect(within(screen.getByRole('dialog')).getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(within(screen.getByRole('dialog')).getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', '');
   });
@@ -279,6 +281,100 @@ describe('isolated HTML rendition', () => {
     expect(action).not.toHaveBeenCalled();
     fireEvent.keyDown(window, { key: 'Delete' });
     expect(action).toHaveBeenCalledOnce();
+  });
+});
+
+describe('libraries AwwO supplies to a running page', () => {
+  const three = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+  const game = `<!doctype html><html><head><script src="${three}"></script></head><body><canvas id="gameCanvas"></canvas>
+    <script>window.onload=()=>{document.body.dataset.three=typeof THREE;new THREE.CapsuleGeometry(0.3,0.8,4,8)}</script></body></html>`;
+
+  it('inlines the pinned copy in place of the exact CDN script and still drops every other external script', () => {
+    const source = `<html><head><script src=" ${three} " integrity="sha512-x" crossorigin="anonymous" type="text/javascript"></script>
+      <script src="https://evil.test/x.js"></script><script src="${three}?v=2"></script></head>
+      <body><svg><script href="${three}"></script></svg><script>start()</script></body></html>`;
+    const doc = new DOMParser().parseFromString(htmlPreviewDocument(source, true, new Map([[three, 'window.LIB=1']])), 'text/html');
+    const scripts = Array.from(doc.querySelectorAll('script'));
+    expect(scripts.map(script => script.textContent)).toEqual(['window.LIB=1', 'start()']);
+    expect(scripts[0].getAttributeNames()).toEqual(['type']);
+    expect(doc.querySelector('[src],[href],[integrity],[crossorigin]')).toBeNull();
+    const csp = doc.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute('content')!;
+    expect(csp).toContain("script-src 'unsafe-inline'");
+    expect(csp).not.toContain('cdnjs');
+    expect(new DOMParser().parseFromString(htmlPreviewDocument(source, true), 'text/html').querySelectorAll('script')).toHaveLength(1);
+    expect(new DOMParser().parseFromString(htmlPreviewDocument(source, false, new Map([[three, 'window.LIB=1']])), 'text/html').querySelector('script')).toBeNull();
+  });
+
+  it('tells supplied libraries apart from the hosts a page would need', () => {
+    const needs = previewScriptNeeds(`<script src="${three}"></script><script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+      <script src="https://unpkg.com/three@0.150.0/build/three.module.js" type="module"></script><script src="./local.js"></script><script>inline()</script>`);
+    expect(needs.libraries.map(library => library.id)).toEqual(['three-r128']);
+    expect(needs.additions).toEqual([]);
+    expect(needs.blocked).toEqual(['unpkg.com', './local.js']);
+    expect(previewScriptNeeds('<script>inline()</script><p>no external scripts</p>')).toBe(NO_PREVIEW_SCRIPT_NEEDS);
+    const capsules = previewScriptNeeds(`<script src="${three}"></script><script>new THREE.CapsuleGeometry(0.3, 0.8, 4, 8)</script>`);
+    expect(capsules.additions.map(addition => addition.label)).toEqual(['CapsuleGeometry']);
+    expect(previewScriptNeeds('<script>new THREE.CapsuleGeometry(1, 1)</script><script src="https://cdn.test/x.js"></script>').additions).toEqual([]);
+  });
+
+  it('supplies three.js r128 as the pinned npm release, under every URL that names it', async () => {
+    const [library] = PREVIEW_LIBRARIES;
+    const text = await library.load();
+    const bytes = new TextEncoder().encode(text);
+    expect(bytes.byteLength).toBe(library.bytes);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(library.sha256);
+    expect(text.startsWith('/**\n * @license\n * Copyright 2010-2021 Three.js Authors\n * SPDX-License-Identifier: MIT\n */')).toBe(true);
+    const code = await loadPreviewLibraries({ libraries: [library], additions: [] });
+    expect([...code.keys()]).toEqual(library.urls);
+    expect(new Set(code.values())).toEqual(new Set([text]));
+    const withCapsules = await loadPreviewLibraries({ libraries: [library], additions: library.additions! });
+    const inline = withCapsules.get(three)!;
+    expect(inline.startsWith(text)).toBe(true);
+    expect(inline.slice(text.length)).toContain('THREE.CapsuleGeometry = CapsuleGeometry');
+    expect(/<\/script|<!--/i.test(inline)).toBe(false);
+  });
+
+  it('refuses a copy that is not the pinned file or could end its own script element', async () => {
+    const base = { label: 'test', urls: ['https://cdn.test/a.js'], bytes: 12 };
+    await expect(loadPreviewLibraries({ libraries: [{ ...base, id: 'test-closer', sha256: '', load: async () => 'x</script>y;' }], additions: [] })).rejects.toThrow('preview_library_invalid');
+    await expect(loadPreviewLibraries({ libraries: [{ ...base, id: 'test-size', sha256: '', load: async () => 'window.a=1;' }], additions: [] })).rejects.toThrow('preview_library_invalid');
+  });
+
+  it('runs a game that loads three.js r128 with AwwO\'s copy, with pointer lock for mouse look', async () => {
+    const request = vi.fn(async function (this: HTMLIFrameElement) { return undefined; });
+    Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, value: true });
+    Object.defineProperty(HTMLIFrameElement.prototype, 'requestFullscreen', { configurable: true, writable: true, value: request });
+    try {
+      render(<ArtifactPreview source={game} type="html" title="游戏" renderMarkdown={markdown} />);
+      expect(screen.getByTitle('游戏 · HTML 预览').getAttribute('srcdoc')).not.toContain('Three.js Authors');
+      expect(screen.queryByRole('button', { name: '全屏' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+      const frame = await screen.findByTitle('游戏 · HTML 预览', {}, { timeout: 10_000 });
+      await vi.waitFor(() => expect(frame.getAttribute('srcdoc')).toContain('Copyright 2010-2021 Three.js Authors'));
+      const doc = new DOMParser().parseFromString(screen.getByTitle('游戏 · HTML 预览').getAttribute('srcdoc')!, 'text/html');
+      expect(doc.querySelectorAll('script')).toHaveLength(2);
+      expect(doc.querySelector('[src]')).toBeNull();
+      expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
+      expect(screen.getByText('页面用到的 three.js r128 由 AwwO 内置提供，不需要联网。 页面还用到了这个版本没有的 CapsuleGeometry，AwwO 已补上。')).toBeTruthy();
+      expect(doc.querySelector('script')!.textContent).toContain('THREE.CapsuleGeometry = CapsuleGeometry');
+      fireEvent.click(screen.getByRole('button', { name: '全屏' }));
+      expect(request).toHaveBeenCalledOnce();
+      expect(request.mock.contexts[0]).toBe(screen.getByTitle('游戏 · HTML 预览'));
+      fireEvent.click(screen.getByRole('button', { name: '停止交互' }));
+      expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', '');
+      expect(screen.queryByText(/由 AwwO 内置提供/)).toBeNull();
+      expect(screen.queryByRole('button', { name: '全屏' })).toBeNull();
+    } finally {
+      delete (document as { fullscreenEnabled?: boolean }).fullscreenEnabled;
+      delete (HTMLIFrameElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+    }
+  });
+
+  it('names the hosts of scripts the preview cannot supply', () => {
+    render(<ArtifactPreview source={'<html><body><script src="https://cdn.example.com/engine.js"></script><script>go()</script></body></html>'} type="html" title="页面" renderMarkdown={markdown} />);
+    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+    expect(screen.getByTitle('页面 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
+    expect(screen.getByText('页面引用的外部脚本没有加载：cdn.example.com。下载后用浏览器打开可以完整运行。')).toBeTruthy();
   });
 });
 

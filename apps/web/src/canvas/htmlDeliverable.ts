@@ -113,7 +113,7 @@ function previewRootAttributes(source: string, tagName: 'html' | 'body', interac
  * an opaque-origin sandboxed iframe. The original bytes remain untouched for source/download.
  * Sanitization removes navigation and metadata; CSP and the empty sandbox are independent guards.
  */
-export function htmlPreviewDocument(value: string, interactive = false): string {
+export function htmlPreviewDocument(value: string, interactive = false, libraries?: ReadonlyMap<string, string>): string {
   const source = htmlDocumentSource(value);
   if (new TextEncoder().encode(source).byteLength > MAX_ARTIFACT_PREVIEW_BYTES) throw new Error('preview_too_large');
   const template = document.createElement('template');
@@ -125,9 +125,14 @@ export function htmlPreviewDocument(value: string, interactive = false): string 
       continue;
     }
     // Only inline script bodies survive. In particular, SVG script href/src and
-    // imported module URLs do not gain authority from the source document.
+    // imported module URLs do not gain authority from the source document. The one
+    // exception is an HTML script naming a library AwwO supplies (previewLibraries.ts):
+    // its body becomes AwwO's pinned copy, so it still runs inline, with no request.
     if (name === 'script') {
-      if (element.hasAttribute('src') || element.hasAttribute('href') || element.hasAttribute('xlink:href')) { element.remove(); continue; }
+      const library = interactive && element.namespaceURI === 'http://www.w3.org/1999/xhtml' && !element.hasAttribute('href') && !element.hasAttribute('xlink:href')
+        ? libraries?.get((element.getAttribute('src') ?? '').trim()) : undefined;
+      if (library !== undefined) element.textContent = library;
+      else if (element.hasAttribute('src') || element.hasAttribute('href') || element.hasAttribute('xlink:href')) { element.remove(); continue; }
       for (const attribute of Array.from(element.attributes)) if (attribute.name !== 'type') element.removeAttribute(attribute.name);
     } else filterPreviewAttributes(element, interactive);
   }
