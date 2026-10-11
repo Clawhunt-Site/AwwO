@@ -51,7 +51,7 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
     ok: t(`今日额度 · 剩 ${left} 次`, `Today · ${left} calls left`),
   }[state.kind];
   const warn = state.kind === 'daily-out' || state.kind === 'premium-out';
-  // A premium text route closed with 0 never offered a call: the free plan simply does not include it.
+  // A premium text route closed with 0 never offered a call: this workspace's free allowance does not include it.
   const premiumClosed = (['gate', 'bedrock'] as const).some(route => usage.routes?.[route]?.limit === 0);
   const interested = recorded || usage.interested;
   const ask = async () => {
@@ -76,7 +76,7 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
         })}
       </dl>
       {state.kind === 'daily-out' && <p className="saas-route-usage-out">{t('今天的总次数已用完，所有模型都要等到 UTC 0 点后才能再运行。', 'Today’s calls are used up; no model can run again until 00:00 UTC.')}</p>}
-      {premiumClosed && <p className="saas-route-usage-out">{t('免费版只含默认模型；Claude、GPT、Bedrock 需要 Pro / Max 套餐，按点数使用。', 'The free plan includes the default model only; Claude, GPT and Bedrock need the Pro or Max plan and run on credits.')}</p>}
+      {premiumClosed && <p className="saas-route-usage-out">{t('标着「不含」的高级模型不在这个工作区的免费额度里，需要 Pro / Max 套餐，按点数使用。', 'Premium models marked Not included are outside this workspace’s free allowance; they need the Pro or Max plan and run on credits.')}</p>}
       {interested && <p role="status" className="saas-route-usage-recorded">{t('已记录你的需求。现在就能升级 Pro / Max，用点数继续使用高级模型。', 'Noted. You can upgrade to Pro or Max now and keep using premium models on credits.')}</p>}
       {/* Paid plans are on sale, so upgrading is the way to more calls; a click still records the interest the
           admin panel lists, without waiting for it before the plans open. */}

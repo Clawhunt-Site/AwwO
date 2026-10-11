@@ -74,11 +74,11 @@ describe('the canvas assistant’s tasks', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? premium : url.endsWith('/computer-runs') ? { items: [] } : detail)));
     render(view());
     expect(await screen.findByText('直接执行用：Claude Opus 5 · Pro')).toBeInTheDocument();
-    expect(screen.getByText(/这个模型需要 Pro \/ Max/)).toBeInTheDocument();
+    expect(screen.getByText(/这个模型不在当前工作区的免费额度里，需要 Pro \/ Max/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toHaveAttribute('target', '_blank');
     fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('openai-agents', 'qwen3.8-27b-p6') } });
     expect(await screen.findByText('直接执行用：默认模型')).toBeInTheDocument();
-    expect(screen.queryByText(/这个模型需要 Pro \/ Max/)).toBeNull();
+    expect(screen.queryByText(/这个模型不在当前工作区的免费额度里/)).toBeNull();
   });
 
   it('reads nothing until the canvas activates it', async () => {
@@ -123,7 +123,7 @@ describe('the canvas assistant’s tasks', () => {
     await screen.findByText('直接执行用：qwen3.8-27b-p6');
     // The reader had picked a premium model for direct tasks.
     fireEvent.change(screen.getByLabelText('直接执行的模型'), { target: { value: executionModelKey('pi', 'claude-opus-5') } });
-    expect(await screen.findByText(/免费版每天的次数只能用于默认模型/)).toBeInTheDocument();
+    expect(await screen.findByText(/高级模型（Claude、GPT、Bedrock）免费次数已经用完/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
     fireEvent.click(screen.getByRole('button', { name: '改用默认模型 qwen3.8-27b-p6（免费）' }));
     expect(await screen.findByText('直接执行已改用 qwen3.8-27b-p6，重新发送这条请求即可免费继续。')).toBeInTheDocument();

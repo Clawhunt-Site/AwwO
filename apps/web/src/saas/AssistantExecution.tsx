@@ -386,8 +386,8 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
       </div>
     </details>}
     {needsPlan && <div className="awwo-execution-plan-needed" role="note">
-      <p>{t('这个模型需要 Pro / Max：免费版只含默认模型，直接执行会被拒绝。可以先换成默认模型免费执行。',
-        'This model needs Pro or Max: the free plan includes the default model only, so a direct task on it is refused. Choose the default model to run it free.')}</p>
+      <p>{t('这个模型不在当前工作区的免费额度里，需要 Pro / Max，直接执行会被拒绝。可以先换成默认模型免费执行。',
+        'This model is outside this workspace’s free allowance and needs Pro or Max, so a direct task on it is refused. Choose the default model to run it free.')}</p>
       <PlanUpsell tenantId={execution.tenantId} />
     </div>}
     {execution.knowledgeCount > 0 && <p className="awwo-execution-knowledge">{t(`将带上 ${execution.knowledgeCount} 份已选知识`, `Takes ${execution.knowledgeCount} selected knowledge items`)}</p>}

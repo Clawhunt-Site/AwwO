@@ -100,7 +100,7 @@ describe('durable team run details', () => {
     const upgrade = await screen.findByRole('link', { name: 'Upgrade to Pro or Max to continue today' });
     expect(upgrade.getAttribute('href')).toContain('account=plans');
     expect(screen.getByText(/The workspace run quota has been reached: today’s calls are used up/)).toBeInTheDocument();
-    expect(screen.getByText(/Pro and Max have many more calls a day and more runs at once, and include premium models/)).toBeInTheDocument();
+    expect(screen.getByText(/Pro and Max have many more calls a day and more runs at once, and run premium models such as Claude and GPT on credits/)).toBeInTheDocument();
     expect(screen.queryByText('quota_exceeded')).toBeNull();
   });
 
@@ -114,7 +114,7 @@ describe('durable team run details', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === path ? record('running')
       : { items: [turn({ status: 'failed', error: 'premium_quota_exceeded' })] })));
     render(view({ defaultOpen: true }));
-    await screen.findByText(/The free plan’s daily calls are for the default model only/);
+    await screen.findByText(/This workspace’s free premium-model calls \(Claude, GPT, Bedrock\) are used up/);
     expect(screen.queryByRole('link', { name: /Upgrade to Pro or Max/ })).toBeNull();
   });
 

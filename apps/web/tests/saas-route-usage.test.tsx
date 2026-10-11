@@ -136,7 +136,7 @@ it('tells a free workspace its plan includes no premium model and makes upgradin
   }));
   meter();
   fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 28 次' }));
-  expect(await screen.findByText('免费版只含默认模型；Claude、GPT、Bedrock 需要 Pro / Max 套餐，按点数使用。')).toBeVisible();
+  expect(await screen.findByText('标着「不含」的高级模型不在这个工作区的免费额度里，需要 Pro / Max 套餐，按点数使用。')).toBeVisible();
   const upgrade = screen.getByRole('link', { name: '升级 Pro / Max' });
   expect(upgrade).toHaveClass('saas-primary');
   expect(upgrade.getAttribute('href')).toContain('account=plans');

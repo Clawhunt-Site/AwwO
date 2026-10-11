@@ -27,8 +27,8 @@ export function PlanUpsell({ tenantId, reason = 'premium' }: { tenantId: string;
         : t('升级 Pro / Max，继续使用高级模型', 'Upgrade to Pro or Max to keep using premium models')}
     </a>
     <p>{daily
-      ? t('Pro / Max 每天的调用次数多得多，能同时运行更多任务，还能用 Claude、GPT 等高级模型。升级后回到这里重新运行即可。',
-        'Pro and Max have many more calls a day and more runs at once, and include premium models such as Claude and GPT. After upgrading, come back and run again.')
+      ? t('Pro / Max 每天的调用次数多得多，能同时运行更多任务，Claude、GPT 等高级模型按点数使用，不占全站的免费名额。升级后回到这里重新运行即可。',
+        'Pro and Max have many more calls a day and more runs at once, and run premium models such as Claude and GPT on credits, outside the service-wide free calls. After upgrading, come back and run again.')
       : t('Claude、GPT、Bedrock 按点数计费，默认模型照常免费。升级后回到这里重新发送即可。',
         'Claude, GPT and Bedrock run on credits; the default model stays free. After upgrading, come back and send again.')}</p>
   </div>;

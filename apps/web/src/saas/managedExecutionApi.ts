@@ -1,6 +1,6 @@
 import { API_BASE, api, SaaSApiError, tenantPath } from './api';
 
-/** requiresUpgrade: this workspace's plan does not include the model (the free plan has no Claude, GPT or Bedrock calls). */
+/** requiresUpgrade: this workspace's free allowance does not include the model (a premium route closed to it). */
 export interface ExecutionModel { id: string; label: string; runtime: string; efforts?: string[]; route?: string; requiresUpgrade?: boolean }
 export interface ExecutionRuntime { ready: boolean; reason?: string; capabilities: { workspace: boolean; approvals: boolean }; models: ExecutionModel[] }
 export interface ExecutionRunSummary { id: string; status: string; prompt: string; createdAt: string; updatedAt: string }

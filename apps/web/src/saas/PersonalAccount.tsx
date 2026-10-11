@@ -107,7 +107,7 @@ export function PersonalEngineGate({
     <nav className="saas-personal-nav"><a href={home()}>{t("返回工作区", "Back to workspace")}</a><a href={accountURL("security")}>{t("账号安全", "Account security")}</a></nav>
     <InviteFriends identity={identity} />
   </AccountLayout>;
-  if (section === "plans") return <AccountLayout title={t("套餐与点数", "Plans and credits")} intro={t("免费版之外，Pro 和 Max 每月给你一笔点数，用于 Claude、GPT、Bedrock 和图片视频生成；默认模型的次数也更多。", "Beyond the free plan, Pro and Max give you monthly credits for Claude, GPT, Bedrock and image or video generation, and more default-model calls.")}>
+  if (section === "plans") return <AccountLayout title={t("套餐与点数", "Plans and credits")} intro={t("免费版每天的次数里也能用 Claude、GPT 等高级模型（全站每天共享一份免费名额）。Pro 和 Max 每月另给一笔点数，用于这些模型和图片视频生成，不占免费名额，默认模型的次数也更多。", "The free plan can use premium models such as Claude and GPT within its daily calls (the service shares one daily number of free premium calls). Pro and Max add monthly credits for these models and for image or video generation, outside that free number, and more default-model calls.")}>
     <nav className="saas-personal-nav"><a href={home()}>{t("返回工作区", "Back to workspace")}</a><a href={accountURL("security")}>{t("账号安全", "Account security")}</a></nav>
     <PlansPage identity={identity} />
   </AccountLayout>;
