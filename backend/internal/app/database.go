@@ -111,6 +111,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 27, "migrations/027_signup_ip_days.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 28, "migrations/028_parallel_graph_runs.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

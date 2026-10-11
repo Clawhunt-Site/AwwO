@@ -96,15 +96,6 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_task_frame", err.Error())
 		return
 	}
-	var active bool
-	if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND status IN ('queued','running'))", tid, cid).Scan(&active); e != nil {
-		a.dbError(w, e)
-		return
-	}
-	if active {
-		fail(w, 409, "graph_busy", "Canvas already has an active graph run")
-		return
-	}
 	var d graphDocument
 	var scope []string
 	seeds := map[string]string{}
@@ -115,6 +106,17 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if e != nil {
 		fail(w, 400, "invalid_graph", e.Error())
+		return
+	}
+	// Several graphs may run on one canvas at once, each executing its own nodes; the canvas row lock taken above
+	// serializes admissions, so two graphs can never both claim a node.
+	busy, e := graphAdmissionConflict(r.Context(), tx, tid, cid, scope, b.Collaboration != nil)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if busy {
+		fail(w, 409, "graph_busy", "Some of these components are already running on this canvas")
 		return
 	}
 	entitlement, e := tenantModelEntitlement(r.Context(), tx, tid)
@@ -282,7 +284,9 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			if b.Collaboration != nil {
+			if sid != "" {
+				// One node runs one thing at a time: a graph never executes a node that is still answering a chat
+				// or running in another task (runs_one_active_session would fail the node later, after admission).
 				var busy bool
 				if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM runs WHERE tenant_id=$1 AND session_id=$2 AND status IN ('queued','running'))", tid, sid).Scan(&busy); e != nil {
 					a.dbError(w, e)

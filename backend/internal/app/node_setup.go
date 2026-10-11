@@ -95,8 +95,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "version_conflict", "Canvas changed; reload before initializing")
 		return
 	}
-	var busy bool
-	e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM node_sessions s JOIN runs r ON r.tenant_id=s.tenant_id AND r.session_id=s.id WHERE s.tenant_id=$1 AND s.canvas_id=$2 AND r.status IN ('queued','running')) OR EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND status IN ('queued','running'))", tid, cid).Scan(&busy)
+	busy, e := initializationConflict(r.Context(), tx, tid, cid, scope)
 	if e != nil {
 		a.dbError(w, e)
 		return
