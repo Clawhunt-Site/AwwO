@@ -1,3 +1,5 @@
+import { deliveryJsonSource } from './deliveryJson';
+
 import { htmlDocumentSource, isCompleteHtmlDocument } from './htmlDeliverable';
 
 /** Versioned, local input/output forms for an Agent session. File values are references. */
@@ -89,11 +91,9 @@ export function parseContractOutput(contract: NodeContract, output: string): Con
   if (!contract.outputs.length) return { values, errors: [] };
   const single = contract.outputs.length === 1 ? contract.outputs[0] : undefined;
   const acceptsText = single && (single.type === 'text' || single.type === 'markdown' || single.type === 'html');
-  const trimmed = output.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fenced ? fenced[1] : trimmed);
+    parsed = JSON.parse(deliveryJsonSource(output));
   } catch {
     if (!acceptsText) {
       return { values, errors: [`输出须为以字段 ID 为键的 JSON 对象：${contract.outputs.map((f) => f.label || f.id).join('、')}。`] };

@@ -32,6 +32,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Trash2, Video, X } from 'lucide-react';
 import { parseMediaOutput } from './mediaOutput';
+import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
 import { mediaKindOf } from './mediaCatalog';
 import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
@@ -162,10 +163,8 @@ function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<Con
       if (summary) return summary;
     }
     if (turns[i].role === 'agent' && outputs.length) {
-      const trimmed = raw.trim();
-      const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
       try {
-        const parsed: unknown = JSON.parse(fenced ? fenced[1] : trimmed);
+        const parsed: unknown = JSON.parse(deliveryJsonSource(raw));
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           const values = parsed as Record<string, unknown>;
           for (const field of outputs) {
@@ -210,9 +209,8 @@ function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField
   if (!trimmed) return '';
   const generated = media ? mediaPreview(trimmed, locale) : null;
   if (generated) return generated;
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   try {
-    const parsed: unknown = JSON.parse(fenced ? fenced[1] : trimmed);
+    const parsed: unknown = JSON.parse(deliveryJsonSource(trimmed));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const values = parsed as Record<string, unknown>;
       for (const id of outputs.length ? outputs.map(field => field.id) : ['result', 'output', 'text']) {

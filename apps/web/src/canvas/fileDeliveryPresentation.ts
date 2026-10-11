@@ -1,4 +1,5 @@
 import { parseContractOutput, type NodeContract } from './nodeContracts';
+import { deliveryJsonSource } from './deliveryJson';
 
 export interface PendingFileDelivery { name: string; byteLength?: number }
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -51,9 +52,7 @@ function redactLargeContentStrings(source: string): string {
 }
 
 function envelope(source: string): unknown {
-  const trimmed = source.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return JSON.parse(fenced ? fenced[1] : trimmed);
+  return JSON.parse(deliveryJsonSource(source));
 }
 
 /** Keep ordinary source byte-for-byte; encoded attachments never belong in the transcript DOM. */

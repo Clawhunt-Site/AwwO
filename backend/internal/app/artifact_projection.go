@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"regexp"
-	"strings"
 )
 
 type deliveryReference struct {
@@ -18,10 +17,7 @@ type deliveryReference struct {
 // tenant/run/session-node/canvas/field artifact with matching bytes becomes a link.
 // Missing storage is described as unavailable; no derived or invented ID is used.
 func projectFileDelivery(output string, references map[string]deliveryReference) (string, bool) {
-	normalized := strings.TrimSpace(stripReasoningPreamble(output))
-	if strings.HasPrefix(normalized, "```") && strings.HasSuffix(normalized, "```") {
-		normalized = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(normalized, "```json"), "```"), "```"))
-	}
+	normalized := graphOutputJSONText(output)
 	var fields map[string]json.RawMessage
 	if json.Unmarshal([]byte(normalized), &fields) != nil || fields == nil {
 		return output, false

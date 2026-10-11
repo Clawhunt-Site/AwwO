@@ -1,14 +1,13 @@
 import type { CanvasDocument, CanvasNode } from './canvasDoc';
 import { parseContractOutput, type NodeContract } from './nodeContracts';
+import { deliveryJsonSource } from './deliveryJson';
 
 /** A conversation publishes only an explicit, complete set of declared output fields.
  * Plain answers remain conversation even when a one-field contract accepts arbitrary text. */
 export function followupDeliveryContract(node: CanvasNode, output: string): NodeContract | undefined {
   if (node.kind !== 'session' || !node.contract?.outputs.length) return undefined;
-  const trimmed = output.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   let value: unknown;
-  try { value = JSON.parse(fenced ? fenced[1] : trimmed); } catch { return undefined; }
+  try { value = JSON.parse(deliveryJsonSource(output)); } catch { return undefined; }
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !node.contract.outputs.some(field => Object.hasOwn(value, field.id))) return undefined;
   const parsed = parseContractOutput(node.contract, output);

@@ -2,6 +2,7 @@ import { normalizeContract, type ContractField } from './nodeContracts';
 import type { CollaborationMessageContext, Turn } from './sessions';
 import { isCompleteHtmlDocument } from './htmlDeliverable';
 import { deliveryPresentation, type PendingFileDelivery } from './fileDeliveryPresentation';
+import { deliveryJsonSource } from './deliveryJson';
 
 /** Match explicit transport metadata to this exact stored message and Session. */
 export function collaborationMessageContext(value: unknown, runId: string | undefined, sessionId: string): CollaborationMessageContext | undefined {
@@ -43,10 +44,8 @@ export function readableOutput(turn: Turn): ReadableOutput {
   if (result.errors.length) return { fields: [], invalid: true };
   // A one-field text contract also accepts ordinary prose. Keep that text as it is;
   // only a complete keyed JSON object is a structured response worth projecting.
-  const trimmed = turn.text.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   let object: unknown;
-  try { object = JSON.parse(fenced ? fenced[1] : trimmed); } catch { return raw; }
+  try { object = JSON.parse(deliveryJsonSource(turn.text)); } catch { return raw; }
   if (!object || typeof object !== 'object' || Array.isArray(object)) return raw;
   const fields = contract.outputs
     .filter(field => Object.hasOwn(object, field.id) && (Object.hasOwn(result.values, field.id) || result.pendingFiles.has(field.id)))

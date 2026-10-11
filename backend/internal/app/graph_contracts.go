@@ -496,6 +496,83 @@ func graphSystemPrompt(instructions, policy string) string {
 		"Node instructions (JSON string; preserve persona and content requirements):\n" + string(persona) + "\n\n" + policy
 }
 
+// maxRestoredClosers bounds the repair below: a delivery object nests a file object or a
+// list a few levels deep at most, so needing more closers means the text is not that case.
+const maxRestoredClosers = 8
+
+// graphOutputJSONText is the one normalization every reader of a node's delivered JSON
+// applies, so contract validation, artifact storage and transcript projection always read
+// the same object. A leaked reasoning preamble is healed, surrounding whitespace and one
+// Markdown fence are removed, and an object whose only defect is that its final closing
+// brackets are missing gets them back. Every step is idempotent.
+func graphOutputJSONText(output string) string {
+	text := strings.TrimSpace(stripReasoningPreamble(output))
+	if strings.HasPrefix(text, "```") && strings.HasSuffix(text, "```") {
+		text = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(text, "```json"), "```"), "```"))
+	}
+	return closeUnterminatedJSONObject(text)
+}
+
+// closeUnterminatedJSONObject repairs one defect models make on long deliveries: a JSON
+// object that is complete except for its last closing brackets. Only that case changes.
+// Text that ends inside a string, after a separator or key, after a number or literal
+// (whose last characters may be the missing part), that closes early, or that would need
+// more than a few closers is returned unchanged, so a delivery cut off mid-content still
+// fails instead of being passed off as complete.
+func closeUnterminatedJSONObject(text string) string {
+	if !strings.HasPrefix(text, "{") || json.Valid([]byte(text)) {
+		return text
+	}
+	var open []byte
+	inString, escaped := false, false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			open = append(open, '}')
+		case '[':
+			open = append(open, ']')
+		case '}', ']':
+			if len(open) == 0 || open[len(open)-1] != c {
+				return text
+			}
+			open = open[:len(open)-1]
+			if len(open) == 0 {
+				// The object closed before the end: what follows is a different defect.
+				return text
+			}
+		}
+	}
+	if inString || len(open) == 0 || len(open) > maxRestoredClosers {
+		return text
+	}
+	trimmed := strings.TrimRight(text, " \t\r\n")
+	if last := trimmed[len(trimmed)-1]; last != '"' && last != '}' && last != ']' {
+		return text
+	}
+	closers := make([]byte, len(open))
+	for i := range open {
+		closers[i] = open[len(open)-1-i]
+	}
+	if restored := trimmed + string(closers); json.Valid([]byte(restored)) {
+		return restored
+	}
+	return text
+}
+
 // graphOutputFiles parses a node's output against its contract. A `file` output may be either a
 // plain string (a reference the caller supplied itself) or an object {name, content}, which is
 // returned as a pending artifact for the caller to store. Values for pending artifacts hold the
@@ -519,10 +596,7 @@ func graphOutputFiles(n graphNode, output string) (map[string]string, []pendingA
 	// a settled canvas into a permanent failure. Every reader of this text applies
 	// the same idempotent normalization, so validation and storage cannot disagree.
 	output = stripReasoningPreamble(output)
-	text := strings.TrimSpace(output)
-	if strings.HasPrefix(text, "```") && strings.HasSuffix(text, "```") {
-		text = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(text, "```json"), "```"), "```"))
-	}
+	text := graphOutputJSONText(output)
 	var obj map[string]any
 	err := json.Unmarshal([]byte(text), &obj)
 	if single {
