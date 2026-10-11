@@ -86,40 +86,42 @@ func xtasyModels() []*mediaModel {
 	videoRatios := []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"}
 	prompt := mediaPrompt{MinLength: 1, MaxLength: 32000}
 	// Verified: every model generated once at these defaults with the operator's key on 2026-10-10 (TestXtasyLiveEveryModel).
-	model := func(id, name, vendor, kind, remote string, params ...mediaParam) *mediaModel {
-		return &mediaModel{ID: id, Name: name, Vendor: vendor, Kind: kind, Mode: "text-to-" + kind, Endpoint: xtasyEndpoints[kind],
-			Version: remote, Prompt: prompt, Params: params, Docs: xtasyDocs, Verified: "2026-10-10", Provider: mediaProviderXtasy}
+	// Users see a generic name in their language, never the provider's or the model family's (owner decisions
+	// 2026-10-11): what a model is good for, by the facts below (2K by default, up to 4K, several pictures a run).
+	model := func(id string, label [2]string, kind, remote string, params ...mediaParam) *mediaModel {
+		return &mediaModel{ID: id, Name: label[0], Label: label, Vendor: mediaVendorShown, Kind: kind, Mode: "text-to-" + kind,
+			Endpoint: xtasyEndpoints[kind], Version: remote, Prompt: prompt, Params: params, Docs: xtasyDocs, Verified: "2026-10-10",
+			Provider: mediaProviderXtasy}
 	}
 	return []*mediaModel{
-		model("xt.seedream-5-pro", "Seedream 5.0 Pro", "bytedance", mediaKindImage, "model_db5a9f8c-6421-5dd4-8ede-8e1e9b545110",
+		model("xt.seedream-5-pro", [2]string{"图片 · 高清", "Image · HD"}, mediaKindImage, "model_db5a9f8c-6421-5dd4-8ede-8e1e9b545110",
 			ratio("1:1", ratios...), resolution("2K", "2K", "1K")),
-		model("xt.gemini-3-1-flash-image", "Nano Banana 2 (Gemini 3.1 Flash Image)", "google", mediaKindImage, "model_740b5a45-d90d-531f-9dba-f51dd4e71254",
+		model("xt.gemini-3-1-flash-image", [2]string{"图片 · 超清", "Image · Ultra HD"}, mediaKindImage, "model_740b5a45-d90d-531f-9dba-f51dd4e71254",
 			ratio("1:1", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "1:8", "4:1", "8:1"),
 			resolution("1K", "512px", "1K", "2K", "4K")),
-		model("xt.gpt-image-2-5", "GPT Image 2.5", "openai", mediaKindImage, "model_6fe4cc38-b598-5a88-ad7e-b4cefa0a9e51",
+		model("xt.gpt-image-2-5", [2]string{"图片 · 超清多张 Pro", "Image · Ultra HD batch Pro"}, mediaKindImage, "model_6fe4cc38-b598-5a88-ad7e-b4cefa0a9e51",
 			ratio("auto", "auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"), images(4), resolution("1K", "1K", "2K", "4K")),
-		model("xt.gpt-image-2", "GPT Image 2", "openai", mediaKindImage, "model_f56b6e0e-b445-5113-ad06-000604f1c548",
+		model("xt.gpt-image-2", [2]string{"图片 · 超清多张", "Image · Ultra HD batch"}, mediaKindImage, "model_f56b6e0e-b445-5113-ad06-000604f1c548",
 			ratio("1:1", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"), images(4),
 			resolution("1024x1024", "1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "3840x2160", "2160x3840")),
-		// The names users see never name the provider (owner decision 2026-10-11): its own models are listed by kind.
-		model("xt.xtasy-3", "Image 3.0", "xtasy", mediaKindImage, "model_0641b8b9-f39e-5bd5-bccb-104b84988282",
+		model("xt.xtasy-3", [2]string{"图片 · 标准多张", "Image · Standard batch"}, mediaKindImage, "model_0641b8b9-f39e-5bd5-bccb-104b84988282",
 			ratio("1:1", ratios...), images(6), resolution("1K", "1K", "2K"), negative),
-		model("xt.xtasy-3-pro", "Image 3.0 Pro", "xtasy", mediaKindImage, "model_52c32c2d-aecc-564d-84d6-c5549ff349c9",
+		model("xt.xtasy-3-pro", [2]string{"图片 · 标准多张 Pro", "Image · Standard batch Pro"}, mediaKindImage, "model_52c32c2d-aecc-564d-84d6-c5549ff349c9",
 			ratio("1:1", ratios...), images(6), resolution("1K", "1K", "2K"), negative),
-		model("xt.omni-image-5-pro", "全能图片 5.0 Pro", "xtasy", mediaKindImage, "model_5cb47bcb-5ce8-57d2-804c-8f382dedc9fe",
+		model("xt.omni-image-5-pro", [2]string{"图片 · 全能", "Image · All-round"}, mediaKindImage, "model_5cb47bcb-5ce8-57d2-804c-8f382dedc9fe",
 			ratio("1:1", ratios...), resolution("2K", "2K", "1K")),
-		model("xt.xtasy-v3", "Video V3", "xtasy", mediaKindVideo, "model_5426a2da-911e-5226-a770-477a3d08a6c0",
+		model("xt.xtasy-v3", [2]string{"视频 · 标准", "Video · Standard"}, mediaKindVideo, "model_5426a2da-911e-5226-a770-477a3d08a6c0",
 			ratio("16:9", videoRatios...), duration(2, 30), resolution("720p", "480p", "720p", "1080p"), audio, thinking),
-		model("xt.omni-video-2-5", "全能视频 v2.5", "xtasy", mediaKindVideo, "model_c69e040f-0150-5092-a9bc-2a4c03aaaf49",
+		model("xt.omni-video-2-5", [2]string{"视频 · 全能 Pro", "Video · All-round Pro"}, mediaKindVideo, "model_c69e040f-0150-5092-a9bc-2a4c03aaaf49",
 			ratio("16:9", videoRatios...), duration(4, 30), resolution("720p", "480p", "720p"), audio),
-		model("xt.omni-video", "全能视频", "xtasy", mediaKindVideo, "model_c0b9927f-48b0-539e-8f79-087e226e4e81",
+		model("xt.omni-video", [2]string{"视频 · 全能", "Video · All-round"}, mediaKindVideo, "model_c0b9927f-48b0-539e-8f79-087e226e4e81",
 			ratio("16:9", videoRatios...), duration(4, 15), resolution("720p", "480p", "720p"), audio),
 	}
 }
 
 func validXtasyModel(m *mediaModel) error {
-	if m.Provider != mediaProviderXtasy || !xtasyModelID.MatchString(m.ID) || !cleanCatalogText(m.Name, 80) || !mediaVendor.MatchString(m.Vendor) ||
-		!mediaDate.MatchString(m.Verified) || !xtasyRemoteModel.MatchString(m.Version) {
+	if m.Provider != mediaProviderXtasy || !xtasyModelID.MatchString(m.ID) || !cleanCatalogText(m.Name, 80) || !validMediaLabel(m) ||
+		m.Vendor != mediaVendorShown || !mediaDate.MatchString(m.Verified) || !xtasyRemoteModel.MatchString(m.Version) {
 		return errors.New("identity")
 	}
 	if (m.Kind != mediaKindImage && m.Kind != mediaKindVideo) || m.Mode != "text-to-"+m.Kind || m.Endpoint != xtasyEndpoints[m.Kind] {

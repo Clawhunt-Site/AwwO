@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createSessionNode, sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { portsFor } from '../src/canvas/ports';
-import { mediaKindOf, mediaModelsOf, mediaVendorLabel, parseMediaCatalogue } from '../src/canvas/mediaCatalog';
+import { mediaGroupLabel, mediaKindOf, mediaModelsOf, parseMediaCatalogue } from '../src/canvas/mediaCatalog';
 import { parseMediaOutput } from '../src/canvas/mediaOutput';
 import { MediaResult } from '../src/canvas/MediaResult';
 import { withAgentKind } from '../src/canvas/MediaNodeSettings';
@@ -33,7 +33,7 @@ describe('3D model nodes', () => {
     const catalogue = parseMediaCatalogue(raw);
     expect(mediaModelsOf(catalogue, 'model3d').map(model => model.id)).toEqual(['tripo.v3-1']);
     expect(mediaModelsOf(catalogue, 'image').map(model => model.id)).toEqual(['rh.seedream-v5-pro']);
-    expect(mediaVendorLabel('tripo', 'zh')).toBe('媒体');
+    expect(mediaGroupLabel('zh')).toBe('媒体');
     expect(parseMediaCatalogue({ ...raw, models: [{ ...raw.models[0], id: 'evil.model' }] }).models).toEqual([]);
   });
 

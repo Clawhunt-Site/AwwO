@@ -24,7 +24,7 @@ const rawCatalogue = {
       params: [{ name: 'stylize', type: 'integer', min: 0, max: 1000, default: 100, label: ['风格化', 'Stylize'] },
         { name: 'raw', type: 'boolean', default: false, label: ['原始模式', 'Raw mode'] },
         { name: 'negativePrompt', type: 'text', maxLength: 20, label: ['反向提示词', 'Negative prompt'] }] },
-    { id: 'rh.kling-v3-pro', name: 'Kling 3.0 Pro', vendor: 'kuaishou', kind: 'video', mode: 'text-to-video', prompt: { minLength: 1, maxLength: 2500 },
+    { id: 'rh.kling-v3-pro', name: 'Kling 3.0 Pro', label: ['视频 · 标准', 'Video · Standard'], vendor: 'kuaishou', kind: 'video', mode: 'text-to-video', prompt: { minLength: 1, maxLength: 2500 },
       params: [{ name: 'duration', type: 'enum', values: ['5', '10'], default: '5', label: ['时长（秒）', 'Duration (s)'] }] },
     // Malformed entries are dropped, never repaired.
     { id: 'seedream', name: 'No prefix', vendor: 'x', kind: 'image', prompt: { minLength: 1, maxLength: 9 }, params: [] },
@@ -155,7 +155,11 @@ describe('media node configuration', () => {
     render(<LocaleProvider locale="en"><InspectorPanel {...props({ node })} /></LocaleProvider>);
     expect(screen.getByLabelText('Duration (s)')).toHaveValue('5');
     expect(screen.getByRole('option', { name: '5 (default)' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Kuaishou' })).toBeInTheDocument();
+    // One group for every media model, each by its generic name in the reader's language, never by its maker.
+    expect(screen.getByRole('group', { name: 'Media' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Kuaishou' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Video · Standard' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Kling 3.0 Pro' })).not.toBeInTheDocument();
   });
 });
 

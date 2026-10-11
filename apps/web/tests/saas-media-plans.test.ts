@@ -3,7 +3,7 @@ import { AGENT_TEMPLATE_IDS, createAgentTemplate } from '../src/canvas/agentTemp
 import { createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { applyCanvasPlan, CANVAS_PLAN_PROTOCOL, PLAN_TEMPLATE_IDS, parseCanvasPlan, withMediaNodes, type CanvasPlanMedia } from '../src/canvas/canvasPlan';
 import { buildPlanningContext, observedProgress } from '../src/canvas/canvasPlanning';
-import { mediaVendorLabel, parseMediaCatalogue, replacementMediaModel } from '../src/canvas/mediaCatalog';
+import { mediaGroupLabel, mediaModelLabel, parseMediaCatalogue, replacementMediaModel } from '../src/canvas/mediaCatalog';
 import { activeNodeThread } from '../src/canvas/nodeThreads';
 import { replaceRetiredMediaModels } from '../src/canvas/retiredMediaModels';
 import { runScopeWithoutMedia } from '../src/canvas/runScope';
@@ -148,11 +148,12 @@ describe('retired media models and provider names', () => {
     expect(replaceRetiredMediaModels(moved, catalogue)).toBeNull();
   });
 
-  it('shows the generators AwwO runs as one media group, never by provider', () => {
-    for (const vendor of ['xtasy', 'tripo']) {
-      expect(mediaVendorLabel(vendor, 'zh')).toBe('媒体');
-      expect(mediaVendorLabel(vendor, 'en')).toBe('Media');
-    }
-    expect(mediaVendorLabel('bytedance', 'zh')).toBe('字节跳动');
+  it('shows every media model in one media group by its generic name, never by provider or maker', () => {
+    expect(mediaGroupLabel('zh')).toBe('媒体');
+    expect(mediaGroupLabel('en')).toBe('Media');
+    const labelled = parseMediaCatalogue({ configured: true, available: true, models: [
+      { ...model('xt.gpt-image-2', 'Old name', 'media', 'image'), label: ['图片 · 超清多张', 'Image · Ultra HD batch'] }] }).models[0];
+    expect(mediaModelLabel(labelled, 'zh')).toBe('图片 · 超清多张');
+    expect(mediaModelLabel(labelled, 'en')).toBe('Image · Ultra HD batch');
   });
 });

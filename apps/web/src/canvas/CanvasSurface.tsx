@@ -60,7 +60,7 @@ import { Marquee, useMarquee } from './Marquee';
 import { AddNodeMenu, type AddNodeKind } from './AddNodeMenu';
 import { InspectorPanel } from './InspectorPanel';
 import { mediaCatalogueOf, type MediaCatalogueState } from './MediaNodeSettings';
-import { mediaKindOf, mediaModelsOf, mediaVendorLabel, readMediaCatalogue, type MediaKind } from './mediaCatalog';
+import { mediaGroupLabel, mediaKindOf, mediaModelLabel, mediaModelsOf, readMediaCatalogue, type MediaKind } from './mediaCatalog';
 import { replaceRetiredMediaModels } from './retiredMediaModels';
 import { runScopeWithoutMedia } from './runScope';
 import type { NodeModelChoice } from './NodeModelPicker';
@@ -3092,7 +3092,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   })), [currentModelCatalogue, palette?.groups]);
   const mediaModelChoices = useMemo<Record<MediaKind, NodeModelChoice[]>>(() => {
     const catalogue = mediaCatalogueOf(mediaState);
-    const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: model.name, group: mediaVendorLabel(model.vendor, locale), available: true }));
+    const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: mediaModelLabel(model, locale), group: mediaGroupLabel(locale), available: true }));
     return { image: of('image'), video: of('video'), model3d: of('model3d') };
   }, [mediaState, locale]);
   const modelChoicesRef = useRef({ chat: chatModelChoices, media: mediaModelChoices });

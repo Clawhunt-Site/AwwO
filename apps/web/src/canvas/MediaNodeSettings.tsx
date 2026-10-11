@@ -7,14 +7,14 @@ import { useCanvasI18n } from './i18n';
 import './media.css';
 import {
   invalidMediaParams,
+  mediaGroupLabel,
   mediaKindOf,
+  mediaModelLabel,
   mediaModelsOf,
   mediaParamValue,
-  mediaVendorLabel,
   withMediaParam,
   type MediaCatalogue,
   type MediaKind,
-  type MediaModel,
   type MediaParam,
 } from './mediaCatalog';
 
@@ -55,10 +55,6 @@ export function mediaSetupProblem(node: SessionNode, catalogue: MediaCatalogue |
   return invalidMediaParams(model, node.mediaParams).length ? 'params' : null;
 }
 
-function vendorsOf(models: MediaModel[]): string[] {
-  return [...new Set(models.map(model => model.vendor))];
-}
-
 export function MediaNodeSettings({ node, state, disabled, onChange, onRetry }: {
   node: SessionNode;
   state: MediaCatalogueState | undefined;
@@ -90,9 +86,9 @@ export function MediaNodeSettings({ node, state, disabled, onChange, onRetry }: 
         onChange({ ...rest, model: event.target.value });
       }}>
       {!model ? <option value="" disabled>{t('media.chooseModel')}</option> : null}
-      {vendorsOf(models).map(vendor => <optgroup key={vendor} label={mediaVendorLabel(vendor, locale)}>
-        {models.filter(entry => entry.vendor === vendor).map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-      </optgroup>)}
+      <optgroup label={mediaGroupLabel(locale)}>
+        {models.map(entry => <option key={entry.id} value={entry.id}>{mediaModelLabel(entry, locale)}</option>)}
+      </optgroup>
     </select>
     {model ? <>
       {model.params.map(param => <MediaParamControl key={`${model.id}:${param.name}`} param={param} value={mediaParamValue(param, node.mediaParams)}

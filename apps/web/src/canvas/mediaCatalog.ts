@@ -26,6 +26,8 @@ export interface MediaParam {
 export interface MediaModel {
   id: string;
   name: string;
+  /** The name users see, [Chinese, English]; an entry without one is shown by its name in both. */
+  label: [string, string];
   vendor: string;
   kind: MediaKind;
   prompt: { minLength: number; maxLength: number };
@@ -98,7 +100,8 @@ function parseModel(raw: unknown): MediaModel | null {
     if (!param) return null;
     params.push(param);
   }
-  return { id: r.id, name: r.name, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params };
+  const shown: [string, string] = label(r.label) ? [r.label[0], r.label[1]] : [r.name, r.name];
+  return { id: r.id, name: r.name, label: shown, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params };
 }
 
 export function parseMediaCatalogue(raw: unknown): MediaCatalogue {
@@ -171,18 +174,15 @@ export function withMediaParam(params: MediaParams | undefined, param: MediaPara
   return next;
 }
 
-// The generators AwwO runs itself are shown as one group, 媒体 (owner decision 2026-10-11): users see media models,
-// never which service makes them.
-const VENDORS: Record<string, [string, string]> = {
-  bytedance: ['字节跳动', 'ByteDance'], google: ['Google', 'Google'], openai: ['OpenAI', 'OpenAI'], alibaba: ['阿里巴巴', 'Alibaba'],
-  midjourney: ['Midjourney', 'Midjourney'], xai: ['xAI', 'xAI'], kuaishou: ['快手', 'Kuaishou'], minimax: ['MiniMax', 'MiniMax'],
-  shengshu: ['生数科技', 'Shengshu'], pixverse: ['PixVerse', 'PixVerse'], tripo: ['媒体', 'Media'], xtasy: ['媒体', 'Media'],
-};
+// Every media model is shown in one group, 媒体, by a generic name (owner decisions 2026-10-11): users see media
+// models, never which service, model family or maker produces them.
+export function mediaGroupLabel(locale: UiLocale): string {
+  return locale === 'zh' ? '媒体' : 'Media';
+}
 
-/** A display name for a vendor slug; an unknown slug is shown as it is. */
-export function mediaVendorLabel(vendor: string, locale: UiLocale): string {
-  const known = VENDORS[vendor];
-  return known ? known[locale === 'zh' ? 0 : 1] : vendor;
+/** The name a media model is shown by, in the reader's language. */
+export function mediaModelLabel(model: MediaModel, locale: UiLocale): string {
+  return model.label[locale === 'zh' ? 0 : 1];
 }
 
 // Models of a generator this deployment no longer runs (ids `rh.*`), with the model of the same family a workspace is

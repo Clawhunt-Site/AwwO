@@ -30,6 +30,10 @@ const (
 	mediaProviderRunningHub = "runninghub"
 	mediaProviderTripo      = "tripo"
 	mediaProviderXtasy      = "xtasy"
+
+	// mediaVendorShown is the only vendor the generators AwwO runs itself publish: users see 媒体 (media) models, never
+	// which service or model family makes them (owner decisions 2026-10-11).
+	mediaVendorShown = "media"
 )
 
 type mediaPrompt struct {
@@ -51,8 +55,10 @@ type mediaParam struct {
 }
 
 type mediaModel struct {
-	ID       string       `json:"id"`
-	Name     string       `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Label is the name users see, [Chinese, English]. A model without one is shown by its Name in both languages.
+	Label    [2]string    `json:"label"`
 	Vendor   string       `json:"vendor"`
 	Kind     string       `json:"kind"`
 	Mode     string       `json:"mode"`
@@ -117,6 +123,9 @@ func parseMediaCatalog(raw []byte) (*mediaCatalog, error) {
 func validMediaModel(m *mediaModel) error {
 	if !mediaModelID.MatchString(m.ID) || !cleanCatalogText(m.Name, 80) || !mediaVendor.MatchString(m.Vendor) || !mediaEndpoint.MatchString(m.Endpoint) || !mediaDate.MatchString(m.Verified) {
 		return errors.New("identity")
+	}
+	if m.Label != ([2]string{}) && !validMediaLabel(m) {
+		return errors.New("label")
 	}
 	if (m.Kind != mediaKindImage && m.Kind != mediaKindVideo) || m.Mode != "text-to-"+m.Kind {
 		return errors.New("kind")
@@ -197,6 +206,20 @@ func cleanCatalogText(s string, max int) bool {
 		}
 	}
 	return true
+}
+
+// validMediaLabel: both names are set and short enough for a picker, and the Chinese one is the model's Name, which a
+// client that predates labels shows instead.
+func validMediaLabel(m *mediaModel) bool {
+	return cleanCatalogText(m.Label[0], 40) && cleanCatalogText(m.Label[1], 40) && m.Name == m.Label[0]
+}
+
+// shownLabel is the [Chinese, English] name a client shows for the model.
+func (m *mediaModel) shownLabel() [2]string {
+	if m.Label == ([2]string{}) {
+		return [2]string{m.Name, m.Name}
+	}
+	return m.Label
 }
 
 var builtinMediaCatalog = withProviderModels(mustMediaCatalog(mediaCatalogJSON))
@@ -335,7 +358,7 @@ func (m *mediaModel) validMediaPrompt(prompt string) bool {
 
 // mediaCatalogue answers GET /tenants/{tenantId}/media: whether media generation is configured,
 // and the catalog models this workspace may use, with their closed parameters. It never names
-// the provider key or endpoint host.
+// the provider key or endpoint host, nor which provider runs a model (owner decision 2026-10-11).
 func (a *App) mediaCatalogue(w http.ResponseWriter, r *http.Request) {
 	entitlement, e := tenantModelEntitlement(r.Context(), a.db, r.PathValue("tenantId"))
 	if e != nil {
@@ -349,10 +372,10 @@ func (a *App) mediaCatalogue(w http.ResponseWriter, r *http.Request) {
 			if !a.cfg.mediaProviderConfigured(m.Provider) || !a.mediaEntitled(entitlement, m.ID) {
 				continue
 			}
-			models = append(models, map[string]any{"id": m.ID, "name": m.Name, "vendor": m.Vendor, "kind": m.Kind, "mode": m.Mode,
-				"prompt": m.Prompt, "params": m.Params, "verified": m.Verified, "provider": m.Provider})
+			models = append(models, map[string]any{"id": m.ID, "name": m.Name, "label": m.shownLabel(), "vendor": m.Vendor, "kind": m.Kind,
+				"mode": m.Mode, "prompt": m.Prompt, "params": m.Params, "verified": m.Verified})
 		}
 	}
-	writeJSON(w, 200, map[string]any{"provider": "runninghub", "configured": configured, "available": configured && len(models) > 0, "models": models,
+	writeJSON(w, 200, map[string]any{"configured": configured, "available": configured && len(models) > 0, "models": models,
 		"limits": map[string]any{"runsPerDay": a.cfg.MediaRunsPerDay, "timeoutSeconds": int(a.cfg.MediaTimeout.Seconds())}})
 }

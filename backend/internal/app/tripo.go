@@ -51,16 +51,18 @@ func tripoModels() []*mediaModel {
 		Label: [2]string{"贴图质量", "Texture quality"}}
 	negative := mediaParam{Name: "negativePrompt", Type: "text", MaxLength: 255, Label: [2]string{"不要出现的内容", "Negative prompt"}}
 	autoSize := mediaParam{Name: "autoSize", Type: "boolean", Default: false, Label: [2]string{"按真实尺寸（米）", "Real-world size (m)"}}
-	// The names users see never name the provider (owner decision 2026-10-11).
+	// Users see a generic name in their language, never the provider's (owner decisions 2026-10-11).
 	return []*mediaModel{
-		{ID: "tripo.v3-1", Name: "3D v3.1 · 高精度模型", Vendor: "tripo", Kind: mediaKindModel3D, Mode: "text-to-model3d",
+		{ID: "tripo.v3-1", Name: "3D · 高精度", Label: [2]string{"3D · 高精度", "3D · High detail"}, Vendor: mediaVendorShown,
+			Kind: mediaKindModel3D, Mode: "text-to-model3d",
 			Endpoint: "/generation/text-to-model", Version: "v3.1-20260211", Prompt: mediaPrompt{MinLength: 1, MaxLength: 1024},
 			Params: []mediaParam{texture, pbr, textureQuality,
 				{Name: "geometryQuality", Type: "enum", Values: []string{"standard", "detailed"}, Default: "standard", Label: [2]string{"几何精度", "Geometry detail"}},
 				{Name: "faceLimit", Type: "integer", Min: number(1000), Max: number(500000), Label: [2]string{"面数上限", "Face limit"}},
 				negative, autoSize},
 			Docs: "https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard", Provider: mediaProviderTripo},
-		{ID: "tripo.p1", Name: "3D P1 · 游戏低多边形", Vendor: "tripo", Kind: mediaKindModel3D, Mode: "text-to-model3d",
+		{ID: "tripo.p1", Name: "3D · 游戏低多边形", Label: [2]string{"3D · 游戏低多边形", "3D · Low-poly game asset"}, Vendor: mediaVendorShown,
+			Kind: mediaKindModel3D, Mode: "text-to-model3d",
 			Endpoint: "/generation/text-to-model", Version: "P1-20260311", Prompt: mediaPrompt{MinLength: 1, MaxLength: 1024},
 			Params: []mediaParam{texture, pbr, textureQuality,
 				{Name: "faceLimit", Type: "integer", Min: number(500), Max: number(20000), Default: 5000.0, Label: [2]string{"面数上限", "Face limit"}},
@@ -70,8 +72,8 @@ func tripoModels() []*mediaModel {
 }
 
 func validTripoModel(m *mediaModel) error {
-	if m.Provider != mediaProviderTripo || !tripoModelID.MatchString(m.ID) || !cleanCatalogText(m.Name, 80) || m.Vendor != "tripo" ||
-		!mediaDate.MatchString(m.Verified) || !tripoVersionID.MatchString(m.Version) {
+	if m.Provider != mediaProviderTripo || !tripoModelID.MatchString(m.ID) || !cleanCatalogText(m.Name, 80) || !validMediaLabel(m) ||
+		m.Vendor != mediaVendorShown || !mediaDate.MatchString(m.Verified) || !tripoVersionID.MatchString(m.Version) {
 		return errors.New("identity")
 	}
 	if m.Kind != mediaKindModel3D || m.Mode != "text-to-model3d" || m.Endpoint != "/generation/text-to-model" {
