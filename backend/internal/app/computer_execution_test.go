@@ -552,6 +552,11 @@ func TestPostgresComputerTaskFitsTheWorkerAndNamesItsRefusals(t *testing.T) {
 	}
 	h.request(t, owner, "POST", base+"/runs/"+strings.TrimPrefix(running, base+"/computer-runs/")+"/cancel", map[string]any{}, 200)
 	awaitComputerStatus(t, h, owner, running, "cancelled")
+	// A busy worker (429) is asked again until computerQueueWait runs out (startComputerTask); shortened here, it
+	// still ends as computer_busy.
+	savedWait, savedPoll := computerQueueWait, computerQueuePoll
+	computerQueueWait, computerQueuePoll = 50*time.Millisecond, 10*time.Millisecond
+	defer func() { computerQueueWait, computerQueuePoll = savedWait, savedPoll }()
 	for status, want := range map[int32]string{429: "computer_busy", 503: "computer_unavailable", 409: "computer_rejected"} {
 		refuse.Store(status)
 		detail := awaitComputerStatus(t, h, owner, task(fmt.Sprintf("computer-refused-%d", status)), "failed")

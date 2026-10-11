@@ -14,6 +14,8 @@ export interface ExecutionArtifact { id: string; name: string; runId: string; no
 export interface ExecutionRun extends ExecutionRunSummary {
   output: string; outputTruncated?: boolean; error: string; canRespond: boolean; canCancel: boolean; truncated: boolean;
   messages: ExecutionMessage[]; approvals: ExecutionApproval[]; artifacts: ExecutionArtifact[];
+  /** In line for a free execution slot: every workspace is running a task and this one starts when one frees up. */
+  waitingForSlot?: boolean;
 }
 export interface ExecutionInput { operationId: string; prompt: string; runtime: string; model: string; effort?: string; knowledgeRevisionIds?: string[] }
 export interface ExecutionResponseInput { requestId: string; behavior: 'allow' | 'deny'; message?: string; operationId: string }
@@ -67,6 +69,7 @@ export async function readExecutionRun(tenantId: string, runId: string, signal: 
   return checked(await bounded(runPath(tenantId, runId), signal), (value): value is ExecutionRun => summary(value) && value.id === runId
     && object(value) && string(value.output) && string(value.error) && bool(value.canRespond) && bool(value.canCancel) && bool(value.truncated)
     && (value.outputTruncated === undefined || bool(value.outputTruncated))
+    && (value.waitingForSlot === undefined || bool(value.waitingForSlot))
     && Array.isArray(value.messages) && value.messages.every(message => object(message) && nonempty(message.id) && string(message.role) && string(message.text) && string(message.createdAt)
       && (message.truncated === undefined || bool(message.truncated))) && unique(value.messages)
     && Array.isArray(value.approvals) && value.approvals.every(item => object(item) && nonempty(item.id) && nonempty(item.requestId)

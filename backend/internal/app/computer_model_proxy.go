@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+// computerModelCallTimeout bounds one managed-execution model call through the proxy: the Pi and openai-agents
+// workers stop a call themselves after 10 minutes (AWWO_PI_TIMEOUT_MS), and the task's lease ends it sooner when
+// the task stops. Thinking models routinely need more than the 30 s an ordinary API request gets.
+const computerModelCallTimeout = 10 * time.Minute
+
 // OpenMaus receives a task-scoped bearer, never a user's provider key. Only the
 // already trusted Pi/OpenAI worker receives personalAdmission's ephemeral key.
 func validateComputerCompletion(raw []byte, budget int) (map[string]json.RawMessage, bool, error) {
@@ -149,7 +154,8 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 	index := lease.calls
 	lease.mu.Unlock()
 	defer func() { lease.mu.Lock(); lease.busy = false; lease.mu.Unlock() }()
-	ctx, cancel := context.WithCancel(r.Context())
+	// Not the API's 30 s request deadline (requestDeadlineApplies): its own bound, and the task's lease.
+	ctx, cancel := context.WithTimeout(r.Context(), computerModelCallTimeout)
 	defer cancel()
 	stop := context.AfterFunc(lease.ctx, cancel)
 	defer stop()

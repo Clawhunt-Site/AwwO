@@ -549,7 +549,7 @@ describe('the canvas assistant’s tasks', () => {
   });
 
   it.each([
-    ['computer_busy', '工作区正忙：它一次只运行一个任务。等当前任务结束后再试。'],
+    ['computer_busy', '执行环境一直都在忙，排队 10 分钟仍没有空位，任务没有开始。请稍后再试。'],
     ['credits_exhausted', '本期套餐点数已用完。可以把节点换成默认模型继续，点数在下次续费后重置；需要更多点数可以请工作区所有者在「套餐与点数」里升级。'],
     ['some_new_code', '任务没有完成（some_new_code）。'],
   ])('says why a task ended without its result (%s) as a sentence', async (code, sentence) => {
@@ -1370,6 +1370,14 @@ describe('the canvas assistant’s tasks', () => {
     const process = screen.getByText('执行过程（2 条记录）').closest('details') as HTMLDetailsElement;
     expect(process.open).toBe(false);
     expect(within(process).getByText('写入 report.md')).toBeInTheDocument();
+  });
+
+  it('says a task waiting for a free execution slot is queued, not working', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/run-a') ? { ...detail, approvals: [], messages: [], waitingForSlot: true } : defaultResponse(url))));
+    render(view());
+    const headline = await screen.findByText('执行环境都在忙，已排队，空出来就开始');
+    expect(headline.closest('[role="status"]')).toBeVisible();
+    expect(screen.queryByText('正在执行任务')).toBeNull();
   });
 
   it('times out HTTP reads at 15 seconds without retrying', async () => {

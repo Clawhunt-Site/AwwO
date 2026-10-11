@@ -43,7 +43,7 @@ function elapsed(from: string, to: number): string {
 /** Why a task ended without its result, in the reader's words; an unknown code is still named. */
 function taskErrorText(t: T, locale: UiLocale, code: string): string {
   const known: Record<string, [string, string]> = {
-    computer_busy: ['工作区正忙：它一次只运行一个任务。等当前任务结束后再试。', 'The workspace is busy: it runs one task at a time. Try again when the current task ends.'],
+    computer_busy: ['执行环境一直都在忙，排队 10 分钟仍没有空位，任务没有开始。请稍后再试。', 'Every workspace stayed busy for 10 minutes, so the task did not start. Try again later.'],
     computer_unavailable: ['工作区执行服务暂时不可用，请稍后再试。', 'Workspace execution is temporarily unavailable. Try again later.'],
     computer_rejected: ['执行服务没有接受这个任务，请稍后再试。', 'The execution service did not accept this task. Try again later.'],
     computer_execution_failed: ['任务执行失败，没有完成。', 'The task failed before it finished.'],
@@ -222,6 +222,7 @@ function RunStatus({ execution, run }: { execution: ManagedExecution; run: Execu
   if (run.messages.length) facts.push(t(`${run.messages.length} 条进展`, `${run.messages.length} updates`));
   if (run.artifacts.length) facts.push(t(`${run.artifacts.length} 个文件`, `${run.artifacts.length} files`));
   const headline = terminal ? statusLabel(t, run.status) : waiting ? t('等你回应后继续', 'Waiting for your response')
+    : run.waitingForSlot ? t('执行环境都在忙，已排队，空出来就开始', 'Every workspace is busy; queued, starting as soon as one frees up')
     : run.status === 'queued' ? t('排队中，即将开始', 'Queued, starting soon') : t('正在执行任务', 'Working on the task');
   return <div className={`awwo-execution-status is-${statusTone(run.status)}`} role="status">
     <p className="awwo-execution-status-headline">

@@ -214,7 +214,7 @@ func (a *App) Close() {
 func (a *App) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("POST /api/internal/workspace-calls", a.workspaceCallback)
-	m.HandleFunc("POST /api/internal/computer-model/v1/chat/completions", a.computerModelProxy)
+	m.HandleFunc("POST "+computerModelRoute, a.computerModelProxy)
 	m.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -348,15 +348,34 @@ func (a *App) workerAvailable(w http.ResponseWriter) bool {
 	}
 	return true
 }
+
+// requestDeadline bounds an ordinary API request (security); a variable so tests can shorten it.
+var requestDeadline = 30 * time.Second
+
+// computerModelRoute is managed execution's internal model call (computerModelProxy), bounded by its own
+// computerModelCallTimeout and its task's lease instead of requestDeadline.
+const computerModelRoute = "/api/internal/computer-model/v1/chat/completions"
+
+// requestDeadlineApplies reports whether requestDeadline bounds a request to this path.
+func requestDeadlineApplies(path string) bool {
+	if strings.HasSuffix(path, "/events") || (strings.Contains(path, "/artifacts/") && strings.HasSuffix(path, "/media")) {
+		return false
+	}
+	return path != computerModelRoute
+}
+
 func (a *App) security(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !a.workerAvailable(w) {
 			return
 		}
 		// Event streams and inline media (a seekable video) outlive a request deadline; the media
-		// route bounds itself. Everything else, including the media catalogue, keeps this one.
-		if !strings.HasSuffix(r.URL.Path, "/events") && !(strings.Contains(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/media")) {
-			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		// route bounds itself. So does managed execution's model call (computerModelProxy): a
+		// thinking model routinely answers it after more than 30 s, and the deadline cut every
+		// such call off at exactly 30 s (computer_model_transport). Everything else, including
+		// the media catalogue, keeps this one.
+		if requestDeadlineApplies(r.URL.Path) {
+			ctx, cancel := context.WithTimeout(r.Context(), requestDeadline)
 			defer cancel()
 			r = r.WithContext(ctx)
 		}
