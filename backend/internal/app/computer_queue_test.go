@@ -169,11 +169,18 @@ func TestPostgresComputerTaskWaitsInLineForAFreeSlot(t *testing.T) {
 
 // Launch day: tasks waited on their owner to allow a workspace tool or answer a question, and held a worker slot
 // until the worker's 15-minute limit. Workspace tools the deployment allows are now allowed as they are requested,
-// and a question nobody answers within computerQuestionWait is answered "go on with sensible defaults".
-func TestPostgresComputerAllowsWorkspaceToolsAndAnswersAnUnansweredQuestion(t *testing.T) {
-	savedQuestion := computerQuestionWait
-	computerQuestionWait = 100 * time.Millisecond
-	defer func() { computerQuestionWait = savedQuestion }()
+// and a question is answered "go on with sensible defaults": at once by default (the owner's choice of 2026-10-11),
+// or once a configured wait has passed.
+func TestPostgresComputerAllowsWorkspaceToolsAndAnswersQuestions(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		wait time.Duration
+	}{{"at once", 0}, {"after the configured wait", 300 * time.Millisecond}} {
+		t.Run(c.name, func(t *testing.T) { checkComputerAutoAnswers(t, c.wait) })
+	}
+}
+
+func checkComputerAutoAnswers(t *testing.T, wait time.Duration) {
 	pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { computerPiHealth(w) }))
 	defer pi.Close()
 	answers := make(chan map[string]string, 4)
@@ -216,15 +223,20 @@ func TestPostgresComputerAllowsWorkspaceToolsAndAnswersAnUnansweredQuestion(t *t
 		if b := await("tool-1"); b != nil && (b["behavior"] != "allow" || b["message"] != "") {
 			t.Errorf("workspace tool not simply allowed: %v", b)
 		}
+		asked := time.Now()
 		send(map[string]any{"type": "computer_approval", "requestId": "ask-1", "title": "Your bot has a question", "description": "Which language?", "kind": "question"})
 		if b := await("ask-1"); b != nil && (b["behavior"] != "allow" || b["message"] != computerQuestionFallback) {
 			t.Errorf("question not answered with the fallback: %v", b)
+		}
+		if waited := time.Since(asked); waited < wait {
+			t.Errorf("question answered after %v, before the configured wait of %v", waited, wait)
 		}
 		send(map[string]any{"type": "completed", "output": "Report written in Chinese, as assumed."})
 	}))
 	defer worker.Close()
 	h := computerHarness(t, pi.URL, worker.URL)
 	h.a.cfg.ComputerAutoAllowTools, _ = parseComputerAutoAllow("")
+	h.a.cfg.ComputerQuestionWait = wait
 	owner, tid, rid := startComputerTestRun(t, h, "computer-auto@example.test", "computer-auto-answers")
 	h.awaitRun(t, owner, tid, rid, "completed")
 	detail := h.request(t, owner, "GET", "/tenants/"+tid+"/computer-runs/"+rid, nil, 200)
@@ -236,6 +248,20 @@ func TestPostgresComputerAllowsWorkspaceToolsAndAnswersAnUnansweredQuestion(t *t
 	var audited int
 	if e := h.db.QueryRow(t.Context(), "SELECT count(*) FROM audit_events WHERE tenant_id=$1 AND resource_id=$2 AND actor_id IS NULL AND action IN ('computer.response.auto_allow','computer.response.auto_answer')", tid, rid).Scan(&audited); e != nil || audited != 2 {
 		t.Fatal("automatic answers not audited", audited, e)
+	}
+}
+
+// The owner's 2026-10-11 choice is the default: unset answers a question at once; a wait is opt-in and bounded.
+func TestComputerQuestionWaitSetting(t *testing.T) {
+	for raw, want := range map[string]time.Duration{"": 0, " ": 0, "0": 0, "120": 2 * time.Minute, "900": 15 * time.Minute} {
+		if got, e := parseComputerQuestionWait(raw); e != nil || got != want {
+			t.Errorf("parseComputerQuestionWait(%q) = %v, %v; want %v", raw, got, e, want)
+		}
+	}
+	for _, raw := range []string{"-1", "901", "1.5", "2m", "abc"} {
+		if _, e := parseComputerQuestionWait(raw); e == nil {
+			t.Errorf("parseComputerQuestionWait(%q) accepted", raw)
+		}
 	}
 }
 

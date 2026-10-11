@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,7 +17,7 @@ import (
 // their owner to allow a workspace tool or answer a question held a slot until the worker's 15-minute limit
 // (TIMEOUT -> computer_execution_failed), which in turn kept the slots full. This file holds the answers to those:
 // the task waits in line for a slot, tools of the isolated workspace the deployment allows are allowed without asking,
-// and a question nobody answers in time is answered for the owner with "go on with sensible defaults".
+// and a question is answered for the owner with "go on with sensible defaults" (at once, unless a wait is configured).
 
 // computerQueueWait bounds how long a task waits for a free slot on the managed-execution worker, which answers
 // 429 WORKER_BUSY while every slot runs a task, before it fails as computer_busy; computerQueuePoll is how often it
@@ -26,12 +27,28 @@ var (
 	computerQueuePoll = 3 * time.Second
 )
 
-// computerQuestionWait is how long a task's question waits for its owner before the service answers it with
-// computerQuestionFallback; a variable so tests can shorten it.
-var computerQuestionWait = 2 * time.Minute
+// A task's question is answered for its owner with computerQuestionFallback after Config.ComputerQuestionWait
+// (AWWO_COMPUTER_QUESTION_WAIT_SECONDS, parseComputerQuestionWait). Unset or 0 answers it at once: the owner chose on
+// 2026-10-11 that a task never waits on a question (「提问也不等，直接按默认继续」). A positive value first gives the
+// task's owner that long to answer, at most maxComputerQuestionWait.
+const maxComputerQuestionWait = 15 * time.Minute
 
-const computerQuestionFallback = "（用户暂时没有回复）请不要再提问：按最合理的默认做法直接完成任务，并在结果里写明你做了哪些假设。" +
-	" The user is away: do not ask again; finish the task with sensible defaults and state your assumptions in the result."
+const computerQuestionFallback = "（自动回复）请不要再提问：按最合理的默认做法直接完成任务，并在结果里写明你做了哪些假设。" +
+	" Automatic reply: do not ask again; finish the task with sensible defaults and state your assumptions in the result."
+
+// parseComputerQuestionWait reads AWWO_COMPUTER_QUESTION_WAIT_SECONDS: unset or 0 answers a task's question at once;
+// 1 to 900 waits that many seconds for the owner first. Anything else is refused at startup.
+func parseComputerQuestionWait(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 || time.Duration(n)*time.Second > maxComputerQuestionWait {
+		return 0, errors.New("AWWO_COMPUTER_QUESTION_WAIT_SECONDS must be a whole number of seconds from 0 (answer at once) to 900")
+	}
+	return time.Duration(n) * time.Second, nil
+}
 
 // computerWorkspaceTools are the managed-execution worker's tools as their approval requests name them (the
 // awwo_workspace MCP server of apps/openmaus-worker/transport.ts). Each acts only inside the task's own isolated
@@ -124,11 +141,12 @@ func (a *App) startComputerTask(ctx context.Context, tid, rid string, payload ma
 	}
 }
 
-// answerUnansweredQuestion answers a task's question for its owner once computerQuestionWait has passed without an
+// answerUnansweredQuestion answers a task's question for its owner once Config.ComputerQuestionWait has passed without an
 // answer, so a task whose owner stepped away finishes on sensible defaults instead of holding a slot until the
-// worker's time limit. An answer the owner gave meanwhile wins: only a request still pending is answered.
+// worker's time limit. An answer the owner gave meanwhile wins: only a request still pending is answered. With no
+// wait configured the stream answers the question itself, at once, and does not start this.
 func (a *App) answerUnansweredQuestion(ctx context.Context, tid, rid, requestID string) {
-	timer := time.NewTimer(computerQuestionWait)
+	timer := time.NewTimer(a.cfg.ComputerQuestionWait)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():

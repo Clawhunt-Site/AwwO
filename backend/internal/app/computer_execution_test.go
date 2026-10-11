@@ -349,6 +349,8 @@ func TestPostgresComputerUncertainApprovalIsNeverAutomaticallyRepeated(t *testin
 	h.a.cfg.OpenMausURL = worker.URL
 	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
 	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
+	// The owner answers this question: a deployment that keeps questions for their owners configures a wait.
+	h.a.cfg.ComputerQuestionWait = maxComputerQuestionWait
 	owner, tid, _ := h.register(t, "computer-unknown@example.test")
 	canvas, _, _ := h.fixture(t, owner, tid)
 	base := "/tenants/" + tid

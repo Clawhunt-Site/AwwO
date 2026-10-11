@@ -498,6 +498,9 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 				case ev.Kind == "approval" && a.cfg.ComputerAutoAllowTools[ev.Title]:
 					// A tool of the isolated workspace the deployment allows: answered now, as the owner would.
 					a.autoRespondComputer(ctx, tid, rid, ev.RequestID, "", "auto_allow")
+				case ev.Kind == "question" && a.cfg.ComputerQuestionWait <= 0:
+					// No wait configured: answered now with the fallback, so the task goes on with sensible defaults.
+					a.autoRespondComputer(ctx, tid, rid, ev.RequestID, computerQuestionFallback, "auto_answer")
 				case ev.Kind == "question":
 					go a.answerUnansweredQuestion(ctx, tid, rid, ev.RequestID)
 				}

@@ -21,6 +21,9 @@ type Config struct {
 	// ComputerAutoAllowTools are the isolated-workspace tools a managed-execution task uses without asking its owner
 	// each time (AWWO_COMPUTER_AUTO_ALLOW_TOOLS, parseComputerAutoAllow); nil or empty asks for every one.
 	ComputerAutoAllowTools map[string]bool
+	// ComputerQuestionWait is how long a managed-execution task's question waits for its owner before the service
+	// answers it "go on with sensible defaults" (AWWO_COMPUTER_QUESTION_WAIT_SECONDS); 0 answers it at once.
+	ComputerQuestionWait time.Duration
 
 	TypeSafeAPIKey, TypeSafeModel                       string
 	TypeSafeEnabledTenantIDs                            []string
@@ -98,6 +101,9 @@ func ConfigFromEnv() (Config, error) {
 		return c, err
 	}
 	c.ComputerAutoAllowTools = autoAllow
+	if c.ComputerQuestionWait, err = parseComputerQuestionWait(os.Getenv("AWWO_COMPUTER_QUESTION_WAIT_SECONDS")); err != nil {
+		return c, err
+	}
 	if err := c.openMausFromEnv(); err != nil {
 		return c, err
 	}
