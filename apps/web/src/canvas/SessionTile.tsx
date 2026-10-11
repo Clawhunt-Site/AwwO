@@ -197,7 +197,8 @@ function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<Con
 
 /** The overview shows a published result before any newer chat snippet. */
 function firstMeaningfulLine(value: string): string {
-  const lines = value.split(/\\n|\r?\n/).map(line => line.trim()).filter(Boolean);
+  // A code delivery opens with a fence and often a lone brace; neither says anything about it.
+  const lines = value.split(/\\n|\r?\n/).map(line => line.trim()).filter(line => line && !/^(?:```|~~~)/.test(line) && !/^[[\]{}(),;]+$/.test(line));
   // Section labels are useful in the full delivery, but the overview should lead with its
   // content. Keep a readable title as the fallback when no body has arrived yet.
   const body = lines.filter(line => !/^#{1,6}(?:\s|$)/.test(line) && !/^\*\*[^*]+\*\*[:：]?$/.test(line));
