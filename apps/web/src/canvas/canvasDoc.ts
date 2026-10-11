@@ -224,7 +224,7 @@ export const SESSION_NODE_SIZE = { w: 340, h: 260 } as const;
 export const FORM_NODE_SIZE = { w: 300, h: 200 } as const;
 
 const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video', 'model3d'];
-const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review'];
+const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure'];
 /** Waypoint slots are the number-row keys; anything outside is clamped into range. */
 export const WAYPOINT_MIN_SLOT = 1;
 export const WAYPOINT_MAX_SLOT = 9;

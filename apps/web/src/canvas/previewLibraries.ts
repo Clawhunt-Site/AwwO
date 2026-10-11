@@ -4,6 +4,8 @@
  * CSP stays inline-only and no host is ever allowed. A copy is the npm release byte for byte; its size and sha256
  * are pinned here and checked by tests/canvas-artifact-preview.test.tsx.
  */
+import { FIGURE_KIT_BYTES, FIGURE_KIT_SHA256, FIGURE_KIT_URL } from './figureKit/figureKit';
+
 export interface PreviewAddition {
   /** Shown to the user, e.g. "CapsuleGeometry". */
   readonly label: string;
@@ -17,6 +19,8 @@ export interface PreviewLibrary {
   readonly id: string;
   /** Shown to the user, e.g. "three.js r128". */
   readonly label: string;
+  /** The label in the Chinese interface, when it differs from `label`. */
+  readonly labelZh?: string;
   /** The script URLs (compared after trimming) that name this release. */
   readonly urls: readonly string[];
   readonly bytes: number;
@@ -62,6 +66,16 @@ export const PREVIEW_LIBRARIES: readonly PreviewLibrary[] = [{
   // A separate chunk, fetched only when a running page needs it.
   load: () => import('three-r128/build/three.min.js?raw').then(module => module.default),
   additions: [{ label: 'CapsuleGeometry', used: /\bTHREE\.CapsuleGeometry\b/, code: CAPSULE_GEOMETRY }],
+}, {
+  id: 'figure-kit-1',
+  label: 'Figure kit',
+  labelZh: '原理图解组件',
+  // AwwO's own figure kit (figureKit/figureKit.ts): the anatomy kit (third_party/anatomy, MIT) as one classic script
+  // that defines window.Anatomy. The hosted site serves these same bytes at the URL for downloaded pages.
+  urls: [FIGURE_KIT_URL],
+  bytes: FIGURE_KIT_BYTES,
+  sha256: FIGURE_KIT_SHA256,
+  load: () => import('./figureKit/anatomy-kit.js?raw').then(module => module.default),
 }];
 
 const BY_URL = new Map(PREVIEW_LIBRARIES.flatMap(library => library.urls.map(url => [url, library] as const)));

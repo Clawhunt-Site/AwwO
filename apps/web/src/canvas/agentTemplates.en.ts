@@ -1,5 +1,6 @@
 import type { ContractField, ContractFieldType } from './nodeContracts';
 import type { AgentTemplate } from './agentTemplates';
+import { figurePersona } from './figureKit/figureKit';
 
 const field = (
   id: string,
@@ -18,6 +19,9 @@ function template(spec: Omit<AgentTemplate, 'input' | 'output'>): AgentTemplate 
     persona: `${spec.persona}\n\nWorkflow:\n${spec.workflow.map((step, index) => `${index + 1}. ${step}`).join('\n')}\n\nAcceptance criteria:\n${spec.checklist.map(item => `- ${item}`).join('\n')}\n\nEvidence policy: distinguish verified, unverified, and blocked work. Cite actual checks or files and state any evidence gaps. Never describe a plan, example, or placeholder as a completed result.`,
   };
 }
+
+/** An explainer-figure node builds its page with AwwO's figure kit: its persona carries the kit guide after the role. */
+const withFigureGuide = (item: AgentTemplate): AgentTemplate => ({ ...item, persona: figurePersona(item.persona) });
 
 /** English presentation and defaults for newly created nodes. Stable IDs mirror the Chinese set. */
 export const EN_AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
@@ -173,4 +177,22 @@ export const EN_AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
     ],
     deliverableTitle: 'Review result', emptyTitle: 'Define how completion will be proven', emptyDescription: 'Bring together the delivery, criteria, and evidence so the conclusion can be independently checked.',
   }),
+  withFigureGuide(template({
+    id: 'figure', title: 'Explainer figure', subtitle: 'An idea as a machine you can play with', tag: 'FIGURE',
+    persona: 'Explain one principle, algorithm or mechanism by inventing a real, well-made small machine whose working IS the idea, and deliver one page with an interactive isometric figure that runs as soon as it opens. Every number it shows comes from one true model. No boxes, arrows or flowcharts, and no words inside the drawing. Light theme by default; hover and arrow keys both work.',
+    inputs: [
+      field('idea', 'Idea to explain', true, 'Idea:\nAudience:\nThe one thing to understand:\nLook or interaction wishes (optional):', 'Say what to explain and for whom, for example "explain how a token bucket rate limiter works".'),
+      field('facts', 'True numbers', false, 'Sizes, counts, rates, thresholds:\nKey behaviour:', 'The readout and the motion follow these numbers; anything missing takes the accepted real value, stated in the caption.'),
+    ],
+    outputs: [
+      field('figure', 'Interactive figure', true, 'One complete HTML page: the isometric machine, the card corners (number, title, hint, live readout), legend and a caption', 'Runs in Results as soon as it is delivered and downloads as a single web page.', 'html'),
+    ],
+    workflow: ['Write the true numbers and behaviour as one small model (sizes, counts, rates, thresholds)', 'Invent the machine: say in one sentence what moves and what that motion means', 'List 40–80 parts (base, structure, mechanism, controls and the one lit subject), then build the geometry with the kit', 'Paint back to front and bottom to top, inside a card with number, title, hint and live readout', 'Add calm motion: an idle tour when untouched, hover and arrow keys to control it, still under reduced motion'],
+    checklist: ['It reads at once as a real machine, not boxes and arrows', 'It is finely detailed (screws, ticks, bevels, knurls) and every part sits on another part', 'Readout, motion and caption come from the same true model', 'It runs on open: hover or arrow keys move it and the readout follows', 'The page names no external address but the kit script'],
+    starterPrompts: [
+      { label: 'Invent the machine', prompt: 'For the idea to explain, list the true numbers, the machine that maps onto it, what moves, where the readout comes from, and a parts list of at least 40 parts.' },
+      { label: 'Build the figure', prompt: 'Build that machine from the idea and its true numbers, and deliver one page with an interactive figure that works as soon as it opens.' },
+    ],
+    deliverableTitle: 'Interactive figure', emptyTitle: 'Name an idea to explain', emptyDescription: 'For example "explain how an LRU cache evicts entries": it builds a machine you can play with to show it.',
+  })),
 ];

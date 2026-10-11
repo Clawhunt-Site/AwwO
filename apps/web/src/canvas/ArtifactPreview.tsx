@@ -149,7 +149,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     return () => { live = false; };
   }, [needs]);
   const libraries = !needs.libraries.length ? 'none' : supplied?.needs !== needs ? 'loading' : supplied.code ? 'ready' : 'failed';
-  const libraryNames = needs.libraries.map(library => library.label).join(', ');
+  const libraryNames = needs.libraries.map(library => (locale === 'zh' && library.labelZh) || library.label).join(', ');
   const code = libraries === 'ready' ? supplied?.code ?? undefined : undefined;
   const html = useMemo(() => type === 'html' && !tooLarge ? htmlPreviewDocument(documentSource, running, code) : '', [documentSource, type, tooLarge, running, code]);
   // A game laid out for a whole browser window can need more height than the inline frame has.

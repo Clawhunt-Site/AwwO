@@ -45,7 +45,7 @@ const NODE_MARKER = '"add_node"';
 const EDGE_MARKER = '"connect"';
 // Only a member of the closed template set the canvas catalogue and the SaaS plan gate accept
 // (apps/web/src/canvas/agentTemplates.ts, backend planning.go) is ever reported as a template.
-const TEMPLATE_IDS: ReadonlySet<string> = new Set(['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review']);
+const TEMPLATE_IDS: ReadonlySet<string> = new Set(['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure']);
 const TEMPLATE_PAIR = /^"templateId"\s{0,8}:\s{0,8}"([a-z]{1,16})"/;
 // How much of the stream a template is read from: a node's templateId is found only while its
 // marker is still inside this window; one written further away is simply not shown.

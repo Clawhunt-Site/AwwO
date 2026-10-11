@@ -68,7 +68,8 @@ const (
 // validates against it, and progress reports a template only when it is one of these.
 // image, video and model3d declare media nodes, which generate from a prompt instead of
 // running an Agent; the canvas offers them to the planner only when the workspace can run them.
-var planTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "image", "video", "model3d"}
+// figure is an Agent that draws an interactive explainer figure with AwwO's figure kit.
+var planTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "figure", "image", "video", "model3d"}
 
 // planOperationTypes is the closed set of operations a proposal may contain; the plan gate
 // rejects any other, and progress names the newest one only as a member of this set.

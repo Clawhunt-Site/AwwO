@@ -8,6 +8,7 @@ import { preflightGraph, runGraph } from '../src/canvas/runGraph';
 const corePorts: Record<AgentTemplateId, [string, string]> = {
   general: ['brief', 'result'], frontend: ['api', 'delivery'], backend: ['schema', 'api'],
   data: ['brief', 'schema'], users: ['brief', 'identity'], materials: ['brief', 'assets'], review: ['delivery', 'report'],
+  figure: ['idea', 'figure'],
 };
 
 beforeEach(() => localStorage.clear());
@@ -18,10 +19,12 @@ describe('complete role templates', () => {
     const contract = node.contract!;
     expect(node).toMatchObject({ templateId: template.id, templateVersion: 1, binding: null, issueId: null, runtime: '', model: '', effort: '' });
     expect(node.lastOutput).toBeUndefined();
-    expect(contract.inputs.length).toBeGreaterThanOrEqual(3);
+    // A figure node takes the idea (with any look wishes) and its true numbers, and delivers exactly one html page, so
+    // the page can come back as plain text instead of JSON-escaped.
+    expect(contract.inputs.length).toBeGreaterThanOrEqual(template.id === 'figure' ? 2 : 3);
     expect(contract.inputs.length).toBeLessThanOrEqual(4);
-    expect(contract.outputs.length).toBeGreaterThanOrEqual(2);
-    expect(contract.outputs.length).toBeLessThanOrEqual(3);
+    expect(contract.outputs.length).toBeGreaterThanOrEqual(template.id === 'figure' ? 1 : 2);
+    expect(contract.outputs.length).toBeLessThanOrEqual(template.id === 'figure' ? 1 : 3);
     expect([contract.inputs[0].id, contract.outputs[0].id]).toEqual(corePorts[template.id]);
     for (const fields of [contract.inputs, contract.outputs]) {
       expect(fields.filter(field => field.required)).toHaveLength(1);
@@ -68,8 +71,8 @@ describe('complete role templates', () => {
     expect(backend.title).toBe('后端服务');
     expect(backend.persona).toContain('授权策略由用户系统节点提供');
     expect(users.persona).toContain('不接管通用业务接口实现');
-    expect(new Set(AGENT_TEMPLATES.map(template => template.persona)).size).toBe(7);
-    expect(new Set(AGENT_TEMPLATES.map(template => template.emptyTitle)).size).toBe(7);
+    expect(new Set(AGENT_TEMPLATES.map(template => template.persona)).size).toBe(8);
+    expect(new Set(AGENT_TEMPLATES.map(template => template.emptyTitle)).size).toBe(8);
   });
 });
 

@@ -24,7 +24,8 @@ describe('model and persona shelf', () => {
     const platform = screen.getByRole('region', { name: 'ClawHunt · 平台模型' });
     expect(within(platform).getByRole('button', { name: /添加 Qwen fixture/ })).toBeEnabled();
     expect(within(screen.getByRole('region', { name: 'codex' })).queryByRole('button')).toBeNull();
-    expect(screen.getAllByRole('radio')).toHaveLength(8);
+    expect(screen.getAllByRole('radio')).toHaveLength(9);
+    expect(screen.getByRole('radio', { name: '原理图解' })).not.toBeChecked();
     expect(screen.getByRole('radio', { name: '无预设' })).toBeChecked();
   });
 

@@ -10,6 +10,7 @@ import { canConnect, edgeId, portsFor, reconcileEdges, type PortSpec } from './p
 import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
 import { TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH } from './taskFrame';
+import { figurePersona } from './figureKit/figureKit';
 
 /** The media kinds a plan may add as nodes (templateId image, video or model3d): generators that make one asset from a
  *  prompt instead of running an Agent. A host offers the planner only the kinds its workspace can generate. */
@@ -18,7 +19,7 @@ export type PlanTemplateId = AgentTemplateId | MediaKind;
 const isMediaTemplate = (value: unknown): value is MediaKind => MEDIA_PLAN_TEMPLATE_IDS.includes(value as MediaKind);
 /** Every template id a plan may declare, media nodes included: planning progress names a node only by one of these.
  *  Literal ids (checked against AgentTemplateId), so building it at load never reads another module's bindings. */
-const AGENT_PLAN_TEMPLATE_IDS = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review'] as const satisfies ReadonlyArray<AgentTemplateId>;
+const AGENT_PLAN_TEMPLATE_IDS = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure'] as const satisfies ReadonlyArray<AgentTemplateId>;
 export const PLAN_TEMPLATE_IDS: ReadonlySet<string> = new Set<string>([...AGENT_PLAN_TEMPLATE_IDS, ...MEDIA_PLAN_TEMPLATE_IDS]);
 
 export type CanvasPlanFieldChanges = Partial<Pick<ContractField, 'label' | 'type' | 'required' | 'help' | 'placeholder'>>;
@@ -59,7 +60,7 @@ export interface CanvasPlanMedia { models: Partial<Record<MediaKind, string>>; p
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
 允许的 operations（未知键会被拒绝）：
-add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review",title?:string,persona?:string,inputValues?:{[已有输入字段ID]:string}}
+add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure",title?:string,persona?:string,inputValues?:{[已有输入字段ID]:string}}
 update_node: {type:"update_node",nodeId:string,title?:string,persona?:string}
 set_input: {type:"set_input",nodeId:string,fieldId:string,value:string}
 add_field: {type:"add_field",nodeId:string,side:"input"|"output",field:{id:string,label:string,type:"text"|"markdown"|"html"|"number"|"boolean"|"file",required:boolean,value:"",help?:string,placeholder?:string}}
@@ -498,7 +499,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         // Every new downstream reviewer receives it even if an upstream draft drifts.
         if (constraints.length) node.taskFrame = { version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [] };
         if (op.title !== undefined) node.title = op.title;
-        if (op.persona !== undefined) node.persona = op.persona;
+        // A figure node's page is built with AwwO's figure kit: a planned persona replaces its role, never the guide.
+        if (op.persona !== undefined) node.persona = op.templateId === 'figure' ? figurePersona(op.persona) : op.persona;
         for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust);
         draft.nodes.push(node); refs.set(op.ref, node.id); addedNodeIds.push(node.id);
         break;
@@ -508,7 +510,9 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         const node = resolve(op.nodeId);
         if (op.persona !== undefined && node.kind !== 'session') fail('表单节点不能设置 persona。');
         if (op.title !== undefined) node.title = op.title;
-        if (op.persona !== undefined && node.kind === 'session' && !mediaKindOf(node.agentKind)) node.persona = op.persona;
+        if (op.persona !== undefined && node.kind === 'session' && !mediaKindOf(node.agentKind)) {
+          node.persona = node.templateId === 'figure' ? figurePersona(op.persona) : op.persona;
+        }
         break;
       }
       case 'set_input': if (!skipped.has(op.nodeId)) setInput(resolve(op.nodeId), op.fieldId, op.value, adjust, media); break;

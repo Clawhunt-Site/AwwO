@@ -476,8 +476,8 @@ func graphOutputPolicy(n graphNode) string {
 	for _, f := range n.Contract.Outputs {
 		if f.Type == "html" {
 			policy += "\nHTML requires a complete HTML document with explicit html, head and body tags, never a path or fragment. Use self-contained inline CSS and inline SVG/data images, with no external libraries or scripts needed for presentation. " +
-				"The one exception is three.js r128 referenced by the tag " + previewLibraryTag + ": AwwO's previews replace that tag with their own copy of the release, " +
-				"so a page may use it; never paste the source of three.js or any other library into the page."
+				"The exceptions are three.js r128 referenced by the tag " + previewLibraryTag + " and a script whose exact URL the node instructions say AwwO supplies: AwwO's previews replace those tags with their own copies, " +
+				"so a page may use them; never paste the source of three.js or any other library into the page."
 			break
 		}
 	}

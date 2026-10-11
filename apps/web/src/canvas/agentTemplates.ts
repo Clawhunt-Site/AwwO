@@ -3,8 +3,9 @@ import { edgeId } from './ports';
 import type { ContractField, ContractFieldType } from './nodeContracts';
 import type { UiLocale } from '../locale';
 import { EN_AGENT_TEMPLATES } from './agentTemplates.en';
+import { figurePersona } from './figureKit/figureKit';
 
-export type AgentTemplateId = 'general' | 'frontend' | 'backend' | 'data' | 'users' | 'materials' | 'review';
+export type AgentTemplateId = 'general' | 'frontend' | 'backend' | 'data' | 'users' | 'materials' | 'review' | 'figure';
 export const AGENT_TEMPLATE_VERSION = 1;
 
 export interface AgentTemplate {
@@ -34,6 +35,11 @@ function template(spec: Omit<AgentTemplate, 'input' | 'output'>): AgentTemplate 
     input: [spec.inputs[0].id, spec.inputs[0].label], output: [spec.outputs[0].id, spec.outputs[0].label],
     persona: `${spec.persona}\n\n工作步骤：\n${spec.workflow.map((step, index) => `${index + 1}. ${step}`).join('\n')}\n\n验收要求：\n${spec.checklist.map(item => `- ${item}`).join('\n')}\n\n证据口径：区分已验证、未验证和受阻事项；引用实际检查记录或文件，缺少证据时写明缺口。不要把计划、示例或占位内容描述为已完成结果。`,
   };
+}
+
+/** A figure node (原理图解) builds its page with AwwO's figure kit: its persona carries the kit guide after the role. */
+function withFigureGuide(item: AgentTemplate): AgentTemplate {
+  return { ...item, persona: figurePersona(item.persona) };
 }
 
 export const AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
@@ -189,6 +195,24 @@ export const AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
     ],
     deliverableTitle: '验收结果', emptyTitle: '先确定用什么证明完成', emptyDescription: '汇集交付物、标准与证据，让验收结论可以复核。',
   }),
+  withFigureGuide(template({
+    id: 'figure', title: '原理图解', subtitle: '把原理做成能上手玩的机械图', tag: 'FIGURE',
+    persona: '负责把一个原理、算法或机制讲清楚：发明一台真实、做工精良的小机器，让它的运转本身就是这个原理，交付一页打开就能上手玩的等轴测交互图解。图里的每个读数都来自同一个真实模型；不画方框、箭头和流程图，不在图里写字。默认浅色主题，悬停和方向键都能操作。',
+    inputs: [
+      field('idea', '要讲清楚的原理', true, '原理：\n讲给谁听：\n要看懂的那一点：\n外观或操作要求（可选）：', '说清楚要解释什么、讲给谁听，例如“解释令牌桶限流是怎么工作的”。'),
+      field('facts', '真实数字', false, '尺寸、数量、速率、阈值：\n关键行为：', '图里的读数和动作按这些数字来；没写的由节点按公认事实取值，并写进图下说明。'),
+    ],
+    outputs: [
+      field('figure', '交互原理图', true, '一页完整的 HTML：等轴测机器、卡片四角的编号/标题/操作提示/实时读数、图例和一句说明', '交付后在成果里直接运行，也可以下载成单个网页文件。', 'html'),
+    ],
+    workflow: ['写下真实数字与行为，做成一个小模型（尺寸、数量、速率、阈值）', '构思一台机器：它怎么动、这个动作代表原理里的什么，用一句话说清', '列出 40–80 个零件（底座、结构、机构、操作件和唯一高亮的主体），再用组件搭出几何', '从后往前、从下往上绘制，装进带编号、标题、操作提示和实时读数的卡片', '加上平缓的动作：无人操作时自动演示，悬停和方向键都能控制，减少动态时保持静止'],
+    checklist: ['一眼能认出是一台真实的机器，而不是方框和箭头', '零件足够细（螺丝、刻度、倒角、滚花），每个零件都落在另一个零件上', '读数、动作和说明来自同一个模型，数字真实', '打开即运行：悬停或方向键能操作，读数随之变化', '整页只引用组件脚本这一个外部地址，没有其他网络资源'],
+    starterPrompts: [
+      { label: '构思机器', prompt: '根据要讲清楚的原理，先列出真实数字、对应的机器、它怎么动、读数从哪来，以及 40 个以上的零件清单。' },
+      { label: '做出图解', prompt: '按原理和真实数字造出这台机器，交付一页打开就能上手操作的交互原理图。' },
+    ],
+    deliverableTitle: '交互原理图', emptyTitle: '说一个想讲清楚的原理', emptyDescription: '比如“解释 LRU 缓存怎么淘汰旧数据”，它会造一台能上手玩的机器来讲。',
+  })),
 ];
 
 const LEGACY_TITLES: Record<AgentTemplateId, ReadonlyArray<string>> = {
@@ -199,10 +223,11 @@ const LEGACY_TITLES: Record<AgentTemplateId, ReadonlyArray<string>> = {
   users: ['用户系统', 'User system'],
   materials: ['物料制作', 'Content production'],
   review: ['交付验收', 'Delivery review'],
+  figure: ['原理图解', 'Explainer figure'],
 };
 
 /** The closed template set; the only values planning progress may name a node with. */
-export const AGENT_TEMPLATE_IDS: ReadonlySet<string> = new Set<AgentTemplateId>(['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review']);
+export const AGENT_TEMPLATE_IDS: ReadonlySet<string> = new Set<AgentTemplateId>(['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure']);
 
 /** The legacy export remains Chinese so existing callers and saved documents keep their defaults. */
 export function getAgentTemplates(locale: UiLocale): ReadonlyArray<AgentTemplate> {

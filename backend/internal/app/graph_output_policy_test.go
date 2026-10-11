@@ -67,6 +67,10 @@ func TestGraphOutputPolicyAllowsThePreviewLibrary(t *testing.T) {
 		!strings.Contains(page, "never paste the source of three.js or any other library") {
 		t.Fatal("HTML policy does not name the supplied library", page)
 	}
+	// A figure node's instructions name the figure kit's URL; the policy must not forbid the tag they require.
+	if !strings.Contains(page, "a script whose exact URL the node instructions say AwwO supplies") {
+		t.Fatal("HTML policy forbids the script a node's instructions say AwwO supplies", page)
+	}
 	if text := graphOutputPolicy(graphNode{Contract: &graphContract{Version: 1, Outputs: []graphField{{ID: "answer", Type: "text", Required: true}}}}); strings.Contains(text, "three.js") {
 		t.Fatal("a non-HTML policy mentions the page library", text)
 	}

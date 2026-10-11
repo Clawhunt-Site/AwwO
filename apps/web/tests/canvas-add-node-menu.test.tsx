@@ -24,12 +24,14 @@ describe('canvas add menu model shelf mode', () => {
     expect(p.onOpenAgentLibrary).toHaveBeenCalledOnce();
   });
 
-  it('preserves all seven legacy template choices when the model shelf is not supplied', () => {
+  it('preserves all eight template choices when the model shelf is not supplied', () => {
     const p = props(); render(<AddNodeMenu {...p} />);
-    expect(screen.getAllByRole('menuitem')).toHaveLength(7);
+    expect(screen.getAllByRole('menuitem')).toHaveLength(8);
     expect(screen.queryByRole('menuitem', { name: '模型与人设…' })).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: '前端开发' }));
     expect(p.onPick).toHaveBeenCalledWith('frontend');
+    fireEvent.click(screen.getByRole('menuitem', { name: '原理图解' }));
+    expect(p.onPick).toHaveBeenCalledWith('figure');
   });
 
   it('localizes the model shelf entry and cleans up Escape and outside-click listeners', () => {
