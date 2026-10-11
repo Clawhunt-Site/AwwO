@@ -57,15 +57,17 @@ describe('node deliverables', () => {
     expect(within(delivery).getByLabelText('Markdown 源码')).toHaveTextContent(original);
   });
 
-  it('defaults to an isolated HTML preview while keeping exact source available', () => {
+  it('runs an HTML delivery in its sandbox while keeping exact source available', () => {
     const { container } = render(<NodeDeliverables node={node({
       contract: { version: 1, inputs: [], outputs: [field({ type: 'html', value: '' })] },
       lastOutput: { text: html, at: 1, source: 'run' },
     })} readOnly />);
     const preview = screen.getByTitle('交付说明 · HTML 预览');
-    expect(preview).toHaveAttribute('sandbox', '');
+    // Shown running, like the homepage cases: an opaque-origin sandbox, inline scripts only, no outside resources.
+    expect(preview).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     expect(preview.getAttribute('srcdoc')).toContain('<h1>交付页面</h1>');
-    expect(preview.getAttribute('srcdoc')).not.toContain('window.__unsafe');
+    expect(preview.getAttribute('srcdoc')).toContain('window.__unsafe');
+    expect(preview.getAttribute('srcdoc')).not.toContain('example.com/private.png');
     expect(container.querySelector('script, img')).toBeNull();
     expect(screen.getByRole('button', { name: '下载 .html' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '交付页面' })).toBeNull();

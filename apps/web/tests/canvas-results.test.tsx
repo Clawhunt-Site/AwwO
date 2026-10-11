@@ -47,10 +47,11 @@ describe('the 成果 view', () => {
     expect(within(result).getByRole('heading', { name: '可玩试玩关' })).toBeVisible();
     expect(within(result).getByText(/运行交付 · 2 分钟前交付 · 第 2 步，共 3 步/)).toBeVisible();
     const frame = within(result).getByTitle('可玩试玩关交付 · HTML 预览');
-    // Static until the reader chooses to run it: no scripts, an opaque origin.
-    expect(frame).toHaveAttribute('sandbox', '');
+    // Running at once, like a homepage case's result: an opaque origin, inline scripts only, no network.
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     expect(frame.getAttribute('srcdoc')).toContain('Saved game page');
-    expect(frame.getAttribute('srcdoc')).toContain("script-src 'none'");
+    expect(frame.getAttribute('srcdoc')).toContain("script-src 'unsafe-inline'");
+    expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'");
     // Nothing that edits a deliverable is offered here.
     expect(screen.queryByText('编辑交付表单')).toBeNull();
     expect(screen.queryByText('添加交付要求')).toBeNull();

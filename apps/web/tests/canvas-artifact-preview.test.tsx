@@ -25,33 +25,54 @@ function stored(identity = 'node:session:1') {
 afterEach(() => { cleanup(); clearSaaSCanvas(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('isolated HTML rendition', () => {
-  it('runs inline interactions only after explicit opt-in, resets with a new frame, and stops on source view', () => {
+  it('runs a delivered page as soon as it is shown, restarts it in a new frame, and stops it in source view', () => {
     const game = '<html><head></head><body><canvas id="board"></canvas><button id="score" onclick="this.textContent=Number(this.textContent)+1">0</button><script>document.body.dataset.ready="yes"</script></body></html>';
     const { rerender } = render(<ArtifactPreview source={game} type="html" title="游戏" renderMarkdown={markdown} />);
-    const initial = screen.getByTitle('游戏 · HTML 预览');
-    expect(initial).toHaveAttribute('sandbox', '');
-    expect(initial.getAttribute('srcdoc')).not.toContain('dataset.ready');
-    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+    expect(screen.queryByRole('button', { name: '运行交互' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '停止交互' })).toBeNull();
     const running = screen.getByTitle('游戏 · HTML 预览');
-    expect(running).not.toBe(initial);
     expect(running).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     expect(running.getAttribute('srcdoc')).toContain('dataset.ready');
     expect(running.getAttribute('srcdoc')).toContain('<canvas id="board">');
     expect(running.getAttribute('srcdoc')).toContain('onclick=');
-    expect(screen.getByText(/不等同于网络隔离/)).toBeTruthy();
+    expect(running.getAttribute('srcdoc')).toContain("script-src 'unsafe-inline'");
+    expect(screen.getByText(/点一下画面，再用键盘操作。.*不等同于网络隔离/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
     expect(screen.getByTitle('游戏 · HTML 预览')).not.toBe(running);
-    fireEvent.click(screen.getByRole('button', { name: '停止交互' }));
-    expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', '');
-    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
     fireEvent.click(screen.getByRole('button', { name: '源码', exact: true }));
     expect(screen.queryByTitle('游戏 · HTML 预览')).toBeNull();
+    expect(screen.queryByRole('button', { name: '重新开始' })).toBeNull();
     expect(screen.getByLabelText('HTML 源码').textContent).toBe(game);
     fireEvent.click(screen.getByRole('button', { name: '预览', exact: true }));
-    expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', '');
-    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+    expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
+    const before = screen.getByTitle('游戏 · HTML 预览');
     rerender(<ArtifactPreview source={html} type="html" title="游戏" renderMarkdown={markdown} />);
-    expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', '');
+    const next = screen.getByTitle('游戏 · HTML 预览');
+    expect(next).not.toBe(before);
+    expect(next).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
+    expect(next.getAttribute('srcdoc')).toContain('已保存的内容');
+  });
+
+  it('puts the delivered page back when it sends its frame elsewhere, and stops a page that keeps doing so', () => {
+    render(<ArtifactPreview source={html} type="html" title="作品" renderMarkdown={markdown} />);
+    const first = screen.getByTitle('作品 · HTML 预览');
+    fireEvent.load(first);
+    expect(screen.queryByText('页面试图把预览跳转到别的网址，已换回交付的页面。')).toBeNull();
+    fireEvent.load(first);
+    const restored = screen.getByTitle('作品 · HTML 预览');
+    expect(restored).not.toBe(first);
+    expect(screen.getByText('页面试图把预览跳转到别的网址，已换回交付的页面。')).toBeTruthy();
+    fireEvent.load(restored);
+    fireEvent.load(restored);
+    const again = screen.getByTitle('作品 · HTML 预览');
+    fireEvent.load(again);
+    fireEvent.load(again);
+    expect(screen.queryByTitle('作品 · HTML 预览')).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent('页面反复试图跳转到别的网址，已停止运行。');
+    expect(screen.getByLabelText('HTML 源码')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '预览', exact: true }));
+    expect(screen.getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('retains inline scripts and data attributes but strips external scripts, navigation and embeds in interactive mode', () => {
@@ -72,17 +93,18 @@ describe('isolated HTML rendition', () => {
     expect(doc.head.firstElementChild?.tagName).toBe('META');
   });
 
-  it('stops the compact interactive frame when opening a separately opted-in expanded preview', () => {
+  it('runs only the expanded copy while it is open, and the inline page again once it closes', () => {
     render(<ArtifactPreview source={html} type="html" title="作品" renderMarkdown={markdown} />);
-    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
+    expect(screen.getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     fireEvent.click(screen.getByRole('button', { name: '放大预览' }));
     const frames = screen.getAllByTitle('作品 · HTML 预览');
     expect(frames).toHaveLength(2);
-    expect(frames.every(frame => frame.getAttribute('sandbox') === '')).toBe(true);
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '运行交互' }));
-    expect(within(screen.getByRole('dialog')).getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
+    const expandedFrame = within(screen.getByRole('dialog')).getByTitle('作品 · HTML 预览');
+    expect(expandedFrame).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
+    expect(frames.filter(frame => frame !== expandedFrame).map(frame => frame.getAttribute('sandbox'))).toEqual(['']);
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', '');
+    expect(screen.getAllByTitle('作品 · HTML 预览')).toHaveLength(1);
+    expect(screen.getByTitle('作品 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
   });
 
   it('retains body initialization and keyboard handlers only after interactive opt-in', () => {
@@ -100,7 +122,7 @@ describe('isolated HTML rendition', () => {
     const source = html.replace('</body>', '<svg viewBox="0 0 20 20"><path d="M1 1L10 10" stroke="red" /></svg></body>');
     render(<ArtifactPreview source={source} type="html" title="作品" renderMarkdown={markdown} />);
     const frame = screen.getByTitle('作品 · HTML 预览');
-    expect(frame).toHaveAttribute('sandbox', '');
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
     const document = new DOMParser().parseFromString(frame.getAttribute('srcdoc')!, 'text/html');
     expect(document.body.getAttribute('class')).toBe('page');
@@ -109,7 +131,8 @@ describe('isolated HTML rendition', () => {
     expect(document.querySelector('style')?.textContent).toContain('html{background:#abc}');
     expect(document.querySelector('h1')?.textContent).toBe('交付页面');
     expect(document.querySelector('svg path')?.getAttribute('stroke')).toBe('red');
-    expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("script-src 'none'");
+    const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content');
+    for (const rule of ["default-src 'none'", "script-src 'unsafe-inline'", "connect-src 'none'", "form-action 'none'"]) expect(csp).toContain(rule);
     expect(document.documentElement.outerHTML).toContain('h1{color:rgb(10,20,30)}');
   });
 
@@ -213,7 +236,7 @@ describe('isolated HTML rendition', () => {
     expect(within(dialog).queryByRole('button', { name: '放大预览' })).toBeNull();
     if (type === 'html') {
       const frame = within(dialog).getByTitle('完整作品 · HTML 预览');
-      expect(frame).toHaveAttribute('sandbox', '');
+      expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
       expect(frame.getAttribute('srcdoc')).toContain('交付页面');
     } else expect(within(dialog).getByText('# Report')).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -346,9 +369,8 @@ describe('libraries AwwO supplies to a running page', () => {
     Object.defineProperty(HTMLIFrameElement.prototype, 'requestFullscreen', { configurable: true, writable: true, value: request });
     try {
       render(<ArtifactPreview source={game} type="html" title="游戏" renderMarkdown={markdown} />);
-      expect(screen.getByTitle('游戏 · HTML 预览').getAttribute('srcdoc')).not.toContain('Three.js Authors');
+      expect(screen.getByRole('status')).toHaveTextContent('正在载入 three.js r128…');
       expect(screen.queryByRole('button', { name: '全屏' })).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
       const frame = await screen.findByTitle('游戏 · HTML 预览', {}, { timeout: 10_000 });
       await vi.waitFor(() => expect(frame.getAttribute('srcdoc')).toContain('Copyright 2010-2021 Three.js Authors'));
       const doc = new DOMParser().parseFromString(screen.getByTitle('游戏 · HTML 预览').getAttribute('srcdoc')!, 'text/html');
@@ -360,8 +382,8 @@ describe('libraries AwwO supplies to a running page', () => {
       fireEvent.click(screen.getByRole('button', { name: '全屏' }));
       expect(request).toHaveBeenCalledOnce();
       expect(request.mock.contexts[0]).toBe(screen.getByTitle('游戏 · HTML 预览'));
-      fireEvent.click(screen.getByRole('button', { name: '停止交互' }));
-      expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', '');
+      fireEvent.click(screen.getByRole('button', { name: '源码', exact: true }));
+      expect(screen.queryByTitle('游戏 · HTML 预览')).toBeNull();
       expect(screen.queryByText(/由 AwwO 内置提供/)).toBeNull();
       expect(screen.queryByRole('button', { name: '全屏' })).toBeNull();
     } finally {
@@ -372,7 +394,6 @@ describe('libraries AwwO supplies to a running page', () => {
 
   it('names the hosts of scripts the preview cannot supply', () => {
     render(<ArtifactPreview source={'<html><body><script src="https://cdn.example.com/engine.js"></script><script>go()</script></body></html>'} type="html" title="页面" renderMarkdown={markdown} />);
-    fireEvent.click(screen.getByRole('button', { name: '运行交互' }));
     expect(screen.getByTitle('页面 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     expect(screen.getByText('页面引用的外部脚本没有加载：cdn.example.com。下载后用浏览器打开可以完整运行。')).toBeTruthy();
   });

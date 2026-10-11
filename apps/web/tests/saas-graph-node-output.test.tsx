@@ -118,10 +118,10 @@ it('uses the existing isolated HTML preview and preserves the unsafe original in
   const original = JSON.stringify({ result: html });
   const { container } = render(view(graph(contract('html')), result({ output: original })));
   const frame = screen.getByTitle('Saved deliverable · HTML preview');
-  expect(frame).toHaveAttribute('sandbox', '');
+  expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
   expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
   expect(frame.getAttribute('srcdoc')).toContain('Delivered page');
-  expect(frame.getAttribute('srcdoc')).not.toContain('unsafe()');
+  expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'");
   expect(frame.getAttribute('srcdoc')).not.toContain('src="/api/private"');
   expect(container.querySelector('script, img')).toBeNull();
   const raw = screen.getByText('Original response').closest('details')!;

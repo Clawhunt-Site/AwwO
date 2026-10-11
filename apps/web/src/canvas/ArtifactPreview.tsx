@@ -19,12 +19,14 @@ const messages = {
     unsupported: '此文件格式暂不支持预览，可以下载查看。',
     tooLarge: '文件超过 2 MiB 预览上限，请下载查看。', storedTooLarge: '文件超过对应格式的预览上限，请下载查看。', retry: '重试预览',
     static: '静态预览 · 脚本和外部资源已停用', expand: '放大预览', close: '关闭预览',
-    run: '运行交互', stop: '停止交互', reset: '重新开始', fullscreen: '全屏',
+    reset: '重新开始', fullscreen: '全屏', hint: '点一下画面，再用键盘操作。',
     interactive: '独立沙盒 · 不授予 AwwO 账号或存储访问；外部资源受限，但不等同于网络隔离。',
+    navigated: '页面试图把预览跳转到别的网址，已换回交付的页面。',
+    navigationStopped: '页面反复试图跳转到别的网址，已停止运行。可以查看源码，或下载后用浏览器打开。',
     libraryLoading: '正在载入 {name}…',
     libraryInlined: '页面用到的 {name} 由 AwwO 内置提供，不需要联网。',
     libraryAdditions: '页面还用到了这个版本没有的 {additions}，AwwO 已补上。',
-    libraryFailed: '{name} 没能载入，页面可能无法运行。请停止后重新运行，或下载后用浏览器打开。',
+    libraryFailed: '{name} 没能载入，页面可能无法运行。请点「重新开始」，或下载后用浏览器打开。',
     blockedScripts: '页面引用的外部脚本没有加载：{hosts}。下载后用浏览器打开可以完整运行。',
   },
   en: {
@@ -33,12 +35,14 @@ const messages = {
     unsupported: 'Preview is not available for this file format. Download it to view.',
     tooLarge: 'This file exceeds the 2 MiB preview limit. Download it to view.', storedTooLarge: 'This file exceeds the preview limit for its format. Download it to view.', retry: 'Retry preview',
     static: 'Static preview · scripts and external resources are disabled', expand: 'Expand preview', close: 'Close preview',
-    run: 'Run interaction', stop: 'Stop interaction', reset: 'Restart', fullscreen: 'Full screen',
+    reset: 'Restart', fullscreen: 'Full screen', hint: 'Click the page, then use the keyboard.',
     interactive: 'Isolated sandbox · no AwwO account or storage access is granted. External resources are restricted; this is not complete network isolation.',
+    navigated: 'The page tried to send the preview to another address; the delivered page is back.',
+    navigationStopped: 'The page kept trying to go to another address, so it was stopped. View the source, or download it and open it in a browser.',
     libraryLoading: 'Loading {name}…',
     libraryInlined: '{name}, which this page uses, is supplied by AwwO, so no network access is needed.',
     libraryAdditions: 'The page also uses {additions}, which this release lacks; AwwO adds it.',
-    libraryFailed: '{name} could not be loaded, so the page may not run. Stop and run it again, or download it and open it in a browser.',
+    libraryFailed: '{name} could not be loaded, so the page may not run. Click Restart, or download it and open it in a browser.',
     blockedScripts: 'External scripts this page references were not loaded: {hosts}. Download the page and open it in a browser to run it in full.',
   },
 };
@@ -112,6 +116,13 @@ export function ExpandedPreview({ title, closeLabel, onClose, children }: { titl
   </dialog>, document.body);
 }
 
+/** FNV-1a over the page text: tells one delivered page from the next, so a new delivery mounts a new frame. */
+function fingerprint(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  return `${(hash >>> 0).toString(36)}-${text.length}`;
+}
+
 /** A rendition of published bytes. Switching presentation never republishes an output. */
 export function ArtifactPreview({ source, previewSource, type, title, renderMarkdown, downloadUrl, canDownload = true, onStoredDownload, allowExpand = true }: ArtifactPreviewProps) {
   const { locale, t } = useCanvasI18n();
@@ -119,10 +130,13 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   const [mode, setMode] = useState<'preview' | 'source'>('preview');
   const [downloadError, setDownloadError] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [execution, setExecution] = useState<{ source: string; epoch: number } | null>(null);
+  const [epoch, setEpoch] = useState(0);
+  const [navigation, setNavigation] = useState({ notice: false, stopped: false });
   const documentSource = type === 'html' ? htmlDocumentSource(source) : source;
   const tooLarge = new TextEncoder().encode(documentSource).byteLength > MAX_ARTIFACT_PREVIEW_BYTES;
-  const running = type === 'html' && mode === 'preview' && execution?.source === documentSource;
+  // A delivered page runs as soon as it is shown, like the homepage cases: in its own sandbox, with no AwwO account or
+  // storage access and no network. While its expanded copy is open the inline one stays static, so it never runs twice.
+  const running = type === 'html' && mode === 'preview' && !tooLarge && !expanded;
   // A running page's external scripts: libraries AwwO supplies are inlined once loaded, the rest stay blocked.
   const needs = useMemo(() => running && !tooLarge ? previewScriptNeeds(documentSource) : NO_PREVIEW_SCRIPT_NEEDS, [running, tooLarge, documentSource]);
   const [supplied, setSupplied] = useState<{ needs: PreviewScriptNeeds; code: ReadonlyMap<string, string> | null } | null>(null);
@@ -141,6 +155,32 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   // A game laid out for a whole browser window can need more height than the inline frame has.
   const frameRef = useRef<HTMLIFrameElement>(null);
   const canFullscreen = typeof document !== 'undefined' && document.fullscreenEnabled === true;
+  // One frame per page, run and restart: a new delivery, a restart or leaving the expanded view mounts a fresh one.
+  const sourceKey = useMemo(() => fingerprint(documentSource), [documentSource]);
+  const frameKey = `${running ? 'run' : 'static'}:${epoch}:${sourceKey}`;
+  const loads = useRef({ key: '', count: 0 });
+  const redirects = useRef<number[]>([]);
+  const onFrameLoad = () => {
+    if (loads.current.key !== frameKey) loads.current = { key: frameKey, count: 0 };
+    loads.current.count += 1;
+    if (!running || loads.current.count === 1) return;
+    // A second load means the page sent its own frame elsewhere, which no sandbox flag forbids: put the delivered
+    // page back, and stop it if it keeps doing so.
+    const now = Date.now();
+    redirects.current = [...redirects.current.filter(at => now - at < 15_000), now];
+    if (redirects.current.length >= 3) {
+      setNavigation({ notice: false, stopped: true });
+      setMode('source');
+      return;
+    }
+    setNavigation({ notice: true, stopped: false });
+    setEpoch(value => value + 1);
+  };
+  const showPreview = () => {
+    redirects.current = [];
+    setNavigation({ notice: false, stopped: false });
+    setMode('preview');
+  };
   const downloadLabel = downloadUrl ? t('deliverable.downloadFile') : t('deliverable.downloadFormat', { format: type === 'html' ? 'html' : 'md' });
   const download = () => {
     // Plain source previews are stored artifacts and use their original download
@@ -152,32 +192,33 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   return <div className="awwo-artifact-preview">
     <div className="awwo-artifact-toolbar" role="group" aria-label={title}>
       <div className="awwo-artifact-modes">
-        {type !== 'text' && <button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}>{text.preview}</button>}
-        <button type="button" aria-pressed={type === 'text' || mode === 'source'} onClick={() => { setExecution(null); setMode('source'); }}>{text.source}</button>
+        {type !== 'text' && <button type="button" aria-pressed={mode === 'preview'} onClick={showPreview}>{text.preview}</button>}
+        <button type="button" aria-pressed={type === 'text' || mode === 'source'} onClick={() => setMode('source')}>{text.source}</button>
       </div>
-      {type === 'html' && !tooLarge && <div className="awwo-artifact-execution">
-        <button type="button" aria-pressed={running} onClick={() => {
-          setMode('preview'); setExecution(running ? null : { source: documentSource, epoch: Date.now() });
-        }}>{running ? text.stop : text.run}</button>
-        {running && <button type="button" onClick={() => setExecution(current => current ? { ...current, epoch: current.epoch + 1 } : null)}>{text.reset}</button>}
-        {running && canFullscreen && libraries !== 'loading' && <button type="button" onClick={() => { void frameRef.current?.requestFullscreen()?.catch(() => undefined); }}>{text.fullscreen}</button>}
+      {running && <div className="awwo-artifact-execution">
+        <button type="button" onClick={() => setEpoch(value => value + 1)}>{text.reset}</button>
+        {canFullscreen && libraries !== 'loading' && <button type="button" onClick={() => { void frameRef.current?.requestFullscreen()?.catch(() => undefined); }}>{text.fullscreen}</button>}
       </div>}
       <div className="awwo-artifact-actions">
-        {allowExpand && !tooLarge && <button type="button" aria-label={text.expand} title={text.expand} onClick={() => { setExecution(null); setExpanded(true); }}><Maximize2 size={15} aria-hidden="true" /></button>}
+        {allowExpand && !tooLarge && <button type="button" aria-label={text.expand} title={text.expand} onClick={() => setExpanded(true)}><Maximize2 size={15} aria-hidden="true" /></button>}
         {canDownload && (downloadUrl
           ? <a className="awwo-artifact-download" href={downloadUrl} download rel="noreferrer" aria-label={downloadLabel} title={downloadLabel} onClick={onStoredDownload}><Download size={15} aria-hidden="true" /></a>
           : type !== 'text' && <button className="awwo-artifact-download" type="button" aria-label={downloadLabel} title={downloadLabel} onClick={download}><Download size={15} aria-hidden="true" /></button>)}
       </div>
     </div>
     {tooLarge ? <p className="awwo-artifact-status" role="status">{text.tooLarge}</p>
-      : type === 'text' || mode === 'source' ? <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code>{documentSource}</code></pre>
+      : type === 'text' || mode === 'source' ? <>
+        {navigation.stopped && <p className="awwo-artifact-status" role="alert">{text.navigationStopped}</p>}
+        <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code>{documentSource}</code></pre>
+      </>
         : type === 'html' ? <>
           {running && libraries === 'loading'
             ? <p className="awwo-artifact-status" role="status">{text.libraryLoading.replace('{name}', libraryNames)}</p>
             // Pointer lock lets a game's mouse look work; the browser offers Esc to release it.
-            : <iframe ref={frameRef} key={`${running ? 'run' : 'static'}:${running ? execution?.epoch : ''}`} className="awwo-artifact-frame" title={`${title} · ${text.html}`}
-              sandbox={running ? 'allow-scripts allow-pointer-lock' : ''} referrerPolicy="no-referrer" srcDoc={html} />}
-          <p className="awwo-artifact-note">{running ? text.interactive : text.static}</p>
+            : <iframe ref={frameRef} key={frameKey} className="awwo-artifact-frame" title={`${title} · ${text.html}`}
+              sandbox={running ? 'allow-scripts allow-pointer-lock' : ''} referrerPolicy="no-referrer" srcDoc={html} onLoad={onFrameLoad} />}
+          <p className="awwo-artifact-note">{running ? `${text.hint} ${text.interactive}` : text.static}</p>
+          {running && navigation.notice && <p className="awwo-artifact-status" role="status">{text.navigated}</p>}
           {running && libraries === 'ready' && <p className="awwo-artifact-note">{text.libraryInlined.replace('{name}', libraryNames)}
             {needs.additions.length > 0 && ` ${text.libraryAdditions.replace('{additions}', needs.additions.map(addition => addition.label).join(', '))}`}</p>}
           {running && libraries === 'failed' && <p className="awwo-artifact-status" role="alert">{text.libraryFailed.replace('{name}', libraryNames)}</p>}

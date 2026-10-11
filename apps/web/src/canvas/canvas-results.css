@@ -53,6 +53,9 @@
 .awwo-results-run:hover:not(:disabled) { background: var(--saas-primary-hover); }
 
 /* The deliverable itself is framed as the exhibit in the skin (design/canvas.css, 成果 view). */
+/* A delivered page gets the room the homepage gives a case's focused result (production-made.css), so a game laid
+   out for a browser window fits on a 1080p screen without going full screen. */
+.awwo-results-body .awwo-artifact-frame { height: min(820px, 78dvh); }
 .awwo-results-nothing, .awwo-results-form > p { margin: 0; padding: 28px 22px; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset; color: var(--saas-muted); }
 .awwo-results-form {
   & h3 { margin: 0 0 10px; color: var(--saas-muted); font-size: var(--saas-text-xs); font-weight: 600; }
