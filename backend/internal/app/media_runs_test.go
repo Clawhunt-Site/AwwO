@@ -367,6 +367,10 @@ func TestPostgresMediaRunAdmissionRefusals(t *testing.T) {
 	if got := h.mediaRun(t, c, tid, img, "cat", 400); errorCode(got) != "media_prompt_invalid" {
 		t.Fatal("prompt shorter than the model allows", got)
 	}
+	// A composer's file lines never reach the provider: a message of files alone has no prompt at all.
+	if got := h.mediaRun(t, c, tid, img, "[附件] ref.png · awwo-file:aFILEFILEFILEFILE", 400); errorCode(got) != "media_prompt_invalid" {
+		t.Fatal("a files-only message reached the media model", got)
+	}
 	if got := h.request(t, c, "POST", base+"/runs", map[string]any{"sessionId": img, "prompt": "a cat in a hat", "operationId": randomID(), "knowledgeRevisionIds": []string{"k1"}}, 400); errorCode(got) != "media_knowledge_unsupported" {
 		t.Fatal("knowledge context on a media node", got)
 	}
