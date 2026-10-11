@@ -1,17 +1,29 @@
 import { AGENT_TEMPLATES, createAgentTemplate, type AgentTemplateId } from './agentTemplates';
-import type { CanvasDocument, CanvasNode, SessionNode } from './canvasDoc';
+import { createSessionNode, type CanvasDocument, type CanvasNode, type SessionNode } from './canvasDoc';
+import { canvasText } from './i18n';
 import { invalidateOutputs } from './invalidateOutputs';
 import { normalizeContract, validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
 import { arrangeNodePositions } from './nodePresentation';
-import { mediaKindOf } from './mediaCatalog';
+import { updateNodeDraft } from './nodeThreads';
+import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { canConnect, edgeId, portsFor, reconcileEdges, type PortSpec } from './ports';
 import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
 import { TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH } from './taskFrame';
 
+/** The media kinds a plan may add as nodes (templateId image, video or model3d): generators that make one asset from a
+ *  prompt instead of running an Agent. A host offers the planner only the kinds its workspace can generate. */
+export const MEDIA_PLAN_TEMPLATE_IDS: ReadonlyArray<MediaKind> = ['image', 'video', 'model3d'];
+export type PlanTemplateId = AgentTemplateId | MediaKind;
+const isMediaTemplate = (value: unknown): value is MediaKind => MEDIA_PLAN_TEMPLATE_IDS.includes(value as MediaKind);
+/** Every template id a plan may declare, media nodes included: planning progress names a node only by one of these.
+ *  Literal ids (checked against AgentTemplateId), so building it at load never reads another module's bindings. */
+const AGENT_PLAN_TEMPLATE_IDS = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review'] as const satisfies ReadonlyArray<AgentTemplateId>;
+export const PLAN_TEMPLATE_IDS: ReadonlySet<string> = new Set<string>([...AGENT_PLAN_TEMPLATE_IDS, ...MEDIA_PLAN_TEMPLATE_IDS]);
+
 export type CanvasPlanFieldChanges = Partial<Pick<ContractField, 'label' | 'type' | 'required' | 'help' | 'placeholder'>>;
 export type CanvasPlanOperation =
-  | { type: 'add_node'; ref: string; templateId: AgentTemplateId; title?: string; persona?: string; inputValues?: Record<string, string> }
+  | { type: 'add_node'; ref: string; templateId: PlanTemplateId; title?: string; persona?: string; inputValues?: Record<string, string> }
   | { type: 'update_node'; nodeId: string; title?: string; persona?: string }
   | { type: 'set_input'; nodeId: string; fieldId: string; value: string }
   | { type: 'add_field'; nodeId: string; side: 'input' | 'output'; field: ContractField }
@@ -40,6 +52,9 @@ export interface CanvasPlan { version: 1; summary: string; operations: CanvasPla
 /** `adjustments` says, in the request's language, what was applied differently from how the plan wrote it
  *  (a connection given its own input, a link a field change broke) or left out (a connection that would loop). */
 export interface AppliedCanvasPlan { doc: CanvasDocument; addedNodeIds: string[]; summary: string; adjustments: string[] }
+/** What a host tells a plan about the media nodes it can run: the model a new node of each kind starts on (a kind
+ *  missing here cannot be added), and the longest prompt a model takes. */
+export interface CanvasPlanMedia { models: Partial<Record<MediaKind, string>>; promptMax: (model: string) => number | undefined }
 
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
@@ -64,6 +79,25 @@ connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点�
 最多100个操作、JSON最多120000字符、summary最多1000字符；ID/ref最多128字符，title/label最多200字符，persona最多8000字符，输入value最多16000字符，help/placeholder最多2000字符；每个节点每侧最多64字段。`;
 
 const LIMITS = { raw: 120000, operations: 100, id: 128, title: 200, persona: 8000, value: 16000, help: 2000, fields: 64 } as const;
+
+const MEDIA_KIND_WORDS: Record<MediaKind, string> = { image: '图片', video: '视频', model3d: '3D 模型' };
+
+/**
+ * The protocol with media nodes offered: add_node may also name the given kinds, and one line says what a media node
+ * is and how to write one. Without kinds it is the protocol unchanged, so a workspace that cannot generate media is
+ * never told about media nodes.
+ */
+export function withMediaNodes(protocol: string, kinds: ReadonlyArray<MediaKind>): string {
+  const offered = MEDIA_PLAN_TEMPLATE_IDS.filter(kind => kinds.includes(kind));
+  if (!offered.length) return protocol;
+  const names = offered.map(kind => `${kind}=${MEDIA_KIND_WORDS[kind]}`).join('、');
+  const line = `媒体节点（templateId 为 ${names}）：只在需求明确需要生成这类素材时添加，每个素材一个节点；在 inputValues.prompt 写这个素材完整、具体的生成提示词`
+    + '（主体、风格、构图或镜头、材质与配色；3D 模型只写单个物体或角色，不超过 1000 字），不写 persona 和其他输入。'
+    + '媒体节点的输出端口 ID 为 result（图片、视频为对应类型，3D 模型为 file），图片节点另有 reference 输入可接收参考图片；连线只能接到类型相同的输入。'
+    + '媒体节点由用户在节点上点发送才会生成，画布运行不会运行它们；已有媒体节点的提示词用 set_input 的 fieldId:"prompt" 修改。';
+  return protocol.split('\n').flatMap(text => text.startsWith('add_node:')
+    ? [text.replace('|"review"', `|"review"${offered.map(kind => `|"${kind}"`).join('')}`), line] : [text]).join('\n');
+}
 const FIELD_TYPES = ['text', 'markdown', 'html', 'number', 'boolean', 'file'];
 const RESERVED = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -146,7 +180,7 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
         const ref = id(op.ref, `${location}.ref`);
         if (refs.has(ref)) fail(`重复的新增节点引用「${ref}」。`);
         refs.add(ref);
-        if (!AGENT_TEMPLATES.some(item => item.id === op.templateId)) fail(`${location}.templateId不是可用模板。`);
+        if (!AGENT_TEMPLATES.some(item => item.id === op.templateId) && !isMediaTemplate(op.templateId)) fail(`${location}.templateId不是可用模板。`);
         let inputValues: Record<string, string> | undefined;
         if (Object.hasOwn(op, 'inputValues')) {
           const values = object(op.inputValues, `${location}.inputValues`);
@@ -154,7 +188,7 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
           inputValues = Object.create(null) as Record<string, string>;
           for (const [key, value] of Object.entries(values)) inputValues[id(key, '输入字段 ID')] = text(value, `${location}.inputValues.${key}`, LIMITS.value);
         }
-        return { type: 'add_node', ref, templateId: op.templateId as AgentTemplateId,
+        return { type: 'add_node', ref, templateId: op.templateId as PlanTemplateId,
           ...optionalText(op, 'title', LIMITS.title, location, false), ...optionalText(op, 'persona', LIMITS.persona, location),
           ...(inputValues ? { inputValues } : {}),
         };
@@ -280,9 +314,23 @@ function plannedInput(node: CanvasNode, reference: string): PortSpec | undefined
   return inputs.find(port => port.id === reference);
 }
 
+/** A media node takes one input, its prompt: the draft its next Send generates from, cut to what its model takes. */
+function setMediaPrompt(node: SessionNode, fieldId: string, value: string, media: CanvasPlanMedia | undefined, adjust: Adjust): void {
+  if (fieldId.replace(/^in:/, '').trim().toLowerCase() !== 'prompt') {
+    adjust(`没有填写「${titleOf(node)}」的「${fieldId}」：媒体节点只接受提示词（prompt）`,
+      `Left “${fieldId}” on “${titleOf(node)}” unfilled: a media node takes only its prompt`);
+    return;
+  }
+  const max = media?.promptMax(node.model) ?? LIMITS.value;
+  const characters = Array.from(value.trim());
+  if (characters.length > max) adjust(`「${titleOf(node)}」的提示词超过 ${max} 字，已截断`, `The prompt of “${titleOf(node)}” was over ${max} characters and was shortened`);
+  node.threads = updateNodeDraft(node, characters.slice(0, max).join('')).threads;
+}
+
 /** Fill one input, or say why it was left alone: a field that is not there, or a value its type does not take,
  *  costs that one value rather than the whole plan. Outputs are never reached from here. */
-function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adjust): void {
+function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adjust, media?: CanvasPlanMedia): void {
+  if (node.kind === 'session' && mediaKindOf(node.agentKind)) { setMediaPrompt(node, fieldId, value, media, adjust); return; }
   const fields: ReadonlyArray<{ id: string; label: string; value: string }> | undefined = node.kind === 'form' ? node.fields : node.contract?.inputs;
   const field = fields && namedField(fields, fieldId, 'in:');
   if (!field) {
@@ -392,7 +440,7 @@ function disconnectBroken(draft: CanvasDocument, nodeId: string, adjust: Adjust)
 
 /** Validate against a private clone, then return one complete document. No partial writes: an operation that
  *  cannot apply as written is either repaired or left out, and each such case is listed in `adjustments`. */
-export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = ''): AppliedCanvasPlan {
+export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = '', media?: CanvasPlanMedia): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
   const adjustments: string[] = [];
   const adjust: Adjust = (zh, en) => { if (adjustments.length < LIMITS.operations) adjustments.push(locale === 'en' ? en : zh); };
@@ -413,6 +461,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   draft.edges = structuredClone(base.edges);
   const originalIds = new Set(doc.nodes.map(node => node.id));
   const refs = new Map<string, string>();
+  // New-node refs left out (a media kind this workspace cannot generate); each was said once, so steps naming one skip.
+  const skipped = new Set<string>();
   const addedNodeIds: string[] = [];
   const find = (reference: string): CanvasNode | undefined => draft.nodes.find(item => item.id === (refs.get(reference) ?? reference));
   const resolve = (reference: string): CanvasNode => {
@@ -426,6 +476,23 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
     switch (op.type) {
       case 'add_node': {
         if (originalIds.has(op.ref) || draft.nodes.some(node => node.id === op.ref)) fail(`新增引用「${op.ref}」与已有节点 ID 冲突。`);
+        if (isMediaTemplate(op.templateId)) {
+          // A media node is a generator, not a role: no persona, contract or task frame; its prompt is its draft, and it
+          // generates when the user sends it.
+          const kind = op.templateId;
+          const model = media?.models[kind];
+          const label = canvasText(locale, kind === 'video' ? 'node.video' : kind === 'model3d' ? 'node.model3d' : 'node.image');
+          if (!model) {
+            skipped.add(op.ref);
+            adjust(`没有添加「${op.title ?? label}」：此工作区现在不能生成${MEDIA_KIND_WORDS[kind]}`,
+              `Did not add “${op.title ?? label}”: this workspace cannot generate ${kind === 'model3d' ? '3D models' : `${kind}s`} now`);
+            break;
+          }
+          const node: SessionNode = { ...createSessionNode(kind, { x: 0, y: 0 }), title: op.title ?? label, model };
+          for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust, media);
+          draft.nodes.push(node); refs.set(op.ref, node.id); addedNodeIds.push(node.id);
+          break;
+        }
         const node = createAgentTemplate(op.templateId, { x: 0, y: 0 }, locale);
         // Carry the human's exact request separately from the model-authored persona.
         // Every new downstream reviewer receives it even if an upstream draft drifts.
@@ -437,16 +504,18 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         break;
       }
       case 'update_node': {
+        if (skipped.has(op.nodeId)) break;
         const node = resolve(op.nodeId);
         if (op.persona !== undefined && node.kind !== 'session') fail('表单节点不能设置 persona。');
         if (op.title !== undefined) node.title = op.title;
-        if (op.persona !== undefined && node.kind === 'session') node.persona = op.persona;
+        if (op.persona !== undefined && node.kind === 'session' && !mediaKindOf(node.agentKind)) node.persona = op.persona;
         break;
       }
-      case 'set_input': setInput(resolve(op.nodeId), op.fieldId, op.value, adjust); break;
+      case 'set_input': if (!skipped.has(op.nodeId)) setInput(resolve(op.nodeId), op.fieldId, op.value, adjust, media); break;
       case 'add_field':
       case 'update_field':
       case 'remove_field': {
+        if (skipped.has(op.nodeId)) break;
         const node = resolve(op.nodeId);
         if (node.kind !== 'session') fail('输入输出结构编辑仅适用于 Agent 节点。');
         if (mediaKindOf(node.agentKind)) {
@@ -498,6 +567,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         break;
       }
       case 'remove_node': {
+        if (skipped.has(op.nodeId)) break;
         const node = resolve(op.nodeId);
         draft.nodes = draft.nodes.filter(item => item.id !== node.id);
         draft.edges = draft.edges.filter(edge => edge.fromNode !== node.id && edge.toNode !== node.id);
@@ -538,6 +608,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
     const from = find(op.fromNode); const to = find(op.toNode);
     if (!from || !to) {
       const missing = !from ? op.fromNode : op.toNode;
+      // A media node this workspace cannot generate was already said; its connections go with it.
+      if (skipped.has(missing)) continue;
       adjust(`跳过了一条连线：节点「${missing}」不在画布上`, `Skipped a connection: the node “${missing}” is not on the canvas`);
       continue;
     }

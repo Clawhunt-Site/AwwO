@@ -66,7 +66,9 @@ const (
 
 // planTemplateIDs is the closed template set a proposal may declare. The plan gate
 // validates against it, and progress reports a template only when it is one of these.
-var planTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review"}
+// image, video and model3d declare media nodes, which generate from a prompt instead of
+// running an Agent; the canvas offers them to the planner only when the workspace can run them.
+var planTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "image", "video", "model3d"}
 
 // planOperationTypes is the closed set of operations a proposal may contain; the plan gate
 // rejects any other, and progress names the newest one only as a member of this set.
@@ -76,7 +78,7 @@ var planOperationTypes = []string{"add_node", "update_node", "set_input", "add_f
 // node's template beside them; a connection concerns two, and naming one would misstate it.
 var planNodeOperationTypes = []string{"add_node", "update_node", "set_input", "add_field", "update_field", "remove_field", "remove_node"}
 
-var plannerTemplatePattern = regexp.MustCompile(`^"templateId"\s{0,8}:\s{0,8}"([a-z]{1,16})"`)
+var plannerTemplatePattern = regexp.MustCompile(`^"templateId"\s{0,8}:\s{0,8}"([a-z][a-z0-9]{0,15})"`)
 
 type plannerProgressFrame struct {
 	Type       string `json:"type"`

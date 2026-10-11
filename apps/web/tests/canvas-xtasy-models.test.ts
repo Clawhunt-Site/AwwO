@@ -11,6 +11,7 @@ describe('X-tasy media models', () => {
       models: [model('xt.seedream-5-pro', 'image', 'bytedance'), model('xt.xtasy-v3', 'video'), model('xt.Bad', 'image'), model('xx.other', 'video')] });
     expect(mediaModelsOf(catalogue, 'image').map(m => m.id)).toEqual(['xt.seedream-5-pro']);
     expect(mediaModelsOf(catalogue, 'video').map(m => m.id)).toEqual(['xt.xtasy-v3']);
-    expect(mediaVendorLabel('xtasy', 'zh')).toBe('X-tasy');
+    expect(mediaVendorLabel('xtasy', 'zh')).toBe('媒体');
+    expect(mediaVendorLabel('xtasy', 'en')).toBe('Media');
   });
 });

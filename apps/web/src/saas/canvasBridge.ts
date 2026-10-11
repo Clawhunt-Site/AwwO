@@ -3,8 +3,7 @@ import { modelEffortCapability, runtimeDefinitions, runtimeModels, withPlanTag, 
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
-import { AGENT_TEMPLATE_IDS } from '../canvas/agentTemplates';
-import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES } from '../canvas/canvasPlan';
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, PLAN_TEMPLATE_IDS } from '../canvas/canvasPlan';
 import { plannerRecovery, planningRecoveryRequired, type PlannerRun } from './plannerRecovery';
 
 type CanvasScope = { tenant: Tenant; canvasId: string };
@@ -259,13 +258,13 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
                 edges: count(event.edges, observed.edges), reasoning: count(event.reasoning, observed.reasoning),
                 // Only a member of the closed template set is forwarded, never other model text, and
                 // only beside the node count it was reported with.
-                ...(typeof event.template === 'string' && AGENT_TEMPLATE_IDS.has(event.template)
+                ...(typeof event.template === 'string' && PLAN_TEMPLATE_IDS.has(event.template)
                   && typeof event.nodes === 'number' && Number.isFinite(event.nodes) && event.nodes >= 0 ? { template: event.template } : {}),
                 // The operation being written and the node it concerns, as members of the closed
                 // operation and template sets; a target only ever beside an operation on one node.
                 ...(typeof event.operation === 'string' && CANVAS_PLAN_OPERATION_TYPES.has(event.operation) ? { operation: event.operation,
                   ...(CANVAS_PLAN_NODE_OPERATION_TYPES.has(event.operation) && typeof event.target === 'string'
-                    && AGENT_TEMPLATE_IDS.has(event.target) ? { target: event.target } : {}) } : {}) };
+                    && PLAN_TEMPLATE_IDS.has(event.target) ? { target: event.target } : {}) } : {}) };
               progress(false);
             } else if (event.type === 'queued' || event.type === 'running') {
               observed = { ...observed, stage: event.type };

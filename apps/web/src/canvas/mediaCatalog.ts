@@ -171,14 +171,38 @@ export function withMediaParam(params: MediaParams | undefined, param: MediaPara
   return next;
 }
 
+// The generators AwwO runs itself are shown as one group, 媒体 (owner decision 2026-10-11): users see media models,
+// never which service makes them.
 const VENDORS: Record<string, [string, string]> = {
   bytedance: ['字节跳动', 'ByteDance'], google: ['Google', 'Google'], openai: ['OpenAI', 'OpenAI'], alibaba: ['阿里巴巴', 'Alibaba'],
   midjourney: ['Midjourney', 'Midjourney'], xai: ['xAI', 'xAI'], kuaishou: ['快手', 'Kuaishou'], minimax: ['MiniMax', 'MiniMax'],
-  shengshu: ['生数科技', 'Shengshu'], pixverse: ['PixVerse', 'PixVerse'], tripo: ['Tripo 3D', 'Tripo 3D'], xtasy: ['X-tasy', 'X-tasy'],
+  shengshu: ['生数科技', 'Shengshu'], pixverse: ['PixVerse', 'PixVerse'], tripo: ['媒体', 'Media'], xtasy: ['媒体', 'Media'],
 };
 
 /** A display name for a vendor slug; an unknown slug is shown as it is. */
 export function mediaVendorLabel(vendor: string, locale: UiLocale): string {
   const known = VENDORS[vendor];
   return known ? known[locale === 'zh' ? 0 : 1] : vendor;
+}
+
+// Models of a generator this deployment no longer runs (ids `rh.*`), with the model of the same family a workspace is
+// now offered. Any other retired model of a kind moves to that kind's first offered model.
+const RETIRED_MEDIA_MODELS: Readonly<Record<string, string>> = {
+  'rh.seedream-v5-pro': 'xt.seedream-5-pro',
+  'rh.nano-banana-2': 'xt.gemini-3-1-flash-image',
+  'rh.nano-banana-pro': 'xt.gemini-3-1-flash-image',
+  'rh.gpt-image-2': 'xt.gpt-image-2',
+};
+
+/**
+ * The model a media node set to a retired generator's model moves to: the same family when this workspace is offered
+ * it, else the first offered model of the node's kind. Null while the node's model is still offered (a deployment
+ * that runs that generator keeps it), for any model that is not a retired one, or when nothing of the kind is offered.
+ */
+export function replacementMediaModel(catalogue: MediaCatalogue | null | undefined, kind: MediaKind, model: string): string | null {
+  if (!model.startsWith('rh.')) return null;
+  const offered = mediaModelsOf(catalogue, kind);
+  if (!offered.length || offered.some(item => item.id === model)) return null;
+  const preferred = RETIRED_MEDIA_MODELS[model];
+  return offered.find(item => item.id === preferred)?.id ?? offered[0].id;
 }

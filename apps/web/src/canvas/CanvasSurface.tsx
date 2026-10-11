@@ -45,7 +45,7 @@ import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
-import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes } from './canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, type CanvasPlanMedia } from './canvasPlan';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
   readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
@@ -60,7 +60,9 @@ import { Marquee, useMarquee } from './Marquee';
 import { AddNodeMenu, type AddNodeKind } from './AddNodeMenu';
 import { InspectorPanel } from './InspectorPanel';
 import { mediaCatalogueOf, type MediaCatalogueState } from './MediaNodeSettings';
-import { mediaKindOf, mediaModelsOf, readMediaCatalogue, type MediaKind } from './mediaCatalog';
+import { mediaKindOf, mediaModelsOf, mediaVendorLabel, readMediaCatalogue, type MediaKind } from './mediaCatalog';
+import { replaceRetiredMediaModels } from './retiredMediaModels';
+import { runScopeWithoutMedia } from './runScope';
 import type { NodeModelChoice } from './NodeModelPicker';
 import { inspectorSavedNode } from './inspectorSave';
 import { RunControls } from './RunControls';
@@ -502,6 +504,26 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     },
     [syncHistory],
   );
+
+  // What a plan needs to add media nodes: the model each kind starts on (the add menu's first one) and each model's
+  // longest prompt. Without a catalogue the planner is offered no media nodes at all.
+  const planMedia = useMemo<CanvasPlanMedia | undefined>(() => {
+    const catalogue = mediaCatalogueOf(mediaState);
+    if (!catalogue?.available) return undefined;
+    const models: CanvasPlanMedia['models'] = {};
+    for (const kind of ['image', 'video', 'model3d'] as const) {
+      const first = mediaModelsOf(catalogue, kind)[0];
+      if (first) models[kind] = first.id;
+    }
+    return { models, promptMax: model => catalogue.models.find(item => item.id === model)?.prompt.maxLength };
+  }, [mediaState]);
+  // A media node still set to a retired generator's model moves to the model offered now, with nothing said about it
+  // (owner decision 2026-10-11). Its results stay: the move is not an edit that makes them stale.
+  useEffect(() => {
+    if (readOnly) return;
+    const moved = replaceRetiredMediaModels(docRef.current, mediaCatalogueOf(mediaState));
+    if (moved) patchDoc(() => moved, { silent: true, serverIdentity: true });
+  }, [doc, mediaState, readOnly, patchDoc]);
 
   // User callbacks can outlive their idle render. The journal/ref checks also cover
   // acceptance before React commits `running`, waiting nodes, and terminal settlement.
@@ -1269,13 +1291,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
   }, [locale, t, saveLocalDocument, runUnavailableReason]);
 
-  const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
+  const startRun = useCallback((requestedScope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
     if (readOnlyRef.current || outdatedObserver.current) return Promise.resolve();
     if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
+    // Image, video and 3D nodes generate only from their own Send: a canvas or component run leaves them out
+    // (runScopeWithoutMedia) instead of the server refusing it whole. A whole-canvas run stays one: `whole`.
+    const whole = !requestedScope;
+    let scope = requestedScope;
+    if (!manualMessage) {
+      const runnable = runScopeWithoutMedia(docRef.current.nodes, requestedScope);
+      if (!runnable) { setHandoffNote(surfaceNotice(t, 'media_runs_alone')); return Promise.resolve(); }
+      scope = runnable.scope;
+    }
     // ---- admission: a free lane whose nodes no running work touches ----
     const executingIds = new Set(scope ?? docRef.current.nodes.map(node => node.id));
     // A whole-canvas run, a review loop and a collaboration run alone; so does anything while one of them runs.
-    const alone = !scope || Boolean(collaboration) || (!manualMessage && Boolean(docRef.current.execution));
+    const alone = whole || Boolean(collaboration) || (!manualMessage && Boolean(docRef.current.execution));
     const activeLanes = RUN_LANES.filter(laneActive);
     if (activeLanes.length && (alone || exclusiveLaneActive())) { setHandoffNote(surfaceNotice(t, 'run_wait_others')); return Promise.resolve(); }
     const busyIds = busyNodeIds(undefined, true);
@@ -2416,7 +2447,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const jev = !resume && plannerProvider === 'jev'
         ? await requestJevPlan(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress) : null;
       const plan = jev?.plan ?? await planRequest(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress,
-        resume ? { recoveryOperationId: planningRecovery!.operationId } : undefined);
+        { ...(resume ? { recoveryOperationId: planningRecovery!.operationId } : {}), mediaKinds });
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (canvasPlanRevision(docRef.current) !== revision || laneGuard.current.active() || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale', route);
@@ -2424,7 +2455,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const applied = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt);
+      const applied = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia);
       // Every step skipped (each one said in the adjustments) leaves the canvas as it was: nothing to patch, undo
       // or select, and the reply says so instead of calling it applied.
       const changed = canvasPlanRevision(applied.doc) !== canvasPlanRevision(before);
@@ -2443,7 +2474,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // A plan that changed nothing else keeps the nodes it added, which tell whether it is still on the canvas.
       // What was applied differently from how the plan wrote it is said with its summary, never hidden.
       const shownAdjustments = applied.adjustments.slice(0, 6);
-      const lead = !changed && plan.operations.length ? [applied.summary, t('planning.nothingApplied')] : [applied.summary];
+      // Media nodes a plan added generate only when sent: said once, so the user knows what to press.
+      const addedMedia = changed ? applied.doc.nodes.filter(node => applied.addedNodeIds.includes(node.id) && node.kind === 'session' && mediaKindOf(node.agentKind)).length : 0;
+      const lead = [...(!changed && plan.operations.length ? [applied.summary, t('planning.nothingApplied')] : [applied.summary]),
+        ...(addedMedia ? [t('planning.mediaAdded', { count: addedMedia })] : [])];
       const reply = applied.adjustments.length ? [...lead, ...(changed ? [t('planning.adjusted', { count: applied.adjustments.length })] : []),
         ...shownAdjustments.map(item => `· ${item}`),
         ...(applied.adjustments.length > shownAdjustments.length ? [t('planning.adjustedMore', { count: applied.adjustments.length - shownAdjustments.length })] : [])].join('\n')
@@ -3058,9 +3092,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   })), [currentModelCatalogue, palette?.groups]);
   const mediaModelChoices = useMemo<Record<MediaKind, NodeModelChoice[]>>(() => {
     const catalogue = mediaCatalogueOf(mediaState);
-    const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: model.name, group: model.vendor, available: true }));
+    const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: model.name, group: mediaVendorLabel(model.vendor, locale), available: true }));
     return { image: of('image'), video: of('video'), model3d: of('model3d') };
-  }, [mediaState]);
+  }, [mediaState, locale]);
   const modelChoicesRef = useRef({ chat: chatModelChoices, media: mediaModelChoices });
   modelChoicesRef.current = { chat: chatModelChoices, media: mediaModelChoices };
   const changeNodeModel = useCallback((nodeId: string, key: string) => {

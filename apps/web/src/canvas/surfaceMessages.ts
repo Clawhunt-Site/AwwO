@@ -26,7 +26,8 @@ export type SurfaceNotice =
   | 'node_busy_edit'
   | 'node_already_running'
   | 'run_wait_others'
-  | 'run_lanes_full';
+  | 'run_lanes_full'
+  | 'media_runs_alone';
 
 const NOTICE_KEYS = {
   recovering_run: 'surface.recoveringRun',
@@ -52,6 +53,7 @@ const NOTICE_KEYS = {
   node_already_running: 'surface.nodeAlreadyRunning',
   run_wait_others: 'surface.runWaitOthers',
   run_lanes_full: 'surface.runLanesFull',
+  media_runs_alone: 'surface.mediaRunsAlone',
 } as const;
 
 export function surfaceNotice(t: CanvasTranslate, notice: SurfaceNotice): string {

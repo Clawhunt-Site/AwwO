@@ -33,7 +33,7 @@ describe('3D model nodes', () => {
     const catalogue = parseMediaCatalogue(raw);
     expect(mediaModelsOf(catalogue, 'model3d').map(model => model.id)).toEqual(['tripo.v3-1']);
     expect(mediaModelsOf(catalogue, 'image').map(model => model.id)).toEqual(['rh.seedream-v5-pro']);
-    expect(mediaVendorLabel('tripo', 'zh')).toBe('Tripo 3D');
+    expect(mediaVendorLabel('tripo', 'zh')).toBe('媒体');
     expect(parseMediaCatalogue({ ...raw, models: [{ ...raw.models[0], id: 'evil.model' }] }).models).toEqual([]);
   });
 

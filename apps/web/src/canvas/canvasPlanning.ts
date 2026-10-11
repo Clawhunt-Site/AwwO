@@ -1,10 +1,12 @@
 import { canvasStorage, workspaceStorage } from './canvasStorage';
 import { canvasFetch, currentSaaSCanvas } from '../saas/canvasBridge';
 import { gatewayApiBase } from '../chatAutomations';
-import { AGENT_TEMPLATE_IDS, getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
+import { getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import type { CanvasDocument } from './canvasDoc';
-import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, canvasPlanRevision, parseCanvasPlan, type CanvasPlan,
-  type CanvasPlanOperationType } from './canvasPlan';
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, MEDIA_PLAN_TEMPLATE_IDS, PLAN_TEMPLATE_IDS, canvasPlanRevision,
+  parseCanvasPlan, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType } from './canvasPlan';
+import { mediaKindOf, type MediaKind } from './mediaCatalog';
+import { activeNodeThread } from './nodeThreads';
 import type { UiLocale } from '../locale';
 import { canvasText } from './i18n';
 import { readSseFrames } from '../sse';
@@ -73,14 +75,14 @@ export function observedProgress(frame: Record<string, unknown>, previous: PlanP
   const stage = PLAN_STAGES.includes(frame.stage as PlanProgress['stage']) ? frame.stage as PlanProgress['stage'] : previous.stage;
   // Only a member of the closed template set is kept, and only beside the node count it was
   // reported with: a frame whose count is unusable cannot say which node the template names.
-  const template = typeof frame.template === 'string' && AGENT_TEMPLATE_IDS.has(frame.template) && validCount(frame.nodes)
+  const template = typeof frame.template === 'string' && PLAN_TEMPLATE_IDS.has(frame.template) && validCount(frame.nodes)
     ? frame.template : undefined;
   // Likewise only a member of the closed operation set, and a target only beside an operation on
   // one node: a node is named only through the operation that concerns it.
   const operation = typeof frame.operation === 'string' && CANVAS_PLAN_OPERATION_TYPES.has(frame.operation)
     ? frame.operation as CanvasPlanOperationType : undefined;
   const target = operation && CANVAS_PLAN_NODE_OPERATION_TYPES.has(operation) && typeof frame.target === 'string'
-    && AGENT_TEMPLATE_IDS.has(frame.target) ? frame.target : undefined;
+    && PLAN_TEMPLATE_IDS.has(frame.target) ? frame.target : undefined;
   return { stage, characters: count(frame.characters, previous.characters), nodes: count(frame.nodes, previous.nodes),
     edges: count(frame.edges, previous.edges), reasoning: count(frame.reasoning, previous.reasoning),
     ...(template ? { template } : {}), ...(operation ? { operation } : {}), ...(target ? { target } : {}), attempt: previous.attempt };
@@ -100,14 +102,15 @@ export function saveLastPlanDuration(seconds: number): void {
 }
 
 
-/** Keep the shared structural protocol, with only the Go host's supported operations/types. */
-function planningProtocol(saas: boolean): string {
+/** Keep the shared structural protocol, with only the Go host's supported operations/types, and the media nodes the
+ *  workspace can generate (a hosted workspace only). */
+function planningProtocol(saas: boolean, mediaKinds: ReadonlyArray<MediaKind> = []): string {
   if (!saas) return CANVAS_PLAN_PROTOCOL;
-  return CANVAS_PLAN_PROTOCOL.split('\n').filter(line =>
+  return withMediaNodes(CANVAS_PLAN_PROTOCOL.split('\n').filter(line =>
     !/^(set_edge_kind:|set_execution:|互审Graph使用)/.test(line),
   ).map(line => line.startsWith('connect 使用')
     ? 'connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源，全图不得成环。'
-    : line.replace(',kind?:"data"|"feedback"', '').replace('/reviewerNodeId', '')).join('\n');
+    : line.replace(',kind?:"data"|"feedback"', '').replace('/reviewerNodeId', '')).join('\n'), mediaKinds);
 }
 
 /** The plan a SaaS workspace can apply. `kind: "data"` on a connect is the default kind, which models add although
@@ -148,12 +151,17 @@ export function savePlanningConversation(value: PlanningConversation): void {
   catch { /* The current conversation remains in memory if local persistence is unavailable. */ }
 }
 
-/** Supply the current structure, never execution credentials, transcripts or generated artifacts. */
-export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMessage[], locale: UiLocale = 'zh'): string {
+/** Supply the current structure, never execution credentials, transcripts or generated artifacts. `mediaKinds` are the
+ *  media nodes this workspace can generate; only those are offered to the planner. */
+export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMessage[], locale: UiLocale = 'zh', mediaKinds: ReadonlyArray<MediaKind> = []): string {
   const saas = currentSaaSCanvas() !== null;
+  const offeredMedia = saas ? MEDIA_PLAN_TEMPLATE_IDS.filter(kind => mediaKinds.includes(kind)) : [];
   const graph = {
     nodes: doc.nodes.map(node => {
       if (node.kind === 'form') return { id: node.id, kind: node.kind, title: node.title, fields: node.fields };
+      // A media node is described by what it makes and the prompt it will make it from, never by its model.
+      const media = mediaKindOf(node.agentKind);
+      if (media) return { id: node.id, templateId: media, title: node.title, prompt: activeNodeThread(node).draft };
       const template = getAgentTemplateForNode(node, locale);
       return { id: node.id, templateId: template?.id, title: node.title,
         // Templates already declare responsibilities below. Preserve only user-authored differences.
@@ -166,10 +174,15 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
     execution: doc.execution ? { mode: doc.execution.mode, maxRounds: doc.execution.maxRounds,
       reviewerNodeId: doc.execution.reviewerNodeId, verdictFieldId: doc.execution.verdictFieldId } : { mode: 'workflow' },
   };
-  const templates = getAgentTemplates(locale).map(item => ({ id: item.id, title: item.title, responsibility: item.subtitle,
+  const templates = [...getAgentTemplates(locale).map(item => ({ id: item.id, title: item.title, responsibility: item.subtitle,
     inputs: item.inputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
     outputs: item.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
-  }));
+  })), ...offeredMedia.map(kind => ({ id: kind,
+    title: canvasText(locale, kind === 'video' ? 'node.addVideo' : kind === 'model3d' ? 'node.addModel3d' : 'node.addImage'),
+    responsibility: canvasText(locale, 'planning.mediaResponsibility', { kind: canvasText(locale, kind === 'video' ? 'media.kindVideo' : kind === 'model3d' ? 'media.kindModel3d' : 'media.kindImage') }),
+    inputs: [{ id: 'prompt', label: canvasText(locale, 'planning.mediaPrompt'), type: 'text', required: true }],
+    outputs: [{ id: 'result', label: canvasText(locale, 'planning.mediaResult'), type: kind === 'model3d' ? 'file' : kind, required: true }],
+  }))];
   const guidance = locale === 'en' ? [
     'You are the AwwO canvas architecture assistant. Arrange independent Agent nodes, input/output contracts, and real dependencies around the user goal. Produce a structural plan, not execution results.',
     'Software products commonly need data, backend, identity, frontend, and review responsibilities; select only what the request needs. Put core business requirements in the root node input and pass downstream inputs through exact field connections. '
@@ -189,9 +202,12 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
     '只返回协议JSON。summary用简洁中文说明本次结构改动及必要的待确认事项。不要调用工具或执行项目。没有足够信息可返回空operations并在summary提出一个具体问题。',
     '组件模板', '当前画布', '对话上下文（仅作意图参考，以当前画布为准）',
   ];
+  const mediaGuidance = !offeredMedia.length ? '' : locale === 'en'
+    ? ' When the request needs pictures, video or 3D models as assets, add one matching media node per asset with its prompt written, rather than having a text Agent describe the asset or claim a file.'
+    : '需要图片、视频或3D模型素材时，为每个素材添加一个对应的媒体节点并写好提示词，不要让文字Agent用描述代替生成或声称已有文件。';
   return [
-    planningProtocol(saas),
-    ...guidance.slice(0, 4),
+    planningProtocol(saas, offeredMedia),
+    guidance[0], guidance[1] + mediaGuidance, ...guidance.slice(2, 4),
     `${guidance[4]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(templates)}`,
     `${guidance[5]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(graph)}`,
     `${guidance[6]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(messages.slice(-10).map(({ role, content, status }) => ({ role, content, status })))}`,
@@ -245,7 +261,7 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
   const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan`, {
     method: 'POST', credentials: 'include', signal,
     headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' },
-    body: JSON.stringify({ prompt, context: buildPlanningContext(doc, messages, locale), ...(saas ? { revision: canvasPlanRevision(doc),
+    body: JSON.stringify({ prompt, context: buildPlanningContext(doc, messages, locale, options?.mediaKinds), ...(saas ? { revision: canvasPlanRevision(doc),
       ...(options?.recoveryOperationId !== undefined ? { recoveryOperationId: options.recoveryOperationId } : {}) } : {}) }),
   });
   // A progress stream carries its own terminal frames, so its transport status is already 200.
@@ -294,7 +310,8 @@ export async function cancelCanvasPlanRecovery(operationId: string, signal?: Abo
   if (!response.ok) throw new PlanFailure(payload.error, payload.code);
 }
 
-export type PlanRequestOptions = { recoveryOperationId?: string };
+/** `mediaKinds`: the media nodes the workspace can generate, which the planner may then add. */
+export type PlanRequestOptions = { recoveryOperationId?: string; mediaKinds?: ReadonlyArray<MediaKind> };
 export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
   locale: UiLocale = 'zh', onProgress?: PlanProgressReporter, options?: PlanRequestOptions): Promise<CanvasPlan> {
   const scope = currentSaaSCanvas();
