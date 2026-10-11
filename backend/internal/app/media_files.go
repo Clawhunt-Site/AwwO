@@ -178,7 +178,10 @@ func sniffMedia(head []byte) (contentType, ext, kind string) {
 	return "", "", ""
 }
 
-var inlineMediaTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true, "video/mp4": true, "video/webm": true, "video/quicktime": true}
+// Uploads add the audio and image types sniffUpload proves from the bytes themselves; a type taken from a file name
+// is never in this set.
+var inlineMediaTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true, "video/mp4": true, "video/webm": true, "video/quicktime": true,
+	"image/bmp": true, "image/avif": true, "audio/mpeg": true, "audio/wav": true, "audio/ogg": true, "audio/flac": true, "audio/mp4": true, "audio/aac": true}
 
 // mediaResultFits says whether a stored file is what the node generates: its own kind, or for a 3D node, its
 // model first and then the provider's rendered preview picture.

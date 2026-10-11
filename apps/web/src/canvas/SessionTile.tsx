@@ -41,6 +41,7 @@ import type { RunNodeStatus } from './runGraph';
 import { getSnapshot, subscribe, type NodeSession, type Turn } from './sessions';
 import { restoreHistory, sendMessage, statusLabel } from './sessionTransport';
 import { TileComposer } from './TileComposer';
+import { joinAttachments, splitAttachments } from './attachments';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
 import { collaborationInputSummary, htmlPreviewSummary } from './readableTranscript';
@@ -894,12 +895,13 @@ export const SessionTile = memo(function SessionTile({
                     <div className="awwo-node-empty" data-template={template?.id}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
                       <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound')}</span>
-                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => setComposerDraft(composerDraft ? `${composerDraft}\n\n${starter.prompt}` : starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
+                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => { const parts = splitAttachments(composerDraft); setComposerDraft(joinAttachments(parts.body ? `${parts.body}\n\n${starter.prompt}` : starter.prompt, parts.attachments, locale)); }}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                     </div>
                     : <TileTranscript key={storeKey} turns={session.turns} history={session.history} streaming={session.streaming} streamingSince={session.streamingSince}
                       currentRunDetails={currentRunDetails} mediaResults={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
+                    attachNodeId={nodeId} mediaNode={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
                     accessory={node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team

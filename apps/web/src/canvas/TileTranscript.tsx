@@ -26,6 +26,8 @@ import { PendingFileDelivery } from './PendingFileDelivery';
 import { storedArtifactUrl } from '../saas/canvasBridge';
 import { parseMediaOutput } from './mediaOutput';
 import { MediaResult } from './MediaResult';
+import { MessageWithAttachments } from './ComposerAttachments';
+import { splitAttachments } from './attachments';
 
 const markdownComponents: Components = {
   table: ({ node: _node, ...props }) => <div className="canvas-transcript-table"><table {...props} /></div>,
@@ -71,9 +73,13 @@ function TurnContent({ turn, mediaResults }: { turn: Turn; mediaResults: boolean
     }
     if (presentation?.displayText !== undefined && presentation.displayText !== turn.text) {
       return <>
-        <div>{presentation.displayText}</div>
+        <MessageWithAttachments text={presentation.displayText} render={body => <div>{body}</div>} />
         <RawDetails label={t('transcript.executionDetails')} text={turn.text} />
       </>;
+    }
+    // A message that carried files: the words, then a chip per file (never the quoted file data).
+    if (splitAttachments(turn.text).attachments.length) {
+      return <MessageWithAttachments text={turn.text} render={body => <div>{fileSafeDisplaySource(body)}</div>} />;
     }
   }
   // An image or video node's result names stored files; show them, not the record. Only such a

@@ -10,10 +10,14 @@
 //
 // An UNBOUND tile cannot send at all. It is disabled with the reason stated — never a live-looking
 // box whose message would silently go nowhere.
+//
+// It is a composite box: files of any type go with the words (the "+" button, a drop or a paste), shown as
+// chips and carried as lines at the end of the message (ComposerAttachments.tsx).
 
 import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
+import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
 
 export const COMPOSER_COPY = {
   notice:
@@ -41,9 +45,13 @@ export interface TileComposerProps {
   notice?: string;
   /** Shown under the input, like a chat app's model switch. */
   accessory?: ReactNode;
+  /** The node files are attached on (provenance only). */
+  attachNodeId?: string;
+  /** An image, video or 3D node: its generator takes words only, which the box says when files are attached. */
+  mediaNode?: boolean;
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode = false }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
   const disclaimerId = useId();
@@ -52,12 +60,15 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
   const setInput = (value: string) => { setLocalInput(value); onDraftChange?.(value); };
   const disabled = blocked || streaming;
   const sendReason = !blocked ? sendUnavailableReason?.trim() || undefined : undefined;
+  const attach = useComposerAttachments({ value: input, onChange: setInput, nodeId: attachNodeId, disabled });
+  const waitReason = attach.busy ? t('attach.waiting') : undefined;
 
   const send = () => {
     const message = input.trim();
-    if (!message || disabled || sendReason) return;
-    if (deferClear) onSend(message, () => setInput(''));
-    else { setInput(''); onSend(message); }
+    if (!message || disabled || sendReason || attach.busy) return;
+    const sent = () => { setInput(''); attach.markSent(); };
+    if (deferClear) onSend(message, sent);
+    else { sent(); onSend(message); }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -69,7 +80,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
   };
 
   return (
-    <div className="canvas-composer">
+    <div className={`canvas-composer${attach.dragging ? ' is-dropping' : ''}`} {...attach.dropProps}>
       {blocked ? (
         <div className="canvas-composer-blocked" data-testid="composer-blocked">
           {blockedReason || t('composer.unbound')}
@@ -79,32 +90,38 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
       ) : (
         <div className="canvas-composer-notice">{notice ?? t('composer.notice')}</div>
       )}
-      <div className="canvas-composer-row">
-        <textarea
-          className="canvas-composer-input"
-          data-testid="composer-input"
-          value={input}
-          rows={2}
-          placeholder={t('composer.placeholder')}
-          aria-label={t('composer.placeholder')}
-          aria-describedby={blocked ? undefined : disclaimerId}
-          disabled={disabled}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        <button
-          type="button"
-          className="canvas-composer-send"
-          data-testid="composer-send"
-          disabled={disabled || Boolean(sendReason) || !input.trim()}
-          title={sendReason}
-          aria-label={sendReason ? `${t('composer.send')}：${sendReason}` : undefined}
-          aria-describedby={sendReason ? reasonId : undefined}
-          onClick={send}
-        >
-          {streaming ? <Loader2 size={16} aria-hidden="true" /> : <ArrowUp size={16} aria-hidden="true" />}
-          <span>{t(streaming ? 'composer.sending' : 'composer.send')}</span>
-        </button>
+      <div className="canvas-composer-box">
+        <AttachmentTray state={attach} disabled={disabled} />
+        {mediaNode && attach.attachments.length ? <p className="awwo-attachment-notice is-info">{t('attach.mediaNote')}</p> : null}
+        <div className="canvas-composer-row">
+          <AttachButton state={attach} className="canvas-composer-attach" />
+          <textarea
+            className="canvas-composer-input"
+            data-testid="composer-input"
+            value={attach.body}
+            rows={2}
+            placeholder={t('composer.placeholder')}
+            aria-label={t('composer.placeholder')}
+            aria-describedby={blocked ? undefined : disclaimerId}
+            disabled={disabled}
+            onChange={(e) => attach.setBody(e.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={attach.onPaste}
+          />
+          <button
+            type="button"
+            className="canvas-composer-send"
+            data-testid="composer-send"
+            disabled={disabled || Boolean(sendReason) || attach.busy || !input.trim()}
+            title={sendReason ?? waitReason}
+            aria-label={sendReason ? `${t('composer.send')}：${sendReason}` : waitReason ? `${t('composer.send')}：${waitReason}` : undefined}
+            aria-describedby={sendReason ? reasonId : undefined}
+            onClick={send}
+          >
+            {streaming ? <Loader2 size={16} aria-hidden="true" /> : <ArrowUp size={16} aria-hidden="true" />}
+            <span>{t(streaming ? 'composer.sending' : 'composer.send')}</span>
+          </button>
+        </div>
       </div>
       {accessory ? <div className="canvas-composer-accessory">{accessory}</div> : null}
       {blocked ? null : <small id={disclaimerId} className="canvas-composer-disclaimer" title={t('composer.disclaimerFull')}>

@@ -5,6 +5,7 @@ import { canvasErrorMessage, canvasText } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, PLAN_TEMPLATE_IDS } from '../canvas/canvasPlan';
 import { plannerRecovery, planningRecoveryRequired, type PlannerRun } from './plannerRecovery';
+import type { UploadedCanvasFile } from '../canvas/attachments';
 
 type CanvasScope = { tenant: Tenant; canvasId: string };
 let active: CanvasScope | null = null;
@@ -104,6 +105,50 @@ export function storedMediaUrl(artifactId: string): string | null {
   const scope = active;
   if (!scope || !ARTIFACT_ID.test(artifactId)) return null;
   return `${API_BASE}${tenantPath(scope.tenant.id)}/artifacts/${encodeURIComponent(artifactId)}/media`;
+}
+
+/** Files can be attached only on a cloud canvas: the bytes are kept by the workspace's server. */
+export function canvasUploadsAvailable(): boolean {
+  return Boolean(active);
+}
+
+/** Upload one file of any type to the mounted canvas, reporting progress. The request is bound to the canvas
+ * mounted when it starts, so a file never lands on the canvas the page switched to meanwhile. */
+export function uploadCanvasFile(file: File, options: { nodeId?: string; onProgress?: (fraction: number) => void; signal?: AbortSignal } = {}): Promise<UploadedCanvasFile> {
+  const scope = active;
+  return new Promise((resolve, reject) => {
+    if (!scope) { reject(new Error(canvasText('请先打开一张云端画布再上传文件。', 'Open a cloud canvas to upload files.'))); return; }
+    if (options.signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+    const query = new URLSearchParams({ name: file.name || 'file' });
+    if (options.nodeId) query.set('node', options.nodeId);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}${tenantPath(scope.tenant.id)}/canvases/${encodeURIComponent(scope.canvasId)}/uploads?${query}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('Accept', 'application/json');
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = event => { if (event.lengthComputable && event.total > 0) options.onProgress?.(Math.min(1, event.loaded / event.total)); };
+    const abort = () => xhr.abort();
+    options.signal?.addEventListener('abort', abort, { once: true });
+    const settle = () => options.signal?.removeEventListener('abort', abort);
+    xhr.onload = () => {
+      settle();
+      let payload: any = null;
+      try { payload = JSON.parse(xhr.responseText); } catch { /* an HTML error page from a proxy */ }
+      if (xhr.status === 201 && payload && typeof payload.id === 'string' && ARTIFACT_ID.test(payload.id)) { resolve(payload as UploadedCanvasFile); return; }
+      const code = payload?.error?.code || (xhr.status === 413 ? 'upload_too_large' : 'request_failed');
+      reject(new SaaSApiError(xhr.status, code, payload?.error?.message || canvasText(`上传失败（${xhr.status}）`, `Upload failed (${xhr.status})`)));
+    };
+    xhr.onerror = () => { settle(); reject(new SaaSApiError(0, 'request_failed', canvasText('网络中断，文件没有传完。', 'The connection dropped before the file finished uploading.'))); };
+    xhr.onabort = () => { settle(); reject(new DOMException('Aborted', 'AbortError')); };
+    xhr.send(file);
+  });
+}
+
+/** Take back a file attached in a composer and never sent. */
+export async function deleteCanvasUpload(id: string): Promise<void> {
+  const scope = active;
+  if (!scope || !ARTIFACT_ID.test(id)) return;
+  await api(`${tenantPath(scope.tenant.id)}/canvases/${encodeURIComponent(scope.canvasId)}/uploads/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 /** An image or video run reports the provider's own state; there is no invented percentage. */

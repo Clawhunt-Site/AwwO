@@ -297,6 +297,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.updateCanvas, 2))
 	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.deleteCanvas, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/artifacts", a.tenant(a.listArtifacts, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/uploads", a.tenant(a.uploadCanvasFile, 2))
+	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}/uploads/{uploadId}", a.tenant(a.deleteCanvasUpload, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}", a.tenant(a.downloadArtifact, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}/media", a.tenant(a.mediaArtifact, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/media", a.tenant(a.mediaCatalogue, 1))
@@ -358,7 +360,9 @@ const computerModelRoute = "/api/internal/computer-model/v1/chat/completions"
 
 // requestDeadlineApplies reports whether requestDeadline bounds a request to this path.
 func requestDeadlineApplies(path string) bool {
-	if strings.HasSuffix(path, "/events") || (strings.Contains(path, "/artifacts/") && strings.HasSuffix(path, "/media")) {
+	// An upload streams a file of up to AWWO_UPLOAD_MAX_MB over the member's own connection; it bounds itself too.
+	if strings.HasSuffix(path, "/events") || (strings.Contains(path, "/artifacts/") && strings.HasSuffix(path, "/media")) ||
+		(strings.Contains(path, "/canvases/") && strings.HasSuffix(path, "/uploads")) {
 		return false
 	}
 	return path != computerModelRoute

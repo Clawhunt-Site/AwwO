@@ -1,0 +1,67 @@
+/* The attachment half of a composite composer (ComposerAttachments.tsx). Colours come from the canvas theme. */
+.awwo-attach-button {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 30px; height: 30px; padding: 0; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 8px;
+  color: var(--awwo-muted, #68736d); background: var(--awwo-surface, #fff); cursor: pointer;
+}
+.awwo-attach-button:hover:not(:disabled) { color: var(--awwo-accent, #286454); border-color: var(--awwo-accent, #286454); background: var(--awwo-accent-soft, #edf4ee); }
+.awwo-attach-button:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 2px; }
+.awwo-attach-button:disabled { cursor: not-allowed; opacity: .45; }
+.awwo-assistant-composer-actions .awwo-assistant-attach { margin-right: auto; }
+
+.awwo-attachment-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; min-width: 0; }
+.awwo-attachment-chips.is-compact { margin: 8px 0 0; }
+.awwo-attachment-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: min(260px, 100%); min-width: 0; height: 32px;
+  padding: 0 6px 0 3px; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 8px;
+  color: var(--awwo-ink, #232c29); background: var(--awwo-surface, #fff); font-size: 12px; line-height: 1.2;
+}
+.awwo-attachment-chips.is-compact .awwo-attachment-chip { height: 28px; background: color-mix(in srgb, var(--awwo-surface, #fff) 70%, transparent); }
+.awwo-attachment-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 24px; height: 24px; border-radius: 6px;
+  color: var(--awwo-accent, #286454); background: var(--awwo-accent-soft, #edf4ee);
+}
+.awwo-attachment-thumb { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 6px; object-fit: cover; background: var(--awwo-accent-soft, #edf4ee); }
+.awwo-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; text-decoration: none; }
+a.awwo-attachment-name:hover { color: var(--awwo-accent, #286454); text-decoration: underline; text-underline-offset: 2px; }
+a.awwo-attachment-name:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 2px; border-radius: 3px; }
+.awwo-attachment-meta { flex: 0 0 auto; color: var(--awwo-muted, #68736d); font-variant-numeric: tabular-nums; font-size: 11px; }
+.awwo-attachment-remove {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: 5px; color: var(--awwo-muted, #68736d); background: transparent; cursor: pointer;
+}
+.awwo-attachment-remove:hover:not(:disabled) { color: var(--awwo-ink, #232c29); background: var(--awwo-accent-soft, #edf4ee); }
+.awwo-attachment-remove:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 1px; }
+.awwo-attachment-chip.is-pending { border-style: dashed; }
+.awwo-attachment-chip.is-failed { border-color: #c9887f; }
+.awwo-attachment-chip.is-failed .awwo-attachment-icon { color: #a33f35; background: color-mix(in srgb, #a33f35 12%, transparent); }
+.awwo-attachment-chip.is-failed .awwo-attachment-meta { color: #a33f35; }
+.awwo-attachment-spin { animation: awwo-attachment-spin 1s linear infinite; }
+@keyframes awwo-attachment-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .awwo-attachment-spin { animation: none; } }
+
+.awwo-attachment-notice {
+  display: flex; align-items: flex-start; gap: 6px; margin: 0 0 8px; padding: 6px 8px; border-radius: 8px;
+  color: #8a4b1f; background: color-mix(in srgb, #d98a3a 12%, transparent); font-size: 12px; line-height: 1.5;
+}
+.awwo-attachment-notice.is-info { color: var(--awwo-muted, #68736d); background: var(--awwo-accent-soft, #edf4ee); }
+.awwo-attachment-notice button { margin-left: auto; display: inline-flex; padding: 2px; border: 0; border-radius: 4px; color: inherit; background: transparent; cursor: pointer; }
+
+/* A box that takes a drop says so while files are held over it. */
+.awwo-attachment-drop {
+  position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; pointer-events: none;
+  border: 2px dashed var(--awwo-accent, #286454); border-radius: inherit; color: var(--awwo-accent, #286454);
+  background: color-mix(in srgb, var(--awwo-accent-soft, #edf4ee) 88%, transparent); font-size: 13px; font-weight: 600;
+}
+.awwo-assistant-composer, .canvas-composer-box, .awwo-file-field, .awwo-markdown { position: relative; }
+
+/* The node composer: the tray sits above the row of "+", text and send. */
+.canvas-composer-box { min-width: 0; border-radius: 10px; }
+.canvas-composer-row .canvas-composer-attach { align-self: flex-end; margin-bottom: 2px; }
+
+/* A node's text and file inputs: chips over a row of "+" and the field. */
+.awwo-file-field { min-width: 0; border-radius: 8px; }
+.awwo-file-field-row { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.awwo-file-field-row .awwo-field-value { flex: 1 1 auto; min-width: 0; }
+.awwo-file-field-row .awwo-attach-button { margin-top: 3px; }
+.awwo-markdown-toolbar .awwo-attach-button { width: 28px; height: 28px; border-color: transparent; background: transparent; }

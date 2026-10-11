@@ -62,6 +62,16 @@ badge do not establish the current environment: the API process was verified as
 `APP_ENV=production` on 2026-10-02. Preserve the existing domain, routing and separate TypeSafe
 root when promoting the candidate; inspect the current nginx configuration before any UI change.
 
+Files attached on a canvas (`POST /api/v1/tenants/{tenantId}/canvases/{id}/uploads`, any type, up to
+`AWWO_UPLOAD_MAX_MB`, 64 by default) need more than nginx's server-wide `client_max_body_size 2m`. Since
+2026-10-11 `nginx-web.conf` carries one location for exactly that route, between `# BEGIN AWWO CANVAS UPLOADS
+2026-10-11` and its END line and placed before the `/api` location (regex locations match in order): 70m, the
+body buffered by nginx so the API reads it at local speed, and otherwise the `/api` location's headers, flood
+limits and error page. The release launcher adds it idempotently, validated as `awwo-saas` and checked with a
+3 MB probe (the upload route reaches the API; another API route still answers 413). Keep it when rebuilding the
+config; without it every upload over 2 MB fails at nginx with a 413. The files themselves live in
+`AWWO_MEDIA_DIR/<tenant>/uploads/` beside the generated media and are swept the same way.
+
 ## Historical API/HTML build
 
 For the managed upgrade, use the complete Linux CI package and verification steps in the

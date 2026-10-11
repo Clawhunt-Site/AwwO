@@ -7,6 +7,8 @@ import { useEnterToSend } from './composerKeys';
 import type { PlanProgress } from './canvasPlanning';
 import type { AssistantPending, AssistantPendingPhase, AssistantRoute } from './assistantRouting';
 import type { UiLocale } from '../locale';
+import { AttachButton, AttachmentTray, MessageWithAttachments, useComposerAttachments } from './ComposerAttachments';
+import { joinAttachments } from './attachments';
 
 export interface CanvasAssistantMessage {
   id: string;
@@ -194,6 +196,10 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const canSend = !busy && !routing && !recovery && !submitDisabled && Boolean(draft.trim());
+  const waitingForReply = busy || routing;
+  const attach = useComposerAttachments({ value: draft, onChange: onDraftChange, disabled: waitingForReply || Boolean(unified?.readOnly) });
+  // The request itself is bounded at 8 000 characters, file lines included.
+  const bodyLimit = Math.max(0, 8000 - (draft.length - attach.body.length));
   const lastMessage = messages.at(-1);
   const duplicateLastError = lastMessage?.role === 'assistant' && lastMessage.status === 'error' && lastMessage.content === error;
   useEffect(() => {
@@ -230,7 +236,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const changedAt = useMemo(() => Date.now(), [signature]);
   const quietSeconds = busy ? Math.max(0, Math.floor((Date.now() - changedAt) / 1000)) : 0;
 
-  const send = () => { if (canSend) onSend(); };
+  const send = () => { if (canSend && !attach.busy) { attach.markSent(); onSend(); } };
   const composerKeys = useEnterToSend(send);
 
   let status: ReactNode = null;
@@ -296,11 +302,13 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
           {/* How the server handled the request: said on each reply, never asked of the user beforehand. */}
           {unified && message.role === 'assistant' && message.route ? <span className={`awwo-assistant-route is-${message.route}`}>
             {t(message.route === 'plan' ? 'assistant.routePlan' : 'assistant.routeExecute')}</span> : null}
-          {message.taskId && unified ? unified.renderTask(message.taskId) : <p role={message.status === 'error' ? 'alert' : undefined}>{message.content}</p>}
+          {message.taskId && unified ? unified.renderTask(message.taskId)
+            : message.role === 'user' ? <MessageWithAttachments text={message.content} />
+            : <p role={message.status === 'error' ? 'alert' : undefined}>{message.content}</p>}
           {message.status === 'applied' ? <span className="awwo-assistant-message-status" role="status">{t('assistant.applied')}</span>
             : message.status === 'stale' ? <span className="awwo-assistant-message-status is-stale" role="alert">{t('assistant.stale')}</span> : null}
         </li>)}
-        {pending ? <li className="awwo-assistant-message awwo-assistant-message--user is-pending"><p>{pending.prompt}</p></li> : null}
+        {pending ? <li className="awwo-assistant-message awwo-assistant-message--user is-pending"><MessageWithAttachments text={pending.prompt} /></li> : null}
         {unified?.switchRoute ? <li className="awwo-assistant-switch">
           <button type="button" disabled={busy || routing} onClick={unified.switchRoute.onSwitch}>
             {t(unified.switchRoute.to === 'execute' ? 'assistant.switchToExecute' : 'assistant.switchToPlan')}</button>
@@ -314,7 +322,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       {error ? <p className="awwo-assistant-error" role="alert" id={errorId}>{error}</p> : null}
       {recovery ? <div className="awwo-assistant-recovery" role="group" aria-label={t('assistant.recoveryTitle')}>
         <p>{t('assistant.recoveryTitle')}</p>
-        <p className="awwo-assistant-recovery-prompt">{recovery.prompt}</p>
+        <div className="awwo-assistant-recovery-prompt"><MessageWithAttachments text={recovery.prompt} /></div>
         <p>{t(recovery.canResume ? 'assistant.recoveryHint' : 'assistant.recoveryChanged')}</p>
         <div className="awwo-assistant-composer-actions">
           <button type="button" className="awwo-assistant-cancel" disabled={busy || routing || recovery.busy} onClick={recovery.onStop}>{t('assistant.recoveryStop')}</button>
@@ -338,16 +346,18 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
         {nextSteps.footnote ? <p className="awwo-assistant-next-footnote">{nextSteps.footnote}</p> : null}
         {nextSteps.actions.length ? <div className="awwo-assistant-next-actions">{nextSteps.actions.map(nextActionControl)}</div> : null}
       </div> : null}
-      <form className="awwo-assistant-composer" aria-label={t('assistant.form')} onSubmit={event => { event.preventDefault(); send(); }}>
+      <form className={`awwo-assistant-composer${attach.dragging ? ' is-dropping' : ''}`} aria-label={t('assistant.form')} onSubmit={event => { event.preventDefault(); send(); }} {...attach.dropProps}>
+        <AttachmentTray state={attach} disabled={waiting} />
         <textarea ref={input} aria-label={t('assistant.input')} aria-describedby={error ? errorId : disclaimerId}
           placeholder={t(unified ? (welcome ? 'assistant.unifiedWelcomePlaceholder' : 'assistant.unifiedPlaceholder')
             : welcome ? 'assistant.welcomePlaceholder' : 'assistant.panelPlaceholder')}
-          value={draft} disabled={waiting} rows={3} maxLength={8000}
-          onChange={event => onDraftChange(event.target.value)} {...composerKeys} />
+          value={attach.body} disabled={waiting} rows={3} maxLength={bodyLimit}
+          onChange={event => attach.setBody(event.target.value)} onPaste={attach.onPaste} {...composerKeys} />
         {status}
         <div className="awwo-assistant-composer-actions">
+          <AttachButton state={attach} className="awwo-assistant-attach" />
           {busy || pending?.phase === 'routing' ? <button type="button" className="awwo-assistant-cancel" onClick={onCancel}><Square size={12} aria-hidden="true" />{t('assistant.cancel')}</button> : null}
-          <button type="submit" className="awwo-assistant-send" disabled={!canSend}><span>{sendLabel}</span><ArrowUp size={15} aria-hidden="true" /></button>
+          <button type="submit" className="awwo-assistant-send" disabled={!canSend || attach.busy} title={attach.busy ? t('attach.waiting') : undefined}><span>{sendLabel}</span><ArrowUp size={15} aria-hidden="true" /></button>
         </div>
       </form>
       <small id={disclaimerId} className="awwo-composer-disclaimer" title={t('composer.disclaimerFull')}>
@@ -362,7 +372,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
 
     {welcome && !recovery ? <div className="awwo-assistant-examples" role="group" aria-label={t('assistant.examples')}>
       {examples.map(example => <button type="button" key={example} disabled={waiting}
-        onClick={() => { onDraftChange(example); input.current?.focus(); }}>{example}</button>)}
+        onClick={() => { onDraftChange(joinAttachments(example, attach.attachments, locale)); input.current?.focus(); }}>{example}</button>)}
     </div> : null}
     </>}
   </section>;

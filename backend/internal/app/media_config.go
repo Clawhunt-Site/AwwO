@@ -54,6 +54,11 @@ type mediaSettings struct {
 	XtasyAPIKey        string
 	XtasyBaseURL       string
 	XtasyAllWorkspaces bool
+	// Files members attach (uploads.go) live in the same AWWO_MEDIA_DIR: at most UploadMaxBytes each,
+	// UploadsPerDay a workspace each UTC day, and UploadWorkspaceBytes a workspace in total.
+	UploadMaxBytes       int64
+	UploadsPerDay        int
+	UploadWorkspaceBytes int64
 }
 
 const (
@@ -158,6 +163,29 @@ func (c *Config) mediaFromEnv() error {
 		c.TripoAllWorkspaces = true
 	default:
 		return errors.New("AWWO_TRIPO_ALL_WORKSPACES must be true or false")
+	}
+	// Cloudflare's request body limit is 100 MB, so one upload stays below it.
+	c.UploadMaxBytes, c.UploadsPerDay, c.UploadWorkspaceBytes = 64<<20, 200, 2048<<20
+	if s := os.Getenv("AWWO_UPLOAD_MAX_MB"); s != "" {
+		n, e := strconv.Atoi(s)
+		if e != nil || n < 1 || n > 95 {
+			return errors.New("AWWO_UPLOAD_MAX_MB must be between 1 and 95")
+		}
+		c.UploadMaxBytes = int64(n) << 20
+	}
+	if s := os.Getenv("AWWO_UPLOADS_PER_DAY"); s != "" {
+		n, e := strconv.Atoi(s)
+		if e != nil || n < 0 || n > 100000 {
+			return errors.New("AWWO_UPLOADS_PER_DAY must be between 0 and 100000")
+		}
+		c.UploadsPerDay = n
+	}
+	if s := os.Getenv("AWWO_UPLOAD_WORKSPACE_MB"); s != "" {
+		n, e := strconv.Atoi(s)
+		if e != nil || n < 0 || n > 1<<20 {
+			return errors.New("AWWO_UPLOAD_WORKSPACE_MB must be between 0 and 1048576")
+		}
+		c.UploadWorkspaceBytes = int64(n) << 20
 	}
 	c.XtasyAPIKey = strings.TrimSpace(os.Getenv("AWWO_XTASY_API_KEY"))
 	c.XtasyBaseURL = strings.TrimRight(env("AWWO_XTASY_BASE_URL", defaultXtasyBaseURL), "/")

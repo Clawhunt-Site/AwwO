@@ -306,6 +306,9 @@ type runInput struct {
 	Prompt               string   `json:"prompt"`
 	OperationID          string   `json:"operationId"`
 	KnowledgeRevisionIDs []string `json:"knowledgeRevisionIds,omitempty"`
+	// AttachmentText, when set, is the part of the prompt whose uploaded files go with the run (a plan attaches
+	// only what its request names, not every file its canvas context mentions). Otherwise the whole prompt is read.
+	AttachmentText string `json:"attachmentText,omitempty"`
 }
 
 func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
@@ -316,14 +319,15 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	if b.OperationID == "" {
 		b.OperationID = r.Header.Get("Idempotency-Key")
 	}
-	if b.SessionID == "" || strings.TrimSpace(b.Prompt) == "" || len(b.Prompt) > 128000 || len(b.OperationID) < 8 || len(b.OperationID) > 200 {
+	if b.SessionID == "" || strings.TrimSpace(b.Prompt) == "" || len(b.Prompt) > 128000 || len(b.OperationID) < 8 || len(b.OperationID) > 200 || len(b.AttachmentText) > 128000 {
 		fail(w, 400, "invalid_input", "Session, prompt (up to 128000 bytes) and operationId (8–200 bytes) required")
 		return
 	}
 	body, _ := json.Marshal(struct {
 		SessionID, Prompt    string
 		KnowledgeRevisionIDs []string `json:",omitempty"`
-	}{b.SessionID, b.Prompt, b.KnowledgeRevisionIDs})
+		AttachmentText       string   `json:",omitempty"`
+	}{b.SessionID, b.Prompt, b.KnowledgeRevisionIDs, b.AttachmentText})
 	hash := tokenHash(string(body))
 	tid := r.PathValue("tenantId")
 	tx, e := a.db.Begin(r.Context())
@@ -433,8 +437,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var document []byte
-	var nodeID string
-	if e = tx.QueryRow(r.Context(), "SELECT c.document,s.node_id FROM node_sessions s JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2", tid, b.SessionID).Scan(&document, &nodeID); e != nil {
+	var nodeID, canvasID string
+	if e = tx.QueryRow(r.Context(), "SELECT c.document,s.node_id,s.canvas_id FROM node_sessions s JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2", tid, b.SessionID).Scan(&document, &nodeID, &canvasID); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -443,7 +447,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		// to reuse the reserved node id, persona, team, or task frame.
 		document, nodeID = []byte(`{}`), ""
 	} else if engine == agentEngineMedia {
-		// Image and video nodes run through the media provider, not a model worker.
+		// Image and video nodes run through the media provider, not a model worker. A file attached in the
+		// composer cannot go to a provider yet, so its line never becomes part of what is generated.
+		if stripped := stripAttachmentLines(b.Prompt); stripped != "" {
+			b.Prompt = stripped
+		}
 		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, model, entitlement, readRouteLimits(routes), plan != nil, workspaceLimits{active, concurrent, today, daily, needsPlan})
 		return
 	}
@@ -554,6 +562,27 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		a.knowledgeFailure(w, e)
 		return
+	}
+	// The files the message names go with it, frozen now: their text is quoted after the user's words (and kept
+	// in the conversation, so a follow-up still has it), and a workspace runtime also gets the files themselves.
+	attachmentSource := b.Prompt
+	if b.AttachmentText != "" {
+		attachmentSource = b.AttachmentText
+	}
+	workspaceRoom := 0
+	if snapshot.Workspace != nil {
+		workspaceRoom = maxWorkspaceInputBytes
+	}
+	attached, e := a.freezeUploadAttachments(r.Context(), tx, tid, canvasID, attachmentSource, workspaceRoom)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if attached != nil {
+		b.Prompt = attachmentUserPrompt(b.Prompt, attached)
+		if snapshot.Workspace != nil {
+			snapshot.Workspace.Inputs = append(snapshot.Workspace.Inputs, attached.Workspace...)
+		}
 	}
 	framedInstructions := knowledgeSystemPrompt(taskFrameSystemPrompt(instructions, snapshot.TaskFrame), snapshot.Knowledge)
 	framedPrompt := knowledgeUserPrompt(b.Prompt, snapshot.Knowledge)

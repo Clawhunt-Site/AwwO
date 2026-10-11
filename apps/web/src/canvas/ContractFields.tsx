@@ -3,6 +3,8 @@ import { Bold, Eye, Heading2, Link2, List, Pencil, Plus, Trash2 } from 'lucide-r
 import { DeliverableMarkdown } from './DeliverableMarkdown';
 import { validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
+import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
+import { canvasUploadsAvailable } from '../saas/canvasBridge';
 
 const FIELD_TYPES: Array<{ value: ContractFieldType; label: CanvasTextKey }> = [
   { value: 'text', label: 'contract.text' },
@@ -41,19 +43,21 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
   const { locale, t } = useCanvasI18n();
   const [preview, setPreview] = useState(false);
   const editor = useRef<HTMLTextAreaElement>(null);
+  const attach = useComposerAttachments({ value: field.value, onChange, disabled: readOnly, keepOnRemove: true });
+  const source = attach.body;
   const format = (before: string, after = '') => {
     if (readOnly) return;
     const element = editor.current;
-    const start = element?.selectionStart ?? field.value.length;
+    const start = element?.selectionStart ?? source.length;
     const end = element?.selectionEnd ?? start;
-    const selected = field.value.slice(start, end);
-    onChange(field.value.slice(0, start) + before + selected + after + field.value.slice(end));
+    const selected = source.slice(start, end);
+    attach.setBody(source.slice(0, start) + before + selected + after + source.slice(end));
     queueMicrotask(() => {
       element?.focus();
       element?.setSelectionRange(start + before.length, end + before.length);
     });
   };
-  return <div className="awwo-markdown">
+  return <div className={`awwo-markdown${attach.dragging ? ' is-dropping' : ''}`} {...attach.dropProps}>
     <div className="awwo-markdown-toolbar" role="toolbar" aria-label={t('contract.formatToolbar', { name })}>
       {[
         { label: 'contract.bold' as const, Icon: Bold, before: '**', after: '**' },
@@ -64,16 +68,41 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
         disabled={readOnly || preview} onMouseDown={(e) => e.preventDefault()} onClick={() => format(before, after)}>
         <Icon size={15} aria-hidden="true" />
       </button>)}
+      <AttachButton state={attach} />
       <button type="button" className="awwo-markdown-preview-toggle" aria-label={locale === 'zh' ? `${t(preview ? 'contract.edit' : 'contract.preview')}${name}` : `${t(preview ? 'contract.edit' : 'contract.preview')} ${name}`}
         aria-pressed={preview} onClick={() => setPreview(!preview)}>
         {preview ? <Pencil size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
         {t(preview ? 'contract.edit' : 'contract.preview')}
       </button>
     </div>
+    <AttachmentTray state={attach} disabled={readOnly} />
     {preview ? <div className="awwo-markdown-preview" aria-label={t('contract.previewName', { name })} aria-describedby={describedBy}>
-      {field.value ? <DeliverableMarkdown>{field.value}</DeliverableMarkdown> : <span className="awwo-field-hint">{t('contract.noContent')}</span>}
-    </div> : <textarea ref={editor} className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={describedBy} value={field.value}
-      disabled={readOnly} rows={4} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? t('contract.placeholder')} />}
+      {source ? <DeliverableMarkdown>{source}</DeliverableMarkdown> : <span className="awwo-field-hint">{t('contract.noContent')}</span>}
+    </div> : <textarea ref={editor} className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={describedBy} value={source}
+      disabled={readOnly} rows={4} onChange={(event) => attach.setBody(event.target.value)} onPaste={attach.onPaste} placeholder={placeholder ?? t('contract.placeholder')} />}
+  </div>;
+}
+
+/** A file input: upload files of any type (the "+", a drop or a paste) or enter a path or link. Uploaded files are
+ * kept as attachment lines in the value, so a run of this node takes them along (uploads.go). */
+function FileFieldValue({ field, name, readOnly, onChange, placeholder, describedBy, rows = 2 }: {
+  field: ContractField;
+  name: string;
+  readOnly: boolean;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  describedBy?: string;
+  rows?: number;
+}) {
+  const { t } = useCanvasI18n();
+  const attach = useComposerAttachments({ value: field.value, onChange, disabled: readOnly, keepOnRemove: true });
+  return <div className={`awwo-file-field${attach.dragging ? ' is-dropping' : ''}`} {...attach.dropProps}>
+    <AttachmentTray state={attach} disabled={readOnly} />
+    <div className="awwo-file-field-row">
+      <AttachButton state={attach} />
+      <textarea className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={describedBy} value={attach.body}
+        disabled={readOnly} rows={rows} placeholder={placeholder} onChange={(event) => attach.setBody(event.target.value)} onPaste={attach.onPaste} />
+    </div>
   </div>;
 }
 
@@ -132,12 +161,15 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, onCh
             onChange={(event) => patch(field.id, { value: event.target.value })}>
             <option value="">{field.placeholder ?? t('contract.choose')}</option><option value="true">{t('contract.yes')}</option><option value="false">{t('contract.no')}</option>
           </select>
+          : field.type === 'file' || field.type === 'text' ? <FileFieldValue field={displayed} name={name} readOnly={valueReadOnly} describedBy={helpId}
+            rows={field.type === 'text' ? 3 : 2}
+            placeholder={field.placeholder ?? t(field.type === 'file' ? 'contract.filePlaceholder' : 'contract.textPlaceholder')} onChange={(value) => patch(field.id, { value })} />
           : <textarea className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
-            inputMode={field.type === 'number' ? 'decimal' : undefined} rows={field.type === 'html' ? 6 : field.type === 'text' ? 3 : 2}
+            inputMode={field.type === 'number' ? 'decimal' : undefined} rows={field.type === 'html' ? 6 : 2}
             spellCheck={field.type === 'html' ? false : undefined}
-            placeholder={field.placeholder ?? t(field.type === 'html' ? 'contract.htmlPlaceholder' : field.type === 'file' ? 'contract.filePlaceholder' : field.type === 'number' ? 'contract.numberPlaceholder' : 'contract.textPlaceholder')}
+            placeholder={field.placeholder ?? t(field.type === 'html' ? 'contract.htmlPlaceholder' : field.type === 'number' ? 'contract.numberPlaceholder' : 'contract.textPlaceholder')}
             onChange={(event) => patch(field.id, { value: event.target.value })} />}
-        {field.type === 'file' ? <p className="awwo-field-hint">{t('contract.fileHint')}</p> : null}
+        {field.type === 'file' ? <p className="awwo-field-hint">{t(canvasUploadsAvailable() ? 'contract.fileHint' : 'contract.fileHintLocal')}</p> : null}
       </div>;
     })}
     {errors.length > 0 ? <ul className="awwo-contract-errors" role="alert" aria-label={t('contract.validation', { label })}>

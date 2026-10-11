@@ -188,7 +188,7 @@ const artifactListLimit = 500
 func (a *App) listArtifacts(w http.ResponseWriter, r *http.Request) {
 	tid, canvasID := r.PathValue("tenantId"), r.PathValue("id")
 	rows, e := rowsJSON(r.Context(), a.db,
-		"SELECT jsonb_build_object('id',id,'name',name,'size',size,'sha256',sha256,'runId',run_id,'nodeId',node_id,'fieldId',field_id,'createdAt',created_at) FROM artifacts WHERE tenant_id=$1 AND canvas_id=$2 AND field_id<>'__workspace_snapshot' ORDER BY created_at DESC, id LIMIT $3",
+		"SELECT jsonb_build_object('id',id,'name',name,'size',size,'sha256',sha256,'runId',run_id,'nodeId',node_id,'fieldId',field_id,'createdAt',created_at) FROM artifacts WHERE tenant_id=$1 AND canvas_id=$2 AND field_id NOT IN ('__workspace_snapshot','upload') ORDER BY created_at DESC, id LIMIT $3",
 		tid, canvasID, artifactListLimit+1)
 	if e != nil {
 		a.dbError(w, e)

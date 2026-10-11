@@ -48,7 +48,8 @@ type mediaItem struct {
 
 // Server-generated identifiers only; anything else never becomes part of a path.
 var mediaPathPart = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-var mediaFileName = regexp.MustCompile(`^[0-9a-f]{64}\.(png|jpg|webp|gif|mp4|webm|mov|glb)$`)
+// Uploaded files of any type are stored as <sha256>.bin (uploads.go); their type lives in the artifact row.
+var mediaFileName = regexp.MustCompile(`^[0-9a-f]{64}\.(png|jpg|webp|gif|mp4|webm|mov|glb|bin)$`)
 
 // mediaHub is the configured RunningHub client, or nil when image and video generation is off.
 func (a *App) mediaHub() *runningHub {

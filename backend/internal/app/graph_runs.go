@@ -681,6 +681,26 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		}
 		snap.Workspace.Inputs = inputs
 	}
+	// Files a member uploaded into this node's inputs (or that its prompt otherwise names) go with it like a
+	// composer's attachments: quoted text after the prompt, and the files themselves for a workspace runtime.
+	var graphCanvas string
+	if e = tx.QueryRow(ctx, "SELECT canvas_id FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, gid).Scan(&graphCanvas); e != nil {
+		return e
+	}
+	workspaceRoom := 0
+	if snap.Workspace != nil {
+		workspaceRoom = maxWorkspaceInputBytes
+		for _, input := range snap.Workspace.Inputs {
+			workspaceRoom -= len(input.Content) * 3 / 4
+		}
+	}
+	uploads, e := a.freezeUploadAttachments(ctx, tx, tid, graphCanvas, prompt, max(workspaceRoom, 0))
+	if e != nil {
+		return e
+	}
+	if uploads != nil && snap.Workspace != nil {
+		snap.Workspace.Inputs = append(snap.Workspace.Inputs, uploads.Workspace...)
+	}
 	if turn != nil {
 		if snap.Team != nil {
 			return errors.New("collaboration_nested_team_unsupported")
@@ -721,6 +741,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 			snap.OutputPolicy += "\n\n" + graphFileDataPolicy
 		}
 	}
+	prompt = attachmentUserPrompt(prompt, uploads)
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
 	framedInstructions := knowledgeSystemPrompt(taskFrameSystemPrompt(instructions, snap.TaskFrame), snap.Knowledge)
 	framedPrompt := knowledgeUserPrompt(prompt, snap.Knowledge)
