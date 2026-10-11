@@ -1,0 +1,44 @@
+/* AwwO hosted app: the two ways to use it.
+ *
+ * 普通用户模式 (simple) keeps the conversations, each node's chat and model, and what the canvas made. Components
+ * render less in that mode (CanvasSurface, AgentWorkspace, SessionTile read useSimpleCanvas); the rules here only
+ * restyle what is left so the chat-first surface reads like a chat app, and draw the switch itself. */
+
+/* ── The switch ────────────────────────────────────────────────────────────────────────────────── */
+.saas-mode-switch { display: grid; gap: 6px; padding: 8px 10px; border-radius: var(--saas-radius-sm, 10px); }
+.saas-mode-switch-label { color: var(--saas-subtle, #6b7c84); font: 600 var(--saas-text-xs, 11px)/1.2 var(--saas-font, inherit); letter-spacing: .02em; }
+.saas-mode-switch-options {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px;
+  border-radius: var(--saas-radius-pill, 999px); background: var(--saas-field, #eef1f1);
+  & > button {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 0 10px;
+    border: 0; border-radius: var(--saas-radius-pill, 999px); background: transparent; color: var(--saas-muted, #4b5d65);
+    font: 600 var(--saas-text-sm, 12px)/1 var(--saas-font, inherit); cursor: pointer; white-space: nowrap;
+    transition: background-color var(--saas-dur-1, .12s), color var(--saas-dur-1, .12s), box-shadow var(--saas-dur-1, .12s);
+  }
+  & > button:hover:not([aria-pressed='true']) { color: var(--saas-text, #0b2230); }
+  & > button[aria-pressed='true'] { background: var(--saas-card, #fff); color: var(--saas-text, #0b2230); box-shadow: 0 0 0 1px var(--saas-hairline, #dde3e2) inset, var(--saas-shadow-xs, none); }
+  & > button:focus-visible { outline: 2px solid var(--saas-focus, #1c6f76); outline-offset: 1px; }
+}
+
+html:root .saas-canvas-shell .saas-mode-pill, .saas-mode-pill {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; min-height: 30px; padding: 0 12px; margin-right: 4px;
+  border: 1px solid var(--saas-border, #dde3e2); border-radius: var(--saas-radius-pill, 999px);
+  background: var(--saas-card, #fff); color: var(--saas-muted, #4b5d65); cursor: pointer; white-space: nowrap;
+  font: 600 var(--saas-text-xs, 11px)/1 var(--saas-font, inherit);
+  transition: border-color var(--saas-dur-1, .12s), color var(--saas-dur-1, .12s), background-color var(--saas-dur-1, .12s);
+  &:hover { border-color: var(--saas-border-strong, #c9d2d1); color: var(--saas-text, #0b2230); }
+  &.is-developer { border-color: color-mix(in srgb, var(--saas-accent, #2b7ad8) 45%, var(--saas-border, #dde3e2)); color: var(--saas-accent, #2b7ad8); background: var(--saas-accent-soft, #e1ecfb); }
+  &:focus-visible { outline: 2px solid var(--saas-focus, #1c6f76); outline-offset: 2px; }
+}
+@media (max-width: 760px) { .saas-mode-pill > span { display: none; } .saas-mode-pill { width: 30px; padding: 0; justify-content: center; } }
+
+/* ── Simple mode: a chat-first canvas ─────────────────────────────────────────────────────────── */
+/* The ports are the graph's structure for a person wiring by hand; in simple mode the assistant wires the canvas,
+   so the wires stay and their handles go. */
+html:root .saas-canvas-shell .awwo-workspace.is-simple .canvas-port { opacity: 0; pointer-events: none; }
+html:root .saas-canvas-shell .awwo-workspace.is-simple .awwo-view-tools.is-simple { gap: 2px; }
+/* The assistant's conversation is the main way in: a little wider, like a chat app's column. */
+@media (min-width: 1180px) {
+  html:root .saas-canvas-shell .awwo-workspace.is-simple .awwo-planner-sidebar { width: min(420px, 32vw); flex: 0 0 min(420px, 32vw); }
+}

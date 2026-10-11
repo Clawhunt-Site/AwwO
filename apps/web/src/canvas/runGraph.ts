@@ -182,8 +182,9 @@ export function preflightGraph(
 export function withPerKeySerialization<A extends unknown[], R>(
   keyOf: (...args: A) => string,
   fn: (...args: A) => Promise<R>,
+  /** Share one queue across several wrapped functions (parallel runs on one canvas still take turns per agent). */
+  tails: Map<string, Promise<unknown>> = new Map(),
 ): (...args: A) => Promise<R> {
-  const tails = new Map<string, Promise<unknown>>();
   return (...args: A) => {
     const key = keyOf(...args);
     const prev = tails.get(key) ?? Promise.resolve();

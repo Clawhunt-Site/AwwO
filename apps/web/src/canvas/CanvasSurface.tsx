@@ -60,7 +60,8 @@ import { Marquee, useMarquee } from './Marquee';
 import { AddNodeMenu, type AddNodeKind } from './AddNodeMenu';
 import { InspectorPanel } from './InspectorPanel';
 import { mediaCatalogueOf, type MediaCatalogueState } from './MediaNodeSettings';
-import { mediaKindOf, mediaModelsOf, readMediaCatalogue } from './mediaCatalog';
+import { mediaKindOf, mediaModelsOf, readMediaCatalogue, type MediaKind } from './mediaCatalog';
+import type { NodeModelChoice } from './NodeModelPicker';
 import { inspectorSavedNode } from './inspectorSave';
 import { RunControls } from './RunControls';
 import { GraphSettings } from './GraphSettings';
@@ -91,6 +92,9 @@ import { preflightGraphIssue, runGraph, validateNodeOutput, type RunNodeStatus }
 import { createGatewayExecutor, cancelConversationRunViaGateway } from './runTransport';
 import { settleExecutionResult, settleRecoveredJournal } from './runSettlement';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal, clearRunJournal, patchRunJournalNode, reconcileRunJournal, journalSummary, type CanvasRunJournal } from './runJournal';
+import { CANVAS_RUN_JOURNAL_KEY as RUN_JOURNAL_KEY, loadRunJournal as loadJournal, saveRunJournal as saveJournal, clearRunJournal as clearJournal } from './runJournal';
+import { RUN_LANES, exclusiveJournal, laneJournalKey, laneOfStorageKey, laneStorage, loadLaneJournals, withLaneOwnership } from './runLanes';
+import { canvasStorage as baseCanvasStorage } from './canvasStorage';
 import { currentGraphRunEntry } from './currentGraphRun';
 import { applyRecoveredDocument, prepareRunDocument, runInputFingerprint, recoveryJournalForDocument, mergeRecoveredManualConversation } from './runRecoveryDocument';
 import { prepareManualHistoryCapacity, persistManualHistoryWithNativeProof } from './manualHistoryRetention';
@@ -110,6 +114,10 @@ import { gatewayApiBase } from '../chatAutomations';
 import './canvas.css';
 import './node-view-styles.css';
 import { nodeViewRootProps, useNodeViewPreference } from './nodeViewStyle';
+import { useSimpleCanvas } from './uiMode';
+import { CARD_PREVIEW_DEFAULT, clampCard, loadCardFrames, saveCardFrames, showsPreview, type CardFrames } from './cardFrames';
+import { DeliverableStudio } from './studio/DeliverableStudio';
+import { studioGroups } from './studio/studioModel';
 /** A node failure refused by the free premium allowance reads as that error's own copy, in either language. */
 const refusalTexts = (codes: ReadonlyArray<string>) => codes
   .flatMap(code => (['zh', 'en'] as const).map(language => runErrorText(code, language) ?? '')).filter(Boolean);
@@ -147,8 +155,8 @@ function isFittedCamera(view: ViewportState, fitted: ViewportState | null): bool
 }
 
 /** Compact summaries remain readable at overview scale without the full-workbench fit floor. */
-function fitNodeOverview(nodes: ReadonlyArray<CanvasNode>, size: { w: number; h: number }): ViewportState {
-  const bounds = boundsOfNodes(presentationNodes(nodes, null));
+function fitNodeOverview(nodes: ReadonlyArray<CanvasNode>, size: { w: number; h: number }, cardFrames?: CardFrames): ViewportState {
+  const bounds = boundsOfNodes(presentationNodes(nodes, null, undefined, cardFrames));
   const maxScale = Math.max(.06, Math.min(1.05,
     (size.w - 96) / Math.max(1, bounds.maxX - bounds.minX),
     (size.h - 140) / Math.max(1, bounds.maxY - bounds.minY)));
@@ -158,6 +166,38 @@ function fitNodeOverview(nodes: ReadonlyArray<CanvasNode>, size: { w: number; h:
 function hasStreamingConversation(nodes: ReadonlyArray<CanvasNode>): boolean {
   return nodes.some(node => node.kind === 'session' && getNodeThreads(node)
     .some(thread => getSessionSnapshot(sessionStoreKey(node, thread.id)).streaming));
+}
+
+/** A saved document's canonical text without its camera and save time: what a run's recovery has to preserve. */
+function sansCamera(json: string | null): string | null {
+  if (json === null) return null;
+  try {
+    const { view: _view, updatedAt: _updatedAt, ...rest } = JSON.parse(json) as Record<string, unknown>;
+    return JSON.stringify(rest);
+  } catch { return json; }
+}
+
+/** Where a node sits, how large it is drawn and the next message being typed into it are not part of what a run executes. */
+function nodeSubstance(node: CanvasNode): string {
+  const { x: _x, y: _y, w: _w, h: _h, ...rest } = node as CanvasNode & { deliverablesOpen?: boolean };
+  delete (rest as { deliverablesOpen?: boolean }).deliverablesOpen;
+  // People write their next message while the node works; the run already holds the one it was sent.
+  if (node.kind === 'session') (rest as { threads?: unknown }).threads = getNodeThreads(node).map(({ draft: _draft, ...thread }) => thread);
+  return JSON.stringify(rest);
+}
+
+/** Whether an edit changes a node a lane is executing, adds or removes one, or rewires one. */
+export function touchesBusyNodes(prev: Pick<CanvasDocument, 'nodes' | 'edges'>, next: Pick<CanvasDocument, 'nodes' | 'edges'>, busy: ReadonlySet<string>): boolean {
+  for (const id of busy) {
+    const before = prev.nodes.find(node => node.id === id);
+    const after = next.nodes.find(node => node.id === id);
+    if (!before && !after) continue;
+    if (!before || !after) return true;
+    if (before !== after && nodeSubstance(before) !== nodeSubstance(after)) return true;
+  }
+  const wires = (doc: Pick<CanvasDocument, 'edges'>) => doc.edges.filter(edge => busy.has(edge.fromNode) || busy.has(edge.toNode))
+    .map(edge => JSON.stringify(edge)).sort().join('\n');
+  return prev.edges !== next.edges && wires(prev) !== wires(next);
 }
 
 export interface CanvasSurfaceProps {
@@ -260,10 +300,16 @@ export interface CanvasResultsOptions {
   initialView?: 'canvas' | 'results';
   /** The view changed; a host can keep it in the address. */
   onViewChange?: (view: 'canvas' | 'results') => void;
+  /** Show the results in the deliverable studio (file tree, search, live pages). */
+  studio?: boolean;
 }
 
 export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
+  // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
+  const simple = useSimpleCanvas();
+  const simpleRef = useRef(simple);
+  simpleRef.current = simple;
   const viewText = surfaceViewMessages(t);
   // The opened-node look is a viewer preference: it styles focused tiles only and never the document.
   const [nodeViewPreference] = useNodeViewPreference();
@@ -278,9 +324,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const cloudScope = currentSaaSCanvas();
   const loadWorkspaceAgents = useMemo(() => storageMode === 'cloud' && cloudScope ? workspaceAgentCatalog(cloudScope.tenant.id) : undefined, [storageMode, cloudScope?.tenant.id]);
   const [storage] = useState(canvasStorage);
+  const baseStorage = storage;
+  // Cards enlarged to show their deliverable (a view preference, never the document): see cardFrames.ts.
+  const [cardFrames, setCardFrames] = useState<CardFrames>(() => loadCardFrames());
+  const cardFramesRef = useRef(cardFrames);
+  cardFramesRef.current = cardFrames;
   const canInitialize = storageMode === 'cloud' && Boolean(cloudScope);
   const runUnavailableReason = storageMode === 'cloud' ? executionUnavailableReason?.trim() || '' : '';
   const [palette, setPalette] = useState<Awaited<ReturnType<typeof readModelPalette>> | null>(null);
+  const paletteRef = useRef(palette);
+  paletteRef.current = palette;
   const [paletteLoading, setPaletteLoading] = useState(false);
   const [paletteError, setPaletteError] = useState('');
   const [paletteRefresh, setPaletteRefresh] = useState(0);
@@ -375,6 +428,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const localSaveFailure = useRef(onLocalDocumentSaveFailed);
   localSaveFailure.current = onLocalDocumentSaveFailed;
   if (lastSavedRevision.current === null) lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(doc));
+  const lastSavedRaw = useRef<string | null>(null);
+  if (lastSavedRaw.current === null) { try { lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY); } catch { /* read again after the first save */ } }
   const saveLocalDocument = useCallback((next: CanvasDocument): boolean => {
     if (outdatedObserver.current) return false;
     if (!saveDocument(next)) {
@@ -383,6 +438,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
     lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(next));
     lastSavedDocument.current = canonicalCanvasDocumentJSON(next);
+    try { lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY); } catch { lastSavedRaw.current = null; }
     pendingRecoveryDocument.current = null;
     return true;
   }, []);
@@ -406,14 +462,27 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
    * updater must stay pure (React may invoke it twice), and reading the live doc from a ref lets
    * several patches in one tick compose correctly.
    */
+  // Runs are fenced off node by node (runLanes.ts): an edit may change anything except a node some lane is executing
+  // (its wires included). Moving, resizing or opening that node is presentation and stays free. The guard is filled
+  // in once the lanes below exist; until then nothing runs.
+  const laneGuard = useRef<{ busy: (exceptLane?: number) => Set<string>; active: () => boolean; exclusive: () => boolean }>({
+    busy: () => new Set(), active: () => false, exclusive: () => false,
+  });
+  const laneGuardLaneActive = useRef<(lane: number) => boolean>(() => false);
   const patchDoc = useCallback(
-    (mut: (prev: CanvasDocument) => CanvasDocument, opts?: { label?: string; silent?: boolean; serverIdentity?: boolean }) => {
-      if (readOnlyRef.current || outdatedObserver.current || setupRequest.current
-          || (!runAbort.current && (journal.current || recoveringRef.current || loadRunJournal()))) return;
+    (mut: (prev: CanvasDocument) => CanvasDocument, opts?: { label?: string; silent?: boolean; serverIdentity?: boolean; lane?: number }) => {
+      if (readOnlyRef.current || outdatedObserver.current || setupRequest.current) return;
+      // A review loop or a collaboration holds the whole canvas, as every run once did.
+      if (opts?.lane === undefined && laneGuard.current.exclusive()) return;
       const prev = docRef.current;
       const proposed = mut(prev);
       const next = opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed);
       if (next === prev) return;
+      const busy = laneGuard.current.busy(opts?.lane);
+      if (busy.size && touchesBusyNodes(prev, next, busy)) {
+        if (!opts?.silent) setHandoffNote(surfaceNotice(t, 'node_busy_edit'));
+        return;
+      }
 
       if (!opts?.silent) {
         const label = opts?.label ?? 'edit';
@@ -436,10 +505,17 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   // User callbacks can outlive their idle render. The journal/ref checks also cover
   // acceptance before React commits `running`, waiting nodes, and terminal settlement.
-  const canEditStructure = useCallback((allowBindingSave = false) => !(
-    readOnlyRef.current || outdatedObserver.current || setupRequest.current || runAbort.current || journal.current || loadRunJournal() || recoveringRef.current
-    || (inspectorCloseLocked.current && !allowBindingSave) || hasStreamingConversation(docRef.current.nodes)
-  ), []);
+  // `touching` names the nodes an edit changes: such an edit may go ahead while other nodes run. Without it the
+  // canvas must be idle (undo, a plan, settings that reach every node).
+  const canEditStructure = useCallback((allowBindingSave = false, touching?: ReadonlyArray<string>) => {
+    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || (inspectorCloseLocked.current && !allowBindingSave)) return false;
+    if (touching) {
+      if (laneGuard.current.exclusive()) return false;
+      const busy = laneGuard.current.busy();
+      return !touching.some(id => busy.has(id)) && !hasStreamingConversation(docRef.current.nodes.filter(node => touching.includes(node.id)));
+    }
+    return !laneGuard.current.active() && !recoveringRef.current && !hasStreamingConversation(docRef.current.nodes);
+  }, []);
 
   /**
    * Step to a stored document without recording it as a new edit. The camera is not history (its
@@ -447,7 +523,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
    * step was taken, which the screen would not show and a reopen would land on.
    */
   const restoreDoc = useCallback((target: CanvasDocument) => {
-    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || loadRunJournal()) return;
+    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || laneGuard.current.active()) return;
     lastCommit.current = null;
     const live = docRef.current;
     const restored = invalidateOutputs(live, { ...target, view: live.view, nodes: target.nodes.map(node => {
@@ -495,8 +571,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   useEffect(() => {
     // Another tab can clear the durable journal before this observer adopts its final
     // document. Keep queued ordinary saves from publishing our previous canvas in that gap.
-    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current
-        || (!runAbort.current && (journal.current || recoveringRef.current || loadRunJournal()))) return;
+    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current) return;
+    // Lanes keep the canvas editable while they run, so ordinary saves go on, but only over the document this page
+    // wrote last: a different one is another tab's (a run it finished), which this page's observer adopts instead.
+    if (laneGuard.current.active() || recoveringRef.current) {
+      let cached: string | null = null;
+      try { cached = canvasStorage().getItem(CANVAS_STORAGE_KEY); } catch { return; }
+      if (cached !== lastSavedRaw.current) return;
+    }
     saveLocalDocument({ ...doc, edges });
   }, [doc, edges, readOnly, saveLocalDocument]);
 
@@ -554,7 +636,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // The operator's camera waiting out the save debounce (see the viewport persistence below).
   const pendingCameraSave = useRef<{ timer: ReturnType<typeof setTimeout>; camera: ViewportState; save: () => void } | null>(null);
   const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: { w: number; h: number }, automatic = false) => {
-    const next = fitNodeOverview(fitNodes, box);
+    const next = fitNodeOverview(fitNodes, box, cardFramesRef.current);
     lastAutoView.current = next;
     // The app refits only a camera it may take over (a requested fit, say): the operator's camera still waiting to be
     // saved is saved now, before the refit replaces it, if it is still the live one (not a frame the camera has left).
@@ -586,7 +668,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId, narrowFocusWidth(size.w)), [nodes, focusedId, size.w]);
+  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId, narrowFocusWidth(size.w), cardFrames), [nodes, focusedId, size.w, cardFrames]);
   const renderNodeById = useMemo(() => new globalThis.Map(renderNodes.map(node => [node.id, node])), [renderNodes]);
   // Focus pushes the pre-focus viewport so a second press returns exactly where you were.
   const focusReturn = useRef<ViewportState | null>(null);
@@ -727,7 +809,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   focusNodeRef.current = focusNode;
 
   const arrangeNodes = useCallback(() => {
-    if (!canEditStructure()) return;
+    if (!canEditStructure(false, [])) return;
     const arranged = arrangeNodePositions(docRef.current.nodes, docRef.current.edges);
     patchDoc(previous => ({ ...previous, nodes: arranged }), { label: 'arrange:nodes' });
     setInspectorId(null);
@@ -808,41 +890,123 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   );
 
   // ---- run state ----------------------------------------------------------------------------
-  const [initialJournal] = useState(() => readOnly ? null : loadRunJournal());
-  const journal = useRef<CanvasRunJournal | null>(initialJournal);
-  const [recovering, setRecovering] = useState(Boolean(initialJournal));
+  // Runs happen in lanes (runLanes.ts): a node's chat or one component's task runs beside the others instead of
+  // holding the whole canvas. Each lane has its own durable journal, abort controller and recovery observer; the
+  // board reads the aggregate (every lane's badges, whether anything runs, which nodes are busy).
+  type RunLane = {
+    journal: { current: CanvasRunJournal | null };
+    abort: { current: AbortController | null };
+    /** Claimed by a start that has not written its journal yet (so two quick starts never share a lane). */
+    reserved: Set<string> | null;
+  };
+  const [initialJournals] = useState(() => readOnly ? [] : loadLaneJournals());
+  const initialOf = (lane: number) => initialJournals.find(item => item.lane === lane)?.journal ?? null;
+  const lanes = useRef<RunLane[] | null>(null);
+  if (!lanes.current) lanes.current = RUN_LANES.map(lane => ({ journal: { current: initialOf(lane) }, abort: { current: null }, reserved: null }));
+  const laneList = lanes.current;
+  // Two nodes bound to one agent take turns, even when they run in different lanes.
+  const agentQueue = useRef(new globalThis.Map<string, Promise<unknown>>());
+  const [laneRuns, setLaneRuns] = useState<Array<Record<string, RunView>>>(() => RUN_LANES.map(lane => initialOf(lane)?.nodes ?? {}));
+  const [laneRunning, setLaneRunning] = useState<boolean[]>(() => RUN_LANES.map(lane => Boolean(initialOf(lane))));
+  const [laneRecovering, setLaneRecovering] = useState<boolean[]>(() => RUN_LANES.map(lane => Boolean(initialOf(lane))));
+  const laneRecoveringRef = useRef(laneRecovering);
+  laneRecoveringRef.current = laneRecovering;
+  // Lanes never share a node, so their badges merge without conflict; a lane that starts takes its nodes' badges.
+  const runs = useMemo(() => Object.assign({}, ...laneRuns) as Record<string, RunView>, [laneRuns]);
+  const running = laneRunning.some(Boolean);
+  const recovering = laneRecovering.some(Boolean);
   const recoveringRef = useRef(recovering);
   recoveringRef.current = recovering;
-  const [runs, setRuns] = useState<Record<string, RunView>>(() => initialJournal?.nodes ?? {});
-  const [running, setRunning] = useState(Boolean(initialJournal));
-  const [reviewRound, setReviewRound] = useState(initialJournal?.review?.round ?? 0);
+  const laneSetters = useMemo(() => RUN_LANES.map(lane => ({
+    setRuns: (value: Record<string, RunView> | ((previous: Record<string, RunView>) => Record<string, RunView>)) => setLaneRuns(previous => {
+      const next = [...previous];
+      next[lane] = typeof value === 'function' ? value(previous[lane]) : value;
+      return next;
+    }),
+    setRunning: (value: boolean) => setLaneRunning(previous => previous[lane] === value ? previous : previous.map((item, index) => index === lane ? value : item)),
+    setRecovering: (value: boolean) => setLaneRecovering(previous => previous[lane] === value ? previous : previous.map((item, index) => index === lane ? value : item)),
+  })), []);
+  /** Clear badges across every lane (an edit that makes earlier results no longer describe the canvas). */
+  const setAllRuns = useCallback((update: (previous: Record<string, RunView>) => Record<string, RunView>) => setLaneRuns(previous => previous.map(update)), []);
+  /** A lane holds work: its journal (here or written by another tab), a live executor, or a start in progress. A reader
+   *  never runs or recovers, so another tab's stored journal does not lock its view. */
+  const laneActive = useCallback((lane: number) => {
+    const state = laneList[lane];
+    return Boolean(state.journal.current || state.abort.current || state.reserved || (!readOnly && canvasStorage().getItem(laneJournalKey(lane))));
+  }, [laneList, readOnly]);
+  const laneJournal = useCallback((lane: number) => laneList[lane].journal.current ?? (readOnly ? null : loadRunJournal(laneStorage(lane))), [laneList, readOnly]);
+  const anyLaneActive = useCallback(() => RUN_LANES.some(laneActive), [laneActive]);
+  /** A review loop or a collaboration runs alone: while one is active nothing else starts or changes. */
+  const exclusiveLaneActive = useCallback(() => RUN_LANES.some(lane => exclusiveJournal(laneJournal(lane))), [laneJournal]);
+  /** The nodes lanes are executing (optionally leaving one lane out: a lane may change its own nodes). A start that has
+   *  not been accepted yet only reserves its nodes against a second start (`forAdmission`); until its journal exists
+   *  they stay editable, and its acceptance refuses a canvas that changed meanwhile, exactly as a single run did. */
+  const busyNodeIds = useCallback((exceptLane?: number, forAdmission = false): Set<string> => {
+    const busy = new Set<string>();
+    for (const lane of RUN_LANES) {
+      if (lane === exceptLane) continue;
+      const state = laneList[lane];
+      if (forAdmission) for (const id of state.reserved ?? []) busy.add(id);
+      const active = state.journal.current ?? (!readOnly && canvasStorage().getItem(laneJournalKey(lane)) ? loadRunJournal(laneStorage(lane)) : null);
+      for (const id of active?.scope ?? []) busy.add(id);
+    }
+    return busy;
+  }, [laneList, readOnly]);
+  const laneOfNode = useCallback((nodeId: string) => RUN_LANES.find(lane => laneJournal(lane)?.scope.includes(nodeId)), [laneJournal]);
+  laneGuard.current = { busy: busyNodeIds, active: anyLaneActive, exclusive: exclusiveLaneActive };
+  laneGuardLaneActive.current = laneActive;
+  // A collaboration runs alone, so at most one lane holds one.
+  const collaborationJournal = RUN_LANES.map(lane => laneList[lane].journal.current).find(item => item?.collaboration) ?? null;
+  // What the board locks this render: the nodes lanes execute, or everything while a review/collaboration runs.
+  const busyNow = busyNodeIds();
+  const exclusiveNow = exclusiveLaneActive();
+  // A node running on its own (a chat, or 运行节点) can be stopped from its card without touching the other lanes.
+  // A node that is one step of a larger run is stopped with that run, from the toolbar.
+  const soloRunning = new Set<string>();
+  RUN_LANES.forEach(lane => {
+    const scope = laneRunning[lane] ? laneList[lane].journal.current?.scope : undefined;
+    if (scope?.length === 1 && !laneList[lane].journal.current?.collaboration) soloRunning.add(scope[0]);
+  });
+  const [reviewRound, setReviewRound] = useState(initialJournals.find(item => item.journal.review)?.journal.review?.round ?? 0);
   const [runSummary, setRunSummary] = useState<Parameters<typeof RunControls>[0]['summary']>(null);
   const [stopped, setStopped] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const runAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     if (readOnly) return;
     const observeOtherTab = (event: StorageEvent) => {
       if (readOnlyRef.current || outdatedObserver.current) return;
-      if (event.key !== canvasStorageKey(CANVAS_RUN_JOURNAL_KEY) || runAbort.current) return;
-      const active = loadRunJournal();
+      const lane = laneOfStorageKey(event.key);
+      if (lane === null || laneList[lane].abort.current) return;
+      const active = loadRunJournal(laneStorage(lane));
       if (active) {
-        journal.current = active; setRuns(active.nodes); setReviewRound(active.review?.round ?? 0); setRunning(true); setRecovering(true);
+        const { setRuns, setRunning, setRecovering } = laneSetters[lane];
+        laneList[lane].journal.current = active; setRuns(active.nodes); setReviewRound(active.review?.round ?? 0); setRunning(true); setRecovering(true);
       }
     };
     window.addEventListener('storage', observeOtherTab);
     return () => window.removeEventListener('storage', observeOtherTab);
   }, [readOnly]);
   // A page reload detaches observation; only an explicit Stop cancels native execution.
-  const updateJournal = useCallback((nodeId: string, patch: Parameters<typeof patchRunJournalNode>[2]) => {
+  const updateJournalFor = useCallback((lane: number) => (nodeId: string, patch: Parameters<typeof patchRunJournalNode>[2]) => {
+    const journal = laneList[lane].journal;
     if (readOnlyRef.current || outdatedObserver.current || !journal.current) return;
     journal.current = patchRunJournalNode(journal.current, nodeId, patch);
-    if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
-  }, []);
-  useEffect(() => {
-    if (readOnly || !recovering || outdatedObserver.current) return;
+    if (!saveRunJournal(journal.current, laneStorage(lane))) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
+  }, [laneList]);
+  // One lane's recovery observer (a server graph being watched, a detached chat, another tab's run). The body below
+  // is the single-run observer, bound to its lane: `journal`, the lane's storage and lock, and its badge setters.
+  const observeLane = useCallback((lane: number): (() => void) => {
+    const journal = laneList[lane].journal;
+    const { setRuns, setRunning, setRecovering } = laneSetters[lane];
+    const storage = laneStorage(lane, baseStorage);
+    const CANVAS_RUN_JOURNAL_KEY = RUN_JOURNAL_KEY;
+    const loadRunJournal = (from: Pick<Storage, 'getItem'> = storage) => loadJournal(from);
+    const saveRunJournal = (value: CanvasRunJournal, to: Pick<Storage, 'setItem'> = storage) => saveJournal(value, to);
+    const clearRunJournal = (target: Parameters<typeof clearJournal>[0] | string, expected?: string) =>
+      typeof target === 'string' ? clearJournal(storage, target) : clearJournal(target, expected);
+    const withCanvasRunOwnership = (run: () => Promise<void>, refused: () => void) => withLaneOwnership(lane, run, refused);
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const capturedDocumentKey = canvasStorageKey(CANVAS_STORAGE_KEY);
@@ -859,7 +1023,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const hasNoUnsavedSourceEdits = () => {
       const live = canonicalCanvasDocumentJSON(docRef.current);
       const pending = pendingRecoveryDocument.current;
-      return live === lastSavedDocument.current || Boolean(pending && pending.document === live
+      // Where someone is looking (the camera, saved as they pan) is not an edit a recovery could lose.
+      return live === lastSavedDocument.current || sansCamera(live) === sansCamera(lastSavedDocument.current)
+        || Boolean(pending && pending.document === live
         && pending.storageKey === capturedDocumentKey && pending.journalId === (loadRunJournal()?.id ?? journal.current?.id));
     };
     const canWriteRecovery = () => {
@@ -868,13 +1034,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // Scoped fingerprints omit unrelated nodes, drafts and history. Protect the complete
       // durable base AND any unsaved source edits in this page before rewriting the cache.
       // Only an exact recovery result that this observer failed to save may be retried.
-      return cached.status === 'ok' && canonicalCanvasDocumentJSON(cached.doc) === lastSavedDocument.current
-        && hasNoUnsavedSourceEdits() ? true : pauseOutdatedObserver();
+      if (cached.status !== 'ok' || canonicalCanvasDocumentJSON(cached.doc) !== lastSavedDocument.current) return pauseOutdatedObserver();
+      if (hasNoUnsavedSourceEdits()) return true;
+      // Lanes leave the canvas editable while they run: an edit this page made a moment ago (a card moved, another
+      // node's chat) is this page's newest document over the cache it last wrote. Save it first, then recover over it.
+      return saveLocalDocument(docRef.current) || pauseOutdatedObserver();
     };
+    // Node preparation (another lane starting) rewrites the document through the server: wait for it.
+    const preparing = () => Boolean(setupRequest.current);
     const refreshedHistories = new Set<string>();
     setHandoffNote(surfaceNotice(t, 'recovering_run'));
     const poll = () => withCanvasRunOwnership(async () => {
       if (!observerIsActive()) return;
+      if (preparing()) { timer = setTimeout(() => void poll(), 600); return; }
       const durable = loadRunJournal();
       if (!durable) {
         if (!hasNoUnsavedSourceEdits()) { pauseOutdatedObserver(); return; }
@@ -914,7 +1086,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         if (!observerIsActive()) return;
         if (!hasNoUnsavedSourceEdits()) { pauseOutdatedObserver(); return; }
         docRef.current = current.doc; setDoc(current.doc);
-        lastSavedDocument.current = canonicalCanvasDocumentJSON(current.doc);
+        lastSavedDocument.current = canonicalCanvasDocumentJSON(current.doc); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
         lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(current.doc));
         pendingRecoveryDocument.current = null;
         journal.current = null; setRecovering(false); setRunning(false); setRuns({}); setReviewRound(0);
@@ -967,7 +1139,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setRuns(next.nodes);
       setReviewRound(next.review?.round ?? 0);
       setRunStartedAt(next.startedAt);
-      if (!next.collaboration) setTimelineOpen(true);
+      if (!next.collaboration && next.scope.length > 1 && !simpleRef.current) setTimelineOpen(true);
       const recovered = applyRecoveredDocument(docRef.current, { ...next, inputFingerprint: next.inputFingerprint ?? '' });
       docRef.current = recovered; setDoc(recovered);
       // Persist the complete batch before deleting its recovery journal.
@@ -1048,7 +1220,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     });
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [readOnly, recovering, patchDoc, saveLocalDocument, t, locale, focusNode]);
+  }, [laneList, laneSetters, patchDoc, saveLocalDocument, t, locale, focusNode]);
+  // Each recovering lane has its own observer; it stops when the lane settles.
+  const laneObservers = useRef(new globalThis.Map<number, () => void>());
+  useEffect(() => {
+    if (readOnly || outdatedObserver.current) return;
+    for (const lane of RUN_LANES) {
+      const stop = laneObservers.current.get(lane);
+      if (laneRecovering[lane] && !stop) laneObservers.current.set(lane, observeLane(lane));
+      else if (!laneRecovering[lane] && stop) { stop(); laneObservers.current.delete(lane); }
+    }
+  }, [readOnly, laneRecovering, observeLane]);
+  useEffect(() => () => { for (const stop of laneObservers.current.values()) stop(); laneObservers.current.clear(); }, []);
   useEffect(() => {
     if (!running) return undefined;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -1078,7 +1261,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (!mounted.current || controller.signal.aborted || readOnlyRef.current) throw new Error(locale === 'zh' ? '节点准备已取消。' : 'Node setup was cancelled.');
       docRef.current = document; setDoc(document);
       lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(document));
-      lastSavedDocument.current = canonicalCanvasDocumentJSON(document);
+      lastSavedDocument.current = canonicalCanvasDocumentJSON(document); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
       return document;
     } finally {
       if (setupRequest.current === controller) setupRequest.current = null;
@@ -1089,6 +1272,38 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const startRun = useCallback((scope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
     if (readOnlyRef.current || outdatedObserver.current) return Promise.resolve();
     if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
+    // ---- admission: a free lane whose nodes no running work touches ----
+    const executingIds = new Set(scope ?? docRef.current.nodes.map(node => node.id));
+    // A whole-canvas run, a review loop and a collaboration run alone; so does anything while one of them runs.
+    const alone = !scope || Boolean(collaboration) || (!manualMessage && Boolean(docRef.current.execution));
+    const activeLanes = RUN_LANES.filter(laneActive);
+    if (activeLanes.length && (alone || exclusiveLaneActive())) { setHandoffNote(surfaceNotice(t, 'run_wait_others')); return Promise.resolve(); }
+    const busyIds = busyNodeIds(undefined, true);
+    if ([...executingIds].some(id => busyIds.has(id))) { setHandoffNote(surfaceNotice(t, 'node_already_running')); return Promise.resolve(); }
+    const lane = RUN_LANES.find(candidate => !laneActive(candidate));
+    if (lane === undefined) { setHandoffNote(surfaceNotice(t, 'run_lanes_full')); return Promise.resolve(); }
+    // Claimed until this start writes its journal or gives up, so a second quick start picks another lane.
+    laneList[lane].reserved = executingIds;
+    // ---- the run itself, bound to its lane ----
+    const journal = laneList[lane].journal;
+    const runAbort = laneList[lane].abort;
+    const { setRuns: setLaneOwnRuns, setRunning, setRecovering } = laneSetters[lane];
+    // A lane that starts takes its nodes' badges from earlier runs in other lanes; its own earlier badges go.
+    const setRuns = (value: Record<string, RunView> | ((previous: Record<string, RunView>) => Record<string, RunView>)) => {
+      if (typeof value !== 'function' && !Object.keys(value).length) {
+        setLaneRuns(previous => previous.map((item, index) => index === lane ? {} : Object.fromEntries(Object.entries(item).filter(([id]) => !executingIds.has(id)))));
+        return;
+      }
+      setLaneOwnRuns(value);
+    };
+    const updateJournal = updateJournalFor(lane);
+    const canvasStorage = () => laneStorage(lane, baseCanvasStorage());
+    const loadRunJournal = (from: Pick<Storage, 'getItem'> = laneStorage(lane)) => loadJournal(from);
+    const saveRunJournal = (value: CanvasRunJournal, to: Pick<Storage, 'setItem'> = laneStorage(lane)) => saveJournal(value, to);
+    const clearRunJournal = (target: Parameters<typeof clearJournal>[0] | string, expected?: string) =>
+      typeof target === 'string' ? clearJournal(laneStorage(lane), target) : clearJournal(target, expected);
+    const withCanvasRunOwnership = (run: () => Promise<void>, refused: () => void) => withLaneOwnership(lane, run, refused);
+    const release = () => { if (laneList[lane].reserved === executingIds) laneList[lane].reserved = null; };
     const collaborationRevision = collaboration ? canvasPlanRevision(docRef.current) : undefined;
     // Ownership can arrive after another edit. A manual send belongs to the exact Session
     // and draft that initiated it, never whichever Session happens to be selected later.
@@ -1099,6 +1314,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       ? getNodeThreads(submittedNode).find(thread => thread.id === activeThreadId(submittedNode))
       : undefined;
     return withCanvasRunOwnership(async () => {
+    try {
+    // Another lane may be preparing its nodes (that rewrites the document through the server): wait for it.
+    for (let waited = 0; setupRequest.current && waited < 30_000; waited += 150) await new Promise(resolve => setTimeout(resolve, 150));
     // Synchronous re-entrancy guard on the REF: React state commits asynchronously, so a double
     // click could otherwise start two overlapping runs whose callbacks interleave into one map.
     if (!mounted.current || currentSaaSCanvas() !== cloudScope || readOnlyRef.current || outdatedObserver.current || setupRequest.current || runAbort.current || journal.current) return;
@@ -1133,7 +1351,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // Another tab's document: what this page's undo knew about the plan no longer describes it.
       planStep.current?.reset();
       lastSavedRevision.current = persistedRevision;
-      lastSavedDocument.current = canonicalCanvasDocumentJSON(persistedCanvas.doc);
+      lastSavedDocument.current = canonicalCanvasDocumentJSON(persistedCanvas.doc); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
       setHandoffNote(surfaceNotice(t, 'canvas_changed_elsewhere'));
       return;
     }
@@ -1149,7 +1367,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setHandoffNote(surfaceNotice(t, 'canvas_changed_elsewhere')); return;
     }
     if (inspectorCloseLocked.current) { setHandoffNote(surfaceNotice(t, 'bind_before_run')); return; }
-    if (hasStreamingConversation(docRef.current.nodes)) { setHandoffNote(surfaceNotice(t, 'wait_conversation')); return; }
+    if (hasStreamingConversation(docRef.current.nodes.filter(node => executingIds.has(node.id)))) { setHandoffNote(surfaceNotice(t, 'wait_conversation')); return; }
     if (!currentSaaSCanvas() && nodes.some(node => node.kind === 'session' && node.team && (!scope || scope.includes(node.id)))) {
       setHandoffNote(locale === 'zh' ? '此工作区未提供节点团队执行能力，请使用 SaaS 工作区运行。' : 'This workspace cannot execute node teams. Run this canvas in a SaaS workspace.'); return;
     }
@@ -1223,7 +1441,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setReviewRound(0);
     setRunStartedAt(Date.now());
     setNow(Date.now());
-    setTimelineOpen(!collaboration);
+    // A component running on its own shows its progress on its card, so the timeline (which would cover the board other
+    // components keep working on) opens only for a run of several steps, and never on the chat-first surface.
+    if (!collaboration && pending.scope.length > 1 && !simpleRef.current) setTimelineOpen(true);
     if (pending.serverGraph) {
       const submissionStorage = canvasStorage();
       let admitted = false;
@@ -1260,6 +1480,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const nativeExec = createGatewayExecutor({
       gatewayBase: gatewayApiBase(),
       signal: ac.signal,
+      // One queue for every lane: two nodes bound to one agent take turns even across side-by-side runs.
+      agentQueue: agentQueue.current,
       deferFinalPresentation: true,
       operationIdForNode: nodeId => journal.current?.nodes[nodeId]?.operationId ?? undefined,
       // Display metadata is captured separately; the Agent receives the complete execution
@@ -1279,7 +1501,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           ...prev,
           nodes: prev.nodes.map((n) => (n.id === nodeId && n.kind === 'session'
             ? updateThreadIssueId(n, threadId ?? activeThreadId(n), issueId) : n)),
-        }), { silent: true, serverIdentity: true });
+        }), { silent: true, serverIdentity: true, lane });
       },
       onRunAccepted: (nodeId, identity) => updateJournal(nodeId, identity),
       onCancelFailure: (_nodeId, detail) => setHandoffNote(stopUnconfirmedMessage(t, detail)),
@@ -1310,7 +1532,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         if (runAbort.current !== ac) return;
         const stamp = Date.now();
         if (!manualMessage && !reviewPolicy && (status.state === 'done' || status.state === 'failed' || status.state === 'cancelled') && status.output) {
-          patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, lastOutput: { text: status.output!, at: stamp, source: 'run' as const, ...(status.state !== 'done' ? { partial: true } : {}) } } : n) }), { silent: true });
+          patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, lastOutput: { text: status.output!, at: stamp, source: 'run' as const, ...(status.state !== 'done' ? { partial: true } : {}) } } : n) }), { silent: true, lane });
         }
         setRuns(prev => ({ ...prev, [nodeId]: { ...status, startedAt: prev[nodeId]?.startedAt ?? stamp, ...(status.state !== 'waiting' && status.state !== 'running' ? { endedAt: stamp } : {}) } }));
     };
@@ -1415,11 +1637,20 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setStopped(finalSummary.cancelled > 0);
       setRunSummary(finalSummary);
     }
-    }, () => setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere')));
-  }, [patchDoc, saveLocalDocument, updateJournal, prepareNodes, locale, t, runUnavailableReason]);
+    } finally { release(); }
+    }, () => { release(); setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere')); });
+  }, [patchDoc, saveLocalDocument, updateJournalFor, prepareNodes, locale, t, runUnavailableReason, laneActive, exclusiveLaneActive, busyNodeIds, laneList, laneSetters]);
 
-  const stopRun = useCallback(() => {
+  const stopLane = useCallback((lane: number) => {
     if (readOnlyRef.current || outdatedObserver.current) return;
+    const journal = laneList[lane].journal;
+    const runAbort = laneList[lane].abort;
+    const { setRuns } = laneSetters[lane];
+    const recovering = laneRecoveringRef.current[lane];
+    const loadRunJournal = () => loadJournal(laneStorage(lane));
+    const saveRunJournal = (value: CanvasRunJournal) => saveJournal(value, laneStorage(lane));
+    const withCanvasRunOwnership = (run: () => Promise<void>, refused: () => void, _locks?: undefined, wait = false) => withLaneOwnership(lane, run, refused, undefined, wait);
+    if (!journal.current && !runAbort.current) journal.current = loadRunJournal();
     if (journal.current?.serverGraph) {
       journal.current = { ...journal.current, serverGraph: { ...journal.current.serverGraph, cancelRequested: true } };
       if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
@@ -1452,7 +1683,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         }, () => setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere')), undefined, true);
       });
     }
-  }, [recovering, updateJournal, t]);
+  }, [laneList, laneSetters, t]);
+  /** Stop: every lane that holds work (the toolbar and the palette). A node stops only its own lane (stopNode). */
+  const stopRun = useCallback(() => { for (const lane of RUN_LANES) if (laneActive(lane)) stopLane(lane); }, [laneActive, stopLane]);
+  const stopNode = useCallback((nodeId: string) => { const lane = laneOfNode(nodeId); if (lane !== undefined) stopLane(lane); }, [laneOfNode, stopLane]);
 
   /**
    * Every node downstream of `roots`, plus the roots themselves — the set a change at `roots`
@@ -1498,7 +1732,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     (nodeId: string, preview: string, threadId?: string) => {
       // Recovery can briefly display a previously loaded transcript while another tab has
       // already saved the final document. Never write that stale tail back into its preview.
-      if (recovering || (journal.current && !runAbort.current)) return;
+      // With lanes, only the nodes a run executes are recovering; every other node keeps its preview.
+      if (laneGuard.current.busy().has(nodeId)) return;
       patchDoc((prev) => {
         const target = prev.nodes.find((n) => n.id === nodeId);
         if (!target || target.kind !== 'session') return prev;
@@ -1510,21 +1745,24 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         };
       }, { silent: true });
     },
-    [patchDoc, recovering],
+    [patchDoc],
   );
 
   const persistDraft = useCallback((nodeId: string, threadId: string, draft: string) => {
-    if (readOnlyRef.current || runAbort.current || inspectorCloseLocked.current) return;
+    // Once a node's own run executes, its draft belongs to that run's acceptance (as with the single run before lanes);
+    // a draft typed while the run still waits for ownership is kept, and every other node's draft saves while others run.
+    const executing = RUN_LANES.some(lane => laneList[lane].abort.current && laneList[lane].journal.current?.scope.includes(nodeId));
+    if (readOnlyRef.current || inspectorCloseLocked.current || executing) return;
     patchDoc(prev => {
       const target = prev.nodes.find(node => node.id === nodeId);
       if (!target || target.kind !== 'session') return prev;
       const next = updateNodeDraft(target, draft, threadId);
       return next === target ? prev : { ...prev, nodes: prev.nodes.map(node => node.id === nodeId ? next : node) };
     }, { silent: true });
-  }, [patchDoc]);
+  }, [patchDoc, laneList]);
 
   const toggleDeliverables = useCallback((nodeId: string, open: boolean) => {
-    if (!canEditStructure()) return;
+    if (!canEditStructure(false, [])) return;
     const target = docRef.current.nodes.find(node => node.id === nodeId);
     if (!target || target.kind !== 'session' || Boolean(target.deliverablesOpen) === open || hasStreamingConversation([target])) return;
     patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => {
@@ -1537,7 +1775,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const addNode = useCallback(
     (kind: AddNodeKind, world: { x: number; y: number }) => {
-      if (!canEditStructure()) return;
+      if (!canEditStructure(false, [])) return;
       const media = canInitialize ? mediaKindOf(kind) : null;
       // A cloud image or video node is a plain generator: no role template, delivery format or
       // team. The first catalog model is shown, and runs only once the operator saves it.
@@ -1565,7 +1803,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
    */
   const moveNode = useCallback(
     (nodeId: string, x: number, y: number) => {
-      if (!canEditStructure()) return;
+      if (!canEditStructure(false, [])) return;
       patchDoc(
         (prev) => {
           const target = prev.nodes.find((n) => n.id === nodeId);
@@ -1606,7 +1844,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const resizeNode = useCallback(
     (nodeId: string, w: number, h: number) => {
-      if (!canEditStructure()) return;
+      if (!canEditStructure(false, [])) return;
       patchDoc((prev) => ({ ...prev, nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, w, h } : n)) }), {
         label: `resize:${nodeId}`,
       });
@@ -1616,7 +1854,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const deleteNodes = useCallback(
     (ids: ReadonlyArray<string>) => {
-      if (!canEditStructure()) return;
+      if (!canEditStructure(false, ids)) return;
       if (!ids.length) return;
       const kill = new Set(ids);
       const removed = docRef.current.nodes.filter(node => kill.has(node.id));
@@ -1641,7 +1879,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const saveNode = useCallback(
     (next: CanvasNode, allowBindingSave = false) => {
-      if (!canEditStructure(allowBindingSave)) return;
+      if (!canEditStructure(allowBindingSave, [next.id])) return;
       const current = docRef.current.nodes.find(n => n.id === next.id);
       if (current?.kind === 'session' && next.kind === 'session' &&
         activeThreadId(current) !== activeThreadId(next) && hasStreamingConversation([current])) return;
@@ -1659,7 +1897,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (current?.kind === 'session' && next.kind === 'session' && (JSON.stringify(current.team) !== JSON.stringify(next.team)
         || JSON.stringify(current.taskFrame) !== JSON.stringify(next.taskFrame))) {
         const affected = new Set(downstreamClosure([next.id]));
-        setRuns(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !affected.has(id))));
+        setAllRuns(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !affected.has(id))));
         setRunSummary(null);
       }
       setHandoffNote('');
@@ -1671,7 +1909,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const saveInspector = useCallback((draft: CanvasNode) => {
     if (readOnlyRef.current) return;
     const live = docRef.current.nodes.find(n => n.id === draft.id);
-    if (!live || !canEditStructure(true)) return;
+    if (!live || !canEditStructure(true, [draft.id])) return;
     if (live.kind === 'session' && draft.kind === 'session') {
       const bindingChanged = live.binding?.companyId !== draft.binding?.companyId || live.binding?.agentId !== draft.binding?.agentId;
       const configChanged = !bindingChanged && boundAgentConfigurationChanged(live, draft);
@@ -1689,8 +1927,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [canEditStructure, saveNode]);
   const initializeInspector = useCallback(async (draft: SessionNode) => {
     let completed = false;
-    await withCanvasRunOwnership(async () => {
-      if (readOnlyRef.current || setupRequest.current || runAbort.current || journal.current || loadRunJournal()) throw new Error(locale === 'zh' ? '请等待当前任务结束后再保存配置。' : 'Wait for the current task before saving configuration.');
+    // Any free lane's lock: preparing one node never waits for another node's chat or task.
+    const lane = RUN_LANES.find(candidate => !laneGuardLaneActive.current(candidate)) ?? 0;
+    await withLaneOwnership(lane, async () => {
+      if (readOnlyRef.current || setupRequest.current || laneGuard.current.exclusive() || laneGuard.current.busy().has(draft.id)) throw new Error(locale === 'zh' ? '请等待当前任务结束后再保存配置。' : 'Wait for the current task before saving configuration.');
       saveInspector(draft);
       await prepareNodes([draft.id]);
       completed = true;
@@ -1700,7 +1940,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const onConnect = useCallback(
     (from: PortRef, to: PortRef, dataType: DataType) => {
-      if (!canEditStructure()) return;
+      if (!canEditStructure(false, [from.nodeId, to.nodeId])) return;
       patchDoc((prev) => {
         const id = edgeId(from, to);
         if (prev.edges.some((e) => e.id === id)) return prev;
@@ -1720,7 +1960,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const disconnect = useCallback(
     (edge: CanvasEdge) => {
-      if (!canEditStructure()) return;
+      if (!canEditStructure(false, [edge.fromNode, edge.toNode])) return;
       patchDoc((prev) => ({ ...prev, edges: prev.edges.filter((e) => e.id !== edge.id) }), {
         label: `disconnect:${edge.id}`,
       });
@@ -1759,16 +1999,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     (node: CanvasNode, turn: { runId?: string }, latest: boolean) => {
       // Graph retries have not yet appeared in transcript history. Do not combine a
       // historical message's run ID with the current graph's status or duplicate it.
-      if (currentGraphRunEntry(node, journal.current)) return null;
+      const lane = laneOfNode(node.id);
+      if (currentGraphRunEntry(node, lane === undefined ? null : laneJournal(lane))) return null;
       return turn.runId ? (
         <TeamRunDetails key={turn.runId} tenantId={cloudScope!.tenant.id} runId={turn.runId} defaultOpen={latest}
           runStatus={latest ? runs[node.id]?.state : undefined} />
       ) : null;
     },
-    [cloudScope, runs],
+    [cloudScope, runs, laneOfNode, laneJournal],
   );
   const tileCurrentRunDetails = useCallback((node: CanvasNode) => {
-    const active = journal.current;
+    const lane = laneOfNode(node.id);
+    const active = lane === undefined ? null : laneJournal(lane);
     const entry = currentGraphRunEntry(node, active);
     if (!cloudScope || !entry) return undefined;
     const pendingText = entry.state === 'blocked' ? (locale === 'zh' ? '本次任务未执行此节点。' : 'This node was not executed in the current task.')
@@ -1780,7 +2022,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       {entry.runId ? <TeamRunDetails key={entry.runId} tenantId={cloudScope.tenant.id} runId={entry.runId} runStatus={entry.state} defaultOpen />
         : <p role="status">{pendingText}</p>}
     </section>;
-  }, [cloudScope, runs, running, locale]);
+  }, [cloudScope, runs, running, locale, laneOfNode, laneJournal]);
   const tileOnSend = useCallback(
     (node: CanvasNode, message: string, onAccepted?: () => void, displayText?: string) => { void startRun([node.id], message, onAccepted, displayText); },
     [startRun],
@@ -1806,6 +2048,28 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     (id: string) => deleteNodes([id]),
     [deleteNodes],
   );
+  // Cards resized on the board (a view preference: allowed while running and for readers; never an undo step).
+  const resizeCard = useCallback((nodeId: string, w: number, h: number) => {
+    setCardFrames(previous => ({ ...previous, [nodeId]: clampCard(w, h) }));
+  }, []);
+  const toggleCardPreview = useCallback((nodeId: string) => {
+    setCardFrames(previous => {
+      if (showsPreview(previous[nodeId])) { const { [nodeId]: _shrunk, ...rest } = previous; return rest; }
+      return { ...previous, [nodeId]: clampCard(CARD_PREVIEW_DEFAULT.w, CARD_PREVIEW_DEFAULT.h) };
+    });
+  }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => saveCardFrames(cardFrames, new Set(docRef.current.nodes.map(node => node.id))), 300);
+    return () => clearTimeout(timer);
+  }, [cardFrames]);
+  // The results studio (成果工作台), over the board: one node's deliverables or the whole canvas's.
+  const [studio, setStudio] = useState<{ nodeId?: string; entryId?: string } | null>(null);
+  const openStudio = useCallback((nodeId?: string, entryId?: string) => setStudio({ nodeId, entryId }), []);
+  // Every file the canvas made, for previews that show what another node generated. Keyed on outputs only, so a
+  // moved card does not hand every card a new array (cards are memoised).
+  const outputsKey = nodes.map(node => node.kind === 'session'
+    ? `${node.id}\u0001${node.title}\u0001${node.lastOutput?.at ?? ''}\u0001${node.lastOutput?.text.length ?? 0}` : node.id).join('\u0002');
+  const canvasEntries = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: docRef.current.edges }).flatMap(group => group.entries), [outputsKey]);
   const [addMenu, setAddMenu] = useState<{ at: { x: number; y: number }; world: { x: number; y: number } } | null>(null);
   const [barMode, setBarMode] = useState<CommandBarMode | null>(null);
   const [minimapOpen, setMinimapOpen] = useState(true);
@@ -1817,7 +2081,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // SNAPSHOT of the graph, so a wire cut mid-run would not change what is executing — the user
   // would be shown a graph that no longer matches the timeline describing the run. Omitting
   // onConnect leaves the ports visible but inert (they are the graph's structure, not a control).
-  const wiring = useWiring({ nodes: renderNodes, edges, onConnect: readOnly || running || initializing ? undefined : onConnect, rootRef, view });
+  const wiring = useWiring({ nodes: renderNodes, edges, onConnect: readOnly || exclusiveNow || initializing || simple ? undefined : onConnect, rootRef, view });
   const marquee = useMarquee({
     enabled: selectionTool,
     nodes: renderNodes,
@@ -1866,7 +2130,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     [addNode],
   );
 
-  const canEdit = !running && !recovering && canEditStructure();
+  const canEdit = !exclusiveNow && canEditStructure(false, []);
   const commandActions: CanvasCommandActions = useMemo(
     () => readOnly ? ({
       fitAll, toggleTimeline: focusedId ? undefined : () => setTimelineOpen(o => !o),
@@ -1900,7 +2164,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
   const addWorkspaceAgent = useCallback((agent: WorkspaceAgent) => {
-    if (!canEditStructure()) return;
+    if (!canEditStructure(false, [])) return;
     const v = viewRef.current;
     const s = sizeRef.current;
     const node = createWorkspaceAgentNode(agent, { x: (-v.x + s.w / 2) / (v.scale || 1) - 170, y: (-v.y + s.h / 2) / (v.scale || 1) - 130 }, locale);
@@ -1909,7 +2173,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setSelection([node.id]); focusNode(node.id);
   }, [canEditStructure, patchDoc, focusNode, locale]);
   const addMarketAgent = useCallback((agent: TeamMarketAgent) => {
-    if (!canEditStructure()) return;
+    if (!canEditStructure(false, [])) return;
     const v = viewRef.current;
     const s = sizeRef.current;
     const node = createMarketplaceRoleNode(agent, { x: (-v.x + s.w / 2) / (v.scale || 1) - 170, y: (-v.y + s.h / 2) / (v.scale || 1) - 130 }, locale);
@@ -1917,7 +2181,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setSelection([node.id]); focusNode(node.id);
   }, [canEditStructure, patchDoc, focusNode, locale]);
   const createTemplate = useCallback(() => {
-    if (!canEditStructure()) return;
+    if (!canEditStructure(false, [])) return;
     const currentNodes = docRef.current.nodes;
     const world = currentNodes.length ? { x: boundsOfNodes(presentationNodes(currentNodes, null)).maxX + 160, y: 60 } : { x: 0, y: 0 };
     const template = createDevelopmentTemplate(world, locale);
@@ -1979,7 +2243,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setPlanning(previous => ({ ...previous, draft: [previous.draft.trim(), taskDraft.prompt].filter(Boolean).join('\n\n') }));
     setAssistantOpen(true);
   }, [taskDraft, readOnly, assistantPending]);
-  const [assistantOpen, setAssistantOpen] = useState(false);
+  // Simple mode is chat-first: on a desktop stage the assistant's conversation is open beside the canvas from the start.
+  const [assistantOpen, setAssistantOpen] = useState(() => simple && !readOnly && isDesktopStage());
   const [planningBusy, setPlanningBusy] = useState(false);
   // The assistant's canvas changes on the operator's model are outside today's calls up to a daily number (the server's
   // route usage says how many are left); read again whenever a plan settles, so the composer's note stays true.
@@ -2114,7 +2379,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (resume && !planningRecovery?.operationId) return '';
     if (planningRecovery?.pending && (!resume || !planningRecovery.matches)) return '';
     if (planningRequest.current) return '';
-    if (journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
+    if (laneGuard.current.active() || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
       return surfaceNotice(t, 'planning_busy');
     }
     return null;
@@ -2153,7 +2418,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const plan = jev?.plan ?? await planRequest(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress,
         resume ? { recoveryOperationId: planningRecovery!.operationId } : undefined);
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
-      if (canvasPlanRevision(docRef.current) !== revision || journal.current || runAbort.current || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
+      if (canvasPlanRevision(docRef.current) !== revision || laneGuard.current.active() || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale', route);
         setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
         return;
@@ -2765,7 +3030,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const v = viewRef.current;
     addPaletteModel(chosen.model, chosen.personaId, { x: (event.clientX - rect.left - v.x) / (v.scale || 1), y: (event.clientY - rect.top - v.y) / (v.scale || 1) });
   };
-  const modelShelf = canInitialize && !readOnly ? <ModelPersonaShelf modelsOnly
+  const modelShelf = canInitialize && !readOnly && !simple ? <ModelPersonaShelf modelsOnly
     configureModelsHref={personalCredentialsRequired ? accountURL('engines') : undefined}
     operatorManaged={!personalCredentialsRequired} groups={palette?.groups ?? []}
     loading={paletteLoading} error={paletteError} disabled={!canEdit || planningBusy || initializing || bindingLocked}
@@ -2785,10 +3050,43 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const currentModelCatalogue = cloudScope && palette?.tenantId === cloudScope.tenant.id && palette.canvasId === cloudScope.canvasId
     ? palette.models : undefined;
+  // The models a node's own chat can switch to, in its composer: the workspace's chat models for an agent, the
+  // media catalogue's models of its kind for an image, video or 3D node. Stable arrays, so cards stay memoised.
+  const chatModelChoices = useMemo<NodeModelChoice[]>(() => (currentModelCatalogue ?? []).map(model => ({
+    key: model.key, label: model.displayName || model.label, available: model.available, reason: model.reason,
+    group: palette?.groups.find(group => group.id === model.providerGroup)?.label,
+  })), [currentModelCatalogue, palette?.groups]);
+  const mediaModelChoices = useMemo<Record<MediaKind, NodeModelChoice[]>>(() => {
+    const catalogue = mediaCatalogueOf(mediaState);
+    const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: model.name, group: model.vendor, available: true }));
+    return { image: of('image'), video: of('video'), model3d: of('model3d') };
+  }, [mediaState]);
+  const modelChoicesRef = useRef({ chat: chatModelChoices, media: mediaModelChoices });
+  modelChoicesRef.current = { chat: chatModelChoices, media: mediaModelChoices };
+  const changeNodeModel = useCallback((nodeId: string, key: string) => {
+    const live = docRef.current.nodes.find(node => node.id === nodeId);
+    if (!live || live.kind !== 'session' || live.team) return;
+    const media = mediaKindOf(live.agentKind);
+    if (media) {
+      if (!modelChoicesRef.current.media[media].some(choice => choice.key === key)) return;
+      // Another model has other settings: its own defaults apply until they are set again.
+      const { mediaParams: _previous, ...rest } = live;
+      saveInspector({ ...rest, model: key });
+      return;
+    }
+    const choice = paletteRef.current?.models.find(model => model.key === key && model.available);
+    if (!choice) return;
+    saveInspector({ ...live, runtime: choice.runtime, model: choice.model, effort: choice.effort ?? '' });
+  }, [saveInspector]);
+  const tileModelChoices = (node: CanvasNode): ReadonlyArray<NodeModelChoice> | undefined => {
+    if (node.kind !== 'session' || readOnly || !canInitialize) return undefined;
+    const media = mediaKindOf(node.agentKind);
+    return media ? mediaModelChoices[media] : chatModelChoices;
+  };
 
   const renderInspector = (node: CanvasNode, inline = false) => (
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
-      readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || running} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
+      readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || busyNow.has(node.id) || exclusiveNow} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       media={canInitialize ? mediaState : undefined} onRetryMedia={() => setMediaRefresh(value => value + 1)}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
       onCreateCompany={!readOnly && onCreateCompany ? () => {
@@ -2805,7 +3103,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   );
 
   return (
-    <AgentWorkspace readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={running}
+    <AgentWorkspace simple={simple} readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={exclusiveNow}
       modelShelf={modelShelf}
       modelCatalogue={currentModelCatalogue}
       personaControls={modelShelf ? <ModelPersonaControls personaId={palettePersona} onPersonaChange={setPalettePersona}
@@ -2830,7 +3128,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         notice={initializing ? { kind: 'status', text: locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…' }
           : handoffNote ? { kind: 'alert', text: handoffNote, onDismiss: () => setHandoffNote('') } : undefined}
         onOpenNode={id => { focusNode(id); refocus('.awwo-view-switch button'); }}
-        onBack={() => { changeStageView('canvas'); refocus('.awwo-view-switch button'); }} receipt={results?.receipt} /> : undefined}
+        onBack={() => { changeStageView('canvas'); refocus('.awwo-view-switch button'); }} receipt={results?.receipt}
+        studio={results?.studio} studioTitle={t('studio.heading')} /> : undefined}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked || initializing}>{accountControl}</div>}
       toolbar={<>{!cloudScope && <GraphSettings doc={doc} selectedNodeId={selection[0]} selectedEdgeId={selectedEdgeId}
         disabled={readOnly || running || initializing || bindingLocked} onChange={next => { if (canEditStructure()) patchDoc(() => next, { label: 'graph-settings' }); }}
@@ -2862,9 +3161,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           setSelectedEdgeId(null);
           return undefined;
         }}
-        onBackgroundDoubleClick={readOnly || running || initializing ? undefined : (world) => addNode('llm', world)}
+        onBackgroundDoubleClick={readOnly || exclusiveNow || initializing || simple ? undefined : (world) => addNode('llm', world)}
         onBackgroundContextMenu={
-          readOnly || running
+          readOnly || exclusiveNow || simple
             ? undefined
             : (world, client) => {
                 const rect = rootRef.current?.getBoundingClientRect();
@@ -2875,10 +3174,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
               }
         }
       >
-        <WirePlane nodes={renderNodes} edges={edges} runs={journal.current?.collaboration ? {} : runs} running={running && !journal.current?.collaboration} round={doc.execution ? reviewRound : 0} scale={view.scale}
-          selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={readOnly || running || initializing ? undefined : setSelectedEdgeId}
-          preview={wiring.wireDrag} onDisconnect={readOnly || running || initializing ? undefined : disconnect} />
-        <CollaborationFlow nodes={renderNodes} collaboration={journal.current?.collaboration} running={running} scale={view.scale} />
+        <WirePlane nodes={renderNodes} edges={edges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
+          selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={readOnly || exclusiveNow || initializing || simple ? undefined : setSelectedEdgeId}
+          preview={wiring.wireDrag} onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />
+        <CollaborationFlow nodes={renderNodes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />
         {nodes.map((node) => (
           visibleIds.has(node.id) && (
           <SessionTile
@@ -2903,17 +3202,24 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onPreview={readOnly ? undefined : persistPreview}
             onDraftChange={readOnly ? undefined : persistDraft}
             onToggleDeliverables={readOnly ? undefined : toggleDeliverables}
-            interactionLocked={running || initializing || bindingLocked}
-            onMove={readOnly || running || initializing ? undefined : moveNode}
-            onResizeNode={readOnly || running || initializing || (node.kind === 'session' && focusedId !== node.id) ? undefined : resizeNode}
+            interactionLocked={busyNow.has(node.id) || exclusiveNow || initializing || bindingLocked}
+            onMove={readOnly || exclusiveNow || initializing ? undefined : moveNode}
+            onResizeNode={readOnly || exclusiveNow || initializing || (node.kind === 'session' && focusedId !== node.id) ? undefined : resizeNode}
             onSelect={selectNode}
             onToggleFocus={toggleFocus}
             onFitNode={focusNode}
-            onConfigure={tileOnConfigure}
+            onConfigure={simple ? undefined : tileOnConfigure}
             configurationPanel={!canInitialize && node.kind === 'session' && focusedId === node.id && inspectorId === node.id ? renderInspector(node, true) : null}
-            onUpdateNode={readOnly || running || initializing || bindingLocked ? undefined : saveNode}
-            onRunNode={readOnly || running || initializing || runUnavailableReason ? undefined : rerunNode}
-            onDelete={readOnly || running || initializing ? undefined : tileDelete}
+            onUpdateNode={readOnly || busyNow.has(node.id) || exclusiveNow || initializing || bindingLocked ? undefined : saveNode}
+            onRunNode={readOnly || busyNow.has(node.id) || exclusiveNow || initializing || runUnavailableReason ? undefined : rerunNode}
+            onDelete={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : tileDelete}
+            modelChoices={tileModelChoices(node)}
+            onChangeModel={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : changeNodeModel}
+            onResizeCard={resizeCard}
+            onToggleCardPreview={toggleCardPreview}
+            onOpenStudio={openStudio}
+            canvasEntries={canvasEntries}
+            onStopNode={!readOnly && soloRunning.has(node.id) ? stopNode : undefined}
             wiring={wiring}
           />
           )
@@ -2921,34 +3227,34 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
 
-      {!running && <SelectionCollaboration key={`selection:${JSON.stringify(selection)}`} nodes={nodes.filter(node => selection.includes(node.id))}
+      {!running && !simple && <SelectionCollaboration key={`selection:${JSON.stringify(selection)}`} nodes={nodes.filter(node => selection.includes(node.id))}
         disabled={readOnly || initializing || bindingLocked || Boolean(runUnavailableReason)} available={Boolean(cloudScope)}
         onStart={(ids, policy) => { void startRun(ids, undefined, undefined, undefined, policy); }} />}
-      {running && journal.current?.collaboration && <CollaborationStatus nodes={nodes} collaboration={journal.current.collaboration} />}
+      {running && collaborationJournal?.collaboration && <CollaborationStatus nodes={nodes} collaboration={collaborationJournal.collaboration} />}
 
       {initializing && <div className="awwo-handoff-note" role="status">{locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…'}</div>}
       {!initializing && handoffNote && <div className="awwo-handoff-note" role="alert"><span>{handoffNote}</span><button type="button" aria-label={locale === 'zh' ? '关闭提示' : 'Dismiss notice'} onClick={() => setHandoffNote('')}>×</button></div>}
       {/* Same guard as the minimap: the view tools never paint over the opaque welcome overlay of a
           fresh canvas. An empty canvas that still has something to undo or redo keeps them, or a
           deleted last node or an undone plan could only come back through a keyboard shortcut. */}
-      {(nodes.length > 0 || history.undo > 0 || history.redo > 0) && <div className="awwo-view-tools" role="toolbar" aria-label={viewText.toolbar}>
-        <button type="button" aria-label={locale === 'zh' ? '框选组件' : 'Select components'} title={locale === 'zh' ? '框选组件（也可按住 Shift 拖动）' : 'Select components (or Shift + drag)'} aria-pressed={selectionTool}
+      {(nodes.length > 0 || history.undo > 0 || history.redo > 0) && <div className={`awwo-view-tools${simple ? ' is-simple' : ''}`} role="toolbar" aria-label={viewText.toolbar}>
+        {!simple && <><button type="button" aria-label={locale === 'zh' ? '框选组件' : 'Select components'} title={locale === 'zh' ? '框选组件（也可按住 Shift 拖动）' : 'Select components (or Shift + drag)'} aria-pressed={selectionTool}
           onClick={() => setSelectionTool(value => !value)}><MousePointer2 size={16} /></button>
-        <span className="awwo-tool-separator" />
+        <span className="awwo-tool-separator" /></>}
         <button aria-label={viewText.zoomOut} title={viewText.zoomOut} onClick={() => zoomBy(1 / 1.2)}><Minus size={16} /></button>
         <span>{Math.round(view.scale * 100)}%</span>
         <button aria-label={viewText.zoomIn} title={viewText.zoomIn} onClick={() => zoomBy(1.2)}><Plus size={16} /></button>
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.fitAll} title={viewText.fitAll} disabled={!nodes.length} onClick={fitAll}><Maximize2 size={16} /></button>
-        <button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={readOnly || running || initializing || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
+        {!simple && <><button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={readOnly || exclusiveNow || initializing || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
         <button className="awwo-minimap-toggle" aria-label={viewText.showMinimap} title={focusedId ? t('surface.minimapWhileOpen') : viewText.showMinimap} aria-pressed={minimapOpen} disabled={Boolean(focusedId)} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.undo} title={viewText.undo} disabled={readOnly || running || initializing || !history.undo} onClick={undo}><Undo2 size={16} /></button>
         <button aria-label={viewText.redo} title={viewText.redo} disabled={readOnly || running || initializing || !history.redo} onClick={redo}><Redo2 size={16} /></button>
-        {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={runUnavailableReason || viewText.runSelection} disabled={readOnly || running || Boolean(runUnavailableReason)} onClick={runFromSelection}><Play size={15} /></button></>}
+        {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={runUnavailableReason || viewText.runSelection} disabled={readOnly || exclusiveNow || Boolean(runUnavailableReason)} onClick={runFromSelection}><Play size={15} /></button></>}</>}
       </div>}
 
-      {minimapOpen && nodes.length > 0 ? (
+      {minimapOpen && !simple && nodes.length > 0 ? (
         <Minimap
           boxes={renderNodes}
           view={view}
@@ -3002,6 +3308,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           keyHints={keyHintMap(keyBindings)}
         />
       ) : null}
+      {studio ? <DeliverableStudio variant="dialog" nodes={nodes} edges={edges} execution={doc.execution} nodeId={studio.nodeId}
+        initialEntryId={studio.entryId} assetEntries={canvasEntries}
+        title={studio.nodeId ? t('studio.titleNode', { title: nodes.find(node => node.id === studio.nodeId)?.title || '—' }) : t('studio.titleCanvas', { title: workspaceName || 'AwwO' })}
+        onClose={() => setStudio(null)} onOpenNode={id => { setStudio(null); changeStageView('canvas'); focusNode(id); }} /> : null}
     </div>
     </AgentWorkspace>
   );

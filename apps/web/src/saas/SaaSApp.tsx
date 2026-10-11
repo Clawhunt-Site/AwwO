@@ -11,6 +11,7 @@ import { CanvasSurface, type CanvasResultsOptions, type InitialPlanRequest } fro
 import { CanvasRunReceipt } from './CanvasRunReceipt';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
+import { MAX_RUN_LANES, laneStorage, loadLaneJournals, withLaneOwnership } from '../canvas/runLanes';
 import { withCanvasRunOwnership } from '../canvas/runOwnership';
 import { supersededGraphNodes } from '../canvas/followupDelivery';
 import { recoverableOutput, runInputFingerprint } from '../canvas/runRecoveryDocument';
@@ -19,7 +20,9 @@ import { GraphRunPanel } from './GraphRunPanel';
 import { createCanvasRuntimeReader } from '../canvasRuntimeReader';
 import { CanvasAccountControl } from '../CanvasAccountControl';
 import { createSaaSAccountApi } from './accountApi';
-import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls } from './preferences';
+import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls, UiModeSwitch } from './preferences';
+import { BootSurface } from './BootSurface';
+import { navigateTo } from './navigation';
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
 import { AdminPanel } from './AdminPanel';
@@ -47,7 +50,7 @@ const workspaceURL = (tenant?: string, canvas?: string) => {
   if (canvas) query.set('canvas', canvas);
   return '/' + (query.size ? '?' + query : '');
 };
-const navigate = (tenant?: string, canvas?: string) => window.location.assign(workspaceURL(tenant, canvas));
+const navigate = (tenant?: string, canvas?: string) => navigateTo(workspaceURL(tenant, canvas));
 /** A canvas page's 成果 view, kept in the address (?view=results) so a reload or a link opens it again. */
 function canvasResultsOptions(tenantId: string, canvasId: string): CanvasResultsOptions {
   return {
@@ -59,6 +62,7 @@ function canvasResultsOptions(tenantId: string, canvasId: string): CanvasResults
       history.replaceState(history.state, '', url.pathname + url.search + url.hash);
     },
     receipt: final => <CanvasRunReceipt tenantId={tenantId} canvasId={canvasId} final={final} />,
+    studio: true,
   };
 }
 function CanvasBackLink({ tenantId }: { tenantId: string }) {
@@ -240,6 +244,8 @@ function LinkExistingAccount({ onAuthenticated }: { onAuthenticated: (identity: 
 }
 function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
   const { locale, t } = useSaaSPreferences();
+  // Still loading: the boot surface the page opened on stays until there is something to show.
+  if (!retry) return <BootSurface text={text} canvas={Boolean(new URLSearchParams(window.location.search).get('canvas'))} />;
   return <main className="saas-notice"><PreferenceControls /><strong>AwwO</strong><p role={retry ? 'alert' : 'status'}>{text}</p>{retry && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</main>;
 }
 const LOGIN_PREVIEW_DOCUMENT = {
@@ -324,6 +330,7 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
         ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined, invitesUrl: accountURL('invites'), plansUrl: accountURL('plans') } } : {}) }} />
     <ActionMenu label={t('更多选项', 'More options')}>{close => <>
       <PreferenceControls />
+      <UiModeSwitch onSwitched={close} />
       <TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
       {identity.authentication === 'clawhunt' && <a href={accountURL('invites')}><Gift size={16}/>{t('邀请好友', 'Invite friends')}</a>}
@@ -368,7 +375,7 @@ function downloadDocument(value: unknown, name: string) {
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url);
 }
 function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
-  const { locale, t } = useSaaSPreferences();
+  const { locale, t, uiMode } = useSaaSPreferences();
   // A viewer can review the canvas's tasks in the assistant but not start or answer one.
   const execution = useManagedExecution(tenant.id, canvasId, { readOnly: true });
   const resultsView = useMemo(() => canvasResultsOptions(tenant.id, canvasId), [tenant.id, canvasId]);
@@ -387,14 +394,16 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
     }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => { controller.abort(); clearSaaSCanvas(); configureSaaSCanvasSave(null); };
   }, [identity.user.id, tenant.id, canvasId]);
-  if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p></main>;
+  if (!record) return error
+    ? <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><p role="alert">{saasErrorMessage(error, locale)}</p></main>
+    : <main className="saas-canvas-loading"><BootSurface canvas text={t('正在加载云端画布…', 'Loading cloud canvas…')} /><CanvasPageHeader tenantId={tenant.id} controls={controls} /></main>;
   return <div className="saas-canvas-shell">
     <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone="readonly" status={<><Eye size={12} aria-hidden="true" /><span title={t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}>{t('只读', 'Read-only')}</span><span className="saas-visually-hidden">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span></>} />}
-      canvasTools={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} readOnly />}
+      canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} readOnly /> : undefined}
       assistantExecution={executionHost(execution)}
       results={resultsView}
-      headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></div>} />
+      headerActions={<div className="saas-canvas-doc-actions"><UiModeSwitch variant="pill" />{uiMode === 'developer' && <><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></>}</div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }
@@ -412,7 +421,7 @@ function readCloudRuntimeStatus(value: unknown): CloudRuntimeStatus {
 }
 
 function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
-  const { locale, t } = useSaaSPreferences();
+  const { locale, t, uiMode } = useSaaSPreferences();
   // The canvas assistant's tasks; the canvas has the service read once it opens, so routing knows whether one can start.
   const execution = useManagedExecution(tenant.id, canvasId, { userId: identity.user.id });
   // The server decides whether each assistant message arranges the canvas or becomes a task.
@@ -497,8 +506,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
         const cached = storage.getItem(CANVAS_STORAGE_KEY);
         const baseVersion = Number(storage.getItem('awwo.cloud.version'));
         const rawJournal = storage.getItem(CANVAS_RUN_JOURNAL_KEY);
-        const hasJournal = Boolean(loadRunJournal(storage));
-        if (rawJournal && !hasJournal) storage.setItem(`${CANVAS_RUN_JOURNAL_KEY}.corrupt.${Date.now()}`, rawJournal);
+        // Any lane's run counts: several components may have been running when this page was last open.
+        const hasJournal = Boolean(loadRunJournal(storage)) || loadLaneJournals(storage).length > 0;
+        if (rawJournal && !loadRunJournal(storage)) storage.setItem(`${CANVAS_RUN_JOURNAL_KEY}.corrupt.${Date.now()}`, rawJournal);
         // Migrate pre-draft caches conservatively, including edits whose draft write hit a storage error.
         // A confirmed clean cache can follow a newer server version without a false recovery prompt.
         if (!unreviewedCanvasDrafts(storage, saved).length && cached) {
@@ -523,15 +533,21 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           // an observation cache; the server owns accepted task and dependency state.
           try {
             const graphs = await api<{ items: GraphRunSnapshot[] }>(graphPath(tenant.id, canvasId), { signal: controller.signal });
-            const latest = graphs.items?.[0];
-            if (latest && !controller.signal.aborted) {
+            const items = graphs.items ?? [];
+            const latest = items[0];
+            // Every graph still running (components run side by side, each in its own lane), and the latest one if it
+            // finished with a result this page has not published yet.
+            const candidates = [...items.filter(graphIsActive), ...(latest && !graphIsActive(latest) ? [latest] : [])].slice(0, MAX_RUN_LANES);
+            let nextLane = 0;
+            for (const graph of candidates) {
+              if (controller.signal.aborted) break;
               const document = sanitizeDocument(value.document);
-              const recovered = graphRecoveryJournal(latest, tenant.id, document);
+              const recovered = graphRecoveryJournal(graph, tenant.id, document);
               const inputsMatch = recovered.inputFingerprint === runInputFingerprint(document, recovered.scope);
               // Only a result the recovery would publish counts. Outside a collaboration the server records every
               // waiting, blocked or reused step with an empty output; counting that as missing re-recovered an
               // applied run on every open.
-              const superseded = supersededGraphNodes(document, latest);
+              const superseded = supersededGraphNodes(document, graph);
               const unpublished = recovered.scope.some(id => {
                 const item = recovered.nodes[id];
                 const output = item ? recoverableOutput(recovered, item) : null;
@@ -540,14 +556,15 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
                 if (superseded.has(id)) return false;
                 return output !== null && shown?.text !== output;
               });
-              if (graphIsActive(latest) || (inputsMatch && unpublished)) {
-                await withCanvasRunOwnership(async () => {
-                  // Another tab may have started a newer operation while discovery was pending.
-                  // Share its execution lock and preserve any journal written in the meantime.
-                  if (controller.signal.aborted || loadRunJournal(storage)) return;
-                  saveRunJournal(recovered, storage);
-                }, () => {});
-              }
+              if (!graphIsActive(graph) && !(inputsMatch && unpublished)) continue;
+              const lane = nextLane++;
+              await withLaneOwnership(lane, async () => {
+                // Another tab may have started a newer operation while discovery was pending.
+                // Share its execution lock and preserve any journal written in the meantime.
+                const target = laneStorage(lane, storage);
+                if (controller.signal.aborted || loadRunJournal(target)) return;
+                saveRunJournal(recovered, target);
+              }, () => {});
             }
           } catch { /* The run panel shows connectivity errors; backend admission prevents overlap. */ }
         }
@@ -709,7 +726,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       const kept = [...reviewed];
       const cloud = JSON.stringify(sanitizeDocument(current.current!.document));
       const cached = storage.getItem(CANVAS_STORAGE_KEY);
-      if (storage.getItem(CANVAS_RUN_JOURNAL_KEY) && cached) {
+      if ((storage.getItem(CANVAS_RUN_JOURNAL_KEY) || loadLaneJournals(storage).length) && cached) {
         // An older conflicting draft may coexist with a newer detached run's local snapshot.
         // Archive that snapshot under its actual local base before replacing the working cache.
         const baseVersion = Number(storage.getItem('awwo.cloud.version'));
@@ -738,7 +755,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     } catch (error) { setError(message(error)); }
   };
   if (recovery) return <DraftRecovery tenantId={tenant.id} controls={controls} record={record} drafts={recovery} error={error}
-    hasJournal={Boolean(scopedStorage.current && loadRunJournal(scopedStorage.current))} manual={manualRecovery} onUseCloud={() => useCloud()}
+    hasJournal={Boolean(scopedStorage.current && (loadRunJournal(scopedStorage.current) || loadLaneJournals(scopedStorage.current).length))} manual={manualRecovery} onUseCloud={() => useCloud()}
     onRestore={saved => {
       if (!saved.draft || !current.current || saved.draft.baseVersion !== current.current.version) return;
       const storage = scopedStorage.current!;
@@ -762,7 +779,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       setLocalDraftCount(remaining.length);
       if (remaining.length) setRecovery(remaining); else useCloud(remaining);
     }} />;
-  if (!record) return <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><section className="saas-page-intro"><p role={error ? 'alert' : 'status'}>{error ? saasErrorMessage(error, locale) : t('正在加载云端画布…', 'Loading cloud canvas…')}</p>{error && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</section></main>;
+  if (!record) return error
+    ? <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><section className="saas-page-intro"><p role="alert">{saasErrorMessage(error, locale)}</p><button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button></section></main>
+    : <main className="saas-canvas-loading"><BootSurface canvas text={t('正在加载云端画布…', 'Loading cloud canvas…')} /><CanvasPageHeader tenantId={tenant.id} controls={controls} /></main>;
   const exportLocal = () => {
     const latest = pending.current ?? draft.current?.document;
     const bytes = latest ? JSON.stringify(latest) : scopedStorage.current?.getItem(CANVAS_STORAGE_KEY) || '{}';
@@ -782,17 +801,17 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
-      taskDraft={knowledgeTaskDraft} canvasTools={<CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} />}
+      taskDraft={knowledgeTaskDraft} canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /> : undefined}
       assistantExecution={executionHost(execution)} routeAssistant={routeAssistant}
       results={resultsView}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
-      headerActions={<div className="saas-canvas-doc-actions"><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {
+      headerActions={<div className="saas-canvas-doc-actions"><UiModeSwitch variant="pill" />{uiMode === 'developer' && <GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />}{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {
         if (pending.current || saving.current || failed.current || !scopedStorage.current) return;
         const saved = readCanvasDrafts(scopedStorage.current);
         setLocalDraftCount(saved.length);
         if (saved.length) { setManualRecovery(true); setRecovery(saved); }
-      }}><span className="saas-draft-desktop-label">{t('查看本机草稿', 'View local drafts')}</span><span className="saas-draft-mobile-label">{t('草稿', 'Drafts')}</span><span aria-hidden="true">({localDraftCount})</span></button>}<button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={exportLocal}><Download size={16} aria-hidden="true" /></button></div>} />
+      }}><span className="saas-draft-desktop-label">{t('查看本机草稿', 'View local drafts')}</span><span className="saas-draft-mobile-label">{t('草稿', 'Drafts')}</span><span aria-hidden="true">({localDraftCount})</span></button>}{uiMode === 'developer' && <button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={exportLocal}><Download size={16} aria-hidden="true" /></button>}</div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }

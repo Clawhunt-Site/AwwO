@@ -1,5 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { beforeEach } from 'vitest';
+import { setDefaultUiMode } from '../src/canvas/uiMode';
+
+// The suites below were written against every control. The hosted app's default is the simple surface; tests that
+// cover it choose it explicitly (localStorage 'awwo.ui-mode.v1' = 'simple', or setDefaultUiMode('simple')).
+setDefaultUiMode('developer');
 
 // Native dialogs are exercised in browser acceptance; jsdom needs the open state API.
 if (typeof HTMLDialogElement !== 'undefined') {

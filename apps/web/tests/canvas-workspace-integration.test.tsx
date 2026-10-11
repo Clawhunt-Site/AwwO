@@ -126,7 +126,7 @@ it('preserves the server thread while undoing a user edit made before graph exec
   expect(screen.getByRole('button', { name: '撤销', exact: true })).toBeDisabled();
 });
 
-it('waits for native settlement before publishing output or enabling edits', async () => {
+it('waits for native settlement before publishing output, while adding new Agents stays available', async () => {
   const node = createAgentTemplate('data', { x: 0, y: 0 });
   node.runtime = 'claude_local';
   node.binding = { companyId: 'company', agentId: 'agent', agentName: 'Data agent' };
@@ -139,7 +139,8 @@ it('waits for native settlement before publishing output or enabling edits', asy
   render(<CanvasSurface />);
   fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
   await waitFor(() => expect(resolveSettlement).toBeTypeOf('function'));
-  expect(screen.getByRole('button', { name: '添加 Agent', exact: true })).toBeDisabled();
+  // A run holds only its own nodes: a new Agent can join the canvas while this one settles.
+  expect(screen.getByRole('button', { name: '添加 Agent', exact: true })).not.toBeDisabled();
   expect(loadDocumentWithStatus().doc.nodes[0].lastOutput).toBeFalsy();
   resolveSettlement(new Response(JSON.stringify({ confirmed: true, status: 'succeeded', holdId: 'native-hold' })));
   await screen.findByText(/运行完成：1\/1/);

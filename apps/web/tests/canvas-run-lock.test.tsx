@@ -96,8 +96,20 @@ function expectOriginalGraph() {
   expect(JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!).nodes.map((node: { id: string }) => node.id)).toEqual(['f1', 's1']);
 }
 
+/** Lanes keep the canvas editable while it runs: the run's own nodes are untouched, and the addition is there. */
+function expectRunUntouchedWithAddedNode() {
+  const saved = JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument;
+  const original = seed();
+  for (const id of ['f1', 's1']) {
+    const node = saved.nodes.find(item => item.id === id);
+    expect(node).toBeDefined();
+    expect(node!.title).toBe(original.nodes.find(item => item.id === id)!.title);
+  }
+  expect(saved.nodes.length).toBeGreaterThan(2);
+}
+
 describe('CanvasSurface run lock', () => {
-  it('rejects stale delete, move, resize, config, and wiring callbacks while nodes are waiting', async () => {
+  it('rejects stale delete, config and wiring callbacks on running nodes, while moving and resizing them stays free', async () => {
     const OriginalTile = Tiles.SessionTile;
     let tile: Tiles.SessionTileProps | undefined;
     vi.spyOn(Tiles, 'SessionTile').mockImplementation(props => {
@@ -140,7 +152,11 @@ describe('CanvasSurface run lock', () => {
     await waitFor(() => expect(sentMessages()).toHaveLength(1));
     expectOriginalGraph();
     const saved = JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument;
-    expect(saved.nodes[0]).toMatchObject({ id: 'f1', title: '需求表单', x: doc.nodes[0].x, y: doc.nodes[0].y, w: doc.nodes[0].w, h: doc.nodes[0].h });
+    // The run executes a snapshot: where a card sits and how large it is drawn are presentation and stay free (people
+    // arrange the board while it works); its configuration, its wires and its existence are what the run reads.
+    expect(saved.nodes[0]).toMatchObject({ id: 'f1', title: '需求表单' });
+    expect(saved.nodes[0].x).not.toBe(doc.nodes[0].x);
+    expect([saved.nodes[0].w, saved.nodes[0].h]).not.toEqual([doc.nodes[0].w, doc.nodes[0].h]);
     expect(saved.edges).toEqual([edge]);
     expect(sentMessages()[0][1]?.signal?.aborted).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: /停止/ }));
@@ -228,7 +244,7 @@ describe('CanvasSurface run lock', () => {
     expect(mutate).not.toHaveBeenCalled();
   });
 
-  it('rejects an already-open add menu immediately after run acceptance, before the running render', async () => {
+  it('adds a node from an already-open menu while a run is accepted, without touching the run', async () => {
     render(<CanvasSurface />);
     fireEvent.contextMenu(document.querySelector('.canvas-viewport')!, { clientX: 40, clientY: 60 });
     const add = within(screen.getByTestId('canvas-add-menu')).getByRole('menuitem', { name: '前端开发' });
@@ -237,12 +253,13 @@ describe('CanvasSurface run lock', () => {
       fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
       acceptedId = loadRunJournal()?.id;
       expect(acceptedId).toBeTruthy();
-      // This callback still belongs to the idle render. `running` alone cannot guard it.
+      // This callback still belongs to the idle render. A new node is not part of the run's snapshot, so it lands.
       fireEvent.click(add);
     });
     await waitFor(() => expect(sentMessages()).toHaveLength(1));
-    expectOriginalGraph();
+    expectRunUntouchedWithAddedNode();
     expect(loadRunJournal()?.id).toBe(acceptedId);
+    expect(loadRunJournal()?.scope.sort()).toEqual(['f1', 's1']);
     expect(sentMessages()[0][1]?.signal?.aborted).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: /停止/ }));
     await waitFor(() => expect(loadRunJournal()).toBeNull());
@@ -267,7 +284,7 @@ describe('CanvasSurface run lock', () => {
     await waitFor(() => expect(loadRunJournal()).toBeNull());
   });
 
-  it('guards a palette action captured before run acceptance without waiting for disabled rows to render', async () => {
+  it('lets a palette addition captured before run acceptance land beside the run', async () => {
     render(<CanvasSurface />);
     fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
     const add = screen.getByTestId('cmdbar-row-add-session-coding');
@@ -277,13 +294,13 @@ describe('CanvasSurface run lock', () => {
       fireEvent.click(add);
     });
     await waitFor(() => expect(sentMessages()).toHaveLength(1));
-    expectOriginalGraph();
+    expectRunUntouchedWithAddedNode();
     expect(sentMessages()[0][1]?.signal?.aborted).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: /停止/ }));
     await waitFor(() => expect(loadRunJournal()).toBeNull());
   });
 
-  it('also guards a full-template callback captured while idle after a run is accepted', async () => {
+  it('lets a full-template callback captured while idle add its canvas beside an accepted run', async () => {
     const OriginalWorkspace = Workspace.AgentWorkspace;
     let createTemplate: (() => void) | undefined;
     vi.spyOn(Workspace, 'AgentWorkspace').mockImplementation(props => {
@@ -297,14 +314,16 @@ describe('CanvasSurface run lock', () => {
       createTemplate!();
     });
     await waitFor(() => expect(sentMessages()).toHaveLength(1));
-    expectOriginalGraph();
-    expect(JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!).edges).toEqual([]);
+    expectRunUntouchedWithAddedNode();
+    // The run's nodes keep their wires: whatever the template wired is among its own new nodes.
+    const saved = JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument;
+    expect(saved.edges.some(edge => ['f1', 's1'].includes(edge.fromNode) || ['f1', 's1'].includes(edge.toNode))).toBe(false);
     expect(sentMessages()[0][1]?.signal?.aborted).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: /停止/ }));
     await waitFor(() => expect(loadRunJournal()).toBeNull());
   });
 
-  it('rejects an idle-render menu callback when a session store starts streaming independently', () => {
+  it('adds a node while another node streams on its own: only the streaming node is held', () => {
     render(<CanvasSurface />);
     fireEvent.contextMenu(document.querySelector('.canvas-viewport')!, { clientX: 40, clientY: 60 });
     const add = within(screen.getByTestId('canvas-add-menu')).getByRole('menuitem', { name: '前端开发' });
@@ -313,7 +332,7 @@ describe('CanvasSurface run lock', () => {
       expect(loadRunJournal()).toBeNull();
       fireEvent.click(add);
     });
-    expectOriginalGraph();
+    expectRunUntouchedWithAddedNode();
     expect(sentMessages()).toHaveLength(0);
     act(() => setStreaming('s1', false));
   });

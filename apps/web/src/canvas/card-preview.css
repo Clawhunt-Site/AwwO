@@ -1,0 +1,49 @@
+/* An enlarged card's deliverable, drawn inside the card under its head. */
+.canvas-tile.awwo-node.has-preview { display: flex; flex-direction: column; overflow: hidden; }
+.canvas-tile.awwo-node.has-preview > .canvas-tile-head { flex: 0 0 auto; }
+.awwo-card-preview { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; margin: 0 8px 8px; border: 1px solid var(--saas-hairline, var(--awwo-border, #dde3e2));
+  border-radius: 12px; overflow: hidden; background: var(--saas-card, #fff); }
+.awwo-card-preview.is-running { box-shadow: 0 0 0 2px color-mix(in srgb, var(--saas-bio, #2bb3bb) 40%, transparent); }
+.awwo-card-preview-body { position: relative; display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; background: var(--saas-card, #fff); }
+.awwo-card-preview-body > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.awwo-card-preview-body .awwo-live-page { background: #fff; }
+.awwo-card-preview-doc { overflow: auto; padding: 14px 18px; font-size: 13px; line-height: 1.6; }
+.awwo-card-preview-text { margin: 0; overflow: auto; padding: 12px 14px; background: #0d1b24; color: #d8e3e8; font: 11.5px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.awwo-card-preview-image, .awwo-card-preview-video { display: grid; place-items: center; background: repeating-conic-gradient(rgb(11 34 48 / 6%) 0% 25%, transparent 0% 50%) 50% / 18px 18px;
+  & img, & video { max-width: 100%; max-height: 100%; object-fit: contain; display: block; } }
+.awwo-card-preview-video { background: #0b1218; }
+.awwo-card-preview-grid { display: grid; gap: 4px; padding: 4px; background: #0b1218;
+  &.is-2 { grid-template-columns: 1fr 1fr; } &.is-3, &.is-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  & button { min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: #111; cursor: zoom-in; }
+  & img { width: 100%; height: 100%; object-fit: cover; display: block; } }
+.awwo-card-preview-model { display: flex; flex-direction: column; & > * { flex: 1; min-height: 0; } & .awwo-model-stage { height: auto; flex: 1; } }
+.awwo-card-preview-empty { display: grid; place-content: center; justify-items: center; gap: 8px; padding: 16px; color: var(--saas-muted, #4b5d65); text-align: center; font-size: 12.5px;
+  & p { margin: 0; max-width: 360px; } &.is-warning { color: var(--saas-warning, #8f5a0c); }
+  & button { height: 28px; padding: 0 12px; border: 1px solid var(--saas-border, #dde3e2); border-radius: 999px; background: var(--saas-card, #fff); color: var(--saas-text, #0b2230); font: 600 11.5px/1 var(--saas-font, inherit); cursor: pointer; } }
+.awwo-card-preview-live { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; overflow: hidden; color: var(--saas-muted, #4b5d65); font-size: 12.5px;
+  & p { margin: 0; flex: 1; min-height: 0; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; mask-image: linear-gradient(to bottom, transparent, #000 28px); color: var(--saas-text, #0b2230); line-height: 1.6; } }
+.awwo-card-preview-pulse { display: inline-flex; align-items: center; gap: 6px; color: var(--saas-bio, #1c8f96); font-weight: 650; & svg { animation: awwo-studio-spin 1s linear infinite; } }
+.awwo-card-preview-foot { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 6px 4px 10px; border-top: 1px solid var(--saas-hairline, #dde3e2); background: var(--saas-card, #fff); }
+.awwo-card-preview-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--saas-muted, #4b5d65); font-size: 11.5px; }
+.awwo-card-preview-files { display: flex; gap: 4px; min-width: 0; flex: 1; overflow: hidden;
+  & button { min-width: 0; max-width: 150px; height: 24px; padding: 0 9px; border: 1px solid var(--saas-border, #dde3e2); border-radius: 999px; background: transparent; color: var(--saas-muted, #4b5d65);
+    font: 600 11px/1 var(--saas-font, inherit); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  & button[aria-pressed='true'] { background: var(--saas-text, #0b2230); color: var(--saas-card, #fff); border-color: transparent; } }
+.awwo-card-preview-actions { display: flex; gap: 4px; flex: 0 0 auto;
+  & button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 1px solid var(--saas-border, #dde3e2); border-radius: 999px; background: var(--saas-card, #fff);
+    color: var(--saas-text, #0b2230); font: 600 11.5px/1 var(--saas-font, inherit); cursor: pointer; white-space: nowrap; }
+  & button.is-primary { background: var(--saas-text, #0b2230); color: var(--saas-card, #fff); border-color: transparent; } }
+
+/* The resize grip of a card: always reachable at its corner, quiet until the card is hovered or selected. */
+.canvas-tile.awwo-node .awwo-card-resize { position: absolute; right: 2px; bottom: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 0 0 10px 0; background: transparent;
+  cursor: nwse-resize; opacity: 0; z-index: 4; transition: opacity .12s;
+  &::after { content: ''; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px; border-right: 2px solid var(--saas-muted, #4b5d65); border-bottom: 2px solid var(--saas-muted, #4b5d65); border-radius: 0 0 3px 0; }
+  &:focus-visible { opacity: 1; outline: 2px solid var(--saas-focus, #1c6f76); outline-offset: 1px; } }
+.canvas-tile.awwo-node:hover .awwo-card-resize, .canvas-tile.awwo-node.canvas-tile--selected .awwo-card-resize, .canvas-tile.awwo-node.has-preview .awwo-card-resize { opacity: .85; }
+.canvas-tile.awwo-node .awwo-card-expand { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--saas-muted, #4b5d65); cursor: pointer;
+  &:hover { background: var(--saas-soft, rgb(11 34 48 / 6%)); color: var(--saas-text, #0b2230); } }
+/* Stop one running component: the others keep going. */
+.canvas-tile.awwo-node .awwo-card-stop { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 24px; height: 24px; padding: 0 7px; border: 0; border-radius: 999px;
+  background: color-mix(in srgb, var(--saas-danger, #c8382f) 12%, transparent); color: var(--saas-danger, #c8382f); font: 650 11px/1 var(--saas-font, inherit); cursor: pointer;
+  & svg { fill: currentColor; }
+  &:hover { background: var(--saas-danger, #c8382f); color: var(--saas-on-danger, #fff); } }

@@ -25,6 +25,19 @@
 }
 .awwo-results-main { display: grid; gap: 16px; min-width: 0; }
 .awwo-results-aside { position: sticky; top: 0; display: grid; gap: 14px; min-width: 0; }
+/* The results studio fills the view: the file tree and viewer take the height, the steps keep their column. */
+.awwo-results.is-studio { display: flex; flex-direction: column; gap: 10px; overflow: hidden; padding: 14px 16px 16px; }
+.awwo-results-layout.is-studio { flex: 1 1 auto; min-height: 0; width: 100%; max-width: none; align-items: stretch; grid-template-columns: minmax(0, 1fr) minmax(240px, 280px); }
+.awwo-results-main.is-studio { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.awwo-results-main.is-studio > .awwo-studio { flex: 1 1 auto; min-height: 0; }
+.awwo-results-layout.is-studio > .awwo-results-aside { position: static; min-height: 0; overflow: auto; align-content: start; }
+.awwo-results-studio-caveat { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--saas-warning-dot, #c98a1e) 35%, var(--saas-border));
+  border-radius: 12px; background: color-mix(in srgb, var(--saas-warning-dot, #c98a1e) 9%, var(--saas-card)); color: var(--saas-text); font-size: var(--saas-text-sm, 12.5px);
+  & > svg { flex: 0 0 auto; color: var(--saas-warning, #8f5a0c); } & > span { flex: 1; min-width: 0; } & .awwo-results-run { margin-left: auto; } }
+@container awwo-results (max-width: 760px) {
+  .awwo-results-layout.is-studio { grid-template-columns: minmax(0, 1fr); }
+  .awwo-results-layout.is-studio > .awwo-results-aside { display: none; }
+}
 /* Nothing inside the result may be wider than its column: an overflowing preview slid under the steps beside it. */
 .awwo-results-main > *, .awwo-results-body, .awwo-results-body :is(.awwo-deliverables, .awwo-deliverable, .awwo-artifact-preview) { min-width: 0; max-width: 100%; }
 /* Every file of the result stays reachable as a tab: they wrap instead of scrolling out of sight. */

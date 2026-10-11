@@ -4,6 +4,7 @@ import '../styles.css';
 import './saas.css';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { SaaSApp } from './SaaSApp';
+import { installNavigationFeedback } from './navigation';
 import '../canvas/ios-theme.css';
 // The hosted app's design system, after the shared sheets it refines: tokens first, then components.
 import './design/tokens.css';
@@ -11,5 +12,8 @@ import './design/system.css';
 import './design/canvas.css';
 import './design/surfaces.css';
 import './design/motion.css';
+import './design/modes.css';
+import './design/transitions.css';
 
+installNavigationFeedback();
 createRoot(document.getElementById('root')!).render(<React.StrictMode><ErrorBoundary><SaaSApp /></ErrorBoundary></React.StrictMode>);

@@ -304,6 +304,11 @@ export interface GatewayExecutorArgs {
   presentationForNode?: (node: SessionNode) => sessions.TurnPresentation | undefined;
   deferFinalPresentation?: boolean;
   signal?: AbortSignal;
+  /**
+   * The per-agent queue. Runs on one canvas that execute side by side pass the same map, so two nodes bound to one
+   * agent still take turns even when they belong to different runs.
+   */
+  agentQueue?: Map<string, Promise<unknown>>;
 }
 
 /**
@@ -312,7 +317,7 @@ export interface GatewayExecutorArgs {
  * and attaches to its live run, so parallel turns could cross-attribute outputs. Nodes bound to
  * different agents stay fully concurrent.
  */
-export function createGatewayExecutor({ gatewayBase, onIssueId, onRunAccepted, onCancelFailure, operationIdForNode, presentationForNode, deferFinalPresentation, signal }: GatewayExecutorArgs) {
+export function createGatewayExecutor({ gatewayBase, onIssueId, onRunAccepted, onCancelFailure, operationIdForNode, presentationForNode, deferFinalPresentation, signal, agentQueue }: GatewayExecutorArgs) {
   // Explicit type args: inference would otherwise take the arg tuple from `keyOf` alone (which
   // ignores `message`) and then reject the two-argument executor.
   return withPerKeySerialization<[SessionNode, string], ExecAgentResult>(
@@ -327,5 +332,6 @@ export function createGatewayExecutor({ gatewayBase, onIssueId, onRunAccepted, o
         onRunAccepted: onRunAccepted ? (identity) => onRunAccepted(node.id, identity, activeThreadId(node)) : undefined,
         onCancelFailure: onCancelFailure ? (detail) => onCancelFailure(node.id, detail, activeThreadId(node)) : undefined,
       }),
+    agentQueue,
   );
 }

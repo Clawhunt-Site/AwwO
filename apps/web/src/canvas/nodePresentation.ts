@@ -10,16 +10,19 @@ export const DELIVERY_DRAWER_WIDTH = 320;
  * Geometry for the current canvas view only. Persisted workspace sizes and session contents
  * remain untouched, so closing a conversation does not resize or discard the user's work.
  * Use these same nodes for cards, port anchors, wires, minimap, selection and viewport fitting.
+ * `cardFrames` are the sizes people enlarged cards to (cardFrames.ts), a view preference too.
  */
-export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: string | null, narrowFocusWidth?: number): CanvasNode[] {
+export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: string | null, narrowFocusWidth?: number,
+  cardFrames?: Readonly<Record<string, { w: number; h: number }>>): CanvasNode[] {
   return nodes.map(node => {
     if (node.kind !== 'session') return node;
+    const card = cardFrames?.[node.id];
     const w = node.id === focusedId
       ? narrowFocusWidth
         ? Math.min(Math.max(280, narrowFocusWidth), Math.max(node.w, FOCUSED_SESSION_MIN_SIZE.w))
         : Math.max(node.w, FOCUSED_SESSION_MIN_SIZE.w + (node.deliverablesOpen ? DELIVERY_DRAWER_WIDTH : 0))
-      : COMPACT_SESSION_SIZE.w;
-    const h = node.id === focusedId ? Math.max(node.h, FOCUSED_SESSION_MIN_SIZE.h) : COMPACT_SESSION_SIZE.h;
+      : card?.w ?? COMPACT_SESSION_SIZE.w;
+    const h = node.id === focusedId ? Math.max(node.h, FOCUSED_SESSION_MIN_SIZE.h) : card?.h ?? COMPACT_SESSION_SIZE.h;
     return node.w === w && node.h === h ? node : { ...node, w, h };
   });
 }

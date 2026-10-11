@@ -1,2 +1,33 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>AwwO · Agent Workspace</title><link rel="icon" type="image/svg+xml" href="/awwo-fold.svg"/></head><body><div id="root"></div><script type="module" src="/src/saas/main.tsx"></script></body></html>
+<html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>AwwO · Agent Workspace</title><link rel="icon" type="image/svg+xml" href="/awwo-fold.svg"/>
+<script>(function(){try{var d=document.documentElement,t=localStorage.getItem('superclaw_theme');if(t!=='light'&&t!=='dark')t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';d.dataset.theme=t;d.style.colorScheme=t;var m=localStorage.getItem('awwo.ui-mode.v1');if(m==='simple'||m==='developer')d.dataset.uiMode=m;if(new URLSearchParams(location.search).get('canvas'))d.dataset.boot='canvas';}catch(e){}})();</script>
+<style>
+/* Paints before the app's bundle: the page background in the reader's theme, and the AwwO boot surface, so moving
+   between pages never flashes white. The app keeps the same surface until its page has content (SaaSApp). */
+@view-transition{navigation:auto}
+::view-transition-old(root){animation:140ms ease-out both awwo-vt-out}
+::view-transition-new(root){animation:260ms cubic-bezier(.2,.8,.2,1) both awwo-vt-in}
+@keyframes awwo-vt-out{to{opacity:0}}
+@keyframes awwo-vt-in{from{opacity:0;transform:translateY(6px)}}
+html{background:#eef0ef}html[data-theme=dark]{background:#07161f}body{margin:0}
+.awwo-boot{position:fixed;inset:0;display:grid;place-items:center;align-content:center;gap:18px;background:#eef0ef;color:#4b5d65;font:500 13px/1.5 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;z-index:1}
+html[data-theme=dark] .awwo-boot{background:#07161f;color:#a3b5bc}
+.awwo-boot-orb{width:76px;height:76px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#5fe3e8 0,#2b7ad8 26%,#0d2f57 58%,#081a2e 100%);box-shadow:0 0 0 1px rgb(43 179 187/18%),0 18px 46px -12px rgb(13 47 87/55%),0 0 46px rgb(43 179 187/28%);animation:awwo-boot-breathe 2.4s ease-in-out infinite}
+.awwo-boot-line{width:132px;height:3px;border-radius:3px;overflow:hidden;background:rgb(11 34 48/9%)}
+html[data-theme=dark] .awwo-boot-line{background:rgb(231 238 240/10%)}
+.awwo-boot-line::after{content:"";display:block;width:40%;height:100%;border-radius:3px;background:linear-gradient(90deg,#2bb3bb,#2b7ad8);animation:awwo-boot-slide 1.15s cubic-bezier(.4,0,.2,1) infinite}
+.awwo-boot-text{min-height:20px;margin:0}
+.awwo-boot.is-canvas,html[data-boot=canvas] .awwo-boot{display:block;padding:10px;box-sizing:border-box}
+.awwo-boot-frame{display:none}
+.awwo-boot.is-canvas .awwo-boot-frame,html[data-boot=canvas] .awwo-boot-frame{display:grid;height:100%;grid-template-rows:56px 48px 1fr;border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 1px 2px rgb(11 34 48/5%)}
+html[data-theme=dark] .awwo-boot-frame{background:#0c2230}
+.awwo-boot-frame>i{display:block;border-bottom:1px solid rgb(11 34 48/7%)}
+.awwo-boot-frame>i:last-child{border:0;background:radial-gradient(rgb(11 34 48/13%) 1px,transparent 1.4px) 0 0/22px 22px,#e9ecea;position:relative}
+html[data-theme=dark] .awwo-boot-frame>i:last-child{background:radial-gradient(rgb(231 238 240/10%) 1px,transparent 1.4px) 0 0/22px 22px,#061019}
+.awwo-boot.is-canvas .awwo-boot-center,html[data-boot=canvas] .awwo-boot-center{position:fixed;inset:0;display:grid;place-items:center;align-content:center;gap:16px;pointer-events:none}
+.awwo-boot-center{display:grid;place-items:center;gap:18px}
+@keyframes awwo-boot-breathe{0%,100%{transform:scale(1);filter:saturate(1)}50%{transform:scale(1.045);filter:saturate(1.2)}}
+@keyframes awwo-boot-slide{0%{transform:translateX(-110%)}100%{transform:translateX(260%)}}
+@media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}.awwo-boot-orb,.awwo-boot-line::after{animation:none}}
+</style></head>
+<body><div id="root"><div class="awwo-boot" aria-busy="true" role="status" aria-label="AwwO"><div class="awwo-boot-frame" aria-hidden="true"><i></i><i></i><i></i></div><div class="awwo-boot-center"><div class="awwo-boot-orb" aria-hidden="true"></div><div class="awwo-boot-line" aria-hidden="true"></div></div></div></div><script type="module" src="/src/saas/main.tsx"></script></body></html>

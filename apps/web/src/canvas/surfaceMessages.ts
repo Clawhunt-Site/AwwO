@@ -22,7 +22,11 @@ export type SurfaceNotice =
   | 'plan_stale'
   | 'plan_cancelled'
   | 'plan_interrupted'
-  | 'plan_undone';
+  | 'plan_undone'
+  | 'node_busy_edit'
+  | 'node_already_running'
+  | 'run_wait_others'
+  | 'run_lanes_full';
 
 const NOTICE_KEYS = {
   recovering_run: 'surface.recoveringRun',
@@ -44,6 +48,10 @@ const NOTICE_KEYS = {
   plan_cancelled: 'surface.planCancelled',
   plan_interrupted: 'surface.planInterrupted',
   plan_undone: 'surface.planUndone',
+  node_busy_edit: 'surface.nodeBusyEdit',
+  node_already_running: 'surface.nodeAlreadyRunning',
+  run_wait_others: 'surface.runWaitOthers',
+  run_lanes_full: 'surface.runLanesFull',
 } as const;
 
 export function surfaceNotice(t: CanvasTranslate, notice: SurfaceNotice): string {

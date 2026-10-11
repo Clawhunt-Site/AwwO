@@ -30,7 +30,7 @@
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Trash2, Video, X } from 'lucide-react';
+import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, Minimize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
@@ -53,6 +53,11 @@ import { activeNodeThread, getNodeThreads, createNodeThread, selectNodeThread, u
 import { prepareNodeConversation, type NodeConversationContext } from './nodeConversation';
 import './awwo-node.css';
 import { NodeViewStylePicker } from './NodeViewStylePicker';
+import { modelChoiceKey, NodeModelPicker, type NodeModelChoice } from './NodeModelPicker';
+import { useSimpleCanvas } from './uiMode';
+import { CardPreview } from './CardPreview';
+import { showsPreview } from './cardFrames';
+import type { StudioEntry } from './studio/studioModel';
 import { canvasText, useCanvasI18n, type CanvasTranslate } from './i18n';
 import { recoveryDetailMessage } from './surfaceMessages';
 import { nodeTeamModeLabel } from './NodeTeamEditor';
@@ -301,6 +306,20 @@ export interface SessionTileProps {
   /** The document owner records edits and preserves undo/redo and run locks. */
   onUpdateNode?: (node: CanvasNode) => void;
   onRunNode?: (nodeId: string) => void;
+  /** Models this node's chat can switch to, shown as a picker in its composer (a stable array per node kind). */
+  modelChoices?: ReadonlyArray<NodeModelChoice>;
+  /** Switch the node to the model with this choice key; the host applies its configuration rules. */
+  onChangeModel?: (nodeId: string, key: string) => void;
+  /** Resize the card on the board (a view preference, allowed while the canvas runs and for readers). */
+  onResizeCard?: (nodeId: string, w: number, h: number) => void;
+  /** Enlarge the card to preview its deliverable, or shrink it back. */
+  onToggleCardPreview?: (nodeId: string) => void;
+  /** Open the results studio on this node's deliverables (optionally on one file). */
+  onOpenStudio?: (nodeId: string, entryId?: string) => void;
+  /** Every file of the canvas, so a previewed page can show what other nodes made. */
+  canvasEntries?: ReadonlyArray<StudioEntry>;
+  /** Stop this node's own run (its lane), leaving every other running node alone. */
+  onStopNode?: (nodeId: string) => void;
 }
 
 /**
@@ -341,8 +360,16 @@ export const SessionTile = memo(function SessionTile({
   onDelete,
   onUpdateNode,
   onRunNode,
+  modelChoices,
+  onChangeModel,
+  onResizeCard,
+  onToggleCardPreview,
+  onOpenStudio,
+  canvasEntries,
+  onStopNode,
 }: SessionTileProps) {
   const { locale, t } = useCanvasI18n();
+  const simple = useSimpleCanvas();
   const viewOnlyRef = useRef(viewOnly);
   viewOnlyRef.current = viewOnly;
   // History selection is an in-memory projection, never a document or draft write.
@@ -418,7 +445,7 @@ export const SessionTile = memo(function SessionTile({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       const t = e.target as HTMLElement | null;
-      const inScroller = Boolean(t?.closest?.('.canvas-transcript-scroll, .canvas-composer-input, .awwo-node-panel, .awwo-contract-fields, .awwo-session-list, .awwo-deliverables, .canvas-inspector'));
+      const inScroller = Boolean(t?.closest?.('.canvas-transcript-scroll, .canvas-composer-input, .awwo-node-panel, .awwo-contract-fields, .awwo-session-list, .awwo-deliverables, .canvas-inspector, .awwo-card-preview-doc, .awwo-card-preview-text, .awwo-model-stage'));
       if (inScroller || focusedRef.current) e.stopPropagation();
     };
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -438,7 +465,7 @@ export const SessionTile = memo(function SessionTile({
       if (viewOnlyRef.current || e.button !== 0 || !onMove) return;
       // A press that lands on a control or a scrollable region is that control's, not a drag.
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.('button, textarea, input, select, a, summary, .canvas-transcript-scroll, .awwo-contract-fields, .awwo-deliverables, .canvas-inspector')) return;
+      if (t?.closest?.('button, textarea, input, select, a, summary, .canvas-transcript-scroll, .awwo-contract-fields, .awwo-deliverables, .canvas-inspector, .awwo-card-preview-body')) return;
       const px = e.clientX;
       const py = e.clientY;
       const ox = node.x;
@@ -495,6 +522,32 @@ export const SessionTile = memo(function SessionTile({
       window.addEventListener('pointercancel', up);
     },
     [nodeId, frame.w, frame.h, onResizeNode],
+  );
+
+  // Resizing a CARD (not an opened node) is a view preference: it works for readers and while the canvas runs.
+  const onCardResizePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.stopPropagation();
+      if (e.button !== 0 || !onResizeCard) return;
+      e.preventDefault();
+      const px = e.clientX;
+      const py = e.clientY;
+      const ow = frame.w;
+      const oh = frame.h;
+      const move = (pe: PointerEvent) => {
+        const s = scaleRef.current || 1;
+        onResizeCard(nodeId, ow + (pe.clientX - px) / s, oh + (pe.clientY - py) / s);
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    },
+    [nodeId, frame.w, frame.h, onResizeCard],
   );
 
   // Restore THIS node's own stored thread, once, as soon as the tile is showing a transcript at
@@ -668,6 +721,11 @@ export const SessionTile = memo(function SessionTile({
   };
   const closeInput = () => { setInputOpen(false); setInputSchemaOpen(false); };
   const emptyConversation = session.turns.length === 0 && !currentRunDetails && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming;
+  // An enlarged card shows its deliverable instead of its one-line summary, once it is readable on screen. Only the
+  // card's presented size counts: a node's own w/h is the size it opens at, not how large its card is drawn.
+  const previewing = compact && node.kind === 'session' && Boolean(geometry) && showsPreview(geometry) && (geometry?.h ?? 0) * scale >= 110;
+  const previewLiveText = previewing && (session.streaming || run?.state === 'running')
+    ? [...session.turns].reverse().find(turn => turn.role === 'agent')?.text : undefined;
   // A copied case node with nothing said or run yet opens on its inputs (what it was asked and received).
   const caseIntro = node.kind === 'session' && node.lastOutput?.source === 'case' && emptyConversation && !(templateOpen && template);
   const outputView = output ? <div className="canvas-tile-output" data-testid={`canvas-tile-output-${nodeId}`}>
@@ -688,7 +746,7 @@ export const SessionTile = memo(function SessionTile({
       // exists to answer "which node failed" could not answer it.
       className={`canvas-tile awwo-node canvas-tile--${kindClass} canvas-tile--${lod}${
         selected ? ' canvas-tile--selected' : ''
-      } is-${dot}${settledMark ? ` is-just-${settledMark}` : ''}${compact ? ' is-compact' : ''}`}
+      } is-${dot}${settledMark ? ` is-just-${settledMark}` : ''}${compact ? ' is-compact' : ''}${previewing ? ' has-preview' : ''}`}
       style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
       data-testid={`canvas-tile-${nodeId}`}
       data-lod={lod}
@@ -699,7 +757,7 @@ export const SessionTile = memo(function SessionTile({
       onPointerDown={onPointerDown}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        if ((e.target as HTMLElement)?.closest?.('button, textarea, input, select, a, .awwo-node-panel')) return;
+        if ((e.target as HTMLElement)?.closest?.('button, textarea, input, select, a, .awwo-node-panel, .awwo-card-preview-body')) return;
         onToggleFocus?.(nodeId);
       }}
     >
@@ -737,9 +795,12 @@ export const SessionTile = memo(function SessionTile({
           </span>
         ) : null}
         {expanded && node.kind === 'session' ? <div className="awwo-node-tools">
+          {onStopNode && (run?.state === 'running' || run?.state === 'waiting') ? <button type="button" className="awwo-card-stop" aria-label={t('run.stopNode')} title={t('run.stopNode')}
+            onClick={() => onStopNode(nodeId)}><Square size={12} /><span>{t('run.stopNode')}</span></button> : null}
           {onConfigure ? <button type="button" aria-label={t('tile.configure')} title={t('tile.configure')} disabled={busy} onClick={() => onConfigure(nodeId)}><Settings2 size={15} /></button> : null}
           <button type="button" aria-label={t(deliverablesOpen ? 'tile.collapseDeliverables' : 'tile.expandDeliverables')} title={t('tile.deliverables')} aria-expanded={deliverablesOpen} onClick={toggleDeliverables}><PanelRight size={15} /><span>{t('tile.deliverables')}</span></button>
-          <NodeViewStylePicker />
+          {onOpenStudio && node.lastOutput ? <button type="button" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={15} /></button> : null}
+          {!simple && <NodeViewStylePicker />}
           {onToggleFocus ? <button type="button" aria-label={t('tile.collapseNode')} title={t('tile.collapseNode')} disabled={Boolean(configurationPanel) && interactionLocked} onClick={() => onToggleFocus(nodeId)}><X size={15} /></button> : null}
           <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenuOpen(false); } }}>
@@ -749,8 +810,13 @@ export const SessionTile = memo(function SessionTile({
           </div> : null}
         </div> : null}
         {compact ? <div className="awwo-node-tools">
+          {onStopNode && (run?.state === 'running' || run?.state === 'waiting') ? <button type="button" className="awwo-card-stop" aria-label={t('run.stopNode')} title={t('run.stopNode')}
+            onClick={() => onStopNode(nodeId)}><Square size={11} /></button> : null}
+          {onToggleCardPreview && node.kind === 'session' ? <button type="button" className="awwo-card-expand" aria-label={t(previewing ? 'card.shrink' : 'card.enlarge')} title={t(previewing ? 'card.shrink' : 'card.enlarge')}
+            onClick={() => onToggleCardPreview(nodeId)}>{previewing ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button> : null}
           <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu">
+            {onOpenStudio && node.kind === 'session' && node.lastOutput ? <button type="button" onClick={() => { onOpenStudio(nodeId); setMenuOpen(false); }}><SquareArrowOutUpRight size={14} />{t('studio.open')}</button> : null}
             {onConfigure ? <button type="button" disabled={busy} onClick={() => { onConfigure(nodeId); setMenuOpen(false); }}><Settings2 size={14} />{t('tile.configure')}</button> : null}
             {onRunNode ? <button type="button" disabled={viewOnly || busy || (node.kind === 'session' && !node.binding && !initializeOnSend)} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
             {onDelete ? <button type="button" disabled={viewOnly || busy} onClick={() => { if (!viewOnlyRef.current) onDelete(nodeId); }}><Trash2 size={14} />{t('tile.delete')}</button> : null}
@@ -758,7 +824,9 @@ export const SessionTile = memo(function SessionTile({
         </div> : null}
       </div>
 
-      {compact && node.kind === 'session' ? <button className="awwo-compact-open" style={{ fontSize: Math.min(16, 11 / Math.max(.4, scale)) }} type="button" aria-label={t('tile.openSession', { title: node.title })} onClick={event => {
+      {compact && node.kind === 'session' && previewing ? <CardPreview node={node} canvasEntries={canvasEntries} running={busy} liveText={previewLiveText}
+        onOpenStudio={onOpenStudio ? entryId => onOpenStudio(nodeId, entryId) : undefined} onOpenChat={onToggleFocus ? () => onToggleFocus(nodeId) : undefined} />
+      : compact && node.kind === 'session' ? <button className="awwo-compact-open" style={{ fontSize: Math.min(16, 11 / Math.max(.4, scale)) }} type="button" aria-label={t('tile.openSession', { title: node.title })} onClick={event => {
         // The tile's pointerdown already toggled additive selection. Opening here would replace
         // that group with this one focused node immediately after the user's modifier-click.
         if (event.shiftKey || event.metaKey || event.ctrlKey) return;
@@ -804,11 +872,11 @@ export const SessionTile = memo(function SessionTile({
               </nav> : null}
               <div className="awwo-node-chat">
                 {expanded ? <div className="awwo-chat-heading">
-                  {!sessionsOpen ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
+                  {!sessionsOpen && !simple ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
                   <span>{currentThread?.title || 'Session 1'}</span>
                   {freeConversation && onRunNode ? <button type="button" className="awwo-chat-task-action" disabled={viewOnly || busy || interactionLocked} onClick={() => onRunNode(nodeId)}><Play size={13} />{t('conversation.executeTask')}</button> : null}
-                  {template ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
-                  {!sessionsOpen ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} /></button> : null}
+                  {template && !simple ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
+                  {!sessionsOpen && !simple ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} /></button> : null}
                 </div> : null}
                 {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
                   <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={closeInput}><X size={14} /></button></header>
@@ -831,12 +899,15 @@ export const SessionTile = memo(function SessionTile({
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
+                    accessory={node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team
+                      ? <NodeModelPicker choices={modelChoices} value={modelChoiceKey(node)} currentLabel={node.model || undefined}
+                        disabled={busy || readOnly} disabledReason={busy ? t('tile.taskRunning') : undefined} onChange={key => onChangeModel(nodeId, key)} /> : undefined}
                     blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(conversationError)}
                     blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : conversationError || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>
               </div>
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
-                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span><button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode}
+                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span>{onOpenStudio && node.lastOutput ? <button type="button" className="awwo-drawer-studio" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={14} /></button> : null}<button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode}
                   editorOpen={deliverablesEditorOpen}
                   editorRequest={deliverablesEditorRequest}
                   onRerun={onRunNode && !viewOnly && !busy && (node.kind !== 'session' || Boolean(node.binding) || initializeOnSend) ? () => { if (!viewOnlyRef.current) onRunNode(nodeId); } : undefined} /></>}
@@ -878,7 +949,7 @@ export const SessionTile = memo(function SessionTile({
         </div>
       )}
 
-      <TilePorts node={geometry ? { ...node, ...geometry } : node} wiring={viewOnly ? undefined : wiring} />
+      <TilePorts node={geometry ? { ...node, ...geometry } : node} wiring={viewOnly || simple || interactionLocked ? undefined : wiring} />
 
       {!viewOnly && onResizeNode && !compact ? (
         <button
@@ -888,6 +959,17 @@ export const SessionTile = memo(function SessionTile({
           aria-label={t('tile.resize', { title: node.title })}
           onPointerDown={onResizePointerDown}
           onDoubleClick={(e) => e.stopPropagation()}
+        />
+      ) : null}
+      {compact && node.kind === 'session' && onResizeCard ? (
+        <button
+          type="button"
+          className="awwo-card-resize"
+          data-testid={`canvas-card-resize-${nodeId}`}
+          aria-label={t('card.resize', { title: node.title })}
+          title={t('card.resize', { title: node.title })}
+          onPointerDown={onCardResizePointerDown}
+          onDoubleClick={(e) => { e.stopPropagation(); onToggleCardPreview?.(nodeId); }}
         />
       ) : null}
     </div>

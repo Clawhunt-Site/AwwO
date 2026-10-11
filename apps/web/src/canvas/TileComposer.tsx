@@ -11,7 +11,7 @@
 // An UNBOUND tile cannot send at all. It is disabled with the reason stated — never a live-looking
 // box whose message would silently go nowhere.
 
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 
@@ -39,9 +39,11 @@ export interface TileComposerProps {
   /** The host acknowledges only after the message has a durable execution record. */
   deferClear?: boolean;
   notice?: string;
+  /** Shown under the input, like a chat app's model switch. */
+  accessory?: ReactNode;
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
   const disclaimerId = useId();
@@ -104,6 +106,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
           <span>{t(streaming ? 'composer.sending' : 'composer.send')}</span>
         </button>
       </div>
+      {accessory ? <div className="canvas-composer-accessory">{accessory}</div> : null}
       {blocked ? null : <small id={disclaimerId} className="canvas-composer-disclaimer" title={t('composer.disclaimerFull')}>
         <span aria-hidden="true">{t('composer.disclaimer')}</span><span className="sr-only">{t('composer.disclaimerFull')}</span>
       </small>}

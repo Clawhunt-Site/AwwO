@@ -10,6 +10,7 @@ import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n'
 import { DeliverableMarkdown, NodeDeliverables } from './NodeDeliverables';
 import type { RunNodeStatus } from './runGraph';
 import { storedArtifactUrl } from '../saas/canvasBridge';
+import { DeliverableStudio } from './studio/DeliverableStudio';
 import './canvas-results.css';
 
 /** A notice the board would show (why a run did not start, what it is preparing): here, so it is seen. */
@@ -31,6 +32,11 @@ export interface CanvasResultsProps {
   onBack: () => void;
   /** The host's record of the run behind the result. */
   receipt?: (final: CanvasNode | null) => ReactNode;
+  /** Show the deliverables in the results studio (file tree, search, every file running or rendered) instead of the
+   *  single-result viewer. The hosted app opts in. */
+  studio?: boolean;
+  /** Title of the studio (the canvas's name). */
+  studioTitle?: string;
 }
 
 const RUN_STATE_KEY: Record<RunNodeStatus['state'], CanvasTextKey> = {
@@ -57,7 +63,7 @@ function stepChip(step: StepDelivery, runs: CanvasResultsProps['runs'], running:
   return { tone: step.state === 'run' ? 'run' : step.state === 'none' ? 'idle' : 'caveat', label: t(DELIVERY_KEY[step.state]) };
 }
 
-export function CanvasResults({ nodes, edges, execution, runs, running, readOnly, runUnavailableReason, onRun, notice, onOpenNode, onBack, receipt }: CanvasResultsProps) {
+export function CanvasResults({ nodes, edges, execution, runs, running, readOnly, runUnavailableReason, onRun, notice, onOpenNode, onBack, receipt, studio = false, studioTitle }: CanvasResultsProps) {
   const { t } = useCanvasI18n();
   const result = useMemo(() => canvasResult({ nodes: [...nodes], edges: [...edges], execution }), [nodes, edges, execution]);
   const steps = useMemo(() => result.stages.flat(), [result]);
@@ -86,16 +92,27 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
   const badge = t(result.complete ? 'results.finalBadge' : 'results.furthestBadge');
   const runButton = !readOnly && onRun ? <button type="button" className="awwo-results-run" disabled={running || Boolean(runUnavailableReason)}
     title={runUnavailableReason} onClick={onRun}><Play size={14} aria-hidden="true" />{t('results.run')}</button> : null;
+  const useStudio = studio && items.length > 0;
+  // What the studio's result is, said where it is seen: a copied case's recording, a failed run's capture, unfinished steps.
+  const caveat = useStudio && result.final ? [
+    result.final.state === 'case' && result.final.output ? `${t('deliverable.fromCase', { run: caseRunLabel(result.final.output) })} · ${t('deliverable.case')}` : '',
+    result.final.state === 'partial' ? t('results.statePartial') : '',
+    result.pending.length ? t('results.pendingSteps', { count: result.pending.length }) : '',
+  ].filter(Boolean).join(' · ') : '';
 
-  return <section ref={root} className="awwo-results" aria-label={t('results.region')}>
+  return <section ref={root} className={`awwo-results${useStudio ? ' is-studio' : ''}`} aria-label={t('results.region')}>
     {notice && <p className={`awwo-results-notice is-${notice.kind}`} role={notice.kind}>
       {notice.kind === 'status' && <Loader2 size={15} aria-hidden="true" />}<span>{notice.text}</span>
       {notice.onDismiss && <button type="button" aria-label={t('results.dismiss')} onClick={notice.onDismiss}><X size={14} aria-hidden="true" /></button>}
     </p>}
     {running && <p className="awwo-results-running" role="status"><Loader2 size={15} aria-hidden="true" />
       <span>{t('results.running', { done, total: tracked.length || steps.length })}</span><small>{t('results.runningHint')}</small></p>}
-    <div className="awwo-results-layout">
-      <div className="awwo-results-main">
+    <div className={`awwo-results-layout${useStudio ? ' is-studio' : ''}`}>
+      {useStudio ? <div className="awwo-results-main is-studio">
+        {caveat ? <p className="awwo-results-studio-caveat" role="note"><AlertTriangle size={14} aria-hidden="true" /><span>{caveat}</span>{runButton}</p> : null}
+        <DeliverableStudio variant="embedded" nodes={nodes} edges={edges} execution={execution} title={studioTitle || t('results.indexTitle')}
+          focusNodeId={chosen ?? undefined} onOpenNode={onOpenNode} />
+      </div> : <div className="awwo-results-main">
         {items.length > 0 && <DeliveredIndex items={items} activeNodeId={chosen ?? result.final?.node.id}
           activeFieldId={chosenField && chosenField.nodeId === (chosen ?? result.final?.node.id) ? chosenField.fieldId : undefined} onOpen={item => {
           setChosenField(item.fieldId ? { nodeId: item.nodeId, fieldId: item.fieldId } : undefined);
@@ -113,7 +130,7 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
             </div>
           </div>}
         {showingFinal && result.review && <ReviewNote step={result.review} onOpen={() => show(result.review!.node.id)} />}
-      </div>
+      </div>}
       <aside className="awwo-results-aside" aria-label={t('results.stagesTitle')}>
         <section className="awwo-results-stages">
           <h3>{t('results.stagesTitle')}</h3>
@@ -128,7 +145,7 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
               return <li key={step.node.id}>
                 {/* The name keeps what the row shows: which step, whether it is the result, how it stands. */}
                 <button type="button" aria-pressed={selected?.node.id === step.node.id} aria-label={t('results.openStepState', { title: step.node.title || '—', state })}
-                  onClick={() => { setChosenField(undefined); setChosen(isFinal ? null : step.node.id); }}>
+                  onClick={() => { setChosenField(undefined); setChosen(isFinal && !useStudio ? null : step.node.id); }}>
                   <span className="awwo-results-step-title">{step.node.title || '—'}</span>
                   {isFinal && <span className="awwo-results-final">{badge}</span>}
                   <span className={`awwo-results-chip is-${chip.tone}`}>{chip.label}</span>
