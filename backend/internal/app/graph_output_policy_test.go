@@ -59,6 +59,19 @@ func TestGraphOutputPolicyMatchesValidation(t *testing.T) {
 	}
 }
 
+// A page may name the one library AwwO's previews supply; the policy says so instead of forbidding every library, which
+// left models that were asked for a three.js page pasting a library or writing a renderer until the output cap.
+func TestGraphOutputPolicyAllowsThePreviewLibrary(t *testing.T) {
+	page := graphOutputPolicy(graphNode{Contract: &graphContract{Version: 1, Outputs: []graphField{{ID: "page", Type: "html", Required: true}}}})
+	if !strings.Contains(page, `<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>`) ||
+		!strings.Contains(page, "never paste the source of three.js or any other library") {
+		t.Fatal("HTML policy does not name the supplied library", page)
+	}
+	if text := graphOutputPolicy(graphNode{Contract: &graphContract{Version: 1, Outputs: []graphField{{ID: "answer", Type: "text", Required: true}}}}); strings.Contains(text, "three.js") {
+		t.Fatal("a non-HTML policy mentions the page library", text)
+	}
+}
+
 func TestSingleTextGraphPolicyDoesNotContradictExactPlainOutput(t *testing.T) {
 	n := graphNode{Contract: &graphContract{Version: 1, Outputs: []graphField{{ID: "result", Type: "markdown", Required: true}}}}
 	policy := graphOutputPolicy(n)

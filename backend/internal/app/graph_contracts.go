@@ -423,6 +423,10 @@ func graphOutputContract(n graphNode) (*outputContract, string) {
 	return c, "frozen"
 }
 
+// previewLibraryTag is the one external script a delivered page may name: AwwO's previews (apps/web previewLibraries.ts)
+// replace exactly this tag with their pinned copy of three.js r128, so the output policy must not forbid it.
+const previewLibraryTag = `<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>`
+
 // Generate format instructions from the same frozen fields used by validation.
 // Saved values are never prompt examples: they may be stale prior deliverables.
 func graphOutputPolicy(n graphNode) string {
@@ -471,7 +475,9 @@ func graphOutputPolicy(n graphNode) string {
 	}
 	for _, f := range n.Contract.Outputs {
 		if f.Type == "html" {
-			policy += "\nHTML requires a complete HTML document with explicit html, head and body tags, never a path or fragment. Use self-contained inline CSS and inline SVG/data images, with no external libraries or scripts needed for presentation."
+			policy += "\nHTML requires a complete HTML document with explicit html, head and body tags, never a path or fragment. Use self-contained inline CSS and inline SVG/data images, with no external libraries or scripts needed for presentation. " +
+				"The one exception is three.js r128 referenced by the tag " + previewLibraryTag + ": AwwO's previews replace that tag with their own copy of the release, " +
+				"so a page may use it; never paste the source of three.js or any other library into the page."
 			break
 		}
 	}
