@@ -117,7 +117,8 @@ function CaseDialog({ item, onClose, onReuse }: { item: ProductionCase; onClose:
           <video src={`/showcase/${footageOf(item, locale)}.mp4`} poster={`/showcase/${footageOf(item, locale)}.jpg`} muted loop playsInline autoPlay={!still} controls={still}
             aria-label={item.recording ? t(`${item.title.zh}：交付界面实录`, `${item.title.en}: the delivered interface, recorded`) : t(`${item.title.zh}：AI 生成的示意画面`, `${item.title.en}: AI-generated illustration`)} />
           <figcaption>{item.recording
-            ? t('界面实录：2026-09-04 一次 AwwO 真实运行交付的知识库工作台（演示模式，使用模拟数据）。', 'Recorded: the knowledge-base workspace a real AwwO run delivered on 2026-09-04, in its demo mode with simulated data. UI translated from Chinese.')
+            ? item.caption?.[locale] ?? t(`交付录屏：${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''} 一次 AwwO 真实运行交付的页面，原样运行，用脚本操作录下；下方「它是怎么做出来的」里可以直接玩到它。`,
+              `Recorded: the page a real AwwO run delivered on ${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''}, running as delivered and played by a script; try it yourself below, under “How it was made”. Its interface is in Chinese, as delivered.`)
             : PRODUCTION_RUN_SUMMARY[item.id]
               ? t('封面示意 · AI 生成：这段画面由 AI 视频模型生成，只说明方向；AwwO 实际运行交付的成品在下方「它是怎么做出来的」。', 'Cover: AI illustration. This footage was made by an AI video model and only shows the direction; what an AwwO run actually delivered is below, under “How it was made”.')
               : t('封面示意 · AI 生成：这段画面由 AI 视频模型生成，只说明方向。', 'Cover: AI illustration. This footage was made by an AI video model and only shows the direction.')}</figcaption>

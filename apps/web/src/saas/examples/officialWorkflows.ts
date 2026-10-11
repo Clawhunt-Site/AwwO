@@ -283,8 +283,8 @@ export function createOfficialDocument(item: OfficialWorkflow, locale: UiLocale)
       ? '这是待运行的官方参考工作流。只根据实际输入推进；不要把演示、计划或静态检查冒充成功执行。无法运行或缺少能力时，明确列出未验证项。不要自行部署、发送信息或连接生产数据。'
       : 'This is an official reference workflow awaiting execution. Use actual inputs; never present a demo, plan or static check as successful execution. List unverified items when execution or capabilities are unavailable. Do not deploy, send messages or connect production data.';
     const html = outputType === 'html' ? (locale === 'zh'
-      ? '\n交付完整、自包含 HTML 文档（html、head、body）。CSS、JavaScript、图形和演示数据全部内嵌；不使用外部脚本、模块导入、字体、图片或网络请求。交互必须真的更新状态。'
-      : '\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data; no external scripts, module imports, fonts, images or network requests. Interactions must update real state.') : '';
+      ? '\n交付完整、自包含 HTML 文档（html、head、body）。CSS、JavaScript、图形和演示数据全部内嵌；外部脚本只能引用 AwwO 内置的 three.js r128（https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js），不使用其他外部脚本、模块导入、字体、图片或网络请求。交互必须真的更新状态。'
+      : '\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data; the only external script allowed is AwwO’s built-in three.js r128 (https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js) — no other external scripts, module imports, fonts, images or network requests. Interactions must update real state.') : '';
     return { ...base, title: spec.title[locale], w: 560, h: 420,
       // These nodes have purpose-built contracts; assigning a built-in templateId would display
       // that template's unrelated guide instead of the official case's task and acceptance.

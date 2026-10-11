@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
+import { RECORDED_CASE_WORKFLOWS } from '../src/saas/recordedCanvases';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import type { SessionNode } from '../src/canvas/canvasDoc';
 
@@ -10,14 +11,14 @@ const stagesOf = (id: string) => {
   return [...new Set(workflow.nodes.map(node => node.column))].sort((a, b) => a - b).map(column => workflow.nodes.filter(node => node.column === column).length);
 };
 
-it('gives every illustrated case a canvas and no canvas to anything else', () => {
-  const illustrated = PRODUCTION_CASES.filter(item => !item.recording).map(item => item.id).sort();
-  expect(Object.keys(PRODUCTION_WORKFLOWS).sort()).toEqual(illustrated);
+it('gives every case a canvas here, except the one kept as it ran in recordedCanvases.ts', () => {
+  const own = PRODUCTION_CASES.filter(item => !RECORDED_CASE_WORKFLOWS[item.id]).map(item => item.id).sort();
+  expect(Object.keys(PRODUCTION_WORKFLOWS).sort()).toEqual(own);
   for (const item of WORKFLOWS) expect(PRODUCTION_WORKFLOWS[item.id]).toBe(item);
 });
 
 it('shows on each card exactly the team its canvas has, stage by stage', () => {
-  for (const item of PRODUCTION_CASES.filter(value => !value.recording))
+  for (const item of PRODUCTION_CASES.filter(value => PRODUCTION_WORKFLOWS[value.id]))
     expect(item.stages.map(stage => stage.length), item.id).toEqual(stagesOf(item.id));
 });
 
@@ -57,10 +58,20 @@ it('ends every canvas in a review and delivers exactly one self-contained HTML b
     expect(item.nodes.filter(node => node.column === last).map(node => node.role), item.id).toEqual(['review']);
     const builds = item.nodes.filter(node => node.outputType === 'html');
     expect(builds, item.id).toHaveLength(1);
-    // Sized for the default execution settings: one model call, at most 4,096 output tokens.
-    expect(builds[0].task.zh).toContain('整页不超过 8000 个字符');
-    expect(builds[0].task.en).toContain('at most 8,000 characters');
+    // Sized for Claude Opus 5.5: one call of at most 32,000 output tokens, its own thinking included. A 2D build writes the
+    // page itself (16,000 characters); a 3D build pastes the scene code an upstream node delivered and only wires it
+    // (24,000), or, where the scene is split into two half-size modules (7,000 each), pastes both (28,000).
+    const limit = ['28000', '24000', '16000'].find(size => builds[0].task.zh.includes(`整页不超过 ${size} 个字符`));
+    expect(limit, item.id).toBeDefined();
+    const assembly = limit !== '16000';
+    expect(builds[0].task.en, item.id).toContain(`at most ${Number(limit).toLocaleString('en-US')} characters`);
+    const halves = item.nodes.filter(node => node.task.zh.includes('只输出代码，不超过 7000 个字符') && node.task.en.includes('at most 7,000 characters'));
+    expect(halves.length, item.id).toBe(limit === '28000' ? 2 : 0);
+    expect(builds[0].task.zh).toContain(assembly ? '这一步只做组装' : '这一步只负责把它们实现并组装成页面');
+    expect(builds[0].task.en).toContain(assembly ? 'This step only assembles' : 'this step only implements and assembles them');
     expect(builds[0].task.zh).toMatch(/不使用 localStorage、cookie、网络请求/);
+    // The one external script a build may name is the three.js release AwwO's previews supply.
+    expect(builds[0].task.zh).toContain('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
     expect(item.edges.some(edge => edge.from === builds[0].id && item.nodes.find(node => node.id === edge.to)?.role === 'review'), item.id).toBe(true);
   }
 });
@@ -70,7 +81,8 @@ it('writes every text in both languages and claims no real brand, footage or pro
     const texts = [item.title, item.summary, item.description, item.pattern, item.brief, item.limitations, ...item.artifacts,
       ...item.nodes.flatMap(node => [node.title, node.task, node.output, ...node.acceptance]), ...item.edges.map(edge => edge.label)];
     for (const text of texts) { expect(text.zh.trim(), item.id).not.toBe(''); expect(text.en.trim(), item.id).not.toBe(''); }
-    expect(item.limitations.zh).toContain('最多输出 4096 token');
+    expect(item.limitations.zh).toContain('Claude Opus 5.5');
+    expect(item.limitations.zh).toContain('单次最多输出 32000 token');
     expect(JSON.stringify(item)).not.toMatch(/paperclip/i);
   }
   const ad = PRODUCTION_WORKFLOWS['summer-ad'];
@@ -80,10 +92,11 @@ it('writes every text in both languages and claims no real brand, footage or pro
   expect(PRODUCTION_WORKFLOWS['port-twin'].brief.zh).toContain('模拟数据');
 });
 
-it('keeps every node’s fixed prompt well inside the 28 KB the default model leaves for input', () => {
+it('keeps every node’s fixed prompt well inside what Claude Opus 5.5 leaves for input', () => {
   for (const item of WORKFLOWS) for (const node of createOfficialDocument(item, 'zh').nodes as SessionNode[]) {
-    // Persona, brief and output policy are sent twice (system and user); upstream outputs add the rest.
+    // Persona, brief and output policy are sent twice (system and user); upstream outputs add the rest. The runtime's
+    // system prompt allows 32,768 characters, so the fixed part stays far below it.
     const fixed = new TextEncoder().encode(node.persona + node.contract!.inputs[0].value).byteLength;
-    expect(fixed, `${item.id}/${node.title}`).toBeLessThan(5000);
+    expect(fixed, `${item.id}/${node.title}`).toBeLessThan(16000);
   }
 });

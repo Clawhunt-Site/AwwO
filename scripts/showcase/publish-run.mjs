@@ -2,9 +2,11 @@
 // apps/web/src/saas/production-runs/<case>.ts. Each node's delivered value is read from the frozen
 // graph run with the canvas's own contract parser; nothing is rewritten except identifier redaction.
 //   node scripts/showcase/publish-run.mjs <raw-record.json> <notes.json>
-// notes.json: { "note": { "zh": "…", "en": "…" }, "verification": { "zh": "…", "en": "…" },
-//   "source": { "api": "<commit>", "worker": "<commit>" }, "thinking": false } — what happened in the run, what
-// was checked in a browser before publishing, the revisions that ran, and whether thinking was off. All required.
+// notes.json: { "note": { "zh": "…", "en": "…" }, "verification": { "zh": "…", "en": "…" }, "edition": { "zh": "…", "en": "…" },
+//   "source": { "api": "<commit>", "worker": "<commit>" }, "thinking": false, "model": "<label shown>" (optional),
+//   "limits": { "contextWindow": n, "maxOutputTokens": n, "modelCallsPerNode": n, "concurrency": n } } — what happened in
+// the run, what was checked in a browser before publishing, where it ran, the revisions that ran, whether thinking was
+// off, and the execution settings it had. All required except the model label.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,10 +18,14 @@ const [rawFile, notesFile] = process.argv.slice(2);
 if (!rawFile || !notesFile) throw new Error('Usage: publish-run.mjs <raw-record.json> <notes.json>');
 const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
 const notes = JSON.parse(fs.readFileSync(notesFile, 'utf8'));
-for (const key of ['note', 'verification']) if (!notes[key]?.zh?.trim() || !notes[key]?.en?.trim()) throw new Error(`notes.${key} needs zh and en`);
+for (const key of ['note', 'verification', 'edition']) if (!notes[key]?.zh?.trim() || !notes[key]?.en?.trim()) throw new Error(`notes.${key} needs zh and en`);
 // The revisions that ran and whether the model's thinking was off are part of the receipt, never assumed.
 if (!/^[0-9a-f]{8,40}$/.test(notes.source?.api || '') || !/^[0-9a-f]{8,40}$/.test(notes.source?.worker || '') || typeof notes.thinking !== 'boolean')
   throw new Error('notes.source.api, notes.source.worker (commit hashes) and notes.thinking (boolean) are required');
+// The execution settings the run actually had (the model's own limits on the runtime that ran it), never a default.
+const LIMIT_KEYS = ['contextWindow', 'maxOutputTokens', 'modelCallsPerNode', 'concurrency'];
+if (!notes.limits || LIMIT_KEYS.some(key => !Number.isInteger(notes.limits[key]) || notes.limits[key] <= 0))
+  throw new Error(`notes.limits needs positive integers ${LIMIT_KEYS.join(', ')}`);
 
 const { build } = await import(pathToFileURL(path.join(ROOT, 'apps/web/node_modules/rolldown/dist/index.mjs')).href);
 const bundle = path.join(path.dirname(path.resolve(rawFile)), '.publish-helpers.mjs');
@@ -68,11 +74,12 @@ const artifactOutput = nodes.find(node => node.id === artifact?.id)?.output;
 const catalog = raw.catalog?.runtimes?.find(runtime => runtime.id === raw.runtime);
 const record = {
   caseId: raw.caseId,
-  edition: { zh: '本地部署的 AwwO，API 与执行器和这次发布到线上的版本相同，使用默认执行设置', en: 'A local AwwO running the same API and runtime as the production release, on default execution settings' },
-  runtime: raw.runtime, model: raw.model, capturedOn: raw.startedAt.slice(0, 10),
+  edition: notes.edition,
+  runtime: raw.runtime, model: notes.model || raw.model, capturedOn: raw.startedAt.slice(0, 10),
   seconds: seconds(raw.graph.createdAt, raw.graph.updatedAt), completed: nodes.filter(node => node.status === 'done').length, total: nodes.length,
   outputLocale: raw.locale,
-  limits: { contextWindow: 32768, maxOutputTokens: 4096, modelCallsPerNode: 1, concurrency: 2, thinking: notes.thinking !== false },
+  limits: { contextWindow: notes.limits.contextWindow, maxOutputTokens: notes.limits.maxOutputTokens, modelCallsPerNode: notes.limits.modelCallsPerNode,
+    concurrency: notes.limits.concurrency, thinking: notes.thinking },
   source: notes.source,
   canvasSHA256: crypto.createHash('sha256').update(ranText).digest('hex'),
   ...(artifactOutput ? { artifactNodeId: artifact.id, artifactSHA256: crypto.createHash('sha256').update(artifactOutput).digest('hex') } : {}),

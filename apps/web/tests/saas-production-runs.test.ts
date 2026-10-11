@@ -58,8 +58,10 @@ it('records each SaaS case run on the very canvas a member can copy today', () =
     // Every task, persona, brief, contract and wire the run used is the copyable canvas today, word for word.
     expect(createHash('sha256').update(canonicalCanvasText(createOfficialDocument(workflow, record.outputLocale))).digest('hex'), record.caseId).toBe(record.canvasSHA256);
     expect(record.artifactNodeId === undefined || record.artifactNodeId === workflow.nodes.find(node => node.outputType === 'html')!.id).toBe(true);
-    // The default execution settings, as on production when it ran.
-    expect(record.limits).toEqual({ contextWindow: 32768, maxOutputTokens: 4096, modelCallsPerNode: 1, concurrency: 2, thinking: false });
+    // The settings it ran with on production: Claude Opus 5.5's own limits, one model call per node, its thinking on.
+    expect(record.model, record.caseId).toBe('Claude Opus 5.5');
+    expect(record.limits, record.caseId).toMatchObject({ contextWindow: 200000, maxOutputTokens: 32000, modelCallsPerNode: 1, thinking: true });
+    expect([1, 2, 3, 4], record.caseId).toContain(record.limits?.concurrency);
     expect(record.source?.api).toMatch(/^[0-9a-f]{8,40}$/);
     expect(record.source?.worker).toMatch(/^[0-9a-f]{8,40}$/);
     expect(record.runtime).toBe('openai-agents');

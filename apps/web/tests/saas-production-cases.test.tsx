@@ -37,7 +37,8 @@ function observeIntersections() {
 
 it('tells every case as a brief, a staged team and a deliverable, with its footage on disk', () => {
   expect(new Set(PRODUCTION_CASES.map(item => item.id)).size).toBe(PRODUCTION_CASES.length);
-  expect(PRODUCTION_CASES.filter(item => item.recording).map(item => item.id)).toEqual(['knowledge-base']);
+  // Every cover is a recording of what its case's run delivered; none is an AI illustration any more.
+  expect(PRODUCTION_CASES.filter(item => !item.recording).map(item => item.id)).toEqual([]);
   expect(PRODUCTION_CASES[0].recording).toBe(true);
   for (const item of PRODUCTION_CASES) {
     for (const text of [item.title, item.brief, item.deliverable, ...item.stages.flat(), ...(item.facts ?? [])]) {
@@ -45,10 +46,13 @@ it('tells every case as a brief, a staged team and a deliverable, with its foota
     }
     expect(item.stages.length).toBeGreaterThanOrEqual(3);
     expect(item.stages.at(-1)!.map(role => role.zh)).toEqual(['验收']);
-    if (!item.recording) expect(item.facts).toBeUndefined();   // what a run did is read from its record, not written here
+    if (item.id !== 'knowledge-base') expect(item.facts).toBeUndefined();   // what a run did is read from its record, not written here
     for (const stem of [item.footage, item.footageEn].filter(Boolean))
       for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}${stem}.${extension}`), `${stem}.${extension}`).toBe(true);
   }
+  // The AI-generated covers these recordings replaced are no longer shipped.
+  for (const stem of ['pixel', 'config', 'paper', 'film-ad', 'port-twin', 'glider', 'party', 'rhythm'])
+    for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}${stem}.${extension}`), `${stem}.${extension}`).toBe(false);
   // The playable mock-ups made outside AwwO are gone; what plays now is what an AwwO run delivered.
   expect(existsSync(`${SHOWCASE}play`)).toBe(false);
   for (const stem of ['play-fox', 'play-bike', 'play-paper']) expect(existsSync(`${SHOWCASE}${stem}.mp4`)).toBe(false);
@@ -64,10 +68,8 @@ it('labels the cover footage for what it is, and claims delivery only where a pu
   expect(screen.getByText(ran === PRODUCTION_CASES.length ? /^每个案例都是一张真实的 AwwO 画布，并且真的跑过一遍/
     : new RegExp(`^每个案例都是一张真实的 AwwO 画布：.*其中 ${ran} 个已经在 AwwO 里跑过一遍`))).toBeVisible();
   expect(cards()).toHaveLength(PRODUCTION_CASES.length);
-  const [recording, ...illustrations] = cards();
-  expect(within(recording).getByText('交付录屏')).toBeVisible();
-  expect(within(recording).queryByText('封面示意 · AI 生成')).toBeNull();
-  for (const card of illustrations) { expect(within(card).getByText('封面示意 · AI 生成')).toBeVisible(); expect(within(card).queryByText('交付录屏')).toBeNull(); }
+  const [recording, pixelCard] = cards();
+  for (const card of cards()) { expect(within(card).getByText('交付录屏')).toBeVisible(); expect(within(card).queryByText('封面示意 · AI 生成')).toBeNull(); }
   PRODUCTION_CASES.forEach((item, index) => {
     const card = cards()[index], run = PRODUCTION_RUN_SUMMARY[item.id];
     expect(within(card).getByRole('list', { name: 'Agent 团队，按阶段' }).children).toHaveLength(item.stages.length);
@@ -79,9 +81,9 @@ it('labels the cover footage for what it is, and claims delivery only where a pu
   expect(PRODUCTION_RUN_SUMMARY['knowledge-base']).toMatchObject({ completed: 7, total: 7, delivered: true });
   // The label is part of what a screen reader hears for the card, not only what it shows.
   expect(within(recording).getByRole('button', { name: '团队知识库 SaaS' })).toHaveAccessibleDescription('交付录屏 「搭建团队知识库 SaaS：登录、权限、数据治理、后端接口、检索看板、上线物料、验收。」');
-  expect(within(illustrations[0]).getByRole('button', { name: '像素平台跳跃' })).toHaveAccessibleDescription('封面示意 · AI 生成 「做一款像素风平台跳跃：狐狸邮差在空中集市里送信。」');
+  expect(within(pixelCard).getByRole('button', { name: '像素平台跳跃' })).toHaveAccessibleDescription('交付录屏 「做一款像素风平台跳跃：狐狸邮差在空中集市里送信。」');
   expect(within(recording).getByText('权限 · 数据 · 物料')).toBeVisible();
-  expect(within(illustrations[0]).getByText('美术 · 关卡 · 音效')).toBeVisible();
+  expect(within(pixelCard).getByText('美术 · 关卡 · 音效')).toBeVisible();
   // Without IntersectionObserver the posters show at once; nothing autoplays or preloads.
   for (const video of document.querySelectorAll<HTMLVideoElement>('.production-card video')) {
     expect(video.preload).toBe('none'); expect(video.muted).toBe(true); expect(video.autoplay).toBe(false);
@@ -140,7 +142,8 @@ it('opens a case as brief → team → delivery, then shows how it was made from
   const pixel = screen.getByRole('button', { name: '像素平台跳跃' });
   fireEvent.click(pixel);
   const game = screen.getByRole('dialog', { name: '像素平台跳跃' });
-  expect(within(game).getByText(PRODUCTION_RUN_SUMMARY['pixel-platformer'] ? /只说明方向；AwwO 实际运行交付的成品在下方「它是怎么做出来的」。$/ : /^封面示意 · AI 生成：这段画面由 AI 视频模型生成，只说明方向。$/)).toBeVisible();
+  expect(within(game).getByText(/^交付录屏：2026-10-11 一次 AwwO 真实运行交付的页面，原样运行，用脚本操作录下；/)).toBeVisible();
+  expect(game.querySelector('video')).toHaveAttribute('src', '/showcase/pixel-real.mp4');
   expect(within(game).getByText('6 个 Agent · 4 个阶段')).toBeVisible();
   expect(within(game).getByText('3 路并行')).toBeVisible();
   expect(within(game).getByText(PRODUCTION_RUN_SUMMARY['pixel-platformer']?.delivered ? '已交付' : '交付目标')).toBeVisible();
@@ -209,7 +212,8 @@ it('speaks English, with the translated recording marked on the card', async () 
   expect(screen.getByRole('heading', { level: 2, name: 'One brief, handed to a team of agents.' })).toBeVisible();
   const [recording, pixel] = cards();
   expect(within(recording).getByText('Recorded delivery')).toBeVisible();
-  expect(within(pixel).getByText('Cover: AI illustration')).toBeVisible();
+  expect(within(pixel).getByText('Recorded delivery')).toBeVisible();
+  expect(within(pixel).queryByText('Cover: AI illustration')).toBeNull();
   expect(recording.querySelector('video')).toHaveAttribute('src', '/showcase/kb-real-en.mp4');
   // The translated recording says so on the card itself, not only once the case is opened.
   expect(within(recording).getByText('UI translated from Chinese')).toBeVisible();

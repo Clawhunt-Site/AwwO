@@ -141,7 +141,7 @@ it('keeps the recordings through settings, task and wire edits and undo, and cle
 it('names a case recording for what it is, with its model and day, and never as a run of this workspace', () => {
   const node = copyOf('pixel-platformer').nodes[0] as SessionNode;
   render(<NodeDeliverables node={node} readOnly onUpdateNode={() => {}} />);
-  expect(screen.getByText('案例实录 · qwen3.8-27b-p6 · 2026-10-03 真实运行')).toBeVisible();
+  expect(screen.getByText('案例实录 · Claude Opus 5.5 · 2026-10-11 真实运行')).toBeVisible();
   expect(screen.getByText('没有在你的工作区运行；运行整张图会换成你自己的结果')).toBeVisible();
   expect(screen.queryByText(/来自运行|交付$/)).toBeNull();
   cleanup();
@@ -154,12 +154,12 @@ it('marks a recording on the collapsed card and opens a node on what it was aske
   resetAllSessions();
   const art = copyOf('pixel-platformer').nodes[1] as SessionNode;
   const { unmount } = render(<SessionTile node={art} compact scale={1} focused={false} onToggleFocus={vi.fn()} />);
-  expect(screen.getByRole('button', { name: `打开 ${art.title}` })).toHaveTextContent(/^.*案例实录 · const PIXEL = \{/);
+  expect(screen.getByRole('button', { name: `打开 ${art.title}` })).toHaveTextContent(/^.*案例实录 · \/\/ 状态：以下 12 个精灵/);
   unmount();
   const { container, rerender } = render(<SessionTile node={art} scale={1} focused onToggleFocus={vi.fn()} />);
   expect(container.querySelector('.awwo-node-workbench')).toHaveClass('is-case-intro');
   expect(screen.getByRole('region', { name: '输入表单' })).toBeVisible();
-  expect(within(screen.getByRole('region', { name: '交付物' })).getByText('案例实录 · qwen3.8-27b-p6 · 2026-10-03 真实运行')).toBeVisible();
+  expect(within(screen.getByRole('region', { name: '交付物' })).getByText('案例实录 · Claude Opus 5.5 · 2026-10-11 真实运行')).toBeVisible();
   // The member's own result is not a recording: the node lays out as any other.
   rerender(<SessionTile node={{ ...art, lastOutput: { text: art.lastOutput!.text, at: Date.now(), source: 'run' } }} scale={1} focused onToggleFocus={vi.fn()} />);
   expect(container.querySelector('.awwo-node-workbench')).not.toHaveClass('is-case-intro');
@@ -190,14 +190,14 @@ it('copies a case from the workspace home with every agent’s recording, and sa
   const posts = server(), onOpen = vi.fn();
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
   const setup = await openCopy();
-  expect(within(setup).getByText(/并带上 2026-10-03 真实运行中每个 Agent 收到和交付的内容（6\/6 个节点，标为「案例实录」）/)).toBeVisible();
-  expect(within(setup).getByText(/案例实录由 qwen3\.8-27b-p6 生成，没有在你的工作区运行；运行整张图会换成你自己的结果。/)).toBeVisible();
+  expect(within(setup).getByText(/并带上 2026-10-11 真实运行中每个 Agent 收到和交付的内容（6\/6 个节点，标为「案例实录」）/)).toBeVisible();
+  expect(within(setup).getByText(/案例实录由 Claude Opus 5\.5 生成，没有在你的工作区运行；运行整张图会换成你自己的结果。/)).toBeVisible();
   fireEvent.click(within(setup).getByRole('button', { name: '创建草稿' }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
   expect(posts).toHaveLength(1);
   const sent = posts[0].body.document.nodes;
   expect(sent).toHaveLength(6);
-  expect(sent.every((node: any) => node.lastOutput?.source === 'case' && node.lastOutput.model === 'qwen3.8-27b-p6' && node.lastOutput.text)).toBe(true);
+  expect(sent.every((node: any) => node.lastOutput?.source === 'case' && node.lastOutput.model === 'Claude Opus 5.5' && node.lastOutput.text)).toBe(true);
 });
 
 it('tells an English member that the agents worked in Chinese before copying', async () => {
@@ -207,7 +207,7 @@ it('tells an English member that the agents worked in Chinese before copying', a
   fireEvent.click(screen.getByRole('button', { name: 'Pixel platformer' }));
   fireEvent.click(await within(screen.getByRole('dialog', { name: 'Pixel platformer' })).findByRole('button', { name: 'Copy this canvas' }));
   const setup = screen.getByRole('dialog', { name: 'Copy example to my canvases' });
-  expect(within(setup).getByText(/with what every agent received and delivered in the real run on 2026-10-03 \(6\/6 nodes, marked “case recording”\)/)).toBeVisible();
+  expect(within(setup).getByText(/with what every agent received and delivered in the real run on 2026-10-11 \(6\/6 nodes, marked “case recording”\)/)).toBeVisible();
   expect(within(setup).getByText(/This case’s agents worked in Chinese, so the recordings are shown as delivered; the canvas’s tasks are copied in English/)).toBeVisible();
 });
 

@@ -2,7 +2,8 @@ import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 import { ArrowDown, Check, CircleSlash, Copy, Maximize2, Minimize2, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useSaaSPreferences } from './preferences';
 import type { UiLocale } from '../locale';
-import { htmlPreviewDocument } from '../canvas/htmlDeliverable';
+import { htmlDocumentSource, htmlPreviewDocument } from '../canvas/htmlDeliverable';
+import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds } from '../canvas/previewLibraries';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDuration, loadProductionRun, type ProductionNodeStatus, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
@@ -34,12 +35,26 @@ const RECORD_MARKDOWN: Components = {
 };
 const renderRecordMarkdown = (source: string) => <ReactMarkdown remarkPlugins={[remarkGfm]} components={RECORD_MARKDOWN}>{source}</ReactMarkdown>;
 
-/** A model-generated page runs only in an opaque sandbox, through the canvas's own preview sanitizer. */
+/** A model-generated page runs only in an opaque sandbox, through the canvas's own preview sanitizer. A library AwwO
+ * supplies (three.js r128) runs from its pinned copy, exactly as the 成果 preview runs it; other external scripts stay
+ * blocked. */
 function ResultFrame({ html, title }: { html: string; title: string }) {
   const { t } = useSaaSPreferences();
-  const source = useMemo(() => { try { return htmlPreviewDocument(html, true); } catch { return null; } }, [html]);
+  const needs = useMemo(() => { try { return previewScriptNeeds(htmlDocumentSource(html)); } catch { return NO_PREVIEW_SCRIPT_NEEDS; } }, [html]);
+  // undefined while the pinned copy loads; null when none is needed or it could not be loaded (the page then runs without it).
+  const [libraries, setLibraries] = useState<{ needs: typeof needs; code: ReadonlyMap<string, string> | null } | null>(null);
+  useEffect(() => {
+    if (!needs.libraries.length) return;
+    let live = true;
+    loadPreviewLibraries(needs).then(code => { if (live) setLibraries({ needs, code }); }, () => { if (live) setLibraries({ needs, code: null }); });
+    return () => { live = false; };
+  }, [needs]);
+  const loading = needs.libraries.length > 0 && libraries?.needs !== needs;
+  const code = !loading && libraries?.code ? libraries.code : undefined;
+  const source = useMemo(() => { if (loading) return undefined; try { return htmlPreviewDocument(html, true, code); } catch { return null; } }, [html, loading, code]);
+  if (source === undefined) return <p className="production-made-empty" role="status">{t('正在载入成品…', 'Loading the result…')}</p>;
   if (!source) return <p className="production-made-empty">{t('成品过大，无法在这里预览。', 'The result is too large to preview here.')}</p>;
-  return <iframe className="production-made-frame" title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={source} />;
+  return <iframe className="production-made-frame" title={title} sandbox="allow-scripts allow-pointer-lock" referrerPolicy="no-referrer" srcDoc={source} />;
 }
 
 function NodeOutput({ node }: { node: ProductionRunNode }) {
