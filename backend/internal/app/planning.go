@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
-const plannerInstructions = `You are the Awwo canvas planner. Return one JSON object only: {"version":1,"summary":"...","operations":[...]}. Follow the structural protocol supplied in the user context. Only propose add_node, update_node, set_input, add_field, update_field, remove_field, remove_node, connect, disconnect operations. Never change execution bindings, runtime settings, credentials, model configuration or outputs. Node personas define identity, responsibilities and field content, while declared output contracts define serialization. Do not instruct a persona to bypass its template's output contract: a one-sentence or plain-text requirement describes content inside the output fields, not the outer response format. If exactly one raw text output is required, explicitly propose the supported field operations to make the output contract one text/markdown field instead of relying on a persona override. Preserve user quantities, budgets, durations and prohibitions in every relevant author and reviewer instruction. Distinguish exactly, at least and at most; never relax a specified count into a minimum. Never execute tools or claim work was executed. If context is insufficient return an empty operations array and ask in summary. Maximum 100 operations. The caller will validate and explicitly apply the proposal.`
+const plannerInstructions = `You are the Awwo canvas planner. Return one JSON object only: {"version":1,"summary":"...","operations":[...]}. Follow the structural protocol supplied in the user context. Only propose add_node, update_node, set_input, add_field, update_field, remove_field, remove_node, connect, set_edge_kind, set_execution, disconnect operations. Never change execution bindings, runtime settings, credentials, model configuration or outputs. Node personas define identity, responsibilities and field content, while declared output contracts define serialization. Do not instruct a persona to bypass its template's output contract: a one-sentence or plain-text requirement describes content inside the output fields, not the outer response format. If exactly one raw text output is required, explicitly propose the supported field operations to make the output contract one text/markdown field instead of relying on a persona override. Preserve user quantities, budgets, durations and prohibitions in every relevant author and reviewer instruction. Distinguish exactly, at least and at most; never relax a specified count into a minimum. Never execute tools or claim work was executed. If context is insufficient return an empty operations array and ask in summary. Maximum 100 operations. The caller will validate and explicitly apply the proposal.`
 
 func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	var b struct {
@@ -192,7 +193,28 @@ func validatePlan(raw string) bool {
 				return false
 			}
 		case "connect":
-			if !planKeys(op, "type", "fromNode", "fromField", "toNode", "toField") || !planID(op["fromNode"]) || !planID(op["fromField"]) || !planID(op["toNode"]) || !planID(op["toField"]) {
+			if !planKeys(op, "type", "fromNode", "fromField", "toNode", "toField", "kind") || !planID(op["fromNode"]) || !planID(op["fromField"]) || !planID(op["toNode"]) || !planID(op["toField"]) {
+				return false
+			}
+			if v, ok := op["kind"]; ok && !oneOf(v, "data", "feedback") {
+				return false
+			}
+		case "set_edge_kind":
+			if !planKeys(op, "type", "edgeId", "kind") || !planText(op["edgeId"], 600, false) || !oneOf(op["kind"], "data", "feedback") {
+				return false
+			}
+		case "set_execution":
+			switch op["mode"] {
+			case "workflow":
+				if !planKeys(op, "type", "mode") {
+					return false
+				}
+			case "review":
+				rounds, ok := op["maxRounds"].(float64)
+				if !planKeys(op, "type", "mode", "maxRounds", "reviewerNodeId", "verdictFieldId") || !ok || rounds != float64(int(rounds)) || rounds < 1 || rounds > 5 || !planID(op["reviewerNodeId"]) || !planID(op["verdictFieldId"]) {
+					return false
+				}
+			default:
 				return false
 			}
 		case "disconnect":
@@ -268,6 +290,24 @@ func oneOf(v any, values ...string) bool {
 // inside a string cannot end it early. Only whitespace may separate that value from the closing fence, and an
 // answer without a fence is returned whole, so anything else after the plan still fails the schema gate.
 func planJSONBody(raw string) string {
+	body := planJSONText(raw)
+	if json.Valid([]byte(body)) {
+		return body
+	}
+	// Models writing Chinese use ASCII double quotes as quotation marks inside a string (点击"新建") without escaping
+	// them, which ended 6 of the 8 failed plans of 2026-10-09/10 as invalid_canvas_plan. Such quotes are escaped
+	// (repairPlanQuotes) and the answer is read again; a repair that still is not one JSON value changes nothing.
+	trimmed := strings.TrimSpace(raw)
+	if repaired := repairPlanQuotes(trimmed); repaired != trimmed {
+		if fixed := planJSONText(repaired); json.Valid([]byte(fixed)) {
+			return fixed
+		}
+	}
+	return body
+}
+
+// planJSONText is planJSONBody without the quote repair.
+func planJSONText(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if !strings.HasPrefix(raw, "```") {
 		return raw
@@ -283,6 +323,193 @@ func planJSONBody(raw string) string {
 		return body[:end]
 	}
 	return body
+}
+
+// repairPlanQuotes escapes, inside the first JSON object of an answer, the double quotes that cannot end the string
+// they are in, and the raw line breaks and tabs inside strings. A quote ends its string only when what follows it
+// continues the JSON: optional white space and then ':' (it closed a key), '}' or ']', the end of the text, or ','
+// followed by the start of a next key or value. Text before the object and after its closing brace is kept as it is,
+// so a fence and a note after it still read the way planJSONText expects.
+func repairPlanQuotes(s string) string {
+	start := strings.IndexByte(s, '{')
+	if start < 0 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+	b.WriteString(s[:start])
+	depth, inString := 0, false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			switch c {
+			case '\\':
+				b.WriteByte(c)
+				if i+1 < len(s) {
+					i++
+					b.WriteByte(s[i])
+				}
+			case '"':
+				if planQuoteCloses(s[i+1:]) {
+					inString = false
+					b.WriteByte(c)
+				} else {
+					b.WriteString(`\"`)
+				}
+			case '\n':
+				b.WriteString(`\n`)
+			case '\r':
+				b.WriteString(`\r`)
+			case '\t':
+				b.WriteString(`\t`)
+			default:
+				b.WriteByte(c)
+			}
+			continue
+		}
+		b.WriteByte(c)
+		switch c {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				b.WriteString(s[i+1:])
+				return b.String()
+			}
+		}
+	}
+	return b.String()
+}
+
+// planQuoteCloses reports whether a double quote followed by rest can end the JSON string it is in.
+func planQuoteCloses(rest string) bool {
+	rest = strings.TrimLeft(rest, " \t\r\n")
+	if rest == "" {
+		return true
+	}
+	switch rest[0] {
+	case ':', '}', ']':
+		return true
+	case ',':
+		next := strings.TrimLeft(rest[1:], " \t\r\n")
+		return next == "" || strings.IndexByte(`"{[]}-0123456789tfn`, next[0]) >= 0
+	}
+	return false
+}
+
+// acceptPlan is the planner's answer as the canvas receives it: its JSON (planJSONBody) with the slips a model makes
+// that have one safe reading normalized (normalizePlanOperations), when that passes the schema gate. Anything else
+// fails as before.
+func acceptPlan(raw string) (string, bool) {
+	body := planJSONBody(raw)
+	var compact bytes.Buffer
+	if json.Compact(&compact, []byte(body)) == nil && validatePlan(compact.String()) {
+		return compact.String(), true
+	}
+	var p map[string]any
+	if json.Unmarshal([]byte(body), &p) != nil {
+		return "", false
+	}
+	if ops, ok := p["operations"].([]any); ok {
+		p["operations"] = normalizePlanOperations(ops)
+	}
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if encoder.Encode(p) != nil {
+		return "", false
+	}
+	plan := strings.TrimSpace(buffer.String())
+	if !validatePlan(plan) {
+		return "", false
+	}
+	return plan, true
+}
+
+// planReservedIDs are the names the canvas refuses as ids (canvasPlan.ts RESERVED: they are JavaScript object keys).
+var planReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "constructor": true}
+
+// normalizePlanOperations fixes, in place, the slips that turned whole plans into invalid_canvas_plan:
+//   - a new field's value left out, or filled: the protocol has new fields start empty, so value is "", and a filled
+//     input becomes the set_input that fills it right after the field is added (an output is never filled);
+//   - a new node ref or new field id the canvas refuses (prototype, constructor, __proto__): renamed, with every
+//     reference in the plan, to <name>_node or <name>_field. A canvas never holds such an id, so only names this
+//     plan introduces are renamed.
+func normalizePlanOperations(ops []any) []any {
+	nodes, fields := map[string]string{}, map[string]string{}
+	taken := map[string]bool{}
+	for _, item := range ops {
+		if op, ok := item.(map[string]any); ok {
+			if ref, ok := op["ref"].(string); ok {
+				taken[ref] = true
+			}
+			if f, ok := op["field"].(map[string]any); ok {
+				if id, ok := f["id"].(string); ok {
+					taken[id] = true
+				}
+			}
+		}
+	}
+	fresh := func(base string) string {
+		name := base
+		for n := 2; taken[name]; n++ {
+			name = base + "_" + strconv.Itoa(n)
+		}
+		taken[name] = true
+		return name
+	}
+	for _, item := range ops {
+		op, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if ref, ok := op["ref"].(string); ok && op["type"] == "add_node" && planReservedIDs[ref] {
+			if _, done := nodes[ref]; !done {
+				nodes[ref] = fresh(ref + "_node")
+			}
+		}
+		if f, ok := op["field"].(map[string]any); ok && op["type"] == "add_field" {
+			if id, ok := f["id"].(string); ok && planReservedIDs[id] {
+				if _, done := fields[id]; !done {
+					fields[id] = fresh(id + "_field")
+				}
+			}
+		}
+	}
+	rename := func(op map[string]any, names map[string]string, keys ...string) {
+		for _, key := range keys {
+			if v, ok := op[key].(string); ok {
+				if to, ok := names[v]; ok {
+					op[key] = to
+				}
+			}
+		}
+	}
+	out := make([]any, 0, len(ops))
+	for _, item := range ops {
+		op, ok := item.(map[string]any)
+		if !ok {
+			out = append(out, item)
+			continue
+		}
+		rename(op, nodes, "ref", "nodeId", "fromNode", "toNode", "reviewerNodeId")
+		rename(op, fields, "fieldId", "fromField", "toField", "verdictFieldId")
+		out = append(out, op)
+		f, ok := op["field"].(map[string]any)
+		if !ok || op["type"] != "add_field" {
+			continue
+		}
+		rename(f, fields, "id")
+		value, isText := f["value"].(string)
+		f["value"] = ""
+		if isText && value != "" && op["side"] == "input" {
+			out = append(out, map[string]any{"type": "set_input", "nodeId": op["nodeId"], "fieldId": f["id"], "value": value})
+		}
+	}
+	return out
 }
 
 func normalizePlanJSON(raw string) string {

@@ -1148,11 +1148,11 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 			return e
 		}
 		if kind == "planner" {
-			if !validatePlan(output) {
+			if plan, ok := acceptPlan(output); ok {
+				output = plan
+			} else {
 				status = "failed"
 				code = "invalid_canvas_plan"
-			} else {
-				output = normalizePlanJSON(output)
 			}
 		}
 		if kind == "knowledge" {
