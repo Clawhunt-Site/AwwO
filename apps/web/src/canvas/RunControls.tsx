@@ -33,6 +33,8 @@ export interface RunControlsProps {
   round?: number;
   /** Live per-node states (RAW node ids), for the in-flight progress count. */
   runs: Readonly<Record<string, RunNodeStatus>>;
+  /** How many components run side by side right now (run lanes); above one the chip says so. */
+  lanes?: number;
   /** The finished run's summary; null while none has finished in this session. */
   summary?: RunSummary | null;
   /** Whether the summarised run ended because the operator stopped it. */
@@ -95,6 +97,7 @@ export function RunControls({
   execution,
   round = 0,
   runs,
+  lanes = 1,
   summary = null,
   stopped = false,
   initializeOnRun = false,
@@ -200,7 +203,7 @@ export function RunControls({
 
       {running ? (
         <span className="canvas-run-note" role="status">
-          {execution && round > 0 ? `${t('graph.round', { round, max: execution.maxRounds })} · ` : ''}{hasRuns ? t('run.inProgress', { done: doneNow, total: runTotal }) : t('run.preparing')}
+          {execution && round > 0 ? `${t('graph.round', { round, max: execution.maxRounds })} · ` : ''}{lanes > 1 ? `${t('run.lanesRunning', { count: lanes })} · ` : ''}{hasRuns ? t('run.inProgress', { done: doneNow, total: runTotal }) : t('run.preparing')}
         </span>
       ) : problemVisible ? (
         <div className="canvas-run-note canvas-run-note--err" role="alert">

@@ -3139,7 +3139,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           patchDoc(() => result.doc, { label: 'review-partner' });
           setSelection([result.reviewerId]); restoreFocusCamera(); setFocusedId(null);
         }} />}
-      <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id, { configure: true }); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} summary={runSummary}
+      <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id, { configure: true }); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} lanes={laneRunning.filter(Boolean).length} summary={runSummary}
         onViewOutput={id => { toggleDeliverables(id, true); focusNode(id); setTimelineOpen(false); }}
         reviewNote={reviewNote} onReviewNext={() => setAssistantOpen(true)}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}

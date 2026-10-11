@@ -71,6 +71,8 @@ describe('CanvasSurface run lanes', () => {
     await waitFor(() => expect(sent()).toHaveLength(2));
     expect(laneJournal(1)?.scope).toEqual(['s2']);
     expect(localStorage.getItem(laneJournalKey(1))).not.toBeNull();
+    // The run chip says how many components run side by side.
+    expect(await screen.findByText(/2 个组件运行中/)).toBeTruthy();
 
     // The same component cannot run twice, even through a callback captured before it started.
     act(() => { runS1('s1'); });
