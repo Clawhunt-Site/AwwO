@@ -118,6 +118,21 @@ describe('live page document', () => {
     expect(joinPath('site/index.html', '../../etc/passwd')).toBeNull();
     expect(joinPath('site/index.html', './img/a%20b.png')).toBe('site/img/a b.png');
   });
+
+  it('runs three.js r128 from AwwO\'s pinned copy, adding the CapsuleGeometry a game calls', async () => {
+    const cdn = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+    const page = await buildLiveDocument(`<html><head><script src="${cdn}" integrity="sha512-x" crossorigin="anonymous"></script>`
+      + '<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script></head>'
+      + '<body><script>const hero = new THREE.CapsuleGeometry(0.4, 1.2, 4, 8);</script></body></html>');
+    const parsed = new DOMParser().parseFromString(page, 'text/html');
+    const scripts = [...parsed.querySelectorAll('script')];
+    expect(scripts.some(script => script.getAttribute('src') === cdn)).toBe(false);
+    const pinned = scripts.find(script => (script.textContent ?? '').includes('THREE.CapsuleGeometry = CapsuleGeometry'))!;
+    expect(pinned.hasAttribute('integrity')).toBe(false);
+    expect(pinned.textContent!.length).toBeGreaterThan(600_000);
+    // A library AwwO does not supply still loads from its CDN, which the policy allows.
+    expect(scripts.some(script => script.getAttribute('src') === 'https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js')).toBe(true);
+  });
 });
 
 describe('archive limits', () => {

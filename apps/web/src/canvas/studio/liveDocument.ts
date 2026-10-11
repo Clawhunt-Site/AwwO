@@ -15,6 +15,7 @@
 // Relative URLs (an archive's own files, or a canvas file named by the page) are inlined from bytes the studio has,
 // so a multi-file site or a page that uses an image another node generated renders without a server.
 import { htmlDocumentSource } from '../htmlDeliverable';
+import { loadPreviewLibraries, previewScriptNeeds } from '../previewLibraries';
 import { dataUrl, decodeText, mimeOfName } from './studioData';
 
 /** Public CDNs that pages commonly load libraries, styles and fonts from (including mainland-China mirrors). */
@@ -159,6 +160,19 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
     for (const style of Array.from(parsed.querySelectorAll('style'))) style.textContent = await inlineCss(style.textContent ?? '', path, resolve, budget);
     for (const script of Array.from(parsed.querySelectorAll('script[type="module"]:not([src])'))) {
       script.textContent = await inlineModule(script.textContent ?? '', path, resolve, budget, 0);
+    }
+  }
+  // A library AwwO supplies (previewLibraries.ts, e.g. three.js r128) runs from its pinned copy, byte for byte the
+  // CDN file: no network needed, and the additions a generated page calls although its release lacks them (r128 has
+  // no CapsuleGeometry) come with it. If the copy cannot be loaded the page keeps its CDN script, which the CSP allows.
+  const needs = previewScriptNeeds(source);
+  const supplied = needs.libraries.length ? await loadPreviewLibraries(needs).catch(() => null) : null;
+  if (supplied) {
+    for (const script of Array.from(parsed.querySelectorAll('script[src]'))) {
+      const code = script.namespaceURI === 'http://www.w3.org/1999/xhtml' ? supplied.get((script.getAttribute('src') ?? '').trim()) : undefined;
+      if (code === undefined) continue;
+      for (const attribute of ['src', 'integrity', 'crossorigin', 'async', 'defer']) script.removeAttribute(attribute);
+      script.textContent = code;
     }
   }
   const head = parsed.head;
