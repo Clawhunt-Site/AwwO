@@ -1,7 +1,9 @@
 // A delivered page that fails when it runs goes back to the node that made it, once, with the error: the node's own
 // model gets the page as delivered, the browser's message and the lines where it happened, and answers with the fixed
 // page alone, which goes back into its field. It is what a person would do in the component's chat ("this page fails:
-// …, fix it"), done for them the first time; a page the repair delivered is not repaired again.
+// …, fix it"), done for them the first time; a page the repair delivered is not repaired again. An explainer figure that
+// runs but never moves goes back the same way, once, with what AwwO saw when it tried hovering and the keys; that once
+// is its own, beside the once of a page that fails (pageRepairRecordKey).
 //
 // Pages report through pageErrors.ts from wherever they run (the card on the board, the deliverable drawer, the studio,
 // the 成果 view). The report carries the page itself, so the node is found by what it published, not by which view
@@ -117,11 +119,19 @@ export function deferPageRepair(storage: Pick<Storage, 'getItem' | 'setItem'>, n
   return record ? savePageRepairRecord(storage, nodeId, { ...record, retryAfter }) : false;
 }
 
-/** The instruction's first line: it names the field, so the reply (just the fixed page) goes back into that field. */
-const PAGE_REPAIR_HEADER = /^AwwO page repair · field "([^"\n]+)"\n/;
+/** The instruction's first line: it names the field, so the reply (just the fixed page) goes back into that field. The
+ *  request for a figure that never moves ends it with " · still". */
+const PAGE_REPAIR_HEADER = /^AwwO page repair · field "([^"\n]+)"( · still)?\n/;
 
 /** Whether a component chat message is a page repair request (pageRepairMessage). */
 export const isPageRepairMessage = (message: string | undefined): boolean => Boolean(message && PAGE_REPAIR_HEADER.test(message));
+
+/** Where a node's repair is recorded: a figure that never moves has its own once, beside the once of a page that fails. */
+export const pageRepairRecordKey = (nodeId: string, kind?: PageErrorReport['kind']): string => (kind === 'still' ? `${nodeId} · still` : nodeId);
+
+/** The record a repair request belongs to (pageRepairRecordKey), read from the message's first line. */
+export const pageRepairMessageKey = (nodeId: string, message: string | undefined): string =>
+  pageRepairRecordKey(nodeId, message?.match(PAGE_REPAIR_HEADER)?.[2] ? 'still' : undefined);
 
 /**
  * The instruction the node's model receives. The answer is only the fixed page: no JSON to escape a whole document
@@ -132,7 +142,21 @@ export function pageRepairMessage(target: PageRepairTarget, report: PageErrorRep
   const field = contract.outputs.find(item => item.id === target.fieldId)!;
   const page = htmlDocumentSource(target.values[target.fieldId]);
   const others = contract.outputs.some(item => item.id !== target.fieldId && Object.hasOwn(target.values, item.id));
-  return [
+  const sandbox = 'The page runs in a sandbox without storage or network: guard any use of localStorage, sessionStorage or cookies with try/catch.';
+  // A figure that runs but never moves (pageErrors.ts): what AwwO tried and saw, and what moving means in the figure kit.
+  const ask = report.kind === 'still' ? [
+    `AwwO page repair · field "${field.id}" · still`,
+    `AwwO ran the figure you delivered in "${field.label || field.id}", and it never moves, so the reader cannot use it:`,
+    '',
+    report.message,
+    ...report.lines.length ? ['', 'What AwwO saw:', ...report.lines.map(line => `  ${line}`)] : [],
+    '',
+    'Make the figure move, so that it works the first time it opens: an idle tour plays when nobody touches it; hovering over the stage and its keys '
+      + '(← → Home End, and Space or Enter for the main action) move its parts, eased; the loop\'s tick calls draw() and returns true while anything '
+      + 'still moves; draw() sets the moving parts\' transform or d, refills a data-part group with el.innerHTML = …Parts(state), and writes the readout. '
+      + 'Change nothing else: copy every line you do not need to change exactly as it is, character for character, so that its design and its parts, '
+      + 'its words and their language, its numbers and its libraries stay as they are. ' + sandbox,
+  ] : [
     `AwwO page repair · field "${field.id}"`,
     `AwwO ran the page you delivered in "${field.label || field.id}", and it failed with this error, so the reader cannot use it:`,
     '',
@@ -141,8 +165,10 @@ export function pageRepairMessage(target: PageRepairTarget, report: PageErrorRep
     '',
     'Fix this error, and any other mistake you find that would stop the page from running, so that it works the first time it opens. '
       + 'Change nothing else: copy every other line exactly as it is, character for character and punctuation included, so that its design, '
-      + 'its words and their language, its behaviour and its libraries stay as they are. '
-      + 'The page runs in a sandbox without storage or network: guard any use of localStorage, sessionStorage or cookies with try/catch.',
+      + 'its words and their language, its behaviour and its libraries stay as they are. ' + sandbox,
+  ];
+  return [
+    ...ask,
     '',
     'The page as you delivered it, between the two marker lines:',
     '-----BEGIN PAGE-----',
@@ -179,6 +205,10 @@ export function pageRepairDelivery(node: CanvasNode, manualMessage: string | und
 
 /** What the component's chat shows for the request (the full instruction stays out of the transcript). */
 export function pageRepairDisplayText(report: PageErrorReport, locale: 'zh' | 'en'): string {
+  if (report.kind === 'still') {
+    return locale === 'zh' ? '原理图解不会动，AwwO 自动修复一次：悬停、按键后，图里的零件都没有动'
+      : 'The figure never moves, so AwwO is fixing it once: hovering and keys moved none of its parts';
+  }
   const message = report.message.replace(/^Uncaught\s+/, '');
   const short = message.length > 160 ? `${message.slice(0, 160)}…` : message;
   return locale === 'zh' ? `页面运行出错，AwwO 自动修复一次：${short}` : `The page failed to run, so AwwO is fixing it once: ${short}`;

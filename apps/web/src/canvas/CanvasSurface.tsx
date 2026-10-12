@@ -102,7 +102,7 @@ import { currentGraphRunEntry } from './currentGraphRun';
 import { applyRecoveredDocument, prepareRunDocument, runInputFingerprint, recoveryJournalForDocument, mergeRecoveredManualConversation } from './runRecoveryDocument';
 import { prepareManualHistoryCapacity, persistManualHistoryWithNativeProof } from './manualHistoryRetention';
 import { subscribePageErrors, type PageErrorReport } from './pageErrors';
-import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, pageRepairDecision, pageRepairDisplayText, pageRepairMessage, pageRepairRetryAfter, pageRepairTarget, savePageRepairRecord } from './pageRepair';
+import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, pageRepairDecision, pageRepairDisplayText, pageRepairMessage, pageRepairMessageKey, pageRepairRecordKey, pageRepairRetryAfter, pageRepairTarget, savePageRepairRecord } from './pageRepair';
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
 import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage } from './surfaceMessages';
@@ -1580,7 +1580,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // A page repair the service refused before it ran (today's calls used up, every run slot busy) was no repair: its
       // delivery may go back again later (pageRepair.ts), in this canvas's own storage, where repairPage recorded it.
       const retryAfter = result.refusedCode && isPageRepairMessage(manualMessage) ? pageRepairRetryAfter(result.refusedCode, Date.now()) : null;
-      if (retryAfter !== null) deferPageRepair(baseCanvasStorage(), node.id, retryAfter);
+      if (retryAfter !== null) deferPageRepair(baseCanvasStorage(), pageRepairMessageKey(node.id, manualMessage), retryAfter);
       return journalSummary(journal.current!);
     };
     const options = {
@@ -2067,22 +2067,23 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     [startRun],
   );
   // A delivered page that fails when it runs goes back to its node once, with the error, as a message in the node's
-  // own chat (pageRepair.ts). Nothing starts while a run is active: the request waits here and starts once the canvas
-  // is idle, unless the node has delivered something else by then.
+  // own chat (pageRepair.ts); so does a figure that never moves, once of its own. Nothing starts while a run is active:
+  // the request waits here and starts once the canvas is idle, unless the node has delivered something else by then.
   const waitingRepairs = useRef(new globalThis.Map<string, PageErrorReport>());
   const repairPage = useCallback((report: PageErrorReport) => {
     if (readOnlyRef.current || outdatedObserver.current || runUnavailableReason) return;
     const target = pageRepairTarget(docRef.current.nodes, report.page);
     if (!target) return;
     const storage = canvasStorage();
-    if (pageRepairDecision(loadPageRepairRecords(storage)[target.node.id], target.output) !== 'repair') return;
+    const key = pageRepairRecordKey(target.node.id, report.kind);
+    if (pageRepairDecision(loadPageRepairRecords(storage)[key], target.output) !== 'repair') return;
     if (anyLaneActive() || setupRequest.current || busyNodeIds(undefined, true).has(target.node.id)) {
-      waitingRepairs.current.set(target.node.id, report);
+      waitingRepairs.current.set(key, report);
       return;
     }
-    waitingRepairs.current.delete(target.node.id);
+    waitingRepairs.current.delete(key);
     // Recorded before the start: every other view of this page, and every other tab of this canvas, leaves it alone.
-    if (!savePageRepairRecord(storage, target.node.id, { from: target.output.at, at: Date.now() })) return;
+    if (!savePageRepairRecord(storage, key, { from: target.output.at, at: Date.now() })) return;
     void startRun([target.node.id], pageRepairMessage(target, report), undefined, pageRepairDisplayText(report, locale));
   }, [startRun, anyLaneActive, busyNodeIds, runUnavailableReason, locale]);
   useEffect(() => subscribePageErrors(repairPage), [repairPage]);

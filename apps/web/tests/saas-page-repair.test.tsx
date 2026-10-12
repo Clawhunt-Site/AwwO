@@ -13,9 +13,9 @@ import { CANVAS_STORAGE_KEY, createSessionNode, type CanvasDocument, type NodeOu
 import { canvasStorage } from '../src/canvas/canvasStorage';
 import { htmlPreviewDocument, PREVIEW_HOST_SCRIPT, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { activeThreadId, sessionStoreKey } from '../src/canvas/nodeThreads';
-import { PAGE_ERROR_MESSAGE, PAGE_ERROR_SCRIPT, readPageErrorMessage, reportPageError, subscribePageErrors, type PageErrorReport } from '../src/canvas/pageErrors';
+import { PAGE_ERROR_MESSAGE, PAGE_ERROR_SCRIPT, pageErrorScript, readPageErrorMessage, reportPageError, subscribePageErrors, type PageErrorReport } from '../src/canvas/pageErrors';
 import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, MAX_REPAIR_PAGE_CHARS, PAGE_REPAIR_STORAGE_KEY, pageRepairDecision, pageRepairDelivery, pageRepairDisplayText, pageRepairMessage,
-  pageRepairRetryAfter, pageRepairTarget, REPAIR_RESULT_WINDOW_MS, REPAIR_RETRY_SOON_MS, savePageRepairRecord } from '../src/canvas/pageRepair';
+  pageRepairMessageKey, pageRepairRecordKey, pageRepairRetryAfter, pageRepairTarget, REPAIR_RESULT_WINDOW_MS, REPAIR_RETRY_SOON_MS, savePageRepairRecord } from '../src/canvas/pageRepair';
 import { applyRecoveredDocument, runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 import { getSnapshot, resetAllSessions } from '../src/canvas/sessions';
 import { buildLiveDocument } from '../src/canvas/studio/liveDocument';
@@ -100,6 +100,62 @@ describe('the page error reporter', () => {
   });
 });
 
+// The repaired first production figure (2026-10-12) ran without an error and never moved: its loop never called draw(),
+// and draw() wrote setAttribute("innerHTML", …). The watch runs here with short timings (0.2 s idle, 40 ms a step).
+describe('the figure watch', () => {
+  const MOUNTED = '<figure class="iso-figure"><div class="iso-plate"><span data-readout>进气 0°</span><div class="iso-stage" tabindex="0" role="slider">'
+    + '<svg><g data-part="piston" transform="translate(0,0)"><path d="M0 0"/></g></svg></div></div></figure>';
+  const run = (script: string, { kit = true, mounted = MOUNTED } = {}) => {
+    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
+    const posted: Array<Record<string, unknown>> = [];
+    dom.window.addEventListener('message', event => posted.push(event.data));
+    dom.window.eval(pageErrorScript(200, 40));
+    if (kit) dom.window.eval('window.Anatomy = {};');
+    // What Anatomy.mount does: the plate, with its stage, drawing and readout, inside main.iso-page; then the page's code.
+    dom.window.eval(`{ const main = document.createElement('main'); main.className = 'iso-page'; main.innerHTML = ${JSON.stringify(mounted)};
+      document.body.appendChild(main);
+      window.inputs = { key: 0, pointer: 0 };
+      const stage = document.querySelector('.iso-stage'), piston = document.querySelector('[data-part="piston"]'), readout = document.querySelector('[data-readout]');
+      stage.addEventListener('keydown', () => { window.inputs.key += 1; });
+      stage.addEventListener('pointermove', () => { window.inputs.pointer += 1; });
+      ${script} }`);
+    return { posted, inputs: () => (dom.window as unknown as { inputs: { key: number; pointer: number } }).inputs, close: () => dom.window.close() };
+  };
+
+  it('reports a figure that never moves, with what it saw, and nothing for one that moves on a key, by itself, or is no figure', async () => {
+    const still = run(`stage.addEventListener('keydown', () => { piston.setAttribute('innerHTML', '<path d="M1 1"/>'); });`);
+    const readoutOnly = run(`stage.addEventListener('keydown', () => { readout.textContent = '压缩 90°'; });`);
+    const keyed = run(`stage.addEventListener('keydown', e => { if (e.key === 'ArrowRight') piston.setAttribute('transform', 'translate(4,0)'); });`);
+    const touring = run(`let x = 0; setInterval(() => piston.setAttribute('transform', 'translate(' + (x += 1) + ',0)'), 30);`);
+    const spaceOnly = run(`stage.addEventListener('keydown', e => { if (e.keyCode === 32) piston.setAttribute('transform', 'translate(0,2)'); });`);
+    const page = run('', { kit: false });
+    const canvas = run('', { mounted: MOUNTED.replace('<svg>', '<canvas></canvas><svg>') });
+    // Every watch started together with the same timings: once the two still ones have reported, the others are done too.
+    await waitFor(() => { expect(still.posted).toHaveLength(1); expect(readoutOnly.posted).toHaveLength(1); }, { timeout: 8_000 });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(still.posted).toEqual([{ type: PAGE_ERROR_MESSAGE, kind: 'still', line: 0, column: 0, stack: '',
+      message: 'The drawing never moved: in 0.2 s on screen nothing in it changed by itself, and hovering across it and pressing →, ←, Space, Enter, End and Home moved nothing either. The readout stayed "进气 0°".',
+      notes: [expect.stringContaining('The page sets an attribute named "innerHTML" on <g data-part="piston">: setAttribute("innerHTML", …) draws nothing.'),
+        expect.stringContaining('Almost no animation frame ran during the test (0)')] }]);
+    expect(still.inputs().key).toBe(6);
+    expect(readoutOnly.posted).toHaveLength(1);
+    expect(readoutOnly.posted[0].message).toContain('Only the readout changed, from "进气 0°" to "压缩 90°".');
+    // The first key that moves a part ends the watch: nothing is pressed after it.
+    expect(keyed.posted).toEqual([]);
+    expect(keyed.inputs().key).toBe(1);
+    expect(spaceOnly.posted).toEqual([]);
+    expect(spaceOnly.inputs().key).toBe(3);
+    // A figure that moves by itself is never tried.
+    expect(touring.posted).toEqual([]);
+    expect(touring.inputs()).toEqual({ key: 0, pointer: 0 });
+    for (const other of [page, canvas]) {
+      expect(other.posted).toEqual([]);
+      expect(other.inputs()).toEqual({ key: 0, pointer: 0 });
+    }
+    for (const item of [still, readoutOnly, keyed, touring, spaceOnly, page, canvas]) item.close();
+  });
+});
+
 describe('reading a report', () => {
   it('gives the page’s own lines where it happened: the reported one, then the stack’s, each once', () => {
     const document = ['<!doctype html>', '  let tokens = 10;', 'draw();', `${'x'.repeat(400)}ERROR${'y'.repeat(400)}`].join('\n');
@@ -109,6 +165,13 @@ describe('reading a report', () => {
     expect(readPageErrorMessage({ type: 'awwo-live-link', href: 'https://example.com' }, document, PAGE)).toBeNull();
     expect(readPageErrorMessage({ type: PAGE_ERROR_MESSAGE, message: '   ' }, document, PAGE)).toBeNull();
     expect(readPageErrorMessage({ type: PAGE_ERROR_MESSAGE, message: 'x', line: 99 }, document, PAGE)?.lines).toEqual([]);
+  });
+
+  it('gives a figure that never moves what AwwO saw instead, four notes at most', () => {
+    const notes = ['  The page sets an attribute named "innerHTML" on <g data-part="gas">.  ', 7, '', 'b', 'c', 'd', 'e'];
+    expect(readPageErrorMessage({ type: PAGE_ERROR_MESSAGE, kind: 'still', message: ' The drawing never moved. ', line: 2, notes }, 'a\nb', PAGE))
+      .toEqual({ page: PAGE, kind: 'still', message: 'The drawing never moved.', lines: ['The page sets an attribute named "innerHTML" on <g data-part="gas">.', 'b', 'c', 'd'] });
+    expect(readPageErrorMessage({ type: PAGE_ERROR_MESSAGE, kind: 'still', message: 'still', notes: 'not a list' }, '', PAGE)?.lines).toEqual([]);
   });
 });
 
@@ -183,6 +246,15 @@ describe('once per delivery', () => {
     expect(isPageRepairMessage('this page fails, fix it')).toBe(false);
   });
 
+  it('keeps a figure that never moves apart: it has its own once, beside a failing page’s', () => {
+    expect(pageRepairRecordKey('fig')).toBe('fig');
+    expect(pageRepairRecordKey('fig', 'still')).toBe('fig · still');
+    expect(isPageRepairMessage('AwwO page repair · field "figure" · still\nAwwO ran the figure')).toBe(true);
+    expect(pageRepairMessageKey('fig', 'AwwO page repair · field "figure" · still\nAwwO ran the figure')).toBe('fig · still');
+    expect(pageRepairMessageKey('fig', 'AwwO page repair · field "figure"\nAwwO ran the page')).toBe('fig');
+    expect(pageRepairMessageKey('fig', undefined)).toBe('fig');
+  });
+
   it('keeps the newest records in the canvas’s storage and survives a damaged one', () => {
     const storage = new Map<string, string>();
     const store = { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); } };
@@ -221,6 +293,24 @@ describe('the repair request', () => {
   it('shows the reader a short line in the component’s chat', () => {
     expect(pageRepairDisplayText(report, 'zh')).toBe("页面运行出错，AwwO 自动修复一次：SyntaxError: Identifier 'tokens' has already been declared");
     expect(pageRepairDisplayText({ ...report, message: 'x'.repeat(300) }, 'en')).toBe(`The page failed to run, so AwwO is fixing it once: ${'x'.repeat(160)}…`);
+  });
+
+  it('tells the model of a figure that never moves what AwwO tried and saw, and asks for a moving page alone', () => {
+    const node = figure();
+    const still: PageErrorReport = { page: PAGE, kind: 'still', message: 'The drawing never moved: … The readout stayed "进气 0°".',
+      lines: ['The page sets an attribute named "innerHTML" on <g data-part="gas"> and on 3 more elements: setAttribute("innerHTML", …) draws nothing.'] };
+    const message = pageRepairMessage({ node, output: node.lastOutput!, fieldId: 'figure', values: { figure: PAGE } }, still);
+    expect(message.startsWith('AwwO page repair · field "figure" · still\nAwwO ran the figure you delivered in "交互原理图", and it never moves')).toBe(true);
+    expect(message).toContain(`${still.message}\n\nWhat AwwO saw:\n  ${still.lines[0]}`);
+    expect(message).toContain('the loop\'s tick calls draw() and returns true while anything still moves');
+    expect(message).not.toContain('Where it happened');
+    expect(message).toContain(`-----BEGIN PAGE-----\n${PAGE}\n-----END PAGE-----`);
+    expect(message.endsWith('AwwO puts it back in "交互原理图".')).toBe(true);
+    expect(pageRepairMessageKey('fig', message)).toBe('fig · still');
+    const fixed = PAGE.replace('let tokens = 9;', 'tokens = 9;');
+    expect(JSON.parse(pageRepairDelivery(node, message, fixed)!)).toEqual({ figure: fixed });
+    expect(pageRepairDisplayText(still, 'zh')).toBe('原理图解不会动，AwwO 自动修复一次：悬停、按键后，图里的零件都没有动');
+    expect(pageRepairDisplayText(still, 'en')).toBe('The figure never moves, so AwwO is fixing it once: hovering and keys moved none of its parts');
   });
 });
 
@@ -332,6 +422,24 @@ describe('on the canvas', () => {
     act(() => { reportPageError(report); });
     await waitFor(() => expect(repairs()).toHaveLength(2), { timeout: 8_000 });
   }, 20_000);
+
+  it('sends a figure that never moves back once of its own, even after the page’s error was repaired', async () => {
+    const still: PageErrorReport = { page: PAGE, kind: 'still', message: 'The drawing never moved: … The readout stayed "进气 0°".', lines: [] };
+    render(<CanvasSurface />);
+    // This delivery is the result of an error repair asked for just before it: no second error repair.
+    savePageRepairRecord(canvasStorage(), 'fig', { from: 500, at: 900 });
+    act(() => { reportPageError(report); });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(repairs()).toHaveLength(0);
+    act(() => { reportPageError(still); });
+    await waitFor(() => expect(repairs()).toHaveLength(1));
+    expect(String(repairs()[0][1]?.body)).toContain('AwwO page repair · field \\"figure\\" · still');
+    expect(loadPageRepairRecords(canvasStorage())['fig · still']).toMatchObject({ from: 1_000 });
+    // Reported again (another view of it, a remount): nothing more.
+    act(() => { reportPageError(still); });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(repairs()).toHaveLength(1);
+  });
 
   it('waits while another component runs and asks once the canvas is idle', async () => {
     const OriginalTile = Tiles.SessionTile;
