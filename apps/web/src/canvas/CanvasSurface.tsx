@@ -1294,11 +1294,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const startRun = useCallback((requestedScope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
     if (readOnlyRef.current || outdatedObserver.current) return Promise.resolve();
     if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
-    // Image, video and 3D nodes generate only from their own Send: a canvas or component run leaves them out
-    // (runScopeWithoutMedia) instead of the server refusing it whole. A whole-canvas run stays one: `whole`.
+    // Image, video and 3D nodes generate in a canvas or component run like any other node (graph_media.go on the
+    // server), each one generation on today's allowance. A collaboration discusses in text, so it still leaves them
+    // out (runScopeWithoutMedia). A whole-canvas run stays one: `whole`.
     const whole = !requestedScope;
     let scope = requestedScope;
-    if (!manualMessage) {
+    if (!manualMessage && collaboration) {
       const runnable = runScopeWithoutMedia(docRef.current.nodes, requestedScope);
       if (!runnable) { setHandoffNote(surfaceNotice(t, 'media_runs_alone')); return Promise.resolve(); }
       scope = runnable.scope;

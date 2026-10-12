@@ -389,9 +389,16 @@ func TestPostgresMediaRunAdmissionRefusals(t *testing.T) {
 	if got := h.mediaRun(t, c, tid, vid, "a cat in a hat", 409); errorCode(got) != "node_setup_required" {
 		t.Fatal("changed node kind", got)
 	}
-	// A canvas run never executes a media node.
-	if got := h.request(t, c, "POST", base+"/canvases/"+cid+"/graph-runs", map[string]any{"operationId": randomID(), "documentVersion": canvas["version"], "scope": []string{"img"}}, 400); errorCode(got) != "media_graph_unsupported" {
-		t.Fatal("graph run admitted a media node", got)
+	// A canvas run admits a media node. With no prompt of its own and nothing upstream it fails at its turn, before
+	// anything is paid for (graph_media_test.go covers the generation itself).
+	submitted, _ := rh.counts()
+	graph := h.request(t, c, "POST", base+"/canvases/"+cid+"/graph-runs", map[string]any{"operationId": randomID(), "documentVersion": canvas["version"], "scope": []string{"img"}}, 202)
+	settled := awaitGraph(t, h, c, base+"/canvases/"+cid+"/graph-runs/"+graph["id"].(string), "failed")
+	if n := settled["nodes"].([]any)[0].(map[string]any); n["state"] != "failed" || n["detail"] != "media_prompt_invalid" {
+		t.Fatal("a media node without a prompt", n)
+	}
+	if now, _ := rh.counts(); now != submitted {
+		t.Fatal("a prompt-less canvas-run generation reached the provider", now)
 	}
 	// Generations are paid from the operator's key: a workspace without an allowlist uses media
 	// models only when the operator opts such workspaces in, and an allowlist must name the model.

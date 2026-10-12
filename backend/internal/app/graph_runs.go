@@ -211,57 +211,71 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				a.dbError(w, e)
 				return
 			}
-			if engine == agentEngineMedia {
-				fail(w, 400, "media_graph_unsupported", "Image and video nodes run on their own, not as part of a canvas run")
-				return
-			}
-			team, e := savedNodeTeam(raw, n.ID)
-			if e != nil {
+			media := engine == agentEngineMedia
+			var team *nodeTeam
+			if media {
+				// An image, video or 3D node generates in the run from its own prompt and its upstream text
+				// (graph_media.go). Its model and parameters are frozen now; its allowance is counted when its turn
+				// comes, so a graph never pays for a generation it does not reach.
+				if b.Collaboration != nil {
+					fail(w, 400, "media_collaboration_unsupported", "Image, video and 3D nodes do not take part in a collaboration")
+					return
+				}
+				if snap, e = a.mediaPlanSnapshot(raw, n.ID, model, entitlement); e == nil {
+					e = a.mediaStorageReady()
+				}
+				if e != nil {
+					a.mediaAdmissionError(w, e)
+					return
+				}
+			} else if team, e = savedNodeTeam(raw, n.ID); e != nil {
 				fail(w, 400, "invalid_team", e.Error())
 				return
 			}
-			if !savedRuntimeMatches(raw, n.ID, runtime) {
-				fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
-				return
-			}
-			snap, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
-			if e != nil {
-				a.runtimeAdmissionError(w, e)
-				return
-			}
-			snap.Knowledge = knowledge
-			if e = a.requireWorkspaceSnapshot(snap); e != nil {
-				a.runtimeAdmissionError(w, e)
-				return
-			}
-			if e = validateWorkspaceAgentSession(r.Context(), tx, tid, n.IssueID, n.ID, raw, snap); e != nil {
-				a.workspaceAgentAdmissionError(w, e)
-				return
-			}
-			// Freeze the output policy separately from persona instructions. Team members
-			// retain their own personas without overriding this server-owned format.
-			snap.OutputPolicy = graphOutputPolicy(n)
-			if snap.Workspace != nil {
-				snap.Workspace.OutputFields = workspaceOutputFields(n)
-				snap.OutputPolicy = graphWorkspaceOutputPolicy(n)
-			}
-			snap.TaskFrame, e = savedNodeTaskFrame(raw, n.ID)
-			if e != nil {
-				fail(w, 400, "invalid_task_frame", e.Error())
-				return
-			}
-			// Freeze a structured contract only when the deployment has switched contracts
-			// on, and only for a plain single-agent node whose own model advertises the
-			// capability. A team turn is excluded because its members deliver into the
-			// node's envelope through their own turns, and a runtime or model that never
-			// advertised it keeps the textual policy alone. The decision is frozen with the
-			// rest of the snapshot, so a capability or switch that changes later cannot
-			// change what this run was admitted to do.
-			if a.cfg.StructuredContracts && snap.Workspace == nil && team == nil && snap.Runtime == runtimeOpenAIAgents && snap.Health.supportsStructuredOutput(snap.Model) {
-				contract, outcome := graphOutputContract(n)
-				snap.OutputContract = contract
-				if outcome != "none" {
-					contractOutcomes = append(contractOutcomes, outcome)
+			if !media {
+				if !savedRuntimeMatches(raw, n.ID, runtime) {
+					fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
+					return
+				}
+				snap, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
+				if e != nil {
+					a.runtimeAdmissionError(w, e)
+					return
+				}
+				snap.Knowledge = knowledge
+				if e = a.requireWorkspaceSnapshot(snap); e != nil {
+					a.runtimeAdmissionError(w, e)
+					return
+				}
+				if e = validateWorkspaceAgentSession(r.Context(), tx, tid, n.IssueID, n.ID, raw, snap); e != nil {
+					a.workspaceAgentAdmissionError(w, e)
+					return
+				}
+				// Freeze the output policy separately from persona instructions. Team members
+				// retain their own personas without overriding this server-owned format.
+				snap.OutputPolicy = graphOutputPolicy(n)
+				if snap.Workspace != nil {
+					snap.Workspace.OutputFields = workspaceOutputFields(n)
+					snap.OutputPolicy = graphWorkspaceOutputPolicy(n)
+				}
+				snap.TaskFrame, e = savedNodeTaskFrame(raw, n.ID)
+				if e != nil {
+					fail(w, 400, "invalid_task_frame", e.Error())
+					return
+				}
+				// Freeze a structured contract only when the deployment has switched contracts
+				// on, and only for a plain single-agent node whose own model advertises the
+				// capability. A team turn is excluded because its members deliver into the
+				// node's envelope through their own turns, and a runtime or model that never
+				// advertised it keeps the textual policy alone. The decision is frozen with the
+				// rest of the snapshot, so a capability or switch that changes later cannot
+				// change what this run was admitted to do.
+				if a.cfg.StructuredContracts && snap.Workspace == nil && team == nil && snap.Runtime == runtimeOpenAIAgents && snap.Health.supportsStructuredOutput(snap.Model) {
+					contract, outcome := graphOutputContract(n)
+					snap.OutputContract = contract
+					if outcome != "none" {
+						contractOutcomes = append(contractOutcomes, outcome)
+					}
 				}
 			}
 			sid = n.IssueID
@@ -297,7 +311,9 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			if team != nil {
+			if media {
+				// A generation takes no conversation history.
+			} else if team != nil {
 				history, available, err := completedTeamHistory(r.Context(), tx, tid, sid)
 				if err != nil {
 					a.dbError(w, err)
@@ -502,8 +518,10 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				recorded := out
 				if rs == "completed" {
 					state = "done"
-					vals, files, err := graphOutputFiles(n, out)
-					if err != nil {
+					if graphMediaNode(n) {
+						// A generation's files were stored as it finished (storeMediaResults); its delivery is the
+						// awwo.media record naming them, published as it is.
+					} else if vals, files, err := graphOutputFiles(n, out); err != nil {
 						state, detail = "failed", err.Error()
 					} else if stored, storeErr := a.storeArtifacts(ctx, tid, canvasID, s.RunID, n.ID, out, vals, files); storeErr != nil {
 						// The deliverable content could not be made durable, so the node must not
@@ -547,7 +565,13 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				a.setGraphNode(ctx, tid, id, n.ID, "done", formOutput(n), "")
 				continue
 			}
-			prompt, err := graphPrompt(n, d, outputs)
+			var prompt string
+			var err error
+			if graphMediaNode(n) {
+				prompt, err = a.graphMediaPrompt(ctx, tid, s.SessionID, n, d, outputs)
+			} else {
+				prompt, err = graphPrompt(n, d, outputs)
+			}
 			if err != nil {
 				a.setGraphNode(ctx, tid, id, n.ID, "failed", "", err.Error())
 				continue
@@ -593,11 +617,12 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	}
 	defer tx.Rollback(context.Background())
 	var tenantStatus string
-	var concurrent int
+	var concurrent, daily int
 	var restricted bool
 	var allowed []string
 	var needsPlan bool
-	e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),requires_plan FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&tenantStatus, &concurrent, &restricted, &allowed, &needsPlan)
+	var routes []byte
+	e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),requires_plan,max_runs_per_day,route_limits FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&tenantStatus, &concurrent, &restricted, &allowed, &needsPlan, &daily, &routes)
 	if e != nil {
 		return e
 	}
@@ -665,6 +690,17 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	var snap executionSnapshot
 	if json.Unmarshal(raw, &snap) != nil {
 		return errors.New("invalid_snapshot")
+	}
+	if snap.Media != nil {
+		// An image, video or 3D node: a paid generation, admitted on the same allowances as its own Send.
+		if turn != nil {
+			return errors.New("media_collaboration_unsupported")
+		}
+		today, err := a.workspaceRunsToday(ctx, tx, tid)
+		if err != nil {
+			return err
+		}
+		return a.admitGraphMedia(ctx, tx, tid, gid, nid, sid, actor, prompt, snap, entitlement, owner != nil, readRouteLimits(routes), workspaceLimits{active, concurrent, today, daily, needsPlan})
 	}
 	// This node's catalog was frozen when the graph was admitted, which can be long
 	// before this child is created — and a graph still queued has no child to

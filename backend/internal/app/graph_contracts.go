@@ -50,6 +50,10 @@ type graphNode struct {
 		Text    string `json:"text"`
 		Partial bool   `json:"partial"`
 	} `json:"lastOutput"`
+	// A media node in a canvas run generates from the draft of its active conversation (graph_media.go). Read raw:
+	// a shape this host does not expect leaves the draft empty instead of failing the whole graph.
+	ActiveThreadID json.RawMessage `json:"activeThreadId,omitempty"`
+	Threads        json.RawMessage `json:"threads,omitempty"`
 }
 type graphEdge struct {
 	ID       string          `json:"id"`
@@ -733,6 +737,8 @@ func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (strin
 				return "", err
 			}
 			out = v[strings.TrimPrefix(e.FromPort, "out:")]
+		} else if graphMediaNode(src) {
+			out = mediaDeliveryText(src, out)
 		}
 		inputs[e.ToPort] = out
 		sources[e.ToPort] = src.Title

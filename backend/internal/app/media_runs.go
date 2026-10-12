@@ -48,6 +48,7 @@ type mediaItem struct {
 
 // Server-generated identifiers only; anything else never becomes part of a path.
 var mediaPathPart = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
 // Uploaded files of any type are stored as <sha256>.bin (uploads.go); their type lives in the artifact row.
 var mediaFileName = regexp.MustCompile(`^[0-9a-f]{64}\.(png|jpg|webp|gif|mp4|webm|mov|glb|bin)$`)
 
@@ -146,6 +147,24 @@ func savedMediaNode(document []byte, nodeID string) (kind, model string, params 
 // costs money, so running the previously initialized model instead of the one now shown on the
 // node is not an option.
 func (a *App) mediaSnapshot(document []byte, nodeID, model, prompt string, entitlement modelEntitlement) (executionSnapshot, error) {
+	snapshot, err := a.mediaPlanSnapshot(document, nodeID, model, entitlement)
+	if err != nil {
+		return executionSnapshot{}, err
+	}
+	m, _ := builtinMediaCatalog.model(model)
+	if !m.validMediaPrompt(prompt) {
+		return executionSnapshot{}, mediaPromptError(m)
+	}
+	return snapshot, nil
+}
+
+func mediaPromptError(m *mediaModel) error {
+	return setupError{"media_prompt_invalid", fmt.Sprintf("The prompt must be %d-%d characters for this model", m.Prompt.MinLength, m.Prompt.MaxLength)}
+}
+
+// mediaPlanSnapshot is mediaSnapshot without the prompt: a canvas run freezes a media node's model and parameters
+// when the graph is admitted and composes its prompt only when the node's turn comes (graph_media.go).
+func (a *App) mediaPlanSnapshot(document []byte, nodeID, model string, entitlement modelEntitlement) (executionSnapshot, error) {
 	if !a.cfg.mediaConfigured() {
 		return executionSnapshot{}, setupError{"media_unavailable", "Image and video generation is not configured"}
 	}
@@ -169,9 +188,6 @@ func (a *App) mediaSnapshot(document []byte, nodeID, model, prompt string, entit
 	params, err := m.resolveMediaParams(raw)
 	if err != nil {
 		return executionSnapshot{}, setupError{"media_params_invalid", "Node media settings are invalid for its model"}
-	}
-	if !m.validMediaPrompt(prompt) {
-		return executionSnapshot{}, setupError{"media_prompt_invalid", fmt.Sprintf("The prompt must be %d-%d characters for this model", m.Prompt.MinLength, m.Prompt.MaxLength)}
 	}
 	runtime := runtimeRunningHub
 	switch m.Provider {
@@ -224,114 +240,14 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		a.mediaAdmissionError(w, e)
 		return
 	}
-	// The workspace row is locked; the deployment-wide count takes its own lock, so neither limit
-	// can be passed by concurrent admissions. Both read the clock after waiting for the locks.
-	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321010)"); e != nil {
+	billing, e := a.admitMediaGeneration(ctx, tx, tid, snapshot, routes, paid, false, own)
+	var refusal *mediaRefusal
+	if errors.As(e, &refusal) {
+		fail(w, refusal.status, refusal.code, refusal.message)
+		return
+	}
+	if e != nil {
 		a.dbError(w, e)
-		return
-	}
-	// today counts this workspace's free generations only: paid ones never spend a free allowance.
-	var today, total int
-	if e = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1 AND billed_user_id IS NULL),count(*) FILTER (WHERE billed_user_id IS NULL) FROM media_generations
-		WHERE created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&today, &total); e != nil {
-		a.dbError(w, e)
-		return
-	}
-	// A paid plan's row is locked after the workspace row and the media lock, like every model call's.
-	var plan *activePlan
-	if paid {
-		if plan, e = ownerPlan(ctx, tx, tid, true); e != nil {
-			a.dbError(w, e)
-			return
-		}
-		if plan == nil {
-			// The plan lapsed since createRun read it, which skipped the workspace's own run limits.
-			switch e = own.admit(ctx, tx, tid); {
-			case errors.Is(e, errPlanRequired):
-				fail(w, 402, "plan_required", "This workspace needs its owner's paid plan")
-				return
-			case errors.Is(e, errInvocationQuota):
-				fail(w, 429, "quota_exceeded", "Workspace run quota exceeded")
-				return
-			case e != nil:
-				a.dbError(w, e)
-				return
-			}
-		}
-	}
-	if plan != nil {
-		usage, e := accountPlanUsage(ctx, tx, plan.UserID, a.cfg.PlannerModel)
-		if e != nil {
-			a.dbError(w, e)
-			return
-		}
-		if usage.MediaToday >= plan.Limits.MediaPerDay {
-			fail(w, 429, "plan_media_quota_exceeded", "This plan's image and video generations for today are used up")
-			return
-		}
-		// A generation is a run: it takes one of the plan's agents at once (createRun leaves that count to here).
-		used, e := accountSlotsUsed(ctx, tx, plan.UserID)
-		if e != nil {
-			a.dbError(w, e)
-			return
-		}
-		if used >= plan.Limits.Concurrent {
-			fail(w, 429, "plan_busy", "This plan's agents at once are all running, in this or another workspace; try again when one finishes")
-			return
-		}
-	} else if today >= a.cfg.MediaRunsPerDay {
-		fail(w, 429, "media_quota_exceeded", "This workspace has used today's image and video generations")
-		return
-	}
-	if plan == nil && total >= a.cfg.MediaTotalRunsPerDay {
-		fail(w, 429, "media_capacity_exceeded", "Today's image and video generations are used up; try again tomorrow")
-		return
-	}
-	// A 3D generation is paid from the operator's Tripo balance: free ones have their own, smaller caps, for the
-	// workspace and across every workspace, counted from durable rows under the same lock.
-	if plan == nil && snapshot.Media.Provider == mediaProviderTripo {
-		var mine, all int
-		if e = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1),count(*) FROM media_generations
-			WHERE billed_user_id IS NULL AND model LIKE 'tripo.%' AND created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&mine, &all); e != nil {
-			a.dbError(w, e)
-			return
-		}
-		if mine >= a.cfg.TripoFreeRunsPerDay {
-			fail(w, 429, "model3d_quota_exceeded", "This workspace has used today's free 3D generations")
-			return
-		}
-		if all >= a.cfg.TripoFreeTotalPerDay {
-			fail(w, 429, "model3d_capacity_exceeded", "Today's free 3D generations are used up; try again tomorrow")
-			return
-		}
-	}
-	var credits *int
-	var billedUser *string
-	var billedPeriod *time.Time
-	if plan != nil {
-		n := mediaCreditsFor(snapshot.Model, snapshot.Media.Kind, snapshot.Media.Params)
-		credits, billedUser, billedPeriod = &n, &plan.UserID, &plan.PeriodStart
-		switch e = checkCredits(ctx, tx, plan, n); {
-		case errors.Is(e, errCreditsExhausted):
-			fail(w, 402, "credits_exhausted", "This plan's credits for the period are used up")
-			return
-		case e != nil:
-			a.dbError(w, e)
-			return
-		}
-		routes = nil
-	}
-	// A route-limited free workspace also has its own media allowance and shares a deployment-wide
-	// ceiling with the other route-limited workspaces; one that limits no route (an empty object) has neither.
-	switch code, e := a.mediaRouteLimit(ctx, tx, routes, today); {
-	case e != nil:
-		a.dbError(w, e)
-		return
-	case code == "media_quota_exceeded":
-		fail(w, 429, code, "This workspace has used today's image and video generations")
-		return
-	case code != "":
-		fail(w, 429, code, "Today's image and video generations are used up; try again tomorrow")
 		return
 	}
 	id := randomID()
@@ -345,7 +261,7 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		a.dbError(w, e)
 		return
 	}
-	if _, e = tx.Exec(ctx, "INSERT INTO media_generations(run_id,tenant_id,model,created_at,credit_points,billed_user_id,billed_period_start) VALUES($1,$2,$3,clock_timestamp(),$4,$5,$6)", id, tid, snapshot.Model, credits, billedUser, billedPeriod); e != nil {
+	if _, e = tx.Exec(ctx, "INSERT INTO media_generations(run_id,tenant_id,model,created_at,credit_points,billed_user_id,billed_period_start) VALUES($1,$2,$3,clock_timestamp(),$4,$5,$6)", id, tid, snapshot.Model, billing.credits, billing.billedUser, billing.billedPeriod); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -373,6 +289,124 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		a.execute(ctx, tid, id, b.SessionID, b.Prompt, "", "node", 0, 0)
 	}, r.Context())
 	writeJSON(w, 202, v)
+}
+
+// mediaRefusal is why a generation is not admitted, with the status a run request answers it with.
+type mediaRefusal struct {
+	status        int
+	code, message string
+}
+
+func (r *mediaRefusal) Error() string { return r.code }
+
+// mediaBilling is what an admitted generation is recorded with: a paid plan's credits, account and period, or nothing
+// for a free generation.
+type mediaBilling struct {
+	credits      *int
+	billedUser   *string
+	billedPeriod *time.Time
+}
+
+// admitMediaGeneration decides whether one more generation may be paid for, inside the admitting transaction, which
+// already holds the workspace row: with an entitled plan its daily generations, its agents at once (unless the caller
+// already holds one of them: holdsSlot, as a canvas run does through planRunSlot) and its credits; otherwise the
+// workspace's and the deployment's free allowances, the free 3D caps and the route limits. paid tells that the owner
+// had an entitled plan when it was read without its lock; own are the workspace's own run limits, which apply when
+// that plan lapsed since. A refusal is a *mediaRefusal; any other error is the database's.
+func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, snapshot executionSnapshot, routes routeLimits, paid, holdsSlot bool, own workspaceLimits) (mediaBilling, error) {
+	none := mediaBilling{}
+	// The workspace row is locked; the deployment-wide count takes its own lock, so neither limit
+	// can be passed by concurrent admissions. Both read the clock after waiting for the locks.
+	if _, e := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321010)"); e != nil {
+		return none, e
+	}
+	// today counts this workspace's free generations only: paid ones never spend a free allowance.
+	var today, total int
+	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1 AND billed_user_id IS NULL),count(*) FILTER (WHERE billed_user_id IS NULL) FROM media_generations
+		WHERE created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&today, &total); e != nil {
+		return none, e
+	}
+	// A paid plan's row is locked after the workspace row and the media lock, like every model call's.
+	var plan *activePlan
+	if paid {
+		var e error
+		if plan, e = ownerPlan(ctx, tx, tid, true); e != nil {
+			return none, e
+		}
+		if plan == nil {
+			// The plan lapsed since it was read, and the workspace's own run limits were skipped then.
+			switch e = own.admit(ctx, tx, tid); {
+			case errors.Is(e, errPlanRequired):
+				return none, &mediaRefusal{402, "plan_required", "This workspace needs its owner's paid plan"}
+			case errors.Is(e, errInvocationQuota):
+				return none, &mediaRefusal{429, "quota_exceeded", "Workspace run quota exceeded"}
+			case e != nil:
+				return none, e
+			}
+		}
+	}
+	if plan != nil {
+		usage, e := accountPlanUsage(ctx, tx, plan.UserID, a.cfg.PlannerModel)
+		if e != nil {
+			return none, e
+		}
+		if usage.MediaToday >= plan.Limits.MediaPerDay {
+			return none, &mediaRefusal{429, "plan_media_quota_exceeded", "This plan's image and video generations for today are used up"}
+		}
+		// A generation is a run: it takes one of the plan's agents at once (createRun leaves that count to here).
+		if !holdsSlot {
+			used, e := accountSlotsUsed(ctx, tx, plan.UserID)
+			if e != nil {
+				return none, e
+			}
+			if used >= plan.Limits.Concurrent {
+				return none, &mediaRefusal{429, "plan_busy", "This plan's agents at once are all running, in this or another workspace; try again when one finishes"}
+			}
+		}
+	} else if today >= a.cfg.MediaRunsPerDay {
+		return none, &mediaRefusal{429, "media_quota_exceeded", "This workspace has used today's image and video generations"}
+	}
+	if plan == nil && total >= a.cfg.MediaTotalRunsPerDay {
+		return none, &mediaRefusal{429, "media_capacity_exceeded", "Today's image and video generations are used up; try again tomorrow"}
+	}
+	// A 3D generation is paid from the operator's Tripo balance: free ones have their own, smaller caps, for the
+	// workspace and across every workspace, counted from durable rows under the same lock.
+	if plan == nil && snapshot.Media.Provider == mediaProviderTripo {
+		var mine, all int
+		if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1),count(*) FROM media_generations
+			WHERE billed_user_id IS NULL AND model LIKE 'tripo.%' AND created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&mine, &all); e != nil {
+			return none, e
+		}
+		if mine >= a.cfg.TripoFreeRunsPerDay {
+			return none, &mediaRefusal{429, "model3d_quota_exceeded", "This workspace has used today's free 3D generations"}
+		}
+		if all >= a.cfg.TripoFreeTotalPerDay {
+			return none, &mediaRefusal{429, "model3d_capacity_exceeded", "Today's free 3D generations are used up; try again tomorrow"}
+		}
+	}
+	billing := none
+	if plan != nil {
+		n := mediaCreditsFor(snapshot.Model, snapshot.Media.Kind, snapshot.Media.Params)
+		billing = mediaBilling{&n, &plan.UserID, &plan.PeriodStart}
+		switch e := checkCredits(ctx, tx, plan, n); {
+		case errors.Is(e, errCreditsExhausted):
+			return none, &mediaRefusal{402, "credits_exhausted", "This plan's credits for the period are used up"}
+		case e != nil:
+			return none, e
+		}
+		routes = nil
+	}
+	// A route-limited free workspace also has its own media allowance and shares a deployment-wide
+	// ceiling with the other route-limited workspaces; one that limits no route (an empty object) has neither.
+	switch code, e := a.mediaRouteLimit(ctx, tx, routes, today); {
+	case e != nil:
+		return none, e
+	case code == "media_quota_exceeded":
+		return none, &mediaRefusal{429, code, "This workspace has used today's image and video generations"}
+	case code != "":
+		return none, &mediaRefusal{429, code, "Today's image and video generations are used up; try again tomorrow"}
+	}
+	return billing, nil
 }
 
 func mediaFailureCode(err error) string {

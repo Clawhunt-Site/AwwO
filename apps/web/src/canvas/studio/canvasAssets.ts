@@ -42,12 +42,22 @@ export function canvasFileBytes(entry: StudioEntry): Promise<LoadedFile | null> 
 
 const basename = (path: string) => path.split('/').pop()!.toLowerCase();
 
-/** Relative URLs of a page resolved by file name against the canvas's other files. */
+/** The canvas file a page's relative URL names: by file name, and among several of that name the one whose node id
+ * is the URL's folder (`<node id>/image-1.png`, as a canvas run tells downstream nodes), since every image node calls
+ * its first picture image-1.png. */
+export function pickCanvasFile(entries: ReadonlyArray<StudioEntry>, path: string, self?: string): StudioEntry | undefined {
+  const parts = path.split(/[?#]/)[0].split('/').filter(part => part && part !== '.');
+  const wanted = (parts.pop() ?? '').toLowerCase();
+  const folder = parts.pop();
+  const candidates = entries.filter(entry => entry.id !== self && entry.source.type !== 'inline' && entry.source.type !== 'missing'
+    && (basename(entry.name) === wanted || basename(entry.label) === wanted));
+  return (folder && candidates.find(entry => entry.nodeId === folder)) || candidates[0];
+}
+
+/** Relative URLs of a page resolved against the canvas's other files (pickCanvasFile). */
 export function canvasResolver(entries: ReadonlyArray<StudioEntry>, self?: string): AssetResolver {
   return async path => {
-    const wanted = basename(path);
-    const match = entries.find(entry => entry.id !== self && entry.source.type !== 'inline' && entry.source.type !== 'missing'
-      && (basename(entry.name) === wanted || basename(entry.label) === wanted));
+    const match = pickCanvasFile(entries, path, self);
     if (!match) return null;
     const file = await canvasFileBytes(match);
     return file ? { bytes: file.bytes, name: file.name || match.name } : null;
