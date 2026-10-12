@@ -118,7 +118,7 @@ test('a worker without the Converse bridge refuses a Bedrock model before any re
     return originalFetch(target, init);
   });
   // The openai-agents worker has no bridge for managed execution; a Pi worker built without one refuses as before.
-  for (const [protocol, model, options] of [['chat_completions', 'bedrock.glm-5', {}], ['anthropic_messages', 'bedrock.gemma-3-27b', { bedrockFetch: null }]] as const) {
+  for (const [protocol, model, options] of [['chat_completions', 'bedrock.glm-5', {}], ['anthropic_messages', 'bedrock.gemma-3-27b', { bedrockCall: null }]] as const) {
     const s = await serve(t, protocol, () => assert.fail('No provider request expected'), { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: bedrockKey }, undefined, options);
     const response = await s.send(input({ model }));
     assert.equal(response.status, 400, protocol);
@@ -141,8 +141,20 @@ function fakeConverse(turn: (input: any) => AsyncIterable<Record<string, unknown
   return { sdk: { BedrockRuntimeClient, ConverseStreamCommand }, sent };
 }
 
+// The Pi worker's managed-execution Bedrock call (pi-worker/bedrock-call.mjs), made here in-process with a fake SDK
+// rather than in its child; the child itself is tested in pi-worker/bedrock-call.test.mjs.
+async function inProcessCall(sdk: unknown, seen: any[] = []) {
+  const [{ createBedrockFetch }, { bedrockCall }] = await Promise.all([import('./bedrock-bridge.ts'), import('./pi-worker/bedrock-call.mjs')]);
+  return async (model: any, body: any) => {
+    seen.push(model);
+    const answer = await bedrockCall({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, url: `${model.baseURL}/chat/completions`, body: JSON.stringify(body) },
+      { load: async () => ({ createBedrockFetch, sdk }) });
+    if (!answer.ok) throw Object.assign(new Error('The Bedrock call failed'), { reason: answer.reason });
+    return answer.raw;
+  };
+}
+
 test('Pi serves a Bedrock model to managed execution through the Converse bridge and gathers its stream', async t => {
-  const { createBedrockFetch } = await import('./bedrock-bridge.ts');
   const turns = [
     async function* () {
       yield { messageStart: { role: 'assistant' } };
@@ -165,7 +177,7 @@ test('Pi serves a Bedrock model to managed execution through the Converse bridge
   ];
   const fake = fakeConverse(() => turns[fake.sent.length - 1]());
   const profiles: any[] = [];
-  const bedrockFetch = async (model: any) => { profiles.push(model); return createBedrockFetch({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, sdk: fake.sdk as any }); };
+  const bedrockCall = await inProcessCall(fake.sdk, profiles);
   const originalFetch = globalThis.fetch;
   const outbound: string[] = [];
   t.mock.method(globalThis, 'fetch', (target: string | URL | Request, init?: RequestInit) => {
@@ -174,7 +186,7 @@ test('Pi serves a Bedrock model to managed execution through the Converse bridge
     return originalFetch(target, init);
   });
   const s = await serve(t, 'anthropic_messages', () => assert.fail('No other provider expected'),
-    { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: 'ABSKbedrockkey000000000000000000' }, 'pi', { bedrockFetch });
+    { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: 'ABSKbedrockkey000000000000000000' }, 'pi', { bedrockCall });
   const health = await (await fetch(`${s.origin}/health`)).json();
   assert.equal(health.computerBedrock, true);
   // thinking: false is the router's Qwen switch: a Bedrock call never carries it (the bridge would refuse the field).
@@ -204,20 +216,32 @@ test('Pi serves a Bedrock model to managed execution through the Converse bridge
 });
 
 test('a Bedrock stream that fails or ends early is a failed call, never a partial answer', async t => {
-  const { createBedrockFetch } = await import('./bedrock-bridge.ts');
-  for (const turn of [
-    async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'partial' } } }; },
-    async function* () { yield { messageStart: { role: 'assistant' } }; yield { throttlingException: { message: 'slow down' } }; },
-    async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } }; yield { messageStop: { stopReason: 'max_tokens' } }; },
-  ]) {
+  for (const [turn, reason] of [
+    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'partial' } } }; }, 'stream'],
+    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { throttlingException: { message: 'slow down' } }; }, 'stream'],
+    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } }; yield { messageStop: { stopReason: 'max_tokens' } }; }, 'answer'],
+  ] as const) {
     const fake = fakeConverse(() => turn());
     const s = await serve(t, 'anthropic_messages', () => assert.fail('No other provider expected'),
       { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: 'ABSKbedrockkey000000000000000000' }, 'pi',
-      { bedrockFetch: async (model: any) => createBedrockFetch({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, sdk: fake.sdk as any }) });
+      { bedrockCall: await inProcessCall(fake.sdk) });
     const response = await s.send(input({ model: 'bedrock.gemma-3-27b' }));
     assert.equal(response.status, 502);
-    assert.equal((await response.json()).error.code, 'PROVIDER_ERROR');
+    // The reply says what failed by kind, so a host check can tell a broken stream from a refusal.
+    assert.deepEqual((await response.json()).error, { code: 'PROVIDER_ERROR', message: 'The managed model request could not be completed.', reason });
   }
+  // A refusal from AWS is named by its exception, never by its message.
+  const denial = Object.assign(new Error('User: arn:aws:sts::000000000000:assumed-role/x is not authorized'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } });
+  class ConverseStreamCommand { input: any; constructor(input: any) { this.input = input; } }
+  class BedrockRuntimeClient { async send() { throw denial; } destroy() {} }
+  const s = await serve(t, 'anthropic_messages', () => assert.fail('No other provider expected'),
+    { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: 'ABSKbedrockkey000000000000000000' }, 'pi',
+    { bedrockCall: await inProcessCall({ BedrockRuntimeClient, ConverseStreamCommand }) });
+  const response = await s.send(input({ model: 'bedrock.gemma-3-27b' }));
+  assert.equal(response.status, 502);
+  const text = await response.text();
+  assert.equal(JSON.parse(text).error.reason, 'bedrock:403:AccessDeniedException');
+  assert.doesNotMatch(text, /arn:aws|not authorized/);
 });
 
 test('capacity is shared with existing runs and DELETE aborts the provider and frees its session', { timeout: 5000 }, async t => {

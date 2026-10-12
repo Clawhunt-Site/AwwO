@@ -6,15 +6,7 @@ import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
-import { resolveBedrockAuth, startIsolatedRun } from './runner.mjs';
-
-// Managed execution's Bedrock calls: the Converse bridge for the profile, signed with the parent's AWS credentials
-// (or the profile's Bedrock API key), the same bridge a Bedrock run's child uses. Loaded on the first such call only.
-export async function bedrockComputerFetch(model, { auth = resolveBedrockAuth } = {}) {
-  const [{ createBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
-  return createBedrockFetch({ region: model.region, model: model.model, auth: await auth(model.apiKey), sdk,
-    ...(model.promptCache === true ? { promptCache: true } : {}) });
-}
+import { bedrockComputerCall, startIsolatedRun } from './runner.mjs';
 
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -39,7 +31,8 @@ async function readBody(request) {
   return validateRequest(JSON.parse(Buffer.concat(chunks).toString('utf8')));
 }
 
-export function createPiServer(config, { startRun = startIsolatedRun, bedrockFetch = bedrockComputerFetch } = {}) {
+// Managed execution's Bedrock calls are made in an isolated child, as a Bedrock run's are (bedrockComputerCall).
+export function createPiServer(config, { startRun = startIsolatedRun, bedrockCall = bedrockComputerCall } = {}) {
   const active = new Map();
   const sessions = new Set();
   const observability = createWorkerObservability(config, () => active.size);
@@ -64,7 +57,7 @@ export function createPiServer(config, { startRun = startIsolatedRun, bedrockFet
     }
     if (!authorized(request, config.token)) return json(response, 401, { error: { code: 'UNAUTHORIZED', message: 'Internal service authentication required.' } });
     if (request.method === 'POST' && pathname === '/internal/computer-model') return handleComputerModel(request, response, {
-      config, runtime: 'pi', active, sessions, stopping: () => shuttingDown, bedrockFetch,
+      config, runtime: 'pi', active, sessions, stopping: () => shuttingDown, bedrockCall,
       resolveModel: resolveModelConfig, normalizeUsage, parentObservability, observe: (model, trace) => observability.begin(model, trace),
     });
     if (request.method === 'DELETE' && /^\/internal\/runs\/[A-Za-z0-9_-]+$/.test(pathname)) {

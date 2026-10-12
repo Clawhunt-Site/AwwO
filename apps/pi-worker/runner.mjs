@@ -7,9 +7,10 @@ import { resolveModelConfig } from './config.mjs';
 import { createBedrockAuthResolver } from '../bedrock-bridge.ts';
 
 export const TASK_URL = new URL('./pi-task.mjs', import.meta.url);
+export const BEDROCK_CALL_URL = new URL('./bedrock-call.mjs', import.meta.url);
 // The parent alone reads the AWS credential chain; a Bedrock child only ever receives the
 // API key or the short-lived credentials resolved here, over the same private IPC as any key.
-// Managed-execution calls (server.mjs) are made by the parent itself and use the same resolver.
+// Managed-execution calls (server.mjs) are made the same way (bedrockComputerCall).
 export const resolveBedrockAuth = createBedrockAuthResolver(async () => (await import('@aws-sdk/credential-provider-node')).defaultProvider());
 
 // Deliberately exclude HOME, NODE_OPTIONS, provider keys, proxy credentials,
@@ -148,4 +149,48 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };
+}
+
+
+/**
+ * One managed-execution Bedrock call in an isolated child (bedrock-call.mjs), as a Bedrock run's calls are made: the
+ * credentials are resolved here, the child gets them and the request over private IPC, with no Node options and only
+ * workerEnvironment's variables, so this process's environment never reaches the AWS SDK. Resolves the gathered Chat
+ * Completions answer; rejects with an Error whose `reason` names what failed. An abort stops the child.
+ */
+export async function bedrockComputerCall(model, body, signal, { auth = resolveBedrockAuth, childURL = BEDROCK_CALL_URL, graceMs = 2_000 } = {}) {
+  const failure = (reason) => Object.assign(new Error('The Bedrock call failed'), { reason });
+  let credentials;
+  try { credentials = await auth(model.apiKey); } catch { throw failure('credentials'); }
+  signal?.throwIfAborted();
+  const directory = await mkdtemp(join(tmpdir(), 'awwo-pi-bedrock-'));
+  let child;
+  try {
+    child = fork(childURL, [], { cwd: directory, env: workerEnvironment(directory), execArgv: [], stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'json' });
+  } catch {
+    await rm(directory, { recursive: true, force: true });
+    throw failure('child-start');
+  }
+  // 'close' comes after every message the child sent, so a call that ended without an answer is told apart.
+  const closed = new Promise((resolve) => child.once('close', (code, signalName) => resolve(signalName ?? code)));
+  void closed.then(() => rm(directory, { recursive: true, force: true })).catch(() => {});
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (done) => { if (settled) return; settled = true; signal?.removeEventListener('abort', onAbort); done(); };
+    const onAbort = () => settle(() => {
+      child.kill('SIGTERM');
+      setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }, graceMs).unref();
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    child.once('message', (answer) => settle(() => {
+      if (answer?.ok === true && answer.raw && typeof answer.raw === 'object' && !Array.isArray(answer.raw)) resolve(answer.raw);
+      else reject(failure(typeof answer?.reason === 'string' ? answer.reason.slice(0, 120) : 'unknown'));
+    }));
+    child.once('error', () => settle(() => reject(failure('child-error'))));
+    void closed.then((how) => settle(() => reject(failure(`child-exit:${how}`))));
+    child.send({ region: model.region, model: model.model, auth: credentials, promptCache: model.promptCache === true,
+      url: `${model.baseURL.replace(/\/+$/, '')}/chat/completions`, body: JSON.stringify(body) },
+    (error) => { if (error) settle(() => { child.kill('SIGKILL'); reject(failure('child-send')); }); });
+  });
 }

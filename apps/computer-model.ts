@@ -9,8 +9,10 @@ type Profile = { model: string; apiKey: string; baseURL: string; protocol: strin
   /** Bedrock profiles only: the region the bridge calls and the operator's prompt-cache switch. */
   region?: string; promptCache?: boolean };
 type Entry = { handle: { cancel(): void }; cancelRequested: boolean; released: Promise<void> };
-/** A worker's way to a Bedrock model: the Converse bridge's `fetch` for one profile (bedrock-bridge.ts). */
-export type BedrockFetchFactory = (model: Profile) => Promise<(input: string, init: RequestInit) => Promise<Response>>;
+/** A worker's way to a Bedrock model for managed execution: one call, sent through the Converse bridge
+ *  (bedrock-bridge.ts) and gathered into one Chat Completions answer (gatherChatStream). It rejects with an Error whose
+ *  `reason` names what failed. Pi makes the call in an isolated child (pi-worker/bedrock-call.mjs), as its Bedrock runs. */
+export type BedrockCall = (model: Profile, body: ObjectValue, signal: AbortSignal) => Promise<ObjectValue>;
 const MAX_BYTES = 524_288;
 // The bridge's streamed answer to one call: SSE framing costs far more than the text, so this is well above the 2 MiB
 // the API takes back from a worker; the completion gathered from it is what has to fit there.
@@ -257,12 +259,12 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   config: any; runtime: 'pi' | 'openai-agents'; active: Map<string, Entry>; sessions: Set<string>; stopping(): boolean;
   resolveModel(config: any, selector: string): Profile; normalizeUsage(raw: unknown, protocol: string): ObjectValue;
   parentObservability(value: unknown, timing: ObjectValue): ObjectValue; observe(model: Profile, traceparent: unknown): (event: ObjectValue) => void;
-  /** The worker's Bedrock bridge, when it serves Bedrock models to managed execution (it says so on /health as
+  /** The worker's Bedrock call, when it serves Bedrock models to managed execution (it says so on /health as
    *  computerBedrock); without it a Bedrock model is refused as before. */
-  bedrockFetch?: BedrockFetchFactory;
+  bedrockCall?: BedrockCall | null;
 }): Promise<void> {
   const reply = (status: number, value: ObjectValue) => { if (!response.destroyed) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); } };
-  const reject = (status: number, code: string) => reply(status, { error: { code, message: 'The managed model request could not be completed.' } });
+  const reject = (status: number, code: string, reason?: string) => reply(status, { error: { code, message: 'The managed model request could not be completed.', ...(reason ? { reason } : {}) } });
   const { config, active, sessions } = options;
   if (!config.ready || options.stopping()) return reject(503, 'RUNTIME_UNAVAILABLE');
   if ((request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') return reject(415, 'INVALID_CONTENT_TYPE');
@@ -278,11 +280,11 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   let model: Profile;
   try { model = options.resolveModel(bindUserModel(config, body as any, options.runtime), body.model); }
   catch { return reject(400, 'MODEL_NOT_FOUND'); }
-  // A Bedrock model is served through the worker's Converse bridge, which streams only (bedrockComputerRequest and
-  // gatherChatStream make the one call out of its stream). A worker without the bridge refuses such a model here,
-  // before any capacity is taken or a request leaves the worker.
+  // A Bedrock model is served through the worker's Bedrock call (the Converse bridge, which streams only: the call is
+  // one streaming request gathered into one answer). A worker without one refuses such a model here, before any
+  // capacity is taken or a request leaves the worker.
   const bedrock = model.provider === 'bedrock';
-  if (bedrock && !options.bedrockFetch) return reject(400, 'MODEL_NOT_SUPPORTED');
+  if (bedrock && !options.bedrockCall) return reject(400, 'MODEL_NOT_SUPPORTED');
   const effort = (body.effort === '' ? undefined : body.effort) ?? (model.defaultReasoningEffort || undefined);
   if (effort !== undefined && effort !== 'none' && !model.reasoningEfforts?.includes(effort)) return reject(400, 'EFFORT_NOT_SUPPORTED');
   if (Buffer.byteLength(JSON.stringify(completion)) + completion.messages.length * 32 > model.contextWindow - model.maxTokens - 256) return reject(413, 'CONTEXT_LIMIT');
@@ -305,12 +307,15 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
     let raw: ObjectValue;
     let protocol = model.protocol;
     if (bedrock) {
-      // The bridge speaks Chat Completions whatever the profile says; it never leaves the worker except to Bedrock.
-      const bridge = await options.bedrockFetch!(model);
       const call = bedrockComputerRequest(completion, model, { maxTokens: body.maxTokens });
-      const upstream = await bridge(call.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(call.body), signal: controller.signal });
-      if (!upstream.ok || !upstream.body) { await upstream.body?.cancel(); return reject(502, 'PROVIDER_ERROR'); }
-      raw = await gatherChatStream(upstream.body as unknown as AsyncIterable<Uint8Array>);
+      try { raw = await options.bedrockCall!(model, call.body, controller.signal); }
+      catch (error) {
+        if (controller.signal.aborted) throw error;
+        // The reason is a label (bedrock-call.mjs), never provider text: safe for the reply and the worker's log.
+        const reason = typeof (error as ObjectValue)?.reason === 'string' && /^[A-Za-z0-9_.:-]{1,120}$/.test((error as ObjectValue).reason) ? (error as ObjectValue).reason : 'unknown';
+        console.error(JSON.stringify({ event: 'computer_model_bedrock_failed', model: model.id, reason }));
+        return reject(502, 'PROVIDER_ERROR', reason);
+      }
       protocol = 'chat_completions';
     } else {
       const provider = providerComputerRequest(completion, model, effort, { thinking: body.thinking, maxTokens: body.maxTokens });
@@ -325,7 +330,10 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
     if (usage.inputTokens !== null && usage.outputTokens !== null) result.usage = { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens, total_tokens: usage.computedTotalTokens };
     observed({ type: 'completed', observability }); terminalObserved = true;
     reply(200, { completion: result, observability });
-  } catch { reject(controller.signal.aborted ? 499 : 502, controller.signal.aborted ? 'CANCELLED' : 'PROVIDER_ERROR'); }
+  } catch {
+    // A Bedrock call's own failures answered above with their reason; what reaches here is an answer that did not hold.
+    reject(controller.signal.aborted ? 499 : 502, controller.signal.aborted ? 'CANCELLED' : 'PROVIDER_ERROR', bedrock && !controller.signal.aborted ? 'answer' : undefined);
+  }
   finally {
     if (!terminalObserved) observed({ type: controller.signal.aborted ? 'cancelled' : 'failed', observability: options.parentObservability(undefined, { totalMs: performance.now() - started, outcome: 'failed' }) });
     clearTimeout(timer); response.off('close', disconnected);
