@@ -7,7 +7,7 @@
 .awwo-attach-button:hover:not(:disabled) { color: var(--awwo-accent, #286454); border-color: var(--awwo-accent, #286454); background: var(--awwo-accent-soft, #edf4ee); }
 .awwo-attach-button:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 2px; }
 .awwo-attach-button:disabled { cursor: not-allowed; opacity: .45; }
-.awwo-assistant-composer-actions .awwo-assistant-attach { margin-right: auto; }
+.awwo-assistant-composer-actions > .awwo-assistant-attach { margin-right: auto; }
 
 .awwo-attachment-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; min-width: 0; }
 .awwo-attachment-chips.is-compact { margin: 8px 0 0; }

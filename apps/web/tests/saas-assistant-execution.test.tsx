@@ -61,7 +61,7 @@ const view = (props: Parameters<typeof Harness>[0] = {}) => <SaaSPreferencesProv
 const defaultResponse = (url: string) => url.endsWith('/computer-runtime') ? runtime : url.endsWith('/computer-runs') ? { items: [summary] } : detail;
 const posts = (fetcher: ReturnType<typeof vi.fn>) => fetcher.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
 /** The composer is ready once the catalogue has loaded and offered its model. */
-const composerReady = () => screen.findByText('画布助手用：已有模型连接');
+const composerReady = () => screen.findByTitle('画布助手用：已有模型连接');
 const task = () => screen.getByRole('textbox', { name: '任务说明' });
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearSaaSCanvas(); });
@@ -73,11 +73,11 @@ describe('the canvas assistant’s tasks', () => {
       { id: 'qwen3.8-27b-p6', label: '默认模型', runtime: 'openai-agents', route: 'free' }] };
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? premium : url.endsWith('/computer-runs') ? { items: [] } : detail)));
     render(view());
-    expect(await screen.findByText('画布助手用：Claude Opus 5 · Pro')).toBeInTheDocument();
+    expect(await screen.findByTitle('画布助手用：Claude Opus 5 · Pro')).toBeInTheDocument();
     expect(screen.getByText(/这个模型不在当前工作区的免费额度里，需要 Pro \/ Max/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toHaveAttribute('target', '_blank');
     fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('openai-agents', 'qwen3.8-27b-p6') } });
-    expect(await screen.findByText('画布助手用：默认模型')).toBeInTheDocument();
+    expect(await screen.findByTitle('画布助手用：默认模型')).toBeInTheDocument();
     expect(screen.queryByText(/这个模型不在当前工作区的免费额度里/)).toBeNull();
   });
 
@@ -120,14 +120,14 @@ describe('the canvas assistant’s tasks', () => {
         : url.endsWith('/upgrade-interest') ? { recorded: true, clicks: 1 } : refused));
     vi.stubGlobal('fetch', fetcher);
     render(view());
-    await screen.findByText('画布助手用：qwen3.8-27b-p6');
+    await screen.findByTitle('画布助手用：qwen3.8-27b-p6');
     // The reader had picked a premium model for direct tasks.
     fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('pi', 'claude-opus-5') } });
     expect(await screen.findByText(/高级模型（Claude、GPT、Bedrock）免费次数已经用完/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
     fireEvent.click(screen.getByRole('button', { name: '改用默认模型 qwen3.8-27b-p6（免费）' }));
     expect(await screen.findByText('直接执行已改用 qwen3.8-27b-p6，重新发送这条请求即可免费继续。')).toBeInTheDocument();
-    expect(screen.getByText('画布助手用：qwen3.8-27b-p6')).toBeInTheDocument();
+    expect(screen.getByTitle('画布助手用：qwen3.8-27b-p6')).toBeInTheDocument();
     // Switching re-sends nothing: the request is the reader's to send again.
     expect(posts(fetcher).filter(([url]) => String(url).endsWith('/computer-runs'))).toHaveLength(0);
   });
@@ -264,7 +264,7 @@ describe('the canvas assistant’s tasks', () => {
     });
     vi.stubGlobal('fetch', fetcher); render(view()); await composerReady();
     fireEvent.change(screen.getByLabelText('思考强度'), { target: { value: 'medium' } });
-    expect(screen.getByText('画布助手用：已有模型连接 · medium')).toBeVisible();
+    expect(screen.getByTitle('画布助手用：已有模型连接 · medium')).toBeVisible();
     fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('pi', 'plain_model') } });
     expect(screen.queryByLabelText('思考强度')).toBeNull();
     fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_a') } });
@@ -313,7 +313,7 @@ describe('the canvas assistant’s tasks', () => {
     service = runtime;
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/computer-runtime'))).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
-    expect(await screen.findByText('画布助手用：第二个模型（已不可用）')).toBeVisible();
+    expect(await screen.findByTitle('画布助手用：第二个模型（已不可用）')).toBeVisible();
     const select = screen.getByLabelText('画布助手的模型') as HTMLSelectElement;
     expect(select).toHaveValue(executionModelKey('openai-agents', 'byok_model_b'));
     expect(select.options[0]).toHaveTextContent('第二个模型（已不可用）');

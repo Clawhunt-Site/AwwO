@@ -349,50 +349,73 @@ function ExecutionNotices({ execution, planAvailable }: { execution: ManagedExec
       </div>
     </div>}
     {blockedHere && <p className="awwo-execution-warning" role="status">{t(`暂时不能直接执行任务：${blockedHere}`, `Direct tasks are paused: ${blockedHere}`)}{elsewhere ? ` ${elsewhere}` : ''}</p>}
-  </div>;
-}
-
-/** Under the composer: the model and effort a direct task uses, one quiet line until opened, and the knowledge it takes. */
-function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
-  const { t } = useSaaSPreferences();
-  const models = execution.runtime?.models ?? [];
-  const labelCounts = models.reduce<Record<string, number>>((counts, model) => ({ ...counts, [model.label || model.id]: (counts[model.label || model.id] ?? 0) + 1 }), {});
-  const optionLabel = (model: typeof models[number]) => withPlanTag(labelCounts[model.label || model.id] > 1 ? `${model.label || model.id} · ${model.runtime}` : (model.label || model.id), model);
-  const chosen = execution.choice.model;
-  // A model the workspace's plan does not include is refused when the task starts; say so while it can still be changed.
-  const needsPlan = chosen?.requiresUpgrade === true;
-  const settingsSummary = execution.choice.unavailableLabel ? t(`画布助手用：${execution.choice.unavailableLabel}（已不可用）`, `Canvas assistant uses: ${execution.choice.unavailableLabel} (unavailable)`)
-    : chosen ? `${t('画布助手用', 'Canvas assistant uses')}：${optionLabel(chosen)}${execution.effort ? ` · ${execution.effort}` : ''}` : t('选择画布助手的模型', 'Choose the canvas assistant’s model');
-  if (execution.readOnly || (!models.length && !execution.choice.unavailableLabel && execution.knowledgeCount === 0)) return null;
-  return <div className="awwo-execution-setup">
-    {(models.length > 0 || execution.choice.unavailableLabel) && <details className="awwo-execution-settings">
-      <summary>{settingsSummary}</summary>
-      <label>{t('画布助手的模型', 'Canvas assistant model')}
-        <select value={execution.choice.key} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.chooseModel(event.target.value)}>
-          {execution.choice.unavailableLabel && <option value={execution.choice.key} disabled>{t(`${execution.choice.unavailableLabel}（已不可用）`, `${execution.choice.unavailableLabel} (unavailable)`)}</option>}
-          {!execution.choice.key && <option value="">{t('选择模型', 'Choose a model')}</option>}
-          {models.map(model => <option key={executionModelKey(model.runtime, model.id)} value={executionModelKey(model.runtime, model.id)}>{optionLabel(model)}</option>)}
-        </select>
-      </label>
-      {!!chosen?.efforts?.length && <label>{t('思考强度', 'Reasoning effort')}
-        <select value={execution.effort} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.setEffort(event.target.value)}>
-          <option value="">{t('模型默认', 'Model default')}</option>
-          {chosen.efforts.map(level => <option key={level} value={level}>{level}</option>)}
-        </select>
-      </label>}
-      <p className="awwo-execution-model-note">{t('选好后，直接执行的任务和画布助手新加的组件都用这个模型；规划画布本身仍由平台免费完成。',
-        'Once chosen, direct tasks and the components the assistant adds run on this model; planning the canvas itself stays free.')}</p>
-      {/* Engines are managed in the account; a change there shows here once the list is read again. */}
-      <div className="awwo-execution-settings-actions">
-        <a href={accountURL('engines')}>{t('管理我的引擎', 'Manage my engines')}</a>
-        <button type="button" disabled={execution.loading || execution.busy} onClick={execution.refreshAll}>{execution.loading ? t('正在读取…', 'Reading…') : t('刷新模型列表', 'Refresh the model list')}</button>
-      </div>
-    </details>}
-    {needsPlan && <div className="awwo-execution-plan-needed" role="note">
+    {/* A model the workspace's plan does not include is refused when the task starts; said while it can still be changed. */}
+    {execution.choice.model?.requiresUpgrade === true && <div className="awwo-execution-plan-needed" role="note">
       <p>{t('这个模型不在当前工作区的免费额度里，需要 Pro / Max，直接执行会被拒绝。可以先换成默认模型免费执行。',
         'This model is outside this workspace’s free allowance and needs Pro or Max, so a direct task on it is refused. Choose the default model to run it free.')}</p>
       <PlanUpsell tenantId={execution.tenantId} />
     </div>}
     {execution.knowledgeCount > 0 && <p className="awwo-execution-knowledge">{t(`将带上 ${execution.knowledgeCount} 份已选知识`, `Takes ${execution.knowledgeCount} selected knowledge items`)}</p>}
+  </div>;
+}
+
+/** In the composer's toolbar: the canvas assistant's model and effort (direct tasks and the components it adds run on
+ *  it), a chip whose menu opens above the box like a chat app's model switch, and closes on a click elsewhere or Escape.
+ *  "画布助手用：" stays in the chip for a screen reader and as its tooltip. */
+function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
+  const { t } = useSaaSPreferences();
+  const [open, setOpen] = useState(false);
+  const details = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => { if (!details.current?.contains(event.target as Node | null)) setOpen(false); };
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      details.current?.querySelector('summary')?.focus();
+    };
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', key); };
+  }, [open]);
+  const models = execution.runtime?.models ?? [];
+  const labelCounts = models.reduce<Record<string, number>>((counts, model) => ({ ...counts, [model.label || model.id]: (counts[model.label || model.id] ?? 0) + 1 }), {});
+  const optionLabel = (model: typeof models[number]) => withPlanTag(labelCounts[model.label || model.id] > 1 ? `${model.label || model.id} · ${model.runtime}` : (model.label || model.id), model);
+  const chosen = execution.choice.model;
+  const prefix = t('画布助手用：', 'Canvas assistant uses: ');
+  const label = execution.choice.unavailableLabel ? t(`${execution.choice.unavailableLabel}（已不可用）`, `${execution.choice.unavailableLabel} (unavailable)`)
+    : chosen ? `${optionLabel(chosen)}${execution.effort ? ` · ${execution.effort}` : ''}` : '';
+  const needsPlan = chosen?.requiresUpgrade === true;
+  if (execution.readOnly || (!models.length && !execution.choice.unavailableLabel)) return null;
+  return <div className="awwo-execution-setup">
+    <details ref={details} className={`awwo-execution-settings${needsPlan || execution.choice.unavailableLabel ? ' is-warning' : ''}`} open={open}
+      onToggle={event => setOpen(event.currentTarget.open)}>
+      <summary title={label ? `${prefix}${label}` : t('选择画布助手的模型', 'Choose the canvas assistant’s model')}>
+        {label ? <><span className="sr-only">{prefix}</span><span className="awwo-execution-model">{label}</span></>
+          : <span className="awwo-execution-model">{t('选择画布助手的模型', 'Choose the canvas assistant’s model')}</span>}
+      </summary>
+      <div className="awwo-execution-settings-panel">
+        <label>{t('画布助手的模型', 'Canvas assistant model')}
+          <select value={execution.choice.key} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.chooseModel(event.target.value)}>
+            {execution.choice.unavailableLabel && <option value={execution.choice.key} disabled>{t(`${execution.choice.unavailableLabel}（已不可用）`, `${execution.choice.unavailableLabel} (unavailable)`)}</option>}
+            {!execution.choice.key && <option value="">{t('选择模型', 'Choose a model')}</option>}
+            {models.map(model => <option key={executionModelKey(model.runtime, model.id)} value={executionModelKey(model.runtime, model.id)}>{optionLabel(model)}</option>)}
+          </select>
+        </label>
+        {!!chosen?.efforts?.length && <label>{t('思考强度', 'Reasoning effort')}
+          <select value={execution.effort} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.setEffort(event.target.value)}>
+            <option value="">{t('模型默认', 'Model default')}</option>
+            {chosen.efforts.map(level => <option key={level} value={level}>{level}</option>)}
+          </select>
+        </label>}
+        <p className="awwo-execution-model-note">{t('选好后，直接执行的任务和画布助手新加的组件都用这个模型；规划画布本身仍由平台免费完成。',
+          'Once chosen, direct tasks and the components the assistant adds run on this model; planning the canvas itself stays free.')}</p>
+        {/* Engines are managed in the account; a change there shows here once the list is read again. */}
+        <div className="awwo-execution-settings-actions">
+          <a href={accountURL('engines')}>{t('管理我的引擎', 'Manage my engines')}</a>
+          <button type="button" disabled={execution.loading || execution.busy} onClick={execution.refreshAll}>{execution.loading ? t('正在读取…', 'Reading…') : t('刷新模型列表', 'Refresh the model list')}</button>
+        </div>
+      </div>
+    </details>
   </div>;
 }

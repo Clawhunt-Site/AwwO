@@ -2981,6 +2981,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return true;
   };
   const costNote = assistantCostNote(t, countsCalls, Boolean(unifiedHost), plannerAllowance);
+  // The planner's line only when it needs the reader: connecting, closed (with its retry), an earlier plan to check, or
+  // the Jev planner, whose line says what it does. A ready planner says nothing, like a chat app (owner request 2026-10-12).
+  const plannerReady = plannerProvider === 'jev' ? Boolean(jevStatus?.available) : Boolean(plannerStatus?.available);
+  const showPlannerLine = plannerProvider === 'jev' || !plannerReady || (canInitialize && !recoveryLoaded);
   const assistantProps = {
     nextSteps: assistantNextSteps,
     ...(costNote ? { costNote } : {}),
@@ -3005,11 +3009,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (!canUndoPlan || !undo()) return;
       appendPlanningMessage(`undo-${Date.now()}`, surfaceNotice(t, 'plan_undone'));
     }, canUndo: canUndoPlan,
-    runtimeControls: <div className="awwo-planner-connection"><span className={(plannerProvider === 'jev' ? jevStatus?.available : plannerStatus?.available) ? 'is-ready' : ''} />
+    ...(showPlannerLine ? { runtimeControls: <div className="awwo-planner-connection"><span className={plannerReady ? 'is-ready' : ''} />
       {plannerProvider === 'jev' ? jevStatus?.error || (locale === 'zh' ? 'Jev · 选择人设与模型，新增工作流' : 'Jev · Select personas and models for a new workflow') : plannerConnectionMessage(t, plannerStatus)}
       {plannerProvider === 'pi' && plannerStatus && !plannerStatus.available ? <button type="button" title={plannerStatus.error} onClick={() => { void readPlannerStatus(undefined, locale).then(setPlannerStatus); }}>{t('surface.retryPlanner')}</button> : null}
       {canInitialize && !recoveryLoaded ? <button type="button" disabled={recoveryChecking || recoveryStopping} onClick={() => { void refreshPlanningRecovery(); }}>{locale === 'zh' ? '检查上次规划' : 'Check earlier plan'}</button> : null}
-    </div>,
+    </div> } : {}),
   };
 
   // The latest request and its reply, which 「换一种方式」 hands over to the other way. A hand-over that fails

@@ -8,6 +8,7 @@ import type { PlanProgress } from './canvasPlanning';
 import type { AssistantPending, AssistantPendingPhase, AssistantRoute } from './assistantRouting';
 import type { UiLocale } from '../locale';
 import { AttachButton, AttachmentTray, MessageWithAttachments, useComposerAttachments } from './ComposerAttachments';
+import { ComposerNotes } from './ComposerNotes';
 import { joinAttachments } from './attachments';
 
 export interface CanvasAssistantMessage {
@@ -29,7 +30,7 @@ export interface UnifiedAssistant {
   earlier?: ReactNode;
   /** Above the composer: the task service's notices. */
   notices?: ReactNode;
-  /** Under the composer: the model a direct task uses. */
+  /** In the composer's toolbar, beside the attach button: the model (and effort) a direct task uses. */
   settings?: ReactNode;
   /** Hands the latest request over to the other way, where it can be. */
   switchRoute?: { to: AssistantRoute; onSwitch: () => void };
@@ -65,7 +66,7 @@ export interface CanvasAssistantProps {
   /** What to do next, offered without being asked: the host works it out from the canvas (nextSteps.ts) and acts on
    *  a choice itself. Shown above the composer while nothing is being handled. */
   nextSteps?: AssistantNextSteps;
-  /** Under the composer: what a message costs where calls are counted, and which questions cost nothing. */
+  /** In 用户须知: what a message costs where calls are counted, and which questions cost nothing. */
   costNote?: string;
 }
 
@@ -89,7 +90,7 @@ export interface AssistantNextSteps {
   items?: ReadonlyArray<AssistantNextItem>;
   /** After the items: what follows once they are done. */
   footnote?: string;
-  /** Beside the title: that working this out cost nothing (the hosted app counts calls). */
+  /** That working this out cost nothing (the hosted app counts calls): said in 用户须知, not on the card. */
   note?: string;
 }
 
@@ -238,6 +239,13 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
 
   const send = () => { if (canSend && !attach.busy) { attach.markSent(); onSend(); } };
   const composerKeys = useEnterToSend(send);
+  // Like a chat app's box, nothing is printed around it (owner request 2026-10-12): the standing notices are in
+  // 用户须知, the model sits in the toolbar, and undo is an icon in the panel's header (in the toolbar on the welcome).
+  const notes = [t('composer.disclaimerFull'), costNote, nextSteps?.note ? t('assistant.notesNextFree') : undefined];
+  const undoButton = onUndo && !unified?.readOnly ? <button type="button" className="awwo-assistant-icon-button awwo-assistant-undo"
+    disabled={waiting || !canUndo} aria-label={t('assistant.undo')} title={t('assistant.undo')} onClick={onUndo}>
+    <Undo2 size={16} aria-hidden="true" />
+  </button> : null;
 
   let status: ReactNode = null;
   if (pending && !busy) {
@@ -290,9 +298,12 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   return <section className={`awwo-canvas-assistant awwo-canvas-assistant--${mode}`} aria-label={t('assistant.panelTitle')}>
     <header className="awwo-assistant-header">
       {welcome ? <h1>{t('assistant.title')}</h1> : <h2>{t('assistant.panelTitle')}</h2>}
-      {!welcome && onClose ? <button type="button" className="awwo-assistant-icon-button" aria-label={t('assistant.close')} onClick={onClose}>
-        <X size={17} aria-hidden="true" />
-      </button> : null}
+      {!welcome && (undoButton || onClose) ? <div className="awwo-assistant-header-actions">
+        {undoButton}
+        {onClose ? <button type="button" className="awwo-assistant-icon-button" aria-label={t('assistant.close')} onClick={onClose}>
+          <X size={17} aria-hidden="true" />
+        </button> : null}
+      </div> : null}
     </header>
 
     {(!welcome || messages.length > 0 || pending) && <div ref={log} className="awwo-assistant-messages" role="log" aria-label={t('assistant.conversation')} aria-live="polite" aria-relevant="additions text">
@@ -334,8 +345,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       {unified?.notices}
       {/* Offered unasked once the canvas has something to do next, and never while a message or a plan is handled. */}
       {nextSteps && (nextSteps.actions.length > 0 || (nextSteps.items?.length ?? 0) > 0) && !welcome && !waiting && !recovery ? <div className="awwo-assistant-next" role="group" aria-label={t('assistant.nextTitle')}>
-        <p><strong>{t('assistant.nextTitle')}</strong><span>{nextSteps.lead}</span>
-          {nextSteps.note ? <em className="awwo-assistant-next-free">{nextSteps.note}</em> : null}</p>
+        <p><strong>{t('assistant.nextTitle')}</strong><span>{nextSteps.lead}</span></p>
         {nextSteps.items?.length ? <ul className="awwo-assistant-next-items">
           {nextSteps.items.map(item => <li key={item.id}>
             <span className="awwo-assistant-next-item-title">{item.title}</span>
@@ -351,23 +361,27 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
         <textarea ref={input} aria-label={t('assistant.input')} aria-describedby={error ? errorId : disclaimerId}
           placeholder={t(unified ? (welcome ? 'assistant.unifiedWelcomePlaceholder' : 'assistant.unifiedPlaceholder')
             : welcome ? 'assistant.welcomePlaceholder' : 'assistant.panelPlaceholder')}
-          value={attach.body} disabled={waiting} rows={3} maxLength={bodyLimit}
+          value={attach.body} disabled={waiting} rows={welcome ? 3 : 2} maxLength={bodyLimit}
           onChange={event => attach.setBody(event.target.value)} onPaste={attach.onPaste} {...composerKeys} />
         {status}
+        {/* One toolbar, as in a chat app: files and the model on the left; 用户须知, stop and send on the right. */}
         <div className="awwo-assistant-composer-actions">
-          <AttachButton state={attach} className="awwo-assistant-attach" />
-          {busy || pending?.phase === 'routing' ? <button type="button" className="awwo-assistant-cancel" onClick={onCancel}><Square size={12} aria-hidden="true" />{t('assistant.cancel')}</button> : null}
-          <button type="submit" className="awwo-assistant-send" disabled={!canSend || attach.busy} title={attach.busy ? t('attach.waiting') : undefined}><span>{sendLabel}</span><ArrowUp size={15} aria-hidden="true" /></button>
+          <div className="awwo-assistant-composer-tools">
+            <AttachButton state={attach} className="awwo-assistant-attach" />
+            {unified?.settings}
+            {welcome && canUndo ? undoButton : null}
+          </div>
+          <div className="awwo-assistant-composer-submit">
+            <ComposerNotes notes={notes} />
+            {busy || pending?.phase === 'routing' ? <button type="button" className="awwo-assistant-cancel" title={t('assistant.cancel')} onClick={onCancel}>
+              <Square size={11} aria-hidden="true" /><span>{t('assistant.cancel')}</span></button> : null}
+            <button type="submit" className="awwo-assistant-send" disabled={!canSend || attach.busy} title={attach.busy ? t('attach.waiting') : sendLabel}>
+              <span>{sendLabel}</span><ArrowUp size={16} aria-hidden="true" /></button>
+          </div>
         </div>
       </form>
-      <small id={disclaimerId} className="awwo-composer-disclaimer" title={t('composer.disclaimerFull')}>
-        <span aria-hidden="true">{t('composer.disclaimer')}</span><span className="sr-only">{t('composer.disclaimerFull')}</span>
-      </small>
-      {costNote ? <small className="awwo-assistant-cost">{costNote}</small> : null}
-      {unified?.settings}
-      {onUndo ? <button type="button" className="awwo-assistant-undo" disabled={waiting || !canUndo} onClick={onUndo}>
-        <Undo2 size={14} aria-hidden="true" />{t('assistant.undo')}
-      </button> : null}
+      {/* The notice the box used to print under it, still the box's description for a screen reader. */}
+      <p id={disclaimerId} className="sr-only">{t('composer.disclaimerFull')}</p>
     </div>
 
     {welcome && !recovery ? <div className="awwo-assistant-examples" role="group" aria-label={t('assistant.examples')}>

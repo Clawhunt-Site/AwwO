@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { CanvasAssistant, type CanvasAssistantProps, type UnifiedAssistant } from '../src/canvas/CanvasAssistant';
 import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import type { PlanProgress } from '../src/canvas/canvasPlanning';
@@ -391,12 +391,24 @@ describe('one conversation where the host also does tasks', () => {
     expect(screen.getByRole('button', { name: '关闭画布助手' })).toHaveFocus();
   });
 
-  it('draws the host’s notices above the composer and the model row under it', () => {
+  it('draws the host’s notices above the composer and the model in its toolbar, with nothing under the box', () => {
     render(<Harness mode="panel" unified={unified({ notices: <p>任务服务提示</p>, settings: <p>直接执行用的模型</p> })} />);
     const form = screen.getByRole('form', { name: '画布需求表单' });
     const before = (node: Node, other: Node) => Boolean(node.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(before(screen.getByText('任务服务提示'), form)).toBe(true);
-    expect(before(form, screen.getByText('直接执行用的模型'))).toBe(true);
+    // In the toolbar, after the box and beside the attach button, like a chat app's model switch.
+    const model = screen.getByText('直接执行用的模型');
+    expect(form.contains(model)).toBe(true);
+    expect(before(screen.getByRole('textbox', { name: '画布需求' }), model)).toBe(true);
+    expect(model.closest('.awwo-assistant-composer-tools')).not.toBeNull();
+    // The data notice is no longer printed under the box: it is the box's description and a line in 用户须知.
+    expect(screen.queryByText('AI 内容仅供参考 · 勿输入敏感信息')).toBeNull();
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveAccessibleDescription(/请勿输入身份证号/);
+    fireEvent.click(screen.getByRole('button', { name: '用户须知' }));
+    expect(within(screen.getByRole('region', { name: '用户须知' })).getByText(/请勿输入身份证号/)).toBeVisible();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('region', { name: '用户须知' })).toBeNull();
+    expect(screen.getByRole('button', { name: '用户须知' })).toHaveFocus();
   });
 
   it('keeps an earlier plan’s recovery waiting while a message is handled', () => {

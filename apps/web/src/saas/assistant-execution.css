@@ -218,27 +218,34 @@ html:root .saas-canvas-shell .awwo-canvas-assistant {
     & .awwo-assistant-error { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin: 0; }
     & .awwo-assistant-error .awwo-assistant-icon-button { width: 24px; height: 24px; margin: -2px -4px 0 0; }
   }
-  /* ── Under the composer: the model a direct task uses and the knowledge it takes ─────────────────── */
-  .awwo-execution-setup {
-    display: grid; gap: 4px; margin-top: 6px;
-    & .awwo-execution-knowledge { margin: 0 6px 2px; }
-  }
-  /* The model and its effort: one quiet line under the composer until opened. */
+  /* ── In the composer's toolbar: the model (and effort) a direct task uses, a chip whose menu opens above the box ── */
+  .awwo-execution-setup { display: flex; align-items: center; min-width: 0; }
+  /* The menu takes the composer's width (the form is its anchor), so the panel's edge never clips it. */
+  .awwo-assistant-composer:has(.awwo-execution-settings) { position: relative; }
   .awwo-execution-settings {
-    margin: 0; border: 1px solid transparent; border-radius: var(--saas-radius-sm);
-    transition: background var(--saas-dur-1), border-color var(--saas-dur-1);
-    &[open] { border-color: var(--saas-hairline); background: var(--saas-card); }
+    position: static; min-width: 0; margin: 0; border: 0;
     & > summary {
-      display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 6px; border-radius: inherit; list-style: none; cursor: pointer;
-      overflow: hidden; color: var(--saas-muted); font-size: var(--saas-text-xs); font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 28px; padding: 0 9px 0 10px;
+      border-radius: var(--saas-radius-pill); list-style: none; cursor: pointer;
+      color: var(--saas-muted); font-size: var(--saas-text-xs); font-weight: 600; white-space: nowrap;
+      transition: background var(--saas-dur-1), color var(--saas-dur-1);
       &::-webkit-details-marker { display: none; }
-      &::after { content: ''; flex: none; width: 6px; height: 6px; margin: -3px 2px 0 auto; border: solid currentColor; border-width: 0 1.5px 1.5px 0; rotate: 45deg; transition: rotate var(--saas-dur-2) var(--saas-ease); }
-      &:hover { color: var(--saas-text); }
+      &::after { content: ''; flex: none; width: 5px; height: 5px; margin: -3px 0 0 3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; rotate: 45deg; transition: rotate var(--saas-dur-2) var(--saas-ease); }
+      &:hover { background: var(--saas-soft); color: var(--saas-text); }
+      &:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 1px; }
     }
-    &[open] { padding-bottom: 10px; }
-    &[open] > summary { min-height: 34px; padding-inline: 12px; }
+    & .awwo-execution-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    &[open] > summary { background: var(--saas-soft); color: var(--saas-text); }
     &[open] > summary::after { rotate: 225deg; margin-top: 3px; }
-    & label { display: grid; gap: 5px; padding: 4px 12px 0; color: var(--saas-text); font-size: var(--saas-text-xs); font-weight: 600; }
+    /* A model the plan does not include, or one no longer offered: the chip says so in the warning colour. */
+    &.is-warning > summary { color: var(--saas-warning, var(--saas-muted)); }
+    & > .awwo-execution-settings-panel {
+      position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 30; box-sizing: border-box;
+      display: grid; gap: 8px; width: min(100%, 340px); padding: 12px 0;
+      border: 1px solid var(--saas-border); border-radius: 14px; background: var(--saas-raised); box-shadow: var(--saas-shadow-lg);
+    }
+    & label { display: grid; gap: 5px; padding: 0 12px; color: var(--saas-text); font-size: var(--saas-text-xs); font-weight: 600; }
+    & .awwo-execution-model-note { margin: 0; padding: 0 12px; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.55; }
     & select {
       width: 100%; min-height: 34px; padding: 0 10px; border: 1px solid var(--saas-border); border-radius: var(--saas-radius-xs);
       background: var(--saas-input); color: var(--saas-text); font: 400 var(--saas-text-sm)/1.3 var(--saas-font);
@@ -246,7 +253,7 @@ html:root .saas-canvas-shell .awwo-canvas-assistant {
     }
   }
   .awwo-execution-settings-actions {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 10px 12px 0;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 2px 12px 0;
     & :is(a, button) { padding: 2px 0; border: 0; background: none; color: var(--saas-link); font: 600 var(--saas-text-xs)/1.4 var(--saas-font); text-decoration: none; }
     & :is(a, button):hover:not(:disabled) { color: var(--saas-link-hover); text-decoration: underline; text-underline-offset: 3px; }
   }

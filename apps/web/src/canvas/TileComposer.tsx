@@ -2,11 +2,12 @@
 //
 // Ported from the previous canvas's chat composer (since-deleted apps/web/src/studio/StudioChatBubble.tsx):
 // Enter sends, Shift+Enter is a newline, the input and the button are disabled while a stream is
-// in flight, and the honest notice stays visible.
+// in flight, and the honest notice is one click away, in 用户须知 beside the model.
 //
 // That notice is not decoration. Talking to an agent here wakes its FULL worker: it may really go
 // do governed work (edit files, open sub-issues, request approvals), and the reply IS that
-// execution, not a chatbot answer. The surface says so before the operator types.
+// execution, not a chatbot answer. 用户须知 says so, with the notice against sensitive data, which is
+// also the input's description for a screen reader.
 //
 // An UNBOUND tile cannot send at all. It is disabled with the reason stated — never a live-looking
 // box whose message would silently go nowhere.
@@ -18,6 +19,7 @@ import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
+import { ComposerNotes } from './ComposerNotes';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import type { NodeModelChoice } from './NodeModelPicker';
 
@@ -118,9 +120,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
         </div>
       ) : sendReason ? (
         <div className="canvas-composer-notice" id={reasonId} role="status">{sendReason}</div>
-      ) : (
-        <div className="canvas-composer-notice">{notice ?? t('composer.notice')}</div>
-      )}
+      ) : null}
       <div className="canvas-composer-box">
         <AttachmentTray state={attach} disabled={disabled} />
         {mediaNode && attach.attachments.length ? <p className="awwo-attachment-notice is-info">{mediaAttachmentNotice(t, mediaNode)}</p> : null}
@@ -154,10 +154,12 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
           </button>
         </div>
       </div>
-      {accessory ? <div className="canvas-composer-accessory">{accessory}</div> : null}
-      {blocked ? null : <small id={disclaimerId} className="canvas-composer-disclaimer" title={t('composer.disclaimerFull')}>
-        <span aria-hidden="true">{t('composer.disclaimer')}</span><span className="sr-only">{t('composer.disclaimerFull')}</span>
-      </small>}
+      {/* The model on the left, 用户须知 on the right: the standing notices are no longer printed around the box. */}
+      {accessory || !blocked ? <div className="canvas-composer-accessory">
+        {accessory}
+        {blocked ? null : <ComposerNotes className="canvas-composer-notes" notes={[notice ?? t('composer.notice'), t('composer.disclaimerFull')]} />}
+      </div> : null}
+      {blocked ? null : <p id={disclaimerId} className="sr-only">{t('composer.disclaimerFull')}</p>}
     </div>
   );
 }

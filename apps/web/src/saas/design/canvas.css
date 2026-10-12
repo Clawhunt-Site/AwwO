@@ -762,6 +762,8 @@ html:root .saas-canvas-shell {
   }
   .awwo-canvas-assistant--panel .awwo-assistant-composer { padding: 10px 8px 8px 12px; border-radius: 18px; }
   .awwo-canvas-assistant .awwo-assistant-composer textarea { color: var(--saas-text); font: 400 var(--saas-text-md)/1.65 var(--saas-font); }
+  /* No resize handle: the box grows with what is typed, up to its maximum, as a chat app's does. */
+  .awwo-canvas-assistant .awwo-assistant-composer textarea { resize: none; field-sizing: content; }
   .awwo-canvas-assistant--panel .awwo-assistant-composer textarea { font-size: var(--saas-text-sm); }
   .awwo-assistant-composer textarea::placeholder { color: var(--saas-subtle); opacity: 1; }
   /* Send: an ink pill led by the ClawHunt claw (the arrow makes way for it), as on the main site. */
@@ -775,6 +777,19 @@ html:root .saas-canvas-shell {
     &:hover:not(:disabled)::before { rotate: -8deg; }
   }
   .awwo-assistant-cancel { min-height: 36px; padding-inline: 14px; border-radius: var(--saas-radius-pill); background: var(--saas-field); color: var(--saas-text); }
+  /* In the composer the send is a round icon (the arrow, on the primary ink), stop takes its place while a message is
+     handled, and files come from a quiet round "+": the toolbar a chat app has (owner request 2026-10-12). */
+  .awwo-workspace .awwo-assistant-composer .awwo-assistant-send {
+    width: 32px; height: 32px; min-height: 32px; padding: 0; gap: 0; border-radius: 50%;
+    & > svg { display: block; }
+    &::before { display: none; }
+    &:disabled { opacity: .35; }
+  }
+  .awwo-workspace .awwo-assistant-composer .awwo-assistant-cancel { width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 50%; }
+  .awwo-workspace .awwo-assistant-composer .awwo-attach-button {
+    width: 30px; height: 30px; border-color: transparent; border-radius: 50%; background: transparent; color: var(--saas-muted);
+    &:hover:not(:disabled) { border-color: transparent; background: var(--saas-soft); color: var(--saas-text); }
+  }
   /* The live status: what is happening now, the measured facts, then the four observed steps. */
   .awwo-assistant-status {
     margin-top: 8px; padding: 12px 12px 10px; border: 1px solid color-mix(in srgb, var(--saas-signal) 14%, transparent);

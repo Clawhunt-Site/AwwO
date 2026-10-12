@@ -1,0 +1,24 @@
+/* 用户须知 (ComposerNotes.tsx): one quiet icon in a composer's toolbar, and the notes it opens above itself. The popover
+   is a portal on the page, so it takes the hosted design's tokens where they exist and the canvas theme's otherwise. */
+.awwo-composer-notes-button {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--saas-subtle, var(--awwo-muted, #68736d)); cursor: pointer;
+}
+.awwo-composer-notes-button:hover, .awwo-composer-notes-button[aria-expanded='true'] {
+  background: var(--saas-soft, var(--awwo-accent-soft, #edf4ee)); color: var(--saas-text, var(--awwo-ink, #232c29));
+}
+.awwo-composer-notes-button:focus-visible { outline: 2px solid var(--saas-focus, var(--awwo-accent, #286454)); outline-offset: 2px; }
+.awwo-composer-notes {
+  position: fixed; z-index: 1000; box-sizing: border-box; margin: 0; padding: 12px 14px 12px 12px;
+  border: 1px solid var(--saas-border, var(--awwo-border, #e4e8e2)); border-radius: 14px;
+  background: var(--saas-raised, var(--awwo-surface, #fff)); color: var(--saas-muted, var(--awwo-muted, #68736d));
+  box-shadow: var(--saas-shadow-lg, 0 18px 40px -18px rgb(0 0 0 / 35%));
+  font: 400 12px/1.6 var(--saas-font, system-ui, sans-serif); text-align: left;
+}
+.awwo-composer-notes-title { margin: 0 0 6px; color: var(--saas-text, var(--awwo-ink, #232c29)); font-size: 12.5px; font-weight: 650; }
+.awwo-composer-notes ul { display: grid; gap: 6px; margin: 0; padding: 0 0 0 16px; }
+.awwo-composer-notes li { padding-left: 2px; }
+.awwo-composer-notes li::marker { color: var(--saas-subtle, var(--awwo-muted, #68736d)); }
+/* A node's chat: the button closes the line its model chip starts. */
+.canvas-composer-accessory .canvas-composer-notes { margin-left: auto; }

@@ -35,7 +35,7 @@ describe('the assistant offers what to do next without being asked', () => {
     expect(recorded).toHaveBeenCalledOnce();
   });
 
-  it('lists what the canvas still needs, one row per node with its own step, and says the advice cost nothing', () => {
+  it('lists what the canvas still needs, one row per node with its own step, and keeps what things cost in 用户须知', () => {
     const fillPlan = vi.fn(); const fillCover = vi.fn();
     render(panel({ nextSteps: { lead: '运行前还需要你来定 3 项：', actions: [], note: '本地检查，不用次数', footnote: '填好后就能运行整张画布（至少 4 次）。', items: [
       { id: 'plan', title: '「选题策划」', detail: '主题、目标读者', action: { id: 'fill-plan', label: '去填写', ariaLabel: '去补全「选题策划」', primary: true, onSelect: fillPlan } },
@@ -43,7 +43,8 @@ describe('the assistant offers what to do next without being asked', () => {
     ] }, costNote: '提问会用掉今天的次数：改画布约 1 次，直接执行任务最多 16 次。' }));
     const next = within(screen.getByRole('group', { name: '接下来' }));
     expect(next.getByText('运行前还需要你来定 3 项：')).toBeVisible();
-    expect(next.getByText('本地检查，不用次数')).toBeVisible();
+    // That the advice cost nothing is said in 用户须知, not on the card.
+    expect(next.queryByText('本地检查，不用次数')).toBeNull();
     const rows = next.getAllByRole('listitem');
     expect(rows).toHaveLength(2);
     expect(within(rows[1]).getByText('画面风格')).toBeVisible();
@@ -51,8 +52,13 @@ describe('the assistant offers what to do next without being asked', () => {
     fireEvent.click(next.getByRole('button', { name: '去补全「封面设计」' }));
     expect(fillCover).toHaveBeenCalledOnce(); expect(fillPlan).not.toHaveBeenCalled();
     expect(next.getByRole('button', { name: '去补全「选题策划」' })).toHaveClass('is-primary');
-    // What a message costs is said under the composer, outside the advice.
-    expect(screen.getByText('提问会用掉今天的次数：改画布约 1 次，直接执行任务最多 16 次。')).toBeVisible();
+    // What a message costs, that the advice cost nothing and the data notice are in 用户须知: nothing is printed around the box.
+    expect(screen.queryByText('提问会用掉今天的次数：改画布约 1 次，直接执行任务最多 16 次。')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '用户须知' }));
+    const notes = within(screen.getByRole('region', { name: '用户须知' }));
+    expect(notes.getByText('提问会用掉今天的次数：改画布约 1 次，直接执行任务最多 16 次。')).toBeVisible();
+    expect(notes.getByText('「接下来」里的建议是在本地检查出来的，不用次数。')).toBeVisible();
+    expect(notes.getByText('请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。')).toBeVisible();
   });
 
   it('steps aside while a message is handled, on the welcome screen, and when there is nothing to offer', () => {
