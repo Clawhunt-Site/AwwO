@@ -6,7 +6,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEv
 import { AlertCircle, Box, File as FileIcon, FileArchive, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, Plus, X } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import {
-  attachmentKind, carriesFiles, eventFiles, formatFileSize, joinAttachments, MAX_COMPOSER_ATTACHMENTS, MAX_UPLOAD_BYTES,
+  attachmentKind, attachmentSeenBy, carriesFiles, eventFiles, formatFileSize, joinAttachments, MAX_COMPOSER_ATTACHMENTS, MAX_UPLOAD_BYTES,
   splitAttachments, type AttachmentKind, type ComposerAttachment,
 } from './attachments';
 import { canvasUploadsAvailable, deleteCanvasUpload, storedArtifactUrl, storedMediaUrl, uploadCanvasFile } from '../saas/canvasBridge';
@@ -216,11 +216,14 @@ export function AttachmentTray({ state, disabled = false }: { state: ComposerAtt
   </>;
 }
 
-/** A transcript's read-only view of a sent message: the words, then the files. */
+/** A transcript's read-only view of a sent message: the words, then the files, and which model saw its pictures. */
 export function MessageWithAttachments({ text, render }: { text: string; render?: (body: string) => ReactNode }) {
+  const { t } = useCanvasI18n();
   const { body, attachments } = splitAttachments(text);
+  const seenBy = attachmentSeenBy(text);
   return <>
     {body ? (render ? render(body) : <p>{body}</p>) : null}
     <AttachmentChips attachments={attachments} compact />
+    {seenBy ? <p className="awwo-attach-seen-by" role="note">{t('attach.seenBy', { model: seenBy })}</p> : null}
   </>;
 }

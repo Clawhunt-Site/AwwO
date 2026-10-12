@@ -84,10 +84,10 @@ var uploadExtensionTypes = map[string][2]string{
 	"stl": {"model/stl", uploadKindModel3D}, "fbx": {"application/octet-stream", uploadKindModel3D}, "ply": {"application/octet-stream", uploadKindModel3D},
 	"dae": {"model/vnd.collada+xml", uploadKindModel3D}, "usdz": {"model/vnd.usdz+zip", uploadKindModel3D}, "3mf": {"model/3mf", uploadKindModel3D},
 	"blend": {"application/octet-stream", uploadKindModel3D},
-	"docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", uploadKindDocument},
-	"xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", uploadKindDocument},
-	"pptx": {"application/vnd.openxmlformats-officedocument.presentationml.presentation", uploadKindDocument},
-	"doc":  {"application/msword", uploadKindDocument}, "xls": {"application/vnd.ms-excel", uploadKindDocument},
+	"docx":  {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", uploadKindDocument},
+	"xlsx":  {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", uploadKindDocument},
+	"pptx":  {"application/vnd.openxmlformats-officedocument.presentationml.presentation", uploadKindDocument},
+	"doc":   {"application/msword", uploadKindDocument}, "xls": {"application/vnd.ms-excel", uploadKindDocument},
 	"ppt": {"application/vnd.ms-powerpoint", uploadKindDocument}, "odt": {"application/vnd.oasis.opendocument.text", uploadKindDocument},
 	"rtf": {"application/rtf", uploadKindDocument}, "epub": {"application/epub+zip", uploadKindDocument},
 	"pdf": {"application/pdf", uploadKindDocument}, "key": {"application/octet-stream", uploadKindDocument},
@@ -445,6 +445,9 @@ type uploadAttachment struct {
 	Note          string `json:"note,omitempty"`
 	// Shown marks a picture that also goes with the message as an image the model sees (vision.go).
 	Shown bool `json:"shown,omitempty"`
+	// SeenBy names the model that sees a shown picture when the run moved to it because its node's model cannot
+	// (owner request 2026-10-12: 对话里提示这次换了哪个模型): the transcript says so under the message's files.
+	SeenBy string `json:"seenBy,omitempty"`
 	// Where the file is stored and, for a picture, its pixel count: what showing it needs, never told to the model.
 	storagePath string
 	pixels      int64

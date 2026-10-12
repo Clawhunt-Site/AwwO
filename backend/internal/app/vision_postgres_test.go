@@ -82,7 +82,7 @@ func TestPostgresAttachedPicturesReachAModelThatSeesThem(t *testing.T) {
 	if len(seen.Images) != 1 || seen.Images[0].Name != "hero.png" || seen.Images[0].MimeType != "image/png" || seen.Images[0].Data != base64.StdEncoding.EncodeToString(picture.Bytes()) {
 		t.Fatal("the picture did not reach the model", seen.Images)
 	}
-	if !strings.Contains(seen.Prompt, attachmentShownPolicy) || strings.Count(seen.Prompt, `"shown":true`) != 1 {
+	if !strings.Contains(seen.Prompt, attachmentShownPolicy) || strings.Count(seen.Prompt, `"shown":true`) != 1 || strings.Contains(seen.Prompt, `"seenBy"`) {
 		t.Fatal("the block does not say which picture is shown", seen.Prompt)
 	}
 	var quoted []uploadAttachment
@@ -170,6 +170,9 @@ func TestPostgresAPictureMovesTheRunToAModelThatSees(t *testing.T) {
 	seen, from := last("switch-1", withPicture)
 	if seen.Model != "eye-model" || from != "test-model" || len(seen.Images) != 1 || seen.Images[0].Name != "hero.png" {
 		t.Fatal("the run did not move to the model that sees", seen.Model, from, len(seen.Images))
+	}
+	if !strings.Contains(seen.Prompt, `"seenBy":"eye-model"`) {
+		t.Fatal("the message does not say which model saw its picture", seen.Prompt)
 	}
 	if seen, from = last("switch-2", "只有文字"); seen.Model != "test-model" || from != "" || len(seen.Images) != 0 {
 		t.Fatal("a message without a picture moved", seen.Model, from)

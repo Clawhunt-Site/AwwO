@@ -65,3 +65,6 @@ a.awwo-attachment-name:focus-visible { outline: 2px solid var(--awwo-accent, #28
 .awwo-file-field-row .awwo-field-value { flex: 1 1 auto; min-width: 0; }
 .awwo-file-field-row .awwo-attach-button { margin-top: 3px; }
 .awwo-markdown-toolbar .awwo-attach-button { width: 28px; height: 28px; border-color: transparent; background: transparent; }
+
+/* Which model saw a sent message's pictures when the run moved to one that can (attach.seenBy). */
+.awwo-attach-seen-by { margin: 4px 0 0; color: var(--awwo-muted, #68736d); font-size: 11px; line-height: 1.4; }

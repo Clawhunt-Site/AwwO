@@ -106,6 +106,20 @@ func (h piHealth) modelSeesImages(model string) bool {
 	return false
 }
 
+// modelDisplayName is what a person sees for model: its catalog label, else its name, else its id.
+func (h piHealth) modelDisplayName(model string) string {
+	for _, m := range h.Models {
+		if m.ID == model {
+			for _, name := range []string{m.Label, m.Name} {
+				if name = strings.TrimSpace(name); name != "" && utf8.RuneCountInString(name) <= 80 {
+					return name
+				}
+			}
+		}
+	}
+	return model
+}
+
 // seesImages: the single-model text runs (a node's message, a canvas run's node, the assistant's plan) whose model
 // takes pictures. A team, a workspace, managed execution and a media generation carry their files their own way.
 func (s executionSnapshot) seesImages() bool {
@@ -131,6 +145,9 @@ func freezeVisionImages(snapshot *executionSnapshot, attached *uploadAttachments
 		images = append(images, mediaReference{ArtifactID: strings.TrimPrefix(item.Reference, artifactRefPrefix), Name: item.Name,
 			ContentType: item.ContentType, Size: item.Size, SHA256: item.SHA256, Path: item.storagePath})
 		item.Shown = true
+		if snapshot.VisionFrom != "" {
+			item.SeenBy = snapshot.Health.modelDisplayName(snapshot.Model)
+		}
 	}
 	if len(images) > 0 {
 		snapshot.Vision = &visionPlan{Images: images}

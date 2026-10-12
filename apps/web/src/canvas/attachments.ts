@@ -100,6 +100,28 @@ export function withoutAttachments(text: string): string {
   return splitAttachments(text).body;
 }
 
+/**
+ * The model that saw a sent message's pictures when the run moved to it because the node's model cannot see
+ * (the server's data block names it as `seenBy` on a shown picture), or undefined. Never throws on a malformed block.
+ */
+export function attachmentSeenBy(text: string): string | undefined {
+  const marker = text.indexOf(ATTACHMENT_DATA_MARKER);
+  if (marker < 0) return undefined;
+  const block = text.slice(marker).trimEnd();
+  const last = block.slice(block.lastIndexOf('\n') + 1);
+  try {
+    const items: unknown = JSON.parse(last);
+    if (!Array.isArray(items)) return undefined;
+    for (const item of items) {
+      const seenBy = (item as { seenBy?: unknown } | null)?.seenBy;
+      if (typeof seenBy === 'string' && seenBy.trim() && seenBy.length <= 80) return seenBy.trim();
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 export function formatFileSize(bytes: number, locale: UiLocale): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '';
   const units = ['B', 'KB', 'MB', 'GB'];

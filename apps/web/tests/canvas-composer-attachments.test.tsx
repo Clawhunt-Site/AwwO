@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ATTACHMENT_DATA_MARKER, attachmentKind, attachmentLine, joinAttachments, splitAttachments } from '../src/canvas/attachments';
+import { ATTACHMENT_DATA_MARKER, attachmentKind, attachmentLine, attachmentSeenBy, joinAttachments, splitAttachments } from '../src/canvas/attachments';
+import { MessageWithAttachments } from '../src/canvas/ComposerAttachments';
 import { mediaComposerInfo, TileComposer, type MediaComposerInfo } from '../src/canvas/TileComposer';
 import { parseMediaCatalogue } from '../src/canvas/mediaCatalog';
 import { portsFor } from '../src/canvas/ports';
@@ -97,8 +98,8 @@ describe('a media node composer', () => {
     expect(screen.getByText('这个模型只按文字生成，附带的文件不会使用。要用参考图，请换成：图片 · 高清、图片 · 标准多张。')).toBeInTheDocument();
     rerender(composer({ kind: 'video', references: 0, referenceModels: [] }));
     expect(screen.getByText('这个节点只按你写的文字生成，附带的文件不会交给生成服务。')).toBeInTheDocument();
-    rerender(composer({ kind: 'video', references: 2, referenceModels: ['视频 · 标准'] }));
-    expect(screen.getByText(/会作为视频的第一帧，第二张作为最后一帧/)).toBeInTheDocument();
+    rerender(composer({ kind: 'video', references: 9, referenceModels: ['视频 · 标准'] }));
+    expect(screen.getByText(/它是视频的第一帧.*主体参考，最多 9 张/)).toBeInTheDocument();
     rerender(composer({ kind: 'video', references: 0, referenceModels: ['视频 · 标准'] }));
     expect(screen.getByText('这个模型只按文字生成，附带的文件不会使用。要用参考图，请换成：视频 · 标准。')).toBeInTheDocument();
   });
@@ -247,5 +248,22 @@ describe('the node transcript', () => {
     expect(screen.getByText('总结这份文档')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'notes.md' })).toHaveAttribute('href', `/api/v1/tenants/tenant-a/artifacts/${ID_A}`);
     expect(screen.queryByText(/FILE BODY/)).toBeNull();
+  });
+});
+
+
+describe('a message whose pictures moved its run to a model that sees', () => {
+  it('says which model saw them, and nothing for a message that did not move or a broken block', () => {
+    const block = (items: unknown[]) => `看看这张图\n\n[附件] hero.png · awwo-file:aHero00000\n\n${ATTACHMENT_DATA_MARKER}\n说明\n${JSON.stringify(items)}\n`;
+    const moved = block([{ reference: 'awwo-file:aHero00000', name: 'hero.png', kind: 'image', shown: true, seenBy: 'Claude Haiku 4.5' }]);
+    expect(attachmentSeenBy(moved)).toBe('Claude Haiku 4.5');
+    expect(attachmentSeenBy(block([{ name: 'hero.png', shown: true }]))).toBeUndefined();
+    expect(attachmentSeenBy(`${ATTACHMENT_DATA_MARKER}\nnot json`)).toBeUndefined();
+    expect(attachmentSeenBy('plain words')).toBeUndefined();
+    render(<MessageWithAttachments text={moved} />);
+    expect(screen.getByRole('note')).toHaveTextContent('这次换成了能看图的「Claude Haiku 4.5」来回答');
+    cleanup();
+    render(<MessageWithAttachments text={block([{ name: 'hero.png', shown: true }])} />);
+    expect(screen.queryByRole('note')).toBeNull();
   });
 });

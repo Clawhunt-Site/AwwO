@@ -86,7 +86,10 @@ describe('media port guides', () => {
     expect(result(media('video'))).toContain('接到组件的视频字段');
     expect(result(media('model3d'))).toContain('以文件形式从这里连出去：接到网页或文字节点的「上下文」');
     expect(result(media('model3d'))).toContain('接到组件的文件字段');
-    expect(portsFor(media('video')).some(p => p.id === 'reference')).toBe(false);
+    const videoReference = portsFor(media('video')).find(p => p.id === 'reference');
+    expect(videoReference).toBeDefined();
+    expect(mediaPortGuide((key, values) => canvasText('zh', key, values), 'zh', media('video'), videoReference!,
+      { kind: 'video', references: 9, referenceModels: ['视频 · 全能'] })).toContain('视频从这张图开始（第一帧）');
   });
 
   it('leaves every other port as it was, and shows no guide where nothing can be wired', () => {

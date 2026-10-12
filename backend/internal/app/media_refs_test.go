@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,7 @@ func testReference(data []byte, contentType string) mediaReference {
 
 func TestMediaReferenceCatalog(t *testing.T) {
 	want := map[string]int{"xt.xtasy-3": 1, "xt.xtasy-3-pro": 1, "xt.seedream-5-pro": 1, "tripo.v3-1": 1, "tripo.p1": 1,
-		"jm.image-cinema": 1, "jm.image-express": 1, "xt.xtasy-v3": 2, "xt.omni-video": 2, "xt.omni-video-2-5": 2}
+		"jm.image-cinema": 1, "jm.image-express": 1, "xt.xtasy-v3": 10, "xt.omni-video": 9, "xt.omni-video-2-5": 10}
 	for _, m := range builtinMediaCatalog.List() {
 		if m.References != want[m.ID] {
 			t.Errorf("%s takes %d references, want %d", m.ID, m.References, want[m.ID])
@@ -36,9 +37,9 @@ func TestMediaReferenceCatalog(t *testing.T) {
 	if err := validXtasyModel(&frames); err != nil {
 		t.Fatal("the shipped video model is valid", err)
 	}
-	frames.References = 3
+	frames.References = maxXtasyVideoReferences + 1
 	if validXtasyModel(&frames) == nil {
-		t.Fatal("a video takes a first and a last frame, no more")
+		t.Fatal("a video takes at most the files one message carries")
 	}
 	three := *tripoModels()[0]
 	if err := validTripoModel(&three); err != nil {
@@ -191,10 +192,18 @@ func TestUploadMediaReferencesRefusesChangedBytes(t *testing.T) {
 	}
 }
 
-// Video nodes (owner request 2026-10-12: 视频节点也加参考图): the first picture is the first frame and a second the
-// last frame, in mode interpolation at the adaptive ratio, and a third is left out; without pictures the request is
-// what it was. The roles, the mode and the 2.5 model's adaptive-only ratio are X-tasy's GET /openapi/v1/models.
+// Video nodes (owner requests 2026-10-12: 视频节点也加参考图, 视频也支持按多张图做主体参考): one picture is the first
+// frame (mode interpolation at the adaptive ratio), two or more are subject references (mode multimodal, each a
+// reference_image, the node's ratio kept; the 2.5 model's task type is reference), capped at the model's count;
+// without pictures the request is what it was. Roles, modes and limits are X-tasy's GET /openapi/v1/models.
 func TestMediaReferenceVideoFrames(t *testing.T) {
+	ids := func(n int) []string {
+		out := []string{}
+		for i := 1; i <= n; i++ {
+			out = append(out, fmt.Sprintf("f%d", i))
+		}
+		return out
+	}
 	for _, id := range []string{"xt.xtasy-v3", "xt.omni-video", "xt.omni-video-2-5"} {
 		m, ok := builtinMediaCatalog.model(id)
 		if !ok {
@@ -205,23 +214,31 @@ func TestMediaReferenceVideoFrames(t *testing.T) {
 			t.Fatal(id, err)
 		}
 		plain := xtasyRequest(m, "a cat walks", params, "run1", nil)
+		ratio := plain["parameters"].(map[string]any)["aspect_ratio"]
 		if p := plain["parameters"].(map[string]any); p["mode"] != xtasyFixed[id]["mode"] || len(plain["references"].([]any)) != 0 {
 			t.Fatal(id, "a video without pictures is generated from words as before", plain)
 		}
-		one := xtasyRequest(m, "a cat walks", params, "run1", []string{"f1"})
+		one := xtasyRequest(m, "a cat walks", params, "run1", ids(1))
 		p, refs := one["parameters"].(map[string]any), one["references"].([]any)
 		if p["mode"] != "interpolation" || p["aspect_ratio"] != "adaptive" || len(refs) != 1 ||
 			refs[0].(map[string]any)["role"] != "first_frame" || refs[0].(map[string]any)["file_id"] != "f1" {
 			t.Fatal(id, "one picture is the first frame", one)
 		}
-		two := xtasyRequest(m, "a cat walks", params, "run1", []string{"f1", "f2", "f3"})
-		refs = two["references"].([]any)
-		if len(refs) != 2 || refs[0].(map[string]any)["role"] != "first_frame" || refs[1].(map[string]any)["role"] != "last_frame" ||
-			refs[1].(map[string]any)["file_id"] != "f2" {
-			t.Fatal(id, "a second picture is the last frame and a third is left out", two)
+		if _, sent := p["omni_reference_task_type"]; sent {
+			t.Fatal(id, "a first frame carries no omni reference task type")
 		}
-		if _, sent := two["parameters"].(map[string]any)["omni_reference_task_type"]; sent {
-			t.Fatal(id, "frames never carry an omni reference task type")
+		many := xtasyRequest(m, "图1 的人拿着图2 的杯子", params, "run1", ids(12))
+		p, refs = many["parameters"].(map[string]any), many["references"].([]any)
+		if p["mode"] != "multimodal" || p["aspect_ratio"] != ratio || len(refs) != m.References {
+			t.Fatal(id, "several pictures are subject references, up to the model's count, at the node's ratio", len(refs), p)
+		}
+		for i, ref := range refs {
+			if ref.(map[string]any)["role"] != "reference_image" || ref.(map[string]any)["file_id"] != fmt.Sprintf("f%d", i+1) {
+				t.Fatal(id, "subject references keep their order", refs)
+			}
+		}
+		if task, sent := p["omni_reference_task_type"]; (id == "xt.omni-video-2-5") != sent || (sent && task != "reference") {
+			t.Fatal(id, "only the 2.5 model names its task type, reference", p)
 		}
 	}
 }
