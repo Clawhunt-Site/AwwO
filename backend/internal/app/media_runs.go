@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -37,6 +38,8 @@ type mediaPlan struct {
 	Model    string         `json:"model"`
 	Kind     string         `json:"kind"`
 	Params   map[string]any `json:"params"`
+	// References are the pictures the generation starts from, frozen at admission (media_refs.go).
+	References []mediaReference `json:"references,omitempty"`
 }
 
 type mediaItem struct {
@@ -162,6 +165,39 @@ func mediaPromptError(m *mediaModel) error {
 	return setupError{"media_prompt_invalid", fmt.Sprintf("The prompt must be %d-%d characters for this model", m.Prompt.MinLength, m.Prompt.MaxLength)}
 }
 
+// mediaPromptAccepted applies the model's prompt bounds to a generation's words. A 3D model built from a reference
+// picture reads no words (Tripo's image-to-model takes none), so it needs none; any it has stay within the bound.
+func mediaPromptAccepted(m *mediaModel, text string, refs []mediaReference) bool {
+	if len(refs) > 0 && m.Kind == mediaKindModel3D {
+		return utf8.RuneCountInString(text) <= m.Prompt.MaxLength
+	}
+	return m.validMediaPrompt(text)
+}
+
+// freezeMediaPrompt resolves a media run's reference pictures from its message and checks its words: the stored
+// prompt is the words, then the lines of the pictures the generation starts from (other files are not used and are
+// not kept), and the references go into the run's plan. cut shortens words past the model's limit instead of
+// refusing them: a canvas run composes its prompt from upstream deliveries, a user's own Send does not.
+func (a *App) freezeMediaPrompt(ctx context.Context, q querier, tid, canvasID, prompt string, plan *mediaPlan, cut bool) (string, error) {
+	m, ok := builtinMediaCatalog.model(plan.Model)
+	if !ok {
+		return "", setupError{"model_unavailable", "Node model is unavailable for its runtime or this workspace"}
+	}
+	refs, err := a.freezeMediaReferences(ctx, q, tid, canvasID, prompt, m)
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimSpace(stripAttachmentLines(prompt))
+	if cut {
+		text = strings.TrimSpace(firstRunes(text, m.Prompt.MaxLength))
+	}
+	if !mediaPromptAccepted(m, text, refs) {
+		return "", mediaPromptError(m)
+	}
+	plan.References = refs
+	return withReferenceLines(text, refs), nil
+}
+
 // mediaPlanSnapshot is mediaSnapshot without the prompt: a canvas run freezes a media node's model and parameters
 // when the graph is admitted and composes its prompt only when the node's turn comes (graph_media.go).
 func (a *App) mediaPlanSnapshot(document []byte, nodeID, model string, entitlement modelEntitlement) (executionSnapshot, error) {
@@ -224,14 +260,25 @@ func (a *App) mediaAdmissionError(w http.ResponseWriter, err error) {
 // admitted on the plan's daily generations across the account's workspaces and spends the period's credits,
 // instead of the workspace's own media allowance and the free plan's media route limit and ceiling.
 // own are the workspace's own run limits, which apply when the plan lapsed after createRun read it.
-func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string, b runInput, hash string, document []byte, nodeID, model string, entitlement modelEntitlement, routes routeLimits, paid bool, own workspaceLimits) {
+func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid string, b runInput, hash string, document []byte, nodeID, canvasID, model string, entitlement modelEntitlement, routes routeLimits, paid bool, own workspaceLimits) {
 	ctx := r.Context()
 	if len(b.KnowledgeRevisionIDs) > 0 {
 		fail(w, 400, "media_knowledge_unsupported", "Image and video nodes do not take knowledge context")
 		return
 	}
-	snapshot, e := a.mediaSnapshot(document, nodeID, model, b.Prompt, entitlement)
+	snapshot, e := a.mediaPlanSnapshot(document, nodeID, model, entitlement)
 	if e != nil {
+		a.mediaAdmissionError(w, e)
+		return
+	}
+	// The message's first fitting picture becomes the generation's reference where the model takes one; the words
+	// are checked against the model's bounds, and what is stored (and later sent) is the words without file lines.
+	if b.Prompt, e = a.freezeMediaPrompt(ctx, tx, tid, canvasID, b.Prompt, snapshot.Media, false); e != nil {
+		var input setupError
+		if !errors.As(e, &input) {
+			a.dbError(w, e)
+			return
+		}
 		a.mediaAdmissionError(w, e)
 		return
 	}
@@ -386,7 +433,7 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 	}
 	billing := none
 	if plan != nil {
-		n := mediaCreditsFor(snapshot.Model, snapshot.Media.Kind, snapshot.Media.Params)
+		n := mediaCreditsFor(snapshot.Model, snapshot.Media.Kind, snapshot.Media.Params) + mediaReferenceCredits(snapshot.Model, len(snapshot.Media.References))
 		billing = mediaBilling{&n, &plan.UserID, &plan.PeriodStart}
 		switch e := checkCredits(ctx, tx, plan, n); {
 		case errors.Is(e, errCreditsExhausted):
@@ -432,14 +479,37 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 		a.finish(tid, id, "failed", "", "media_unavailable")
 		return
 	}
+	// The stored prompt ends with the lines of its reference pictures; the provider gets the words alone.
+	text := strings.TrimSpace(stripAttachmentLines(prompt))
+	var references []string
+	if len(plan.References) > 0 {
+		// An upload creates no task and no charge; a run that fails here is not billed (recordMediaTask never ran).
+		if a.mediaStopped(ctx, id, false) {
+			return
+		}
+		ids, err := a.uploadMediaReferences(ctx, hub, tid, id, plan.References)
+		if err != nil {
+			if a.mediaStopped(ctx, id, false) {
+				return
+			}
+			a.finish(tid, id, "failed", "", mediaFailureCode(err))
+			return
+		}
+		references = ids
+	}
+	endpoint := m.Endpoint
 	var body map[string]any
 	switch m.Provider {
 	case mediaProviderTripo:
-		body = tripoRequest(m, prompt, plan.Params)
+		if len(references) > 0 {
+			body, endpoint = tripoImageRequest(m, references[0], plan.Params), tripoImageEndpoint
+		} else {
+			body = tripoRequest(m, text, plan.Params)
+		}
 	case mediaProviderXtasy:
-		body = xtasyRequest(m, prompt, plan.Params, id)
+		body = xtasyRequest(m, text, plan.Params, id, references)
 	default:
-		body = map[string]any{"prompt": strings.TrimSpace(prompt)}
+		body = map[string]any{"prompt": text}
 		for name, value := range plan.Params {
 			body[name] = value
 		}
@@ -452,7 +522,7 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 	if a.mediaStopped(ctx, id, false) {
 		return
 	}
-	task, err := submitMedia(ctx, hub, m.Endpoint, body, func() { a.mediaStatus(ctx, tid, id, "queued") })
+	task, err := submitMedia(ctx, hub, endpoint, body, func() { a.mediaStatus(ctx, tid, id, "queued") })
 	if err != nil {
 		if a.mediaStopped(ctx, id, false) {
 			return

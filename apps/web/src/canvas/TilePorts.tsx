@@ -238,7 +238,7 @@ export function TilePorts({ node, wiring }: TilePortsProps) {
         // Display names belong to the form; stable IDs remain exclusively in the wire payload.
         const sideLabel = t(p.side === 'input' ? 'ports.input' : 'ports.output');
         const typeLabel = t(TYPE_LABEL[p.dataType]);
-        const portLabel = hasContract ? p.label?.trim() || t('ports.unnamed', { side: sideLabel }) : p.id;
+        const portLabel = hasContract ? p.label?.trim() || t('ports.unnamed', { side: sideLabel }) : p.id === 'reference' ? t('ports.reference') : p.id;
         const portKey = `${p.side}:${p.id}`;
         const expanded = expandedLabel === portKey;
         return (

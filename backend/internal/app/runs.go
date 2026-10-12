@@ -447,11 +447,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		// to reuse the reserved node id, persona, team, or task frame.
 		document, nodeID = []byte(`{}`), ""
 	} else if engine == agentEngineMedia {
-		// Image and video nodes run through the media provider, not a model worker. A file attached in the
-		// composer cannot go to a provider yet, so its line never becomes part of what is generated: a message of
-		// files alone is left with no prompt, which the model's own prompt bounds refuse before anything is paid.
-		b.Prompt = stripAttachmentLines(b.Prompt)
-		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, model, entitlement, readRouteLimits(routes), plan != nil, workspaceLimits{active, concurrent, today, daily, needsPlan})
+		// Image, video and 3D nodes run through the media provider, not a model worker. A picture attached in the
+		// composer becomes the generation's reference where the node's model takes one (freezeMediaPrompt); every
+		// other file line is dropped from what is generated, so a message of files alone has no words, which the
+		// model's prompt bounds refuse before anything is paid (a 3D model built from a picture needs none).
+		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, canvasID, model, entitlement, readRouteLimits(routes), plan != nil, workspaceLimits{active, concurrent, today, daily, needsPlan})
 		return
 	}
 	team, e := savedNodeTeam(document, nodeID)

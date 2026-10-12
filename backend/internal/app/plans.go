@@ -394,10 +394,20 @@ var mediaBaseCredits = map[string]int{
 // model3DCredits prices a Tripo text-to-3D task at three times Tripo's own credits (one Tripo credit and one AwwO
 // credit are both $0.01): with texture, without, and what detailed texture and detailed geometry add. Tripo's
 // tables (2026-10): H3.1 20 textured, 10 untextured, +10 detailed texture, +20 detailed geometry; P1 40, 30,
-// +10 detailed texture, and no geometry option.
-var model3DCredits = map[string]struct{ textured, untextured, detailedTexture, detailedGeometry int }{
-	"tripo.v3-1": {textured: 60, untextured: 30, detailedTexture: 30, detailedGeometry: 60},
-	"tripo.p1":   {textured: 120, untextured: 90, detailedTexture: 30},
+// +10 detailed texture, and no geometry option. Building the model from a reference picture (image-to-model) costs
+// Tripo 10 more on every tier of both series (2026-10-12), so 30 more here.
+var model3DCredits = map[string]struct{ textured, untextured, detailedTexture, detailedGeometry, imageInput int }{
+	"tripo.v3-1": {textured: 60, untextured: 30, detailedTexture: 30, detailedGeometry: 60, imageInput: 30},
+	"tripo.p1":   {textured: 120, untextured: 90, detailedTexture: 30, imageInput: 30},
+}
+
+// mediaReferenceCredits is what generating from reference pictures adds to a generation's price: a 3D model built
+// from a picture costs its image-to-model surcharge; an image edited from one costs what generating it would.
+func mediaReferenceCredits(model string, references int) int {
+	if references <= 0 {
+		return 0
+	}
+	return model3DCredits[model].imageInput
 }
 
 // mediaCreditsFor prices a generation from its model and resolved settings. Settings that raise RunningHub's

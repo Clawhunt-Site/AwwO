@@ -2,7 +2,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ATTACHMENT_DATA_MARKER, attachmentKind, attachmentLine, joinAttachments, splitAttachments } from '../src/canvas/attachments';
-import { TileComposer } from '../src/canvas/TileComposer';
+import { mediaComposerInfo, TileComposer, type MediaComposerInfo } from '../src/canvas/TileComposer';
+import { parseMediaCatalogue } from '../src/canvas/mediaCatalog';
+import { portsFor } from '../src/canvas/ports';
 import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
 import { ContractFields } from '../src/canvas/ContractFields';
 import { TileTranscript } from '../src/canvas/TileTranscript';
@@ -81,6 +83,42 @@ function ComposerHost({ onSend, initial = '' }: { onSend: (text: string) => void
   return <><TileComposer streaming={false} draft={draft} onDraftChange={setDraft} onSend={onSend} attachNodeId="node-a" />
     <output data-testid="draft">{draft}</output></>;
 }
+
+describe('a media node composer', () => {
+  const picture = `[附件] cat.png · awwo-file:${ID_A}`;
+  const composer = (mediaNode: MediaComposerInfo) => <TileComposer streaming={false} draft={picture} onSend={vi.fn()} attachNodeId="node-a" mediaNode={mediaNode} />;
+
+  it('says which attached picture a model uses, and which models take one when it does not', () => {
+    const { rerender } = render(composer({ kind: 'model3d', references: 1, referenceModels: ['3D · 高精度'] }));
+    expect(screen.getByText(/3D 模型只按这张图生成，不看文字/)).toBeInTheDocument();
+    rerender(composer({ kind: 'image', references: 1, referenceModels: ['图片 · 高清'] }));
+    expect(screen.getByText(/会作为参考图，按你写的文字改图/)).toBeInTheDocument();
+    rerender(composer({ kind: 'image', references: 0, referenceModels: ['图片 · 高清', '图片 · 标准多张'] }));
+    expect(screen.getByText('这个模型只按文字生成，附带的文件不会使用。要用参考图，请换成：图片 · 高清、图片 · 标准多张。')).toBeInTheDocument();
+    rerender(composer({ kind: 'video', references: 0, referenceModels: [] }));
+    expect(screen.getByText('这个节点只按你写的文字生成，附带的文件不会交给生成服务。')).toBeInTheDocument();
+  });
+
+  it('reads what the node model does from its choices, and only for media nodes', () => {
+    const choices = [{ key: 'tripo.p1', label: '3D · 游戏低多边形', available: true, references: 1 }, { key: 'tripo.x', label: 'X', available: true }];
+    expect(mediaComposerInfo({ kind: 'session', agentKind: 'model3d', model: 'tripo.p1' }, choices)).toEqual({ kind: 'model3d', references: 1, referenceModels: ['3D · 游戏低多边形'] });
+    expect(mediaComposerInfo({ kind: 'session', agentKind: 'model3d', model: 'tripo.x' }, choices)?.references).toBe(0);
+    expect(mediaComposerInfo({ kind: 'session', agentKind: 'llm', model: 'm' }, choices)).toBeUndefined();
+  });
+
+  it('reads a model capability from the catalogue, 0 unless a small whole number', () => {
+    const model = (references: unknown) => ({ id: 'xt.xtasy-3', name: 'x', label: ['图片', 'Image'], vendor: '媒体', kind: 'image', prompt: { minLength: 1, maxLength: 10 }, params: [], references });
+    const catalogue = parseMediaCatalogue({ configured: true, available: true, models: [model(1), { ...model('2'), id: 'xt.b' }, { ...model(9), id: 'xt.c' }, { ...model(undefined), id: 'xt.d' }] });
+    expect(catalogue.models.map(m => m.references)).toEqual([1, 0, 0, 0]);
+  });
+
+  it('gives 3D nodes a reference input, as image nodes have, and video nodes none', () => {
+    const ids = (agentKind: string) => portsFor({ kind: 'session', agentKind } as never).filter(p => p.side === 'input').map(p => p.id);
+    expect(ids('model3d')).toEqual(['context', 'reference']);
+    expect(ids('image')).toEqual(['context', 'reference']);
+    expect(ids('video')).toEqual(['context']);
+  });
+});
 
 describe('the node composer', () => {
   it('uploads a picked file of any type, shows its chip and sends it with the words', async () => {

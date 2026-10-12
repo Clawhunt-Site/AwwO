@@ -66,7 +66,7 @@ func TestXtasyLiveEveryModel(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
 			started := time.Now()
-			task, err := submitMedia(ctx, x, m.Endpoint, xtasyRequest(m, "A quiet mountain lake at sunrise, soft light", params, "verify-"+m.ID+"-"+stamp), func() {})
+			task, err := submitMedia(ctx, x, m.Endpoint, xtasyRequest(m, "A quiet mountain lake at sunrise, soft light", params, "verify-"+m.ID+"-"+stamp, nil), func() {})
 			if err != nil {
 				record["error"] = mediaFailureCode(err)
 				return

@@ -22,6 +22,8 @@ export interface NodeModelChoice {
   group?: string;
   available: boolean;
   reason?: string;
+  /** A media model: how many reference pictures it takes (0 or absent: words only). */
+  references?: number;
 }
 
 export interface NodeModelPickerProps {

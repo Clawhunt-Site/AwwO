@@ -40,7 +40,7 @@ import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
 import { getSnapshot, subscribe, type NodeSession, type Turn } from './sessions';
 import { restoreHistory, sendMessage, statusLabel } from './sessionTransport';
-import { TileComposer } from './TileComposer';
+import { mediaComposerInfo, TileComposer } from './TileComposer';
 import { joinAttachments, splitAttachments } from './attachments';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
@@ -901,7 +901,7 @@ export const SessionTile = memo(function SessionTile({
                       currentRunDetails={currentRunDetails} mediaResults={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
                   {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
-                    attachNodeId={nodeId} mediaNode={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
+                    attachNodeId={nodeId} mediaNode={mediaComposerInfo(node, modelChoices)}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
                     accessory={node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team

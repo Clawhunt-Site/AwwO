@@ -58,6 +58,7 @@ export interface PortRef {
  * - contract session:   input 'in:<id>' / output 'out:<id>' with each field's declared type
  * - session llm/coding: input 'context' (text, MULTI)                       → output 'result' (text)
  * - session image:      input 'context' (text, MULTI) + 'reference' (image) → output 'result' (image)
+ * - session model3d:    input 'context' (text, MULTI) + 'reference' (image) → output 'result' (file)
  */
 export function portsFor(node: CanvasNode): PortSpec[] {
   if (node.kind === 'form') {
@@ -76,7 +77,8 @@ export function portsFor(node: CanvasNode): PortSpec[] {
     ];
   }
   const ports: PortSpec[] = [{ id: 'context', side: 'input', dataType: 'text', multi: true }];
-  if (node.agentKind === 'image') ports.push({ id: 'reference', side: 'input', dataType: 'image' });
+  // A picture wired here is the generation's reference where the node's model takes one (image edit, image-to-3D).
+  if (node.agentKind === 'image' || node.agentKind === 'model3d') ports.push({ id: 'reference', side: 'input', dataType: 'image' });
   ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' ? node.agentKind
     : node.agentKind === 'model3d' ? 'file' : 'text' });
   return ports;

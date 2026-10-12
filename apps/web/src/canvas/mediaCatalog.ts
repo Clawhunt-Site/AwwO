@@ -32,6 +32,8 @@ export interface MediaModel {
   kind: MediaKind;
   prompt: { minLength: number; maxLength: number };
   params: MediaParam[];
+  /** How many pictures a generation can start from (0: words only): the first image attached, or wired in. */
+  references: number;
 }
 
 export interface MediaCatalogue {
@@ -101,7 +103,8 @@ function parseModel(raw: unknown): MediaModel | null {
     params.push(param);
   }
   const shown: [string, string] = label(r.label) ? [r.label[0], r.label[1]] : [r.name, r.name];
-  return { id: r.id, name: r.name, label: shown, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params };
+  const references = Number.isInteger(r.references) && (r.references as number) > 0 && (r.references as number) <= 4 ? r.references as number : 0;
+  return { id: r.id, name: r.name, label: shown, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params, references };
 }
 
 export function parseMediaCatalogue(raw: unknown): MediaCatalogue {

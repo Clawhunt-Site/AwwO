@@ -54,7 +54,7 @@ func TestXtasyRequestUsesWireNamesFixedValuesAndTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := xtasyRequest(video, "  a lake  ", params, "run1")
+	body := xtasyRequest(video, "  a lake  ", params, "run1", nil)
 	if body["model_id"] != video.Version || body["prompt"] != "a lake" || body[xtasyIdempotencyField] != "awwo-run-run1" || len(body["references"].([]any)) != 0 {
 		t.Fatal("body", body)
 	}
@@ -70,7 +70,7 @@ func TestXtasyRequestUsesWireNamesFixedValuesAndTheRun(t *testing.T) {
 	}
 	omni, _ := builtinMediaCatalog.model("xt.omni-video-2-5")
 	resolved, _ := omni.resolveMediaParams(nil)
-	fixed := xtasyRequest(omni, "x", resolved, "run2")["parameters"].(map[string]any)
+	fixed := xtasyRequest(omni, "x", resolved, "run2", nil)["parameters"].(map[string]any)
 	if fixed["mode"] != "text2video" || fixed["watermark"] != false || fixed["return_last_frame"] != false || fixed["output_format"] != "mp4" || fixed["duration"] != 5.0 {
 		t.Fatal("omni video fixed values and the default duration", fixed)
 	}
@@ -249,7 +249,7 @@ func TestXtasyClientSubmitsQueriesAndDownloads(t *testing.T) {
 	x := newXtasy(c)
 	m, _ := builtinMediaCatalog.model("xt.seedream-5-pro")
 	params, _ := m.resolveMediaParams(nil)
-	body := xtasyRequest(m, "a lake", params, "run1")
+	body := xtasyRequest(m, "a lake", params, "run1", nil)
 	waits := 0
 	task, err := submitMedia(context.Background(), x, m.Endpoint, body, func() { waits++ })
 	if err != nil || task.TaskID != "mt_1" || task.Status != "RUNNING" || waits != 1 {

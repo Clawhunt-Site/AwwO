@@ -18,6 +18,30 @@ import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
+import { mediaKindOf, type MediaKind } from './mediaCatalog';
+import type { NodeModelChoice } from './NodeModelPicker';
+
+/**
+ * What an image, video or 3D node's generator does with attached files: its kind, how many reference pictures the
+ * node's model takes (the first picture attached is the one), and the models of that kind that take one.
+ */
+export interface MediaComposerInfo {
+  kind: MediaKind;
+  references: number;
+  referenceModels: string[];
+}
+
+export function mediaComposerInfo(node: { kind: string; agentKind?: string; model?: string }, choices: ReadonlyArray<NodeModelChoice> | undefined): MediaComposerInfo | undefined {
+  if (node.kind !== 'session') return undefined;
+  const kind = mediaKindOf(node.agentKind ?? '');
+  if (!kind) return undefined;
+  const all = choices ?? [];
+  return {
+    kind,
+    references: all.find(choice => choice.key === node.model)?.references ?? 0,
+    referenceModels: all.filter(choice => (choice.references ?? 0) > 0).map(choice => choice.label),
+  };
+}
 
 export const COMPOSER_COPY = {
   notice:
@@ -47,11 +71,18 @@ export interface TileComposerProps {
   accessory?: ReactNode;
   /** The node files are attached on (provenance only). */
   attachNodeId?: string;
-  /** An image, video or 3D node: its generator takes words only, which the box says when files are attached. */
-  mediaNode?: boolean;
+  /** An image, video or 3D node: what its generator does with attached files, which the box says when files are attached. */
+  mediaNode?: MediaComposerInfo;
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode = false }: TileComposerProps) {
+/** The notice under a media node's attachments: which picture is used, or why none is. */
+function mediaAttachmentNotice(t: ReturnType<typeof useCanvasI18n>['t'], media: MediaComposerInfo): string {
+  if (media.references > 0) return t(media.kind === 'model3d' ? 'attach.mediaRef3d' : 'attach.mediaRefImage');
+  if (media.kind !== 'video' && media.referenceModels.length) return t('attach.mediaNoRefs', { models: media.referenceModels.join('、') });
+  return t('attach.mediaNote');
+}
+
+export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
   const disclaimerId = useId();
@@ -92,7 +123,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
       )}
       <div className="canvas-composer-box">
         <AttachmentTray state={attach} disabled={disabled} />
-        {mediaNode && attach.attachments.length ? <p className="awwo-attachment-notice is-info">{t('attach.mediaNote')}</p> : null}
+        {mediaNode && attach.attachments.length ? <p className="awwo-attachment-notice is-info">{mediaAttachmentNotice(t, mediaNode)}</p> : null}
         <div className="canvas-composer-row">
           <AttachButton state={attach} className="canvas-composer-attach" />
           <textarea

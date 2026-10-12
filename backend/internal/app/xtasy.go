@@ -61,6 +61,11 @@ var xtasyFixed = map[string]map[string]any{
 	"xt.omni-video-2-5": {"mode": "text2video", "watermark": false, "return_last_frame": false, "output_format": "mp4"},
 }
 
+// xtasyReferenceModels are the image models that edit one reference picture (mode img2img, the picture uploaded to
+// POST /openapi/v1/files and named as {"role":"reference_image","file_id"}): the models the operator's own scripts
+// have generated that way with this API. Every other model stays text-only until it is verified the same way.
+var xtasyReferenceModels = map[string]int{"xt.xtasy-3": 1, "xt.xtasy-3-pro": 1, "xt.seedream-5-pro": 1}
+
 // xtasyModels is the curated X-tasy catalog: the text-to-image and text-to-video models GET /openapi/v1/models
 // published on 2026-10-10, each pinned to its stable model id, with that model's closed choices. A choice whose
 // cost the model decides itself (an automatic duration) is left out, so a generation's price is known when it is
@@ -91,7 +96,7 @@ func xtasyModels() []*mediaModel {
 	model := func(id string, label [2]string, kind, remote string, params ...mediaParam) *mediaModel {
 		return &mediaModel{ID: id, Name: label[0], Label: label, Vendor: mediaVendorShown, Kind: kind, Mode: "text-to-" + kind,
 			Endpoint: xtasyEndpoints[kind], Version: remote, Prompt: prompt, Params: params, Docs: xtasyDocs, Verified: "2026-10-10",
-			Provider: mediaProviderXtasy}
+			Provider: mediaProviderXtasy, References: xtasyReferenceModels[id]}
 	}
 	return []*mediaModel{
 		model("xt.seedream-5-pro", [2]string{"图片 · 高清", "Image · HD"}, mediaKindImage, "model_db5a9f8c-6421-5dd4-8ede-8e1e9b545110",
@@ -137,6 +142,9 @@ func validXtasyModel(m *mediaModel) error {
 	if !ok {
 		return errors.New("fixed parameters")
 	}
+	if m.References < 0 || m.References > 1 || (m.References > 0 && (m.Kind != mediaKindImage || fixed["mode"] != "txt2img")) {
+		return errors.New("references")
+	}
 	if len(m.Params) > maxMediaParams {
 		return errors.New("too many parameters")
 	}
@@ -157,8 +165,9 @@ func validXtasyModel(m *mediaModel) error {
 }
 
 // xtasyRequest is the body of one generation task: the pinned model, the prompt, the model's fixed parameters and
-// the resolved choices under X-tasy's own names, no references, and the run's Idempotency-Key for the client.
-func xtasyRequest(m *mediaModel, prompt string, params map[string]any, runID string) map[string]any {
+// the resolved choices under X-tasy's own names, and the run's Idempotency-Key for the client. With reference
+// pictures (their uploaded file ids) an image model edits them: mode img2img, each named as a reference_image.
+func xtasyRequest(m *mediaModel, prompt string, params map[string]any, runID string, references []string) map[string]any {
 	parameters := map[string]any{}
 	for name, value := range xtasyFixed[m.ID] {
 		parameters[name] = value
@@ -168,8 +177,89 @@ func xtasyRequest(m *mediaModel, prompt string, params map[string]any, runID str
 			parameters[wire] = value
 		}
 	}
-	return map[string]any{"model_id": m.Version, "prompt": strings.TrimSpace(prompt), "parameters": parameters, "references": []any{},
+	refs := []any{}
+	if len(references) > 0 && m.References > 0 {
+		parameters["mode"] = "img2img"
+		for _, id := range references[:min(len(references), m.References)] {
+			refs = append(refs, map[string]any{"role": "reference_image", "file_id": id})
+		}
+	}
+	return map[string]any{"model_id": m.Version, "prompt": strings.TrimSpace(prompt), "parameters": parameters, "references": refs,
 		xtasyIdempotencyField: "awwo-run-" + runID}
+}
+
+var xtasyFileID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
+
+// xtasyFileWait is how often a reference upload's preparation is read again; xtasyFileReads bounds how many times.
+const (
+	xtasyFileWait  = 2 * time.Second
+	xtasyFileReads = 60
+)
+
+// uploadReference stores one reference picture with X-tasy (POST /openapi/v1/files, multipart) under an
+// Idempotency-Key made from the run and the picture, so a repeated upload of the same run reuses the first one,
+// then waits until X-tasy has prepared it (GET /openapi/v1/files/<id>: status ready). It returns the file id.
+func (x *xtasyClient) uploadReference(ctx context.Context, ref mediaReference, data []byte, runID string) (string, error) {
+	if !mediaReferenceTypes[mediaProviderXtasy][ref.ContentType] || len(data) == 0 || len(data) > maxMediaReferenceBytes || len(ref.SHA256) < 16 {
+		return "", &rhError{Code: "media_reference_unavailable"}
+	}
+	key := "awwo-ref-" + runID + "-" + ref.SHA256[:16]
+	if !xtasyIdemKey.MatchString(key) {
+		return "", &rhError{Code: "media_request_invalid"}
+	}
+	body, contentType, err := multipartFile("file", referenceFileName(ref.ContentType), ref.ContentType, data)
+	if err != nil {
+		return "", &rhError{Code: "media_request_invalid"}
+	}
+	answer, status, _, err := x.request(ctx, http.MethodPost, "/openapi/v1/files", body, contentType, key)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status > 299 {
+		return "", xtasyHTTPError(status, answer)
+	}
+	var created struct {
+		FileID string `json:"file_id"`
+	}
+	if json.Unmarshal(answer, &created) != nil || !xtasyFileID.MatchString(strings.TrimSpace(created.FileID)) {
+		return "", &rhError{Code: "media_provider_unavailable", Transient: true}
+	}
+	id := strings.TrimSpace(created.FileID)
+	for range xtasyFileReads {
+		answer, status, _, err = x.do(ctx, http.MethodGet, "/openapi/v1/files/"+url.PathEscape(id), nil, "")
+		if err != nil {
+			return "", err
+		}
+		if status != 200 {
+			return "", xtasyHTTPError(status, answer)
+		}
+		var file struct {
+			Status      string `json:"status"`
+			Preparation *struct {
+				Status string `json:"status"`
+			} `json:"preparation"`
+		}
+		if json.Unmarshal(answer, &file) != nil {
+			return "", &rhError{Code: "media_provider_unavailable", Transient: true}
+		}
+		state := strings.ToLower(strings.TrimSpace(file.Status))
+		prepared := ""
+		if file.Preparation != nil {
+			prepared = strings.ToLower(strings.TrimSpace(file.Preparation.Status))
+		}
+		switch {
+		case state == "ready" && (prepared == "" || prepared == "ready"):
+			return id, nil
+		case state == "failed" || state == "rejected" || prepared == "failed" || prepared == "rejected":
+			return "", &rhError{Code: "media_reference_unavailable"}
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(xtasyFileWait):
+		}
+	}
+	return "", &rhError{Code: "media_reference_unavailable"}
 }
 
 type xtasyClient struct {
@@ -289,6 +379,11 @@ func (x *xtasyClient) outputURL(raw string) bool {
 
 // do sends one API request. wait is how long a busy (429 or 503) answer asked to wait, and 0 otherwise.
 func (x *xtasyClient) do(ctx context.Context, method, path string, body []byte, idempotency string) (data []byte, status int, wait time.Duration, err error) {
+	return x.request(ctx, method, path, body, "application/json", idempotency)
+}
+
+// request is do with the body's own content type (a multipart upload's).
+func (x *xtasyClient) request(ctx context.Context, method, path string, body []byte, contentType, idempotency string) (data []byte, status int, wait time.Duration, err error) {
 	if ctx.Err() != nil {
 		return nil, 0, 0, ctx.Err()
 	}
@@ -305,7 +400,7 @@ func (x *xtasyClient) do(ctx context.Context, method, path string, body []byte, 
 	// X-tasy's edge refuses some library user agents (Cloudflare 1010), so the client names itself.
 	req.Header.Set("User-Agent", xtasyUserAgent)
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	if idempotency != "" {
 		req.Header.Set("Idempotency-Key", idempotency)

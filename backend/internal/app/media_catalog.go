@@ -67,6 +67,9 @@ type mediaModel struct {
 	Params   []mediaParam `json:"params"`
 	Docs     string       `json:"docs"`
 	Verified string       `json:"verified"`
+	// References is how many pictures a generation may start from (0: words only). The first image attached to the
+	// message, or wired into the node's reference input, is uploaded to the provider for that one task (media_refs.go).
+	References int `json:"references,omitempty"`
 	// Provider runs the model: RunningHub for the embedded catalog, Tripo for the 3D models (tripo.go).
 	Provider string `json:"-"`
 	// Version is the provider's own pinned model version, sent with every request (Tripo).
@@ -129,6 +132,9 @@ func validMediaModel(m *mediaModel) error {
 	}
 	if (m.Kind != mediaKindImage && m.Kind != mediaKindVideo) || m.Mode != "text-to-"+m.Kind {
 		return errors.New("kind")
+	}
+	if m.References != 0 {
+		return errors.New("references")
 	}
 	if m.Prompt.MinLength < 1 || m.Prompt.MaxLength < m.Prompt.MinLength || m.Prompt.MaxLength > 32768 {
 		return errors.New("prompt")
@@ -373,7 +379,7 @@ func (a *App) mediaCatalogue(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			models = append(models, map[string]any{"id": m.ID, "name": m.Name, "label": m.shownLabel(), "vendor": m.Vendor, "kind": m.Kind,
-				"mode": m.Mode, "prompt": m.Prompt, "params": m.Params, "verified": m.Verified})
+				"mode": m.Mode, "prompt": m.Prompt, "params": m.Params, "verified": m.Verified, "references": m.References})
 		}
 	}
 	writeJSON(w, 200, map[string]any{"configured": configured, "available": configured && len(models) > 0, "models": models,

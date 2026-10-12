@@ -17,7 +17,8 @@ import (
 // what its upstream nodes delivered into its context input, and cut to what its model takes. The generation is the
 // same paid provider task its own Send starts: admitted under the same locks and allowances (admitMediaGeneration),
 // executed by executeMedia, resumed after a restart, and published as the awwo.media record naming its stored files.
-// A reference image wired into an image node orders the run but is not sent: no provider here takes one yet.
+// A picture wired into the node's reference input (an upstream image node's result) is the generation's reference
+// where the node's model takes one, before any picture attached to the node's own prompt (media_refs.go).
 
 // graphMediaNode reports whether a saved node is an image, video or 3D node by its kind alone. A node of such a kind
 // can still be bound to an ordinary text Agent, so what decides how a node runs is its frozen snapshot
@@ -34,7 +35,8 @@ func (a *App) frozenMediaNode(ctx context.Context, tid, gid, nid string) (bool, 
 }
 
 // graphMediaDraft is the prompt a media node's next Send would generate from: the draft of its active conversation,
-// where the canvas assistant writes it too. A composer's file lines are dropped, as a Send drops them.
+// where the canvas assistant writes it too. Its file lines stay: a picture among them can be the reference, and
+// admission drops the rest (freezeMediaPrompt), as a Send does.
 func graphMediaDraft(n graphNode) string {
 	active := "default"
 	var id string
@@ -51,14 +53,15 @@ func graphMediaDraft(n graphNode) string {
 	for _, thread := range threads {
 		if tid, ok := thread.ID.(string); ok && tid == active {
 			draft, _ := thread.Draft.(string)
-			return strings.TrimSpace(stripAttachmentLines(draft))
+			return strings.TrimSpace(draft)
 		}
 	}
 	return ""
 }
 
 // lastMediaPrompt is what the node's latest own Send generated from, for a node whose draft is empty because that
-// Send cleared it. A canvas run's own prompts are not read back, so their upstream text is never counted twice.
+// Send cleared it: its words and the line of the picture it started from, if any. A canvas run's own prompts are
+// not read back, so their upstream text is never counted twice.
 func lastMediaPrompt(ctx context.Context, q querier, tid, sid string) string {
 	if sid == "" {
 		return ""
@@ -69,38 +72,49 @@ func lastMediaPrompt(ctx context.Context, q querier, tid, sid string) string {
 		ORDER BY m.created_at DESC,m.id DESC LIMIT 1`, tid, sid).Scan(&prompt) != nil {
 		return ""
 	}
-	return strings.TrimSpace(stripAttachmentLines(prompt))
+	return strings.TrimSpace(prompt)
 }
 
-// graphMediaPrompt is what a media node generates from in a canvas run: its own prompt first (its draft, or else its
-// latest own Send), then each upstream delivery into its context input in canvas order, separated by blank lines.
-// The model's length limits are applied when the generation is admitted (admitGraphMedia).
+// graphMediaPrompt is what a media node generates from in a canvas run: the pictures wired into its reference input
+// (as file lines, in canvas order), its own prompt (its draft, or else its latest own Send), then each upstream
+// delivery into its context input in canvas order, separated by blank lines. Upstream deliveries never contribute a
+// file line. The model's length limits and which pictures it takes are applied at admission (admitGraphMedia).
 func (a *App) graphMediaPrompt(ctx context.Context, tid, sid string, n graphNode, d graphDocument, outputs map[string]string) (string, error) {
 	nodes := map[string]graphNode{}
 	for _, v := range d.Nodes {
 		nodes[v.ID] = v
 	}
-	deps := []graphEdge{}
+	deps, refs := []graphEdge{}, []graphEdge{}
 	for _, e := range d.Edges {
-		if e.ToNode == n.ID && e.ToPort == "context" {
+		switch {
+		case e.ToNode == n.ID && e.ToPort == "context":
 			deps = append(deps, e)
+		case e.ToNode == n.ID && e.ToPort == "reference":
+			refs = append(refs, e)
 		}
 	}
-	sort.SliceStable(deps, func(i, j int) bool {
-		x, y := nodes[deps[i].FromNode], nodes[deps[j].FromNode]
-		if x.Y != y.Y {
-			return x.Y < y.Y
-		}
-		if x.X != y.X {
-			return x.X < y.X
-		}
-		return deps[i].ID < deps[j].ID
-	})
+	inCanvasOrder := func(edges []graphEdge) {
+		sort.SliceStable(edges, func(i, j int) bool {
+			x, y := nodes[edges[i].FromNode], nodes[edges[j].FromNode]
+			if x.Y != y.Y {
+				return x.Y < y.Y
+			}
+			if x.X != y.X {
+				return x.X < y.X
+			}
+			return edges[i].ID < edges[j].ID
+		})
+	}
+	inCanvasOrder(deps)
+	inCanvasOrder(refs)
+	parts := []string{}
+	if lines := wiredReferenceLines(refs, outputs); lines != "" {
+		parts = append(parts, lines)
+	}
 	own := graphMediaDraft(n)
 	if own == "" {
 		own = lastMediaPrompt(ctx, a.db, tid, sid)
 	}
-	parts := []string{}
 	if own != "" {
 		parts = append(parts, own)
 	}
@@ -119,6 +133,27 @@ func (a *App) graphMediaPrompt(ctx context.Context, tid, sid string, n graphNode
 		}
 	}
 	return strings.Join(parts, "\n\n"), nil
+}
+
+// wiredReferenceLines are the file lines of the pictures upstream image nodes delivered into a reference input,
+// read from their awwo.media records (any other delivery has no picture to offer and adds nothing).
+func wiredReferenceLines(edges []graphEdge, outputs map[string]string) string {
+	lines := []string{}
+	for _, e := range edges {
+		var record struct {
+			Type  string      `json:"type"`
+			Items []mediaItem `json:"items"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(outputs[e.FromNode])), &record) != nil || record.Type != mediaOutputType {
+			continue
+		}
+		for _, item := range record.Items {
+			if strings.HasPrefix(item.ContentType, "image/") && uploadRefPattern.MatchString(artifactRefPrefix+item.ArtifactID) {
+				lines = append(lines, mediaReferenceLines([]mediaReference{{ArtifactID: item.ArtifactID, Name: item.Name}}))
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func firstRunes(text string, max int) string {
@@ -168,9 +203,17 @@ func (a *App) admitGraphMedia(ctx context.Context, tx pgx.Tx, tid, gid, nid, sid
 	if !a.mediaEntitled(entitlement, plan.Model) {
 		return errors.New("model_not_allowed")
 	}
-	prompt = strings.TrimSpace(firstRunes(strings.TrimSpace(prompt), m.Prompt.MaxLength))
-	if !m.validMediaPrompt(prompt) {
-		return errors.New("media_prompt_invalid")
+	var canvasID string
+	if e := tx.QueryRow(ctx, "SELECT canvas_id FROM node_sessions WHERE tenant_id=$1 AND id=$2", tid, sid).Scan(&canvasID); e != nil {
+		return e
+	}
+	var e error
+	if prompt, e = a.freezeMediaPrompt(ctx, tx, tid, canvasID, prompt, plan, true); e != nil {
+		var input setupError
+		if errors.As(e, &input) {
+			return errors.New(input.code)
+		}
+		return e
 	}
 	if e := a.mediaStorageReady(); e != nil {
 		var input setupError
