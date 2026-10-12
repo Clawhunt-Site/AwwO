@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ArtifactPreview, artifactFilename, readArtifactPreview, StoredArtifactPreview } from '../src/canvas/ArtifactPreview';
-import { htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from '../src/canvas/htmlDeliverable';
+import { htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, PREVIEW_LIBRARIES, previewScriptNeeds } from '../src/canvas/previewLibraries';
 import { ARTIFACT_REF_PREFIX, clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
@@ -82,8 +82,10 @@ describe('isolated HTML rendition', () => {
       <form action="/api/private"><input formaction="/api/private"><button formaction="/api/private">submit</button></form><img src="/api/private">
       <svg><script href="https://evil.test/remote.js"></script></svg></body></html>`;
     const doc = new DOMParser().parseFromString(htmlPreviewDocument(source, true), 'text/html');
-    expect(doc.querySelectorAll('script')).toHaveLength(1);
-    expect(doc.querySelector('script')!.textContent).toContain('function play()');
+    expect(doc.body.querySelectorAll('script')).toHaveLength(1);
+    expect(doc.body.querySelector('script')!.textContent).toContain('function play()');
+    // The head's only script is AwwO's own viewport script, after the CSP.
+    expect([...doc.head.querySelectorAll('script')].map(script => script.textContent)).toEqual([PREVIEW_VIEWPORT_SCRIPT]);
     expect(doc.querySelector('canvas')!.getAttribute('data-level')).toBe('2');
     expect(doc.querySelector('button')!.getAttribute('onclick')).toBe('play()');
     expect(doc.querySelector('base,iframe,object,embed,meta[http-equiv="refresh"],a[href],[src],[action],[formaction],[target],[ping]')).toBeNull();
@@ -91,6 +93,58 @@ describe('isolated HTML rendition', () => {
     for (const rule of ["default-src 'none'", "script-src 'unsafe-inline'", "connect-src 'none'", "frame-src 'none'", "worker-src 'none'", "form-action 'none'", "base-uri 'none'"]) expect(csp).toContain(rule);
     expect(csp).not.toContain('unsafe-eval');
     expect(doc.head.firstElementChild?.tagName).toBe('META');
+  });
+
+  it('tells a page that started in a 0×0 frame its real size once it has loaded, and leaves a sized page alone', () => {
+    // 2026-10-12, the homepage's 像素平台跳跃 case: the page sized its canvas from a 0×0 window at startup, no resize
+    // followed when the frame got its size, and the result stayed blank.
+    const saved = (['innerWidth', 'innerHeight'] as const).map(key => [key, Object.getOwnPropertyDescriptor(window, key)] as const);
+    const viewport = (width: number, height: number) => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+    };
+    let readyState: DocumentReadyState = 'loading';
+    Object.defineProperty(document, 'readyState', { configurable: true, get: () => readyState });
+    const resizes = vi.fn();
+    window.addEventListener('resize', resizes);
+    vi.useFakeTimers();
+    try {
+      viewport(0, 0);
+      new Function(PREVIEW_VIEWPORT_SCRIPT)();
+      vi.advanceTimersByTime(400);
+      viewport(561, 620);
+      vi.advanceTimersByTime(400);
+      expect(resizes).not.toHaveBeenCalled();
+      readyState = 'complete';
+      vi.advanceTimersByTime(60);
+      expect(resizes).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(20_000);
+      expect(resizes).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // A frame that had its size from the start: nothing happens and nothing keeps running.
+      new Function(PREVIEW_VIEWPORT_SCRIPT)();
+      vi.advanceTimersByTime(20_000);
+      expect(resizes).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // A frame that never gets a size: the script stops looking after 15 s.
+      viewport(0, 0);
+      new Function(PREVIEW_VIEWPORT_SCRIPT)();
+      vi.advanceTimersByTime(14_000);
+      expect(vi.getTimerCount()).toBe(1);
+      vi.advanceTimersByTime(1_100);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(resizes).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      window.removeEventListener('resize', resizes);
+      Reflect.deleteProperty(document, 'readyState');
+      for (const [key, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(window, key, descriptor);
+        else Reflect.deleteProperty(window, key);
+      }
+    }
   });
 
   it('runs only the expanded copy while it is open, and the inline page again once it closes', () => {
@@ -317,14 +371,14 @@ describe('libraries AwwO supplies to a running page', () => {
       <script src="https://evil.test/x.js"></script><script src="${three}?v=2"></script></head>
       <body><svg><script href="${three}"></script></svg><script>start()</script></body></html>`;
     const doc = new DOMParser().parseFromString(htmlPreviewDocument(source, true, new Map([[three, 'window.LIB=1']])), 'text/html');
-    const scripts = Array.from(doc.querySelectorAll('script'));
+    const scripts = Array.from(doc.body.querySelectorAll('script'));
     expect(scripts.map(script => script.textContent)).toEqual(['window.LIB=1', 'start()']);
     expect(scripts[0].getAttributeNames()).toEqual(['type']);
     expect(doc.querySelector('[src],[href],[integrity],[crossorigin]')).toBeNull();
     const csp = doc.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute('content')!;
     expect(csp).toContain("script-src 'unsafe-inline'");
     expect(csp).not.toContain('cdnjs');
-    expect(new DOMParser().parseFromString(htmlPreviewDocument(source, true), 'text/html').querySelectorAll('script')).toHaveLength(1);
+    expect(new DOMParser().parseFromString(htmlPreviewDocument(source, true), 'text/html').body.querySelectorAll('script')).toHaveLength(1);
     expect(new DOMParser().parseFromString(htmlPreviewDocument(source, false, new Map([[three, 'window.LIB=1']])), 'text/html').querySelector('script')).toBeNull();
   });
 
@@ -374,11 +428,11 @@ describe('libraries AwwO supplies to a running page', () => {
       const frame = await screen.findByTitle('游戏 · HTML 预览', {}, { timeout: 10_000 });
       await vi.waitFor(() => expect(frame.getAttribute('srcdoc')).toContain('Copyright 2010-2021 Three.js Authors'));
       const doc = new DOMParser().parseFromString(screen.getByTitle('游戏 · HTML 预览').getAttribute('srcdoc')!, 'text/html');
-      expect(doc.querySelectorAll('script')).toHaveLength(2);
+      expect(doc.body.querySelectorAll('script')).toHaveLength(2);
       expect(doc.querySelector('[src]')).toBeNull();
       expect(screen.getByTitle('游戏 · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
       expect(screen.getByText('页面用到的 three.js r128 由 AwwO 内置提供，不需要联网。 页面还用到了这个版本没有的 CapsuleGeometry，AwwO 已补上。')).toBeTruthy();
-      expect(doc.querySelector('script')!.textContent).toContain('THREE.CapsuleGeometry = CapsuleGeometry');
+      expect(doc.body.querySelector('script')!.textContent).toContain('THREE.CapsuleGeometry = CapsuleGeometry');
       fireEvent.click(screen.getByRole('button', { name: '全屏' }));
       expect(request).toHaveBeenCalledOnce();
       expect(request.mock.contexts[0]).toBe(screen.getByTitle('游戏 · HTML 预览'));

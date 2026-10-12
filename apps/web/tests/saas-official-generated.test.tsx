@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { htmlPreviewDocument } from '../src/canvas/htmlDeliverable';
+import { htmlPreviewDocument, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import GeneratedOfficialDemo from '../src/saas/examples/GeneratedOfficialDemo';
 import { OfficialExamples } from '../src/saas/examples/OfficialExamples';
@@ -26,6 +26,8 @@ function inertDocument(html: string) {
   template.innerHTML = html;
   return template.content;
 }
+/** The page's own first script in a preview, past AwwO's viewport script at the head. */
+const pageScript = (preview: ParentNode) => [...preview.querySelectorAll('script')].find(script => script.textContent !== PREVIEW_VIEWPORT_SCRIPT);
 
 function view() {
   return render(<SaaSPreferencesProvider><OfficialShowcase item={item} record={record}>
@@ -190,7 +192,7 @@ describe('curated model-generated official results', () => {
       expect(preview.querySelector(`button#${id}`), id).not.toBeNull();
     }
     expect(preview.querySelectorAll('canvas')).toHaveLength(3);
-    expect(preview.querySelector('script')?.textContent).toBe(inertDocument(training).querySelector('script')?.textContent);
+    expect(pageScript(preview)?.textContent).toBe(inertDocument(training).querySelector('script')?.textContent);
     expect(document.querySelector('#trainBtn')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -238,7 +240,7 @@ describe('curated model-generated official results', () => {
     expect(preview.querySelectorAll('[data-plan]').length).toBe(3);
     expect(preview.querySelectorAll('[data-cycle]').length).toBe(2);
     expect(preview.querySelector('#generate-btn')?.textContent).toBe('生成方案摘要');
-    expect(preview.querySelector('script')?.textContent).toBe(original.querySelector('script')?.textContent);
+    expect(pageScript(preview)?.textContent).toBe(original.querySelector('script')?.textContent);
     expect(document.querySelector('#generate-btn')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -248,7 +250,8 @@ describe('curated model-generated official results', () => {
     expect(preview.querySelectorAll('meta[http-equiv="Content-Security-Policy"]')).toHaveLength(1);
     expect(preview.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("connect-src 'none'");
     expect(preview.querySelector('script[src]')).toBeNull();
-    expect(preview.querySelector('script')?.textContent).toBe('window.sourceMarker = 1');
+    expect(pageScript(preview)?.textContent).toBe('window.sourceMarker = 1');
+    expect([...preview.querySelectorAll('script')].map(script => script.textContent)).toEqual([PREVIEW_VIEWPORT_SCRIPT, 'window.sourceMarker = 1']);
     expect('sourceMarker' in window).toBe(false);
     expect(fetch).not.toHaveBeenCalled();
   });

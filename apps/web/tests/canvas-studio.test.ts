@@ -5,6 +5,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { fileStem, formatBytes, isTextKind, kindOfName, kindOfType, nodeEntries, primaryEntry, studioGroups } from '../src/canvas/studio/studioModel';
 import { buildLiveDocument, joinPath, LIVE_PAGE_CSP, LIVE_PAGE_SANDBOX, standaloneWrapper } from '../src/canvas/studio/liveDocument';
+import { PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { STUDIO_LIMITS, dataUrl, decodeText, mimeOfName, safeArchivePath, unzipMembers } from '../src/canvas/studio/studioData';
 
 function node(output: string, outputs: SessionNode['contract'] = undefined, extra: Partial<SessionNode> = {}): SessionNode {
@@ -93,6 +94,8 @@ describe('live page document', () => {
     expect(csp.getAttribute('content')).toBe(LIVE_PAGE_CSP);
     // The policy is the first thing the page's own head can be affected by: nothing of the page precedes it.
     expect([...parsed.head.children].indexOf(csp)).toBe(1);
+    // The link guard, with the viewport script, runs before any script of the page's own.
+    expect(parsed.head.querySelector('script')!.textContent).toContain(PREVIEW_VIEWPORT_SCRIPT);
     expect(parsed.querySelector('base')).toBeNull();
     expect(parsed.querySelector('meta[http-equiv="refresh"]')).toBeNull();
     expect(page).toContain('window.x=1');

@@ -68,6 +68,19 @@ export const ARTIFACT_PREVIEW_CSP = "default-src 'none'; script-src 'none'; styl
  * resources and capability access, but is not a guarantee against frame self-navigation. */
 export const ARTIFACT_INTERACTIVE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
 
+/**
+ * AwwO's own script, run ahead of a delivered page wherever one runs (here and in the studio's live page). A sandboxed
+ * frame can start the page before it learns its own size: the page then reads a 0×0 window, and the browser does not
+ * always send a resize when the real size arrives (Chrome may take it as the starting size, WebKit sends none while a
+ * document loads). A page that sizes itself from innerWidth/innerHeight at startup and on resize stays blank: the
+ * homepage's 像素平台跳跃 case did in 3 of 5 opens on 2026-10-12. Only for a frame that started at 0×0, once the
+ * document has loaded into a real size, the page gets one resize event; the script stops looking after 15 s. A page
+ * that started with a real size never sees it act, and the page's own bytes are unchanged.
+ */
+export const PREVIEW_VIEWPORT_SCRIPT = "(()=>{if(innerWidth>0&&innerHeight>0)return;let tries=0;const check=()=>{"
+  + "if(innerWidth>0&&innerHeight>0&&document.readyState==='complete'){dispatchEvent(new Event('resize'));return}"
+  + 'if(++tries<300)setTimeout(check,50)};check()})();';
+
 const PREVIEW_ELEMENTS = new Set(('a abbr address article aside b bdi bdo blockquote br button caption circle cite code col colgroup dd defs del details dfn div dl dt ellipse em fieldset figcaption figure footer form g h1 h2 h3 h4 h5 h6 header hr i img input ins kbd label legend li line main mark meter nav ol optgroup option p path pattern polygon polyline pre progress q rect s samp section select small span strong style sub summary sup svg table tbody td text textarea tfoot th thead time tr tspan u ul use var wbr').split(' '));
 const PREVIEW_ATTRIBUTES = new Set(('class id style title role lang dir alt width height colspan rowspan scope value placeholder type checked disabled selected multiple min max step rows cols size open name for viewbox d fill fill-rule fill-opacity stroke stroke-width stroke-linecap stroke-linejoin stroke-dasharray stroke-opacity clip-rule cx cy r rx ry x x1 x2 y y1 y2 points transform xmlns preserveaspectratio').split(' '));
 
@@ -112,6 +125,7 @@ function previewRootAttributes(source: string, tagName: 'html' | 'body', interac
  * Parse in an inert template (not a live parent document), then put the sanitized result only in
  * an opaque-origin sandboxed iframe. The original bytes remain untouched for source/download.
  * Sanitization removes navigation and metadata; CSP and the empty sandbox are independent guards.
+ * A running preview's head also carries PREVIEW_VIEWPORT_SCRIPT, ahead of everything the page brings.
  */
 export function htmlPreviewDocument(value: string, interactive = false, libraries?: ReadonlyMap<string, string>): string {
   const source = htmlDocumentSource(value);
@@ -140,7 +154,7 @@ export function htmlPreviewDocument(value: string, interactive = false, librarie
   const body = previewRootAttributes(source, 'body', interactive);
   // Escaping '<' in CSS prevents a model-supplied style value from closing the trusted style tag.
   const rootStyle = root.deferredStyle.replace(/</g, '\\3c ');
-  return `<!doctype html><html${root.attributes}><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${interactive ? ARTIFACT_INTERACTIVE_CSP : ARTIFACT_PREVIEW_CSP}"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light;background:#fff}body{margin:20px;color:#202828;font:14px/1.55 system-ui,sans-serif}img,svg,canvas{max-width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere}table{max-width:100%}html{${rootStyle}}</style></head><body${body.attributes}>${template.innerHTML}</body></html>`;
+  return `<!doctype html><html${root.attributes}><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${interactive ? ARTIFACT_INTERACTIVE_CSP : ARTIFACT_PREVIEW_CSP}"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light;background:#fff}body{margin:20px;color:#202828;font:14px/1.55 system-ui,sans-serif}img,svg,canvas{max-width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere}table{max-width:100%}html{${rootStyle}}</style>${interactive ? `<script>${PREVIEW_VIEWPORT_SCRIPT}</script>` : ''}</head><body${body.attributes}>${template.innerHTML}</body></html>`;
 }
 
 /** Export the verified response content. A saved file reference is never read by this helper. */
