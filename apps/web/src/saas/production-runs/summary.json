@@ -29,6 +29,16 @@
     "runtime": "codex_local",
     "outputLocale": "zh"
   },
+  "neon-city": {
+    "completed": 2,
+    "total": 2,
+    "seconds": 376,
+    "delivered": true,
+    "capturedOn": "2026-10-12",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents",
+    "outputLocale": "zh"
+  },
   "papercraft-puzzle": {
     "completed": 7,
     "total": 7,
@@ -75,6 +85,16 @@
     "seconds": 404,
     "delivered": true,
     "capturedOn": "2026-10-11",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents",
+    "outputLocale": "zh"
+  },
+  "shanhai-vn": {
+    "completed": 3,
+    "total": 3,
+    "seconds": 361,
+    "delivered": true,
+    "capturedOn": "2026-10-12",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents",
     "outputLocale": "zh"

@@ -8,6 +8,7 @@
 // the run, what was checked in a browser before publishing, where it ran, the revisions that ran, whether thinking was
 // off, and the execution settings it had. All required except the model label.
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -34,8 +35,15 @@ const { PRODUCTION_WORKFLOWS, createOfficialDocument, canonicalCanvasText, parse
 
 const workflow = PRODUCTION_WORKFLOWS[raw.caseId];
 if (!workflow) throw new Error(`Unknown case ${raw.caseId}`);
+// createOfficialDocument mints the agents first, then the case's image and video nodes (officialMedia.ts).
+const mediaSpecs = workflow.media ?? [];
+if (mediaSpecs.some(spec => spec.kind !== 'image' && spec.kind !== 'video')) throw new Error(`${raw.caseId}: only image and video media nodes are published`);
 const frozen = raw.graph.document.nodes.filter(node => node.kind === 'session');
-if (frozen.length !== workflow.nodes.length) throw new Error('The frozen canvas does not have the workflow’s nodes');
+if (frozen.length !== workflow.nodes.length + mediaSpecs.length) throw new Error('The frozen canvas does not have the workflow’s nodes');
+// A media node's canvas id (minted afresh for every canvas) names its files in the page it feeds; the public record names
+// them by the media node's own id instead (identifier redaction), so no canvas identifier is published.
+const MEDIA_IDS = new Map(mediaSpecs.map((spec, index) => [frozen[workflow.nodes.length + index].id, spec.id]));
+const plain = text => [...MEDIA_IDS].reduce((value, [from, to]) => value.split(`${from}/`).join(`${to}/`), text);
 // The homepage says a case ran on the canvas a member copies, so a run of any other text is never published.
 const ranText = canonicalCanvasText(raw.graph.document);
 if (ranText !== canonicalCanvasText(createOfficialDocument(workflow, raw.locale)))
@@ -62,15 +70,33 @@ const nodes = workflow.nodes.map((spec, index) => {
   if (state.state === 'done' && state.output) {
     const parsed = parseContractOutput(contract, state.output);
     if (parsed.errors.length) throw new Error(`${spec.id}: ${parsed.errors.join('; ')}`);
-    output = redact(parsed.values.result);
+    output = plain(redact(parsed.values.result));
   }
   return { id: spec.id, title: spec.title, column: spec.column, row: spec.row, status: state.state,
     ...(seconds(item?.admittedAt ?? run?.createdAt, item?.completedAt ?? run?.updatedAt) !== undefined ? { seconds: seconds(item?.admittedAt ?? run?.createdAt, item?.completedAt ?? run?.updatedAt) } : {}),
     outputType: spec.outputType ?? 'markdown', ...(output !== undefined ? { output } : {}),
-    ...(state.detail ? { detail: redact(String(state.detail)) } : {}), ...(usage(item) ? { tokens: usage(item) } : {}) };
+    ...(state.detail ? { detail: plain(redact(String(state.detail))) } : {}), ...(usage(item) ? { tokens: usage(item) } : {}) };
 });
 const artifact = workflow.nodes.find(node => node.outputType === 'html');
 const artifactOutput = nodes.find(node => node.id === artifact?.id)?.output;
+// Each media node as the run stored it: its state and the files it made, by the `<node id>/<file>` path the canvas handed
+// the page. They are not agents, so they stay out of `nodes` (a copy pins agents only).
+const media = mediaSpecs.map((spec, index) => {
+  const document = frozen[workflow.nodes.length + index];
+  if (document.title !== spec.title[raw.locale]) throw new Error(`Media node ${index} is “${document.title}”, expected “${spec.title[raw.locale]}”`);
+  const state = states.get(document.id);
+  if (!state || !STATUS.has(state.state)) throw new Error(`${spec.id} ended as ${state?.state}`);
+  let files = [];
+  if (state.state === 'done' && state.output) {
+    const value = JSON.parse(state.output);
+    if (value?.type !== 'awwo.media' || !Array.isArray(value.items)) throw new Error(`${spec.id}: its output is not a media result`);
+    files = value.items.map(item => `${spec.id}/${item.name}`);
+  }
+  const run = raw.runs[document.id];
+  const took = seconds(run?.createdAt, run?.updatedAt);
+  return { id: spec.id, title: spec.title, kind: spec.kind, status: state.state, ...(took !== undefined ? { seconds: took } : {}), files,
+    ...(state.detail ? { detail: redact(String(state.detail)) } : {}) };
+});
 const catalog = raw.catalog?.runtimes?.find(runtime => runtime.id === raw.runtime);
 const record = {
   caseId: raw.caseId,
@@ -83,10 +109,43 @@ const record = {
   source: notes.source,
   canvasSHA256: crypto.createHash('sha256').update(ranText).digest('hex'),
   ...(artifactOutput ? { artifactNodeId: artifact.id, artifactSHA256: crypto.createHash('sha256').update(artifactOutput).digest('hex') } : {}),
-  nodes, edges: workflow.edges, note: notes.note, verification: notes.verification,
+  nodes, edges: workflow.edges, ...(media.length ? { media } : {}), note: notes.note, verification: notes.verification,
 };
 if (!catalog?.available) console.warn('warning: the raw record’s runtime catalog did not list the runtime as available');
 const target = path.join(ROOT, 'apps/web/src/saas/production-runs', `${raw.caseId}.ts`);
 writeRecord(target, record);
 writeSummary(path.join(path.dirname(target), 'summary.json'), record, Boolean(artifactOutput) && nodes.find(node => node.id === artifact.id)?.status === 'done');
+if (media.length) writeMedia(path.join(path.dirname(target), `${raw.caseId}.media.ts`));
 console.log(`${raw.caseId}: ${record.completed}/${record.total} done, ${record.seconds}s → ${path.relative(ROOT, target)}`);
+
+/** The files the published page names, shrunk (pictures to JPEG at most 1600 px wide, the clip to H.264 at most 960 px
+ * wide, without sound) and inlined as data: URLs, keyed by the path the page uses: the homepage has no canvas files. */
+function writeMedia(file) {
+  const stored = path.join(path.dirname(path.resolve(rawFile)), `${path.basename(rawFile).replace(/-\d{8}T\d{6}Z\.json$/, '')}-files`);
+  const scratch = fs.mkdtempSync(path.join(path.dirname(path.resolve(rawFile)), '.media-'));
+  const inlined = {};
+  try {
+    for (const item of media) for (const reference of item.files) {
+      if (!artifactOutput?.includes(reference)) continue;
+      const [specId, name] = [reference.slice(0, reference.indexOf('/')), reference.slice(reference.indexOf('/') + 1)];
+      const nodeId = [...MEDIA_IDS].find(([, to]) => to === specId)?.[0];
+      const entry = (raw.files || []).find(value => value.nodeId === nodeId && value.name === name);
+      if (!entry) throw new Error(`${reference}: the run record has no stored file for it`);
+      const source = path.join(stored, entry.file);
+      const video = item.kind === 'video';
+      const out = path.join(scratch, `${Object.keys(inlined).length}.${video ? 'mp4' : 'jpg'}`);
+      const args = video
+        ? ['-y', '-v', 'error', '-i', source, '-an', '-vf', "scale='min(960,iw)':-2", '-c:v', 'libx264', '-preset', 'slow', '-crf', '30', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out]
+        : ['-y', '-v', 'error', '-i', source, '-vf', "scale='min(1600,iw)':-2", '-q:v', '4', out];
+      const done = spawnSync('ffmpeg', args, { encoding: 'utf8' });
+      if (done.status !== 0) throw new Error(`ffmpeg ${reference}: ${done.stderr}`);
+      inlined[reference] = `data:${video ? 'video/mp4' : 'image/jpeg'};base64,${fs.readFileSync(out).toString('base64')}`;
+    }
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+  const missing = media.flatMap(item => item.files).filter(reference => artifactOutput?.includes(reference) && !inlined[reference]);
+  if (missing.length) throw new Error(`not inlined: ${missing.join(', ')}`);
+  fs.writeFileSync(file, `// Generated by scripts/showcase/publish-run.mjs from a recorded run; do not edit by hand.\n/** The files of ${raw.caseId}'s image and video nodes that its page names, by the path the page uses, as small data: URLs. */\nconst media: Readonly<Record<string, string>> = ${JSON.stringify(inlined)};\nexport default media;\n`);
+  console.log(`${raw.caseId}: ${Object.keys(inlined).length} media file(s) inlined, ${Math.round(fs.statSync(file).size / 1024)} KB → ${path.relative(ROOT, file)}`);
+}

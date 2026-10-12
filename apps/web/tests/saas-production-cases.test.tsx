@@ -68,7 +68,7 @@ it('labels the cover footage for what it is, and claims delivery only where a pu
   expect(screen.getByText(ran === PRODUCTION_CASES.length ? /^每个案例都是一张真实的 AwwO 画布，并且真的跑过一遍/
     : new RegExp(`^每个案例都是一张真实的 AwwO 画布：.*其中 ${ran} 个已经在 AwwO 里跑过一遍`))).toBeVisible();
   expect(cards()).toHaveLength(PRODUCTION_CASES.length);
-  const [recording, pixelCard] = cards();
+  const [recording] = cards(), pixelCard = cards()[PRODUCTION_CASES.findIndex(item => item.id === 'pixel-platformer')];
   for (const card of cards()) { expect(within(card).getByText('交付录屏')).toBeVisible(); expect(within(card).queryByText('封面示意 · AI 生成')).toBeNull(); }
   PRODUCTION_CASES.forEach((item, index) => {
     const card = cards()[index], run = PRODUCTION_RUN_SUMMARY[item.id];

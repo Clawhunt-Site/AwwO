@@ -6,7 +6,9 @@ import { htmlDocumentSource, htmlPreviewDocument } from '../canvas/htmlDeliverab
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds } from '../canvas/previewLibraries';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { formatDuration, loadProductionRun, type ProductionNodeStatus, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
+import { formatDuration, loadProductionMedia, loadProductionRun, type ProductionNodeStatus, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
+import { showcasePage } from './examples/showcaseDocument';
+import { buildLiveDocument, LIVE_PAGE_ALLOW, LIVE_PAGE_SANDBOX } from '../canvas/studio/liveDocument';
 import { PRODUCTION_WORKFLOWS } from './productionWorkflows';
 import { RECORDED_CASE_WORKFLOWS } from './recordedCanvases';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
@@ -37,24 +39,58 @@ const renderRecordMarkdown = (source: string) => <ReactMarkdown remarkPlugins={[
 
 /** A model-generated page runs only in an opaque sandbox, through the canvas's own preview sanitizer. A library AwwO
  * supplies (three.js r128) runs from its pinned copy, exactly as the 成果 preview runs it; other external scripts stay
- * blocked. */
-function ResultFrame({ html, title }: { html: string; title: string }) {
+ * blocked. A media case's page runs the way the canvas runs a page that shows generated media (studio/liveDocument.ts:
+ * every element kept, so its <video> plays; opaque origin, injected policy, links stopped), with the files its run's
+ * image and video nodes made as data: URLs in place of the `<node id>/<file>` paths it names (showcaseDocument.ts). */
+function ResultFrame({ html, title, media }: { html: string; title: string; media: Readonly<Record<string, string>> }) {
   const { t } = useSaaSPreferences();
+  const inline = Object.keys(media).length > 0;
   const needs = useMemo(() => { try { return previewScriptNeeds(htmlDocumentSource(html)); } catch { return NO_PREVIEW_SCRIPT_NEEDS; } }, [html]);
   // undefined while the pinned copy loads; null when none is needed or it could not be loaded (the page then runs without it).
   const [libraries, setLibraries] = useState<{ needs: typeof needs; code: ReadonlyMap<string, string> | null } | null>(null);
   useEffect(() => {
-    if (!needs.libraries.length) return;
+    if (inline || !needs.libraries.length) return;
     let live = true;
     loadPreviewLibraries(needs).then(code => { if (live) setLibraries({ needs, code }); }, () => { if (live) setLibraries({ needs, code: null }); });
     return () => { live = false; };
-  }, [needs]);
-  const loading = needs.libraries.length > 0 && libraries?.needs !== needs;
-  const code = !loading && libraries?.code ? libraries.code : undefined;
-  const source = useMemo(() => { if (loading) return undefined; try { return htmlPreviewDocument(html, true, code); } catch { return null; } }, [html, loading, code]);
+  }, [needs, inline]);
+  const [built, setBuilt] = useState<{ html: string; media: Readonly<Record<string, string>>; document: string | null } | null>(null);
+  useEffect(() => {
+    if (!inline) return;
+    let live = true;
+    buildLiveDocument(showcasePage(html, media)).then(document => { if (live) setBuilt({ html, media, document }); }, () => { if (live) setBuilt({ html, media, document: null }); });
+    return () => { live = false; };
+  }, [html, media, inline]);
+  const loading = inline ? built?.html !== html || built.media !== media : needs.libraries.length > 0 && libraries?.needs !== needs;
+  const code = !inline && !loading && libraries?.code ? libraries.code : undefined;
+  const source = useMemo(() => {
+    if (loading) return undefined;
+    if (inline) return built?.document ?? null;
+    try { return htmlPreviewDocument(html, true, code); } catch { return null; }
+  }, [html, loading, code, inline, built]);
   if (source === undefined) return <p className="production-made-empty" role="status">{t('正在载入成品…', 'Loading the result…')}</p>;
   if (!source) return <p className="production-made-empty">{t('成品过大，无法在这里预览。', 'The result is too large to preview here.')}</p>;
-  return <iframe className="production-made-frame" title={title} sandbox="allow-scripts allow-pointer-lock" referrerPolicy="no-referrer" srcDoc={source} />;
+  return inline
+    ? <iframe className="production-made-frame" title={title} sandbox={LIVE_PAGE_SANDBOX} allow={LIVE_PAGE_ALLOW} referrerPolicy="no-referrer" srcDoc={source} />
+    : <iframe className="production-made-frame" title={title} sandbox="allow-scripts allow-pointer-lock" referrerPolicy="no-referrer" srcDoc={source} />;
+}
+
+const NO_MEDIA: Readonly<Record<string, string>> = {};
+
+/** What the canvas's image and video nodes generated in the run, shown small beside the agents (they are not agents). */
+function MediaStrip({ record, files }: { record: ProductionRunRecord; files: Readonly<Record<string, string>> | undefined }) {
+  const { locale, t } = useSaaSPreferences();
+  if (!record.media?.length) return null;
+  return <section className="production-made-media" aria-label={t('媒体节点在这次运行里生成的素材', 'What the media nodes generated in this run')}>
+    <span>{t(`媒体节点 · ${record.media.length} 个，和 Agent 同一次运行生成`, `${record.media.length} media nodes, generated in the same run`)}</span>
+    <ul>{record.media.map(item => {
+      const url = files?.[item.files[0] ?? ''];
+      return <li key={item.id}>
+        {url ? (item.kind === 'video' ? <video src={url} muted playsInline preload="metadata" aria-hidden="true" /> : <img src={url} alt="" />) : <i aria-hidden="true" />}
+        <span>{item.title[locale]}</span><StatusChip status={item.status} />
+      </li>;
+    })}</ul>
+  </section>;
 }
 
 function NodeOutput({ node }: { node: ProductionRunNode }) {
@@ -82,6 +118,16 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
     loadProductionRun(item.id).then(value => { if (live) setRecord(value ?? null); }, () => { if (live) setRecord(null); });
     return () => { live = false; };
   }, [item.id]);
+  // A media case's files load with it (one lazy chunk); undefined until they are here, {} when there are none.
+  const [media, setMedia] = useState<{ id: string; files: Readonly<Record<string, string>> } | undefined>(undefined);
+  const hasMedia = Boolean(record?.media?.length);
+  useEffect(() => {
+    if (!hasMedia) return;
+    let live = true;
+    loadProductionMedia(item.id).then(files => { if (live) setMedia({ id: item.id, files }); }, () => { if (live) setMedia({ id: item.id, files: {} }); });
+    return () => { live = false; };
+  }, [item.id, hasMedia]);
+  const files = hasMedia ? (media?.id === item.id ? media.files : undefined) : NO_MEDIA;
   const reuse = onReuse && workflow && <button type="button" className="production-made-reuse" onClick={() => onReuse(workflow)}><Copy size={14} aria-hidden="true" />{t('复制这张画布', 'Copy this canvas')}</button>;
   if (!record) return <section className="production-made" aria-labelledby={`${id}-title`}>
     <header className="production-made-heading"><div><span className="production-eyebrow"><span />{t('它是怎么做出来的', 'HOW IT WAS MADE')}</span>
@@ -108,6 +154,7 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
     {translated && <p className="production-made-language">{t(`Agent 用${record.outputLocale === 'en' ? '英文' : '中文'}完成了这次运行，内容按原样显示。`, `The agents worked in ${record.outputLocale === 'zh' ? 'Chinese' : 'English'}; their outputs are shown as delivered.`)}</p>}
     <div className="production-made-grid">
       <div className="production-made-process" hidden={focused}>
+        <MediaStrip record={record} files={files} />
         <ol className="production-made-stages" aria-label={t('按阶段查看每个 Agent', 'Every agent, stage by stage')}>
           {stages.map((group, index) => <li key={group[0].column}>
             <span className="production-made-stage">{String(index + 1).padStart(2, '0')}{group.length > 1 && <small>{t(`${group.length} 路并行`, `${group.length} in parallel`)}</small>}</span>
@@ -130,7 +177,8 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
         <header><span>{artifact ? t('交付的成品 · 在沙箱里运行', 'The delivered result · runs in a sandbox') : t('交付成果', 'Delivery')}</span>
           {artifact && <div><button type="button" onClick={() => setRevision(value => value + 1)} aria-label={t('重新载入成品', 'Reload the result')} title={t('重新载入成品', 'Reload the result')}><RotateCcw size={14} aria-hidden="true" /></button>
             <button type="button" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}{t('专注成品', 'Focus the result')}</button></div>}</header>
-        {artifact?.output ? <Fragment key={revision}><ResultFrame html={artifact.output} title={t(`${item.title.zh}：AwwO 运行交付的成品`, `${item.title.en}: the result an AwwO run delivered`)} /></Fragment>
+        {artifact?.output ? (files ? <Fragment key={revision}><ResultFrame html={artifact.output} media={files} title={t(`${item.title.zh}：AwwO 运行交付的成品`, `${item.title.en}: the result an AwwO run delivered`)} /></Fragment>
+          : <p className="production-made-empty" role="status">{t('正在载入成品…', 'Loading the result…')}</p>)
           : <p className="production-made-empty">{item.recording && deliveryNode?.status === 'done' ? t('这个案例交付的是一个多文件应用，封面就是它的录屏；各个 Agent 交付的契约与说明见左侧。', 'This case delivered a multi-file app; the cover is a recording of it, and each agent’s contracts and notes are on the left.')
             : t('这次运行没有交付成品，失败与被阻断的节点见左侧。', 'This run did not deliver the result; the failed and blocked nodes are on the left.')}</p>}
         {artifact && <p className="production-made-hint">{t('点一下画面，再用键盘操作。成品由模型生成，原样运行，未经人工修改。', 'Click the page, then use the keyboard. The result is model-generated and runs as delivered, without manual edits.')}</p>}

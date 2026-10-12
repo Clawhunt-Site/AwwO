@@ -37,7 +37,10 @@ it.each(['owner', 'reader'] as const)('shows one row of cases on the %s workspac
   expect(cases.compareDocumentPosition(screen.getByRole('heading', { level: 2, name: '从一个作品开始' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(cards()).toHaveLength(COMPACT_CASE_COUNT);
   expect(screen.getByRole('button', { name: `查看全部 ${PRODUCTION_CASES.length} 个制作案例` })).toHaveAttribute('aria-expanded', 'false');
-  // Members copy a case's canvas the way they copy an official example; readers cannot copy.
+  for (const title of ['团队知识库 SaaS', '霓虹之城', '山海异闻录']) expect(screen.getByRole('button', { name: title })).toBeVisible();
+  // Members copy a case's canvas the way they copy an official example; readers cannot copy. The row leads with the
+  // knowledge base and the two media cases, so the pixel case is one click away.
+  fireEvent.click(screen.getByRole('button', { name: `查看全部 ${PRODUCTION_CASES.length} 个制作案例` }));
   fireEvent.click(screen.getByRole('button', { name: '像素平台跳跃' }));
   const dialog = screen.getByRole('dialog', { name: '像素平台跳跃' });
   await within(dialog).findByRole('region');

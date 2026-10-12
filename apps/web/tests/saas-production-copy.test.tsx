@@ -24,9 +24,11 @@ vi.mock('../src/saas/productionRuns', async importOriginal => {
   return { ...actual, loadProductionRun: vi.fn(actual.loadProductionRun) };
 });
 
-// Every published case: the eight canvases compiled from tasks and the knowledge base's recorded one.
+// Every published case: the canvases compiled from tasks and the knowledge base's recorded one.
 const WORKFLOWS = { ...PRODUCTION_WORKFLOWS, ...RECORDED_CASE_WORKFLOWS };
 const CASES = Object.keys(WORKFLOWS);
+// A media case's image and video nodes generate afresh in a copy, and the page they feed is made on its first run.
+const RECORDED = CASES.filter(id => !WORKFLOWS[id].media?.length);
 const records = new Map<string, ProductionRunRecord>();
 const copyOf = (id: string, locale: 'zh' | 'en' = 'zh') => createProductionCopyDocument(WORKFLOWS[id], records.get(id)!, locale, null);
 const tenant: Tenant = { id: 'copy-workspace', name: 'Copy workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
@@ -41,8 +43,9 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.se
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('carries every agent’s recorded delivery into its copy, as the case’s, on the very canvas that ran', () => {
-  expect(CASES).toHaveLength(9);
-  for (const id of CASES) {
+  expect(CASES).toHaveLength(11);
+  expect(RECORDED).toHaveLength(9);
+  for (const id of RECORDED) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     // Only results are added: the tasks, contracts and wires are the pinned canvas the case ran on.
     expect(canonicalCanvasText(copy)).toBe(canonicalCanvasText(createOfficialDocument(workflow, 'zh')));
@@ -63,7 +66,7 @@ it('carries every agent’s recorded delivery into its copy, as the case’s, on
 });
 
 it('shows every agent what it received: each wired input resolves to its upstream recording, marked as one', () => {
-  for (const id of CASES) {
+  for (const id of RECORDED) {
     const copy = copyOf(id), byId = new Map(copy.nodes.map(node => [node.id, node as SessionNode]));
     for (const node of copy.nodes as SessionNode[]) {
       const incoming = copy.edges.filter(edge => edge.toNode === node.id);
@@ -76,6 +79,24 @@ it('shows every agent what it received: each wired input resolves to its upstrea
         expect(context.recorded?.[field]).toBe(true);
       }
     }
+  }
+});
+
+it('copies a media case on the very canvas that ran: agents with their recordings, media nodes fresh, the page they feed made on the first run', () => {
+  const media = CASES.filter(id => WORKFLOWS[id].media?.length);
+  expect(media.sort()).toEqual(['neon-city', 'shanhai-vn']);
+  for (const id of media) {
+    const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
+    expect(canonicalCanvasText(copy)).toBe(canonicalCanvasText(createOfficialDocument(workflow, 'zh')));
+    const fed = new Set(workflow.media!.flatMap(item => item.feeds ?? []));
+    expect(copy.nodes).toHaveLength(workflow.nodes.length + workflow.media!.length);
+    copy.nodes.forEach((node, index) => {
+      const spec = workflow.nodes[index], session = node as SessionNode;
+      if (!spec || fed.has(spec.id)) { expect(session.lastOutput, `${id}/${session.title}`).toBeUndefined(); return; }
+      const recorded = record.nodes.find(value => value.id === spec.id)!;
+      expect(session.lastOutput?.source, `${id}/${spec.id}`).toBe('case');
+      expect(parseContractOutput(session.contract!, session.lastOutput!.text).values.result, `${id}/${spec.id}`).toBe(recorded.output);
+    });
   }
 });
 
@@ -181,6 +202,8 @@ function server() {
   return posts;
 }
 async function openCopy(name = '像素平台跳跃') {
+  // The first row shows three cases; the others are one click away.
+  if (!screen.queryByRole('button', { name })) fireEvent.click(screen.getByRole('button', { name: /^(查看全部 \d+ 个制作案例|See all \d+ cases)$/ }));
   fireEvent.click(screen.getByRole('button', { name }));
   fireEvent.click(await within(screen.getByRole('dialog', { name })).findByRole('button', { name: '复制这张画布' }));
   return screen.getByRole('dialog', { name: '复制案例到我的画布' });
@@ -204,6 +227,7 @@ it('tells an English member that the agents worked in Chinese before copying', a
   localStorage.setItem('superclaw_locale', 'en');
   server();
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+  fireEvent.click(screen.getByRole('button', { name: /^See all \d+ cases$/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Pixel platformer' }));
   fireEvent.click(await within(screen.getByRole('dialog', { name: 'Pixel platformer' })).findByRole('button', { name: 'Copy this canvas' }));
   const setup = screen.getByRole('dialog', { name: 'Copy example to my canvases' });

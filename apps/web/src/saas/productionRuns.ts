@@ -24,6 +24,18 @@ export interface ProductionRunNode {
   readonly tokens?: { readonly input?: number; readonly output?: number };
 }
 
+/** One image or video node of a recorded case run, as the run stored it. */
+export interface ProductionRunMedia {
+  readonly id: string;
+  readonly title: Localized;
+  readonly kind: 'image' | 'video';
+  readonly status: ProductionNodeStatus;
+  readonly seconds?: number;
+  /** The files it generated, by the `<node id>/<file name>` path the canvas handed the page. */
+  readonly files: ReadonlyArray<string>;
+  readonly detail?: string;
+}
+
 export interface ProductionRunRecord {
   readonly caseId: string;
   /** Where it ran, for the receipt. */
@@ -48,6 +60,9 @@ export interface ProductionRunRecord {
   readonly artifactSHA256?: string;
   readonly nodes: ReadonlyArray<ProductionRunNode>;
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: Localized }>;
+  /** The canvas's image and video nodes (not agents, so not in `nodes`): what each generated in this run. Their files,
+   * shrunk, are in production-runs/<case>.media.ts, keyed by the `<node id>/<file>` paths the page names. */
+  readonly media?: ReadonlyArray<ProductionRunMedia>;
   /** What happened in the run, failures included. */
   readonly note: Localized;
   /** What was checked in a browser before publishing, and only that. */
@@ -78,8 +93,15 @@ export interface ProductionRunSummary {
 export const PRODUCTION_RUN_SUMMARY = summary as Readonly<Record<string, ProductionRunSummary>>;
 
 /** Each record loads on its own when its case opens; none is in the homepage bundle. */
-const RECORDS = import.meta.glob<{ default: ProductionRunRecord }>('./production-runs/*.ts');
+const RECORDS = import.meta.glob<{ default: ProductionRunRecord }>(['./production-runs/*.ts', '!./production-runs/*.media.ts']);
 export function loadProductionRun(id: string): Promise<ProductionRunRecord | undefined> {
   const load = RECORDS[`./production-runs/${id}.ts`];
   return load ? load().then(module => module.default) : Promise.resolve(undefined);
+}
+
+/** A media case's generated files as data: URLs, keyed by the paths its page names; loaded with the case, never before. */
+const MEDIA = import.meta.glob<{ default: Readonly<Record<string, string>> }>('./production-runs/*.media.ts');
+export function loadProductionMedia(id: string): Promise<Readonly<Record<string, string>>> {
+  const load = MEDIA[`./production-runs/${id}.media.ts`];
+  return load ? load().then(module => module.default) : Promise.resolve({});
 }

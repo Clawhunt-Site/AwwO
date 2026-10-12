@@ -7,8 +7,27 @@ import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { isCompleteHtmlDocument } from '../src/canvas/htmlDeliverable';
 
-const RECORDS = Object.values(import.meta.glob<ProductionRunRecord>('../src/saas/production-runs/*.ts', { eager: true, import: 'default' }));
+const RECORDS = Object.values(import.meta.glob<ProductionRunRecord>(['../src/saas/production-runs/*.ts', '!../src/saas/production-runs/*.media.ts'], { eager: true, import: 'default' }));
 const byCase = new Map(RECORDS.map(record => [record.caseId, record]));
+const MEDIA = import.meta.glob<Readonly<Record<string, string>>>('../src/saas/production-runs/*.media.ts', { eager: true, import: 'default' });
+
+it('inlines exactly the generated files a media case’s page names, and records its media nodes beside the agents', () => {
+  for (const record of RECORDS) {
+    const workflow = PRODUCTION_WORKFLOWS[record.caseId];
+    const files = MEDIA[`../src/saas/production-runs/${record.caseId}.media.ts`];
+    if (!workflow?.media?.length) { expect(record.media, record.caseId).toBeUndefined(); expect(files, record.caseId).toBeUndefined(); continue; }
+    expect(record.media?.map(item => item.id), record.caseId).toEqual(workflow.media.map(item => item.id));
+    const page = record.nodes.find(node => node.id === record.artifactNodeId)?.output ?? '';
+    const named = record.media!.flatMap(item => item.files).filter(path => page.includes(path));
+    expect(Object.keys(files ?? {}).sort(), record.caseId).toEqual(named.sort());
+    for (const [path, url] of Object.entries(files ?? {})) {
+      const kind = record.media!.find(item => item.files.includes(path))!.kind;
+      expect(url.startsWith(kind === 'video' ? 'data:video/mp4;base64,' : 'data:image/jpeg;base64,'), path).toBe(true);
+    }
+    // The agents are the record's nodes; a media node is never one of them.
+    expect(record.nodes.map(node => node.id).sort(), record.caseId).toEqual(workflow.nodes.map(node => node.id).sort());
+  }
+});
 
 it('publishes a record for real cases only, and summarises each one exactly', () => {
   const ids = new Set(PRODUCTION_CASES.map(item => item.id));

@@ -41,6 +41,7 @@ const DESIGN = role('策划', 'Design'), ART = role('美术', 'Art'), LEVELS = r
 const SOUND = role('音效', 'Sound'), PHYSICS = role('物理', 'Physics'), MODELLING = role('建模', 'Modelling');
 const RENDERING = role('渲染', 'Rendering'), FRONT_END = role('前端', 'Front end'), PRODUCT = role('产品', 'Product');
 const REVIEW = role('验收', 'Review'), BACKEND = role('后端', 'Backend');
+const MEDIA = role('媒体', 'Media');
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
   {
@@ -52,6 +53,20 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
       [BACKEND], [role('前端', 'Frontend')], [REVIEW]],
     deliverable: { zh: '能跑起来的知识库 Web 工作台', en: 'A runnable knowledge-base web workspace' },
     facts: [{ zh: '42/42 测试通过', en: '42/42 tests passing' }, { zh: '独立验收退回 2 处缺陷 → 复验通过', en: 'Independent review sent back 2 defects → re-verified' }],
+  },
+  {
+    id: 'neon-city', kind: 'interactive', recording: true, footage: 'neon-real',
+    title: { zh: '霓虹之城', en: 'Neon City' },
+    brief: { zh: '做一张电影级的全屏互动品牌页：雨夜里永不熄灯的未来都市。', en: 'A cinematic full-screen interactive brand page: a future city whose lights never go out on a rainy night.' },
+    stages: [[MEDIA], [FRONT_END], [REVIEW]],
+    deliverable: { zh: '全屏互动品牌页', en: 'A full-screen interactive brand page' },
+  },
+  {
+    id: 'shanhai-vn', kind: 'game', recording: true, footage: 'shanhai-real',
+    title: { zh: '山海异闻录', en: 'Tales of Mountains and Seas' },
+    brief: { zh: '做一款国风视觉小说试玩章：少年剑客入青丘寻药，遇见九尾狐少女。', en: 'A Chinese-fantasy visual-novel chapter: a young swordsman seeks a cure in Qingqiu and meets a nine-tailed fox girl.' },
+    stages: [[role('剧本', 'Script'), MEDIA], [CODE], [REVIEW]],
+    deliverable: { zh: '可玩的视觉小说试玩章', en: 'A playable visual-novel chapter' },
   },
   {
     id: 'pixel-platformer', kind: 'game', recording: true, footage: 'pixel-real',

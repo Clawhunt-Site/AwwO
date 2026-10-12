@@ -6,9 +6,13 @@ import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import type { SessionNode } from '../src/canvas/canvasDoc';
 
 const WORKFLOWS = Object.values(PRODUCTION_WORKFLOWS);
+// A case's media nodes (image and video generators, officialMedia.ts) are not agents: on its card the media of one
+// stage count as one slot of the team, beside that stage's agents.
 const stagesOf = (id: string) => {
   const workflow = PRODUCTION_WORKFLOWS[id];
-  return [...new Set(workflow.nodes.map(node => node.column))].sort((a, b) => a - b).map(column => workflow.nodes.filter(node => node.column === column).length);
+  const media = workflow.media ?? [];
+  return [...new Set([...workflow.nodes, ...media].map(node => node.column))].sort((a, b) => a - b)
+    .map(column => workflow.nodes.filter(node => node.column === column).length + (media.some(value => value.column === column) ? 1 : 0));
 };
 
 it('gives every case a canvas here, except the one kept as it ran in recordedCanvases.ts', () => {
@@ -26,22 +30,27 @@ it('is a valid DAG that runs left to right and compiles in both languages', () =
   for (const item of WORKFLOWS) {
     const ids = item.nodes.map(node => node.id);
     expect(new Set(ids).size, item.id).toBe(ids.length);
-    const column = new Map(item.nodes.map(node => [node.id, node.column]));
+    const media = item.media ?? [];
+    const column = new Map([...item.nodes, ...media].map(node => [node.id, node.column]));
+    expect(column.size, item.id).toBe(ids.length + media.length);
     const keys = item.edges.map(edge => `${edge.from}->${edge.to}`);
     expect(new Set(keys).size, item.id).toBe(keys.length);
-    for (const edge of item.edges) {
+    // A media node's result reaches the pages it feeds as a soft wire: a hand-off like any edge.
+    const feeds = media.flatMap(value => (value.feeds ?? []).map(to => ({ from: value.id, to })));
+    for (const edge of [...item.edges, ...feeds]) {
       expect(column.has(edge.from) && column.has(edge.to), `${item.id}: ${edge.from}->${edge.to}`).toBe(true);
       // Every handoff goes to a later stage, so stages are the dependency order and there is no cycle.
       expect(column.get(edge.to)!, `${item.id}: ${edge.from}->${edge.to}`).toBeGreaterThan(column.get(edge.from)!);
     }
+    for (const value of media) expect(item.nodes.some(node => value.feeds?.includes(node.id) && node.outputType === 'html'), `${item.id}/${value.id}`).toBe(true);
     // A column is a stage: each node past the first stage receives something from the stage right before it.
     for (const node of item.nodes.filter(value => value.column > 0))
-      expect(item.edges.some(edge => edge.to === node.id && column.get(edge.from) === node.column - 1), `${item.id}/${node.id}`).toBe(true);
+      expect([...item.edges, ...feeds].some(edge => edge.to === node.id && column.get(edge.from) === node.column - 1), `${item.id}/${node.id}`).toBe(true);
     for (const locale of ['zh', 'en'] as const) {
       const document = createOfficialDocument(item, locale);
-      expect(document.nodes).toHaveLength(item.nodes.length);
-      expect(document.edges).toHaveLength(item.edges.length);
-      for (const node of document.nodes as SessionNode[]) {
+      expect(document.nodes).toHaveLength(item.nodes.length + media.length);
+      expect(document.edges).toHaveLength(item.edges.length + feeds.length);
+      for (const node of (document.nodes as SessionNode[]).filter(value => value.contract)) {
         const inputs = node.contract!.inputs.map(field => field.id);
         expect(new Set(inputs).size).toBe(inputs.length);
         // One source per input port, as the server's DAG check requires.
@@ -93,7 +102,7 @@ it('writes every text in both languages and claims no real brand, footage or pro
 });
 
 it('keeps every node’s fixed prompt well inside what Claude Opus 5.5 leaves for input', () => {
-  for (const item of WORKFLOWS) for (const node of createOfficialDocument(item, 'zh').nodes as SessionNode[]) {
+  for (const item of WORKFLOWS) for (const node of (createOfficialDocument(item, 'zh').nodes as SessionNode[]).filter(value => value.contract?.inputs.length)) {
     // Persona, brief and output policy are sent twice (system and user); upstream outputs add the rest. The runtime's
     // system prompt allows 32,768 characters, so the fixed part stays far below it.
     const fixed = new TextEncoder().encode(node.persona + node.contract!.inputs[0].value).byteLength;

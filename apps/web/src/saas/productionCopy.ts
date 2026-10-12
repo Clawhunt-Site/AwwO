@@ -46,9 +46,14 @@ export function createProductionCopyDocument(workflow: OfficialWorkflow, record:
     throw new Error(`The run record of ${record.caseId} does not match the canvas of ${workflow.id}.`);
   const document = createOfficialCopyDocument(workflow, locale, model);
   const at = Date.parse(`${record.capturedOn}T00:00:00Z`);
-  // createOfficialDocument mints one node per workflow node, in the workflow's order.
+  // A media case's image and video nodes follow the agents and generate afresh in the copy; a page they feed names the
+  // case run's own files, which the copy does not have, so its delivery is not pinned either: it is made on the first run.
+  const fed = new Set((workflow.media ?? []).flatMap(item => item.feeds ?? []));
+  // createOfficialDocument mints one node per workflow node, in the workflow's order, then the media nodes.
   const nodes = document.nodes.map((node, index): CanvasNode => {
-    const recorded = record.nodes.find(value => value.id === workflow.nodes[index].id);
+    const spec = workflow.nodes[index];
+    if (!spec || fed.has(spec.id)) return node;
+    const recorded = record.nodes.find(value => value.id === spec.id);
     if (node.kind !== 'session' || recorded?.status !== 'done') return node;
     const text = recorded.outputType === 'fields' ? recordedFields(node, recorded.fields ?? [])
       : recorded.output?.trim() ? recordedText(node, recorded.output) : null;
