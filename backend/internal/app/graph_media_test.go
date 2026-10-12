@@ -80,7 +80,10 @@ func TestGraphMediaDraftReadsTheActiveConversation(t *testing.T) {
 	if e := json.Unmarshal([]byte(`{"id":"m","kind":"session","agentKind":"image","activeThreadId":"t2","threads":[{"id":"default","draft":"old"},{"id":"t2","draft":"  new prompt\n[附件] ref.png · awwo-file:aFILEFILEFILEFILE  "}]}`), &n); e != nil {
 		t.Fatal(e)
 	}
-	if got := graphMediaDraft(n); got != "new prompt" {
+	// The file line stays with the draft: a picture among the lines can be the generation's reference, and admission
+	// drops the others (freezeMediaPrompt). The words are what is left once the lines are stripped.
+	got := graphMediaDraft(n)
+	if got != "new prompt\n[附件] ref.png · awwo-file:aFILEFILEFILEFILE" || stripAttachmentLines(got) != "new prompt" {
 		t.Fatalf("draft %q", got)
 	}
 	// Shapes this host does not expect leave the draft empty; they never fail the graph's parsing.
