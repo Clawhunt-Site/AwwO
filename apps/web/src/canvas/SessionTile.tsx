@@ -34,7 +34,7 @@ import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Ima
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
-import { mediaKindOf } from './mediaCatalog';
+import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
@@ -44,6 +44,7 @@ import { mediaComposerInfo, TileComposer } from './TileComposer';
 import { joinAttachments, splitAttachments } from './attachments';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
+import { MediaWiringGuide } from './MediaWiringGuide';
 import { collaborationInputSummary, htmlPreviewSummary } from './readableTranscript';
 import { ContractFields } from './ContractFields';
 import { emptyContract, type ContractField } from './nodeContracts';
@@ -59,7 +60,7 @@ import { useSimpleCanvas } from './uiMode';
 import { CardPreview } from './CardPreview';
 import { showsPreview } from './cardFrames';
 import type { StudioEntry } from './studio/studioModel';
-import { canvasText, useCanvasI18n, type CanvasTranslate } from './i18n';
+import { canvasText, useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { recoveryDetailMessage } from './surfaceMessages';
 import { nodeTeamModeLabel } from './NodeTeamEditor';
 import type { UiLocale } from '../locale';
@@ -67,6 +68,11 @@ import type { UiLocale } from '../locale';
 /** Smallest a tile may be dragged to. Below this the head itself stops being readable. */
 /** Below this much travel a press is a click, not a drag (in SCREEN px, before scale). */
 const DRAG_THRESHOLD_PX = 3;
+
+/** What an image, video or 3D node that has not generated yet asks for (its empty state's title). */
+const MEDIA_EMPTY_TITLE: Record<MediaKind, CanvasTextKey> = {
+  image: 'media.emptyImage', video: 'media.emptyVideo', model3d: 'media.emptyModel3d',
+};
 
 /** How a press on a tile changes the selection — see SessionTileProps.onSelect. */
 export type SelectMode = 'only' | 'additive' | 'preserve';
@@ -588,6 +594,8 @@ export const SessionTile = memo(function SessionTile({
   // Persist the transcript preview for the glance LOD, but only once the stream has settled —
   // writing mid-stream would put a document save on every delta frame.
   const mediaNode = Boolean(sessionNode && mediaKindOf(sessionNode.agentKind));
+  // An image, video or 3D node that has not generated yet says what to write and how to wire it.
+  const mediaKind = sessionNode && !sessionNode.contract ? mediaKindOf(sessionNode.agentKind) ?? null : null;
   const liveTail = livePreview(session.turns, sessionNode?.contract?.outputs, undefined, mediaNode ? locale : undefined);
   const storedPreview = sessionNode?.preview ?? null;
   useEffect(() => {
@@ -892,10 +900,11 @@ export const SessionTile = memo(function SessionTile({
                     <AgentTemplateDetails template={template} contract={contract}
                       onEditInputs={readOnly ? undefined : editInputStructure} onEditOutputs={readOnly ? undefined : editDeliverableForm} />
                   </section> : emptyConversation ?
-                    <div className="awwo-node-empty" data-template={template?.id}>
+                    <div className="awwo-node-empty" data-template={template?.id} data-media={!template && mediaKind ? mediaKind : undefined}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
-                      <strong>{template?.emptyTitle ?? t('tile.startHere')}</strong><span>{template?.emptyDescription ?? t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound')}</span>
+                      <strong>{template?.emptyTitle ?? (mediaKind ? t(MEDIA_EMPTY_TITLE[mediaKind]) : t('tile.startHere'))}</strong><span>{template?.emptyDescription ?? (mediaKind ? t('media.emptyDescription') : t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound'))}</span>
                       {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => { const parts = splitAttachments(composerDraft); setComposerDraft(joinAttachments(parts.body ? `${parts.body}\n\n${starter.prompt}` : starter.prompt, parts.attachments, locale)); }}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
+                      {expanded && !template && mediaKind && !viewOnly ? <MediaWiringGuide kind={mediaKind} simple={simple} /> : null}
                     </div>
                     : <TileTranscript key={storeKey} turns={session.turns} history={session.history} streaming={session.streaming} streamingSince={session.streamingSince}
                       currentRunDetails={currentRunDetails} mediaResults={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
@@ -954,7 +963,11 @@ export const SessionTile = memo(function SessionTile({
         </div>
       )}
 
-      <TilePorts node={geometry ? { ...node, ...geometry } : node} wiring={viewOnly || simple || interactionLocked ? undefined : wiring} />
+      <TilePorts node={geometry ? { ...node, ...geometry } : node} wiring={viewOnly || simple || interactionLocked ? undefined : wiring}
+        // The reference guide says what the node's own model does with a picture only once the catalogue lists that
+        // model; until then it speaks in general terms rather than guess.
+        media={node.kind === 'session' && modelChoices?.some(choice => choice.key === modelChoiceKey(node)) ? mediaComposerInfo(node, modelChoices) : undefined}
+        scale={scale} />
 
       {!viewOnly && onResizeNode && !compact ? (
         <button

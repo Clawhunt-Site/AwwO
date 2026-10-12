@@ -2507,7 +2507,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // A plan that changed nothing else keeps the nodes it added, which tell whether it is still on the canvas.
       // What was applied differently from how the plan wrote it is said with its summary, never hidden.
       const shownAdjustments = applied.adjustments.slice(0, 6);
-      // Media nodes a plan added generate only when sent: said once, so the user knows what to press.
+      // Media nodes a plan added: said once, so the user knows a canvas run generates them and Send makes one alone.
       const addedMedia = changed ? applied.doc.nodes.filter(node => applied.addedNodeIds.includes(node.id) && node.kind === 'session' && mediaKindOf(node.agentKind)).length : 0;
       const lead = [...(!changed && plan.operations.length ? [applied.summary, t('planning.nothingApplied')] : [applied.summary]),
         ...(addedMedia ? [t('planning.mediaAdded', { count: addedMedia })] : [])];

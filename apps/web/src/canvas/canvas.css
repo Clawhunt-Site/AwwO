@@ -684,6 +684,36 @@
 }
 .canvas-root .canvas-port--image.is-connected { background: var(--kind-image); }
 
+/* A media node's port guide: what to wire there, while the port is hovered or focused. It sits beside the port on
+   the tile's side and takes no pointer events, so it never covers a wire's target or changes a hit area. */
+.canvas-root .canvas-port-guide {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 240px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--awwo-line, var(--line));
+  background: var(--awwo-card, var(--card));
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  color: var(--awwo-muted, var(--muted));
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  cursor: default;
+}
+.canvas-root .canvas-port-guide[hidden] { display: none; }
+/* Its transform is set inline: beside the port (14px, input to the right of it, output to the left), then scaled by
+   1/zoom about the anchor, so it reads the same at every zoom. */
+.canvas-root .canvas-port-guide-title { color: var(--awwo-ink, var(--strong)); font-weight: 600; }
+
 /* Fan-in count. A multi input carrying several upstreams grows into a labelled pill — you must be
    able to see that three things feed this node without opening anything. */
 .canvas-root .canvas-port.has-count {

@@ -257,6 +257,15 @@
 
 /* Contain every node's port layer so folded neighbours cannot cover the active workspace. */
 .canvas-root .awwo-node:not(.canvas-tile--selected):not(.canvas-tile--focus) { z-index: 0; }
+/* While one of its port guides shows, a tile rises above its neighbours, so a guide wider than the tile stays readable. */
+.canvas-root .canvas-tile.awwo-node:has(.canvas-port-guide:not([hidden])) { z-index: 5; }
+
+/* An image, video or 3D node that has not generated yet says how to wire it (MediaWiringGuide), in one paragraph that
+   fits an opened card. Its own classes only: the empty state's strong and direct-span rules stay off it. */
+.canvas-root .awwo-node .awwo-node-empty[data-media] { padding-block: 10px; gap: 4px; }
+.canvas-root .awwo-node-empty .awwo-media-wiring { align-self: stretch; max-width: 420px; margin: 2px auto 0; padding: 7px 10px; border-radius: 8px; background: var(--awwo-soft); color: var(--awwo-muted); font-size: 12px; line-height: 1.6; text-align: left; }
+.canvas-root .awwo-node-empty .awwo-media-wiring p { margin: 0; }
+.canvas-root .awwo-node-empty .awwo-media-wiring-title { color: var(--awwo-ink); font-weight: 600; }
 
 .canvas-root[data-narrow-focus='true'] .awwo-node.canvas-tile--focus .awwo-node-delivery-drawer { position: absolute; inset: 0; z-index: 8; width: 100%; border-left: 0; }
 

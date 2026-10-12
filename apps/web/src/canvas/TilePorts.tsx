@@ -22,8 +22,10 @@
 // one zoom tier: hiding the handles when zoomed out would hide the only affordance for reading
 // and repairing that structure.
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
+import { mediaKindOf } from './mediaCatalog';
+import type { MediaComposerInfo } from './TileComposer';
 import {
   type DataType,
   type PortRef,
@@ -213,17 +215,55 @@ export interface TilePortsProps {
   node: CanvasNode;
   /** Omitted → handles still render (structure is never hidden) but are inert. */
   wiring?: WiringApi;
+  /** An image, video or 3D node's generator (from `mediaComposerInfo`): whether its model uses the reference picture
+   *  wired in, which the reference port's guide says. Omitted → the guide says it in general terms. */
+  media?: MediaComposerInfo;
+  /** The canvas view's scale. A port guide is text to read, so it keeps its on-screen size at any zoom (the handles,
+   *  part of the graph, zoom with it). Omitted → 1. */
+  scale?: number;
+}
+
+type Translate = ReturnType<typeof useCanvasI18n>['t'];
+
+/**
+ * What a media node's port takes or gives, in a sentence or two: shown beside the port while it is hovered or
+ * focused, so the wiring is learnt where it is done. The facts are the ones `portsFor` and the run engine hold:
+ * `context` takes any number of text wires, which a canvas run puts after the node's own prompt; `reference` takes
+ * one picture, used only where the node's model takes one (image edit, image-to-3D); `result` carries the files to
+ * an input of the same type. Null for every other node and port: those keep their plain label.
+ */
+export function mediaPortGuide(t: Translate, locale: string, node: CanvasNode, port: PortSpec, media?: MediaComposerInfo): string | null {
+  if (node.kind !== 'session' || node.contract) return null;
+  const kind = mediaKindOf(node.agentKind ?? '');
+  if (!kind) return null;
+  if (port.side === 'input' && port.id === 'context') return t('media.guideContext');
+  if (port.side === 'input' && port.id === 'reference') {
+    if (!media) return t('media.guideReference');
+    if (media.references > 0) return t(kind === 'model3d' ? 'media.guideReference3d' : 'media.guideReferenceImage');
+    return media.referenceModels.length
+      ? t('media.guideReferenceUnused', { models: media.referenceModels.join(locale === 'en' ? ', ' : '、') })
+      : t('media.guideReferenceNone');
+  }
+  if (port.side === 'output' && port.id === 'result') {
+    return t(kind === 'video' ? 'media.guideResultVideo' : kind === 'model3d' ? 'media.guideResultModel3d' : 'media.guideResultImage');
+  }
+  return null;
 }
 
 /**
  * The node's typed port handles, positioned on the tile from the SAME anchor math the wires use
  * (`portAnchorWorld` minus the node origin) so a handle can never sit off the line that leaves it.
  */
-export function TilePorts({ node, wiring }: TilePortsProps) {
-  const { t } = useCanvasI18n();
+export function TilePorts({ node, wiring, media, scale = 1 }: TilePortsProps) {
+  const { t, locale } = useCanvasI18n();
   const interactive = wiring?.interactive ?? false;
   const [expandedLabel, setExpandedLabel] = useState<string | null>(null);
+  const guideIds = useId();
+  // Counter-scale about the port's anchor: the guide's top-left sits on the anchor (transform-origin 0 0), is moved
+  // beside the port in its own pixels, then scaled by 1/scale, so on screen it is always the same size and distance.
+  const unzoom = 1 / (Number.isFinite(scale) && scale > 0 ? scale : 1);
   const hasContract = node.kind === 'session' && Boolean(node.contract);
+  const mediaPorts = node.kind === 'session' && !hasContract && Boolean(mediaKindOf(node.agentKind ?? ''));
   return (
     <>
       {portsFor(node).map((p) => {
@@ -238,12 +278,21 @@ export function TilePorts({ node, wiring }: TilePortsProps) {
         // Display names belong to the form; stable IDs remain exclusively in the wire payload.
         const sideLabel = t(p.side === 'input' ? 'ports.input' : 'ports.output');
         const typeLabel = t(TYPE_LABEL[p.dataType]);
-        const portLabel = hasContract ? p.label?.trim() || t('ports.unnamed', { side: sideLabel }) : p.id === 'reference' ? t('ports.reference') : p.id;
+        const portLabel = hasContract ? p.label?.trim() || t('ports.unnamed', { side: sideLabel })
+          : p.id === 'reference' ? t('ports.reference')
+            : mediaPorts && p.id === 'context' ? t('media.portContext')
+              : mediaPorts && p.id === 'result' ? t('media.portResult') : p.id;
         const portKey = `${p.side}:${p.id}`;
         const expanded = expandedLabel === portKey;
+        const headline = `${portLabel} · ${typeLabel}${p.multi ? ` · ${t('ports.multi')}`
+          : mediaPorts && p.side === 'input' ? ` · ${t('media.portSingle')}` : ''}${wires ? ` · ${t('ports.connected', { count: wires })}` : ''}`;
+        // A media port that can be wired explains itself where the wiring happens. Inert ports (read-only, simple
+        // mode, a run in progress) do not: nothing can be wired there.
+        const guide = interactive ? mediaPortGuide(t, locale, node, p, media) : null;
+        const guideId = guide ? `${guideIds}-${p.side}-${p.id}` : undefined;
         return (
+          <Fragment key={portKey}>
           <button
-            key={portKey}
             type="button"
             className={`canvas-port canvas-port--${p.side} canvas-port--${p.dataType}${
               interactive ? ' canvas-port--interactive' : ''
@@ -252,9 +301,11 @@ export function TilePorts({ node, wiring }: TilePortsProps) {
             }`}
             style={{ left: anchor.x - node.x, top: anchor.y - node.y }}
             data-wires={wires || undefined}
-            title={`${portLabel} · ${typeLabel}${p.multi ? ` · ${t('ports.multi')}` : ''}${wires ? ` · ${t('ports.wireCount', { count: wires })}` : ''}`}
+            // The guide already shows this headline; a native tooltip on top of it would say it twice.
+            title={guide ? undefined : `${portLabel} · ${typeLabel}${p.multi ? ` · ${t('ports.multi')}` : ''}${wires ? ` · ${t('ports.wireCount', { count: wires })}` : ''}`}
             aria-label={t('ports.port', { side: sideLabel, label: portLabel, type: typeLabel,
               connection: wires ? t('ports.connected', { count: wires }) : t('ports.disconnected') })}
+            aria-describedby={guideId}
             aria-pressed={armed ? true : undefined}
             data-port-id={p.id}
             data-node-id={node.id}
@@ -284,6 +335,16 @@ export function TilePorts({ node, wiring }: TilePortsProps) {
             }}>{portLabel}</span> : null}
             {countLabel ? <span className="canvas-port-count">{countLabel}</span> : null}
           </button>
+          {/* A sibling of the handle, not a child: a button's content is its name, and this is its description.
+              It sits beside the port on the tile's side and takes no pointer events, so it never covers a wire's
+              target or changes the gesture. Kept in the document while hidden, so aria-describedby always resolves. */}
+          {guide ? <div id={guideId} role="tooltip" className={`canvas-port-guide canvas-port-guide--${p.side}`}
+            hidden={!expanded} style={{ left: anchor.x - node.x, top: anchor.y - node.y, transformOrigin: '0 0',
+              transform: `scale(${unzoom}) translate(${p.side === 'input' ? '14px' : 'calc(-100% - 14px)'}, -50%)` }}>
+            <span className="canvas-port-guide-title">{headline}</span>
+            <span className="canvas-port-guide-body">{guide}</span>
+          </div> : null}
+          </Fragment>
         );
       })}
     </>
