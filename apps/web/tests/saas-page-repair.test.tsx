@@ -14,8 +14,8 @@ import { canvasStorage } from '../src/canvas/canvasStorage';
 import { htmlPreviewDocument, PREVIEW_HOST_SCRIPT, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { activeThreadId, sessionStoreKey } from '../src/canvas/nodeThreads';
 import { PAGE_ERROR_MESSAGE, PAGE_ERROR_SCRIPT, readPageErrorMessage, reportPageError, subscribePageErrors, type PageErrorReport } from '../src/canvas/pageErrors';
-import { loadPageRepairRecords, MAX_REPAIR_PAGE_CHARS, PAGE_REPAIR_STORAGE_KEY, pageRepairDecision, pageRepairDelivery, pageRepairDisplayText, pageRepairMessage,
-  pageRepairTarget, REPAIR_RESULT_WINDOW_MS, savePageRepairRecord } from '../src/canvas/pageRepair';
+import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, MAX_REPAIR_PAGE_CHARS, PAGE_REPAIR_STORAGE_KEY, pageRepairDecision, pageRepairDelivery, pageRepairDisplayText, pageRepairMessage,
+  pageRepairRetryAfter, pageRepairTarget, REPAIR_RESULT_WINDOW_MS, REPAIR_RETRY_SOON_MS, savePageRepairRecord } from '../src/canvas/pageRepair';
 import { applyRecoveredDocument, runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 import { getSnapshot, resetAllSessions } from '../src/canvas/sessions';
 import { buildLiveDocument } from '../src/canvas/studio/liveDocument';
@@ -167,6 +167,22 @@ describe('once per delivery', () => {
     expect(pageRepairDecision(record, output(2_000 + REPAIR_RESULT_WINDOW_MS + 1))).toBe('repair');
   });
 
+  it('sends a request the service refused before it ran again once its wait is over, and takes a later delivery as new', () => {
+    const output = (at: number): NodeOutput => ({ text: '{}', at, source: 'run' });
+    const refused = { from: 1_000, at: 2_000, retryAfter: 9_000 };
+    expect(pageRepairDecision(refused, output(1_000), 8_999)).toBe('asked');
+    expect(pageRepairDecision(refused, output(1_000), 9_000)).toBe('repair');
+    expect(pageRepairDecision(refused, output(2_000 + 5 * 60_000), 3_000)).toBe('repair');
+    const at = Date.UTC(2026, 9, 12, 9, 25);
+    expect(pageRepairRetryAfter('quota_exceeded', at)).toBe(at + REPAIR_RETRY_SOON_MS);
+    expect(pageRepairRetryAfter('plan_busy', at)).toBe(at + REPAIR_RETRY_SOON_MS);
+    expect(pageRepairRetryAfter('premium_quota_exceeded', at)).toBe(Date.UTC(2026, 9, 13));
+    expect(pageRepairRetryAfter('credits_exhausted', Date.UTC(2026, 11, 31, 23, 59))).toBe(Date.UTC(2027, 0, 1));
+    expect(pageRepairRetryAfter('model_unpriced', at)).toBeNull();
+    expect(isPageRepairMessage('AwwO page repair · field "figure"\nAwwO ran the page')).toBe(true);
+    expect(isPageRepairMessage('this page fails, fix it')).toBe(false);
+  });
+
   it('keeps the newest records in the canvas’s storage and survives a damaged one', () => {
     const storage = new Map<string, string>();
     const store = { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); } };
@@ -177,6 +193,11 @@ describe('once per delivery', () => {
     expect(Object.keys(records)).toHaveLength(50);
     expect(records.n59).toEqual({ from: 59, at: 10_059 });
     expect(records.n9).toBeUndefined();
+    storage.set(PAGE_REPAIR_STORAGE_KEY, JSON.stringify({ a: { from: 1, at: 2, retryAfter: 'soon' }, b: { from: 1, at: 2, retryAfter: 9 } }));
+    expect(loadPageRepairRecords(store)).toEqual({ a: { from: 1, at: 2 }, b: { from: 1, at: 2, retryAfter: 9 } });
+    expect(deferPageRepair(store, 'a', 20)).toBe(true);
+    expect(loadPageRepairRecords(store).a).toEqual({ from: 1, at: 2, retryAfter: 20 });
+    expect(deferPageRepair(store, 'missing', 20)).toBe(false);
   });
 });
 
@@ -286,6 +307,26 @@ describe('on the canvas', () => {
     act(() => { reportPageError(report); reportPageError(report); });
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(repairs()).toHaveLength(1);
+  });
+
+  it('sends the same page again later, not at once, when the service refused the repair before it ran', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    const refusal = { code: 'quota_exceeded', error: '工作区运行额度已满', admissionRejected: true };
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/messages') && init?.method === 'POST'
+      ? Promise.resolve({ ok: false, status: 429, json: async () => refusal } as unknown as Response)
+      : original(input, init));
+    render(<CanvasSurface />);
+    act(() => { reportPageError(report); });
+    await waitFor(() => expect(repairs()).toHaveLength(1));
+    await waitFor(() => expect(loadPageRepairRecords(canvasStorage()).fig?.retryAfter).toBeGreaterThan(Date.now() + 25 * 60_000));
+    // Until then the same page asks nothing more.
+    act(() => { reportPageError(report); });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(repairs()).toHaveLength(1);
+    // Once that time has passed, the same delivery goes back again.
+    savePageRepairRecord(canvasStorage(), 'fig', { ...loadPageRepairRecords(canvasStorage()).fig!, retryAfter: Date.now() - 1 });
+    act(() => { reportPageError(report); });
+    await waitFor(() => expect(repairs()).toHaveLength(2));
   });
 
   it('waits while another component runs and asks once the canvas is idle', async () => {

@@ -6,7 +6,8 @@
 // Pages report through pageErrors.ts from wherever they run (the card on the board, the deliverable drawer, the studio,
 // the 成果 view). The report carries the page itself, so the node is found by what it published, not by which view
 // happened to show it. The once-only record lives in the canvas's own browser storage: another tab of the same canvas
-// sees it, a reload keeps it.
+// sees it, a reload keeps it. A request the service refuses before anything runs (today's calls used up, every run
+// slot busy) was no repair: the record says when the same delivery may go back (deferPageRepair).
 import type { CanvasNode, NodeOutput, SessionNode } from './canvasDoc';
 import { htmlDocumentSource, isCompleteHtmlDocument } from './htmlDeliverable';
 import { parseContractOutput } from './nodeContracts';
@@ -49,18 +50,24 @@ export function pageRepairTarget(nodes: ReadonlyArray<CanvasNode>, page: string)
   return null;
 }
 
-/** When a node was last asked for a repair: of which delivery (`from`, its time) and when (`at`). */
-export interface PageRepairRecord { from: number; at: number }
+/**
+ * When a node was last asked for a repair: of which delivery (`from`, its time) and when (`at`). `retryAfter` is set when
+ * the service refused that request before anything ran, so it was no repair: from then on the same delivery may go back.
+ */
+export interface PageRepairRecord { from: number; at: number; retryAfter?: number }
 type Records = Record<string, PageRepairRecord>;
 
 export function loadPageRepairRecords(storage: Pick<Storage, 'getItem'>): Records {
   try {
     const value: unknown = JSON.parse(storage.getItem(PAGE_REPAIR_STORAGE_KEY) ?? '{}');
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, PageRepairRecord] => {
-      const record = entry[1] as Partial<PageRepairRecord> | null;
-      return Boolean(record) && Number.isFinite(record!.from) && Number.isFinite(record!.at);
-    }));
+    const records: Records = {};
+    for (const [nodeId, raw] of Object.entries(value as Record<string, unknown>)) {
+      const record = raw as Partial<PageRepairRecord> | null;
+      if (!record || !Number.isFinite(record.from) || !Number.isFinite(record.at)) continue;
+      records[nodeId] = { from: record.from!, at: record.at!, ...Number.isFinite(record.retryAfter) ? { retryAfter: record.retryAfter! } : {} };
+    }
+    return records;
   } catch { return {}; }
 }
 
@@ -74,16 +81,47 @@ export function savePageRepairRecord(storage: Pick<Storage, 'getItem' | 'setItem
 
 /**
  * 'repair': ask the node. 'asked': this delivery (or an older one) was already sent back. 'repaired': this delivery
- * arrived soon after a repair was asked for, so it is the repair's own result; once is enough.
+ * arrived soon after a repair was asked for, so it is the repair's own result; once is enough. A request the service
+ * refused before it ran was no repair: its delivery may go back once `retryAfter` has passed, and a later one is new.
  */
-export function pageRepairDecision(record: PageRepairRecord | undefined, output: NodeOutput): 'repair' | 'asked' | 'repaired' {
+export function pageRepairDecision(record: PageRepairRecord | undefined, output: NodeOutput, now = Date.now()): 'repair' | 'asked' | 'repaired' {
   if (!record) return 'repair';
+  if (record.retryAfter !== undefined) return output.at > record.at || now >= record.retryAfter ? 'repair' : 'asked';
   if (output.at <= record.at) return 'asked';
   return output.at - record.at <= REPAIR_RESULT_WINDOW_MS ? 'repaired' : 'repair';
 }
 
+/** Refusals of today's allowance (the workspace's free premium calls, the service's free capacity, the plan's credits). */
+const REFUSED_FOR_TODAY: ReadonlySet<string> = new Set(['premium_quota_exceeded', 'premium_capacity_exceeded', 'free_capacity_exceeded', 'credits_exhausted']);
+/** Refusals that can clear within the hour: `quota_exceeded` means today's calls OR every run slot in use, `plan_busy` the latter. */
+const REFUSED_FOR_NOW: ReadonlySet<string> = new Set(['quota_exceeded', 'plan_busy']);
+/** How long a request refused for a busy slot (or calls that may be back) waits before its delivery may go again. */
+export const REPAIR_RETRY_SOON_MS = 30 * 60_000;
+
+/**
+ * When a repair request the service refused before it ran (its code, ExecAgentResult.refusedCode) may go again: after
+ * the next UTC midnight, when daily allowances reset, or half an hour on. Null for a refusal waiting does not change
+ * (a model that cannot be billed, a malformed request): that request counts as asked.
+ */
+export function pageRepairRetryAfter(code: string, now: number): number | null {
+  if (REFUSED_FOR_TODAY.has(code)) {
+    const day = new Date(now);
+    return Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + 1);
+  }
+  return REFUSED_FOR_NOW.has(code) ? now + REPAIR_RETRY_SOON_MS : null;
+}
+
+/** The node's last repair request was refused before it ran: its delivery may go back again from `retryAfter` on. */
+export function deferPageRepair(storage: Pick<Storage, 'getItem' | 'setItem'>, nodeId: string, retryAfter: number): boolean {
+  const record = loadPageRepairRecords(storage)[nodeId];
+  return record ? savePageRepairRecord(storage, nodeId, { ...record, retryAfter }) : false;
+}
+
 /** The instruction's first line: it names the field, so the reply (just the fixed page) goes back into that field. */
 const PAGE_REPAIR_HEADER = /^AwwO page repair · field "([^"\n]+)"\n/;
+
+/** Whether a component chat message is a page repair request (pageRepairMessage). */
+export const isPageRepairMessage = (message: string | undefined): boolean => Boolean(message && PAGE_REPAIR_HEADER.test(message));
 
 /**
  * The instruction the node's model receives. The answer is only the fixed page: no JSON to escape a whole document

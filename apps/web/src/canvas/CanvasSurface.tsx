@@ -102,7 +102,7 @@ import { currentGraphRunEntry } from './currentGraphRun';
 import { applyRecoveredDocument, prepareRunDocument, runInputFingerprint, recoveryJournalForDocument, mergeRecoveredManualConversation } from './runRecoveryDocument';
 import { prepareManualHistoryCapacity, persistManualHistoryWithNativeProof } from './manualHistoryRetention';
 import { subscribePageErrors, type PageErrorReport } from './pageErrors';
-import { loadPageRepairRecords, pageRepairDecision, pageRepairDisplayText, pageRepairMessage, pageRepairTarget, savePageRepairRecord } from './pageRepair';
+import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, pageRepairDecision, pageRepairDisplayText, pageRepairMessage, pageRepairRetryAfter, pageRepairTarget, savePageRepairRecord } from './pageRepair';
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
 import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage } from './surfaceMessages';
@@ -1577,6 +1577,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       onStatus(node.id, { state: 'running' });
       const result = await exec(node, manualMessage!);
       onStatus(node.id, { state: result.unconfirmed ? 'running' : result.ok ? 'done' : result.cancelled ? 'cancelled' : 'failed', output: result.output, detail: result.detail });
+      // A page repair the service refused before it ran (today's calls used up, every run slot busy) was no repair: its
+      // delivery may go back again later (pageRepair.ts), in this canvas's own storage, where repairPage recorded it.
+      const retryAfter = result.refusedCode && isPageRepairMessage(manualMessage) ? pageRepairRetryAfter(result.refusedCode, Date.now()) : null;
+      if (retryAfter !== null) deferPageRepair(baseCanvasStorage(), node.id, retryAfter);
       return journalSummary(journal.current!);
     };
     const options = {

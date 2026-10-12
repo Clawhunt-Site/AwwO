@@ -41,6 +41,8 @@ export interface ExecAgentResult {
   /** Streamed text (kept even on failure — a partial output is still evidence). */
   output: string;
   detail: string;
+  /** The service's code when it refused the request before admitting any run (quota_exceeded, plan_busy, …): nothing ran. */
+  refusedCode?: string;
 }
 
 export interface RunGraphOptions {

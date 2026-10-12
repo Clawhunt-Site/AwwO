@@ -286,6 +286,7 @@ export async function execAgentViaGateway(
     ...(t.code !== 'operation_prepare_failed' && !(t.admissionRejected && !runId) && (issueId || operationId) ? { unconfirmed: true } : {}),
     output: text,
     detail: t.detail,
+    ...(t.admissionRejected && !runId && t.code ? { refusedCode: t.code } : {}),
   };
   if (t.kind === 'no_run') return { ok: false, unconfirmed: true, output: text, detail: `已投递但无可见运行${t.detail ? `（${t.detail}）` : ''}` };
   const ok = t.status === 'succeeded';
