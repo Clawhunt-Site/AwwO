@@ -33,7 +33,7 @@ import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePoint
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
-import { nextSteps as canvasNextSteps, isNextStepsQuestion, isOutcomeQuestion, type NextStep, type NextSteps } from './nextSteps';
+import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, type NextStep, type NextSteps } from './nextSteps';
 import { reviewVerdict, reworkRequirements } from './reviewVerdict';
 import { runErrorText } from '../saas/canvasErrors';
 import { fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
@@ -102,7 +102,7 @@ import { applyRecoveredDocument, prepareRunDocument, runInputFingerprint, recove
 import { prepareManualHistoryCapacity, persistManualHistoryWithNativeProof } from './manualHistoryRetention';
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
-import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage } from './surfaceMessages';
+import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage } from './surfaceMessages';
 import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns, patchPresentation } from './sessions';
 import { forgetNode, restoreHistory } from './sessionTransport';
 import { projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
@@ -2703,8 +2703,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     void assistantLatest.current!.sendPlanningMessage(prompt);
   };
   const sendAssistantMessage = async () => {
-    // A question about what the canvas still needs is answered here, from the canvas, before it could cost a call.
-    if (!readOnlyRef.current && !pendingRef.current && !planningRequest.current && answerLocally(planning.draft.trim())) return;
+    // A question about what the canvas still needs is answered here, from the canvas, before it could cost a call; so
+    // is a message about the last run's failure, which only the canvas can see.
+    if (!readOnlyRef.current && !pendingRef.current && !planningRequest.current
+      && (answerLocally(planning.draft.trim()) || repairLocally(planning.draft.trim()))) return;
     if (!unifiedHost || !routeAssistant) { void sendPlanningMessage(); return; }
     if (readOnlyRef.current || pendingRef.current || planningRequest.current) return;
     const prompt = planning.draft.trim();
@@ -2895,6 +2897,41 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
       { id: `${id}-user`, role: 'user' as const, content: prompt }, { id: `${id}-assistant`, role: 'assistant' as const, content }].slice(-60) }));
     if (nodes.length) setAssistantOpen(true);
+    return true;
+  };
+  // 「画布的最后一个节点运行失败了」「处理失败」 (a user, 2026-10-11): the planner and a direct task cannot see the run, so a
+  // short message about its failure is handled here, by the canvas that ran it. The reply says what failed and why;
+  // unless it only asks why, the failed nodes and everything they feed run again, as 「重新运行失败的节点」 does. The
+  // allowance refusals (quota, premium) get the advice instead: running again would be refused the same way.
+  const repairLocally = (prompt: string): boolean => {
+    if (!suggested || !['failed', 'quota', 'premium'].includes(suggested.situation.kind)) return false;
+    const kind = failureRequestKind(prompt);
+    const failed = nodes.filter(node => runs[node.id]?.state === 'failed');
+    if (!kind || !failed.length) return false;
+    let content: string;
+    let scope: string[] | undefined;
+    if (suggested.situation.kind === 'failed') {
+      const first = failed[0];
+      const detail = recoveryDetailMessage(t, runs[first.id]?.detail)?.trim();
+      const reason = !detail ? t('assistant.repairNoReason') : /[。.!?！？]$/.test(detail) ? detail : `${detail}${locale === 'zh' ? '。' : '.'}`;
+      content = failed.length > 1 ? t('assistant.repairFailedMany', { node: first.title, count: failed.length, reason })
+        : t('assistant.repairFailed', { node: first.title, reason });
+      const rerun = kind === 'fix' ? suggested.steps.find(step => step.kind === 'rerun-failed') : undefined;
+      if (rerun?.kind === 'rerun-failed') {
+        scope = downstreamClosure(rerun.nodeIds);
+        const after = scope.length - rerun.nodeIds.length;
+        content += after > 0 ? t('assistant.repairRerun', { count: after }) : t('assistant.repairRerunAlone');
+      } else {
+        const action = assistantNextSteps?.actions[0]?.label;
+        if (action) content += t('assistant.answerSuggest', { action });
+      }
+    } else content = localAnswer();
+    const id = `turn-${Date.now()}-${++planningSequence.current}`;
+    setPlanningError('');
+    setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
+      { id: `${id}-user`, role: 'user' as const, content: prompt }, { id: `${id}-assistant`, role: 'assistant' as const, content }].slice(-60) }));
+    setAssistantOpen(true);
+    if (scope) void startRun(scope);
     return true;
   };
   const costNote = assistantCostNote(t, countsCalls, Boolean(unifiedHost), plannerAllowance);

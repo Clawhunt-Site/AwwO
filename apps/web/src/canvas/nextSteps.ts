@@ -217,3 +217,34 @@ export function isOutcomeQuestion(text: string): boolean {
   const s = raw.replace(/[\s\p{P}\p{S}]/gu, '');
   return ZH_OUTCOME.test(s) && ZH_WHAT_NOW.test(s);
 }
+
+// 「画布的最后一个节点运行失败了」「处理失败」「节点报错了，帮我修一下」: a short message about the last run having
+// failed, which the canvas answers itself while it has a failed node: it says what failed and why, and for anything
+// but a question of why, runs the failed nodes again (the 「重新运行失败的节点」 step). A message that also asks for a
+// change (「失败的节点改成 React」), says nothing failed, or is long is left to the assistant, which plans or works it.
+const ZH_FAILURE = /失败|报错|出错|出了错|没跑通|跑不通|跑不了|跑不起来|没跑成|运行不了|运行不起来|执行不了|挂了|崩了/;
+const ZH_NOT_FAILED = /(?:没有|没|不是|并未|未|不会|别)(?:运行|执行)?失败/;
+const ZH_CHANGE = /改成|改为|换成|换为|替换|改用|修改|调整|优化|重写|美化|新增|增加|添加|加一个|加个|删除|删掉|去掉|移除|拆分|合并|连到|连接/;
+const ZH_WHY = /为什么|为啥|怎么回事|什么原因|啥原因|原因是|原因呢|哪里错|错在哪/;
+// It must be about this canvas's run: short (「处理失败」), or naming the canvas, a node, the run or "it". 「写一份项目失败
+// 原因的分析报告」 is a task about failure in general, not this canvas's.
+const ZH_REFERENCE = /节点|画布|运行|执行|组件|流程|工作流|智能体|上一个|最后一个|这个|那个|它|刚才|上次|这次/;
+const EN_FAILURE = /\b(?:fail(?:ed|s|ing|ure)?|errored|crash(?:ed|es)?|broke(?:n)?)\b/;
+const EN_CHANGE = /\b(?:change|switch|replace|rename|add|remove|delete|rewrite|use)\b/;
+const EN_WHY = /\b(?:why|what happened|reason)\b/;
+const EN_REFERENCE = /\b(?:nodes?|canvas|run|ran|step|component|workflow|agent|it|this|that|last)\b/;
+
+/** 'fix' for a message about the failure to act on, 'why' for a question of why it failed, null for anything else. */
+export function failureRequestKind(text: string): 'fix' | 'why' | null {
+  const raw = text.trim().toLowerCase();
+  if (!raw || [...raw].length > 60) return null;
+  if (/[a-z]/.test(raw) && !/[\u4e00-\u9fff]/.test(raw)) {
+    if (!EN_FAILURE.test(raw) || EN_CHANGE.test(raw) || /\b(?:not|never|didn[’']?t|hasn[’']?t|no)\b[^.?!]*\bfail/.test(raw)) return null;
+    if (raw.length > 20 && !EN_REFERENCE.test(raw)) return null;
+    return EN_WHY.test(raw) ? 'why' : 'fix';
+  }
+  const s = raw.replace(/[\s\p{P}\p{S}]/gu, '');
+  if (!ZH_FAILURE.test(s) || ZH_NOT_FAILED.test(s) || ZH_CHANGE.test(s)) return null;
+  if ([...s].length > 12 && !ZH_REFERENCE.test(s)) return null;
+  return ZH_WHY.test(s) ? 'why' : 'fix';
+}

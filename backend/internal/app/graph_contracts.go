@@ -477,8 +477,10 @@ func graphOutputPolicy(n graphNode) string {
 			"Example shape only (replace example values with actual results): " + string(shape)
 		policy += jsonOnlyPolicy
 	}
+	hasHTML := false
 	for _, f := range n.Contract.Outputs {
 		if f.Type == "html" {
+			hasHTML = true
 			policy += "\nHTML requires a complete HTML document with explicit html, head and body tags, never a path or fragment. Use self-contained inline CSS and inline SVG/data images, with no external libraries or scripts needed for presentation. " +
 				"The exceptions are three.js r128 referenced by the tag " + previewLibraryTag + " and a script whose exact URL the node instructions say AwwO supplies: AwwO's previews replace those tags with their own copies, " +
 				"so a page may use them; never paste the source of three.js or any other library into the page."
@@ -493,9 +495,18 @@ func graphOutputPolicy(n graphNode) string {
 			" a web page, prototype or browser game is delivered as {\"name\":\"index.html\",\"content\":\"<!doctype html>…\"},"+
 			" one self-contained file the reader can open and run, and any instructions that name a file must name one supplied this way.",
 			maxArtifactBytes/1024, maxArtifactsPerNode)
+	} else if !hasHTML {
+		// A text-only node that wrote "交付位置：/workspace/output/index.html" (2026-10-11) sent its reader, and the
+		// canvas assistant asked to find it, looking for a folder that exists nowhere they can see.
+		policy += textOnlyDeliveryPolicy
 	}
 	return policy
 }
+
+// textOnlyDeliveryPolicy ends the output policy of a node whose contract has no file or html field.
+const textOnlyDeliveryPolicy = "\nOnly the fields above reach the reader: AwwO shows their text on the canvas and in Results." +
+	" A file you write while working stays in a private workspace the reader cannot open, so never point the reader to a file path" +
+	" or folder (such as /workspace/output/index.html) as where a result is; put the result itself, or what it is, in the fields."
 
 func graphSystemPrompt(instructions, policy string) string {
 	if policy == "" {
@@ -513,14 +524,171 @@ const maxRestoredClosers = 8
 // graphOutputJSONText is the one normalization every reader of a node's delivered JSON
 // applies, so contract validation, artifact storage and transcript projection always read
 // the same object. A leaked reasoning preamble is healed, surrounding whitespace and one
-// Markdown fence are removed, and an object whose only defect is that its final closing
-// brackets are missing gets them back. Every step is idempotent.
+// Markdown fence are removed, and the slips repairDeliveryJSON knows are repaired when the
+// object does not parse as written. Every step is idempotent.
 func graphOutputJSONText(output string) string {
 	text := strings.TrimSpace(stripReasoningPreamble(output))
 	if strings.HasPrefix(text, "```") && strings.HasSuffix(text, "```") {
 		text = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(text, "```json"), "```"), "```"))
 	}
-	return closeUnterminatedJSONObject(text)
+	return repairDeliveryJSON(text)
+}
+
+// repairDeliveryJSON repairs the slips models make when they write a long delivery object by hand, each with one
+// reading of what the model meant, and only when the object does not parse as written. All 14 deliveries refused as
+// "Output must be a JSON object keyed by output field IDs" from 2026-09-28 to 2026-10-12 came from the default model
+// (qwen3.8-27b-p6); the classes they showed are repaired here:
+//   - the final closing brackets are missing (closeUnterminatedJSONObject);
+//   - the last string value lacks only its closing quote, with exactly the brackets that were open when it began
+//     written after it (quoteUnterminatedFinalString): a complete game whose `"content":"<!DOCTYPE html>…</html>\n`
+//     went straight on to `}` `}`, twice in a row on one canvas;
+//   - inside strings, a raw line break, tab or other control character, a backslash that starts no JSON escape
+//     (`\'`, `\d`, `\u{…}` in embedded code: the backslash itself was meant), and an ASCII double quote that cannot
+//     end its string (点击"开始"), by the rule the planner's repair uses (planQuoteCloses).
+//
+// A model answer stopped by its output cap never gets here: every runtime fails it before delivery (openai-agents
+// as MODEL_OUTPUT_LIMIT, Pi on any stop reason but "stop"). A repair whose result still is not one JSON object
+// returns the text unchanged, so it keeps failing, and the contract is checked on what the repair produced.
+func repairDeliveryJSON(text string) string {
+	if !strings.HasPrefix(text, "{") || json.Valid([]byte(text)) {
+		return text
+	}
+	candidates := []string{closeUnterminatedJSONObject(text)}
+	base := text
+	if quoted, ok := quoteUnterminatedFinalString(text); ok {
+		base = quoted
+		candidates = append(candidates, quoted)
+	}
+	clean := repairDeliveryStrings(base)
+	candidates = append(candidates, clean, closeUnterminatedJSONObject(clean))
+	for _, candidate := range candidates {
+		var object map[string]json.RawMessage
+		if json.Valid([]byte(candidate)) && json.Unmarshal([]byte(candidate), &object) == nil && object != nil {
+			return candidate
+		}
+	}
+	return text
+}
+
+// quoteUnterminatedFinalString adds the closing quote a delivery's last string value lacks. It applies only when the
+// text ends inside a string and what follows that string's last content is exactly, apart from white space, the
+// brackets that were open when the string began, innermost first. ok is false for any other text.
+func quoteUnterminatedFinalString(text string) (string, bool) {
+	if !strings.HasPrefix(text, "{") {
+		return text, false
+	}
+	var open, atStart []byte
+	inString, escaped := false, false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+			atStart = append(atStart[:0], open...)
+		case '{':
+			open = append(open, '}')
+		case '[':
+			open = append(open, ']')
+		case '}', ']':
+			if len(open) == 0 || open[len(open)-1] != c {
+				return text, false
+			}
+			open = open[:len(open)-1]
+			if len(open) == 0 {
+				return text, false
+			}
+		}
+	}
+	if !inString || len(atStart) == 0 || len(atStart) > maxRestoredClosers {
+		return text, false
+	}
+	const space = " \t\r\n"
+	end := len(strings.TrimRight(text, space))
+	cut := end
+	// Read backwards: the text's last bracket closes the outermost container, the first one open.
+	for _, closer := range atStart {
+		cut = len(strings.TrimRight(text[:cut], space))
+		if cut == 0 || text[cut-1] != closer {
+			return text, false
+		}
+		cut--
+	}
+	cut = len(strings.TrimRight(text[:cut], space))
+	return text[:cut] + `"` + text[cut:end], true
+}
+
+// repairDeliveryStrings rewrites, inside the strings of a delivery object, what JSON does not allow there: a control
+// character becomes its escape, a backslash that starts no JSON escape becomes an escaped backslash, and a double
+// quote that cannot end its string (planQuoteCloses) becomes an escaped quote. Text outside strings is unchanged.
+func repairDeliveryStrings(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 32)
+	inString := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !inString {
+			b.WriteByte(c)
+			if c == '"' {
+				inString = true
+			}
+			continue
+		}
+		switch {
+		case c == '\\':
+			if i+1 < len(s) && strings.IndexByte(`"\/bfnrt`, s[i+1]) >= 0 {
+				b.WriteByte(c)
+				i++
+				b.WriteByte(s[i])
+			} else if i+5 < len(s) && s[i+1] == 'u' && isHex4(s[i+2:i+6]) {
+				b.WriteString(s[i : i+6])
+				i += 5
+			} else {
+				b.WriteString(`\\`)
+			}
+		case c == '"':
+			if planQuoteCloses(s[i+1:]) {
+				inString = false
+				b.WriteByte(c)
+			} else {
+				b.WriteString(`\"`)
+			}
+		case c == '\n':
+			b.WriteString(`\n`)
+		case c == '\r':
+			b.WriteString(`\r`)
+		case c == '\t':
+			b.WriteString(`\t`)
+		case c < 0x20:
+			fmt.Fprintf(&b, `\u%04x`, c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+func isHex4(s string) bool {
+	if len(s) != 4 {
+		return false
+	}
+	for i := 0; i < 4; i++ {
+		c := s[i]
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // closeUnterminatedJSONObject repairs one defect models make on long deliveries: a JSON

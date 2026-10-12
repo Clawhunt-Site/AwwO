@@ -399,6 +399,9 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 		a.finish(tid, rid, "failed", "", "invalid_computer_snapshot")
 		return
 	}
+	// The workspace holds none of the canvas the task came from, so the task reads an account of it after the user's
+	// words (canvas_briefing.go); the transcript keeps the user's words alone.
+	prompt += a.canvasBriefing(ctx, tid, sid, prompt)
 	lease := &computerLease{ctx: ctx, tenantID: tid, runID: rid, sessionID: sid, snapshot: snap}
 	token := randomID() + randomID()
 	key := tokenHash(token)
@@ -469,6 +472,9 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			if len(ev.Text) > 65536 || !utf8.ValidString(ev.Text) || strings.ContainsRune(ev.Text, 0) || (ev.Role != "assistant" && ev.Role != "user" && ev.Role != "tool" && ev.Role != "system") {
 				a.finish(tid, rid, "failed", "", "invalid_computer_message")
 				return
+			}
+			if ev.Role == "user" {
+				ev.Text = withoutCanvasBriefing(ev.Text)
 			}
 			e = a.computerEvent(ctx, tid, rid, map[string]any{"type": ev.Type, "id": randomID(), "role": ev.Role, "text": ev.Text, "truncated": ev.Truncated, "createdAt": time.Now().UTC()})
 		case "computer_approval":

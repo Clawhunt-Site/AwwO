@@ -83,8 +83,14 @@ const RECOVERY_DETAIL_KEYS = {
 export function recoveryDetailMessage(t: CanvasTranslate, detail?: string): string | undefined {
   if (!detail) return undefined;
   const key = RECOVERY_DETAIL_KEYS[detail as keyof typeof RECOVERY_DETAIL_KEYS];
-  return key ? t(key) : detail;
+  if (key) return t(key);
+  // The API's delivery-contract refusals (graph_contracts.go graphOutputFiles) say what a model's answer lacked, in
+  // terms of field IDs the reader never sees; the reader is told what it means and what to do.
+  if (DELIVERY_FORMAT_DETAIL.test(detail)) return t('surface.deliveryFormat');
+  return detail;
 }
+
+const DELIVERY_FORMAT_DETAIL = /^(?:Output must be a JSON object keyed by output field IDs|Missing output \S+|Output \S+ (?:requires|allows only|must be) .+)$/;
 
 const PREFLIGHT_KEYS: Record<PreflightIssueCode, CanvasTextKey> = {
   empty_graph: 'run.preflightEmptyGraph',
