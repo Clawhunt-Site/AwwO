@@ -66,6 +66,7 @@ const runErrors: Record<string, [string, string]> = {
   media_storage_failed: ['生成结果保存失败，请重试。', 'The result could not be saved. Please try again.'],
   media_storage_full: ['媒体存储空间不足，生成结果未保存；请联系管理员。', 'Media storage is full, so the result was not saved. Contact an administrator.'],
   media_reference_unavailable: ['参考图读取或上传失败，这次没有生成，也没有扣积分；请重新附上图片再试。', 'The reference picture could not be read or uploaded, so nothing was generated or charged. Attach the picture again and retry.'],
+  image_input_unavailable: ['附带的图片读取失败，这次没有调用模型，也没有扣积分；请重新附上图片再发送。', 'An attached picture could not be read, so the model was not called and nothing was charged. Attach the picture again and resend.'],
   // A route-limited workspace's free allowance for a premium route is a few calls a day or none at all
   // (0). A paid plan is what lifts it, so the copy offers that first (the run details add an upgrade
   // button); the free way forward is the default model on the node AND on any team member that chose

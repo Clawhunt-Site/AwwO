@@ -47,6 +47,11 @@ The Go API (`backend/`) reads the text layer of attached PDFs with
 LICENSE file when distributing the source. It is compiled into the API binary
 and does not change AwwO's own license.
 
+The Go API also scales the pictures it shows a model and reads WebP with
+`golang.org/x/image`, pinned to `v0.45.0` in `backend/go.mod` and
+`backend/go.sum` (BSD-3-Clause, Copyright 2009 The Go Authors). It is compiled
+into the API binary; preserve its LICENSE file when distributing the source.
+
 ## Existing fusion boundary
 
 The first fusion release keeps each upstream runtime isolated. SuperClaw exposes

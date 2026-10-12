@@ -38,6 +38,9 @@ type piHealth struct {
 	// ActiveRuns and MaxConcurrency are the worker's slots in use and in all; the router leaves one free.
 	ActiveRuns     int `json:"activeRuns,omitempty"`
 	MaxConcurrency int `json:"maxConcurrency,omitempty"`
+	// ImageInput is the worker's claim that it takes a run's pictures ("images" on /internal/runs) and shows them
+	// to the models its catalog marks as taking images (vision.go). Only a literal true counts.
+	ImageInput bool `json:"imageInput,omitempty"`
 	// Allowed is the workspace model entitlement frozen with this catalog. nil
 	// means unrestricted, so an omitted field keeps every persisted snapshot
 	// decoding exactly as it did before. It travels inside execution snapshots so
@@ -49,6 +52,23 @@ type runtimeTool struct {
 	ID               string `json:"id"`
 	ContextTextBytes int    `json:"contextTextBytes"`
 }
+
+// UnmarshalJSON decodes a worker's health. Only a literal true sets ImageInput; any other value leaves it false
+// instead of failing the decode, so a malformed claim costs the pictures, never the runtime's text runs.
+func (h *piHealth) UnmarshalJSON(b []byte) error {
+	type plain piHealth
+	var v struct {
+		plain
+		ImageInput json.RawMessage `json:"imageInput"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*h = piHealth(v.plain)
+	h.ImageInput = bytes.Equal(bytes.TrimSpace(v.ImageInput), []byte("true"))
+	return nil
+}
+
 type piModel struct {
 	ID                   string `json:"id"`
 	Name                 string `json:"name"`
@@ -70,6 +90,9 @@ type piModel struct {
 	// runtime, and it is omitted when false so a catalog without the capability
 	// serializes exactly as it did before.
 	StructuredOutput bool `json:"structuredOutput,omitempty"`
+	// Input is what the model takes, as the worker's catalog lists it: "text", and "image" for a model that sees
+	// pictures (vision.go). A list that cannot be read is dropped, so the model is a text model; omitted when empty.
+	Input []string `json:"input,omitempty"`
 	// structuredOutputMalformed remembers a worker value that was neither a boolean
 	// nor null, so the probe can record why the capability was cleared.
 	structuredOutputMalformed bool
@@ -84,11 +107,13 @@ func (m *piModel) UnmarshalJSON(b []byte) error {
 	var v struct {
 		plain
 		StructuredOutput json.RawMessage `json:"structuredOutput"`
+		Input            json.RawMessage `json:"input"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
 		return err
 	}
 	*m = piModel(v.plain)
+	m.Input = modelInputKinds(v.Input)
 	raw := bytes.TrimSpace(v.StructuredOutput)
 	m.StructuredOutput = bytes.Equal(raw, []byte("true"))
 	m.structuredOutputMalformed = len(raw) > 0 && !m.StructuredOutput && !bytes.Equal(raw, []byte("false")) && !bytes.Equal(raw, []byte("null"))
@@ -578,6 +603,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if attached != nil {
+		// Pictures the model takes are frozen with the run and marked shown before the block is written (vision.go).
+		freezeVisionImages(&snapshot, attached)
 		b.Prompt = attachmentUserPrompt(b.Prompt, attached)
 		if snapshot.Workspace != nil {
 			snapshot.Workspace.Inputs = append(snapshot.Workspace.Inputs, attached.Workspace...)
@@ -764,6 +791,20 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	}
 	facts := invocationMetadata(snapshot, nil)
 	facts.Timing.QueueMs = int64ptr(queueDuration.Milliseconds())
+	// The pictures the model is shown are read back and checked before any call is reserved: one that is gone or
+	// changed fails the run at no cost (vision.go).
+	var images []visionImage
+	imageChars := 0
+	if snapshot.Vision != nil {
+		if images, imageChars, e = a.visionImages(ctx, tid, snapshot.Vision); e != nil {
+			if status, code, ended := runContextOutcome(ctx); ended {
+				a.finish(tid, id, status, "", code)
+				return
+			}
+			a.finish(tid, id, "failed", "", "image_input_unavailable")
+			return
+		}
+	}
 	// What the call will send at least; the full request, history included, replaces it once built. The call is
 	// reserved before the history is read, so a run counts against its allowances from the moment it starts.
 	facts.InputBytes = int64(len(prompt) + len(instructions))
@@ -802,12 +843,16 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	if snapshot.OutputContract != nil {
 		request["outputContract"] = snapshot.OutputContract
 	}
+	if len(images) > 0 {
+		request["images"] = images
+	}
 	body, e := json.Marshal(request)
 	if e != nil {
 		finish("failed", "", "invalid_request")
 		return
 	}
-	facts.InputBytes = int64(len(body))
+	// A picture's base64 is not what the model reads: estimates count each one as visionImageEstimateBytes.
+	facts.InputBytes = int64(len(body) - imageChars + len(images)*visionImageEstimateBytes)
 	runtimeCompleted := false
 	defer func() {
 		if !runtimeCompleted {

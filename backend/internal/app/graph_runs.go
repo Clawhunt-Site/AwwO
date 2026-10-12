@@ -784,6 +784,11 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 			snap.OutputPolicy += "\n\n" + graphFileDataPolicy
 		}
 	}
+	if turn == nil {
+		// A node of a canvas run shows its model the pictures it is given, as a message does (vision.go); a
+		// collaboration's turns stay as they are.
+		freezeVisionImages(&snap, uploads)
+	}
 	prompt = attachmentUserPrompt(prompt, uploads)
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
 	framedInstructions := knowledgeSystemPrompt(taskFrameSystemPrompt(instructions, snap.TaskFrame), snap.Knowledge)

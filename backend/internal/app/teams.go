@@ -40,6 +40,8 @@ type executionSnapshot struct {
 	Knowledge *knowledgeContext `json:"knowledge,omitempty"`
 	Computer  *computerPlan     `json:"computer,omitempty"`
 	Media     *mediaPlan        `json:"media,omitempty"`
+	// Vision is the pictures this run's model is shown with its message (vision.go).
+	Vision *visionPlan `json:"vision,omitempty"`
 
 	Runtime          string             `json:"runtime,omitempty"`
 	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`
