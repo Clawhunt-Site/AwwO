@@ -37,7 +37,11 @@
     "capturedOn": "2026-10-12",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents",
-    "outputLocale": "zh"
+    "outputLocale": "zh",
+    "media": {
+      "completed": 4,
+      "total": 4
+    }
   },
   "papercraft-puzzle": {
     "completed": 7,
@@ -97,7 +101,11 @@
     "capturedOn": "2026-10-12",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents",
-    "outputLocale": "zh"
+    "outputLocale": "zh",
+    "media": {
+      "completed": 6,
+      "total": 6
+    }
   },
   "summer-ad": {
     "completed": 6,

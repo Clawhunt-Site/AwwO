@@ -25,12 +25,19 @@ it.each(['neon-city', 'shanhai-vn'])('runs %s with the pictures and the clip its
   const strip = screen.getByRole('region', { name: '媒体节点在这次运行里生成的素材' });
   expect(within(strip).getAllByRole('listitem')).toHaveLength(media.length);
   for (const value of media) expect(within(strip).getByText(value.title.zh)).toBeVisible();
-  expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent(`${PRODUCTION_WORKFLOWS[id].nodes.length} 个 Agent`);
+  // The run counts as the team above does: its agents are agents, its media column is a stage, its nodes include the media.
+  const agents = PRODUCTION_WORKFLOWS[id].nodes.length, nodes = agents + media.length;
+  expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent(`${agents} 个 Agent，3 个阶段，`);
+  expect(screen.getByText(`${nodes}/${nodes} 个节点完成`)).toBeVisible();
+  expect(within(strip).getByText(`阶段 01 · 媒体节点 · ${media.length} 个，和 Agent 同一次运行生成`)).toBeVisible();
+  const stages = screen.getByRole('list', { name: '按阶段查看每个 Agent' });
+  expect([...stages.querySelectorAll('.production-made-stage')].map(label => label.firstChild?.textContent)).toEqual(id === 'neon-city' ? ['02', '03'] : ['01', '02', '03']);
 });
 
-
-it('counts a media case’s agents without its media slot, which still shows as a stage', async () => {
+it('counts a media case’s agents without its media slot, which still shows as a stage, and its media among its nodes', async () => {
   render(<SaaSPreferencesProvider><ProductionCases /></SaaSPreferencesProvider>);
+  for (const [title, chip] of [['霓虹之城', '真实运行 · 6/6 节点完成'], ['山海异闻录', '真实运行 · 9/9 节点完成']] as const)
+    expect(within(screen.getByRole('button', { name: title }).closest<HTMLElement>('.production-card')!).getByText(chip)).toBeVisible();
   for (const [title, line] of [['霓虹之城', '2 个 Agent · 3 个阶段'], ['山海异闻录', '3 个 Agent · 3 个阶段']] as const) {
     fireEvent.click(screen.getByRole('button', { name: title }));
     const dialog = screen.getByRole('dialog', { name: title });

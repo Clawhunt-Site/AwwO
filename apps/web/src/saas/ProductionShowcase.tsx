@@ -81,11 +81,13 @@ function ResultFrame({ html, title, media }: { html: string; title: string; medi
 const NO_MEDIA: Readonly<Record<string, string>> = {};
 
 /** What the canvas's image and video nodes generated in the run, shown small beside the agents (they are not agents). */
-function MediaStrip({ record, files }: { record: ProductionRunRecord; files: Readonly<Record<string, string>> | undefined }) {
+function MediaStrip({ record, files, stage }: { record: ProductionRunRecord; files: Readonly<Record<string, string>> | undefined; stage?: string }) {
   const { locale, t } = useSaaSPreferences();
   if (!record.media?.length) return null;
+  const count = record.media.length;
   return <section className="production-made-media" aria-label={t('媒体节点在这次运行里生成的素材', 'What the media nodes generated in this run')}>
-    <span>{t(`媒体节点 · ${record.media.length} 个，和 Agent 同一次运行生成`, `${record.media.length} media nodes, generated in the same run`)}</span>
+    <span>{stage ? t(`阶段 ${stage} · 媒体节点 · ${count} 个，和 Agent 同一次运行生成`, `Stage ${stage} · ${count} media nodes, generated in the same run`)
+      : t(`媒体节点 · ${count} 个，和 Agent 同一次运行生成`, `${count} media nodes, generated in the same run`)}</span>
     <ul>{record.media.map(item => {
       const url = files?.[item.files[0] ?? ''];
       return <li key={item.id}>
@@ -138,6 +140,12 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
   </section>;
 
   const stages = [...new Set(record.nodes.map(node => node.column))].sort((a, b) => a - b).map(column => record.nodes.filter(node => node.column === column).sort((a, b) => a.row - b.row));
+  // A media node's stage is where its canvas placed it, so the run's stages are counted and numbered over agents and
+  // media alike (as the team above shows them), and its nodes include the media nodes.
+  const mediaColumns = [...new Set((record.media ?? []).flatMap(value => workflow?.media?.find(spec => spec.id === value.id)?.column ?? []))].sort((a, b) => a - b);
+  const columns = [...new Set([...stages.map(group => group[0].column), ...mediaColumns])].sort((a, b) => a - b);
+  const stageLabel = (column: number) => String(columns.indexOf(column) + 1).padStart(2, '0');
+  const nodesDone = record.completed + (record.media ?? []).filter(value => value.status === 'done').length, nodeCount = record.total + (record.media?.length ?? 0);
   const deliveryNode = record.nodes.find(value => value.id === record.artifactNodeId);
   const artifact = deliveryNode?.status === 'done' && deliveryNode.outputType === 'html' && deliveryNode.output ? deliveryNode : undefined;
   const node = record.nodes.find(value => value.id === (selected ?? artifact?.id ?? record.nodes[0].id)) ?? record.nodes[0];
@@ -149,18 +157,18 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
   return <section className={`production-made${focused ? ' is-result-focused' : ''}`} aria-labelledby={`${id}-title`}>
     <header className="production-made-heading">
       <div><span className="production-eyebrow"><span />{t('它是怎么做出来的', 'HOW IT WAS MADE')}</span>
-        <h3 id={`${id}-title`}>{t(`${record.total} 个 Agent，${stages.length} 个阶段，${formatDuration(record.seconds, 'zh')}跑完`, `${record.total} agents, ${stages.length} stages, ${formatDuration(record.seconds, 'en')} end to end`)}</h3>
+        <h3 id={`${id}-title`}>{t(`${record.total} 个 Agent，${columns.length} 个阶段，${formatDuration(record.seconds, 'zh')}跑完`, `${record.total} agents, ${columns.length} stages, ${formatDuration(record.seconds, 'en')} end to end`)}</h3>
         <p className="production-made-receipt"><span className="production-label is-real">{t('真实运行', 'Real run')}</span>
-          <span>{record.model}</span><span>{record.capturedOn}</span><span>{t(`${record.completed}/${record.total} 个节点完成`, `${record.completed}/${record.total} nodes done`)}</span></p></div>
+          <span>{record.model}</span><span>{record.capturedOn}</span><span>{t(`${nodesDone}/${nodeCount} 个节点完成`, `${nodesDone}/${nodeCount} nodes done`)}</span></p></div>
       {reuse}
     </header>
     {translated && <p className="production-made-language">{t(`Agent 用${record.outputLocale === 'en' ? '英文' : '中文'}完成了这次运行，内容按原样显示。`, `The agents worked in ${record.outputLocale === 'zh' ? 'Chinese' : 'English'}; their outputs are shown as delivered.`)}</p>}
     <div className="production-made-grid">
       <div className="production-made-process" hidden={focused}>
-        <MediaStrip record={record} files={files} />
+        <MediaStrip record={record} files={files} stage={mediaColumns.map(stageLabel).join(locale === 'zh' ? '、' : ', ') || undefined} />
         <ol className="production-made-stages" aria-label={t('按阶段查看每个 Agent', 'Every agent, stage by stage')}>
-          {stages.map((group, index) => <li key={group[0].column}>
-            <span className="production-made-stage">{String(index + 1).padStart(2, '0')}{group.length > 1 && <small>{t(`${group.length} 路并行`, `${group.length} in parallel`)}</small>}</span>
+          {stages.map(group => <li key={group[0].column}>
+            <span className="production-made-stage">{stageLabel(group[0].column)}{group.length > 1 && <small>{t(`${group.length} 路并行`, `${group.length} in parallel`)}</small>}</span>
             <div>{group.map(value => <button type="button" key={value.id} aria-pressed={value.id === node.id} aria-controls={`${id}-node`} onClick={() => setSelected(value.id)}>
               <span>{value.title[locale]}</span><StatusChip status={value.status} />{value.seconds !== undefined && <small>{formatDuration(value.seconds, locale)}</small>}
             </button>)}</div>

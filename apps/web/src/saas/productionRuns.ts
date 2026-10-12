@@ -88,6 +88,8 @@ export interface ProductionRunSummary {
   readonly runtime: string;
   /** The language the agents worked in. */
   readonly outputLocale: UiLocale;
+  /** A case with image or video nodes: how many of them completed (nodes, but not agents). */
+  readonly media?: { readonly completed: number; readonly total: number };
 }
 // summary.json types its locale as a plain string; tests pin every entry to its published record.
 export const PRODUCTION_RUN_SUMMARY = summary as Readonly<Record<string, ProductionRunSummary>>;

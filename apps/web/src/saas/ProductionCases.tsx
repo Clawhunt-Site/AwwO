@@ -68,7 +68,8 @@ function RunChip({ item }: { item: ProductionCase }) {
   const { t } = useSaaSPreferences();
   const run = PRODUCTION_RUN_SUMMARY[item.id];
   if (!run) return null;
-  return <span className="production-run-chip">{t(`真实运行 · ${run.completed}/${run.total} 节点完成`, `Real run · ${run.completed}/${run.total} nodes done`)}</span>;
+  const done = run.completed + (run.media?.completed ?? 0), total = run.total + (run.media?.total ?? 0);
+  return <span className="production-run-chip">{t(`真实运行 · ${done}/${total} 节点完成`, `Real run · ${done}/${total} nodes done`)}</span>;
 }
 
 function CaseCard({ item, active, onOpen }: { item: ProductionCase; active: boolean; onOpen: (item: ProductionCase, trigger: HTMLButtonElement) => void }) {

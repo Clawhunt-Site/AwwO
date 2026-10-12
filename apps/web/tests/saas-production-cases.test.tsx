@@ -75,7 +75,7 @@ it('labels the cover footage for what it is, and claims delivery only where a pu
     expect(within(card).getByRole('list', { name: 'Agent 团队，按阶段' }).children).toHaveLength(item.stages.length);
     if (run?.delivered) { expect(within(card).getByText('已交付')).toBeVisible(); expect(card.querySelector('.production-delivered svg')).not.toBeNull(); }
     else { expect(within(card).getByText('交付目标')).toBeVisible(); expect(within(card).queryByText('已交付')).toBeNull(); expect(card.querySelector('.production-delivered svg')).toBeNull(); }
-    if (run) expect(within(card).getByText(`真实运行 · ${run.completed}/${run.total} 节点完成`)).toBeVisible();
+    if (run) expect(within(card).getByText(`真实运行 · ${run.completed + (run.media?.completed ?? 0)}/${run.total + (run.media?.total ?? 0)} 节点完成`)).toBeVisible();
     else expect(card.querySelector('.production-run-chip')).toBeNull();
   });
   expect(PRODUCTION_RUN_SUMMARY['knowledge-base']).toMatchObject({ completed: 7, total: 7, delivered: true });
