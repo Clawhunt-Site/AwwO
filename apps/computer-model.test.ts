@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { computerCompletionResponse } from './computer-model.ts';
+import { bedrockComputerRequest, bedrockOpening, computerCompletionResponse } from './computer-model.ts';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
@@ -213,6 +213,42 @@ test('Pi serves a Bedrock model to managed execution through the Converse bridge
   assert.deepEqual(fake.sent[1].input.messages.at(-1), { role: 'user', content: [{ toolResult: { toolUseId: 'tooluse_Ab12', content: [{ text: 'verified' }] } }] });
   assert.equal(s.calls.length, 0);
   assert.deepEqual(outbound, []);
+});
+
+test('a managed-execution thread that opens with the engine\'s greeting reaches Bedrock at its user turn, the greeting as context', async t => {
+  const fake = fakeConverse(async function* () {
+    yield { messageStart: { role: 'assistant' } };
+    yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: '51 JPH.' } } };
+    yield { messageStop: { stopReason: 'end_turn' } };
+    yield { metadata: { usage: { inputTokens: 30, outputTokens: 4 } } };
+  });
+  const bedrockCall = await inProcessCall(fake.sdk);
+  const s = await serve(t, 'anthropic_messages', () => assert.fail('No other provider expected'),
+    { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: 'ABSKbedrockkey000000000000000000' }, 'pi', { bedrockCall });
+  // The engine's first request of every task on production (2026-10-12): its system prompt, its greeting, the user.
+  const greeting = "Hi, I'm AwwO workspace. What would you like me to do?";
+  const opened = (messages: unknown[]) => input({ model: 'bedrock.gemma-3-27b', completion: { tools: [tool], messages } });
+  const response = await s.send(opened([{ role: 'system', content: 'You are AwwO workspace.' }, { role: 'assistant', content: greeting }, { role: 'user', content: 'Build the project' }]));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).completion.choices[0].message.content, '51 JPH.');
+  const sent = fake.sent[0].input;
+  assert.deepEqual(sent.messages, [{ role: 'user', content: [{ text: 'Build the project' }] }]);
+  assert.deepEqual(sent.system, [{ text: 'You are AwwO workspace.' }, { text: `Earlier in this conversation you said:\n${greeting}` }]);
+  assert.equal(sent.toolConfig.tools[0].toolSpec.name, 'workspace_exec');
+  // An opening that called tools is not rewritten: the bridge refuses it, by kind, before any request is sent.
+  const refused = await s.send(opened([{ role: 'assistant', content: null, tool_calls: [{ ...call, id: 'tooluse_Op1' }] },
+    { role: 'tool', tool_call_id: 'tooluse_Op1', content: 'done' }, { role: 'user', content: 'Build the project' }]));
+  assert.equal(refused.status, 502);
+  assert.equal((await refused.json()).error.reason, 'bedrock:400:invalid_request_error');
+  assert.equal(fake.sent.length, 1);
+  // Later calls of the same task keep the greeting as context and replay the tool turns as Converse expects.
+  const message = { role: 'assistant', content: null, tool_calls: [{ ...call, id: 'tooluse_Ab12' }] };
+  const body = bedrockComputerRequest({ tools: [tool], messages: [{ role: 'system', content: 'S' }, { role: 'assistant', content: greeting },
+    { role: 'user', content: 'Build the project' }, message, { role: 'tool', tool_call_id: 'tooluse_Ab12', content: 'verified' }] }, { model: 'm', baseURL: 'http://b', maxTokens: 64 } as any).body;
+  assert.deepEqual(body.messages.map((m: any) => m.role), ['system', 'system', 'user', 'assistant', 'tool']);
+  // Nothing to move: a thread that opens on its user turn, or an empty greeting, is sent as it came (less the greeting).
+  assert.deepEqual(bedrockOpening([{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }]), [{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }]);
+  assert.deepEqual(bedrockOpening([{ role: 'assistant', content: '  ' }, { role: 'user', content: 'U' }]), [{ role: 'user', content: 'U' }]);
 });
 
 test('a Bedrock stream that fails or ends early is a failed call, never a partial answer', async t => {

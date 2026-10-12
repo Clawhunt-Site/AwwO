@@ -187,6 +187,23 @@ export function computerCompletionResponse(raw: ObjectValue, protocol: string, t
   return { id: `chatcmpl-awwo-${randomUUID()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: 'awwo-model', choices: [{ index: 0, message, finish_reason: finish }] };
 }
 
+/** Converse opens a conversation on a user turn, and the bridge refuses one that does not. The managed-execution engine
+ *  opens every task's thread with its own greeting, so its first request is the system prompt, an assistant message
+ *  ("Hi, I'm AwwO workspace. What would you like me to do?") and only then the user's message (production,
+ *  2026-10-12). Such an opening asks nothing: its text travels as context at the end of the system prompt and the
+ *  conversation starts at the first user message. Only text is moved; an opening with tool calls or tool results stays
+ *  as it is, and the bridge refuses it. */
+export function bedrockOpening(messages: Message[]): Message[] {
+  const first = messages.findIndex(msg => msg.role === 'user');
+  if (first <= 0) return messages;
+  const opening = messages.slice(0, first);
+  if (!opening.some(msg => msg.role === 'assistant') || opening.some(msg => msg.role === 'tool' || msg.tool_calls?.length)) return messages;
+  const said = opening.filter(msg => msg.role === 'assistant' && msg.content?.trim()).map(msg => msg.content!.trim());
+  return [...opening.filter(msg => msg.role !== 'assistant'),
+    ...(said.length ? [{ role: 'system', content: `Earlier in this conversation you said:\n${said.join('\n\n')}` }] : []),
+    ...messages.slice(first)];
+}
+
 /** A Bedrock profile's call goes to the Converse bridge, which answers streaming Chat Completions only: the call is
  *  sent as one streaming request (no reasoning effort and no chat-template switch, which the bridge refuses) and the
  *  stream is gathered back into one completion by gatherChatStream. */
@@ -194,7 +211,7 @@ export function bedrockComputerRequest(completion: Completion, model: Profile, o
   const maxTokens = options.maxTokens ? Math.min(model.maxTokens, options.maxTokens) : model.maxTokens;
   return { url: `${model.baseURL.replace(/\/+$/, '')}/chat/completions`, body: {
     model: model.model, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens,
-    messages: completion.messages.map(({ reasoning_details: _, ...msg }) => msg),
+    messages: bedrockOpening(completion.messages).map(({ reasoning_details: _, ...msg }) => msg),
     ...(completion.tools.length ? { tools: completion.tools } : {}) } };
 }
 
