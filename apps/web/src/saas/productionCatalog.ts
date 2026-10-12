@@ -41,7 +41,9 @@ const DESIGN = role('策划', 'Design'), ART = role('美术', 'Art'), LEVELS = r
 const SOUND = role('音效', 'Sound'), PHYSICS = role('物理', 'Physics'), MODELLING = role('建模', 'Modelling');
 const RENDERING = role('渲染', 'Rendering'), FRONT_END = role('前端', 'Front end'), PRODUCT = role('产品', 'Product');
 const REVIEW = role('验收', 'Review'), BACKEND = role('后端', 'Backend');
-const MEDIA = role('媒体', 'Media');
+/** The media nodes of a stage, shown as one slot of the team: they generate pictures and clips and are not agents. */
+export const MEDIA_ROLE: Localized = role('媒体', 'Media');
+const MEDIA = MEDIA_ROLE;
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
   {

@@ -1,6 +1,7 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import ProductionShowcase from '../src/saas/ProductionShowcase';
+import { ProductionCases } from '../src/saas/ProductionCases';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
@@ -25,4 +26,18 @@ it.each(['neon-city', 'shanhai-vn'])('runs %s with the pictures and the clip its
   expect(within(strip).getAllByRole('listitem')).toHaveLength(media.length);
   for (const value of media) expect(within(strip).getByText(value.title.zh)).toBeVisible();
   expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent(`${PRODUCTION_WORKFLOWS[id].nodes.length} 个 Agent`);
+});
+
+
+it('counts a media case’s agents without its media slot, which still shows as a stage', async () => {
+  render(<SaaSPreferencesProvider><ProductionCases /></SaaSPreferencesProvider>);
+  for (const [title, line] of [['霓虹之城', '2 个 Agent · 3 个阶段'], ['山海异闻录', '3 个 Agent · 3 个阶段']] as const) {
+    fireEvent.click(screen.getByRole('button', { name: title }));
+    const dialog = screen.getByRole('dialog', { name: title });
+    expect(within(dialog).getByText(line)).toBeVisible();
+    expect(within(dialog).getAllByText('媒体').length).toBeGreaterThan(0);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    cleanup();
+    render(<SaaSPreferencesProvider><ProductionCases /></SaaSPreferencesProvider>);
+  }
 });
