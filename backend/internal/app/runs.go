@@ -35,6 +35,9 @@ type piHealth struct {
 	// CompletionOptions are the per-call options the worker's /internal/computer-model keeps
 	// (thinking, maxTokens); the assistant router uses a worker only when it lists them.
 	CompletionOptions []string `json:"completionOptions,omitempty"`
+	// ComputerBedrock is the worker's claim that its /internal/computer-model also serves the Bedrock models of its
+	// catalog (through its Converse bridge), so managed execution may offer them. Only a literal true counts.
+	ComputerBedrock bool `json:"computerBedrock,omitempty"`
 	// ActiveRuns and MaxConcurrency are the worker's slots in use and in all; the router leaves one free.
 	ActiveRuns     int `json:"activeRuns,omitempty"`
 	MaxConcurrency int `json:"maxConcurrency,omitempty"`
@@ -566,9 +569,10 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			fail(w, 403, "computer_owner_required", "Only the task owner can execute this session")
 			return
 		}
-		// Managed execution makes non-streaming completion calls, which the Bedrock bridge does
-		// not serve; refuse such a model here instead of after an invocation is reserved.
-		if snapshot.Health.modelProvider(snapshot.Model) == "bedrock" {
+		// Managed execution makes non-streaming completion calls; a worker serves a Bedrock model on that path only
+		// through its Converse bridge, which it claims on /health (computerBedrock). Without that claim such a model is
+		// refused here instead of after an invocation is reserved.
+		if snapshot.Health.modelProvider(snapshot.Model) == "bedrock" && !snapshot.Health.ComputerBedrock {
 			fail(w, 400, "computer_model_unsupported", "Managed execution cannot use this model")
 			return
 		}

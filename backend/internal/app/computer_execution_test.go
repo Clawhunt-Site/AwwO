@@ -423,6 +423,68 @@ func TestPostgresComputerRunRefusesBedrockModels(t *testing.T) {
 	}
 }
 
+// A worker that claims computerBedrock serves its Bedrock models to managed execution through its Converse bridge,
+// so a direct task on one is admitted like any other model and handed to the execution service.
+func TestPostgresComputerRunAdmitsBedrockModelsAWorkerClaims(t *testing.T) {
+	pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "computerBedrock": true, "models": []map[string]any{
+				{"id": "test-model", "provider": "test", "maxContextTextBytes": 262144},
+				{"id": "bedrock.claude-opus-5-5", "name": "Claude Opus 5.5", "provider": "bedrock", "maxContextTextBytes": 262144}}})
+			return
+		}
+		t.Error("unexpected model worker call", r.Method, r.URL.Path)
+	}))
+	defer pi.Close()
+	var runs atomic.Int32
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"service": "awwo-openmaus-worker", "ready": true, "capabilities": map[string]bool{"workspace": true, "approvals": true}})
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(200)
+			return
+		}
+		runs.Add(1)
+		w.WriteHeader(500)
+	}))
+	defer worker.Close()
+	h := newHarness(t, pi.URL)
+	h.a.cfg.OpenMausURL = worker.URL
+	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
+	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
+	owner, tid, _ := h.register(t, "computer-bedrock-claimed@example.test")
+	canvas, _, _ := h.fixture(t, owner, tid)
+	base := "/tenants/" + tid
+	runtime := h.request(t, owner, "GET", base+"/computer-runtime", nil, 200)
+	offered := false
+	for _, item := range runtime["models"].([]any) {
+		if model := item.(map[string]any); model["id"] == "bedrock.claude-opus-5-5" && model["runtime"] == "pi" {
+			offered = true
+		}
+	}
+	if !offered {
+		t.Fatal("a claimed Bedrock model was not offered for direct tasks", runtime["models"])
+	}
+	run := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]string{"operationId": "computer-bedrock-claimed", "prompt": "Build a page", "runtime": "pi", "model": "bedrock.claude-opus-5-5"}, 202)
+	path := base + "/computer-runs/" + run["id"].(string)
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		value := h.request(t, owner, "GET", path, nil, 200)
+		if status, _ := value["status"].(string); status != "queued" && status != "running" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the admitted run never reached the execution service and ended")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if runs.Load() == 0 {
+		t.Fatal("the admitted Bedrock run was not handed to the execution service")
+	}
+}
+
 // The worker refuses a task whose run time is outside its own bounds, while AWWO_RUN_TIMEOUT also
 // bounds canvas runs and may be longer (production 30 min: every task was refused, 2026-10-06).
 // The bounds are pinned against the worker's own check, so neither side can drift alone.

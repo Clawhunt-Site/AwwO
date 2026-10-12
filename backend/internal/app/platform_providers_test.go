@@ -110,8 +110,9 @@ func TestGateOnlyPlatformWorkerClaims(t *testing.T) {
 	}
 }
 
-// Managed execution makes non-streaming completion calls, which the Bedrock bridge does not
-// serve, so Bedrock models are never offered there, even as the entitled default.
+// Managed execution makes non-streaming completion calls, which a worker serves for Bedrock models
+// only through its Converse bridge: without its computerBedrock claim they are never offered there,
+// even as the entitled default; with it they are offered like any other model.
 func TestComputerModelChoicesLeaveOutBedrock(t *testing.T) {
 	health := piHealth{Model: "bedrock.glm-5", Models: []piModel{
 		{ID: "qwen3.8-27b-p6", Name: "Qwen", Provider: "llmgate", ReasoningEfforts: []string{"low"}},
@@ -124,6 +125,11 @@ func TestComputerModelChoicesLeaveOutBedrock(t *testing.T) {
 	}
 	if efforts := got[0]["efforts"].([]string); !slices.Equal(efforts, []string{"low"}) {
 		t.Fatalf("efforts = %#v", efforts)
+	}
+	health.ComputerBedrock = true
+	claimed := computerModelChoices(runtimePI, health)
+	if len(claimed) != 3 || claimed[1]["id"] != "bedrock.glm-5" || claimed[2]["id"] != "bedrock.claude-opus-5-5" || claimed[2]["label"] != "Claude Opus 5.5" || claimed[2]["runtime"] != runtimePI {
+		t.Fatalf("claimed choices = %#v", claimed)
 	}
 	// A default model that is not in the advertised list is still offered, as before.
 	plain := computerModelChoices(runtimePI, piHealth{Model: "fixture-model"})

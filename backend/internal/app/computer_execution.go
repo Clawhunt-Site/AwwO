@@ -226,14 +226,15 @@ func computerModelCalls(runtime string, h piHealth) bool {
 }
 
 // computerModelChoices lists one runtime's models for managed execution. Managed execution
-// makes single non-streaming completion calls; the Bedrock bridge serves only streaming chat,
-// so Bedrock models are not offered here (the worker also refuses them on that path).
+// makes single non-streaming completion calls; a worker serves its Bedrock models on that path
+// only when it claims computerBedrock (its Converse bridge gathers the stream), so without that
+// claim Bedrock models are not offered here (and that worker refuses them on that path).
 func computerModelChoices(runtime string, h piHealth) []map[string]any {
 	models := []map[string]any{}
 	seen := map[string]bool{}
 	for _, m := range h.Models {
 		seen[m.ID] = true
-		if m.Provider == "bedrock" {
+		if m.Provider == "bedrock" && !h.ComputerBedrock {
 			continue
 		}
 		label := m.Label

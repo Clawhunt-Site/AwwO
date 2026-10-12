@@ -15,7 +15,7 @@ const call = { id: 'call-1', type: 'function', function: { name: 'workspace_exec
 
 // Anthropic Messages is served by Pi and Chat Completions by the openai-agents worker, unless `worker` says;
 // Pi on Chat Completions binds a Gate model, as the router uses in production.
-async function serve(t: any, protocol: string, handler: (body: any, req: any, res: any) => void, overrides: Record<string, string> = {}, worker?: 'pi' | 'openai-agents') {
+async function serve(t: any, protocol: string, handler: (body: any, req: any, res: any) => void, overrides: Record<string, string> = {}, worker?: 'pi' | 'openai-agents', serverOptions: Record<string, unknown> = {}) {
   const calls: any[] = [];
   const provider = createServer(async (req, res) => {
     let text = ''; for await (const chunk of req) text += chunk;
@@ -26,7 +26,7 @@ async function serve(t: any, protocol: string, handler: (body: any, req: any, re
   const pi = worker ? worker === 'pi' : protocol === 'anthropic_messages';
   const prefix = pi ? 'AWWO_PI' : 'AWWO_OPENAI_AGENTS';
   const config = (pi ? loadPi : loadOpenAI)({ [`${prefix}_TOKEN`]: token, [`${prefix}_MODEL`]: 'fixture-model', [`${prefix}_API_KEY`]: 'secret-provider-key', [`${prefix}_BASE_URL`]: baseURL + (pi ? '' : '/v1'), [`${prefix}_PROVIDER`]: pi ? (protocol === 'anthropic_messages' ? 'anthropic' : 'llmgate') : 'openai', [`${prefix}_PROTOCOL`]: protocol, ...overrides });
-  const app = (pi ? createPiServer : createOpenAIAgentsServer)(config);
+  const app = (pi ? createPiServer : createOpenAIAgentsServer)(config, serverOptions as any);
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
   const origin = `http://127.0.0.1:${app.server.address().port}`;
   t.after(async () => { await app.close(); provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); });
@@ -108,7 +108,7 @@ test('admission refuses invalid history, credentials and context before any prov
   assert.equal(s.calls.length, 0);
 });
 
-test('a Bedrock model is refused for managed execution before any request or key leaves the worker', async t => {
+test('a worker without the Converse bridge refuses a Bedrock model before any request or key leaves it', async t => {
   const bedrockKey = 'ABSKbedrockkey000000000000000000';
   const originalFetch = globalThis.fetch;
   const outbound: string[] = [];
@@ -117,14 +117,107 @@ test('a Bedrock model is refused for managed execution before any request or key
     if (url.includes('amazonaws')) outbound.push(url);
     return originalFetch(target, init);
   });
-  for (const [protocol, model] of [['chat_completions', 'bedrock.glm-5'], ['anthropic_messages', 'bedrock.gemma-3-27b']] as const) {
-    const s = await serve(t, protocol, () => assert.fail('No provider request expected'), { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: bedrockKey });
+  // The openai-agents worker has no bridge for managed execution; a Pi worker built without one refuses as before.
+  for (const [protocol, model, options] of [['chat_completions', 'bedrock.glm-5', {}], ['anthropic_messages', 'bedrock.gemma-3-27b', { bedrockFetch: null }]] as const) {
+    const s = await serve(t, protocol, () => assert.fail('No provider request expected'), { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: bedrockKey }, undefined, options);
     const response = await s.send(input({ model }));
     assert.equal(response.status, 400, protocol);
     assert.equal((await response.json()).error.code, 'MODEL_NOT_SUPPORTED');
     assert.equal(s.calls.length, 0);
   }
   assert.deepEqual(outbound, []);
+});
+
+// The two AWS SDK members the bridge uses; `turn` yields the Converse stream events of one answer.
+function fakeConverse(turn: (input: any) => AsyncIterable<Record<string, unknown>>) {
+  const sent: any[] = [];
+  class ConverseStreamCommand { input: any; constructor(input: any) { this.input = input; } }
+  class BedrockRuntimeClient {
+    record: any;
+    constructor(clientConfig: any) { this.record = { clientConfig }; sent.push(this.record); }
+    async send(command: any) { this.record.input = command.input; return { stream: turn(command.input) }; }
+    destroy() {}
+  }
+  return { sdk: { BedrockRuntimeClient, ConverseStreamCommand }, sent };
+}
+
+test('Pi serves a Bedrock model to managed execution through the Converse bridge and gathers its stream', async t => {
+  const { createBedrockFetch } = await import('./bedrock-bridge.ts');
+  const turns = [
+    async function* () {
+      yield { messageStart: { role: 'assistant' } };
+      yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Running it. ' } } };
+      yield { contentBlockStop: { contentBlockIndex: 0 } };
+      yield { contentBlockStart: { contentBlockIndex: 1, start: { toolUse: { toolUseId: 'tooluse_Ab12', name: 'workspace_exec' } } } };
+      yield { contentBlockDelta: { contentBlockIndex: 1, delta: { toolUse: { input: '{"command":' } } } };
+      yield { contentBlockDelta: { contentBlockIndex: 1, delta: { toolUse: { input: '"echo verified"}' } } } };
+      yield { contentBlockStop: { contentBlockIndex: 1 } };
+      yield { messageStop: { stopReason: 'tool_use' } };
+      yield { metadata: { usage: { inputTokens: 40, outputTokens: 9, cacheReadInputTokens: 2 } } };
+    },
+    async function* () {
+      yield { messageStart: { role: 'assistant' } };
+      yield { contentBlockDelta: { contentBlockIndex: 0, delta: { reasoningContent: { text: 'private reasoning' } } } };
+      yield { contentBlockDelta: { contentBlockIndex: 1, delta: { text: 'Verified.' } } };
+      yield { messageStop: { stopReason: 'end_turn' } };
+      yield { metadata: { usage: { inputTokens: 60, outputTokens: 3 } } };
+    },
+  ];
+  const fake = fakeConverse(() => turns[fake.sent.length - 1]());
+  const profiles: any[] = [];
+  const bedrockFetch = async (model: any) => { profiles.push(model); return createBedrockFetch({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, sdk: fake.sdk as any }); };
+  const originalFetch = globalThis.fetch;
+  const outbound: string[] = [];
+  t.mock.method(globalThis, 'fetch', (target: string | URL | Request, init?: RequestInit) => {
+    const url = String(target instanceof Request ? target.url : target);
+    if (url.includes('amazonaws')) outbound.push(url);
+    return originalFetch(target, init);
+  });
+  const s = await serve(t, 'anthropic_messages', () => assert.fail('No other provider expected'),
+    { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: 'ABSKbedrockkey000000000000000000' }, 'pi', { bedrockFetch });
+  const health = await (await fetch(`${s.origin}/health`)).json();
+  assert.equal(health.computerBedrock, true);
+  // thinking: false is the router's Qwen switch: a Bedrock call never carries it (the bridge would refuse the field).
+  const first = await s.send(input({ model: 'bedrock.gemma-3-27b', thinking: false, maxTokens: 900 }));
+  assert.equal(first.status, 200);
+  const body = await first.json();
+  const message = body.completion.choices[0].message;
+  assert.equal(body.completion.choices[0].finish_reason, 'tool_calls');
+  assert.equal(message.content, 'Running it. ');
+  assert.deepEqual(message.tool_calls, [{ id: 'tooluse_Ab12', type: 'function', function: { name: 'workspace_exec', arguments: '{"command":"echo verified"}' } }]);
+  assert.equal(body.observability.usage.inputTokens, 42);
+  assert.equal(body.observability.usage.outputTokens, 9);
+  assert.equal(profiles[0].provider, 'bedrock');
+  const sent = fake.sent[0].input;
+  assert.equal(sent.inferenceConfig.maxTokens, 900);
+  assert.deepEqual(sent.messages, [{ role: 'user', content: [{ text: 'Build the project' }] }]);
+  assert.equal(sent.toolConfig.tools[0].toolSpec.name, 'workspace_exec');
+  // The tool result goes back as Converse expects, and the model's reasoning never comes out.
+  const second = await s.send(input({ model: 'bedrock.gemma-3-27b', completion: { tools: [tool], messages: [{ role: 'user', content: 'Build the project' }, message, { role: 'tool', tool_call_id: 'tooluse_Ab12', content: 'verified' }] } }));
+  assert.equal(second.status, 200);
+  const answer = await second.json();
+  assert.equal(answer.completion.choices[0].message.content, 'Verified.');
+  assert.doesNotMatch(JSON.stringify(answer), /private reasoning/);
+  assert.deepEqual(fake.sent[1].input.messages.at(-1), { role: 'user', content: [{ toolResult: { toolUseId: 'tooluse_Ab12', content: [{ text: 'verified' }] } }] });
+  assert.equal(s.calls.length, 0);
+  assert.deepEqual(outbound, []);
+});
+
+test('a Bedrock stream that fails or ends early is a failed call, never a partial answer', async t => {
+  const { createBedrockFetch } = await import('./bedrock-bridge.ts');
+  for (const turn of [
+    async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'partial' } } }; },
+    async function* () { yield { messageStart: { role: 'assistant' } }; yield { throttlingException: { message: 'slow down' } }; },
+    async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } }; yield { messageStop: { stopReason: 'max_tokens' } }; },
+  ]) {
+    const fake = fakeConverse(() => turn());
+    const s = await serve(t, 'anthropic_messages', () => assert.fail('No other provider expected'),
+      { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: 'ABSKbedrockkey000000000000000000' }, 'pi',
+      { bedrockFetch: async (model: any) => createBedrockFetch({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, sdk: fake.sdk as any }) });
+    const response = await s.send(input({ model: 'bedrock.gemma-3-27b' }));
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).error.code, 'PROVIDER_ERROR');
+  }
 });
 
 test('capacity is shared with existing runs and DELETE aborts the provider and frees its session', { timeout: 5000 }, async t => {

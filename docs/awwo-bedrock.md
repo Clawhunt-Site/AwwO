@@ -34,7 +34,7 @@ flowchart LR
 | 工具的 `strict` | Converse 不保证参数严格符合 schema；worker 执行前仍逐项校验参数，不合格的调用失败而不是执行 |
 | `store`、`user`、`metadata`、`prompt_cache_key`、`safety_identifier`、`stream_options` | 只是请求元数据，不改变回答，忽略 |
 
-只走流式对话：托管执行（managed execution）每次是一次非流式补全，桥不提供，所以 Bedrock 模型不出现在托管执行的模型列表里；直接用 API 创建时以 `computer_model_unsupported` 拒绝（不预留调用额度），worker 也会在任何请求离开前以 `MODEL_NOT_SUPPORTED` 拒绝。
+只走流式对话。托管执行（managed execution，画布助手的直接任务）每次要一次非流式补全：Pi worker 把这一次调用作为一次流式请求发给桥，再把流（文字、按序号拼接的工具调用、结束原因、用量）收拢成一次补全返回（`bedrockComputerRequest` 与 `gatherChatStream`，`apps/computer-model.ts`）；出错帧、未结束的流或 `length` 结束都算失败，不返回半截答案。Pi 在 `/health` 上声明 `computerBedrock: true`，API 只在 worker 声明时把它的 Bedrock 模型列入托管执行的模型列表并接受创建；没有声明的 worker（JS 与 Python openai-agents worker）照旧：列表里没有 Bedrock 模型，直接用 API 创建时以 `computer_model_unsupported` 拒绝（不预留调用额度），worker 也会在任何请求离开前以 `MODEL_NOT_SUPPORTED` 拒绝。托管执行能用哪些 Bedrock 模型取决于 Pi 的目录：2026-10-12 起 Pi 的 `AWWO_BEDROCK_MODELS` 加入 `bedrock.claude-opus-5-5`（drop-in `98-assistant-opus.conf`），画布助手因此可以选 Claude Opus 5.5。
 
 ## 内置目录
 
@@ -147,7 +147,7 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 - 结构化输出：不宣告 `structuredOutput`，节点交付契约走文本路径。
 - 只发文本；图像输入、文件附件不经过桥。
 - Pixtral Large 与 Llama 不调用工具：Bedrock 不在流式模式下为它们提供工具，所以它们在 Pi 上作为纯对话模型提供。
-- 托管执行不支持 Bedrock 模型（见上文）。
+- 托管执行只在声明 `computerBedrock` 的 worker（Pi）上使用 Bedrock 模型，且只限该 worker 目录里的模型（见上文）。
 - 计费走 AWS 账单；`AWWO_MODEL_PRICING_JSON` 未加入 Bedrock 价格，用量估算显示为未知。
 
 ## 验收记录（2026-10-03，本机 WSL，真实 Bedrock，us-east-1）

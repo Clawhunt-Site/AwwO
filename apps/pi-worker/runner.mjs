@@ -9,7 +9,8 @@ import { createBedrockAuthResolver } from '../bedrock-bridge.ts';
 export const TASK_URL = new URL('./pi-task.mjs', import.meta.url);
 // The parent alone reads the AWS credential chain; a Bedrock child only ever receives the
 // API key or the short-lived credentials resolved here, over the same private IPC as any key.
-const resolveBedrockAuth = createBedrockAuthResolver(async () => (await import('@aws-sdk/credential-provider-node')).defaultProvider());
+// Managed-execution calls (server.mjs) are made by the parent itself and use the same resolver.
+export const resolveBedrockAuth = createBedrockAuthResolver(async () => (await import('@aws-sdk/credential-provider-node')).defaultProvider());
 
 // Deliberately exclude HOME, NODE_OPTIONS, provider keys, proxy credentials,
 // npm options, and the launching user's Pi/extension configuration.

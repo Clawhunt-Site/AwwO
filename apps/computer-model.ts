@@ -5,9 +5,16 @@ import { bindUserModel } from './user-models.ts';
 type ObjectValue = Record<string, any>;
 type Message = { role: string; content: string | null; tool_calls?: ObjectValue[]; tool_call_id?: string; reasoning_details?: ObjectValue[] };
 type Completion = { messages: Message[]; tools: ObjectValue[] };
-type Profile = { model: string; apiKey: string; baseURL: string; protocol: string; provider: string; maxTokens: number; contextWindow: number; reasoningEfforts?: string[]; defaultReasoningEffort?: string };
+type Profile = { model: string; apiKey: string; baseURL: string; protocol: string; provider: string; maxTokens: number; contextWindow: number; reasoningEfforts?: string[]; defaultReasoningEffort?: string;
+  /** Bedrock profiles only: the region the bridge calls and the operator's prompt-cache switch. */
+  region?: string; promptCache?: boolean };
 type Entry = { handle: { cancel(): void }; cancelRequested: boolean; released: Promise<void> };
+/** A worker's way to a Bedrock model: the Converse bridge's `fetch` for one profile (bedrock-bridge.ts). */
+export type BedrockFetchFactory = (model: Profile) => Promise<(input: string, init: RequestInit) => Promise<Response>>;
 const MAX_BYTES = 524_288;
+// The bridge's streamed answer to one call: SSE framing costs far more than the text, so this is well above the 2 MiB
+// the API takes back from a worker; the completion gathered from it is what has to fit there.
+const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const object = (v: unknown): v is ObjectValue => !!v && typeof v === 'object' && !Array.isArray(v);
 const identifier = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
 const toolName = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(v);
@@ -178,6 +185,66 @@ export function computerCompletionResponse(raw: ObjectValue, protocol: string, t
   return { id: `chatcmpl-awwo-${randomUUID()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: 'awwo-model', choices: [{ index: 0, message, finish_reason: finish }] };
 }
 
+/** A Bedrock profile's call goes to the Converse bridge, which answers streaming Chat Completions only: the call is
+ *  sent as one streaming request (no reasoning effort and no chat-template switch, which the bridge refuses) and the
+ *  stream is gathered back into one completion by gatherChatStream. */
+export function bedrockComputerRequest(completion: Completion, model: Profile, options: ComputerCallOptions = {}): { url: string; body: ObjectValue } {
+  const maxTokens = options.maxTokens ? Math.min(model.maxTokens, options.maxTokens) : model.maxTokens;
+  return { url: `${model.baseURL.replace(/\/+$/, '')}/chat/completions`, body: {
+    model: model.model, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens,
+    messages: completion.messages.map(({ reasoning_details: _, ...msg }) => msg),
+    ...(completion.tools.length ? { tools: completion.tools } : {}) } };
+}
+
+/** Gathers a streamed Chat Completions answer (`chat.completion.chunk` SSE) into the one non-streaming answer
+ *  computerCompletionResponse reads: the text, each tool call joined by its index, the finish reason and the usage.
+ *  An error frame, a malformed chunk, or a stream that ends without a finish reason is a failed call. */
+export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promise<ObjectValue> {
+  const decoder = new TextDecoder();
+  const calls: { id: string; name: string; arguments: string }[] = [];
+  let size = 0, pending = '', text = '', finish: string | undefined, usage: ObjectValue | undefined, done = false;
+  const take = (line: string) => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (data === '[DONE]') { done = true; return; }
+    if (done) return fail();
+    const chunk: unknown = JSON.parse(data);
+    if (!object(chunk) || chunk.error !== undefined) return fail();
+    if (object(chunk.usage)) usage = chunk.usage;
+    if (chunk.choices === undefined) return;
+    if (!Array.isArray(chunk.choices) || chunk.choices.length > 1) return fail();
+    for (const choice of chunk.choices) {
+      const delta = object(choice?.delta) ? choice.delta : {};
+      if (delta.content != null) { if (typeof delta.content !== 'string') return fail(); text += delta.content; }
+      if (delta.tool_calls !== undefined) {
+        if (!Array.isArray(delta.tool_calls)) return fail();
+        for (const part of delta.tool_calls) {
+          if (!object(part) || !Number.isInteger(part.index) || part.index < 0 || part.index >= 32) return fail();
+          const slot = calls[part.index] ??= { id: '', name: '', arguments: '' };
+          if (typeof part.id === 'string') slot.id = part.id;
+          if (typeof part.function?.name === 'string') slot.name = part.function.name;
+          if (typeof part.function?.arguments === 'string') slot.arguments += part.function.arguments;
+        }
+      }
+      if (typeof choice?.finish_reason === 'string') finish = choice.finish_reason;
+    }
+  };
+  for await (const chunk of source) {
+    size += chunk.length;
+    if (size > MAX_STREAM_BYTES) return fail();
+    pending += decoder.decode(chunk, { stream: true });
+    let end: number;
+    while ((end = pending.indexOf('\n')) >= 0) { take(pending.slice(0, end).replace(/\r$/, '')); pending = pending.slice(end + 1); }
+  }
+  pending += decoder.decode();
+  if (pending.trim()) take(pending.trim());
+  if (!finish) return fail();
+  if (calls.some(call => call === undefined)) return fail();
+  const toolCalls = calls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
+  return { choices: [{ index: 0, message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, finish_reason: finish }],
+    ...(usage ? { usage } : {}) };
+}
+
 async function readJSON(source: AsyncIterable<Uint8Array>): Promise<ObjectValue> {
   let size = 0; const chunks: Uint8Array[] = [];
   for await (const chunk of source) { size += chunk.length; if (size > MAX_BYTES) return fail(); chunks.push(chunk); }
@@ -190,6 +257,9 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   config: any; runtime: 'pi' | 'openai-agents'; active: Map<string, Entry>; sessions: Set<string>; stopping(): boolean;
   resolveModel(config: any, selector: string): Profile; normalizeUsage(raw: unknown, protocol: string): ObjectValue;
   parentObservability(value: unknown, timing: ObjectValue): ObjectValue; observe(model: Profile, traceparent: unknown): (event: ObjectValue) => void;
+  /** The worker's Bedrock bridge, when it serves Bedrock models to managed execution (it says so on /health as
+   *  computerBedrock); without it a Bedrock model is refused as before. */
+  bedrockFetch?: BedrockFetchFactory;
 }): Promise<void> {
   const reply = (status: number, value: ObjectValue) => { if (!response.destroyed) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); } };
   const reject = (status: number, code: string) => reply(status, { error: { code, message: 'The managed model request could not be completed.' } });
@@ -208,10 +278,11 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   let model: Profile;
   try { model = options.resolveModel(bindUserModel(config, body as any, options.runtime), body.model); }
   catch { return reject(400, 'MODEL_NOT_FOUND'); }
-  // Managed execution makes one non-streaming completion call, which the Bedrock bridge does not
-  // serve (it answers the agent runtimes' streaming chat only). Such a model is refused here,
+  // A Bedrock model is served through the worker's Converse bridge, which streams only (bedrockComputerRequest and
+  // gatherChatStream make the one call out of its stream). A worker without the bridge refuses such a model here,
   // before any capacity is taken or a request leaves the worker.
-  if (model.provider === 'bedrock') return reject(400, 'MODEL_NOT_SUPPORTED');
+  const bedrock = model.provider === 'bedrock';
+  if (bedrock && !options.bedrockFetch) return reject(400, 'MODEL_NOT_SUPPORTED');
   const effort = (body.effort === '' ? undefined : body.effort) ?? (model.defaultReasoningEffort || undefined);
   if (effort !== undefined && effort !== 'none' && !model.reasoningEfforts?.includes(effort)) return reject(400, 'EFFORT_NOT_SUPPORTED');
   if (Buffer.byteLength(JSON.stringify(completion)) + completion.messages.length * 32 > model.contextWindow - model.maxTokens - 256) return reject(413, 'CONTEXT_LIMIT');
@@ -231,12 +302,24 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   const observed = options.observe(model, request.headers.traceparent);
   let terminalObserved = false;
   try {
-    const provider = providerComputerRequest(completion, model, effort, { thinking: body.thinking, maxTokens: body.maxTokens });
-    const upstream = await fetch(provider.url, { method: 'POST', headers: provider.headers, body: JSON.stringify(provider.body), redirect: 'error', signal: controller.signal });
-    if (!upstream.ok || !upstream.body) { await upstream.body?.cancel(); return reject(502, 'PROVIDER_ERROR'); }
-    const raw = await readJSON(upstream.body);
-    const result = computerCompletionResponse(raw, model.protocol, completion.tools);
-    const usage = options.normalizeUsage(raw.usage, model.protocol === 'anthropic_messages' ? 'anthropic' : model.protocol);
+    let raw: ObjectValue;
+    let protocol = model.protocol;
+    if (bedrock) {
+      // The bridge speaks Chat Completions whatever the profile says; it never leaves the worker except to Bedrock.
+      const bridge = await options.bedrockFetch!(model);
+      const call = bedrockComputerRequest(completion, model, { maxTokens: body.maxTokens });
+      const upstream = await bridge(call.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(call.body), signal: controller.signal });
+      if (!upstream.ok || !upstream.body) { await upstream.body?.cancel(); return reject(502, 'PROVIDER_ERROR'); }
+      raw = await gatherChatStream(upstream.body as unknown as AsyncIterable<Uint8Array>);
+      protocol = 'chat_completions';
+    } else {
+      const provider = providerComputerRequest(completion, model, effort, { thinking: body.thinking, maxTokens: body.maxTokens });
+      const upstream = await fetch(provider.url, { method: 'POST', headers: provider.headers, body: JSON.stringify(provider.body), redirect: 'error', signal: controller.signal });
+      if (!upstream.ok || !upstream.body) { await upstream.body?.cancel(); return reject(502, 'PROVIDER_ERROR'); }
+      raw = await readJSON(upstream.body);
+    }
+    const result = computerCompletionResponse(raw, protocol, completion.tools);
+    const usage = options.normalizeUsage(raw.usage, protocol === 'anthropic_messages' ? 'anthropic' : protocol);
     const elapsed = Math.floor(performance.now() - started);
     const observability = options.parentObservability({ version: 1, usage, timing: { setupMs: 0, providerMs: elapsed, providerTtftMs: null } }, { totalMs: elapsed, outcome: 'completed' });
     if (usage.inputTokens !== null && usage.outputTokens !== null) result.usage = { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens, total_tokens: usage.computedTotalTokens };
