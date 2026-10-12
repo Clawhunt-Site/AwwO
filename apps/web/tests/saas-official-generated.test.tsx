@@ -1,24 +1,28 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { htmlPreviewDocument, PREVIEW_HOST_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
-import GeneratedOfficialDemo from '../src/saas/examples/GeneratedOfficialDemo';
+import GeneratedOfficialDemo, { hasGeneratedPage } from '../src/saas/examples/GeneratedOfficialDemo';
 import { OfficialExamples } from '../src/saas/examples/OfficialExamples';
 import { OfficialShowcase } from '../src/saas/examples/OfficialShowcase';
 import { OFFICIAL_GENERATED_RECORDS } from '../src/saas/examples/generatedRecords';
-import { getOfficialWorkflow } from '../src/saas/examples/officialWorkflows';
-import orbit from '../src/saas/examples/generated/orbitResult';
-import game from '../src/saas/examples/generated/gameResult';
-import training from '../src/saas/examples/generated/trainingResult';
-import flux from '../src/saas/examples/generated/fluxResult';
+import { OFFICIAL_MEDIA } from '../src/saas/examples/officialMedia';
+import { OFFICIAL_WORKFLOWS, getOfficialWorkflow } from '../src/saas/examples/officialWorkflows';
+import { showcasePage } from '../src/saas/examples/showcaseDocument';
 
-const item = getOfficialWorkflow('interaction-page')!;
+const PAGES = import.meta.glob<string>(['../src/saas/examples/generated/official/*.ts', '!../src/saas/examples/generated/official/*.media.ts'], { eager: true, import: 'default' });
+const MEDIA = import.meta.glob<Readonly<Record<string, string>>>('../src/saas/examples/generated/official/*.media.ts', { eager: true, import: 'default' });
+const pageOf = (id: string) => PAGES[`../src/saas/examples/generated/official/${id}.ts`];
+const mediaOf = (id: string) => MEDIA[`../src/saas/examples/generated/official/${id}.media.ts`] ?? {};
+
+const item = getOfficialWorkflow('studio-pipeline')!;
 const record = OFFICIAL_GENERATED_RECORDS[item.id]!;
-const artifact = item.nodes.find(node => node.id === 'build')!;
-const failed = item.nodes.find(node => node.id === 'handoff')!;
+const artifact = item.nodes.find(node => node.id === record.artifactNodeId)!;
 const left = () => screen.getByRole('region', { name: '编排过程', exact: true });
 const nodeButton = (title: string) => within(left()).getByRole('button', { name: `查看节点：${title}`, exact: true });
+const withPreferences = (node: ReactNode) => render(<SaaSPreferencesProvider>{node}</SaaSPreferencesProvider>);
 
 // These documents are parsed as data. No generated scripts are evaluated in jsdom.
 function inertDocument(html: string) {
@@ -30,9 +34,7 @@ function inertDocument(html: string) {
 const pageScript = (preview: ParentNode) => [...preview.querySelectorAll('script')].find(script => script.textContent !== PREVIEW_HOST_SCRIPT);
 
 function view() {
-  return render(<SaaSPreferencesProvider><OfficialShowcase item={item} record={record}>
-    <GeneratedOfficialDemo id={item.id} title={item.title.zh} />
-  </OfficialShowcase></SaaSPreferencesProvider>);
+  return withPreferences(<OfficialShowcase item={item} record={record}><GeneratedOfficialDemo id={item.id} title={item.title.zh} /></OfficialShowcase>);
 }
 
 beforeEach(() => {
@@ -50,199 +52,94 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('curated model-generated official results', () => {
-  it('preserves the completed game run and the checksum of its layout-only QA revision', () => {
-    const gameRecord = OFFICIAL_GENERATED_RECORDS['orbit-game']!;
-    expect(createHash('sha256').update(game, 'utf8').digest('hex')).toBe(gameRecord.sourceSHA256);
-    expect(gameRecord.originalSHA256).toBe('3fcf2394d35933a4eb27252a19f28e2a33b154265fd4755a6333bb2a64e154a7');
-    expect(gameRecord.completed).toBe(6);
-    expect(gameRecord.total).toBe(6);
-    expect(Object.values(gameRecord.nodes)).toEqual(Array(6).fill('done'));
-    expect(gameRecord.reused).toBeUndefined();
-  });
-  it('keeps every published record tied to existing workflow and node identifiers', () => {
-    expect(Object.keys(OFFICIAL_GENERATED_RECORDS).length).toBeGreaterThan(0);
+describe('the official examples, as their real Claude Opus 5.5 runs made them', () => {
+  it('publishes every official example as a completed run of its own workflow', () => {
+    expect(Object.keys(OFFICIAL_GENERATED_RECORDS).sort()).toEqual(OFFICIAL_WORKFLOWS.map(example => example.id).sort());
     for (const [id, value] of Object.entries(OFFICIAL_GENERATED_RECORDS)) {
-      expect(value, id).toBeDefined();
       const entry = value!;
-      const workflow = getOfficialWorkflow(id);
-      expect(workflow, id).toBeDefined();
-      const nodeIds = workflow!.nodes.map(node => node.id);
-      expect(nodeIds, id).toContain(entry.artifactNodeId);
-      expect(['done', 'cached']).toContain(entry.nodes[entry.artifactNodeId]);
-      expect(Number.isInteger(entry.completed)).toBe(true);
-      expect(Number.isInteger(entry.total)).toBe(true);
-      expect(entry.completed).toBeGreaterThanOrEqual(0);
-      expect(entry.completed).toBeLessThanOrEqual(entry.total);
-      expect(entry.total).toBeGreaterThan(0);
-      expect(entry.total).toBeLessThanOrEqual(nodeIds.length);
-      expect(Object.values(entry.nodes).filter(status => status === 'done')).toHaveLength(entry.completed);
-      expect(Object.values(entry.nodes).filter(status => status !== 'cached')).toHaveLength(entry.total);
-      expect(Object.values(entry.nodes).filter(status => status === 'cached')).toHaveLength(entry.reused || 0);
-      for (const [nodeId, status] of Object.entries(entry.nodes)) {
-        expect(nodeIds, `${id}:${nodeId}`).toContain(nodeId);
-        expect(['done', 'failed', 'blocked', 'canceled', 'cached']).toContain(status);
-      }
+      const workflow = getOfficialWorkflow(id)!;
+      expect(hasGeneratedPage(id), id).toBe(true);
+      expect(entry.model).toBe('Claude Opus 5.5');
+      expect(entry.capturedOn).toBe('2026-10-12');
+      expect(Object.keys(entry.nodes).sort(), id).toEqual(workflow.nodes.map(node => node.id).sort());
+      expect(Object.values(entry.nodes).every(status => status === 'done'), id).toBe(true);
+      expect([entry.completed, entry.total], id).toEqual([workflow.nodes.length, workflow.nodes.length]);
+      expect(workflow.nodes.find(node => node.id === entry.artifactNodeId)?.outputType, id).toBe('html');
+      expect(entry.reused).toBeUndefined();
+      expect(entry.originalSHA256).toBeUndefined();
       expect(entry.sourceSHA256).toMatch(/^[0-9a-f]{64}$/);
-      if (entry.originalSHA256) expect(entry.originalSHA256).toMatch(/^[0-9a-f]{64}$/);
       for (const locale of ['zh', 'en'] as const) {
-        expect(entry.note[locale].trim()).not.toBe('');
-        expect(entry.verification[locale].trim()).not.toBe('');
+        expect(entry.note[locale], id).toContain('Claude Opus 5.5');
+        expect(entry.verification[locale].trim(), id).not.toBe('');
       }
+      // Public copy never says which provider generated a picture, clip or model.
+      expect(JSON.stringify(entry), id).not.toMatch(/x-?tasy|tripo|runninghub|seedream|jimeng/i);
     }
   });
 
-  it('matches the original Orbit HTML bytes to the public provenance checksum', () => {
-    expect(createHash('sha256').update(orbit, 'utf8').digest('hex')).toBe(record.sourceSHA256);
-    expect(record.originalSHA256).toBeUndefined();
-    expect(record.artifactNodeId).toBe('build');
-    expect(record.completed).toBe(5);
-    expect(record.total).toBe(6);
-    expect(Object.values(record.nodes).filter(status => status === 'done')).toHaveLength(5);
-    expect(record.nodes.handoff).toBe('failed');
-  });
-
-  it('keeps the revised training artifact checksum distinct from the original model output', () => {
-    const entry = OFFICIAL_GENERATED_RECORDS['model-lab']!;
-    expect(createHash('sha256').update(training, 'utf8').digest('hex')).toBe(entry.sourceSHA256);
-    expect(entry.originalSHA256).toBe('ad4f67cd27232d900e4fd983a896e404dbb06d04ae2392f7775632ff193d3fdb');
-    expect(entry.originalSHA256).not.toBe(entry.sourceSHA256);
-    expect(entry.completed).toBe(4);
-    expect(entry.total).toBe(6);
-    expect(entry.nodes.build).toBe('done');
-    expect(entry.nodes.check).toBe('failed');
-    expect(entry.nodes.card).toBe('blocked');
-  });
-
-  it('matches the revised FLUX bytes while preserving the original repair output checksum', () => {
-    const entry = OFFICIAL_GENERATED_RECORDS['grid-balance']!;
-    expect(createHash('sha256').update(flux, 'utf8').digest('hex')).toBe(entry.sourceSHA256);
-    expect(entry.originalSHA256).toBe('2388674c6ccb4ccad8c443390cb4505c46e88448438f043317ce104604abff3a');
-    expect(entry.sourceSHA256).not.toBe(entry.originalSHA256);
-    expect(entry.artifactNodeId).toBe('repair');
-    expect(entry.completed).toBe(2);
-    expect(entry.total).toBe(4);
-    expect(entry.reused).toBe(5);
-    expect(entry.nodes.deliver).toBe('failed');
-    expect(entry.nodes.guide).toBe('blocked');
-  });
-
-  it('preserves explicit accessible labels for all seven FLUX sliders after preview sanitization', () => {
-    render(<GeneratedOfficialDemo id="grid-balance" title="FLUX result" />);
-    const preview = inertDocument(screen.getByTitle('FLUX result').getAttribute('srcdoc')!);
-    const controls = Array.from(preview.querySelectorAll('input[type="range"]'));
-    expect(controls).toHaveLength(7);
-    expect(controls.map(control => control.id)).toEqual([
-      'loadScale', 'pvPeak', 'essCap', 'essPower', 'socInit', 'outageStart', 'outageEnd',
-    ]);
-    for (const control of controls) {
-      expect(preview.querySelectorAll(`#${control.id}`)).toHaveLength(1);
-      const labels = preview.querySelectorAll(`label[for="${control.id}"]`);
-      expect(labels).toHaveLength(1);
-      expect(labels[0].textContent?.trim()).not.toBe('');
+  it('keeps each page byte for byte as its node delivered it', () => {
+    for (const [id, entry] of Object.entries(OFFICIAL_GENERATED_RECORDS)) {
+      const page = pageOf(id);
+      expect(typeof page, id).toBe('string');
+      expect(createHash('sha256').update(page, 'utf8').digest('hex'), id).toBe(entry!.sourceSHA256);
+      expect(page.trim(), id).toMatch(/<\/html>$/i);
+      expect(page, id).not.toMatch(/<script[^>]+src=/i);
     }
-    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('shows FLUX continuation progress separately from cached inputs and leaves out-of-scope nodes unclaimed', () => {
-    const workflow = getOfficialWorkflow('grid-balance')!;
-    const entry = OFFICIAL_GENERATED_RECORDS[workflow.id]!;
-    render(<SaaSPreferencesProvider><OfficialShowcase item={workflow} record={entry}>
-      <GeneratedOfficialDemo id={workflow.id} title={workflow.title.zh} />
-    </OfficialShowcase></SaaSPreferencesProvider>);
-    expect(screen.getByText('运行快照 · 2/4 完成')).toBeVisible();
-    expect(screen.getByText(`${entry.model} · ${entry.capturedOn} · 5 个上游沿用`)).toBeVisible();
-    expect(nodeButton(workflow.nodes.find(node => node.id === 'repair')!.title.zh)).toHaveAttribute('aria-pressed', 'true');
-    expect(within(left()).getAllByText('沿用结果', { exact: true })).toHaveLength(5);
-    for (const id of ['ux', 'engine', 'views']) {
-      const button = nodeButton(workflow.nodes.find(node => node.id === id)!.title.zh);
-      expect(within(button).queryByText(/^(完成|失败|阻断|已停止|沿用结果)$/)).toBeNull();
+  it('carries only the generated files a page names, as small inline pictures and clips', () => {
+    const withMedia = [];
+    for (const id of Object.keys(OFFICIAL_GENERATED_RECORDS)) {
+      const media = Object.entries(mediaOf(id));
+      if (!OFFICIAL_MEDIA[id]?.length) expect(media, id).toHaveLength(0);
+      for (const [reference, url] of media) {
+        expect(pageOf(id), `${id}: ${reference}`).toContain(reference);
+        expect(url, reference).toMatch(/^data:(?:image\/(?:jpeg|webp)|video\/mp4);base64,[A-Za-z0-9+/=]+$/);
+        expect(url.length, reference).toBeLessThan(1_000_000);
+      }
+      if (media.length) withMedia.push(id);
     }
-    fireEvent.click(nodeButton(workflow.nodes.find(node => node.id === 'deliver')!.title.zh));
-    expect(screen.getByText('当前节点交付 · 失败')).toBeVisible();
-    expect(screen.getByText('运行快照 · 2/4 完成')).toBeVisible();
-    fireEvent.click(screen.getByText('产物来源与校验', { exact: true }));
-    expect(screen.getByText(`SHA-256 ${entry.sourceSHA256}`)).toBeVisible();
-    expect(screen.getByText(`模型原文 SHA-256 ${entry.originalSHA256}`)).toBeVisible();
-    expect(fetch).not.toHaveBeenCalled();
+    expect(withMedia.sort()).toEqual(Object.keys(OFFICIAL_MEDIA).sort());
   });
 
-  it('provides a sandboxed document for every published generated case', () => {
+  it('puts each named file in place, after ./ or / too, and leaves a page without files as it is', () => {
+    const page = '<img src="n1/image-1.jpg"><img src="./n1/image-1.jpg"><script>clip.src = "/n2/video-1.mp4";</script><p>n3/model-1.glb</p>';
+    expect(showcasePage(page, { 'n1/image-1.jpg': 'data:image/jpeg;base64,AA==', 'n2/video-1.mp4': 'data:video/mp4;base64,BB==' })).toBe(
+      '<img src="data:image/jpeg;base64,AA=="><img src="data:image/jpeg;base64,AA=="><script>clip.src = "data:video/mp4;base64,BB==";</script><p>n3/model-1.glb</p>');
+    expect(showcasePage(page, {})).toBe(page);
+  });
+
+  it('runs each page in an opaque sandbox under the preview policy, with its own files and no requests', async () => {
     for (const id of Object.keys(OFFICIAL_GENERATED_RECORDS)) {
       const title = getOfficialWorkflow(id)!.title.zh;
-      const mounted = render(<GeneratedOfficialDemo id={id} title={title} />);
-      const frame = screen.getByTitle(title);
-      expect(frame, id).toHaveAttribute('sandbox', 'allow-scripts');
-      const preview = inertDocument(frame.getAttribute('srcdoc')!);
-      expect(preview.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content'), id).toContain("connect-src 'none'");
-      expect(preview.querySelector('button, input, select, canvas'), id).not.toBeNull();
+      const mounted = withPreferences(<GeneratedOfficialDemo id={id} title={title} />);
+      const frame = await screen.findByTitle(title, {}, { timeout: 5000 });
+      expect(frame.tagName).toBe('IFRAME');
+      expect(frame, id).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
+      expect(frame).toHaveAttribute('allow', 'clipboard-write');
+      expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
+      expect(frame).not.toHaveAttribute('src');
+      const source = frame.getAttribute('srcdoc')!;
+      const preview = inertDocument(source);
+      const policies = preview.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
+      expect(policies, id).toHaveLength(1);
+      const csp = policies[0].getAttribute('content')!;
+      for (const rule of ["script-src 'unsafe-inline'", "connect-src 'none'", "form-action 'none'", "frame-src 'none'", 'img-src data:', 'media-src data:']) {
+        expect(csp, `${id}: ${rule}`).toContain(rule);
+      }
       expect(preview.querySelector('script[src]'), id).toBeNull();
+      expect(pageScript(preview), id).toBeDefined();
+      for (const reference of Object.keys(mediaOf(id))) expect(source, `${id}: ${reference}`).not.toContain(reference);
       mounted.unmount();
     }
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('retains training controls and inline source as inert preview data', () => {
-    render(<GeneratedOfficialDemo id="model-lab" title="Training result" />);
-    const preview = inertDocument(screen.getByTitle('Training result').getAttribute('srcdoc')!);
-    expect(preview.querySelector('#noise')?.getAttribute('min')).toBe('0');
-    expect(preview.querySelector('#predCpu')?.getAttribute('max')).toBe('100');
-    expect(preview.querySelector('#predQueue')?.getAttribute('max')).toBe('50');
-    for (const id of ['trainBtn', 'stopBtn', 'retrainBtn', 'resetBtn', 'predictBtn']) {
-      expect(preview.querySelector(`button#${id}`), id).not.toBeNull();
-    }
-    expect(preview.querySelectorAll('canvas')).toHaveLength(3);
-    expect(pageScript(preview)?.textContent).toBe(inertDocument(training).querySelector('script')?.textContent);
-    expect(document.querySelector('#trainBtn')).toBeNull();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('labels QA revisions while retaining failed and blocked model statuses and both checksums', () => {
-    const workflow = getOfficialWorkflow('model-lab')!;
-    const entry = OFFICIAL_GENERATED_RECORDS[workflow.id]!;
-    render(<SaaSPreferencesProvider><OfficialShowcase item={workflow} record={entry}>
-      <GeneratedOfficialDemo id={workflow.id} title={workflow.title.zh} />
-    </OfficialShowcase></SaaSPreferencesProvider>);
-    expect(screen.getByText('模型生成 · 验收修订')).toBeVisible();
-    expect(screen.getByText('运行快照 · 4/6 完成')).toBeVisible();
-    expect(nodeButton(workflow.nodes.find(node => node.id === 'build')!.title.zh)).toHaveAttribute('aria-pressed', 'true');
-    expect(within(nodeButton(workflow.nodes.find(node => node.id === 'check')!.title.zh)).getByText('失败')).toBeVisible();
-    expect(within(nodeButton(workflow.nodes.find(node => node.id === 'card')!.title.zh)).getByText('阻断')).toBeVisible();
-    fireEvent.click(screen.getByText('产物来源与校验', { exact: true }));
-    expect(screen.getByText(`SHA-256 ${entry.sourceSHA256}`)).toBeVisible();
-    expect(screen.getByText(`模型原文 SHA-256 ${entry.originalSHA256}`)).toBeVisible();
-    const frame = screen.getByTitle(workflow.title.zh);
-    fireEvent.click(screen.getByRole('button', { name: '专注成果', exact: true }));
-    expect(screen.getByTitle(workflow.title.zh)).toBe(frame);
-    fireEvent.click(screen.getByRole('button', { name: '重置成果', exact: true }));
-    expect(screen.getByTitle(workflow.title.zh)).not.toBe(frame);
-    expect(screen.getByText('模型生成 · 验收修订')).toBeVisible();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('renders the original controls in an opaque iframe with inline scripts and no connection permission', () => {
-    render(<GeneratedOfficialDemo id={item.id} title={item.title.zh} />);
-    const frame = screen.getByTitle(item.title.zh);
-    expect(frame.tagName).toBe('IFRAME');
-    expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
-    expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin');
-    expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
-    expect(frame).not.toHaveAttribute('src');
-    const preview = inertDocument(frame.getAttribute('srcdoc')!);
-    const original = inertDocument(orbit);
-    const csp = preview.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute('content');
-    expect(csp).toContain("script-src 'unsafe-inline'");
-    expect(csp).toContain("connect-src 'none'");
-    expect(csp).toContain("form-action 'none'");
-    expect(csp).toContain("frame-src 'none'");
-    expect(preview.querySelector('input[aria-label="团队人数"]')?.getAttribute('min')).toBe('1');
-    expect(preview.querySelector('input[aria-label="团队人数"]')?.getAttribute('max')).toBe('30');
-    expect(preview.querySelectorAll('[data-plan]').length).toBe(3);
-    expect(preview.querySelectorAll('[data-cycle]').length).toBe(2);
-    expect(preview.querySelector('#generate-btn')?.textContent).toBe('生成方案摘要');
-    expect(pageScript(preview)?.textContent).toBe(original.querySelector('script')?.textContent);
-    expect(document.querySelector('#generate-btn')).toBeNull();
-    expect(fetch).not.toHaveBeenCalled();
+  it('keeps a closed dialog closed and a fixed field fixed in the preview', async () => {
+    withPreferences(<GeneratedOfficialDemo id={item.id} title={item.title.zh} />);
+    const preview = inertDocument((await screen.findByTitle(item.title.zh)).getAttribute('srcdoc')!);
+    expect(preview.querySelectorAll('[hidden]').length).toBeGreaterThan(0);
+    expect(preview.querySelectorAll('textarea[readonly]').length).toBeGreaterThan(0);
   });
 
   it('does not let source metadata or remote script tags weaken the interactive preview policy', () => {
@@ -256,20 +153,17 @@ describe('curated model-generated official results', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('opens the real artifact node while retaining the incomplete graph and failed handoff evidence', () => {
+  it('opens the real artifact node beside the run snapshot and its provenance', async () => {
     view();
     expect(nodeButton(artifact.title.zh)).toHaveAttribute('aria-pressed', 'true');
-    expect(within(left()).getByRole('heading', { name: artifact.title.zh, exact: true })).toBeVisible();
-    expect(screen.getByText('运行快照 · 5/6 完成')).toBeVisible();
+    expect(screen.getByText(`运行快照 · ${record.completed}/${record.total} 完成`)).toBeVisible();
+    expect(screen.getByText(`${record.model} · ${record.capturedOn}`)).toBeVisible();
     expect(screen.getByText('模型生成成果')).toBeVisible();
     expect(within(left()).getByText(record.note.zh)).toBeVisible();
-    expect(within(nodeButton(failed.title.zh)).getByText('失败', { exact: true })).toBeVisible();
-    fireEvent.click(nodeButton(failed.title.zh));
-    expect(screen.getByText('当前节点交付 · 失败')).toBeVisible();
-    expect(screen.getByText('运行快照 · 5/6 完成')).toBeVisible();
     fireEvent.click(screen.getByText('产物来源与校验', { exact: true }));
     expect(screen.getByText(`SHA-256 ${record.sourceSHA256}`)).toBeVisible();
-    expect(screen.getByText(record.verification.zh)).toBeVisible();
+    expect(screen.getByText(record.verification.zh, { exact: false })).toBeVisible();
+    expect(await screen.findByTitle(item.title.zh)).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -280,35 +174,35 @@ describe('curated model-generated official results', () => {
     fireEvent.click(screen.getByRole('button', { name: '播放编排讲解', exact: true }));
     for (let index = 0; index <= item.nodes.length; index++) act(() => { vi.runOnlyPendingTimers(); });
     expect(screen.getByRole('button', { name: '播放编排讲解', exact: true })).toBeVisible();
-    expect(screen.getByText('运行快照 · 5/6 完成')).toBeVisible();
-    expect(within(nodeButton(failed.title.zh)).getByText('失败', { exact: true })).toBeVisible();
+    expect(screen.getByText(`运行快照 · ${record.completed}/${record.total} 完成`)).toBeVisible();
     expect(JSON.stringify(record)).toBe(captured);
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('shows the same incomplete provenance in English', () => {
+  it('shows the same provenance in English', async () => {
     localStorage.setItem('superclaw_locale', 'en');
     view();
     const process = screen.getByRole('region', { name: 'Orchestration process' });
     expect(within(process).getByText(record.note.en)).toBeVisible();
-    expect(screen.getByText('Run snapshot · 5/6 done')).toBeVisible();
+    expect(screen.getByText(`Run snapshot · ${record.completed}/${record.total} done`)).toBeVisible();
     expect(within(process).getByRole('button', { name: `View node: ${artifact.title.en}` })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('Model-generated result')).toBeVisible();
-    expect(screen.getByText(record.verification.en)).toBeVisible();
+    expect(screen.getByText(record.verification.en, { exact: false })).toBeVisible();
+    expect(await screen.findByTitle(item.title.zh)).toBeVisible();
   });
 
-  it('loads the generated result in the real gallery and preserves it across guide navigation', async () => {
-    render(<SaaSPreferencesProvider><OfficialExamples initialId={item.id} /></SaaSPreferencesProvider>);
+  it('loads the generated result in the real gallery and keeps it across the tabs', async () => {
+    withPreferences(<OfficialExamples initialId={item.id} />);
     expect(screen.getByRole('tab', { name: '同屏体验' })).toHaveAttribute('aria-selected', 'true');
     const frameTitle = `${item.title.zh} · 模型生成成果`;
     const frame = await screen.findByTitle(frameTitle);
-    expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
     expect(nodeButton(artifact.title.zh)).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('tab', { name: '复用指南' }));
     expect(screen.getByRole('button', { name: '下载画布 JSON' })).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: '同屏体验' }));
     expect(screen.getByTitle(frameTitle)).toBe(frame);
-    expect(screen.getByText('运行快照 · 5/6 完成')).toBeVisible();
+    expect(screen.getByText(`运行快照 · ${record.completed}/${record.total} 完成`)).toBeVisible();
     expect(fetch).not.toHaveBeenCalled();
   });
 });

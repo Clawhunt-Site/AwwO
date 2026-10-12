@@ -87,7 +87,7 @@ export const PREVIEW_VIEWPORT_SCRIPT = "(()=>{if(innerWidth>0&&innerHeight>0)ret
 export const PREVIEW_HOST_SCRIPT = PREVIEW_VIEWPORT_SCRIPT + PAGE_ERROR_SCRIPT;
 
 const PREVIEW_ELEMENTS = new Set(('a abbr address article aside b bdi bdo blockquote br button caption circle cite code col colgroup dd defs del details dfn div dl dt ellipse em fieldset figcaption figure footer form g h1 h2 h3 h4 h5 h6 header hr i img input ins kbd label legend li line main mark meter nav ol optgroup option p path pattern polygon polyline pre progress q rect s samp section select small span strong style sub summary sup svg table tbody td text textarea tfoot th thead time tr tspan u ul use var wbr').split(' '));
-const PREVIEW_ATTRIBUTES = new Set(('class id style title role lang dir alt width height colspan rowspan scope value placeholder type checked disabled selected multiple min max step rows cols size open name for viewbox d fill fill-rule fill-opacity stroke stroke-width stroke-linecap stroke-linejoin stroke-dasharray stroke-opacity clip-rule cx cy r rx ry x x1 x2 y y1 y2 points transform xmlns preserveaspectratio').split(' '));
+const PREVIEW_ATTRIBUTES = new Set(('class id style title role lang dir alt width height colspan rowspan scope value placeholder type checked disabled selected multiple min max step rows cols size open hidden readonly name for viewbox d fill fill-rule fill-opacity stroke stroke-width stroke-linecap stroke-linejoin stroke-dasharray stroke-opacity clip-rule cx cy r rx ry x x1 x2 y y1 y2 points transform xmlns preserveaspectratio').split(' '));
 
 function filterPreviewAttributes(element: Element, interactive = false): void {
   for (const attribute of Array.from(element.attributes)) {

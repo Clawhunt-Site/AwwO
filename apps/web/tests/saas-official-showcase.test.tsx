@@ -217,12 +217,13 @@ describe('official side-by-side showcase', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('opens the gallery directly in the split view and preserves the result across the existing tabs', async () => {
+  it('opens the gallery directly in the split view and keeps the generated result across the existing tabs', async () => {
     render(<SaaSPreferencesProvider><OfficialExamples initialId={item.id} /></SaaSPreferencesProvider>);
     expect(screen.getByRole('tab', { name: '同屏体验' })).toHaveAttribute('aria-selected', 'true');
     expect(left()).toBeVisible();
-    const search = await within(right()).findByLabelText('搜索你的知识库');
-    fireEvent.change(search, { target: { value: 'preserve this query' } });
+    // Every official example now shows its real run's page (generatedRecords.ts) instead of a reference demo.
+    const frameTitle = `${item.title.zh} · 模型生成成果`;
+    const frame = await within(right()).findByTitle(frameTitle, {}, { timeout: 5000 });
     fireEvent.click(screen.getByRole('button', { name: '展开完整连线画布' }));
     expect(screen.getByRole('tab', { name: '编排画布' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('navigation', { name: '节点目录' })).toBeVisible();
@@ -230,8 +231,7 @@ describe('official side-by-side showcase', () => {
     expect(screen.getByRole('tab', { name: '复用指南' })).toHaveFocus();
     expect(screen.getByRole('button', { name: '下载画布 JSON' })).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: '同屏体验' }));
-    expect(within(right()).getByLabelText('搜索你的知识库')).toBe(search);
-    expect(search).toHaveValue('preserve this query');
+    expect(within(right()).getByTitle(frameTitle)).toBe(frame);
     expect(fetch).not.toHaveBeenCalled();
   });
 });
