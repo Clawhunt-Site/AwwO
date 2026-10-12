@@ -16,9 +16,9 @@
 // change mirrors a real event.
 
 import type { CanvasEdge, CanvasNode, FormNode, SessionNode } from './canvasDoc';
-import { mediaDeliveryText } from './mediaOutput';
+import { mediaInputText } from './mediaOutput';
 import { parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
-import { isMediaSessionNode, reconcileEdges } from './ports';
+import { isMediaSessionNode, isSoftMediaFeed, reconcileEdges } from './ports';
 import { validateNodeTeam } from './nodeTeam';
 
 export type RunNodeState = 'waiting' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled' | 'cached';
@@ -358,15 +358,21 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
         set(id, { state: 'cancelled', detail: '已取消' });
         return false;
       }
-      if (upstreamOk.some((r) => !r)) {
-        const reasons = deps.flatMap((dep, index) => !upstreamOk[index] && dependencyFailures.has(dep.fromNode)
+      // A media node's result feeding a text input is soft: a file that was not made leaves a note, not a block.
+      const target = nodeById.get(id);
+      const soft = deps.map((d) => {
+        const source = nodeById.get(d.fromNode);
+        return !!source && !!target && isSoftMediaFeed(source, target, d);
+      });
+      if (upstreamOk.some((r, index) => !r && !soft[index])) {
+        const reasons = deps.flatMap((dep, index) => !upstreamOk[index] && !soft[index] && dependencyFailures.has(dep.fromNode)
           ? [dependencyFailures.get(dep.fromNode)!] : []);
         const detail = [...new Set(reasons)].join('；') || '上游未完成';
         dependencyFailures.set(id, detail);
         set(id, { state: 'blocked', detail });
         return false;
       }
-      const node = nodeById.get(id);
+      const node = target;
       if (!node) return false;
       if (node.kind === 'form') {
         const output = serializeFormOutput(node);
@@ -382,7 +388,7 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
           toPort: d.toPort,
           output: source?.kind === 'session' && source.contract
             ? parseContractOutput(source.contract, text).values[d.fromPort.slice('out:'.length)] ?? ''
-            : source && isMediaSessionNode(source) ? mediaDeliveryText(source, text) : text,
+            : source && isMediaSessionNode(source) ? mediaInputText(source, outputs.get(d.fromNode)) : text,
         };
       });
       // A throwing transport marks THIS node failed — it must never reject the whole run.

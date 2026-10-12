@@ -1,7 +1,7 @@
 import type { CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
-import { mediaDeliveryText } from './mediaOutput';
+import { mediaDeliveryText, mediaMissingText, parseMediaOutput } from './mediaOutput';
 import { parseContractOutput, type ContractField } from './nodeContracts';
-import { canFeed, isMediaSessionNode, portsFor } from './ports';
+import { canFeed, isMediaSessionNode, isSoftMediaFeed, portsFor } from './ports';
 import { buildNodeMessage, validateNodeOutput, type UpstreamInput } from './runGraph';
 
 export interface NodeConversationContext {
@@ -40,6 +40,12 @@ export function prepareNodeConversation(
     const output = source && portsFor(source).find((port) => port.side === 'output' && port.id === edge.fromPort);
     if (!source || source.id === node.id || !input || !output || !canFeed(source, output, input)) {
       return { messagePrefix: '', sources, error: `输入「${input?.label || edge.toPort}」的上游连线已失效，请检查连接。` };
+    }
+    if ((!source.lastOutput || !source.lastOutput.text.trim() || source.lastOutput.partial || !parseMediaOutput(source.lastOutput.text))
+      && isSoftMediaFeed(source, node, edge)) {
+      // A picture, clip or model that was not made: the input says so and the node goes on without it.
+      upstream.push({ fromTitle: source.title, toPort: edge.toPort, output: mediaMissingText(source) });
+      continue;
     }
     if (!source.lastOutput || !source.lastOutput.text.trim() || source.lastOutput.partial) {
       return { messagePrefix: '', sources, error: `上游「${source.title}」还没有可用的完整产出。` };

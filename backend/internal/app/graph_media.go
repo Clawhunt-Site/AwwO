@@ -186,6 +186,20 @@ func mediaDeliveryText(n graphNode, output string) string {
 	return strings.Join(lines, "\n")
 }
 
+// mediaMissingText is what a downstream input reads from a media node that made no file this time (it failed, was
+// refused or cancelled, or never ran): the node goes on without it (softMediaEdge), told that no path exists.
+func mediaMissingText(n graphNode) string {
+	title := strings.TrimSpace(n.Title)
+	if title == "" {
+		title = n.ID
+	}
+	kind := map[string]string{mediaKindImage: "图片", mediaKindVideo: "视频", mediaKindModel3D: "3D 模型"}[n.AgentKind]
+	if kind == "" {
+		kind = "媒体"
+	}
+	return fmt.Sprintf("「%s」这次没有生成出%s文件，没有可以引用的路径：网页里不要引用它的任何文件，也不要编造文件名，用不依赖它的设计完成。", title, kind)
+}
+
 // admitGraphMedia admits a media node's generation inside admitGraphChild's transaction, after the workspace's runs
 // at once (and an entitled plan's slot) were counted there. Any refusal settles the node failed with its code; only
 // a session still busy with another run waits.

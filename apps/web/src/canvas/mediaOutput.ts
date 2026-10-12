@@ -68,3 +68,20 @@ export function mediaDeliveryText(node: { id: string; title?: string }, text: st
     '网页可以用上面的相对路径引用这些文件，AwwO 的预览会换成真实文件；不要编造其他文件名。',
   ].join('\n');
 }
+
+
+/**
+ * What a downstream input reads from a media node that made no file this time (it failed, was refused or cancelled, or
+ * never ran): the node goes on without it, told that no path exists. The same text the API builds (mediaMissingText in
+ * graph_media.go).
+ */
+export function mediaMissingText(node: { id: string; title?: string; agentKind?: string }): string {
+  const title = node.title?.trim() || node.id;
+  const kind = node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d' ? KIND_WORDS[node.agentKind] : '媒体';
+  return `「${title}」这次没有生成出${kind}文件，没有可以引用的路径：网页里不要引用它的任何文件，也不要编造文件名，用不依赖它的设计完成。`;
+}
+
+/** A media node's delivery as a downstream input reads it: the files it stored, or the note that it made none. */
+export function mediaInputText(node: { id: string; title?: string; agentKind?: string }, text: string | null | undefined): string {
+  return parseMediaOutput(text) ? mediaDeliveryText(node, text!) : mediaMissingText(node);
+}

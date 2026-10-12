@@ -549,6 +549,11 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				}
 				up := states[edge.FromNode]
 				if up.State == "failed" || up.State == "blocked" || up.State == "cancelled" {
+					if softMediaEdge(d, edge) {
+						// A picture, clip or model that was not made: the input says so (graphPrompt) and the node
+						// goes on without it.
+						continue
+					}
 					blocked = true
 				}
 				if up.State != "done" && up.State != "cached" {

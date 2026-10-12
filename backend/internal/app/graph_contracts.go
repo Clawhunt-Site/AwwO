@@ -112,6 +112,28 @@ func edgeTypesFit(src graphNode, fromPort, st, dt string) bool {
 	}
 	return dt == "text" && fromPort == "result" && graphMediaNode(src) && (st == mediaKindImage || st == mediaKindVideo || st == "file")
 }
+
+// softMediaEdge reports whether e is edgeTypesFit's one cross-type case: an image, video or 3D node's result feeding a
+// text input. Such an edge never holds its target back: a file that was not made (the workspace's allowance refused it,
+// moderation stopped it, the provider failed, the run was cancelled) leaves that input a note saying so
+// (mediaMissingText), and the page is made without it instead of being lost for one picture.
+func softMediaEdge(d graphDocument, e graphEdge) bool {
+	var src, dst *graphNode
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == e.FromNode {
+			src = &d.Nodes[i]
+		}
+		if d.Nodes[i].ID == e.ToNode {
+			dst = &d.Nodes[i]
+		}
+	}
+	if src == nil || dst == nil || !graphMediaNode(*src) || e.FromPort != "result" {
+		return false
+	}
+	st, sok := nodePort(*src, e.FromPort, false)
+	dt, dok := nodePort(*dst, e.ToPort, true)
+	return sok && dok && st != dt && edgeTypesFit(*src, e.FromPort, st, dt)
+}
 func nodePort(n graphNode, id string, input bool) (string, bool) {
 	if n.Kind == "form" {
 		return "text", !input && id == "data"
@@ -920,7 +942,13 @@ func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (strin
 			}
 			out = v[strings.TrimPrefix(e.FromPort, "out:")]
 		} else if graphMediaNode(src) {
-			out = mediaDeliveryText(src, out)
+			// No record of stored files means the generation made nothing (only a soft edge gets here then:
+			// the scheduler holds a node back for any other failed upstream).
+			if listed := mediaDeliveryText(src, out); listed != out {
+				out = listed
+			} else {
+				out = mediaMissingText(src)
+			}
 		}
 		inputs[e.ToPort] = out
 		sources[e.ToPort] = src.Title

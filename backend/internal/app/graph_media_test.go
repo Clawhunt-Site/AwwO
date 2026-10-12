@@ -2,7 +2,9 @@ package app
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -150,5 +152,100 @@ func TestGraphMediaResultsFeedTextInputs(t *testing.T) {
 		if _, _, err := parseGraph(doc(bad), nil); err == nil {
 			t.Error("accepted", name)
 		}
+	}
+}
+
+// A media result feeding a text input is the one soft dependency; a picture feeding another picture's reference input,
+// and every text edge, still holds its target back.
+func TestGraphSoftMediaEdgeIsOnlyTheCrossTypeCase(t *testing.T) {
+	d := graphDocument{Nodes: []graphNode{
+		{ID: "hero", Kind: "session", AgentKind: mediaKindImage, Title: "Hero"},
+		{ID: "edit", Kind: "session", AgentKind: mediaKindImage, Title: "Edit"},
+		{ID: "page", Kind: "session", AgentKind: "coding", Title: "Page"},
+		{ID: "brief", Kind: "session", AgentKind: "llm", Title: "Brief", Contract: &graphContract{Version: 1,
+			Inputs: []graphField{{ID: "art", Type: "markdown", Required: true}}, Outputs: []graphField{{ID: "out", Type: "markdown"}}}},
+	}}
+	for _, c := range []struct {
+		edge graphEdge
+		soft bool
+	}{
+		{graphEdge{ID: "a", FromNode: "hero", FromPort: "result", ToNode: "page", ToPort: "context", DataType: "image"}, true},
+		{graphEdge{ID: "b", FromNode: "hero", FromPort: "result", ToNode: "brief", ToPort: "in:art", DataType: "image"}, true},
+		{graphEdge{ID: "c", FromNode: "hero", FromPort: "result", ToNode: "edit", ToPort: "reference", DataType: "image"}, false},
+		{graphEdge{ID: "d", FromNode: "brief", FromPort: "out:out", ToNode: "page", ToPort: "context", DataType: "text"}, false},
+		{graphEdge{ID: "e", FromNode: "gone", FromPort: "result", ToNode: "page", ToPort: "context", DataType: "image"}, false},
+	} {
+		if got := softMediaEdge(d, c.edge); got != c.soft {
+			t.Error("edge", c.edge.ID, "soft", got)
+		}
+	}
+	// What the brief's required field reads when the picture was not made: a note, never an empty value.
+	prompt, err := graphPrompt(d.Nodes[3], graphDocument{Nodes: d.Nodes, Edges: []graphEdge{
+		{ID: "b", FromNode: "hero", FromPort: "result", ToNode: "brief", ToPort: "in:art", DataType: "image"}}}, map[string]string{"hero": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "「Hero」这次没有生成出图片文件") || strings.Contains(prompt, "hero/") {
+		t.Fatal(prompt)
+	}
+}
+
+// A canvas run hands a generated picture to the page that shows it; when the picture is not made (here the day's
+// allowance refuses it), the page is still made, told that no file exists, and only the picture's node fails.
+func TestPostgresGraphRunPageGoesOnWithoutAPictureThatWasNotMade(t *testing.T) {
+	var mu sync.Mutex
+	prompts := []string{}
+	pi := runtimeProvider(t, runtimePI, func(w http.ResponseWriter, r *http.Request, call runtimeCall) {
+		mu.Lock()
+		prompts = append(prompts, call.Prompt)
+		mu.Unlock()
+		completePi(w, `{"result":"PAGE"}`)
+	})
+	t.Cleanup(pi.Close)
+	h := newHarness(t, pi.URL)
+	rh := newFakeRunningHub(t)
+	rh.configure(h.a)
+	c, tid, _ := h.register(t, "media-soft@example.test")
+	base := "/tenants/" + tid
+	aid := h.request(t, c, "POST", base+"/agents", map[string]any{"name": "Page", "adapterType": "pi", "model": "test-model", "instructions": "PAGE"}, 201)["id"].(string)
+	page := map[string]any{"id": "page", "kind": "session", "title": "Page", "runtime": "pi", "agentKind": "llm",
+		"binding": map[string]string{"companyId": tid, "agentId": aid},
+		"contract": map[string]any{"version": 1, "inputs": []any{map[string]any{"id": "art", "label": "Art", "type": "markdown", "required": true}},
+			"outputs": []any{map[string]any{"id": "result", "label": "Result", "type": "markdown", "required": true}}}}
+	doc := map[string]any{"nodes": []any{mediaDraftNode("img", "rh.seedream-v5-pro", "a red bicycle on a beach"), page},
+		"edges": []any{map[string]any{"id": "i-p", "fromNode": "img", "fromPort": "result", "toNode": "page", "toPort": "in:art", "dataType": "image"}}}
+	cid := h.request(t, c, "POST", base+"/canvases", map[string]any{"name": "Soft media", "document": doc}, 201)["id"].(string)
+	canvas := h.request(t, c, "POST", base+"/canvases/"+cid+"/initialize", map[string]any{"documentVersion": 1}, 200)
+	states := func(v map[string]any) map[string]map[string]any {
+		out := map[string]map[string]any{}
+		for _, raw := range v["nodes"].([]any) {
+			n := raw.(map[string]any)
+			out[n["nodeId"].(string)] = n
+		}
+		return out
+	}
+	graph := h.request(t, c, "POST", base+"/canvases/"+cid+"/graph-runs", map[string]any{"operationId": randomID(), "documentVersion": canvas["version"]}, 202)
+	nodes := states(awaitGraph(t, h, c, base+"/canvases/"+cid+"/graph-runs/"+graph["id"].(string), "completed", 15*time.Second))
+	mu.Lock()
+	first := append([]string{}, prompts...)
+	mu.Unlock()
+	if nodes["img"]["state"] != "done" || nodes["page"]["state"] != "done" || len(first) != 1 || !strings.Contains(first[0], "img/image-1.png") {
+		t.Fatalf("with the picture: %v %v %q", nodes["img"], nodes["page"], first)
+	}
+
+	h.a.cfg.MediaRunsPerDay = 1
+	graph = h.request(t, c, "POST", base+"/canvases/"+cid+"/graph-runs", map[string]any{"operationId": randomID(), "documentVersion": canvas["version"]}, 202)
+	nodes = states(awaitGraph(t, h, c, base+"/canvases/"+cid+"/graph-runs/"+graph["id"].(string), "failed", 15*time.Second))
+	mu.Lock()
+	second := append([]string{}, prompts...)
+	mu.Unlock()
+	if nodes["img"]["state"] != "failed" || nodes["img"]["detail"] != "media_quota_exceeded" || nodes["page"]["state"] != "done" || len(second) != 2 {
+		t.Fatalf("without the picture: %v %v %d", nodes["img"], nodes["page"], len(second))
+	}
+	if !strings.Contains(second[1], "这次没有生成出图片文件") || strings.Contains(second[1], "img/image-1.png") {
+		t.Fatalf("the page's input without the picture %q", second[1])
+	}
+	if submits, _ := rh.counts(); submits != 1 {
+		t.Fatal("generations submitted", submits)
 	}
 }

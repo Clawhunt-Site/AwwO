@@ -136,6 +136,17 @@ export function canFeed(fromNode: CanvasNode, out: PortSpec, inp: PortSpec): boo
 }
 
 /**
+ * Is this wire canFeed's one cross-type case, a media node's result feeding a text input? Such a wire never holds its
+ * target back: a file that was not made leaves that input a note (mediaMissingText) and the node goes on without it, as
+ * the API's scheduler does (softMediaEdge), so a page is never lost for one picture.
+ */
+export function isSoftMediaFeed(fromNode: CanvasNode, toNode: CanvasNode, edge: { fromPort: string; toPort: string }): boolean {
+  const out = portSpec(fromNode, 'output', edge.fromPort);
+  const inp = portSpec(toNode, 'input', edge.toPort);
+  return !!out && !!inp && !arePortTypesCompatible(out.dataType, inp.dataType) && canFeed(fromNode, out, inp);
+}
+
+/**
  * Can we connect `from` to `to`?
  *  - both ports exist on their nodes; `from` resolves to an OUTPUT, `to` to an INPUT,
  *  - different nodes (no self-loop),
