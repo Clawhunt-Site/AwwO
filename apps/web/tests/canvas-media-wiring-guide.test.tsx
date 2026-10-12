@@ -46,7 +46,7 @@ describe('media port guides', () => {
 
     fireEvent.mouseEnter(result);
     expect(screen.getByRole('tooltip').textContent).toContain('接到图片或 3D 节点的「参考图」，或组件的图像字段');
-    expect(screen.getByRole('tooltip').textContent).toContain('文字节点的「上下文」只收文字');
+    expect(screen.getByRole('tooltip').textContent).toContain('接到网页或文字节点的「上下文」或文字字段，那个节点会拿到文件路径');
   });
 
   it('says how many wires a port carries', () => {
@@ -84,7 +84,8 @@ describe('media port guides', () => {
   it('gives video and 3D results their own destination', () => {
     const result = (node: SessionNode) => mediaPortGuide((key, values) => canvasText('zh', key, values), 'zh', node, portsFor(node).find(p => p.side === 'output')!);
     expect(result(media('video'))).toContain('接到组件的视频字段');
-    expect(result(media('model3d'))).toContain('以文件形式从这里连出去：接到组件的文件字段');
+    expect(result(media('model3d'))).toContain('以文件形式从这里连出去：接到网页或文字节点的「上下文」');
+    expect(result(media('model3d'))).toContain('接到组件的文件字段');
     expect(portsFor(media('video')).some(p => p.id === 'reference')).toBe(false);
   });
 
