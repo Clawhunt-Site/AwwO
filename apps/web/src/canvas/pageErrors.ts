@@ -9,14 +9,22 @@ export const PAGE_ERROR_MESSAGE = 'awwo-page-error';
  * Runs first in a running preview (with PREVIEW_VIEWPORT_SCRIPT, htmlDeliverable.ts). Reports the first uncaught script
  * error or unhandled rejection, once. What is not the page's own mistake is left alone: a cross-origin "Script error."
  * with no detail, the browser's ResizeObserver loop notice, a request the preview blocks, a missing WebGL context.
+ *
+ * A figure page's own script runs inside AwwO's figure kit (`Anatomy.run`), which catches its error, logs the Error with
+ * console.error and shows its `.anatomy-error` card instead of throwing, so no error event follows. The first such card
+ * is reported too, with the Error the kit logged just before it (its stack carries the page's lines). The first
+ * production figure, 2026-10-12, stopped exactly so: `Cannot access … before initialization`, and nothing was repaired.
  */
-export const PAGE_ERROR_SCRIPT = "(()=>{let sent=0;"
+export const PAGE_ERROR_SCRIPT = "(()=>{let sent=0,caught=null;"
   + "const noise=/^(?:Uncaught )?Script error\\.?$|ResizeObserver loop|Failed to fetch|NetworkError|Load failed|Content Security Policy|WebGL context/i;"
   + "const send=(m,l,c,s)=>{m=String(m||'').slice(0,600);if(sent||!m.trim()||noise.test(m))return;sent=1;"
   + `try{parent.postMessage({type:'${PAGE_ERROR_MESSAGE}',message:m,line:+l||0,column:+c||0,stack:String(s||'').slice(0,1500)},'*')}catch(e){}};`
   + "addEventListener('error',e=>{if(e instanceof ErrorEvent)send(e.message||(e.error&&e.error.message),e.lineno,e.colno,e.error&&e.error.stack)},true);"
   + "addEventListener('unhandledrejection',e=>{const r=e.reason;"
-  + "send('Unhandled promise rejection: '+(r&&r.message?(r.name||'Error')+': '+r.message:String(r)),0,0,r&&r.stack)})})();";
+  + "send('Unhandled promise rejection: '+(r&&r.message?(r.name||'Error')+': '+r.message:String(r)),0,0,r&&r.stack)});"
+  + "try{const log=console.error;console.error=function(){for(const x of arguments)if(x instanceof Error){caught=x;break}return log.apply(this,arguments)}}catch(e){}"
+  + "try{new MutationObserver((r,o)=>{const n=document.querySelector('.anatomy-error');if(!n)return;o.disconnect();const x=caught;"
+  + "send(x?(x.name||'Error')+': '+x.message:n.textContent,0,0,x&&x.stack)}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}})();";
 
 /** A page that failed to run, as the preview that showed it saw it. */
 export interface PageErrorReport {

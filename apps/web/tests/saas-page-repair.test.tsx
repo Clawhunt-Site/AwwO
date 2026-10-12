@@ -2,6 +2,7 @@
 // Round 2 of the explainer-figure tests (2026-10-12) is the case: two one-shot pages never ran, one for a bracket typo,
 // one for a name declared twice, and the reader saw only an error card.
 import vm from 'node:vm';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { ArtifactPreview } from '../src/canvas/ArtifactPreview';
@@ -63,6 +64,27 @@ describe('the page error reporter', () => {
     page.fire('unhandledrejection', { reason });
     expect(page.posted).toEqual([{ type: PAGE_ERROR_MESSAGE, message: "Unhandled promise rejection: TypeError: Cannot read properties of undefined (reading 'x')",
       line: 0, column: 0, stack: 'TypeError: …\n    at draw (about:srcdoc:42:7)' }]);
+  });
+
+  it('reports a figure script error the figure kit caught and showed as its card, and nothing for a logged Error alone', async () => {
+    const page = (script: string) => {
+      const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { runScripts: 'outside-only', virtualConsole: new VirtualConsole() });
+      const posted: unknown[] = [];
+      dom.window.addEventListener('message', event => posted.push(event.data));
+      dom.window.eval(PAGE_ERROR_SCRIPT);
+      dom.window.eval(script);
+      return { dom, posted };
+    };
+    // What the kit's report() does when Anatomy.run's callback throws: log the Error, then show its card.
+    const kit = page(`console.error(new ReferenceError("Cannot access 'crank' before initialization"));
+      const note = document.createElement('div'); note.className = 'anatomy-error'; document.body.appendChild(note);
+      const again = document.createElement('div'); again.className = 'anatomy-error'; document.body.appendChild(again);`);
+    const logged = page(`console.error(new Error('a library logged this and carried on'));`);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(kit.posted).toEqual([{ type: PAGE_ERROR_MESSAGE, message: "ReferenceError: Cannot access 'crank' before initialization", line: 0, column: 0,
+      stack: expect.stringContaining('ReferenceError') }]);
+    expect(logged.posted).toEqual([]);
+    kit.dom.window.close(); logged.dom.window.close();
   });
 
   it('runs ahead of every running page, and in no static one', async () => {
