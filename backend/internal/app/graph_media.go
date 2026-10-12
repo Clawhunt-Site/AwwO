@@ -19,9 +19,18 @@ import (
 // executed by executeMedia, resumed after a restart, and published as the awwo.media record naming its stored files.
 // A reference image wired into an image node orders the run but is not sent: no provider here takes one yet.
 
-// graphMediaNode reports whether a saved node is an image, video or 3D node.
+// graphMediaNode reports whether a saved node is an image, video or 3D node by its kind alone. A node of such a kind
+// can still be bound to an ordinary text Agent, so what decides how a node runs is its frozen snapshot
+// (frozenMediaNode) and, once it ran, whether its child run was a generation.
 func graphMediaNode(n graphNode) bool {
 	return n.Kind == "session" && (n.AgentKind == mediaKindImage || n.AgentKind == mediaKindVideo || n.AgentKind == mediaKindModel3D)
+}
+
+// frozenMediaNode reports whether the graph admitted node nid as a generation (its snapshot holds a media plan).
+func (a *App) frozenMediaNode(ctx context.Context, tid, gid, nid string) (bool, error) {
+	var media bool
+	err := a.db.QueryRow(ctx, "SELECT COALESCE(execution_snapshot ? 'media',false) FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, nid).Scan(&media)
+	return media, err
 }
 
 // graphMediaDraft is the prompt a media node's next Send would generate from: the draft of its active conversation,

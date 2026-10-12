@@ -495,7 +495,8 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 			}
 			if s.State == "running" {
 				var rs, out, code string
-				e = a.db.QueryRow(ctx, "SELECT status,output,error FROM runs WHERE tenant_id=$1 AND id=$2", tid, s.RunID).Scan(&rs, &out, &code)
+				var generation bool
+				e = a.db.QueryRow(ctx, "SELECT status,output,error,media_task IS NOT NULL FROM runs WHERE tenant_id=$1 AND id=$2", tid, s.RunID).Scan(&rs, &out, &code, &generation)
 				if e != nil {
 					continue
 				}
@@ -518,7 +519,7 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				recorded := out
 				if rs == "completed" {
 					state = "done"
-					if graphMediaNode(n) {
+					if generation {
 						// A generation's files were stored as it finished (storeMediaResults); its delivery is the
 						// awwo.media record naming them, published as it is.
 					} else if vals, files, err := graphOutputFiles(n, out); err != nil {
@@ -567,7 +568,13 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 			}
 			var prompt string
 			var err error
+			media := false
 			if graphMediaNode(n) {
+				if media, err = a.frozenMediaNode(ctx, tid, id, n.ID); err != nil {
+					continue
+				}
+			}
+			if media {
 				prompt, err = a.graphMediaPrompt(ctx, tid, s.SessionID, n, d, outputs)
 			} else {
 				prompt, err = graphPrompt(n, d, outputs)
