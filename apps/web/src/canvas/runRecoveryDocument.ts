@@ -4,6 +4,7 @@ import { taskFrameFingerprint } from './taskFrame';
 import type { CanvasDocument, CanvasEdge, CanvasNode, NodeOutput, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
 import { followupDeliveryContract, supersededGraphNodes } from './followupDelivery';
+import { pageRepairDelivery } from './pageRepair';
 import type { CanvasRunJournal } from './runJournal';
 import { activeThreadId, updateThreadIssueId } from './nodeThreads';
 import { reconcileEdges } from './ports';
@@ -485,8 +486,11 @@ function recoveredDelivery(
   // into the replacement Agent's session.
   if (!item || !belongsToJournalBinding(node, item) || !inputsMatch || !selected.has(node.id)) return null;
   if (journal.manual) {
-    if (item.state !== 'done' || item.partial || !item.output || !followupDeliveryContract(node, item.output)) return null;
-    return { text: item.output, at: journal.startedAt, source: 'run',
+    if (item.state !== 'done' || item.partial || !item.output) return null;
+    // A page repair's reply is the fixed page alone; it goes back into its field (pageRepair.ts).
+    const text = followupDeliveryContract(node, item.output) ? item.output : pageRepairDelivery(node, journal.manualMessage, item.output);
+    if (!text) return null;
+    return { text, at: journal.startedAt, source: 'run',
       ...(journal.supersedesThroughGraphVersion ? { supersedesThroughGraphVersion: journal.supersedesThroughGraphVersion, supersedesGraphCanvasId: journal.supersedesGraphCanvasId } : {}) };
   }
   const currentOutput = recoverableOutput(journal, item) ? item : null;

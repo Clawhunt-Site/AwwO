@@ -100,6 +100,8 @@ import { canvasStorage as baseCanvasStorage } from './canvasStorage';
 import { currentGraphRunEntry } from './currentGraphRun';
 import { applyRecoveredDocument, prepareRunDocument, runInputFingerprint, recoveryJournalForDocument, mergeRecoveredManualConversation } from './runRecoveryDocument';
 import { prepareManualHistoryCapacity, persistManualHistoryWithNativeProof } from './manualHistoryRetention';
+import { subscribePageErrors, type PageErrorReport } from './pageErrors';
+import { loadPageRepairRecords, pageRepairDecision, pageRepairDisplayText, pageRepairMessage, pageRepairTarget, savePageRepairRecord } from './pageRepair';
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
 import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage } from './surfaceMessages';
@@ -2059,6 +2061,36 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     (node: CanvasNode, message: string, onAccepted?: () => void, displayText?: string) => { void startRun([node.id], message, onAccepted, displayText); },
     [startRun],
   );
+  // A delivered page that fails when it runs goes back to its node once, with the error, as a message in the node's
+  // own chat (pageRepair.ts). Nothing starts while a run is active: the request waits here and starts once the canvas
+  // is idle, unless the node has delivered something else by then.
+  const waitingRepairs = useRef(new globalThis.Map<string, PageErrorReport>());
+  const repairPage = useCallback((report: PageErrorReport) => {
+    if (readOnlyRef.current || outdatedObserver.current || runUnavailableReason) return;
+    const target = pageRepairTarget(docRef.current.nodes, report.page);
+    if (!target) return;
+    const storage = canvasStorage();
+    if (pageRepairDecision(loadPageRepairRecords(storage)[target.node.id], target.output) !== 'repair') return;
+    if (anyLaneActive() || setupRequest.current || busyNodeIds(undefined, true).has(target.node.id)) {
+      waitingRepairs.current.set(target.node.id, report);
+      return;
+    }
+    waitingRepairs.current.delete(target.node.id);
+    // Recorded before the start: every other view of this page, and every other tab of this canvas, leaves it alone.
+    if (!savePageRepairRecord(storage, target.node.id, { from: target.output.at, at: Date.now() })) return;
+    void startRun([target.node.id], pageRepairMessage(target, report), undefined, pageRepairDisplayText(report, locale));
+  }, [startRun, anyLaneActive, busyNodeIds, runUnavailableReason, locale]);
+  useEffect(() => subscribePageErrors(repairPage), [repairPage]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!waitingRepairs.current.size) return;
+      const waiting = [...waitingRepairs.current.values()];
+      waitingRepairs.current.clear();
+      // The first one starts; the others wait again behind it.
+      for (const report of waiting) repairPage(report);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [repairPage]);
   const tileOnIssueId = useCallback(
     (nodeId: string, issueId: string, threadId: string | undefined) =>
       // Server-minted, not a user edit — never an undo step.

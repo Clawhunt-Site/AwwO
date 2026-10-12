@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useCanvasI18n } from '../i18n';
 import { buildLiveDocument, LIVE_LINK_MESSAGE, LIVE_PAGE_ALLOW, LIVE_PAGE_SANDBOX, type AssetResolver } from './liveDocument';
+import { readPageErrorMessage, reportPageError } from '../pageErrors';
 
 export type LiveDevice = 'desktop' | 'tablet' | 'mobile';
 export const DEVICE_WIDTH: Record<LiveDevice, number | null> = { desktop: null, tablet: 820, mobile: 390 };
@@ -43,11 +44,16 @@ export function LivePage({ html, title, path, resolve, device = 'desktop', reloa
     }).catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, [html, path, resolve]);
+  // The page the frame runs now, for an error report it posts (pageErrors.ts): its line numbers are this document's.
+  const builtRef = useRef(built); builtRef.current = built;
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow) return;
       const data = event.data as { type?: unknown; href?: unknown } | null;
       if (data?.type === LIVE_LINK_MESSAGE && typeof data.href === 'string' && /^https?:\/\//i.test(data.href)) linkRef.current?.(data.href);
+      const current = builtRef.current;
+      const report = current ? readPageErrorMessage(event.data, current.document, current.source) : null;
+      if (report) reportPageError(report);
     };
     window.addEventListener('message', receive);
     return () => window.removeEventListener('message', receive);

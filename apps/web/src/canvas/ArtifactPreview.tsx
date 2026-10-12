@@ -6,6 +6,7 @@ import { sessionFetch } from '../saas/api';
 import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds, type PreviewScriptNeeds } from './previewLibraries';
+import { readPageErrorMessage, reportPageError } from './pageErrors';
 import { artifactImageType } from './artifactImage';
 import { BinaryArtifactPreview } from './BinaryArtifactPreview';
 import { PREVIEW_LIMITS, previewKind, type PreviewFile } from './previewData';
@@ -181,6 +182,17 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     setNavigation({ notice: false, stopped: false });
     setMode('preview');
   };
+  // A running page that fails says so (pageErrors.ts); the canvas may send it back to its node once (pageRepair.ts).
+  useEffect(() => {
+    if (!running || !html) return;
+    const receive = (event: MessageEvent) => {
+      if (!frameRef.current || event.source !== frameRef.current.contentWindow) return;
+      const report = readPageErrorMessage(event.data, html, documentSource);
+      if (report) reportPageError(report);
+    };
+    window.addEventListener('message', receive);
+    return () => window.removeEventListener('message', receive);
+  }, [running, html, documentSource]);
   const downloadLabel = downloadUrl ? t('deliverable.downloadFile') : t('deliverable.downloadFormat', { format: type === 'html' ? 'html' : 'md' });
   const download = () => {
     // Plain source previews are stored artifacts and use their original download

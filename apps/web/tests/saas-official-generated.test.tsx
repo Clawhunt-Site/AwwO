@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { htmlPreviewDocument, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
+import { htmlPreviewDocument, PREVIEW_HOST_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import GeneratedOfficialDemo from '../src/saas/examples/GeneratedOfficialDemo';
 import { OfficialExamples } from '../src/saas/examples/OfficialExamples';
@@ -27,7 +27,7 @@ function inertDocument(html: string) {
   return template.content;
 }
 /** The page's own first script in a preview, past AwwO's viewport script at the head. */
-const pageScript = (preview: ParentNode) => [...preview.querySelectorAll('script')].find(script => script.textContent !== PREVIEW_VIEWPORT_SCRIPT);
+const pageScript = (preview: ParentNode) => [...preview.querySelectorAll('script')].find(script => script.textContent !== PREVIEW_HOST_SCRIPT);
 
 function view() {
   return render(<SaaSPreferencesProvider><OfficialShowcase item={item} record={record}>
@@ -251,7 +251,7 @@ describe('curated model-generated official results', () => {
     expect(preview.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("connect-src 'none'");
     expect(preview.querySelector('script[src]')).toBeNull();
     expect(pageScript(preview)?.textContent).toBe('window.sourceMarker = 1');
-    expect([...preview.querySelectorAll('script')].map(script => script.textContent)).toEqual([PREVIEW_VIEWPORT_SCRIPT, 'window.sourceMarker = 1']);
+    expect([...preview.querySelectorAll('script')].map(script => script.textContent)).toEqual([PREVIEW_HOST_SCRIPT, 'window.sourceMarker = 1']);
     expect('sourceMarker' in window).toBe(false);
     expect(fetch).not.toHaveBeenCalled();
   });

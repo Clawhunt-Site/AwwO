@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ArtifactPreview, artifactFilename, readArtifactPreview, StoredArtifactPreview } from '../src/canvas/ArtifactPreview';
-import { htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
+import { htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES, PREVIEW_HOST_SCRIPT, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, PREVIEW_LIBRARIES, previewScriptNeeds } from '../src/canvas/previewLibraries';
 import { ARTIFACT_REF_PREFIX, clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
@@ -85,7 +85,7 @@ describe('isolated HTML rendition', () => {
     expect(doc.body.querySelectorAll('script')).toHaveLength(1);
     expect(doc.body.querySelector('script')!.textContent).toContain('function play()');
     // The head's only script is AwwO's own viewport script, after the CSP.
-    expect([...doc.head.querySelectorAll('script')].map(script => script.textContent)).toEqual([PREVIEW_VIEWPORT_SCRIPT]);
+    expect([...doc.head.querySelectorAll('script')].map(script => script.textContent)).toEqual([PREVIEW_HOST_SCRIPT]);
     expect(doc.querySelector('canvas')!.getAttribute('data-level')).toBe('2');
     expect(doc.querySelector('button')!.getAttribute('onclick')).toBe('play()');
     expect(doc.querySelector('base,iframe,object,embed,meta[http-equiv="refresh"],a[href],[src],[action],[formaction],[target],[ping]')).toBeNull();
