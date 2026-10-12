@@ -4,6 +4,7 @@ import { taskFrameFingerprint } from './taskFrame';
 import type { CanvasDocument, CanvasEdge, CanvasNode, NodeOutput, SessionNode } from './canvasDoc';
 import { invalidateOutputs } from './invalidateOutputs';
 import { followupDeliveryContract, supersededGraphNodes } from './followupDelivery';
+import { parseMediaOutput } from './mediaOutput';
 import { pageRepairDelivery } from './pageRepair';
 import type { CanvasRunJournal } from './runJournal';
 import { activeThreadId, updateThreadIssueId } from './nodeThreads';
@@ -474,6 +475,14 @@ export function recoverableOutput(
   return (journal.collaboration || ['done', 'failed', 'cancelled'].includes(item.state)) && item.output ? item.output : null;
 }
 
+/** A media node's finished generation, which is that node's delivery; null for any other node or text, and for a
+ *  record of another kind (an image record never becomes a 3D node's delivery). */
+function mediaDelivery(node: CanvasNode, output: string): string | null {
+  if (node.kind !== 'session') return null;
+  const media = parseMediaOutput(output);
+  return media && media.kind === node.agentKind ? output : null;
+}
+
 /** The delivery a recovery writes into this node, or null when it leaves the node's output alone. */
 function recoveredDelivery(
   node: CanvasNode,
@@ -487,8 +496,11 @@ function recoveredDelivery(
   if (!item || !belongsToJournalBinding(node, item) || !inputsMatch || !selected.has(node.id)) return null;
   if (journal.manual) {
     if (item.state !== 'done' || item.partial || !item.output) return null;
+    // An image, video or 3D node generates in its own chat (a canvas run leaves media nodes out), so a finished
+    // generation is that node's delivery: 交付物 and 成果 show it and the nodes downstream receive it.
     // A page repair's reply is the fixed page alone; it goes back into its field (pageRepair.ts).
-    const text = followupDeliveryContract(node, item.output) ? item.output : pageRepairDelivery(node, journal.manualMessage, item.output);
+    const text = mediaDelivery(node, item.output)
+      ?? (followupDeliveryContract(node, item.output) ? item.output : pageRepairDelivery(node, journal.manualMessage, item.output));
     if (!text) return null;
     return { text, at: journal.startedAt, source: 'run',
       ...(journal.supersedesThroughGraphVersion ? { supersedesThroughGraphVersion: journal.supersedesThroughGraphVersion, supersedesGraphCanvasId: journal.supersedesGraphCanvasId } : {}) };
