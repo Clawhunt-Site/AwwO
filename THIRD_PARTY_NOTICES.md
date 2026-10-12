@@ -40,6 +40,13 @@ files when distributing the runtime image. Source reference:
 execution runtime behind AwwO's Go control plane and does not change AwwO's own
 license.
 
+The Go API (`backend/`) reads the text layer of attached PDFs with
+`github.com/ledongthuc/pdf`, pinned to `v0.0.0-20260907135840-6c8c28e0e8a0` in
+`backend/go.mod` and `backend/go.sum`. It declares the BSD-3-Clause license
+(Copyright (c) 2009 The Go Authors, as a fork of `rsc.io/pdf`); preserve its
+LICENSE file when distributing the source. It is compiled into the API binary
+and does not change AwwO's own license.
+
 ## Existing fusion boundary
 
 The first fusion release keeps each upstream runtime isolated. SuperClaw exposes

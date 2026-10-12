@@ -579,6 +579,20 @@ func (a *App) describeAttachment(item *uploadAttachment, path string, budget *in
 		}
 	case uploadKindText, uploadKindModel3D:
 	case uploadKindDocument:
+		if item.ContentType == "application/pdf" || uploadExtension(item.Name) == "pdf" {
+			if *budget <= 0 {
+				item.Note = "Text not included: this message's attached text is at its limit."
+				return
+			}
+			text, truncated, note := pdfText(path, item.Size, min(*budget, maxAttachmentFileText))
+			if text != "" {
+				item.Text, item.TextSource, item.Truncated = text, "extracted", truncated
+				*budget -= len(text)
+			} else if note != "" {
+				item.Note = note
+			}
+			return
+		}
 		if pattern := officeTextEntries[uploadExtension(item.Name)]; pattern != nil && item.Size <= maxOfficeDocumentBytes {
 			text, truncated := officeText(path, pattern, min(*budget, maxAttachmentFileText))
 			if text != "" {
