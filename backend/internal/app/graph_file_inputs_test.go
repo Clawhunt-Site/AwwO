@@ -100,6 +100,40 @@ func decodeGraphFileData(t *testing.T, prompt string) []map[string]string {
 	return data
 }
 
+// A 3D node's result is typed file, so its wire keeps DataType "file". On 2026-10-12 the file reader took that wire
+// for a stored file and failed every page fed by a 3D model with workspace_input_not_stored. The page reads the model
+// as the file list graphPrompt writes, so the reader must leave the wire alone without even reading the 3D node's
+// state (made or not), whether it feeds a page's text input (the soft media case) or a file input.
+func TestGraphFileInputsLeaveA3DResultToItsFileList(t *testing.T) {
+	for name, input := range map[string]graphField{
+		"text input": {ID: "media_hero", Type: "markdown", Required: true},
+		"file input": {ID: "media_hero", Type: "file", Required: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader := newGraphFileReader(t, []byte("unused"))
+			reader.doc = graphDocument{
+				Nodes: []graphNode{
+					{ID: "hero", Kind: "session", AgentKind: mediaKindModel3D, Title: "Hero"},
+					{ID: "review", Kind: "session", AgentKind: "coding", Contract: &graphContract{Version: 1, Inputs: []graphField{input}}},
+				},
+				Edges: []graphEdge{{ID: "media-edge", FromNode: "hero", FromPort: "result", ToNode: "review", ToPort: "in:media_hero", DataType: "file"}},
+			}
+			if soft := softMediaEdge(reader.doc, reader.doc.Edges[0]); soft != (input.Type == "markdown") {
+				t.Fatal("fixture is not the intended edge shape", soft)
+			}
+			// The reader fails the test on any query about "hero", so passing means the 3D node was never read.
+			prompt, attached, err := graphTextFilePrompt(context.Background(), reader, "tenant", "graph", "review", "ORIGINAL")
+			if err != nil || attached || prompt != "ORIGINAL" || reader.reads != 0 {
+				t.Fatal(err, attached, prompt, reader.reads)
+			}
+			files, err := readGraphInputFiles(context.Background(), reader, "tenant", "graph", "review", maxWorkspaceFileBytes, maxWorkspaceInputBytes)
+			if err != nil || len(files) != 0 || reader.reads != 0 {
+				t.Fatal(err, files, reader.reads)
+			}
+		})
+	}
+}
+
 func TestGraphTextFilePromptPreservesExactStoredBytesAndReferences(t *testing.T) {
 	body := []byte("<!doctype html>\n<html lang=\"zh\"><head><title>开始</title></head><body>\n完成。\n</body></html>\n")
 	reader := newGraphFileReader(t, body)

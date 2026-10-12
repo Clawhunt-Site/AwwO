@@ -59,6 +59,12 @@ func readGraphInputFiles(ctx context.Context, tx graphInputReader, tid, gid, nid
 		if !ok {
 			return nil, errors.New("invalid_workspace_graph")
 		}
+		// A 3D node's result is typed file and an edge keeps its source's type, so its wire into a page arrives here as
+		// a file edge. Its output is an awwo.media record, never one stored file: like a picture or a clip it reaches
+		// the input as the file list graphPrompt writes (mediaDeliveryText, or mediaMissingText when nothing was made).
+		if graphMediaNode(src) {
+			continue
+		}
 		var output, state string
 		if err := tx.QueryRow(ctx, "SELECT state,output FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, src.ID).Scan(&state, &output); err != nil {
 			return nil, err
