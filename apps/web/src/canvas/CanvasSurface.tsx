@@ -37,6 +37,7 @@ import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, 
 import { reviewVerdict, reworkRequirements } from './reviewVerdict';
 import { runErrorText } from '../saas/canvasErrors';
 import { fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
+import { recordCanvasEvent, type CanvasUiEvent } from '../saas/uiEvents';
 import { assistantCostNote } from './assistantCost';
 import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHost, type AssistantPending, type AssistantRoute,
   type RouteAssistant } from './assistantRouting';
@@ -2845,6 +2846,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       { label: 'rework' });
     void startRun(downstreamClosure([producerId]));
   };
+  // The hosted app counts a few presses for the operator, to see which of these buttons people use; the desktop shell
+  // has no one to tell.
+  const countPress = (name: CanvasUiEvent) => { if (cloudScope) recordCanvasEvent(cloudScope.tenant.id, cloudScope.canvasId, name); };
   const nextAction = (step: NextStep, primary: boolean): AssistantNextSteps['actions'][number] => {
     switch (step.kind) {
       case 'upgrade': return { id: 'upgrade', primary, label: t('assistant.nextUpgrade'), href: accountURL('plans'),
@@ -2863,7 +2867,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       case 'rework': return { id: `rework-${step.nodeId}`, primary, label: withCalls(t('assistant.nextRework', { node: titleOf(step.nodeId) }), step.calls),
         onSelect: () => reworkFromReview(step.nodeId, step.reviewerId) };
       case 'open-review': return { id: `review-${step.nodeId}`, primary, label: t('assistant.nextOpenReview'),
-        onSelect: () => { toggleDeliverables(step.nodeId, true); focusNode(step.nodeId); setTimelineOpen(false); } };
+        onSelect: () => { toggleDeliverables(step.nodeId, true); focusNode(step.nodeId); setTimelineOpen(false); countPress('review.open_report'); } };
       case 'results': return { id: 'results', primary, label: t('assistant.nextResults'), onSelect: () => changeStageView('results') };
     }
   };
@@ -2929,6 +2933,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
       { id: `${id}-user`, role: 'user' as const, content: prompt }, { id: `${id}-assistant`, role: 'assistant' as const, content }].slice(-60) }));
     if (nodes.length) setAssistantOpen(true);
+    countPress('assistant.local_answer');
     return true;
   };
   // 「画布的最后一个节点运行失败了」「处理失败」 (a user, 2026-10-11): the planner and a direct task cannot see the run, so a
@@ -2964,6 +2969,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       { id: `${id}-user`, role: 'user' as const, content: prompt }, { id: `${id}-assistant`, role: 'assistant' as const, content }].slice(-60) }));
     setAssistantOpen(true);
     if (scope) void startRun(scope);
+    countPress('assistant.local_answer');
     return true;
   };
   const costNote = assistantCostNote(t, countsCalls, Boolean(unifiedHost), plannerAllowance);
@@ -3245,7 +3251,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         }} />}
       <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id, { configure: true }); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} lanes={laneRunning.filter(Boolean).length} summary={runSummary}
         onViewOutput={id => { toggleDeliverables(id, true); focusNode(id); setTimelineOpen(false); }}
-        reviewNote={reviewNote} onReviewNext={() => setAssistantOpen(true)}
+        reviewNote={reviewNote} onReviewNext={() => { setAssistantOpen(true); countPress('review.next_steps'); }}
         stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
         onToggleTimeline={() => { const fromResults = stageViewRef.current === 'results'; changeStageView('canvas'); setTimelineOpen(o => fromResults || !o); }} timelineOpen={timelineOpen && !showingResults}
         timelineUnavailableReason={focusedId ? t('run.timelineWhileOpen') : undefined}

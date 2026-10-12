@@ -300,6 +300,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/artifacts", a.tenant(a.listArtifacts, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/uploads", a.tenant(a.uploadCanvasFile, 2))
 	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}/uploads/{uploadId}", a.tenant(a.deleteCanvasUpload, 2))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/ui-events", a.tenant(a.recordUIEvent, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}", a.tenant(a.downloadArtifact, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/artifacts/{id}/media", a.tenant(a.mediaArtifact, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/media", a.tenant(a.mediaCatalogue, 1))

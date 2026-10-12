@@ -85,6 +85,7 @@
 | POST /canvases/{id}/initialize | documentVersion, scope? | 根据已保存文档准备节点 Agent / Session，200 返回完整 canonical 画布；不执行模型 |
 | DELETE /canvases/{id} | 无 | 成功 204；关联节点或规划 run 为 queued/running 时 409 / resource_in_use，拒绝时不改运行、事件或审计 |
 | POST /canvases/{id}/plan | prompt, context, operationId | 202，创建持久规划 run；空画布也可使用，共享运行限额和 SSE |
+| POST /canvases/{id}/ui-events | `{name}` | member 以上，暂停的工作区 403；记一次按钮点击，供运营统计：name 只能是 `review.next_steps`（运行完成提示里的「看下一步」）、`review.open_report`（「接下来」里的「查看验收报告」）或 `assistant.local_answer`（画布助手在页面上直接回答、没用调用的提问），其他名字或多余字段 400；不是本工作区的画布 404；每次点击写一条审计事件（action `ui.<name>`，resourceId 为画布 id，不带画布内容和 metadata），平台管理员在 `/admin/audit` 可见；同一人 2 秒内在同一画布重复点同一按钮只记一次，写入时成员身份已失效也不记；200 `{recorded}` |
 | GET /agents | limit?, cursor? | Pi Agent 列表，`{items,nextCursor,snapshot}` |
 | POST /agents | name, role?, title?, model?, effort?, adapterConfig?:{model,effort}, instructions?, adapterType? | adapterType 省略时为 pi，也可为 openai-agents；model 与 effort 非空时优先，否则取 adapterConfig 中的同名字段；effort 为空表示不显式设置思考强度（由供应商默认），非空时必须是小写标识符，是否被该模型支持在节点初始化与运行准入时校验；role 是 Agent 工作角色文本，不是用户权限 |
 | GET /agents/{id} | 无 | 已保存的 Agent 定义 |

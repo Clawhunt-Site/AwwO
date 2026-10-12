@@ -129,3 +129,35 @@ export function reworkRequirements(frame: unknown, marker: string, header: strin
   const next: TaskFrame = { ...base, constraints: [...kept, `${head}\n${clip(findings.trim(), room)}`] };
   return taskFrameError(next) === null ? next : null;
 }
+
+/** A review's findings that a rework handed to an Agent, as its task requirements hold them. */
+export interface ReworkFindings {
+  /** The review node's title when the rework was made. */
+  reviewer: string;
+  /** What the Agent is told on each run: the instruction and the findings, after the marker. */
+  text: string;
+}
+
+/**
+ * The constraints a rework from a review added to these task requirements (reworkRequirements), in order. `markers`
+ * are the marker texts in every language with `{node}` for the review's title: a canvas reworked in one language is
+ * read in the other.
+ */
+export function reworkFindings(frame: unknown, markers: ReadonlyArray<string>): ReworkFindings[] {
+  if (!isTaskFrame(frame)) return [];
+  const forms = markers.flatMap(marker => {
+    const at = marker.indexOf('{node}');
+    return at > 0 ? [{ head: marker.slice(0, at), tail: marker.slice(at + '{node}'.length) }] : [];
+  });
+  const found: ReworkFindings[] = [];
+  for (const item of frame.constraints) {
+    for (const { head, tail } of forms) {
+      const end = item.startsWith(head) && tail ? item.indexOf(tail, head.length) : -1;
+      if (end <= head.length) continue;
+      const text = item.slice(end + tail.length).trim();
+      if (text) found.push({ reviewer: item.slice(head.length, end), text });
+      break;
+    }
+  }
+  return found;
+}

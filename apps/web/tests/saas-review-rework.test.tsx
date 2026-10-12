@@ -8,6 +8,7 @@ import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStora
 import { loadRunJournal } from '../src/canvas/runJournal';
 import { resetAllSessions } from '../src/canvas/sessions';
 import type { TaskFrame } from '../src/canvas/taskFrame';
+import { CanvasUiModeProvider } from '../src/canvas/uiMode';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasInitialize, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
 
 // A hosted canvas whose acceptance node ran and concluded 不通过 (a real user's report, 2026-10-10).
@@ -90,6 +91,75 @@ describe('a review that did not pass, on a hosted canvas', () => {
       + '再重新运行它和「小程序产品交付验收」。（这是按画布本地检查的，没有用掉次数。）')).toBeVisible();
     expect(box).toHaveValue('');
     expect(vi.mocked(fetch).mock.calls.slice(requests).filter(([url]) => /plan|runs/.test(String(url)))).toEqual([]);
+  });
+});
+
+// The presses the operator asked to count (2026-10-12): which of 「看下一步」, 「查看验收报告」 and the page's own answers
+// people use. Each is one POST naming the button; nothing from the canvas goes with it.
+const counted = () => vi.mocked(fetch).mock.calls.flatMap(([url, init]) => String(url).endsWith('/tenants/workspace/canvases/canvas/ui-events')
+  && (init as RequestInit | undefined)?.method === 'POST' ? [JSON.parse(String((init as RequestInit).body))] : []);
+
+describe('what the operator counts', () => {
+  it('counts 查看验收报告 and a question answered on the page, and sends nothing else', async () => {
+    seed();
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+    fireEvent.click(toggle());
+    fireEvent.click(within(sidebar().getByRole('group', { name: '接下来' })).getByRole('button', { name: '查看验收报告' }));
+    await waitFor(() => expect(counted()).toEqual([{ name: 'review.open_report' }]));
+    const box = sidebar().getByRole('textbox', { name: '画布需求' });
+    fireEvent.change(box, { target: { value: '验收没通过怎么办' } });
+    const sendButton = () => sidebar().getByRole('button', { name: '修改画布' });
+    await waitFor(() => expect(sendButton()).toBeEnabled());
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(counted()).toEqual([{ name: 'review.open_report' }, { name: 'assistant.local_answer' }]));
+    // A message the assistant does handle is not one of these.
+    fireEvent.change(box, { target: { value: '把交付验收的标准改成只看接口契约' } });
+    await waitFor(() => expect(sendButton()).toBeEnabled());
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/plan|assistant\/route/.test(String(url)))).toBe(true));
+    expect(counted()).toHaveLength(2);
+  });
+
+  it('counts the run note’s 看下一步 when a rework’s review still does not pass', async () => {
+    seed();
+    const done = () => ({ ...graph('completed'), nodes: [
+      { nodeId: 'frontend', state: 'done', output: JSON.stringify({ delivery: '实现页面：18 个，路径已按契约改' }), threadId: 'default', agentId: 'agent-frontend', sessionId: 'session-frontend' },
+      { nodeId: 'review', state: 'done', output: JSON.stringify({ report: REPORT, issues: ISSUES }), threadId: 'default', agentId: 'agent-review', sessionId: 'session-review' },
+    ] });
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: unknown, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url.endsWith('/graph-runs') && init.method === 'POST') { submitted = JSON.parse(String(init.body)); return new Response(JSON.stringify(done()), { status: 202 }); }
+      if (url.includes('/graph-runs/graph')) return new Response(JSON.stringify(done()));
+      return base(input as RequestInfo, init);
+    });
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+    fireEvent.click(toggle());
+    fireEvent.click(within(sidebar().getByRole('group', { name: '接下来' })).getByRole('button', { name: /^按验收意见返工/ }));
+    await waitFor(() => expect(submitted?.scope).toEqual(['frontend', 'review']));
+    const note = await screen.findByText(/「小程序产品交付验收」验收结论：不通过。/);
+    fireEvent.click(toggle());
+    fireEvent.click(within(note.closest('[role="status"]') as HTMLElement).getByRole('button', { name: '看下一步' }));
+    await waitFor(() => expect(counted()).toEqual([{ name: 'review.next_steps' }]));
+    expect(sidebar().getByRole('group', { name: '接下来' })).toBeVisible();
+  });
+});
+
+describe('普通用户模式', () => {
+  it('shows the reworked Agent the findings it was given, though its settings are out of sight', async () => {
+    seed();
+    render(<CanvasUiModeProvider mode="simple"><CanvasSurface storageMode="cloud" runtimeReadJson={reader} /></CanvasUiModeProvider>);
+    // The chat-first mode may already show the assistant.
+    if (toggle().getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle());
+    fireEvent.click(within(sidebar().getByRole('group', { name: '接下来' })).getByRole('button', { name: /^按验收意见返工/ }));
+    await waitFor(() => expect(submitted?.scope).toEqual(['frontend', 'review']));
+    fireEvent.click(screen.getByRole('button', { name: '打开 心理咨询小程序前端开发', exact: true }));
+    const tile = within(screen.getByTestId('canvas-tile-frontend'));
+    expect(tile.queryByRole('button', { name: '配置' })).toBeNull();
+    fireEvent.click(tile.getByRole('button', { name: /带着「小程序产品交付验收」的验收意见/ }));
+    const findings = tile.getByRole('region', { name: '这个节点的验收意见' });
+    expect(findings).toHaveTextContent('上次验收结论：不通过。请按下面的验收意见修改交付');
+    expect(findings).toHaveTextContent('问题：线索列表调用 /leads，契约为 /api/v1/leads');
   });
 });
 

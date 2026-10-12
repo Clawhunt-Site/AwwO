@@ -49,6 +49,7 @@ import { collaborationInputSummary, htmlPreviewSummary } from './readableTranscr
 import { ContractFields } from './ContractFields';
 import { emptyContract, type ContractField } from './nodeContracts';
 import { NodeDeliverables } from './NodeDeliverables';
+import { ReworkFindingsNote } from './ReworkFindingsNote';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { AgentGlyph, AgentTemplateDetails } from './AgentTemplateDetails';
 import { activeNodeThread, getNodeThreads, createNodeThread, selectNodeThread, updateNodeDraft, sessionStoreKey } from './nodeThreads';
@@ -895,6 +896,7 @@ export const SessionTile = memo(function SessionTile({
                   <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className="awwo-node-panel awwo-node-panel--conversation">
+                  {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} /> : null}
                   {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
                     <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
                     <AgentTemplateDetails template={template} contract={contract}

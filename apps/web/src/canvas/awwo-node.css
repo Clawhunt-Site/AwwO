@@ -217,6 +217,22 @@
 .canvas-root .awwo-node-workbench.is-case-intro .awwo-input-drawer + .awwo-node-panel--conversation { flex: 0 0 auto; }
 .canvas-root .awwo-node-workbench.is-case-intro .awwo-input-drawer + .awwo-node-panel--conversation > .awwo-node-empty { display: none; }
 .canvas-root .awwo-input-drawer > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 11px; }
+/* A review's findings that a rework wrote into this Agent's task requirements (ReworkFindingsNote): one line until
+   opened, then the text the Agent is given, scrolled within a bounded height so the chat keeps its room. */
+.canvas-root .awwo-rework-note { flex: 0 0 auto; margin: 8px 12px 0; border: 1px solid var(--awwo-line); border-radius: 8px; background: var(--awwo-soft); color: var(--awwo-ink); font-size: 11.5px; }
+.canvas-root .awwo-rework-note-toggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.canvas-root .awwo-rework-note-toggle > svg:first-child { flex: none; color: var(--awwo-teal); }
+.canvas-root .awwo-rework-note-toggle > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.canvas-root .awwo-rework-note-toggle > small { flex: none; color: var(--awwo-muted); font-size: 10.5px; font-weight: 500; }
+.canvas-root .awwo-rework-note-chevron { flex: none; color: var(--awwo-muted); transition: transform .15s ease; }
+.canvas-root .awwo-rework-note-toggle[aria-expanded="true"] .awwo-rework-note-chevron { transform: rotate(90deg); }
+.canvas-root .awwo-rework-note-toggle:focus-visible { outline: 2px solid var(--awwo-teal); outline-offset: -2px; }
+.canvas-root .awwo-rework-note-body { max-height: 240px; overflow: auto; overscroll-behavior: contain; padding: 0 10px 8px; border-top: 1px solid var(--awwo-line); }
+.canvas-root .awwo-rework-note-body article + article { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--awwo-line); }
+.canvas-root .awwo-rework-note-body .awwo-deliverable-body { padding: 8px 0 0; font-size: 11.5px; }
+.canvas-root .awwo-rework-note-body .awwo-deliverable-body h3 { margin: 8px 0 4px; font-size: 12px; }
+.canvas-root .awwo-rework-note-foot { margin: 8px 0 0; color: var(--awwo-muted); font-size: 10.5px; line-height: 1.45; }
+@media (prefers-reduced-motion: reduce) { .canvas-root .awwo-rework-note-chevron { transition: none; } }
 .canvas-root .awwo-node-delivery-drawer:has(.canvas-inspector) { position: absolute; inset: 0 0 0 auto; width: min(340px, 100%); z-index: 9; box-shadow: -4px 0 16px #0001; }
 .canvas-root .awwo-node .canvas-inspector { border: 0; background: var(--awwo-card); color: var(--awwo-ink); }
 .canvas-root .awwo-node .canvas-inspector-input,
