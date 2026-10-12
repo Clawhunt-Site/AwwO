@@ -8,7 +8,6 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDuration, loadProductionMedia, loadProductionRun, type ProductionNodeStatus, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
 import { showcasePage } from './examples/showcaseDocument';
-import { buildLiveDocument, LIVE_PAGE_ALLOW, LIVE_PAGE_SANDBOX } from '../canvas/studio/liveDocument';
 import { PRODUCTION_WORKFLOWS } from './productionWorkflows';
 import { RECORDED_CASE_WORKFLOWS } from './recordedCanvases';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
@@ -54,11 +53,15 @@ function ResultFrame({ html, title, media }: { html: string; title: string; medi
     loadPreviewLibraries(needs).then(code => { if (live) setLibraries({ needs, code }); }, () => { if (live) setLibraries({ needs, code: null }); });
     return () => { live = false; };
   }, [needs, inline]);
-  const [built, setBuilt] = useState<{ html: string; media: Readonly<Record<string, string>>; document: string | null } | null>(null);
+  const [built, setBuilt] = useState<{ html: string; media: Readonly<Record<string, string>>; document: string | null; sandbox: string; allow: string } | null>(null);
   useEffect(() => {
     if (!inline) return;
     let live = true;
-    buildLiveDocument(showcasePage(html, media)).then(document => { if (live) setBuilt({ html, media, document }); }, () => { if (live) setBuilt({ html, media, document: null }); });
+    // The live-page builder loads with the first media case opened, not with the homepage.
+    import('../canvas/studio/liveDocument').then(async module => {
+      const document = await module.buildLiveDocument(showcasePage(html, media)).catch(() => null);
+      if (live) setBuilt({ html, media, document, sandbox: module.LIVE_PAGE_SANDBOX, allow: module.LIVE_PAGE_ALLOW });
+    }, () => { if (live) setBuilt({ html, media, document: null, sandbox: '', allow: '' }); });
     return () => { live = false; };
   }, [html, media, inline]);
   const loading = inline ? built?.html !== html || built.media !== media : needs.libraries.length > 0 && libraries?.needs !== needs;
@@ -71,7 +74,7 @@ function ResultFrame({ html, title, media }: { html: string; title: string; medi
   if (source === undefined) return <p className="production-made-empty" role="status">{t('正在载入成品…', 'Loading the result…')}</p>;
   if (!source) return <p className="production-made-empty">{t('成品过大，无法在这里预览。', 'The result is too large to preview here.')}</p>;
   return inline
-    ? <iframe className="production-made-frame" title={title} sandbox={LIVE_PAGE_SANDBOX} allow={LIVE_PAGE_ALLOW} referrerPolicy="no-referrer" srcDoc={source} />
+    ? <iframe className="production-made-frame" title={title} sandbox={built!.sandbox} allow={built!.allow} referrerPolicy="no-referrer" srcDoc={source} />
     : <iframe className="production-made-frame" title={title} sandbox="allow-scripts allow-pointer-lock" referrerPolicy="no-referrer" srcDoc={source} />;
 }
 
