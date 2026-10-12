@@ -411,6 +411,15 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 			}
 		}
 	}
+	// The operator's own workspace has no free allowance to run out of (operator_workspace.go); a paid plan's limits are
+	// the plan's, as before.
+	operator := false
+	if plan == nil {
+		var e error
+		if operator, e = operatorWorkspace(ctx, tx, tid); e != nil {
+			return none, e
+		}
+	}
 	if plan != nil {
 		usage, e := accountPlanUsage(ctx, tx, plan.UserID, a.cfg.PlannerModel)
 		if e != nil {
@@ -429,15 +438,15 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 				return none, &mediaRefusal{429, "plan_busy", "This plan's agents at once are all running, in this or another workspace; try again when one finishes"}
 			}
 		}
-	} else if today >= a.cfg.MediaRunsPerDay {
+	} else if !operator && today >= a.cfg.MediaRunsPerDay {
 		return none, &mediaRefusal{429, "media_quota_exceeded", "This workspace has used today's image and video generations"}
 	}
-	if plan == nil && total >= a.cfg.MediaTotalRunsPerDay {
+	if plan == nil && !operator && total >= a.cfg.MediaTotalRunsPerDay {
 		return none, &mediaRefusal{429, "media_capacity_exceeded", "Today's image and video generations are used up; try again tomorrow"}
 	}
 	// A 3D generation is paid from the operator's Tripo balance: free ones have their own, smaller caps, for the
 	// workspace and across every workspace, counted from durable rows under the same lock.
-	if plan == nil && snapshot.Media.Provider == mediaProviderTripo {
+	if plan == nil && !operator && snapshot.Media.Provider == mediaProviderTripo {
 		var mine, all int
 		if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1),count(*) FROM media_generations
 			WHERE billed_user_id IS NULL AND model LIKE 'tripo.%' AND created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&mine, &all); e != nil {

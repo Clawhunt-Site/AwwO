@@ -45,6 +45,14 @@ func (a *App) createTenant(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// A workspace a platform administrator creates has the operator's limits (operator_workspace.go).
+	if currentUser(r).PlatformRole == "admin" {
+		if _, e = tx.Exec(r.Context(), "UPDATE tenants SET max_concurrent_runs=$2,max_runs_per_day=$3,allowed_models=NULL,route_limits=NULL WHERE id=$1",
+			id, operatorMaxConcurrentRuns, operatorMaxRunsPerDay); e != nil {
+			a.dbError(w, e)
+			return
+		}
+	}
 	if needsPlan {
 		if _, e = tx.Exec(r.Context(), "UPDATE tenants SET requires_plan=true WHERE id=$1", id); e != nil {
 			a.dbError(w, e)

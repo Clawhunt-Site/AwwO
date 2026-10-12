@@ -40,7 +40,7 @@ func TestTypeSafeSponsoredConfigIsExplicitAndBounded(t *testing.T) {
 
 func TestPostgresTypeSafeSponsoredPlannerKeepsPersonalEnginesAndDailyBudget(t *testing.T) {
 	h := newHarness(t, "http://127.0.0.1:1")
-	owner, tenant, _ := h.register(t, "sponsored-jev-owner@example.test")
+	owner, tenant, ownerID := h.register(t, "sponsored-jev-owner@example.test")
 	other, otherTenant, _ := h.register(t, "sponsored-jev-other@example.test")
 	h.a.cfg.UserCredentials = true
 	h.a.cfg.TypeSafeAPIKey = "synthetic-sponsored-key"
@@ -94,6 +94,14 @@ func TestPostgresTypeSafeSponsoredPlannerKeepsPersonalEnginesAndDailyBudget(t *t
 	denied := h.request(t, owner, "POST", prefix+"/evaluations", body, 429)
 	if denied["error"].(map[string]any)["code"] != "typesafe_daily_limit" || calls.Load() != 1 {
 		t.Fatal("daily budget reached provider", denied, calls.Load())
+	}
+	// A workspace a platform administrator owns has no daily budget to run out of (operator_workspace.go).
+	if _, err := h.db.Exec(context.Background(), "UPDATE users SET platform_role='admin' WHERE id=$1", ownerID); err != nil {
+		t.Fatal(err)
+	}
+	h.request(t, owner, "POST", prefix+"/evaluations", body, 200)
+	if calls.Load() != 2 {
+		t.Fatal("the operator's workspace stopped at the daily budget", calls.Load())
 	}
 }
 

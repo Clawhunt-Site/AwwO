@@ -413,7 +413,14 @@ func (a *App) persistTypeSafeAudit(ctx context.Context, record typeSafeAuditReco
 			return err
 		}
 		if attempts >= a.cfg.typeSafeDailyLimit() {
-			return &typeSafeAccessError{429, "typesafe_daily_limit"}
+			// The operator's own workspace has no daily allowance to run out of (operator_workspace.go).
+			operator, err := operatorWorkspace(ctx, tx, record.Tenant)
+			if err != nil {
+				return err
+			}
+			if !operator {
+				return &typeSafeAccessError{429, "typesafe_daily_limit"}
+			}
 		}
 		if _, err = tx.Exec(ctx, "INSERT INTO audit_events(actor_id,tenant_id,action,resource_id,metadata) VALUES($1,$2,'typesafe.evaluation',$3,$4)", record.Actor, record.Tenant, record.ID, data); err != nil {
 			return err
