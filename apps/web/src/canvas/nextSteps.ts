@@ -110,7 +110,9 @@ export function nextSteps(input: NextStepsInput): NextSteps | null {
   const offer = (situation: NextSituation, steps: NextStep[], cap = MAX_STEPS): NextSteps | null =>
     steps.length ? { situation, steps: steps.slice(0, cap) } : null;
 
-  const failed = agents.filter(node => runs[node.id]?.state === 'failed');
+  // A delivery a person published by hand after the run (source 'manual') supersedes that run's failure: running the node
+  // again would replace it, so it is not offered as the way on.
+  const failed = agents.filter(node => runs[node.id]?.state === 'failed' && node.lastOutput?.source !== 'manual');
   if (failed.length) {
     const rerun: NextStep[] = canRun ? [{ kind: 'rerun-failed', nodeIds: failed.map(node => node.id) }] : [];
     // The workspace's own allowance stops every node alike, so it comes first; a rerun stays offered, as runs going

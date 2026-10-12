@@ -2938,7 +2938,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const repairLocally = (prompt: string): boolean => {
     if (!suggested || !['failed', 'quota', 'premium'].includes(suggested.situation.kind)) return false;
     const kind = failureRequestKind(prompt);
-    const failed = nodes.filter(node => runs[node.id]?.state === 'failed');
+    const failed = nodes.filter(node => runs[node.id]?.state === 'failed' && !(node.kind === 'session' && node.lastOutput?.source === 'manual'));
     if (!kind || !failed.length) return false;
     let content: string;
     let scope: string[] | undefined;

@@ -66,6 +66,13 @@ describe('the assistant\'s next steps', () => {
       steps: [{ kind: 'open-failed', nodeId: 'a' }, { kind: 'rerun-failed', nodeIds: ['a', 'b'] }] });
   });
 
+  it('takes a delivery published by hand after a failed run as that node’s result, not as a failure to rerun', () => {
+    const runs = { a: { state: 'failed' as const, detail: 'Output must be a JSON object keyed by output field IDs' } };
+    const fixed = agent('a', { lastOutput: { text: '{"result":"repaired"}', at: 2, source: 'manual' } });
+    expect(nextSteps(input({ nodes: [fixed], runs }))).toEqual({ situation: { kind: 'complete' }, steps: [{ kind: 'results' }] });
+    expect(nextSteps(input({ nodes: [agent('a')], runs }))!.situation.kind).toBe('failed');
+  });
+
   it('continues a partly delivered canvas and offers what it has so far', () => {
     expect(nextSteps(input({ nodes: [done(agent('a')), agent('b'), agent('c', { lastOutput: { text: 'half', at: 1, source: 'run', partial: true } })] })))
       .toEqual({ situation: { kind: 'partial', count: 2 }, steps: [{ kind: 'run-rest', nodeIds: ['b', 'c'], calls: 2 }, { kind: 'results' }] });
