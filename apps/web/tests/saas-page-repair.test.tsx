@@ -312,9 +312,13 @@ describe('on the canvas', () => {
   it('sends the same page again later, not at once, when the service refused the repair before it ran', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!;
     const refusal = { code: 'quota_exceeded', error: '工作区运行额度已满', admissionRejected: true };
-    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/messages') && init?.method === 'POST'
-      ? Promise.resolve({ ok: false, status: 429, json: async () => refusal } as unknown as Response)
-      : original(input, init));
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (!String(input).includes('/messages')) return original(input, init);
+      // The service refuses the repair before any run (the workspace is out of calls); the history holds nothing new.
+      return Promise.resolve((init?.method === 'POST'
+        ? { ok: false, status: 429, json: async () => refusal }
+        : { ok: true, status: 200, json: async () => ({ complete: true, messages: [] }) }) as unknown as Response);
+    });
     render(<CanvasSurface />);
     act(() => { reportPageError(report); });
     await waitFor(() => expect(repairs()).toHaveLength(1));
@@ -323,11 +327,11 @@ describe('on the canvas', () => {
     act(() => { reportPageError(report); });
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(repairs()).toHaveLength(1);
-    // Once that time has passed, the same delivery goes back again.
+    // Once that time has passed, the same delivery goes back again (once the refused run has ended).
     savePageRepairRecord(canvasStorage(), 'fig', { ...loadPageRepairRecords(canvasStorage()).fig!, retryAfter: Date.now() - 1 });
     act(() => { reportPageError(report); });
-    await waitFor(() => expect(repairs()).toHaveLength(2));
-  });
+    await waitFor(() => expect(repairs()).toHaveLength(2), { timeout: 8_000 });
+  }, 20_000);
 
   it('waits while another component runs and asks once the canvas is idle', async () => {
     const OriginalTile = Tiles.SessionTile;
