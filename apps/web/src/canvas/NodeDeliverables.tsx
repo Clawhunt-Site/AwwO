@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpFromLine, Check, Copy, FileCode2, FileDown, FileText, RotateCcw } from 'lucide-react';
 import { caseRunLabel, type SessionNode } from './canvasDoc';
 import { ContractFields } from './ContractFields';
@@ -15,6 +15,8 @@ import { parseMediaOutput } from './mediaOutput';
 import { MediaResult } from './MediaResult';
 import { mediaKindOf } from './mediaCatalog';
 import { DeliverableMarkdown, LocalFileReference, localFilePath } from './DeliverableMarkdown';
+import { canvasResolver } from './studio/canvasAssets';
+import type { StudioEntry } from './studio/studioModel';
 
 // Results and other surfaces render deliveries through the same inert Markdown.
 export { DeliverableMarkdown };
@@ -86,6 +88,9 @@ export interface NodeDeliverablesProps {
   onRerun?: () => void;
   /** The field to show first (the 成果 view opens the deliverable a reader picked from its index). */
   initialFieldId?: string;
+  /** Every file of the canvas (studioModel.ts), so a delivered page shows the pictures and clips other nodes made and
+   *  names by `<node id>/<file name>` (a media node wired into it), as the card preview and the studio do. */
+  canvasEntries?: ReadonlyArray<StudioEntry>;
 }
 
 /** What a published `file` field holds: bytes the server keeps, or (in a cloud workspace) only words — a name,
@@ -108,8 +113,9 @@ function MissingFile({ value, onRerun, readOnly }: { value: string; onRerun?: ()
 }
 
 /** Only published output is a deliverable. Editing a form never creates one implicitly. */
-export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 'drawer', editorOpen = false, editorRequest = 0, onRerun, initialFieldId }: NodeDeliverablesProps) {
+export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 'drawer', editorOpen = false, editorRequest = 0, onRerun, initialFieldId, canvasEntries }: NodeDeliverablesProps) {
   const { locale, t } = useCanvasI18n();
+  const resolveAsset = useMemo(() => canvasEntries?.length ? canvasResolver(canvasEntries) : undefined, [canvasEntries]);
   const editor = useRef<HTMLDetailsElement>(null);
   // A collapsed <details> keeps its own state; each edit request opens it again.
   useEffect(() => { if (editorOpen && editor.current) editor.current.open = true; }, [editorOpen, editorRequest]);
@@ -272,6 +278,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
               ? <ArtifactPreview key={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
                   previewSource={field.type === 'markdown' ? legacyWrappedPreview(value, field.id) : undefined}
                   title={field.label || field.id} canDownload={Boolean(value.trim()) && !output.partial}
+                  resolveAsset={field.type === 'html' ? resolveAsset : undefined}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}
                   identity={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}`}

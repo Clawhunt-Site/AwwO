@@ -13,6 +13,10 @@
 .awwo-artifact-toolbar button:focus-visible, .awwo-artifact-toolbar a:focus-visible { outline: 2px solid var(--accent, #237562); outline-offset: 2px; }
 .awwo-artifact-toolbar > .awwo-artifact-download { margin-left: auto; }
 .awwo-artifact-frame { display: block; width: 100%; min-height: 400px; height: min(62vh, 760px); border: 0; background: #fff; }
+/* A page showing the canvas's files runs in the studio's live page, in a box sized like the frame it replaces. */
+.awwo-artifact-frame.awwo-artifact-live { display: flex; overflow: hidden; }
+.awwo-artifact-live > .awwo-live-page { flex: 1 1 auto; min-width: 0; background: #fff; }
+.awwo-artifact-live:fullscreen { height: 100%; }
 .awwo-artifact-image { display: block; max-width: 100%; max-height: 72vh; object-fit: contain; margin: auto; }
 .awwo-artifact-source { padding: 16px; margin: 0; min-height: 240px; max-height: 62vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--ios-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 12px; line-height: 1.65; user-select: text; background: var(--bg-card, var(--panel, #fff)); color: var(--text-primary, var(--fg, #263c31)); }
 .awwo-artifact-source > code { font: inherit; }

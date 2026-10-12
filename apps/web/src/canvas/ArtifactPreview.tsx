@@ -7,6 +7,8 @@ import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds, type PreviewScriptNeeds } from './previewLibraries';
 import { readPageErrorMessage, reportPageError } from './pageErrors';
+import { LivePage } from './studio/LivePage';
+import type { AssetResolver } from './studio/liveDocument';
 import { artifactImageType } from './artifactImage';
 import { BinaryArtifactPreview } from './BinaryArtifactPreview';
 import { PREVIEW_LIMITS, previewKind, type PreviewFile } from './previewData';
@@ -29,6 +31,7 @@ const messages = {
     libraryAdditions: '页面还用到了这个版本没有的 {additions}，AwwO 已补上。',
     libraryFailed: '{name} 没能载入，页面可能无法运行。请点「重新开始」，或下载后用浏览器打开。',
     blockedScripts: '页面引用的外部脚本没有加载：{hosts}。下载后用浏览器打开可以完整运行。',
+    canvasFiles: '页面里的图片和视频是这张画布生成的文件，预览时已放到对应位置。',
   },
   en: {
     preview: 'Preview', source: 'Source', html: 'HTML preview', markdown: 'Markdown source', plain: 'File source',
@@ -45,6 +48,7 @@ const messages = {
     libraryAdditions: 'The page also uses {additions}, which this release lacks; AwwO adds it.',
     libraryFailed: '{name} could not be loaded, so the page may not run. Click Restart, or download it and open it in a browser.',
     blockedScripts: 'External scripts this page references were not loaded: {hosts}. Download the page and open it in a browser to run it in full.',
+    canvasFiles: 'The pictures and clips in this page are files this canvas generated, put in place for the preview.',
   },
 };
 
@@ -63,6 +67,18 @@ export interface ArtifactPreviewProps extends DownloadProps {
   title: string;
   renderMarkdown: MarkdownRenderer;
   allowExpand?: boolean;
+  /** The canvas's other files, for a page that names one by a relative path (a picture wired into it: `<node id>/
+   * image-1.png`, as a canvas run tells the page's node). Such a page runs in the studio's live page, which puts the
+   * files in place (studio/liveDocument.ts); without it, or for a page that names none, nothing changes. */
+  resolveAsset?: AssetResolver;
+}
+
+// A relative URL of a picture, clip or model in an attribute or a CSS url(): what a page wired to a media node names.
+const RELATIVE_MEDIA = /(?:\b(?:src|poster|href)\s*=\s*["']|url\(\s*["']?)(?![a-z][a-z0-9+.-]*:|\/\/|#|data:|blob:)[^"'()\s<>]+\.(?:png|jpe?g|webp|gif|avif|mp4|webm|mov|glb)(?:[?#][^"')\s]*)?["')]/i;
+
+/** Does a page name a picture, clip or model by a relative path, which only the canvas's files can supply? */
+export function namesRelativeMedia(page: string): boolean {
+  return RELATIVE_MEDIA.test(page);
 }
 
 /** Native modal isolation also contains focus inside an opaque-origin preview iframe. The
@@ -125,7 +141,7 @@ function fingerprint(text: string): string {
 }
 
 /** A rendition of published bytes. Switching presentation never republishes an output. */
-export function ArtifactPreview({ source, previewSource, type, title, renderMarkdown, downloadUrl, canDownload = true, onStoredDownload, allowExpand = true }: ArtifactPreviewProps) {
+export function ArtifactPreview({ source, previewSource, type, title, renderMarkdown, downloadUrl, canDownload = true, onStoredDownload, allowExpand = true, resolveAsset }: ArtifactPreviewProps) {
   const { locale, t } = useCanvasI18n();
   const text = messages[locale];
   const [mode, setMode] = useState<'preview' | 'source'>('preview');
@@ -138,8 +154,12 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   // A delivered page runs as soon as it is shown, like the homepage cases: in its own sandbox, with no AwwO account or
   // storage access and no network. While its expanded copy is open the inline one stays static, so it never runs twice.
   const running = type === 'html' && mode === 'preview' && !tooLarge && !expanded;
+  // A page showing files the canvas made runs in the studio's live page, which puts them in place; it brings the
+  // libraries AwwO supplies, its error reports and its navigation guard with it.
+  const live = running && !!resolveAsset && namesRelativeMedia(documentSource);
+  const liveRef = useRef<HTMLDivElement>(null);
   // A running page's external scripts: libraries AwwO supplies are inlined once loaded, the rest stay blocked.
-  const needs = useMemo(() => running && !tooLarge ? previewScriptNeeds(documentSource) : NO_PREVIEW_SCRIPT_NEEDS, [running, tooLarge, documentSource]);
+  const needs = useMemo(() => running && !live && !tooLarge ? previewScriptNeeds(documentSource) : NO_PREVIEW_SCRIPT_NEEDS, [running, live, tooLarge, documentSource]);
   const [supplied, setSupplied] = useState<{ needs: PreviewScriptNeeds; code: ReadonlyMap<string, string> | null } | null>(null);
   useEffect(() => {
     if (!needs.libraries.length) return;
@@ -152,7 +172,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   const libraries = !needs.libraries.length ? 'none' : supplied?.needs !== needs ? 'loading' : supplied.code ? 'ready' : 'failed';
   const libraryNames = needs.libraries.map(library => (locale === 'zh' && library.labelZh) || library.label).join(', ');
   const code = libraries === 'ready' ? supplied?.code ?? undefined : undefined;
-  const html = useMemo(() => type === 'html' && !tooLarge ? htmlPreviewDocument(documentSource, running, code) : '', [documentSource, type, tooLarge, running, code]);
+  const html = useMemo(() => type === 'html' && !tooLarge && !live ? htmlPreviewDocument(documentSource, running, code) : '', [documentSource, type, tooLarge, live, running, code]);
   // A game laid out for a whole browser window can need more height than the inline frame has.
   const frameRef = useRef<HTMLIFrameElement>(null);
   const canFullscreen = typeof document !== 'undefined' && document.fullscreenEnabled === true;
@@ -209,7 +229,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
       </div>
       {running && <div className="awwo-artifact-execution">
         <button type="button" onClick={() => setEpoch(value => value + 1)}>{text.reset}</button>
-        {canFullscreen && libraries !== 'loading' && <button type="button" onClick={() => { void frameRef.current?.requestFullscreen()?.catch(() => undefined); }}>{text.fullscreen}</button>}
+        {canFullscreen && libraries !== 'loading' && <button type="button" onClick={() => { void (live ? liveRef.current : frameRef.current)?.requestFullscreen()?.catch(() => undefined); }}>{text.fullscreen}</button>}
       </div>}
       <div className="awwo-artifact-actions">
         {allowExpand && !tooLarge && <button type="button" aria-label={text.expand} title={text.expand} onClick={() => setExpanded(true)}><Maximize2 size={15} aria-hidden="true" /></button>}
@@ -224,12 +244,17 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
         <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code>{documentSource}</code></pre>
       </>
         : type === 'html' ? <>
-          {running && libraries === 'loading'
+          {live
+            ? <div ref={liveRef} className="awwo-artifact-frame awwo-artifact-live">
+              <LivePage html={documentSource} title={title} path="index.html" resolve={resolveAsset} reloadKey={epoch} />
+            </div>
+            : running && libraries === 'loading'
             ? <p className="awwo-artifact-status" role="status">{text.libraryLoading.replace('{name}', libraryNames)}</p>
             // Pointer lock lets a game's mouse look work; the browser offers Esc to release it.
             : <iframe ref={frameRef} key={frameKey} className="awwo-artifact-frame" title={`${title} · ${text.html}`}
               sandbox={running ? 'allow-scripts allow-pointer-lock' : ''} referrerPolicy="no-referrer" srcDoc={html} onLoad={onFrameLoad} />}
           <p className="awwo-artifact-note">{running ? `${text.hint} ${text.interactive}` : text.static}</p>
+          {live && <p className="awwo-artifact-note">{text.canvasFiles}</p>}
           {running && navigation.notice && <p className="awwo-artifact-status" role="status">{text.navigated}</p>}
           {running && libraries === 'ready' && <p className="awwo-artifact-note">{text.libraryInlined.replace('{name}', libraryNames)}
             {needs.additions.length > 0 && ` ${text.libraryAdditions.replace('{additions}', needs.additions.map(addition => addition.label).join(', '))}`}</p>}
@@ -239,7 +264,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     {downloadError && <p className="awwo-artifact-status" role="alert">{t('deliverable.downloadFailed')}</p>}
     {expanded && <ExpandedPreview title={title} closeLabel={text.close} onClose={() => setExpanded(false)}>
       <ArtifactPreview source={source} previewSource={previewSource} type={type} title={title} renderMarkdown={renderMarkdown} downloadUrl={downloadUrl}
-        canDownload={canDownload} onStoredDownload={onStoredDownload} allowExpand={false} />
+        canDownload={canDownload} onStoredDownload={onStoredDownload} allowExpand={false} resolveAsset={resolveAsset} />
     </ExpandedPreview>}
   </div>;
 }

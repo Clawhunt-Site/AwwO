@@ -924,6 +924,7 @@ export const SessionTile = memo(function SessionTile({
                 {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span>{onOpenStudio && node.lastOutput ? <button type="button" className="awwo-drawer-studio" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={14} /></button> : null}<button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode}
                   editorOpen={deliverablesEditorOpen}
                   editorRequest={deliverablesEditorRequest}
+                  canvasEntries={canvasEntries}
                   onRerun={onRunNode && !viewOnly && !busy && (node.kind !== 'session' || Boolean(node.binding) || initializeOnSend) ? () => { if (!viewOnlyRef.current) onRunNode(nodeId); } : undefined} /></>}
               </section> : null}
             </div>

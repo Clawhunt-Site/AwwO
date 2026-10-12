@@ -11,6 +11,7 @@ import { DeliverableMarkdown, NodeDeliverables } from './NodeDeliverables';
 import type { RunNodeStatus } from './runGraph';
 import { storedArtifactUrl } from '../saas/canvasBridge';
 import { DeliverableStudio } from './studio/DeliverableStudio';
+import { studioGroups, type StudioEntry } from './studio/studioModel';
 import './canvas-results.css';
 
 /** A notice the board would show (why a run did not start, what it is preparing): here, so it is seen. */
@@ -66,6 +67,8 @@ function stepChip(step: StepDelivery, runs: CanvasResultsProps['runs'], running:
 export function CanvasResults({ nodes, edges, execution, runs, running, readOnly, runUnavailableReason, onRun, notice, onOpenNode, onBack, receipt, studio = false, studioTitle }: CanvasResultsProps) {
   const { t } = useCanvasI18n();
   const result = useMemo(() => canvasResult({ nodes: [...nodes], edges: [...edges], execution }), [nodes, edges, execution]);
+  // Every file of the canvas, so a step's page shows the pictures other nodes made for it (NodeDeliverables).
+  const canvasEntries = useMemo(() => studioGroups({ nodes: [...nodes], edges: [...edges] }).flatMap(group => group.entries), [nodes, edges]);
   const steps = useMemo(() => result.stages.flat(), [result]);
   const items = useMemo(() => deliveredItems({ nodes: [...nodes], edges: [...edges], execution }), [nodes, edges, execution]);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -118,7 +121,7 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
           setChosenField(item.fieldId ? { nodeId: item.nodeId, fieldId: item.fieldId } : undefined);
           show(result.final && item.nodeId === result.final.node.id ? null : item.nodeId);
         }} />}
-        {selected ? <SelectedStep step={selected} final={showingFinal} complete={result.complete} pending={showingFinal ? result.pending.length : 0}
+        {selected ? <SelectedStep step={selected} final={showingFinal} complete={result.complete} pending={showingFinal ? result.pending.length : 0} canvasEntries={canvasEntries}
           stage={stageOf(selected)} total={result.stages.length} onBackToResult={result.final && !showingFinal ? () => { setChosenField(undefined); show(null); } : undefined}
           onOpenNode={() => onOpenNode(selected.node.id)} fieldId={chosenField && chosenField.nodeId === selected.node.id ? chosenField.fieldId : undefined} />
           : <div className="awwo-results-empty">
@@ -160,8 +163,9 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
   </section>;
 }
 
-function SelectedStep({ step, final, complete, pending, stage, total, onBackToResult, onOpenNode, fieldId }: {
+function SelectedStep({ step, final, complete, pending, stage, total, onBackToResult, onOpenNode, fieldId, canvasEntries }: {
   step: StepDelivery; final: boolean; complete: boolean; pending: number; stage: number; total: number; onBackToResult?: () => void; onOpenNode: () => void; fieldId?: string;
+  canvasEntries?: ReadonlyArray<StudioEntry>;
 }) {
   const { t } = useCanvasI18n();
   // A case recording is named with the model and day it ran, not when this canvas received it.
@@ -194,7 +198,7 @@ function SelectedStep({ step, final, complete, pending, stage, total, onBackToRe
         {step.node.fields.some(field => field.value.trim()) ? <dl>{step.node.fields.filter(field => field.value.trim()).map(field => <div key={field.id}>
           <dt>{field.label || field.id}</dt><dd>{field.value}</dd></div>)}</dl> : <p>{t('results.inputEmpty')}</p>}
       </section>
-        : step.output ? <NodeDeliverables key={`${step.node.id}:${step.output.at}:${fieldId ?? ''}`} node={step.node} readOnly presentation="result" initialFieldId={fieldId} />
+        : step.output ? <NodeDeliverables key={`${step.node.id}:${step.output.at}:${fieldId ?? ''}`} node={step.node} readOnly presentation="result" initialFieldId={fieldId} canvasEntries={canvasEntries} />
           : <p className="awwo-results-nothing">{t('results.noStepDelivery')}</p>}
     </div>
   </article>;
