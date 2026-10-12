@@ -71,9 +71,12 @@ it('copies a complete draft once, preserves the user prompt, and never starts pl
   expect(posts).toHaveLength(1);
   expect(posts[0].url).toBe('/api/v1/tenants/official-workspace/canvases');
   expect(posts[0].body.name).toBe(first.title.zh);
-  expect(posts[0].body.document.nodes).toHaveLength(first.nodes.length);
-  expect(posts[0].body.document.edges).toHaveLength(first.edges.length);
-  expect(posts[0].body.document.nodes.every((node: any) => node.binding === null && !node.lastOutput && node.model === '')).toBe(true);
+  // The workflow's agents, plus its image, video and 3D nodes, each wired into the pages that show it.
+  const media = first.media ?? [];
+  expect(posts[0].body.document.nodes).toHaveLength(first.nodes.length + media.length);
+  expect(posts[0].body.document.edges).toHaveLength(first.edges.length + media.reduce((sum, spec) => sum + (spec.feeds?.length ?? 0), 0));
+  expect(posts[0].body.document.nodes.every((node: any) => node.binding === null && !node.lastOutput
+    && node.model === (['image', 'video', 'model3d'].includes(node.agentKind) ? media.find(spec => spec.kind === node.agentKind)?.model : ''))).toBe(true);
   expect(onOpen).not.toHaveBeenCalled();
   finish(json({ id: 'copied-official', document: posts[0].body.document }, 201));
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith('copied-official'));

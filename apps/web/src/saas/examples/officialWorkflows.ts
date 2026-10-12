@@ -2,8 +2,10 @@ import { INDUSTRY_WORKFLOWS } from './advanced/catalog';
 import type { AgentTemplateId } from '../../canvas/agentTemplates';
 import { createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../../canvas/canvasDoc';
 import type { ContractField } from '../../canvas/nodeContracts';
+import { updateNodeDraft } from '../../canvas/nodeThreads';
 import { edgeId } from '../../canvas/ports';
 import type { UiLocale } from '../../locale';
+import { OFFICIAL_MEDIA, type OfficialMediaNode } from './officialMedia';
 
 export type Localized = Readonly<Record<UiLocale, string>>;
 export type OfficialWorkflowCategory = 'design' | 'game' | '3d' | 'knowledge' | 'training' | 'operations';
@@ -38,6 +40,11 @@ export interface OfficialWorkflow {
   readonly limitations: Localized;
   /** A canvas kept as it ran, copied instead of compiling `nodes`, which then only lay it out and describe it. */
   readonly canvas?: RecordedCanvas;
+  /** Sized for one model call per node of at most about 32,000 output tokens (Claude Opus 5.5 on AwwO's runtime):
+   * every node is told its length limit, and a page finishes within it instead of being cut off. */
+  readonly sizing?: 'single-call';
+  /** Image, video and 3D nodes that generate the example's media in the same canvas run (officialMedia.ts). */
+  readonly media?: ReadonlyArray<OfficialMediaNode>;
 }
 
 /** One node of a recorded canvas: its title, persona and contract, word for word. */
@@ -254,11 +261,37 @@ const STARTER_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [
   },
 ];
 
-export const OFFICIAL_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...INDUSTRY_WORKFLOWS, ...STARTER_WORKFLOWS];
+/** Every official example, sized for one model call per node (`sizing`) and carrying the media it generates in the
+ * same run (officialMedia.ts). Production cases (productionWorkflows.ts) are sized in their own tasks instead. */
+export const OFFICIAL_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...INDUSTRY_WORKFLOWS, ...STARTER_WORKFLOWS]
+  .map(item => ({ ...item, sizing: 'single-call' as const, ...(OFFICIAL_MEDIA[item.id] ? { media: OFFICIAL_MEDIA[item.id] } : {}) }));
 
 export function getOfficialWorkflow(id: string): OfficialWorkflow | undefined {
   return OFFICIAL_WORKFLOWS.find(item => item.id === id);
 }
+
+// One model call per node, at most about 32,000 output tokens with the model's own thinking counted: a node that
+// writes past it is cut off and its delivery is lost. So each node is told its length, and a page node finishes first.
+// The first real runs on Claude Opus 5.5 (2026-10-12) had thinking take about half the budget, and three heavy nodes
+// that wrote past their limit were cut off: the limits leave that half to thinking.
+const PAGE_LIMIT = 20000;
+const SINGLE_CALL_PAGE: Localized = {
+  zh: `\n\n单次调用规则：这个节点只有一次模型调用，最多约 32000 个输出 token（动笔前的思考也算在内），写超了会被截断、整页作废。所以整页 HTML 不超过 ${PAGE_LIMIT} 个字符，而且先保证写完：一直写到最后的 </html>，宁可少些装饰也不能写不完。上游已经定好规则、数据和代码，这一步只负责实现并组装：不要重新构思方案，动笔前的思考只用几句话定下结构，不要在脑中逐行推演代码，直接开始写；上游交付的代码原样复用，括号不成对时先补齐。代码紧凑：用函数和循环生成重复的界面、数据和图形，不写注释、不留空行，不把上游的说明文字抄进页面。界面达到商业产品水准：清晰的层次、精致的排版与配色、有反馈的交互动效，绝不是线框或示意图。页面在 iframe 里运行：一打开就是完整可操作的界面，适配窗口宽度，整页不出现横向滚动条，内容多时在面板内滚动。输出前默默自查，不要写出自查过程：每个 {、(、[ 都成对闭合；每个按钮和输入都真的更新状态；第一次操作之前运行的代码不读取还没创建的对象。只输出 HTML 文档本身：以 <!DOCTYPE html> 开头、以 </html> 结尾，前后不加任何说明。`,
+  en: `\n\nSingle-call rule: this node makes one model call of at most about 32,000 output tokens, the model’s thinking before it writes included, and a page that runs past it is cut off and lost. So the whole HTML page is at most 20,000 characters, and finishing comes first: write all the way to the final </html>, dropping decoration rather than leaving the page unfinished. The rules, data and code are settled upstream; this step implements and assembles them: do not redesign the plan; think only a few sentences to settle the structure, never rehearse the code in your head, and start writing; reuse upstream code as delivered, closing any unbalanced bracket first. Keep the code compact: generate repeated interface, data and graphics with functions and loops, with no comments or blank lines, and never copy upstream explanations into the page. The interface reaches commercial product quality — clear hierarchy, refined type and colour, responsive feedback and motion — never a wireframe or a diagram. The page runs inside an iframe: it opens as a complete, working interface, fits its window’s width with no horizontal page scrollbar, and scrolls inside panels when content is long. Check silently before answering and do not write the checks out: every {, ( and [ is closed; every button and input really updates state; code that runs before the first user action never reads an object that does not exist yet. Output only the HTML document itself, from <!DOCTYPE html> to </html>, with nothing before or after it.`,
+};
+const SINGLE_CALL_TEXT: Localized = {
+  zh: '\n\n单次调用规则：这个节点只有一次模型调用，最多约 32000 个输出 token（思考也算在内），动笔前的思考只用几句话。说明文字不超过 2000 个中文字符：只写结论、规则、数据、接口和未验证项，多用表格和短条目，不重述上游内容，不写开场白和总结。任务要求交付源代码时，代码另计、不超过 7000 个字符：紧凑、不写注释，括号成对闭合、不用省略号，能原样粘贴运行，顶层不自动运行任何东西。',
+  en: '\n\nSingle-call rule: this node makes one model call of at most about 32,000 output tokens, thinking included, so think only a few sentences before writing. Explanations stay within 1,000 words: conclusions, rules, data, interfaces and unverified items only, in tables and short items, never restating upstream content, with no preamble or summary. When the task asks for source code, the code is counted separately and stays within 7,000 characters: compact, no comments, every bracket closed and no ellipses, runnable as pasted, nothing running by itself at the top level.',
+};
+/** What a page node fed by the example's media nodes is told about the files it receives. */
+const MEDIA_PAGE: Localized = {
+  zh: '\n\n画布里的媒体节点会把它生成的文件交给你（输入「…（生成的文件）」列出每个文件的相对路径，如 节点ID/image-1.png）：页面把这些文件用作真实的主视觉、配图或样片，只写列出的路径，写在 img、video、source 的 src、video 的 poster 或 CSS 的 url() 里；不要编造别的文件名，不要在脚本字符串里拼这些路径。页面里已经写好的这些路径原样保留。输入说这次没有生成出文件时，用不依赖它的设计完成。',
+  en: '\n\nThe canvas’s media nodes hand you the files they generated (the “… (generated files)” inputs list each file’s relative path, such as node-id/image-1.png): the page uses them as its real key visual, pictures or sample clip, by exactly those paths, in an img, video or source src, a video poster or a CSS url(); never invent other file names, and never build these paths inside a script string. Keep any such path the page already has as it is. When an input says no file was made this time, finish with a design that does not need it.',
+};
+const MEDIA_MODEL_PAGE: Localized = {
+  zh: '3D 模型节点给出 GLB 模型和一张渲染预览图：页面用预览图（preview-1.*）展示这个模型，GLB 不放进页面。',
+  en: ' A 3D model node hands over a GLB model and a rendered preview picture: the page shows the model by its preview picture (preview-1.*) and never puts the GLB in the page.',
+};
 
 /** Mint a clean document, never clone bindings, conversations, credentials or sample results.
  * A production case's copy adds its recorded deliveries afterwards (productionCopy.ts); the canvas
@@ -267,28 +300,37 @@ export function getOfficialWorkflow(id: string): OfficialWorkflow | undefined {
  * Runtime and model selection are left to the workspace's existing initialization policy. */
 export function createOfficialDocument(item: OfficialWorkflow, locale: UiLocale): CanvasDocument {
   if (item.canvas) return createRecordedDocument(item, item.canvas);
+  // The example's media nodes, made first so the pages they feed can name their inputs after them.
+  const media = (item.media ?? []).map(spec => ({ spec, node: officialMediaNode(spec, locale) }));
   const nodes = item.nodes.map((spec): SessionNode => {
     const base = createSessionNode(['frontend', 'backend', 'users'].includes(spec.role) ? 'coding' : 'llm',
       { x: spec.column * 680, y: spec.row * 560 });
     const incoming = item.edges.filter(edge => edge.to === spec.id);
+    const pictures = media.filter(entry => entry.spec.feeds?.includes(spec.id)).map(entry => entry.spec);
     const inputs: ContractField[] = [{
       id: 'brief', label: locale === 'zh' ? '任务与边界' : 'Task and boundaries', type: 'markdown', required: true,
       value: `${item.brief[locale]}\n\n${spec.task[locale]}`,
     }, ...incoming.map((edge): ContractField => ({
       id: `from_${edge.from}`, label: edge.label[locale], type: 'markdown', required: true, value: '',
       help: locale === 'zh' ? '由上游节点的真实输出提供。' : 'Supplied by the actual upstream output.',
+    })), ...pictures.map((picture): ContractField => ({
+      id: `media_${picture.id}`, label: locale === 'zh' ? `${picture.title.zh}（生成的文件）` : `${picture.title.en} (generated files)`,
+      type: 'markdown', required: true, value: '',
+      help: locale === 'zh' ? '画布里的媒体节点生成后提供：文件的相对路径，或这次没有生成出文件的说明。'
+        : 'Supplied by the canvas’s media node once it generates: the files’ relative paths, or a note that none was made.',
     }))];
     const outputType = spec.outputType ?? 'markdown';
     const evidence = locale === 'zh'
       ? '这是待运行的官方参考工作流。只根据实际输入推进；不要把演示、计划或静态检查冒充成功执行。无法运行或缺少能力时，明确列出未验证项。不要自行部署、发送信息或连接生产数据。'
       : 'This is an official reference workflow awaiting execution. Use actual inputs; never present a demo, plan or static check as successful execution. List unverified items when execution or capabilities are unavailable. Do not deploy, send messages or connect production data.';
     const html = outputType === 'html' ? (locale === 'zh'
-      ? '\n交付完整、自包含 HTML 文档（html、head、body）。CSS、JavaScript、图形和演示数据全部内嵌；外部脚本只能引用 AwwO 内置的 three.js r128（https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js），不使用其他外部脚本、模块导入、字体、图片或网络请求。交互必须真的更新状态。'
-      : '\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data; the only external script allowed is AwwO’s built-in three.js r128 (https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js) — no other external scripts, module imports, fonts, images or network requests. Interactions must update real state.') : '';
+      ? `\n交付完整、自包含 HTML 文档（html、head、body）。CSS、JavaScript、图形和演示数据全部内嵌；外部脚本只能引用 AwwO 内置的 three.js r128（https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js），不使用其他外部脚本、模块导入、字体、${pictures.length ? '外部图片（媒体节点交给你的文件除外）' : '图片'}或网络请求。交互必须真的更新状态。`
+      : `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data; the only external script allowed is AwwO’s built-in three.js r128 (https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js) — no other external scripts, module imports, fonts, ${pictures.length ? 'external images (the files the media nodes hand you excepted)' : 'images'} or network requests. Interactions must update real state.`) : '';
+    const shows = pictures.length ? `${MEDIA_PAGE[locale]}${pictures.some(picture => picture.kind === 'model3d') ? MEDIA_MODEL_PAGE[locale] : ''}` : '';
     return { ...base, title: spec.title[locale], w: 560, h: 420,
       // These nodes have purpose-built contracts; assigning a built-in templateId would display
       // that template's unrelated guide instead of the official case's task and acceptance.
-      persona: `${spec.task[locale]}\n\n${locale === 'zh' ? '验收要求' : 'Acceptance'}:\n${spec.acceptance.map(check => `- ${check[locale]}`).join('\n')}\n\n${evidence}${html}`,
+      persona: `${spec.task[locale]}\n\n${locale === 'zh' ? '验收要求' : 'Acceptance'}:\n${spec.acceptance.map(check => `- ${check[locale]}`).join('\n')}\n\n${evidence}${html}${shows}${item.sizing === 'single-call' ? (outputType === 'html' ? SINGLE_CALL_PAGE : SINGLE_CALL_TEXT)[locale] : ''}`,
       contract: { version: 1, inputs, outputs: [{ id: 'result', label: spec.output[locale], type: outputType, required: true, value: '',
         help: spec.acceptance.map(check => check[locale]).join('\n') }] },
     };
@@ -303,7 +345,25 @@ export function createOfficialDocument(item: OfficialWorkflow, locale: UiLocale)
     return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId,
       toNode: to.nodeId, toPort: to.portId, dataType: 'text' as const };
   });
-  return { ...emptyDocument(), nodes, edges };
+  // Each media node's result into the pages that show it: a soft wire (ports.ts isSoftMediaFeed), which a picture that
+  // was not made never holds back. The wire keeps its source's type.
+  const mediaEdges = media.flatMap(({ spec, node }) => (spec.feeds ?? []).map(target => {
+    const page = byId.get(target);
+    if (!page) throw new Error(`Invalid official media wire: ${spec.id} -> ${target}`);
+    const from = { nodeId: node.id, portId: 'result' };
+    const to = { nodeId: page.id, portId: `in:media_${spec.id}` };
+    return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId, toNode: to.nodeId, toPort: to.portId,
+      dataType: spec.kind === 'model3d' ? 'file' as const : spec.kind };
+  }));
+  return { ...emptyDocument(), nodes: [...nodes, ...media.map(entry => entry.node)], edges: [...edges, ...mediaEdges] };
+}
+
+/** A media node as the canvas makes one: its model and parameters chosen, its prompt in the draft a run or a Send
+ * generates from, nothing bound and no conversation yet. */
+function officialMediaNode(spec: OfficialMediaNode, locale: UiLocale): SessionNode {
+  const base = createSessionNode(spec.kind, { x: spec.column * 680, y: spec.row * 560 });
+  const node: SessionNode = { ...base, title: spec.title[locale], model: spec.model, ...(spec.params ? { mediaParams: { ...spec.params } } : {}) };
+  return updateNodeDraft(node, spec.prompt[locale]);
 }
 
 /** A recorded canvas in the language it ran in, whatever the interface language: every title, persona,

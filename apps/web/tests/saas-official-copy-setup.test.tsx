@@ -59,6 +59,14 @@ it('binds the explicit runtime/model pair to every newly minted node without cha
   for(const doc of [original,createOfficialDocument(workflow,'zh'),createOfficialCopyDocument(workflow,'en',null)]) expect(doc.nodes.every(node=>node.kind==='session'&&node.model===''&&node.runtime===''&&node.binding===null)).toBe(true);
 });
 
+it('keeps an example’s image, video and 3D nodes on their own media models when agents get the chosen model',()=>{
+  const studio=OFFICIAL_WORKFLOWS.find(item=>item.id==='studio-pipeline')!;
+  const result=createOfficialCopyDocument(studio,'zh',{runtime:'openai-agents',model:'shared-model',label:'ignored'});
+  const media=result.nodes.filter(node=>node.kind==='session'&&['image','video','model3d'].includes(node.agentKind));
+  expect(media.map(node=>node.kind==='session'&&[node.agentKind,node.model,node.runtime])).toEqual(studio.media!.map(spec=>[spec.kind,spec.model,'']));
+  expect(result.nodes.filter(node=>!media.includes(node)).every(node=>node.kind==='session'&&node.runtime==='openai-agents'&&node.model==='shared-model')).toBe(true);
+});
+
 it('rechecks the exact choice before copying, and does not infer effort from advertised levels',async()=>{
   const {fetcher}=server(),{onConfirm}=setup();await choose('openai-agents');
   expect(document.querySelector('.official-copy-selection span')).toHaveTextContent('OpenAI Agents · Python catalog model');

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { api, SaaSApiError, saasErrorMessage, tenantPath } from '../api';
 import { runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeStatus } from '../runtimeCatalog';
 import type { CanvasDocument } from '../../canvas/canvasDoc';
+import { mediaKindOf } from '../../canvas/mediaCatalog';
 import type { UiLocale } from '../../locale';
 import { createOfficialDocument, type OfficialWorkflow } from './officialWorkflows';
 import './official-copy-setup.css';
@@ -36,11 +37,12 @@ export async function readOfficialCopyModels(tenantId: string, signal?: AbortSig
 }
 
 /** Apply only an explicit, validated choice to a freshly minted copy. The source
- * compiler and download/export path continue producing clean, unbound drafts. */
+ * compiler and download/export path continue producing clean, unbound drafts. An image, video or 3D node keeps the
+ * media model the example chose: the agent model a member picks is not one that generates pictures. */
 export function createOfficialCopyDocument(item: OfficialWorkflow, locale: UiLocale, model: OfficialCopyModel | null): CanvasDocument {
   const document = createOfficialDocument(item, locale);
   if (!model) return document;
-  return { ...document, nodes: document.nodes.map(node => node.kind === 'session'
+  return { ...document, nodes: document.nodes.map(node => node.kind === 'session' && !mediaKindOf(node.agentKind)
     ? { ...node, runtime: model.runtime, model: model.model, effort: '' } : node) };
 }
 
