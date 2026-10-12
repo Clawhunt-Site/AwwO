@@ -42,6 +42,8 @@ type executionSnapshot struct {
 	Media     *mediaPlan        `json:"media,omitempty"`
 	// Vision is the pictures this run's model is shown with its message (vision.go).
 	Vision *visionPlan `json:"vision,omitempty"`
+	// VisionFrom is the model this run's node chose, when the run moved to one that sees its pictures (vision.go).
+	VisionFrom string `json:"visionFrom,omitempty"`
 
 	Runtime          string             `json:"runtime,omitempty"`
 	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`

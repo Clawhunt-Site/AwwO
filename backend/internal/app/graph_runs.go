@@ -791,8 +791,15 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		}
 	}
 	if turn == nil {
-		// A node of a canvas run shows its model the pictures it is given, as a message does (vision.go); a
-		// collaboration's turns stay as they are.
+		// A node of a canvas run shows its model the pictures it is given, as a message does (vision.go), moving to a
+		// model that sees them when its own cannot; a collaboration's turns stay as they are.
+		switchRoutes := routes
+		if owner != nil {
+			switchRoutes = nil
+		}
+		if e = a.switchToSeeingModel(ctx, tx, tid, switchRoutes, &snap, uploads); e != nil {
+			return e
+		}
 		freezeVisionImages(&snap, uploads)
 	}
 	prompt = attachmentUserPrompt(prompt, uploads)

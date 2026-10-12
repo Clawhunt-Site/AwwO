@@ -14,6 +14,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp" // WebP sizes and pixels, next to the standard library's PNG, JPEG and GIF
 )
@@ -124,8 +125,7 @@ func freezeVisionImages(snapshot *executionSnapshot, attached *uploadAttachments
 			break
 		}
 		item := &attached.Items[i]
-		if item.Kind != uploadKindImage || !visionTypes[item.ContentType] || item.storagePath == "" || item.Size <= 0 ||
-			item.Size > maxVisionSourceBytes || len(item.SHA256) != 64 || item.pixels <= 0 || item.pixels > maxVisionDecodePixels {
+		if !showablePicture(item) {
 			continue
 		}
 		images = append(images, mediaReference{ArtifactID: strings.TrimPrefix(item.Reference, artifactRefPrefix), Name: item.Name,
@@ -135,6 +135,70 @@ func freezeVisionImages(snapshot *executionSnapshot, attached *uploadAttachments
 	if len(images) > 0 {
 		snapshot.Vision = &visionPlan{Images: images}
 	}
+}
+
+// showablePicture: an attachment of a type the workers take, of a size and pixel count a run's model can be shown.
+func showablePicture(item *uploadAttachment) bool {
+	return item.Kind == uploadKindImage && visionTypes[item.ContentType] && item.storagePath != "" && item.Size > 0 &&
+		item.Size <= maxVisionSourceBytes && len(item.SHA256) == 64 && item.pixels > 0 && item.pixels <= maxVisionDecodePixels
+}
+
+// switchToSeeingModel (owner request 2026-10-12: 附图时自动换成能看图的模型): a single-model text run whose message
+// carries a picture its model cannot see runs, this once, on a model of the same worker that can. Only the run moves:
+// the node keeps its model, a message without pictures stays where it was, and the snapshot remembers the model it
+// left (VisionFrom). The model is taken from the worker's catalog as this workspace may use it (the entitlement is
+// already applied to the snapshot's health), the free models first, then the planner's model, then catalog order. For
+// a workspace with route limits (routes non-nil: a free one) a model whose route has no call left today, or is closed
+// to it, is passed over, asked without locks, so the switch does not turn the message into a premium_quota_exceeded
+// refusal; the reservation still decides. With no such model nothing changes and the pictures are described in words.
+// It must run before freezeVisionImages.
+func (a *App) switchToSeeingModel(ctx context.Context, tx pgx.Tx, tid string, routes []byte, s *executionSnapshot, attached *uploadAttachments) error {
+	if attached == nil || s.Team != nil || s.Workspace != nil || s.Computer != nil || s.Media != nil ||
+		!s.Health.ImageInput || s.Health.modelSeesImages(s.Model) || !slices.ContainsFunc(attached.Items, func(item uploadAttachment) bool {
+		return showablePicture(&item)
+	}) {
+		return nil
+	}
+	limits := readRouteLimits(routes)
+	for _, model := range a.seeingModels(s.Health, s.Model) {
+		if routes != nil {
+			switch e := a.routeLimit(ctx, tx, tid, model, limits, false); {
+			case errors.Is(e, errRouteQuota) || errors.Is(e, errRouteCapacity) || errors.Is(e, errFreeCapacity):
+				continue
+			case e != nil:
+				return e
+			}
+		}
+		budget, overhead, _ := s.Health.modelLimits(model)
+		s.VisionFrom, s.Model, s.Budget, s.Overhead = s.Model, model, budget, overhead
+		if !s.Health.supportsEffort(model, s.Effort) {
+			s.Effort = ""
+		}
+		return nil
+	}
+	return nil
+}
+
+// seeingModels are the models of h, other than current, that a run with pictures may move to, in the order tried.
+func (a *App) seeingModels(h piHealth, current string) []string {
+	var free, planner, rest []string
+	for _, m := range h.Models {
+		if m.ID == current || !h.modelSeesImages(m.ID) {
+			continue
+		}
+		if _, _, ok := h.modelLimits(m.ID); !ok {
+			continue
+		}
+		switch {
+		case a.cfg.modelRoute(m.ID) == routeFree:
+			free = append(free, m.ID)
+		case m.ID == a.cfg.PlannerModel:
+			planner = append(planner, m.ID)
+		default:
+			rest = append(rest, m.ID)
+		}
+	}
+	return slices.Concat(free, planner, rest)
 }
 
 // visionImages reads a run's frozen pictures back, refusing any whose stored bytes are gone or changed, and makes

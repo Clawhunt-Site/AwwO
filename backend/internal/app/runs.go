@@ -604,6 +604,17 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if attached != nil {
+		// A message with pictures its model cannot see runs on one that can, when the workspace may call one now
+		// (vision.go); a paid plan's calls are held by its credits, not the route allowances.
+		switchRoutes := routes
+		if plan != nil {
+			switchRoutes = nil
+		}
+		if e = a.switchToSeeingModel(r.Context(), tx, tid, switchRoutes, &snapshot, attached); e != nil {
+			a.dbError(w, e)
+			return
+		}
+		budget, overhead = snapshot.Budget, snapshot.Overhead
 		// Pictures the model takes are frozen with the run and marked shown before the block is written (vision.go).
 		freezeVisionImages(&snapshot, attached)
 		b.Prompt = attachmentUserPrompt(b.Prompt, attached)

@@ -217,3 +217,54 @@ func TestVisionImagesReadBackTheFrozenBytes(t *testing.T) {
 		t.Fatal("another workspace's picture was read")
 	}
 }
+
+// Owner request 2026-10-12 (附图时自动换成能看图的模型): a run with a picture its model cannot see moves, this once,
+// to a model of the same worker that can - a free one first, then the planner's, then catalog order - and nothing else
+// moves. With routes nil (a paid plan, or no route limits) no allowance is asked, so no transaction is needed.
+func TestSwitchToSeeingModel(t *testing.T) {
+	a := &App{cfg: Config{PlannerModel: "bedrock.planner", RouteFreeModels: []string{"free-text", "free-vision"}}}
+	health := piHealth{ImageInput: true, Model: "free-text", Models: []piModel{
+		{ID: "free-text", Input: []string{"text"}, ReasoningEfforts: []string{"low"}},
+		{ID: "gate-vision", Input: []string{"text", "image"}},
+		{ID: "bedrock.planner", Input: []string{"text", "image"}},
+		{ID: "free-vision", Input: []string{"text", "image"}, MaxContextTextBytes: 4096, MessageOverheadBytes: 64},
+	}}
+	if got := strings.Join(a.seeingModels(health, "free-text"), ","); got != "free-vision,bedrock.planner,gate-vision" {
+		t.Fatalf("order %s", got)
+	}
+	if got := strings.Join(a.seeingModels(health, "free-vision"), ","); got != "bedrock.planner,gate-vision" {
+		t.Fatalf("the current model is never a candidate: %s", got)
+	}
+	picture := uploadAttachment{Kind: uploadKindImage, ContentType: "image/png", storagePath: "u/p.png", Size: 10,
+		SHA256: strings.Repeat("a", 64), pixels: 100}
+	document := uploadAttachment{Kind: "document", ContentType: "application/pdf", storagePath: "u/d.pdf", Size: 10}
+	run := func(s executionSnapshot, items ...uploadAttachment) executionSnapshot {
+		t.Helper()
+		if err := a.switchToSeeingModel(context.Background(), nil, "t1", nil, &s, &uploadAttachments{Items: items}); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	moved := run(executionSnapshot{Model: "free-text", Effort: "low", Budget: 1, Overhead: 1, Health: health}, document, picture)
+	if moved.Model != "free-vision" || moved.VisionFrom != "free-text" || moved.Effort != "" || moved.Budget != 4096 || moved.Overhead != 64 {
+		t.Fatalf("moved %+v", moved)
+	}
+	if !moved.seesImages() {
+		t.Fatal("the moved run must be one whose pictures are frozen")
+	}
+	for name, s := range map[string]executionSnapshot{
+		"no picture":      run(executionSnapshot{Model: "free-text", Health: health}, document),
+		"model sees":      run(executionSnapshot{Model: "gate-vision", Health: health}, picture),
+		"worker blind":    run(executionSnapshot{Model: "free-text", Health: piHealth{Model: "free-text", Models: health.Models}}, picture),
+		"team":            run(executionSnapshot{Model: "free-text", Health: health, Team: &nodeTeam{}}, picture),
+		"workspace":       run(executionSnapshot{Model: "free-text", Health: health, Workspace: &workspacePlan{}}, picture),
+		"picture too big": run(executionSnapshot{Model: "free-text", Health: health}, uploadAttachment{Kind: uploadKindImage, ContentType: "image/png", storagePath: "u/p.png", Size: maxVisionSourceBytes + 1, SHA256: strings.Repeat("a", 64), pixels: 100}),
+	} {
+		if s.VisionFrom != "" || (name != "model sees" && s.Model != "free-text") {
+			t.Fatalf("%s moved: %+v", name, s)
+		}
+	}
+	if s := run(executionSnapshot{Model: "free-text", Health: piHealth{ImageInput: true, Model: "free-text", Models: health.Models[:1]}}, picture); s.Model != "free-text" || s.VisionFrom != "" {
+		t.Fatalf("no seeing model must leave the run as it is: %+v", s)
+	}
+}

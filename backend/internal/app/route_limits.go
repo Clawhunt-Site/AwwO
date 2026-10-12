@@ -227,9 +227,15 @@ const todayUTC = `date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME
 // taken after the workspace lock, in every caller, so the two can never wait on each other in
 // opposite orders.
 func (a *App) checkRouteLimit(ctx context.Context, tx pgx.Tx, tid, model string, limits routeLimits) error {
+	return a.routeLimit(ctx, tx, tid, model, limits, true)
+}
+
+// routeLimit is checkRouteLimit; lock false asks the same question without the ceilings' advisory lock, for a caller
+// that only wants to know whether a call would pass now (the vision switch, vision.go). Only a reservation decides.
+func (a *App) routeLimit(ctx context.Context, tx pgx.Tx, tid, model string, limits routeLimits, lock bool) error {
 	route := a.cfg.modelRoute(model)
 	if route == routeFree {
-		return a.checkFreeModelCeiling(ctx, tx, limits)
+		return a.freeModelCeiling(ctx, tx, limits, lock)
 	}
 	if route == routeMedia {
 		// Generations are admitted on their own path; a text call with such an id is still paid.
@@ -252,8 +258,10 @@ func (a *App) checkRouteLimit(ctx context.Context, tx pgx.Tx, tid, model string,
 	}
 	// A workspace that limits no route (the empty object) is outside the ceilings, held and counted by none.
 	if capped && len(limits) > 0 {
-		if _, e := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321011)"); e != nil {
-			return e
+		if lock {
+			if _, e := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321011)"); e != nil {
+				return e
+			}
 		}
 		var used int
 		if e := tx.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi JOIN tenants t ON t.id=mi.tenant_id WHERE t.route_limits IS NOT NULL AND NOT `+noRouteLimited+` AND mi.created_at>=`+todayUTC+` AND `+routeInvocationFilter, route, free).Scan(&used); e != nil {
@@ -280,6 +288,11 @@ const freeInvocationFilter = `mi.model_id = ANY($1::text[])
 // a slot is free, and takes the route ceilings' advisory lock, so concurrent calls of different workspaces cannot
 // each see room for one more.
 func (a *App) checkFreeModelCeiling(ctx context.Context, tx pgx.Tx, limits routeLimits) error {
+	return a.freeModelCeiling(ctx, tx, limits, true)
+}
+
+// freeModelCeiling is checkFreeModelCeiling; lock false skips the advisory lock (routeLimit).
+func (a *App) freeModelCeiling(ctx context.Context, tx pgx.Tx, limits routeLimits, lock bool) error {
 	if a.cfg.FreeModelTotalPerDay <= 0 || len(limits) == 0 {
 		return nil
 	}
@@ -287,8 +300,10 @@ func (a *App) checkFreeModelCeiling(ctx context.Context, tx pgx.Tx, limits route
 	if free == nil {
 		free = []string{}
 	}
-	if _, e := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321011)"); e != nil {
-		return e
+	if lock {
+		if _, e := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321011)"); e != nil {
+			return e
+		}
 	}
 	var used int
 	if e := tx.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi JOIN tenants t ON t.id=mi.tenant_id WHERE t.route_limits IS NOT NULL AND NOT `+noRouteLimited+` AND mi.created_at>=`+todayUTC+` AND `+freeInvocationFilter, free).Scan(&used); e != nil {
