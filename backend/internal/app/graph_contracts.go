@@ -153,7 +153,7 @@ func nodePort(n graphNode, id string, input bool) (string, bool) {
 	if input && id == "context" {
 		return "text", true
 	}
-	if input && id == "reference" && (n.AgentKind == "image" || n.AgentKind == mediaKindModel3D) {
+	if input && id == "reference" && (n.AgentKind == "image" || n.AgentKind == mediaKindVideo || n.AgentKind == mediaKindModel3D) {
 		return "image", true
 	}
 	if !input && id == "result" {

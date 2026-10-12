@@ -77,8 +77,8 @@ export interface TileComposerProps {
 
 /** The notice under a media node's attachments: which picture is used, or why none is. */
 function mediaAttachmentNotice(t: ReturnType<typeof useCanvasI18n>['t'], media: MediaComposerInfo): string {
-  if (media.references > 0) return t(media.kind === 'model3d' ? 'attach.mediaRef3d' : 'attach.mediaRefImage');
-  if (media.kind !== 'video' && media.referenceModels.length) return t('attach.mediaNoRefs', { models: media.referenceModels.join('、') });
+  if (media.references > 0) return t(media.kind === 'model3d' ? 'attach.mediaRef3d' : media.kind === 'video' ? 'attach.mediaRefVideo' : 'attach.mediaRefImage');
+  if (media.referenceModels.length) return t('attach.mediaNoRefs', { models: media.referenceModels.join('、') });
   return t('attach.mediaNote');
 }
 

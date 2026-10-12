@@ -50,8 +50,9 @@ var (
 	xtasyEndpoints   = map[string]string{mediaKindImage: "/openapi/v1/images/generations", mediaKindVideo: "/openapi/v1/videos/generations"}
 )
 
-// xtasyFixed are the parameters each model always sends with one value: text-only generation (AwwO has no
-// reference upload yet), and for the omni video models no watermark and no extra last-frame picture beside the video.
+// xtasyFixed are the parameters each model always sends with one value: text-only generation (a reference picture
+// changes the mode, xtasyRequest), and for the omni video models no watermark and no extra last-frame picture beside
+// the video.
 var xtasyFixed = map[string]map[string]any{
 	"xt.seedream-5-pro": {"mode": "txt2img"}, "xt.gemini-3-1-flash-image": {"mode": "txt2img"},
 	"xt.gpt-image-2-5": {"mode": "txt2img"}, "xt.gpt-image-2": {"mode": "txt2img"},
@@ -61,10 +62,18 @@ var xtasyFixed = map[string]map[string]any{
 	"xt.omni-video-2-5": {"mode": "text2video", "watermark": false, "return_last_frame": false, "output_format": "mp4"},
 }
 
-// xtasyReferenceModels are the image models that edit one reference picture (mode img2img, the picture uploaded to
-// POST /openapi/v1/files and named as {"role":"reference_image","file_id"}): the models the operator's own scripts
-// have generated that way with this API. Every other model stays text-only until it is verified the same way.
-var xtasyReferenceModels = map[string]int{"xt.xtasy-3": 1, "xt.xtasy-3-pro": 1, "xt.seedream-5-pro": 1}
+// xtasyReferenceModels are the models that generate from reference pictures uploaded to POST /openapi/v1/files, and
+// how many each takes. The image models edit one (mode img2img, named {"role":"reference_image","file_id"}): the
+// models the operator's own scripts have generated that way with this API. The video models (owner request
+// 2026-10-12: 视频节点也加参考图) start from one (mode interpolation, {"role":"first_frame"}) and end on a second
+// when there is one ({"role":"last_frame"}): every one of them lists those roles, at most one each, and that mode in
+// GET /openapi/v1/models (read 2026-10-12 12:01Z), where the 2.5 model also allows only an adaptive ratio with them.
+// Every other model stays text-only until it is verified the same way.
+var xtasyReferenceModels = map[string]int{"xt.xtasy-3": 1, "xt.xtasy-3-pro": 1, "xt.seedream-5-pro": 1,
+	"xt.xtasy-v3": 2, "xt.omni-video": 2, "xt.omni-video-2-5": 2}
+
+// xtasyFrameRoles name a video's reference pictures in order: the first frame, then the last.
+var xtasyFrameRoles = []string{"first_frame", "last_frame"}
 
 // xtasyModels is the curated X-tasy catalog: the text-to-image and text-to-video models GET /openapi/v1/models
 // published on 2026-10-10, each pinned to its stable model id, with that model's closed choices. A choice whose
@@ -142,7 +151,8 @@ func validXtasyModel(m *mediaModel) error {
 	if !ok {
 		return errors.New("fixed parameters")
 	}
-	if m.References < 0 || m.References > 1 || (m.References > 0 && (m.Kind != mediaKindImage || fixed["mode"] != "txt2img")) {
+	if m.References < 0 || m.References > len(xtasyFrameRoles) || (m.References > 0 && !(m.Kind == mediaKindVideo ||
+		(m.Kind == mediaKindImage && fixed["mode"] == "txt2img" && m.References == 1))) {
 		return errors.New("references")
 	}
 	if len(m.Params) > maxMediaParams {
@@ -166,7 +176,9 @@ func validXtasyModel(m *mediaModel) error {
 
 // xtasyRequest is the body of one generation task: the pinned model, the prompt, the model's fixed parameters and
 // the resolved choices under X-tasy's own names, and the run's Idempotency-Key for the client. With reference
-// pictures (their uploaded file ids) an image model edits them: mode img2img, each named as a reference_image.
+// pictures (their uploaded file ids) an image model edits them: mode img2img, each named as a reference_image; a
+// video model starts from the first as its first_frame and ends on a second as its last_frame (mode interpolation),
+// at the adaptive ratio, so the video keeps its pictures' shape (the only ratio the 2.5 model allows with frames).
 func xtasyRequest(m *mediaModel, prompt string, params map[string]any, runID string, references []string) map[string]any {
 	parameters := map[string]any{}
 	for name, value := range xtasyFixed[m.ID] {
@@ -179,9 +191,14 @@ func xtasyRequest(m *mediaModel, prompt string, params map[string]any, runID str
 	}
 	refs := []any{}
 	if len(references) > 0 && m.References > 0 {
+		role := func(int) string { return "reference_image" }
 		parameters["mode"] = "img2img"
-		for _, id := range references[:min(len(references), m.References)] {
-			refs = append(refs, map[string]any{"role": "reference_image", "file_id": id})
+		if m.Kind == mediaKindVideo {
+			role = func(i int) string { return xtasyFrameRoles[i] }
+			parameters["mode"], parameters["aspect_ratio"] = "interpolation", "adaptive"
+		}
+		for i, id := range references[:min(len(references), m.References, len(xtasyFrameRoles))] {
+			refs = append(refs, map[string]any{"role": role(i), "file_id": id})
 		}
 	}
 	return map[string]any{"model_id": m.Version, "prompt": strings.TrimSpace(prompt), "parameters": parameters, "references": refs,

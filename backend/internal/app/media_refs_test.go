@@ -20,20 +20,25 @@ func testReference(data []byte, contentType string) mediaReference {
 
 func TestMediaReferenceCatalog(t *testing.T) {
 	want := map[string]int{"xt.xtasy-3": 1, "xt.xtasy-3-pro": 1, "xt.seedream-5-pro": 1, "tripo.v3-1": 1, "tripo.p1": 1,
-		"jm.image-cinema": 1, "jm.image-express": 1}
+		"jm.image-cinema": 1, "jm.image-express": 1, "xt.xtasy-v3": 2, "xt.omni-video": 2, "xt.omni-video-2-5": 2}
 	for _, m := range builtinMediaCatalog.List() {
 		if m.References != want[m.ID] {
 			t.Errorf("%s takes %d references, want %d", m.ID, m.References, want[m.ID])
 		}
-		if m.References > 0 && m.Kind == mediaKindVideo {
-			t.Errorf("%s: no video model takes a reference yet", m.ID)
-		}
 	}
 	bad := *xtasyModels()[0]
-	bad.ID, bad.References = "xt.omni-video", 1
-	bad.Kind, bad.Endpoint, bad.Mode = mediaKindVideo, xtasyEndpoints[mediaKindVideo], "text-to-video"
-	if validXtasyModel(&bad) == nil {
-		t.Fatal("a video model may not claim references")
+	bad.References = 2
+	if bad.Kind != mediaKindImage || validXtasyModel(&bad) == nil {
+		t.Fatal("an image model edits one reference")
+	}
+	video, _ := builtinMediaCatalog.model("xt.omni-video")
+	frames := *video
+	if err := validXtasyModel(&frames); err != nil {
+		t.Fatal("the shipped video model is valid", err)
+	}
+	frames.References = 3
+	if validXtasyModel(&frames) == nil {
+		t.Fatal("a video takes a first and a last frame, no more")
 	}
 	three := *tripoModels()[0]
 	if err := validTripoModel(&three); err != nil {
@@ -183,5 +188,40 @@ func TestUploadMediaReferencesRefusesChangedBytes(t *testing.T) {
 	ref := testReference(testPNG, "image/png")
 	if _, err := h.uploadMediaReferences(context.Background(), &fakeMediaProvider{}, "t", "run1", []mediaReference{ref}); mediaFailureCode(err) != "media_reference_unavailable" {
 		t.Fatal("a provider without uploads, or a missing file, ends the run before anything is billed", err)
+	}
+}
+
+// Video nodes (owner request 2026-10-12: 视频节点也加参考图): the first picture is the first frame and a second the
+// last frame, in mode interpolation at the adaptive ratio, and a third is left out; without pictures the request is
+// what it was. The roles, the mode and the 2.5 model's adaptive-only ratio are X-tasy's GET /openapi/v1/models.
+func TestMediaReferenceVideoFrames(t *testing.T) {
+	for _, id := range []string{"xt.xtasy-v3", "xt.omni-video", "xt.omni-video-2-5"} {
+		m, ok := builtinMediaCatalog.model(id)
+		if !ok {
+			t.Fatal(id, "missing")
+		}
+		params, err := m.resolveMediaParams(nil)
+		if err != nil {
+			t.Fatal(id, err)
+		}
+		plain := xtasyRequest(m, "a cat walks", params, "run1", nil)
+		if p := plain["parameters"].(map[string]any); p["mode"] != xtasyFixed[id]["mode"] || len(plain["references"].([]any)) != 0 {
+			t.Fatal(id, "a video without pictures is generated from words as before", plain)
+		}
+		one := xtasyRequest(m, "a cat walks", params, "run1", []string{"f1"})
+		p, refs := one["parameters"].(map[string]any), one["references"].([]any)
+		if p["mode"] != "interpolation" || p["aspect_ratio"] != "adaptive" || len(refs) != 1 ||
+			refs[0].(map[string]any)["role"] != "first_frame" || refs[0].(map[string]any)["file_id"] != "f1" {
+			t.Fatal(id, "one picture is the first frame", one)
+		}
+		two := xtasyRequest(m, "a cat walks", params, "run1", []string{"f1", "f2", "f3"})
+		refs = two["references"].([]any)
+		if len(refs) != 2 || refs[0].(map[string]any)["role"] != "first_frame" || refs[1].(map[string]any)["role"] != "last_frame" ||
+			refs[1].(map[string]any)["file_id"] != "f2" {
+			t.Fatal(id, "a second picture is the last frame and a third is left out", two)
+		}
+		if _, sent := two["parameters"].(map[string]any)["omni_reference_task_type"]; sent {
+			t.Fatal(id, "frames never carry an omni reference task type")
+		}
 	}
 }

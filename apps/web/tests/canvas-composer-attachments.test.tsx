@@ -97,6 +97,10 @@ describe('a media node composer', () => {
     expect(screen.getByText('这个模型只按文字生成，附带的文件不会使用。要用参考图，请换成：图片 · 高清、图片 · 标准多张。')).toBeInTheDocument();
     rerender(composer({ kind: 'video', references: 0, referenceModels: [] }));
     expect(screen.getByText('这个节点只按你写的文字生成，附带的文件不会交给生成服务。')).toBeInTheDocument();
+    rerender(composer({ kind: 'video', references: 2, referenceModels: ['视频 · 标准'] }));
+    expect(screen.getByText(/会作为视频的第一帧，第二张作为最后一帧/)).toBeInTheDocument();
+    rerender(composer({ kind: 'video', references: 0, referenceModels: ['视频 · 标准'] }));
+    expect(screen.getByText('这个模型只按文字生成，附带的文件不会使用。要用参考图，请换成：视频 · 标准。')).toBeInTheDocument();
   });
 
   it('reads what the node model does from its choices, and only for media nodes', () => {
@@ -112,11 +116,12 @@ describe('a media node composer', () => {
     expect(catalogue.models.map(m => m.references)).toEqual([1, 0, 0, 0]);
   });
 
-  it('gives 3D nodes a reference input, as image nodes have, and video nodes none', () => {
+  it('gives 3D and video nodes a reference input, as image nodes have, and text nodes none', () => {
     const ids = (agentKind: string) => portsFor({ kind: 'session', agentKind } as never).filter(p => p.side === 'input').map(p => p.id);
     expect(ids('model3d')).toEqual(['context', 'reference']);
     expect(ids('image')).toEqual(['context', 'reference']);
-    expect(ids('video')).toEqual(['context']);
+    expect(ids('video')).toEqual(['context', 'reference']);
+    expect(ids('llm')).not.toContain('reference');
   });
 });
 

@@ -60,6 +60,14 @@ describe('ports: typed port derivation', () => {
     ]);
   });
 
+  it('gives a video session the same single picture reference input, its first frame', () => {
+    const ports = portsFor(createSessionNode('video', { x: 0, y: 0 }));
+    expect(ports.filter((p) => p.side === 'input')).toEqual([
+      { id: 'context', side: 'input', dataType: 'text', multi: true },
+      { id: 'reference', side: 'input', dataType: 'image' },
+    ]);
+  });
+
   it('anchors inputs on the left edge and outputs on the right, spread down the box', () => {
     const image = createSessionNode('image', { x: 100, y: 200 });
     const context = portAnchorWorld(image, 'context');

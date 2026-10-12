@@ -78,7 +78,7 @@ export function portsFor(node: CanvasNode): PortSpec[] {
   }
   const ports: PortSpec[] = [{ id: 'context', side: 'input', dataType: 'text', multi: true }];
   // A picture wired here is the generation's reference where the node's model takes one (image edit, image-to-3D).
-  if (node.agentKind === 'image' || node.agentKind === 'model3d') ports.push({ id: 'reference', side: 'input', dataType: 'image' });
+  if (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d') ports.push({ id: 'reference', side: 'input', dataType: 'image' });
   ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' ? node.agentKind
     : node.agentKind === 'model3d' ? 'file' : 'text' });
   return ports;
