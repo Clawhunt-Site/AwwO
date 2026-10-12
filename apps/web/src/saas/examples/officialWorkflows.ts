@@ -43,6 +43,8 @@ export interface OfficialWorkflow {
   /** Sized for one model call per node of at most about 32,000 output tokens (Claude Opus 5.5 on AwwO's runtime):
    * every node is told its length limit, and a page finishes within it instead of being cut off. */
   readonly sizing?: 'single-call';
+  /** A tighter page limit than the default, for an example whose page outran one call on a real run. */
+  readonly pageLimit?: number;
   /** Image, video and 3D nodes that generate the example's media in the same canvas run (officialMedia.ts). */
   readonly media?: ReadonlyArray<OfficialMediaNode>;
 }
@@ -261,10 +263,15 @@ const STARTER_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [
   },
 ];
 
+/** Page limits tighter than PAGE_LIMIT, by example: FOUNDRY's page outran one Opus 5.5 call at 26,000 and again at
+ * 20,000 characters on 2026-10-12 (its thinking took the full budget both times, and its page is mostly Chinese text). */
+const PAGE_LIMITS: Readonly<Record<string, number>> = { 'model-foundry': 13000 };
+
 /** Every official example, sized for one model call per node (`sizing`) and carrying the media it generates in the
  * same run (officialMedia.ts). Production cases (productionWorkflows.ts) are sized in their own tasks instead. */
 export const OFFICIAL_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...INDUSTRY_WORKFLOWS, ...STARTER_WORKFLOWS]
-  .map(item => ({ ...item, sizing: 'single-call' as const, ...(OFFICIAL_MEDIA[item.id] ? { media: OFFICIAL_MEDIA[item.id] } : {}) }));
+  .map(item => ({ ...item, sizing: 'single-call' as const, ...(OFFICIAL_MEDIA[item.id] ? { media: OFFICIAL_MEDIA[item.id] } : {}),
+    ...(PAGE_LIMITS[item.id] ? { pageLimit: PAGE_LIMITS[item.id] } : {}) }));
 
 export function getOfficialWorkflow(id: string): OfficialWorkflow | undefined {
   return OFFICIAL_WORKFLOWS.find(item => item.id === id);
@@ -275,10 +282,10 @@ export function getOfficialWorkflow(id: string): OfficialWorkflow | undefined {
 // The first real runs on Claude Opus 5.5 (2026-10-12) had thinking take about half the budget, and three heavy nodes
 // that wrote past their limit were cut off: the limits leave that half to thinking.
 const PAGE_LIMIT = 20000;
-const SINGLE_CALL_PAGE: Localized = {
-  zh: `\n\n单次调用规则：这个节点只有一次模型调用，最多约 32000 个输出 token（动笔前的思考也算在内），写超了会被截断、整页作废。所以整页 HTML 不超过 ${PAGE_LIMIT} 个字符，而且先保证写完：一直写到最后的 </html>，宁可少些装饰也不能写不完。上游已经定好规则、数据和代码，这一步只负责实现并组装：不要重新构思方案，动笔前的思考只用几句话定下结构，不要在脑中逐行推演代码，直接开始写；上游交付的代码原样复用，括号不成对时先补齐。代码紧凑：用函数和循环生成重复的界面、数据和图形，不写注释、不留空行，不把上游的说明文字抄进页面。界面达到商业产品水准：清晰的层次、精致的排版与配色、有反馈的交互动效，绝不是线框或示意图。页面在 iframe 里运行：一打开就是完整可操作的界面，适配窗口宽度，整页不出现横向滚动条，内容多时在面板内滚动。输出前默默自查，不要写出自查过程：每个 {、(、[ 都成对闭合；每个按钮和输入都真的更新状态；第一次操作之前运行的代码不读取还没创建的对象。只输出 HTML 文档本身：以 <!DOCTYPE html> 开头、以 </html> 结尾，前后不加任何说明。`,
-  en: `\n\nSingle-call rule: this node makes one model call of at most about 32,000 output tokens, the model’s thinking before it writes included, and a page that runs past it is cut off and lost. So the whole HTML page is at most 20,000 characters, and finishing comes first: write all the way to the final </html>, dropping decoration rather than leaving the page unfinished. The rules, data and code are settled upstream; this step implements and assembles them: do not redesign the plan; think only a few sentences to settle the structure, never rehearse the code in your head, and start writing; reuse upstream code as delivered, closing any unbalanced bracket first. Keep the code compact: generate repeated interface, data and graphics with functions and loops, with no comments or blank lines, and never copy upstream explanations into the page. The interface reaches commercial product quality — clear hierarchy, refined type and colour, responsive feedback and motion — never a wireframe or a diagram. The page runs inside an iframe: it opens as a complete, working interface, fits its window’s width with no horizontal page scrollbar, and scrolls inside panels when content is long. Check silently before answering and do not write the checks out: every {, ( and [ is closed; every button and input really updates state; code that runs before the first user action never reads an object that does not exist yet. Output only the HTML document itself, from <!DOCTYPE html> to </html>, with nothing before or after it.`,
-};
+const singleCallPage = (limit: number): Localized => ({
+  zh: `\n\n单次调用规则：这个节点只有一次模型调用，最多约 32000 个输出 token（动笔前的思考也算在内），写超了会被截断、整页作废。所以整页 HTML 不超过 ${limit} 个字符，而且先保证写完：一直写到最后的 </html>，宁可少些装饰也不能写不完。上游已经定好规则、数据和代码，这一步只负责实现并组装：不要重新构思方案，动笔前的思考只用几句话定下结构，不要在脑中逐行推演代码，直接开始写；上游交付的代码原样复用，括号不成对时先补齐。代码紧凑：用函数和循环生成重复的界面、数据和图形，不写注释、不留空行，不把上游的说明文字抄进页面。界面达到商业产品水准：清晰的层次、精致的排版与配色、有反馈的交互动效，绝不是线框或示意图。页面在 iframe 里运行：一打开就是完整可操作的界面，适配窗口宽度，整页不出现横向滚动条，内容多时在面板内滚动。输出前默默自查，不要写出自查过程：每个 {、(、[ 都成对闭合；每个按钮和输入都真的更新状态；第一次操作之前运行的代码不读取还没创建的对象。只输出 HTML 文档本身：以 <!DOCTYPE html> 开头、以 </html> 结尾，前后不加任何说明。`,
+  en: `\n\nSingle-call rule: this node makes one model call of at most about 32,000 output tokens, the model’s thinking before it writes included, and a page that runs past it is cut off and lost. So the whole HTML page is at most ${limit.toLocaleString('en-US')} characters, and finishing comes first: write all the way to the final </html>, dropping decoration rather than leaving the page unfinished. The rules, data and code are settled upstream; this step implements and assembles them: do not redesign the plan; think only a few sentences to settle the structure, never rehearse the code in your head, and start writing; reuse upstream code as delivered, closing any unbalanced bracket first. Keep the code compact: generate repeated interface, data and graphics with functions and loops, with no comments or blank lines, and never copy upstream explanations into the page. The interface reaches commercial product quality — clear hierarchy, refined type and colour, responsive feedback and motion — never a wireframe or a diagram. The page runs inside an iframe: it opens as a complete, working interface, fits its window’s width with no horizontal page scrollbar, and scrolls inside panels when content is long. Check silently before answering and do not write the checks out: every {, ( and [ is closed; every button and input really updates state; code that runs before the first user action never reads an object that does not exist yet. Output only the HTML document itself, from <!DOCTYPE html> to </html>, with nothing before or after it.`,
+});
 const SINGLE_CALL_TEXT: Localized = {
   zh: '\n\n单次调用规则：这个节点只有一次模型调用，最多约 32000 个输出 token（思考也算在内），动笔前的思考只用几句话。说明文字不超过 2000 个中文字符：只写结论、规则、数据、接口和未验证项，多用表格和短条目，不重述上游内容，不写开场白和总结。任务要求交付源代码时，代码另计、不超过 7000 个字符：紧凑、不写注释，括号成对闭合、不用省略号，能原样粘贴运行，顶层不自动运行任何东西。',
   en: '\n\nSingle-call rule: this node makes one model call of at most about 32,000 output tokens, thinking included, so think only a few sentences before writing. Explanations stay within 1,000 words: conclusions, rules, data, interfaces and unverified items only, in tables and short items, never restating upstream content, with no preamble or summary. When the task asks for source code, the code is counted separately and stays within 7,000 characters: compact, no comments, every bracket closed and no ellipses, runnable as pasted, nothing running by itself at the top level.',
@@ -330,7 +337,7 @@ export function createOfficialDocument(item: OfficialWorkflow, locale: UiLocale)
     return { ...base, title: spec.title[locale], w: 560, h: 420,
       // These nodes have purpose-built contracts; assigning a built-in templateId would display
       // that template's unrelated guide instead of the official case's task and acceptance.
-      persona: `${spec.task[locale]}\n\n${locale === 'zh' ? '验收要求' : 'Acceptance'}:\n${spec.acceptance.map(check => `- ${check[locale]}`).join('\n')}\n\n${evidence}${html}${shows}${item.sizing === 'single-call' ? (outputType === 'html' ? SINGLE_CALL_PAGE : SINGLE_CALL_TEXT)[locale] : ''}`,
+      persona: `${spec.task[locale]}\n\n${locale === 'zh' ? '验收要求' : 'Acceptance'}:\n${spec.acceptance.map(check => `- ${check[locale]}`).join('\n')}\n\n${evidence}${html}${shows}${item.sizing === 'single-call' ? (outputType === 'html' ? singleCallPage(item.pageLimit ?? PAGE_LIMIT) : SINGLE_CALL_TEXT)[locale] : ''}`,
       contract: { version: 1, inputs, outputs: [{ id: 'result', label: spec.output[locale], type: outputType, required: true, value: '',
         help: spec.acceptance.map(check => check[locale]).join('\n') }] },
     };

@@ -79,8 +79,9 @@ describe.each(OFFICIAL_WORKFLOWS)('$id executable reference', item => {
         else expect(upstream).toHaveLength(0);
       }
       // One model call per node: every node is told its length, and a page node that it must finish.
+      const limit = item.pageLimit ?? 20000;
       expect(node.persona).toContain(node.contract!.outputs[0].type === 'html'
-        ? (locale === 'zh' ? '整页 HTML 不超过 20000 个字符' : 'at most 20,000 characters')
+        ? (locale === 'zh' ? `整页 HTML 不超过 ${limit} 个字符` : `at most ${limit.toLocaleString('en-US')} characters`)
         : (locale === 'zh' ? '说明文字不超过 2000 个中文字符' : 'Explanations stay within 1,000 words'));
       // A page a media node feeds is told how to show its files; any other page still uses none.
       const fed = node.contract!.inputs.some(field => field.id.startsWith('media_'));
