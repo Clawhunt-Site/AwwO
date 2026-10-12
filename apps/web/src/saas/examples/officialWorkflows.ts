@@ -265,8 +265,9 @@ const STARTER_WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [
 
 /** Page limits tighter than PAGE_LIMIT, by example: FOUNDRY's page outran one Opus 5.5 call at 26,000 and again at
  * 20,000 characters on 2026-10-12 (its thinking took the full budget both times, and its page is mostly Chinese text);
- * KEPLER's playable page (colony-command) outran it at 20,000 the same day (11:29Z), with its concept art wired in. */
-const PAGE_LIMITS: Readonly<Record<string, number>> = { 'model-foundry': 13000, 'colony-command': 13000 };
+ * KEPLER's playable page (colony-command) outran it at 20,000 the same day (11:29Z), with its concept art wired in, and
+ * so did HABITAT's twin console (habitat-twin, 12:34Z) with its building's 3D preview wired in. */
+const PAGE_LIMITS: Readonly<Record<string, number>> = { 'model-foundry': 13000, 'colony-command': 13000, 'habitat-twin': 13000 };
 
 /** Every official example, sized for one model call per node (`sizing`) and carrying the media it generates in the
  * same run (officialMedia.ts). Production cases (productionWorkflows.ts) are sized in their own tasks instead. */
