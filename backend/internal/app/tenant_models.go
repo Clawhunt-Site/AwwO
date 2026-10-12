@@ -13,8 +13,13 @@ import (
 // workspace that exists today is, so the entitlement starts as the identity
 // filter. A stored list is authoritative and exhaustive for that workspace: an
 // empty one permits nothing rather than everything, so an operator narrowing an
-// allowlist can never accidentally widen access.
-type modelEntitlement struct{ allowed *[]string }
+// allowlist can never accidentally widen access. tenant is the workspace the
+// entitlement was read for (tenantModelEntitlement), "" when it was built without
+// one; only operator grants keyed by workspace (AWWO_JIMENG_WORKSPACES) read it.
+type modelEntitlement struct {
+	allowed *[]string
+	tenant  string
+}
 
 const maxAllowedModels = 64
 
@@ -148,7 +153,11 @@ func tenantModelEntitlement(ctx context.Context, q querier, tid string) (modelEn
 	if e := q.QueryRow(ctx, "SELECT allowed_models IS NOT NULL,COALESCE(allowed_models,'{}') FROM tenants WHERE id=$1", tid).Scan(&restricted, &allowed); e != nil {
 		return deniedModels(), e
 	}
-	return newModelEntitlement(restricted, allowed)
+	entitlement, e := newModelEntitlement(restricted, allowed)
+	if e == nil {
+		entitlement.tenant = tid
+	}
+	return entitlement, e
 }
 
 // A graph node freezes its snapshot when the graph is admitted, so the catalog it

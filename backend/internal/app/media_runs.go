@@ -94,8 +94,21 @@ func (a *App) xtasyHub() *xtasyClient {
 	return a.xtasy
 }
 
-// mediaProvider is a media generation backend: X-tasy or RunningHub for images and video, Tripo for 3D models. A
-// task is submitted once, queried until it ends, and its result files are downloaded through an allowlisted client.
+// jimengHub is the configured Jimeng client, or nil when its image and video generation is off.
+func (a *App) jimengHub() *jimengClient {
+	if !a.cfg.jimengConfigured() {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.jimeng == nil {
+		a.jimeng = newJimeng(a.cfg)
+	}
+	return a.jimeng
+}
+
+// mediaProvider is a media generation backend: Jimeng, X-tasy or RunningHub for images and video, Tripo for 3D models.
+// A task is submitted once, queried until it ends, and its result files are downloaded through an allowlisted client.
 type mediaProvider interface {
 	submit(ctx context.Context, endpoint string, body map[string]any) (rhTask, error)
 	query(ctx context.Context, taskID string) (rhTask, error)
@@ -116,6 +129,10 @@ func (a *App) mediaProviderFor(provider string) mediaProvider {
 		}
 	case mediaProviderXtasy:
 		if hub := a.xtasyHub(); hub != nil {
+			return hub
+		}
+	case mediaProviderJimeng:
+		if hub := a.jimengHub(); hub != nil {
 			return hub
 		}
 	}
@@ -231,6 +248,8 @@ func (a *App) mediaPlanSnapshot(document []byte, nodeID, model string, entitleme
 		runtime = runtimeTripo
 	case mediaProviderXtasy:
 		runtime = runtimeXtasy
+	case mediaProviderJimeng:
+		runtime = runtimeJimeng
 	}
 	return executionSnapshot{Runtime: runtime, Model: m.ID, Media: &mediaPlan{Version: 1, Provider: m.Provider, Model: m.ID, Kind: m.Kind, Params: params}}, nil
 }
@@ -508,6 +527,8 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 		}
 	case mediaProviderXtasy:
 		body = xtasyRequest(m, text, plan.Params, id, references)
+	case mediaProviderJimeng:
+		body = jimengRequest(m, text, plan.Params, id, references)
 	default:
 		body = map[string]any{"prompt": text}
 		for name, value := range plan.Params {

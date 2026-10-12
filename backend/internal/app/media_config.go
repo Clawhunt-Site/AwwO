@@ -54,6 +54,19 @@ type mediaSettings struct {
 	XtasyAPIKey        string
 	XtasyBaseURL       string
 	XtasyAllWorkspaces bool
+	// Jimeng (image and video nodes on the operator's Jimeng member account) runs through its official canvas CLI at
+	// JimengCLI, signed in under JimengHome (profile JimengProfile; the CLI's recovery records in JimengStateDir), and
+	// stores its files in the same AWWO_MEDIA_DIR. One generation spends at most JimengCreditCeiling Jimeng credits.
+	// Its models are offered only explicitly: to JimengWorkspaces, to every workspace with JimengAllWorkspaces, or to a
+	// workspace whose model allowlist names them; an unrestricted workspace alone is not enough, because it spends a
+	// personal member account.
+	JimengCLI           string
+	JimengHome          string
+	JimengProfile       string
+	JimengStateDir      string
+	JimengCreditCeiling int
+	JimengAllWorkspaces bool
+	JimengWorkspaces    []string
 	// Files members attach (uploads.go) live in the same AWWO_MEDIA_DIR: at most UploadMaxBytes each,
 	// UploadsPerDay a workspace each UTC day, and UploadWorkspaceBytes a workspace in total.
 	UploadMaxBytes       int64
@@ -196,19 +209,56 @@ func (c *Config) mediaFromEnv() error {
 	default:
 		return errors.New("AWWO_XTASY_ALL_WORKSPACES must be true or false")
 	}
+	if err := c.jimengFromEnv(); err != nil {
+		return err
+	}
 	return validateMediaConfig(*c)
 }
 
+func (c *Config) jimengFromEnv() error {
+	c.JimengCLI = strings.TrimSpace(os.Getenv("AWWO_JIMENG_CLI"))
+	c.JimengHome = strings.TrimSpace(os.Getenv("AWWO_JIMENG_HOME"))
+	c.JimengProfile = env("AWWO_JIMENG_PROFILE", defaultJimengProfile)
+	c.JimengStateDir = strings.TrimSpace(os.Getenv("AWWO_JIMENG_STATE_DIR"))
+	if c.JimengStateDir == "" && c.JimengHome != "" {
+		c.JimengStateDir = filepath.Join(c.JimengHome, "state")
+	}
+	c.JimengCreditCeiling = defaultJimengCeiling
+	if s := os.Getenv("AWWO_JIMENG_CREDIT_CEILING"); s != "" {
+		n, e := strconv.Atoi(s)
+		if e != nil {
+			return errors.New("AWWO_JIMENG_CREDIT_CEILING must be a whole number")
+		}
+		c.JimengCreditCeiling = n
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AWWO_JIMENG_ALL_WORKSPACES"))) {
+	case "", "false":
+	case "true":
+		c.JimengAllWorkspaces = true
+	default:
+		return errors.New("AWWO_JIMENG_ALL_WORKSPACES must be true or false")
+	}
+	c.JimengWorkspaces = nil
+	for _, id := range strings.Split(os.Getenv("AWWO_JIMENG_WORKSPACES"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			c.JimengWorkspaces = append(c.JimengWorkspaces, id)
+		}
+	}
+	return nil
+}
+
 func validateMediaConfig(c Config) error {
-	if c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.XtasyAPIKey == "" && c.MediaDir == "" {
+	if c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.XtasyAPIKey == "" && c.JimengCLI == "" && c.MediaDir == "" {
 		return nil
 	}
-	if c.MediaDir == "" || (c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.XtasyAPIKey == "") {
+	if c.MediaDir == "" || (c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.XtasyAPIKey == "" && c.JimengCLI == "") {
 		switch {
 		case c.TripoAPIKey != "":
 			return errors.New("AWWO_TRIPO_API_KEY needs AWWO_MEDIA_DIR: generated models are stored there")
 		case c.XtasyAPIKey != "":
 			return errors.New("AWWO_XTASY_API_KEY needs AWWO_MEDIA_DIR: generated images and videos are stored there")
+		case c.JimengCLI != "":
+			return errors.New("AWWO_JIMENG_CLI needs AWWO_MEDIA_DIR: generated images and videos are stored there")
 		}
 		return errors.New("AWWO_RUNNINGHUB_API_KEY and AWWO_MEDIA_DIR must be set together")
 	}
@@ -219,6 +269,11 @@ func validateMediaConfig(c Config) error {
 	}
 	if c.XtasyAPIKey != "" {
 		if err := validateXtasyConfig(c); err != nil {
+			return err
+		}
+	}
+	if c.JimengCLI != "" {
+		if err := validateJimengConfig(c); err != nil {
 			return err
 		}
 	}
@@ -288,6 +343,39 @@ func validateXtasyConfig(c Config) error {
 	return nil
 }
 
+// validateJimengConfig checks the Jimeng CLI's settings: absolute, clean paths for the binary, its sign-in home and
+// its records (never inside AWWO_MEDIA_DIR, which the API serves files from), a profile name the CLI accepts, a
+// credit ceiling, and workspace ids of the shape AwwO makes.
+func validateJimengConfig(c Config) error {
+	clean := func(p string) bool { return filepath.IsAbs(p) && filepath.Clean(p) == p }
+	if !clean(c.JimengCLI) {
+		return errors.New("AWWO_JIMENG_CLI must be an absolute, clean path to dreamina-canvas")
+	}
+	if c.JimengHome == "" || !clean(c.JimengHome) || !clean(c.JimengStateDir) {
+		return errors.New("AWWO_JIMENG_HOME (and AWWO_JIMENG_STATE_DIR when set) must be absolute, clean paths")
+	}
+	for _, dir := range []string{c.JimengHome, c.JimengStateDir} {
+		if rel, err := filepath.Rel(c.MediaDir, dir); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return errors.New("AWWO_JIMENG_HOME and AWWO_JIMENG_STATE_DIR must be outside AWWO_MEDIA_DIR: the sign-in is not a media file")
+		}
+	}
+	if !jimengProfileName.MatchString(c.JimengProfile) {
+		return errors.New("AWWO_JIMENG_PROFILE must be 1-40 lowercase letters, digits, - or _")
+	}
+	if c.JimengCreditCeiling < 1 || c.JimengCreditCeiling > 20000 {
+		return errors.New("AWWO_JIMENG_CREDIT_CEILING must be between 1 and 20000")
+	}
+	if len(c.JimengWorkspaces) > 64 {
+		return errors.New("AWWO_JIMENG_WORKSPACES lists at most 64 workspaces")
+	}
+	for _, id := range c.JimengWorkspaces {
+		if !jimengWorkspaceID.MatchString(id) {
+			return errors.New("AWWO_JIMENG_WORKSPACES must list workspace ids separated by commas")
+		}
+	}
+	return nil
+}
+
 // validateMediaStorage checks what every media provider shares: where files are kept and how runs are bounded.
 func validateMediaStorage(c Config) error {
 	if c.MediaDevProxy != "" && (c.Env != "development" || !loopbackOrigin(c.MediaDevProxy)) {
@@ -336,10 +424,21 @@ func loopbackOrigin(raw string) bool {
 func (c Config) runningHubConfigured() bool { return c.RunningHubAPIKey != "" && c.MediaDir != "" }
 func (c Config) tripoConfigured() bool      { return c.TripoAPIKey != "" && c.MediaDir != "" }
 func (c Config) xtasyConfigured() bool      { return c.XtasyAPIKey != "" && c.MediaDir != "" }
+func (c Config) jimengConfigured() bool     { return c.JimengCLI != "" && c.MediaDir != "" }
+
+// jimengWorkspace reports whether the operator named workspace tid in AWWO_JIMENG_WORKSPACES.
+func (c Config) jimengWorkspace(tid string) bool {
+	for _, id := range c.JimengWorkspaces {
+		if tid != "" && id == tid {
+			return true
+		}
+	}
+	return false
+}
 
 // mediaConfigured: some media provider (image and video, or 3D) can run.
 func (c Config) mediaConfigured() bool {
-	return c.runningHubConfigured() || c.tripoConfigured() || c.xtasyConfigured()
+	return c.runningHubConfigured() || c.tripoConfigured() || c.xtasyConfigured() || c.jimengConfigured()
 }
 
 // mediaProviderConfigured: the provider a catalog model names has its key and storage.
@@ -351,14 +450,16 @@ func (c Config) mediaProviderConfigured(provider string) bool {
 		return c.tripoConfigured()
 	case mediaProviderXtasy:
 		return c.xtasyConfigured()
+	case mediaProviderJimeng:
+		return c.jimengConfigured()
 	}
 	return false
 }
 
-// isMediaModelID reports whether a model id names a media generator: RunningHub's "rh.", Tripo's "tripo." or
-// X-tasy's "xt." ids.
+// isMediaModelID reports whether a model id names a media generator: RunningHub's "rh.", Tripo's "tripo.", X-tasy's
+// "xt." or Jimeng's "jm." ids.
 func isMediaModelID(id string) bool {
-	return strings.HasPrefix(id, "rh.") || strings.HasPrefix(id, "tripo.") || strings.HasPrefix(id, "xt.")
+	return strings.HasPrefix(id, "rh.") || strings.HasPrefix(id, "tripo.") || strings.HasPrefix(id, "xt.") || strings.HasPrefix(id, "jm.")
 }
 
 // validateMediaExposure runs once every setting is read. Generations are paid from the operator's
@@ -377,6 +478,9 @@ func validateMediaExposure(c Config) error {
 	}
 	if c.XtasyAllWorkspaces && c.xtasyConfigured() {
 		return errors.New("AWWO_XTASY_ALL_WORKSPACES requires AWWO_MAX_OWNED_WORKSPACES")
+	}
+	if c.JimengAllWorkspaces && c.jimengConfigured() {
+		return errors.New("AWWO_JIMENG_ALL_WORKSPACES requires AWWO_MAX_OWNED_WORKSPACES")
 	}
 	if c.NewWorkspaceModels.allowed != nil {
 		for _, id := range *c.NewWorkspaceModels.allowed {

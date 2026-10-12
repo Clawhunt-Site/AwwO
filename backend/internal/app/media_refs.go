@@ -45,6 +45,8 @@ type mediaReference struct {
 var mediaReferenceTypes = map[string]map[string]bool{
 	mediaProviderTripo: {"image/png": true, "image/jpeg": true},
 	mediaProviderXtasy: {"image/png": true, "image/jpeg": true, "image/webp": true},
+	// Jimeng's canvas registers an uploaded picture by its extension; these are the picture types it reads.
+	mediaProviderJimeng: {"image/png": true, "image/jpeg": true, "image/webp": true},
 }
 
 // referenceUploader is a provider that takes reference pictures: it returns the id its generation request names.

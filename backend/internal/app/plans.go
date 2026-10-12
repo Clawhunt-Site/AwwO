@@ -415,6 +415,9 @@ func mediaReferenceCredits(model string, references int) int {
 // video. Sound, on by default where a model offers it, is in the base price. An unknown model takes the highest
 // video price.
 func mediaCreditsFor(model, kind string, params map[string]any) int {
+	if credits, ok := jimengCredits(model, params); ok {
+		return credits
+	}
 	base, ok := mediaBaseCredits[model]
 	if !ok {
 		base = 200

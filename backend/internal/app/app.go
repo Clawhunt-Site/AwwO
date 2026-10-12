@@ -67,6 +67,7 @@ type App struct {
 	media         *runningHub
 	tripo         *tripoClient
 	xtasy         *xtasyClient
+	jimeng        *jimengClient
 	resumable     map[string]bool
 	mediaReserved int64
 }

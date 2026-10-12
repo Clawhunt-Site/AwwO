@@ -50,6 +50,12 @@ func (a *App) mediaSetupAllowed(kind, model string, entitlement modelEntitlement
 // offered to every workspace (AWWO_TRIPO_ALL_WORKSPACES), their free generations bounded by their own caps, and so
 // may X-tasy's image and video models (AWWO_XTASY_ALL_WORKSPACES), within the media daily limits.
 func (a *App) mediaEntitled(entitlement modelEntitlement, model string) bool {
+	if m, ok := builtinMediaCatalog.model(model); ok && m.Provider == mediaProviderJimeng {
+		// Jimeng generations spend the operator's personal member account, so only an explicit grant offers them: the
+		// operator's list of workspaces, the all-workspaces switch, or a workspace allowlist that names the model.
+		return a.cfg.JimengAllWorkspaces || a.cfg.jimengWorkspace(entitlement.tenant) ||
+			(!entitlement.unrestricted() && entitlement.permits(model))
+	}
 	if a.cfg.TripoAllWorkspaces || a.cfg.XtasyAllWorkspaces {
 		if m, ok := builtinMediaCatalog.model(model); ok &&
 			(m.Provider == mediaProviderTripo && a.cfg.TripoAllWorkspaces || m.Provider == mediaProviderXtasy && a.cfg.XtasyAllWorkspaces) {

@@ -645,6 +645,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if e != nil {
 		return e
 	}
+	entitlement.tenant = tid
 	var actor, gstatus string
 	e = tx.QueryRow(ctx, "SELECT actor_id,status FROM graph_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, gid).Scan(&actor, &gstatus)
 	if e != nil {

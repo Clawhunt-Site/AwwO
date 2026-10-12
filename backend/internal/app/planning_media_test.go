@@ -43,7 +43,7 @@ func TestPlansMayDeclareMediaNodes(t *testing.T) {
 func TestMediaModelNamesNeverNameTheirProvider(t *testing.T) {
 	seen := 0
 	for _, m := range builtinMediaCatalog.List() {
-		if m.Provider != mediaProviderXtasy && m.Provider != mediaProviderTripo {
+		if m.Provider != mediaProviderXtasy && m.Provider != mediaProviderTripo && m.Provider != mediaProviderJimeng {
 			continue
 		}
 		seen++
@@ -56,11 +56,11 @@ func TestMediaModelNamesNeverNameTheirProvider(t *testing.T) {
 			}
 		}
 	}
-	if seen != len(xtasyModels())+len(tripoModels()) {
+	if seen != len(jimengModels())+len(xtasyModels())+len(tripoModels()) {
 		t.Fatalf("checked %d models", seen)
 	}
 	names := map[string]string{}
-	for _, m := range append(xtasyModels(), tripoModels()...) {
+	for _, m := range append(append(jimengModels(), xtasyModels()...), tripoModels()...) {
 		for _, shown := range m.Label {
 			if other, taken := names[shown]; taken {
 				t.Errorf("%s and %s are both shown as %q", other, m.ID, shown)
@@ -77,7 +77,7 @@ func TestMediaModelNamesNeverNameTheirProvider(t *testing.T) {
 
 // mediaBrandWords are providers, model families and makers a media name must not carry.
 var mediaBrandWords = []string{"xtasy", "x-tasy", "tripo", "runninghub", "running hub", "seedream", "seedance", "doubao", "豆包", "即梦",
-	"jimeng", "bytedance", "字节", "banana", "gemini", "google", "imagen", "veo", "gpt", "openai", "dall", "sora", "kling", "可灵",
+	"jimeng", "dreamina", "bytedance", "字节", "banana", "gemini", "google", "imagen", "veo", "gpt", "openai", "dall", "sora", "kling", "可灵",
 	"kuaishou", "快手", "hailuo", "海螺", "minimax", "midjourney", "flux", "wan2", "万相", "qwen", "通义", "hunyuan", "混元", "vidu",
 	"生数", "pixverse", "grok", "xai", "stable diffusion", "sdxl", "recraft", "ideogram"}
 

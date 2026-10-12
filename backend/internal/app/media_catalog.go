@@ -238,10 +238,10 @@ func mustMediaCatalog(raw []byte) *mediaCatalog {
 	return c
 }
 
-// withProviderModels adds the X-tasy image and video models (xtasy.go) and the 3D models (tripo.go) to a parsed
-// catalog, refusing to start on one that does not validate or that collides with an existing id, as the embedded
-// catalog itself is refused. X-tasy's come first, so a new image or video node starts on one wherever X-tasy is
-// configured.
+// withProviderModels adds the Jimeng (jimeng.go) and X-tasy (xtasy.go) image and video models and the 3D models
+// (tripo.go) to a parsed catalog, refusing to start on one that does not validate or that collides with an existing
+// id, as the embedded catalog itself is refused. Jimeng's come first, then X-tasy's: a new image or video node starts
+// on the first one its workspace is offered (Jimeng's only where the operator granted them, X-tasy's elsewhere).
 func withProviderModels(c *mediaCatalog) *mediaCatalog {
 	c.list = nil
 	add := func(m *mediaModel, err error) {
@@ -253,6 +253,9 @@ func withProviderModels(c *mediaCatalog) *mediaCatalog {
 		}
 		c.byID[m.ID] = m
 		c.list = append(c.list, m)
+	}
+	for _, m := range jimengModels() {
+		add(m, validJimengModel(m))
 	}
 	for _, m := range xtasyModels() {
 		add(m, validXtasyModel(m))
@@ -266,7 +269,7 @@ func withProviderModels(c *mediaCatalog) *mediaCatalog {
 	return c
 }
 
-// List is every model in catalog order: X-tasy's, RunningHub's, then the 3D models.
+// List is every model in catalog order: Jimeng's, X-tasy's, RunningHub's, then the 3D models.
 func (c *mediaCatalog) List() []*mediaModel { return c.list }
 
 func (c *mediaCatalog) model(id string) (*mediaModel, bool) {

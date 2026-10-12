@@ -31,6 +31,10 @@ it('explains unready execution in both languages without changing the backend st
   expect(saasErrorMessage(new SaaSApiError(503, 'unknown_provider', 'Provider diagnostic'), 'zh')).toBe('Provider diagnostic');
 });
 it('translates HTTP and recovered error codes using the current locale while preserving unknown details', () => {
+  document.documentElement.lang = 'zh-CN';
+  expect(canvasErrorMessage('generation stopped', 'media_credit_ceiling')).toContain('单次上限');
+  document.documentElement.lang = 'en';
+  expect(canvasErrorMessage('generation stopped', 'media_credit_ceiling')).toContain('per-generation limit');
   document.documentElement.lang = 'en'; expect(canvasErrorMessage('quota_exceeded')).toContain('quota');
   expect(canvasErrorMessage('Pi execution failed', 'runtime_failed')).toContain('Model execution failed');
   document.documentElement.lang = 'zh-CN'; expect(canvasErrorMessage('Pi execution failed', 'runtime_failed')).toContain('模型执行失败');
