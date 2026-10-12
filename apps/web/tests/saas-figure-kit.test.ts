@@ -89,7 +89,8 @@ describe('the figure kit bundle', () => {
     const code = await loadPreviewLibraries(needs);
     expect(code.get(FIGURE_KIT_URL)).toBe(kitText);
     const doc = new DOMParser().parseFromString(htmlPreviewDocument(page, true, code), 'text/html');
-    const scripts = Array.from(doc.querySelectorAll('script'));
+    // The page's own scripts; the preview's head carries only AwwO's viewport script ahead of them.
+    const scripts = Array.from(doc.body.querySelectorAll('script'));
     expect(scripts).toHaveLength(2);
     expect(scripts[0].textContent).toBe(kitText);
     expect(scripts[1].textContent).toContain('Anatomy.run(');
