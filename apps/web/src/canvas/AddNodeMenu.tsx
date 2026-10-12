@@ -6,13 +6,15 @@
 // that leaks a capture-phase window listener would keep swallowing presses after it is gone.
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { MonitorPlay } from 'lucide-react';
 import type { AgentKind } from './canvasDoc';
 import { getAgentTemplates, type AgentTemplateId } from './agentTemplates';
 import { AgentGlyph } from './AgentWorkspace';
+import { displayText } from './displayCopy';
 import { useCanvasI18n } from './i18n';
 
-/** What the menu can create: a user-authored form, or a session tile of one agent kind. */
-export type AddNodeKind = 'form' | AgentKind | AgentTemplateId;
+/** What the menu can create: a user-authored form, a session tile of one agent kind, or a 预览展示 window. */
+export type AddNodeKind = 'form' | AgentKind | AgentTemplateId | 'display';
 
 export interface AddNodeMenuProps {
   /** Position relative to the `.canvas-root` element (already converted by the caller). */
@@ -24,9 +26,11 @@ export interface AddNodeMenuProps {
   onOpenModelShelf?: () => void;
   /** Image, video and 3D model nodes the host can run (its media catalogue offers a model of that kind). */
   mediaKinds?: ReadonlyArray<'image' | 'video' | 'model3d'>;
+  /** Offer a 预览展示 window (displayNodes.ts), picked as kind 'display'. */
+  withDisplay?: boolean;
 }
 
-export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenModelShelf, mediaKinds = [] }: AddNodeMenuProps) {
+export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenModelShelf, mediaKinds = [], withDisplay = false }: AddNodeMenuProps) {
   const { locale, t } = useCanvasI18n();
   const items = getAgentTemplates(locale).filter(item => !onOpenModelShelf || item.id === 'general');
   const ref = useRef<HTMLDivElement>(null);
@@ -42,7 +46,7 @@ export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenMod
       x: Math.max(8, Math.min(at.x, bounds.width - menu.offsetWidth - 8)),
       y: Math.max(8, Math.min(at.y, bounds.height - menu.offsetHeight - 8)),
     });
-  }, [at.x, at.y, locale, Boolean(onOpenModelShelf), Boolean(onOpenAgentLibrary), mediaKinds.length]);
+  }, [at.x, at.y, locale, Boolean(onOpenModelShelf), Boolean(onOpenAgentLibrary), mediaKinds.length, withDisplay]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -95,6 +99,14 @@ export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenMod
           <span><strong>{item.title}</strong><small>{item.subtitle}</small></span>
         </button>
       ))}
+      {withDisplay ? <>
+        <div className="canvas-add-menu-title">{displayText(locale, 'display.addSection')}</div>
+        <button type="button" role="menuitem" className="canvas-add-menu-item awwo-template-menu-item" aria-label={displayText(locale, 'display.add')}
+          data-template="display" onClick={(e) => { e.stopPropagation(); onPick('display'); }}>
+          <span className="canvas-tile-glyph"><MonitorPlay size={16} aria-hidden="true" /></span>
+          <span><strong>{displayText(locale, 'display.add')}</strong><small>{displayText(locale, 'display.addHint')}</small></span>
+        </button>
+      </> : null}
     </div>
   );
 }

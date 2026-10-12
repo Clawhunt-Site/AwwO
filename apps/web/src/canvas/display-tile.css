@@ -1,0 +1,151 @@
+/* 预览展示: a window on the board that shows what was made, live (DisplayTile.tsx). Colours come from the theme's
+   tokens, with the canvas card colours as fallbacks, so every appearance (and dark mode) carries over. */
+.canvas-root .canvas-tile.awwo-node.awwo-display {
+  display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; cursor: default;
+  background: var(--saas-card, var(--awwo-card, #fff)); color: var(--saas-text, var(--awwo-ink, #25332f));
+}
+.canvas-root .canvas-tile.awwo-node.awwo-display.canvas-tile--selected { z-index: 3; }
+.canvas-root .canvas-tile.awwo-node.awwo-display:fullscreen { border: 0; border-radius: 0; box-shadow: none; animation: none; }
+.canvas-root .awwo-display .awwo-display-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 6px 8px 6px 12px; cursor: move;
+  border-bottom: 1px solid var(--saas-hairline, var(--awwo-line, #dce4de)); user-select: none;
+}
+.canvas-root .awwo-display.is-fullscreen .awwo-display-head { cursor: default; }
+.canvas-root .awwo-display .awwo-display-glyph {
+  display: inline-grid; place-items: center; flex: 0 0 auto; width: 24px; height: 24px; border-radius: 7px;
+  background: color-mix(in srgb, var(--saas-accent, var(--awwo-teal, #177969)) 14%, transparent); color: var(--saas-accent, var(--awwo-teal, #177969));
+}
+.canvas-root .awwo-display .awwo-display-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-root .awwo-display .awwo-display-source {
+  flex: 0 1 220px; min-width: 72px; max-width: 46%; height: 28px; padding: 0 8px; cursor: pointer; text-overflow: ellipsis;
+  border: 1px solid var(--saas-border, var(--awwo-line, #dce4de)); border-radius: 999px;
+  background: var(--saas-field, var(--awwo-soft, #f4f6f1)); color: var(--saas-text, var(--awwo-ink, #25332f)); font: 600 12px/1 var(--saas-font, inherit);
+}
+.canvas-root .awwo-display .awwo-display-source:disabled { cursor: default; opacity: .85; }
+.canvas-root .awwo-display .awwo-display-tools > button { min-width: 28px; }
+
+/* The second row: what to look at (the components, or a component's files) and the zoom. */
+.canvas-root .awwo-display .awwo-display-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px;
+  border-bottom: 1px solid var(--saas-hairline, var(--awwo-line, #dce4de)); background: var(--saas-card, var(--awwo-card, #fff));
+}
+.canvas-root .awwo-display .awwo-display-chips { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.canvas-root .awwo-display .awwo-display-chips::-webkit-scrollbar { display: none; }
+.canvas-root .awwo-display .awwo-display-chips > button {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; max-width: 200px; height: 26px; padding: 0 10px; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--saas-border, var(--awwo-line, #dce4de)); border-radius: 999px; background: transparent;
+  color: var(--saas-muted, var(--awwo-muted, #67756f)); font: 600 11.5px/1 var(--saas-font, inherit);
+}
+.canvas-root .awwo-display .awwo-display-chips > button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.canvas-root .awwo-display .awwo-display-chips > button:hover { color: var(--saas-text, var(--awwo-ink, #25332f)); }
+.canvas-root .awwo-display .awwo-display-chips > button[aria-pressed='true'] {
+  background: var(--saas-text, var(--awwo-ink, #25332f)); color: var(--saas-card, var(--awwo-card, #fff)); border-color: transparent; cursor: default;
+}
+.canvas-root .awwo-display .awwo-display-chips > button.awwo-display-back { padding-left: 6px; }
+.canvas-root .awwo-display .awwo-display-chip-title { flex: 0 1 auto; min-width: 0; margin: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.canvas-root .awwo-display .awwo-display-zoom-tools {
+  display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; padding: 2px;
+  border: 1px solid var(--saas-border, var(--awwo-line, #dce4de)); border-radius: 999px;
+}
+.canvas-root .awwo-display .awwo-display-zoom-tools > button {
+  display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; border: 0; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--saas-muted, var(--awwo-muted, #67756f)); font: 650 11px/1 var(--saas-font, inherit); font-variant-numeric: tabular-nums;
+}
+.canvas-root .awwo-display .awwo-display-zoom-tools > button:hover:not(:disabled) { background: var(--saas-soft, var(--awwo-soft, #f4f6f1)); color: var(--saas-text, var(--awwo-ink, #25332f)); }
+.canvas-root .awwo-display .awwo-display-zoom-tools > button:disabled { opacity: .4; cursor: default; }
+.canvas-root .awwo-display .awwo-display-zoom-tools > .awwo-display-zoom-value { min-width: 48px; }
+
+/* The content: a press, a scroll or a key in here is the content's, never the board's. */
+.canvas-root .awwo-display .awwo-display-body {
+  position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; cursor: auto;
+  background: color-mix(in srgb, var(--saas-text, #0b2230) 4%, var(--saas-card, #fff));
+}
+.canvas-root .awwo-display .awwo-display-content { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.canvas-root .awwo-display .awwo-display-entry { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
+.canvas-root .awwo-display .awwo-display-entry > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.canvas-root .awwo-display .awwo-display-stage { position: absolute; inset: 0; overflow: hidden; }
+.canvas-root .awwo-display .awwo-display-stage.is-magnify {
+  display: flex; overflow: auto; overscroll-behavior: contain;
+  background: repeating-conic-gradient(color-mix(in srgb, var(--saas-text, #0b2230) 6%, transparent) 0% 25%, transparent 0% 50%) 50% / 18px 18px;
+}
+.canvas-root .awwo-display .awwo-display-magnify { flex: 0 0 auto; margin: auto; display: flex; min-width: 0; min-height: 0; }
+.canvas-root .awwo-display .awwo-display-zoom { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: flex; transform-origin: 0 0; }
+.canvas-root .awwo-display :is(.awwo-display-magnify, .awwo-display-zoom) > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.canvas-root .awwo-display .awwo-live-page { background: #fff; }
+.canvas-root .awwo-display .awwo-display-picture { display: block; width: 100%; height: 100%; object-fit: contain; }
+.canvas-root .awwo-display video.awwo-display-picture { background: #0b1218; }
+.canvas-root .awwo-display .awwo-display-model { display: flex; flex-direction: column; }
+.canvas-root .awwo-display .awwo-display-model > * { flex: 1; min-height: 0; }
+.canvas-root .awwo-display .awwo-display-model .awwo-model-stage { height: auto; flex: 1; }
+.canvas-root .awwo-display .awwo-display-pdf { overflow: auto; background: var(--saas-card, #fff); }
+.canvas-root .awwo-display .awwo-display-doc { overflow: auto; padding: 16px 20px; background: var(--saas-card, #fff); font-size: 13.5px; line-height: 1.65; }
+.canvas-root .awwo-display .awwo-display-text {
+  margin: 0; overflow: auto; padding: 12px 14px; background: #0d1b24; color: #d8e3e8;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.canvas-root .awwo-display .awwo-display-audio { display: grid; place-content: center; justify-items: center; gap: 10px; padding: 16px; color: var(--saas-muted, #4b5d65); font-size: 12px; }
+.canvas-root .awwo-display .awwo-display-empty {
+  display: grid; place-content: center; justify-items: center; gap: 8px; padding: 20px; text-align: center;
+  color: var(--saas-muted, var(--awwo-muted, #4b5d65)); font-size: 13px; line-height: 1.55;
+}
+.canvas-root .awwo-display .awwo-display-empty p { margin: 0; max-width: 440px; }
+.canvas-root .awwo-display .awwo-display-empty.is-warning { color: var(--saas-warning, #8f5a0c); }
+.canvas-root .awwo-display .awwo-display-empty button {
+  height: 28px; padding: 0 12px; cursor: pointer; border: 1px solid var(--saas-border, #dde3e2); border-radius: 999px;
+  background: var(--saas-card, #fff); color: var(--saas-text, #0b2230); font: 600 11.5px/1 var(--saas-font, inherit);
+}
+.canvas-root .awwo-display .awwo-display-note {
+  display: flex; align-items: center; gap: 6px; flex: 0 0 auto; margin: 0; padding: 5px 12px;
+  background: var(--saas-signal-soft, color-mix(in srgb, #2bb3bb 14%, transparent)); color: var(--saas-link, #1c6f76); font-size: 11.5px; font-weight: 600;
+}
+
+/* The whole canvas: its result large on top, the other components' deliverables in a row under it, each live. */
+.canvas-root .awwo-display .awwo-display-overview { display: flex; flex-direction: column; gap: 10px; padding: 10px; min-width: 0; min-height: 0; }
+.canvas-root .awwo-display .awwo-display-overview > .awwo-display-card.is-hero { flex: 1 1 66%; min-height: 140px; }
+.canvas-root .awwo-display .awwo-display-strip { display: flex; gap: 10px; flex: 0 0 30%; min-height: 110px; overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain; }
+.canvas-root .awwo-display .awwo-display-strip > .awwo-display-card { flex: 0 0 auto; height: 100%; aspect-ratio: 4 / 3; }
+.canvas-root .awwo-display .awwo-display-card {
+  position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
+  border: 1px solid var(--saas-border, var(--awwo-line, #dce4de)); border-radius: 12px; background: var(--saas-card, var(--awwo-card, #fff));
+}
+.canvas-root .awwo-display .awwo-display-card.is-hero {
+  border-color: color-mix(in srgb, var(--saas-accent, #177969) 45%, var(--saas-border, #dde3e2));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--saas-accent, #177969) 12%, transparent);
+}
+.canvas-root .awwo-display .awwo-display-card.is-running { border-color: color-mix(in srgb, var(--saas-signal, #2bb3bb) 70%, transparent); }
+.canvas-root .awwo-display .awwo-display-card > header {
+  display: flex; align-items: center; gap: 6px; flex: 0 0 auto; min-height: 32px; padding: 4px 6px 4px 10px; font-size: 12px;
+  border-bottom: 1px solid var(--saas-hairline, var(--awwo-line, #dce4de));
+}
+.canvas-root .awwo-display .awwo-display-card > header strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.canvas-root .awwo-display .awwo-display-card > header button {
+  flex: 0 0 auto; height: 22px; padding: 0 9px; cursor: pointer; border: 1px solid var(--saas-border, #dde3e2); border-radius: 999px;
+  background: transparent; color: var(--saas-muted, #4b5d65); font: 600 11px/1 var(--saas-font, inherit);
+}
+.canvas-root .awwo-display .awwo-display-card > header button:hover { background: var(--saas-soft, #f4f6f1); color: var(--saas-text, #0b2230); }
+.canvas-root .awwo-display .awwo-display-star { flex: 0 0 auto; color: #d99a00; fill: currentColor; }
+.canvas-root .awwo-display .awwo-display-badge {
+  flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  background: var(--saas-soft, #f4f6f1); color: var(--saas-muted, #4b5d65); font: 600 10.5px/1.4 var(--saas-font, inherit);
+}
+.canvas-root .awwo-display .awwo-display-badge.is-final { background: color-mix(in srgb, var(--saas-accent, #177969) 14%, transparent); color: var(--saas-accent, #177969); }
+.canvas-root .awwo-display .awwo-display-badge.is-running { background: var(--saas-signal-soft, color-mix(in srgb, #2bb3bb 14%, transparent)); color: var(--saas-link, #1c6f76); }
+.canvas-root .awwo-display .awwo-display-card-body { position: relative; display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; background: var(--saas-card, #fff); }
+
+/* Far out on the board: what it shows, large and readable, instead of running it. */
+.canvas-root .awwo-display .awwo-display-summary {
+  position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: .35em; padding: 1em; text-align: center;
+  color: var(--saas-muted, var(--awwo-muted, #4b5d65));
+}
+.canvas-root .awwo-display .awwo-display-summary svg { width: 2.2em; height: 2.2em; color: var(--saas-accent, var(--awwo-teal, #177969)); }
+.canvas-root .awwo-display .awwo-display-summary strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--saas-text, var(--awwo-ink, #25332f)); font-size: 1.05em; }
+.canvas-root .awwo-display .awwo-display-summary small { font-size: .72em; opacity: .85; }
+
+/* From a component to the display that shows it. */
+.canvas-root .awwo-display-links { z-index: 0; }
+.canvas-root .awwo-display-link { fill: none; stroke: color-mix(in srgb, var(--saas-accent, #177969) 55%, transparent); stroke-width: 1.8; stroke-dasharray: 7 6; }
+
+/* While a display is dragged or resized, no page on the board takes the pointer away from the drag. */
+.canvas-root.is-display-dragging iframe { pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) { .canvas-root .awwo-display .awwo-studio-spin { animation: none; } }

@@ -24,6 +24,7 @@ import type { ViewportState } from './viewport';
 import { normalizeContract, type NodeContract } from './nodeContracts';
 import type { AgentTemplateId } from './agentTemplates';
 import { sanitizeNodeTeam, type NodeTeam } from './nodeTeam';
+import { sanitizeDisplays, type DisplayNode } from './displayNodes';
 
 export type AgentKind = 'llm' | 'coding' | 'image' | 'video' | 'model3d';
 
@@ -203,6 +204,8 @@ export interface CanvasDocument {
   view: ViewportState | null;
   /** Absent on legacy documents, which keep their single-pass workflow semantics. */
   execution?: ReviewGraphPolicy;
+  /** 预览展示 windows: they show what the canvas made and are no part of its graph (displayNodes.ts). Absent = none. */
+  displays?: DisplayNode[];
 }
 
 export const CANVAS_STORAGE_KEY = 'superclaw.canvas.v2';
@@ -527,6 +530,9 @@ export function sanitizeDocument(raw: unknown): CanvasDocument {
   const execution = r.execution != null
     ? typeof r.execution === 'object' && !Array.isArray(r.execution) ? r.execution as Record<string, unknown> : {}
     : null;
+  // Displays name what they show by node id, but outlive it: one whose component was deleted says so and can be
+  // pointed at another, and undoing the deletion brings both back as they were.
+  const displays = sanitizeDisplays(r.displays);
   return {
     version: 2,
     updatedAt: num(r.updatedAt, Date.now()),
@@ -540,6 +546,7 @@ export function sanitizeDocument(raw: unknown): CanvasDocument {
       reviewerNodeId: str(execution.reviewerNodeId),
       verdictFieldId: str(execution.verdictFieldId),
     } } : {}),
+    ...(displays ? { displays } : {}),
   };
 }
 

@@ -29,7 +29,7 @@ import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionR
 //   * the corrupt-document backup and the empty-first-run rule are inherited from canvasDoc.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type DragEvent } from 'react';
-import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2 } from 'lucide-react';
+import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2, MonitorPlay } from 'lucide-react';
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
@@ -112,8 +112,8 @@ import { forgetNode, restoreHistory } from './sessionTransport';
 import { projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
 import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserveThreadRuntime, rebindNodeThread, sessionStoreKey,
   updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
-import { arrangeNodePositions, presentationNodes } from './nodePresentation';
-import { boundsWithinViewport, fitBounds, fitOverview, focusWorld, MIN_READABLE_FIT_SCALE, openInPlace, visibleBoxIds, type ViewportState } from './viewport';
+import { arrangeNodePositions, nodeDepths, presentationNodes } from './nodePresentation';
+import { boundsOfBoxes, boundsWithinViewport, fitBounds, fitOverview, focusWorld, MIN_READABLE_FIT_SCALE, openInPlace, visibleBoxIds, type ViewportState } from './viewport';
 import { RAIL_MODEL_KEY, isDesktopStage, readRailCollapsed, useDesktopStage, writeRailCollapsed } from './railState';
 import { paperclipApiBase } from '../paperclipBridge';
 import { gatewayApiBase } from '../chatAutomations';
@@ -124,6 +124,11 @@ import { useSimpleCanvas } from './uiMode';
 import { CARD_PREVIEW_DEFAULT, clampCard, loadCardFrames, saveCardFrames, showsPreview, type CardFrames } from './cardFrames';
 import { DeliverableStudio } from './studio/DeliverableStudio';
 import { studioGroups } from './studio/studioModel';
+import { DisplayLinks, DisplayTile, type DisplayChoice } from './DisplayTile';
+import { clampDisplaySize, createDisplayNode, displayBounds, MAX_DISPLAYS, placeDisplayAfter, placeDisplayBeside, sameDisplaySource, type DisplayNode, type DisplaySource } from './displayNodes';
+import { displayText } from './displayCopy';
+/** A document with no 预览展示 windows (displayNodes.ts): one shared empty list, so memoised readers see no change. */
+const NO_DISPLAYS: ReadonlyArray<DisplayNode> = [];
 /** A node failure refused by the free premium allowance reads as that error's own copy, in either language. */
 const refusalTexts = (codes: ReadonlyArray<string>) => codes
   .flatMap(code => (['zh', 'en'] as const).map(language => runErrorText(code, language) ?? '')).filter(Boolean);
@@ -160,9 +165,12 @@ function isFittedCamera(view: ViewportState, fitted: ViewportState | null): bool
     && Math.abs(view.y - fitted.y) <= CAMERA_SLOP_PX;
 }
 
-/** Compact summaries remain readable at overview scale without the full-workbench fit floor. */
-function fitNodeOverview(nodes: ReadonlyArray<CanvasNode>, size: { w: number; h: number }, cardFrames?: CardFrames): ViewportState {
-  const bounds = boundsOfNodes(presentationNodes(nodes, null, undefined, cardFrames));
+/** Compact summaries remain readable at overview scale without the full-workbench fit floor. Displays (preview
+ *  windows beside the graph) are part of the board, so a fit shows them too. */
+function fitNodeOverview(nodes: ReadonlyArray<CanvasNode>, size: { w: number; h: number }, cardFrames?: CardFrames,
+  displays: ReadonlyArray<DisplayNode> = NO_DISPLAYS): ViewportState {
+  const cards = presentationNodes(nodes, null, undefined, cardFrames);
+  const bounds = displays.length ? boundsOfBoxes([...cards, ...displays]) : boundsOfNodes(cards);
   const maxScale = Math.max(.06, Math.min(1.05,
     (size.w - 96) / Math.max(1, bounds.maxX - bounds.minX),
     (size.h - 140) / Math.max(1, bounds.maxY - bounds.minY)));
@@ -662,7 +670,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // The operator's camera waiting out the save debounce (see the viewport persistence below).
   const pendingCameraSave = useRef<{ timer: ReturnType<typeof setTimeout>; camera: ViewportState; save: () => void } | null>(null);
   const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: { w: number; h: number }, automatic = false) => {
-    const next = fitNodeOverview(fitNodes, box, cardFramesRef.current);
+    const next = fitNodeOverview(fitNodes, box, cardFramesRef.current, docRef.current.displays);
     lastAutoView.current = next;
     // The app refits only a camera it may take over (a requested fit, say): the operator's camera still waiting to be
     // saved is saved now, before the refit replaces it, if it is still the live one (not a frame the camera has left).
@@ -690,6 +698,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const [selection, setSelection] = useState<string[]>([]);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  // A selected 预览展示 window. Its own state, beside the node selection: a display is never a node, so nothing that
+  // acts on selected nodes (runs, collaboration, group moves) can reach it.
+  const [selectedDisplayId, setSelectedDisplayId] = useState<string | null>(null);
+  const selectedDisplayRef = useRef(selectedDisplayId);
+  selectedDisplayRef.current = selectedDisplayId;
+  const displays = doc.displays ?? NO_DISPLAYS;
+  useEffect(() => { if (selection.length) setSelectedDisplayId(null); }, [selection]);
+  useEffect(() => {
+    if (selectedDisplayId && !displays.some(display => display.id === selectedDisplayId)) setSelectedDisplayId(null);
+  }, [displays, selectedDisplayId]);
   // Read inside the drag so moving a group never depends on the callback identity at press time.
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
@@ -1813,8 +1831,81 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     requestAnimationFrame(() => focusNodeRef.current(nodeId));
   }, [canEditStructure, patchDoc]);
 
+  // ---- 预览展示 windows (displayNodes.ts) ---------------------------------------------------------
+  // Each change is an ordinary document edit (an undo step, a cloud save) beside the graph. It touches no node, so a
+  // display moves, resizes and switches what it shows while components run, and no run ever sees it.
+  const renderNodesRef = useRef(renderNodes);
+  renderNodesRef.current = renderNodes;
+  const patchDisplays = useCallback((label: string, update: (list: ReadonlyArray<DisplayNode>) => ReadonlyArray<DisplayNode>) => {
+    patchDoc(prev => {
+      const current = prev.displays ?? NO_DISPLAYS;
+      const next = update(current);
+      if (next === current) return prev;
+      const { displays: _displays, ...rest } = prev;
+      return next.length ? { ...rest, displays: [...next] } : rest;
+    }, { label });
+  }, [patchDoc]);
+  const selectDisplay = useCallback((id: string) => {
+    setSelection(previous => previous.length ? [] : previous);
+    setSelectedEdgeId(null);
+    setSelectedDisplayId(id);
+  }, []);
+  const addDisplay = useCallback((world: { x: number; y: number }, source: DisplaySource = { type: 'canvas' }): DisplayNode | null => {
+    if (readOnlyRef.current) return null;
+    if ((docRef.current.displays?.length ?? 0) >= MAX_DISPLAYS) {
+      setHandoffNote(displayText(locale, 'display.tooMany', { count: MAX_DISPLAYS }));
+      return null;
+    }
+    const display = createDisplayNode(world, source);
+    patchDisplays(`display-add:${display.id}`, list => [...list, display]);
+    // A review loop or a collaboration holds the whole canvas; then nothing was added.
+    if (!docRef.current.displays?.some(item => item.id === display.id)) return null;
+    selectDisplay(display.id);
+    return display;
+  }, [locale, patchDisplays, selectDisplay]);
+  const moveDisplay = useCallback((id: string, x: number, y: number) => patchDisplays(`display-move:${id}`, list =>
+    list.some(item => item.id === id && (item.x !== x || item.y !== y)) ? list.map(item => item.id === id ? { ...item, x, y } : item) : list), [patchDisplays]);
+  const resizeDisplay = useCallback((id: string, w: number, h: number) => {
+    const size = clampDisplaySize(w, h);
+    patchDisplays(`display-resize:${id}`, list => list.some(item => item.id === id && (item.w !== size.w || item.h !== size.h))
+      ? list.map(item => item.id === id ? { ...item, ...size } : item) : list);
+  }, [patchDisplays]);
+  const changeDisplaySource = useCallback((id: string, source: DisplaySource) => patchDisplays(`display-source:${id}`, list =>
+    list.some(item => item.id === id && !sameDisplaySource(item.source, source)) ? list.map(item => item.id === id ? { ...item, source } : item) : list), [patchDisplays]);
+  const deleteDisplay = useCallback((id: string) => {
+    patchDisplays(`display-delete:${id}`, list => list.some(item => item.id === id) ? list.filter(item => item.id !== id) : list);
+    setSelectedDisplayId(previous => previous === id ? null : previous);
+  }, [patchDisplays]);
+  /** Bring a display into view when it is not: centred, at a zoom where it fits (never closer than the camera now). */
+  const revealDisplay = useCallback((display: DisplayNode) => {
+    const box = viewportSize();
+    if (!box) return;
+    const current = glideTarget.current ?? viewRef.current;
+    if (boundsWithinViewport(displayBounds(display), current, box)) return;
+    const fits = Math.min((box.w - 96) / Math.max(1, display.w), (box.h - 140) / Math.max(1, display.h));
+    const scale = Math.max(0.06, Math.min(current.scale, fits));
+    moveCamera(focusWorld({ ...current, scale }, display.x + display.w / 2, display.y + display.h / 2, box));
+  }, [viewportSize, moveCamera]);
+  /** The view tools' 预览展示: everything the canvas made, live, at the end of the board (the one already there, if any). */
+  const showCanvasDisplay = useCallback(() => {
+    const existing = docRef.current.displays?.find(item => item.source.type === 'canvas');
+    if (existing) { selectDisplay(existing.id); revealDisplay(existing); return; }
+    const added = addDisplay(placeDisplayAfter([...renderNodesRef.current, ...(docRef.current.displays ?? NO_DISPLAYS)]));
+    if (added) fitAll();
+  }, [selectDisplay, revealDisplay, addDisplay, fitAll]);
+  /** A card's 在预览展示中查看: the display already showing that component, or a new one beside it. */
+  const showNodeInDisplay = useCallback((nodeId: string) => {
+    const existing = docRef.current.displays?.find(item => item.source.type === 'node' && item.source.nodeId === nodeId);
+    if (existing) { selectDisplay(existing.id); revealDisplay(existing); return; }
+    const card = renderNodesRef.current.find(node => node.id === nodeId);
+    if (!card) return;
+    const added = addDisplay(placeDisplayBeside(card, [...renderNodesRef.current, ...(docRef.current.displays ?? NO_DISPLAYS)]), { type: 'node', nodeId });
+    if (added) revealDisplay(added);
+  }, [selectDisplay, revealDisplay, addDisplay]);
+
   const addNode = useCallback(
     (kind: AddNodeKind, world: { x: number; y: number }) => {
+      if (kind === 'display') { addDisplay(world); return; }
       if (!canEditStructure(false, [])) return;
       const media = canInitialize ? mediaKindOf(kind) : null;
       // A cloud image or video node is a plain generator: no role template, delivery format or
@@ -1831,7 +1922,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setInspectorId(node.id);
       return node;
     },
-    [patchDoc, focusNode, locale, canEditStructure, canInitialize, mediaState, t],
+    [patchDoc, focusNode, locale, canEditStructure, canInitialize, mediaState, t, addDisplay],
   );
 
   /**
@@ -2141,6 +2232,26 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const outputsKey = nodes.map(node => node.kind === 'session'
     ? `${node.id}\u0001${node.title}\u0001${node.lastOutput?.at ?? ''}\u0001${node.lastOutput?.text.length ?? 0}` : node.id).join('\u0002');
   const canvasEntries = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: docRef.current.edges }).flatMap(group => group.entries), [outputsKey]);
+  // What the 预览展示 windows read, keyed so a moved card hands them nothing new (they are memoised and run pages).
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+  const edgesKey = edges.map(edge => `${edge.id}\u0001${edge.kind ?? ''}`).join('\u0002');
+  const executionKey = doc.execution ? JSON.stringify(doc.execution) : '';
+  const displayGroups = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: edgesRef.current, execution: docRef.current.execution }),
+    [outputsKey, edgesKey, executionKey]);
+  const choicesKey = nodes.map(node => node.kind === 'session' ? `${node.id}\u0001${node.title}` : '').join('\u0002');
+  const displayChoices = useMemo<DisplayChoice[]>(() => {
+    const depths = nodeDepths(docRef.current.nodes, edgesRef.current.filter(edge => edge.kind !== 'feedback'));
+    return docRef.current.nodes.flatMap((node, index) => node.kind === 'session' ? [{ id: node.id, title: node.title.trim() || node.id, depth: depths.get(node.id) ?? 0, index }] : [])
+      .sort((a, b) => a.depth - b.depth || a.index - b.index).map(({ id, title }) => ({ id, title }));
+  }, [choicesKey, edgesKey]);
+  const runningKey = [...new Set([...busyNow, ...Object.entries(runs).filter(([, run]) => run.state === 'running').map(([id]) => id)])].sort().join('\u0001');
+  const runningIds = useMemo<ReadonlySet<string>>(() => new Set(runningKey ? runningKey.split('\u0001') : []), [runningKey]);
+  const visibleDisplayIds = useMemo(() => {
+    const ids = new Set(visibleBoxIds(displays, view, size));
+    if (selectedDisplayId) ids.add(selectedDisplayId);
+    return ids;
+  }, [displays, view, size, selectedDisplayId]);
   const [addMenu, setAddMenu] = useState<{ at: { x: number; y: number }; world: { x: number; y: number } } | null>(null);
   const [barMode, setBarMode] = useState<CommandBarMode | null>(null);
   const [minimapOpen, setMinimapOpen] = useState(true);
@@ -2169,7 +2280,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     onPalette: () => setBarMode('commands'),
     onSearch: () => setBarMode('search'),
     onFitAll: fitAll,
-    onDeleteSelection: readOnly || running || initializing ? undefined : () => deleteNodes(selection),
+    onDeleteSelection: readOnly || running || initializing ? undefined : () => {
+      // A selected display (never selected together with nodes) goes the way a selected node does.
+      if (!selection.length && selectedDisplayRef.current) deleteDisplay(selectedDisplayRef.current);
+      else deleteNodes(selection);
+    },
     // Undo/redo are locked during a run for the same reason every other structural edit is: the
     // run executes a SNAPSHOT, so rewinding the graph under it would show the operator a document
     // that does not match the timeline describing what is executing.
@@ -3281,6 +3396,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           if (marquee.onBackgroundPointerDown(e)) return true;
           setSelection([]);
           setSelectedEdgeId(null);
+          setSelectedDisplayId(null);
           return undefined;
         }}
         onBackgroundDoubleClick={readOnly || exclusiveNow || initializing || simple ? undefined : (world) => addNode('llm', world)}
@@ -3300,6 +3416,25 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={readOnly || exclusiveNow || initializing || simple ? undefined : setSelectedEdgeId}
           preview={wiring.wireDrag} onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />
         <CollaborationFlow nodes={renderNodes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />
+        <DisplayLinks displays={displays} boxes={renderNodeById} />
+        {displays.map(display => visibleDisplayIds.has(display.id) && (
+          <DisplayTile
+            key={display.id}
+            display={display}
+            groups={displayGroups}
+            choices={displayChoices}
+            canvasEntries={canvasEntries}
+            running={runningIds}
+            scale={view.scale}
+            selected={selectedDisplayId === display.id}
+            onSelect={selectDisplay}
+            onMove={readOnly ? undefined : moveDisplay}
+            onResize={readOnly ? undefined : resizeDisplay}
+            onChangeSource={readOnly ? undefined : changeDisplaySource}
+            onDelete={readOnly ? undefined : deleteDisplay}
+            onOpenStudio={openStudio}
+          />
+        ))}
         {nodes.map((node) => (
           visibleIds.has(node.id) && (
           <SessionTile
@@ -3340,6 +3475,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onResizeCard={resizeCard}
             onToggleCardPreview={toggleCardPreview}
             onOpenStudio={openStudio}
+            onShowInDisplay={readOnly ? undefined : showNodeInDisplay}
             canvasEntries={canvasEntries}
             onStopNode={!readOnly && soloRunning.has(node.id) ? stopNode : undefined}
             wiring={wiring}
@@ -3368,6 +3504,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <button aria-label={viewText.zoomIn} title={viewText.zoomIn} onClick={() => zoomBy(1.2)}><Plus size={16} /></button>
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.fitAll} title={viewText.fitAll} disabled={!nodes.length} onClick={fitAll}><Maximize2 size={16} /></button>
+        <button className="awwo-display-tool" aria-label={displayText(locale, 'display.showCanvas')} title={displayText(locale, 'display.showCanvas')}
+          disabled={!nodes.length || (readOnly && !displays.some(display => display.source.type === 'canvas'))} onClick={showCanvasDisplay}><MonitorPlay size={16} /></button>
         {!simple && <><button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={readOnly || exclusiveNow || initializing || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
         <button className="awwo-minimap-toggle" aria-label={viewText.showMinimap} title={focusedId ? t('surface.minimapWhileOpen') : viewText.showMinimap} aria-pressed={minimapOpen} disabled={Boolean(focusedId)} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
         <span className="awwo-tool-separator" />
@@ -3378,7 +3516,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
       {minimapOpen && !simple && nodes.length > 0 ? (
         <Minimap
-          boxes={renderNodes}
+          boxes={displays.length ? [...renderNodes, ...displays] : renderNodes}
           view={view}
           size={size}
           onCenter={(wx, wy) => moveCamera(focusWorld(viewRef.current, wx, wy, sizeRef.current))}
@@ -3403,6 +3541,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <AddNodeMenu
           onOpenModelShelf={modelShelf ? () => setShelfCollapsed(false) : undefined}
           mediaKinds={canInitialize ? mediaKinds : undefined}
+          withDisplay
           onOpenAgentLibrary={loadWorkspaceAgents ? () => { setAddMenu(null); setAgentLibraryRequest(value => value + 1); } : undefined}
           at={addMenu.at}
           onPick={(kind) => {

@@ -30,7 +30,8 @@
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, Minimize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
+import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
+import { displayText } from './displayCopy';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
@@ -327,6 +328,8 @@ export interface SessionTileProps {
   onToggleCardPreview?: (nodeId: string) => void;
   /** Open the results studio on this node's deliverables (optionally on one file). */
   onOpenStudio?: (nodeId: string, entryId?: string) => void;
+  /** Show this node's deliverables in a 预览展示 window on the board (the one already showing it, or a new one). */
+  onShowInDisplay?: (nodeId: string) => void;
   /** Every file of the canvas, so a previewed page can show what other nodes made. */
   canvasEntries?: ReadonlyArray<StudioEntry>;
   /** Stop this node's own run (its lane), leaving every other running node alone. */
@@ -376,6 +379,7 @@ export const SessionTile = memo(function SessionTile({
   onResizeCard,
   onToggleCardPreview,
   onOpenStudio,
+  onShowInDisplay,
   canvasEntries,
   onStopNode,
 }: SessionTileProps) {
@@ -830,6 +834,7 @@ export const SessionTile = memo(function SessionTile({
           <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu">
             {onOpenStudio && node.kind === 'session' && node.lastOutput ? <button type="button" onClick={() => { onOpenStudio(nodeId); setMenuOpen(false); }}><SquareArrowOutUpRight size={14} />{t('studio.open')}</button> : null}
+            {onShowInDisplay && node.kind === 'session' ? <button type="button" onClick={() => { setMenuOpen(false); onShowInDisplay(nodeId); }}><MonitorPlay size={14} />{displayText(locale, 'display.showNode')}</button> : null}
             {onConfigure ? <button type="button" disabled={busy} onClick={() => { onConfigure(nodeId); setMenuOpen(false); }}><Settings2 size={14} />{t('tile.configure')}</button> : null}
             {onRunNode ? <button type="button" disabled={viewOnly || busy || (node.kind === 'session' && !node.binding && !initializeOnSend)} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
             {onDelete ? <button type="button" disabled={viewOnly || busy} onClick={() => { if (!viewOnlyRef.current) onDelete(nodeId); }}><Trash2 size={14} />{t('tile.delete')}</button> : null}
