@@ -49,3 +49,22 @@ export function parseMediaOutput(text: unknown): MediaOutput | null {
   }
   return { kind, model: record.model.slice(0, 80), items };
 }
+
+
+const KIND_WORDS: Record<MediaOutputKind, string> = { image: '图片', video: '视频', model3d: '3D 模型' };
+
+/**
+ * How a media node's delivery reads in a downstream node's input: the files it stored, by the path a page can name them
+ * with (`<node id>/<file name>`, which AwwO's previews resolve), never the raw record. The same text the API builds for
+ * a canvas run (mediaDeliveryText in graph_media.go); any other text is returned as it is.
+ */
+export function mediaDeliveryText(node: { id: string; title?: string }, text: string): string {
+  const media = parseMediaOutput(text);
+  if (!media) return text;
+  const title = node.title?.trim() || node.id;
+  return [
+    `「${title}」生成的${KIND_WORDS[media.kind]}文件（存放在这张画布的成果里，这里只列文件，不含内容）：`,
+    ...media.items.map(item => `- ${node.id}/${item.name}（${item.contentType}，${item.size} 字节）`),
+    '网页可以用上面的相对路径引用这些文件，AwwO 的预览会换成真实文件；不要编造其他文件名。',
+  ].join('\n');
+}

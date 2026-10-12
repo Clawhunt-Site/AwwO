@@ -1,6 +1,7 @@
 import type { CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
+import { mediaDeliveryText } from './mediaOutput';
 import { parseContractOutput, type ContractField } from './nodeContracts';
-import { arePortTypesCompatible, portsFor } from './ports';
+import { canFeed, isMediaSessionNode, portsFor } from './ports';
 import { buildNodeMessage, validateNodeOutput, type UpstreamInput } from './runGraph';
 
 export interface NodeConversationContext {
@@ -37,7 +38,7 @@ export function prepareNodeConversation(
     const source = byId.get(edge.fromNode);
     const input = portsFor(node).find((port) => port.side === 'input' && port.id === edge.toPort);
     const output = source && portsFor(source).find((port) => port.side === 'output' && port.id === edge.fromPort);
-    if (!source || source.id === node.id || !input || !output || !arePortTypesCompatible(output.dataType, input.dataType)) {
+    if (!source || source.id === node.id || !input || !output || !canFeed(source, output, input)) {
       return { messagePrefix: '', sources, error: `输入「${input?.label || edge.toPort}」的上游连线已失效，请检查连接。` };
     }
     if (!source.lastOutput || !source.lastOutput.text.trim() || source.lastOutput.partial) {
@@ -49,7 +50,7 @@ export function prepareNodeConversation(
     }
     const text = source.kind === 'session' && source.contract
       ? parseContractOutput(source.contract, source.lastOutput.text).values[edge.fromPort.slice('out:'.length)] ?? ''
-      : source.lastOutput.text;
+      : isMediaSessionNode(source) ? mediaDeliveryText(source, source.lastOutput.text) : source.lastOutput.text;
     upstream.push({ fromTitle: source.title, toPort: edge.toPort, output: text });
     if (source.lastOutput.source === 'case') recorded[edge.toPort.slice('in:'.length)] = true;
   }

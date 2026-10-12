@@ -20,12 +20,14 @@ import {
   arePortTypesCompatible,
   boundsOfNodes,
   canConnect,
+  canFeed,
   edgeBezierPath,
   edgeId,
   portAnchorWorld,
   portsFor,
   reconcileEdges,
 } from '../src/canvas/ports';
+import { mediaDeliveryText } from '../src/canvas/mediaOutput';
 import { LOD_CARD_MAX_PX, LOD_GLANCE_MAX_PX, TAIL_LINES, lodFor } from '../src/canvas/lod';
 import { hitTestRect, nextIn, orderNodes } from '../src/canvas/spatialOrder';
 
@@ -112,6 +114,33 @@ describe('ports: canConnect', () => {
     const image = createSessionNode('image', { x: 400, y: 0 });
     // form emits text; 'reference' wants image
     expect(canConnect([form, image], [], { nodeId: form.id, portId: 'data' }, { nodeId: image.id, portId: 'reference' })).toBe(false);
+  });
+
+  it('lets a picture, a clip or a 3D model feed a text input, and only a media node’s result', () => {
+    const page = createSessionNode('coding', { x: 600, y: 0 });
+    for (const kind of ['image', 'video', 'model3d'] as const) {
+      const media = createSessionNode(kind, { x: 0, y: 0 });
+      expect(canConnect([media, page], [], { nodeId: media.id, portId: 'result' }, { nodeId: page.id, portId: 'context' })).toBe(true);
+      const wired = { id: `${media.id}:result->${page.id}:context`, fromNode: media.id, fromPort: 'result', toNode: page.id, toPort: 'context',
+        dataType: kind === 'model3d' ? 'file' : kind } as CanvasEdge;
+      expect(reconcileEdges([media, page], [wired])).toHaveLength(1);
+    }
+    // Text still never feeds a picture input, and a text node's result is still text.
+    const llm = createSessionNode('llm', { x: 0, y: 0 });
+    const image = createSessionNode('image', { x: 600, y: 300 });
+    expect(canConnect([llm, image], [], { nodeId: llm.id, portId: 'result' }, { nodeId: image.id, portId: 'reference' })).toBe(false);
+    expect(canFeed(llm, { id: 'result', side: 'output', dataType: 'file' }, { id: 'context', side: 'input', dataType: 'text', multi: true })).toBe(false);
+  });
+
+  it('reads a media delivery as the files it stored, the same text the API builds', () => {
+    const record = JSON.stringify({ type: 'awwo.media', version: 1, kind: 'image', model: 'jm.image-cinema',
+      items: [{ artifactId: 'aAAAAAAAAAAA', name: 'image-1.png', contentType: 'image/png', size: 2048 }] });
+    expect(mediaDeliveryText({ id: 'hero', title: '主视觉' }, record)).toBe([
+      '「主视觉」生成的图片文件（存放在这张画布的成果里，这里只列文件，不含内容）：',
+      '- hero/image-1.png（image/png，2048 字节）',
+      '网页可以用上面的相对路径引用这些文件，AwwO 的预览会换成真实文件；不要编造其他文件名。',
+    ].join('\n'));
+    expect(mediaDeliveryText({ id: 'hero' }, 'plain text')).toBe('plain text');
   });
 
   it('accepts a second upstream on a MULTI input, and the same output may feed several nodes', () => {

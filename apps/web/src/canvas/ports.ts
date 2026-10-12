@@ -119,6 +119,22 @@ export function arePortTypesCompatible(outType: DataType, inType: DataType): boo
   return outType === inType;
 }
 
+/** Is `node` an image, video or 3D node (its `result` is the generated files)? */
+export function isMediaSessionNode(node: CanvasNode): boolean {
+  return node.kind === 'session' && !node.contract && (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d');
+}
+
+/**
+ * May this output feed this input? The same type, or a media node's result (a picture, a clip, a 3D model) into a text
+ * input: that input then reads the files the generation stored, by the paths a page names them with, so a canvas run
+ * hands its media to the page that uses them. The API applies the same rule to a run's graph (edgeTypesFit).
+ */
+export function canFeed(fromNode: CanvasNode, out: PortSpec, inp: PortSpec): boolean {
+  if (arePortTypesCompatible(out.dataType, inp.dataType)) return true;
+  return inp.dataType === 'text' && out.id === 'result' && isMediaSessionNode(fromNode)
+    && (out.dataType === 'image' || out.dataType === 'video' || out.dataType === 'file');
+}
+
 /**
  * Can we connect `from` to `to`?
  *  - both ports exist on their nodes; `from` resolves to an OUTPUT, `to` to an INPUT,
@@ -140,7 +156,7 @@ export function canConnect(
   const out = portSpec(fromNode, 'output', from.portId);
   const inp = portSpec(toNode, 'input', to.portId);
   if (!out || !inp) return false;
-  if (!arePortTypesCompatible(out.dataType, inp.dataType)) return false;
+  if (!canFeed(fromNode, out, inp)) return false;
   const already = edges.some(
     (e) =>
       e.toNode === to.nodeId && e.toPort === to.portId && e.fromNode === from.nodeId && e.fromPort === from.portId,
@@ -178,7 +194,7 @@ export function reconcileEdges(
     const outSpec = portSpec(fromNode, 'output', e.fromPort);
     const inSpec = portSpec(toNode, 'input', e.toPort);
     if (!outSpec || !inSpec) continue;
-    if (!arePortTypesCompatible(outSpec.dataType, inSpec.dataType)) continue;
+    if (!canFeed(fromNode, outSpec, inSpec)) continue;
     out.push({ ...e, dataType: outSpec.dataType });
   }
   return out;

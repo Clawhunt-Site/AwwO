@@ -71,6 +71,10 @@ func TestGraphOutputPolicyAllowsThePreviewLibrary(t *testing.T) {
 	if !strings.Contains(page, "a script whose exact URL the node instructions say AwwO supplies") {
 		t.Fatal("HTML policy forbids the script a node's instructions say AwwO supplies", page)
 	}
+	// A page fed by an image or video node shows its files by the paths the input gives, not inline data it cannot have.
+	if !strings.Contains(page, "<node id>/<file name> paths") || !strings.Contains(page, "never build such a path inside a script string") {
+		t.Fatal("HTML policy does not let a page show the media an upstream node stored", page)
+	}
 	if text := graphOutputPolicy(graphNode{Contract: &graphContract{Version: 1, Outputs: []graphField{{ID: "answer", Type: "text", Required: true}}}}); strings.Contains(text, "three.js") {
 		t.Fatal("a non-HTML policy mentions the page library", text)
 	}

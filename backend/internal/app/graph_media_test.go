@@ -114,3 +114,41 @@ func TestGraphPromptNamesMediaFilesInsteadOfTheirRecord(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// A canvas run hands its pictures, clips and 3D models to the page that uses them: a media node's result may feed a
+// text input (a page's context, or a text field of a contract node) and reads there as the files it made. Every other
+// mismatch is still refused, and the edge keeps its source's type.
+func TestGraphMediaResultsFeedTextInputs(t *testing.T) {
+	bound := func(n map[string]any) map[string]any {
+		n["binding"], n["runtime"] = map[string]any{"agentId": "agent-" + n["id"].(string)}, "pi"
+		return n
+	}
+	page := bound(map[string]any{"id": "page", "kind": "session", "agentKind": "coding", "title": "Page"})
+	brief := bound(map[string]any{"id": "brief", "kind": "session", "agentKind": "llm", "title": "Brief",
+		"contract": map[string]any{"version": 1, "inputs": []any{map[string]any{"id": "art", "label": "Art", "type": "markdown"}},
+			"outputs": []any{map[string]any{"id": "out", "label": "Out", "type": "file"}}}})
+	doc := func(edges ...map[string]any) []byte {
+		raw, _ := json.Marshal(map[string]any{"nodes": []any{
+			bound(map[string]any{"id": "hero", "kind": "session", "agentKind": "image", "title": "Hero"}),
+			bound(map[string]any{"id": "clip", "kind": "session", "agentKind": "video", "title": "Clip"}),
+			bound(map[string]any{"id": "model", "kind": "session", "agentKind": "model3d", "title": "Model"}),
+			page, brief}, "edges": edges})
+		return raw
+	}
+	edge := func(id, from, fromPort, to, toPort, dataType string) map[string]any {
+		return map[string]any{"id": id, "fromNode": from, "fromPort": fromPort, "toNode": to, "toPort": toPort, "dataType": dataType}
+	}
+	if _, _, err := parseGraph(doc(edge("a", "hero", "result", "page", "context", "image"), edge("b", "clip", "result", "page", "context", "video"),
+		edge("c", "model", "result", "page", "context", "file"), edge("d", "hero", "result", "brief", "in:art", "image")), nil); err != nil {
+		t.Fatal("media results feed text inputs", err)
+	}
+	for name, bad := range map[string]map[string]any{
+		"edge typed as its target":         edge("x", "hero", "result", "page", "context", "text"),
+		"text into a picture input":        edge("x", "page", "result", "hero", "reference", "text"),
+		"a contract file output into text": edge("x", "brief", "out:out", "page", "context", "file"),
+	} {
+		if _, _, err := parseGraph(doc(bad), nil); err == nil {
+			t.Error("accepted", name)
+		}
+	}
+}

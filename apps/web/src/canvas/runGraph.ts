@@ -16,8 +16,9 @@
 // change mirrors a real event.
 
 import type { CanvasEdge, CanvasNode, FormNode, SessionNode } from './canvasDoc';
+import { mediaDeliveryText } from './mediaOutput';
 import { parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
-import { reconcileEdges } from './ports';
+import { isMediaSessionNode, reconcileEdges } from './ports';
 import { validateNodeTeam } from './nodeTeam';
 
 export type RunNodeState = 'waiting' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled' | 'cached';
@@ -381,7 +382,7 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
           toPort: d.toPort,
           output: source?.kind === 'session' && source.contract
             ? parseContractOutput(source.contract, text).values[d.fromPort.slice('out:'.length)] ?? ''
-            : text,
+            : source && isMediaSessionNode(source) ? mediaDeliveryText(source, text) : text,
         };
       });
       // A throwing transport marks THIS node failed — it must never reject the whole run.

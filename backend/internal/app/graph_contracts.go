@@ -101,6 +101,17 @@ func fieldType(t string) string {
 	}
 	return t
 }
+
+// edgeTypesFit reports whether an edge from src's port (of type st) may feed an input of type dt: the same type, or an
+// image, video or 3D node's result into a text input (a page's context or a text field). That input then reads the
+// files the generation stored, by the paths a page names them with (mediaDeliveryText), so a canvas run hands its
+// pictures and clips to the page that uses them. The edge keeps its source's type.
+func edgeTypesFit(src graphNode, fromPort, st, dt string) bool {
+	if st == dt {
+		return true
+	}
+	return dt == "text" && fromPort == "result" && graphMediaNode(src) && (st == mediaKindImage || st == mediaKindVideo || st == "file")
+}
 func nodePort(n graphNode, id string, input bool) (string, bool) {
 	if n.Kind == "form" {
 		return "text", !input && id == "data"
@@ -185,7 +196,7 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 		dst, dok := byID[e.ToNode]
 		st, sp := nodePort(src, e.FromPort, false)
 		dt, dp := nodePort(dst, e.ToPort, true)
-		if e.ID == "" || edgeIDs[e.ID] || !sok || !dok || !sp || !dp || st != dt || e.DataType != st {
+		if e.ID == "" || edgeIDs[e.ID] || !sok || !dok || !sp || !dp || !edgeTypesFit(src, e.FromPort, st, dt) || e.DataType != st {
 			return d, nil, errors.New("Invalid graph edge or incompatible field types")
 		}
 		edgeIDs[e.ID] = true
@@ -483,7 +494,10 @@ func graphOutputPolicy(n graphNode) string {
 			hasHTML = true
 			policy += "\nHTML requires a complete HTML document with explicit html, head and body tags, never a path or fragment. Use self-contained inline CSS and inline SVG/data images, with no external libraries or scripts needed for presentation. " +
 				"The exceptions are three.js r128 referenced by the tag " + previewLibraryTag + " and a script whose exact URL the node instructions say AwwO supplies: AwwO's previews replace those tags with their own copies, " +
-				"so a page may use them; never paste the source of three.js or any other library into the page."
+				"so a page may use them; never paste the source of three.js or any other library into the page. " +
+				"When an input lists files an upstream image, video or 3D node stored (as <node id>/<file name> paths), the page may show them by exactly those relative paths, " +
+				"written in an img, video or source src, a video poster or a CSS url(); AwwO's previews put the stored files in their place. Never invent other file names, " +
+				"and never build such a path inside a script string (a script that needs an image's pixels reads them from the img element that shows it)."
 			break
 		}
 	}
