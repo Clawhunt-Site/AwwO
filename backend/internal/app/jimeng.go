@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,6 +52,17 @@ const (
 
 // jimengResendWait is how long a transient submission waits before it is sent again (a variable for tests).
 var jimengResendWait = 10 * time.Second
+
+// jimengDownloadTries is how often one result is fetched before its run fails. A download is free and names its
+// resource, so a passing failure (Jimeng answered "busy" while several results of one canvas run came back at once,
+// 2026-10-12) is tried again instead of losing a generation that was made and paid for. Each wait is
+// jimengDownloadWait times the try (a variable for tests).
+const jimengDownloadTries = 4
+
+var jimengDownloadWait = 3 * time.Second
+
+// jimengLogText keeps a CLI field the log may carry (an error code, class or request id) to a short closed shape.
+var jimengLogText = regexp.MustCompile(`[^A-Za-z0-9._:-]`)
 
 var (
 	jimengModelID     = regexp.MustCompile(`^jm\.[a-z0-9][a-z0-9-]{0,62}$`)
@@ -232,12 +244,13 @@ type jimengClient struct {
 	mu                                 sync.Mutex
 	canvases                           map[string]bool
 	refreshed                          time.Time
+	log                                *slog.Logger
 }
 
 func newJimeng(c Config) *jimengClient {
 	j := &jimengClient{cli: c.JimengCLI, home: c.JimengHome, state: c.JimengStateDir, profile: c.JimengProfile, ceiling: c.JimengCreditCeiling,
 		maxFile: c.MediaMaxFileBytes, scratch: filepath.Join(c.MediaDir, ".tmp"), now: time.Now, slots: make(chan struct{}, jimengConcurrency),
-		canvases: map[string]bool{}}
+		canvases: map[string]bool{}, log: slog.Default()}
 	j.run = j.execute
 	return j
 }
@@ -319,6 +332,9 @@ type jimengEnvelope struct {
 	OK    bool            `json:"ok"`
 	Data  json.RawMessage `json:"data"`
 	Error *jimengFault    `json:"error"`
+	Meta  struct {
+		RequestID string `json:"requestId"`
+	} `json:"meta"`
 }
 
 type jimengFault struct {
@@ -367,14 +383,47 @@ func (j *jimengClient) callOnce(ctx context.Context, timeout time.Duration, args
 	}
 	if !ok {
 		if exit == 0 {
-			return nil, jimengMalformed()
+			err = jimengMalformed()
+		} else {
+			err = jimengFailure(exit, nil)
 		}
-		return nil, jimengFailure(exit, nil)
+		j.logFailure(args, exit, nil, "", err)
+		return nil, err
 	}
 	if exit == 0 && env.OK && env.Error == nil {
 		return env.Data, nil
 	}
-	return nil, jimengFailure(exit, env.Error)
+	err = jimengFailure(exit, env.Error)
+	j.logFailure(args, exit, env.Error, env.Meta.RequestID, err)
+	return nil, err
+}
+
+// logFailure records a failed CLI call by its structured fields alone: the command, the exit code, the CLI's error
+// code, class, required action and request id, and the closed code AwwO made of it, so a failure on the host can be
+// told apart afterwards. Never the CLI's message (it can echo a prompt) and never an argument (a prompt is one).
+// A passing failure, which is sent again, is information; any other is a warning.
+func (j *jimengClient) logFailure(args []string, exit int, fault *jimengFault, requestID string, err error) {
+	if j.log == nil {
+		return
+	}
+	clean := func(s string) string { return jimengLogText.ReplaceAllString(s[:min(len(s), 64)], "") }
+	command := ""
+	for i := 0; i < min(len(args), 2) && !strings.HasPrefix(args[i], "-"); i++ {
+		command = strings.TrimSpace(command + " " + clean(args[i]))
+	}
+	attrs := []any{"event", "jimeng_cli_failed", "command", command, "exit", exit, "code", mediaFailureCode(err)}
+	if fault != nil {
+		attrs = append(attrs, "cli_code", clean(fault.Code), "cli_class", clean(fault.Class), "retryable", fault.Retryable,
+			"required_action", clean(fault.RequiredAction))
+	}
+	if requestID != "" {
+		attrs = append(attrs, "request_id", clean(requestID))
+	}
+	if e, ok := asRHError(err); ok && e.Transient {
+		j.log.Info("Jimeng CLI call failed", attrs...)
+		return
+	}
+	j.log.Warn("Jimeng CLI call failed", attrs...)
 }
 
 func parseJimengEnvelope(raw []byte) (jimengEnvelope, bool) {
@@ -641,7 +690,20 @@ func (j *jimengClient) download(ctx context.Context, raw string, w io.Writer) (i
 	}
 	defer os.RemoveAll(dir)
 	target := filepath.Join(dir, "result")
-	data, err := j.call(ctx, 15*time.Minute, "resource", "download", resource, "--project-id", canvas, "--output", target)
+	var data json.RawMessage
+	for try := 1; ; try++ {
+		_ = os.Remove(target)
+		data, err = j.call(ctx, 15*time.Minute, "resource", "download", resource, "--project-id", canvas, "--output", target)
+		e, known := asRHError(err)
+		if err == nil || !known || e.Code == "media_provider_unauthorized" || try >= jimengDownloadTries || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(time.Duration(try) * jimengDownloadWait):
+		}
+	}
 	if err != nil {
 		if e, ok := asRHError(err); ok && (e.Code == "media_params_invalid" || e.Code == "media_failed") {
 			return 0, &rhError{Code: "media_result_unavailable", Transient: true}
@@ -682,6 +744,23 @@ func (j *jimengClient) download(ctx context.Context, raw string, w io.Writer) (i
 		return n, &rhError{Code: "media_result_too_large"}
 	}
 	return n, nil
+}
+
+// existingReference names a picture this account's own earlier generation made by its resource on Jimeng's canvas,
+// so an image-to-image run takes it as res:<id> there without uploading it again: taskID is that run's
+// "<canvas>:<submit id>" and index the result's place (its artifact's media-N). Read only, free; any doubt (the
+// task no longer reports success, no such result) returns false and the picture is uploaded as before.
+func (j *jimengClient) existingReference(ctx context.Context, taskID string, index int) (string, bool) {
+	task, err := j.query(ctx, taskID)
+	if err != nil || task.Status != "SUCCESS" || index < 1 || index > len(task.Results) {
+		return "", false
+	}
+	rest, ok := strings.CutPrefix(task.Results[index-1].URL, "jimeng:")
+	canvas, resource, cut := strings.Cut(rest, "/")
+	if !ok || !cut || !jimengUUIDPattern.MatchString(canvas) || !jimengUUIDPattern.MatchString(resource) {
+		return "", false
+	}
+	return canvas + "/" + resource, true
 }
 
 // uploadReference puts one reference picture on the day's canvas with `resource upload`, under a resource id derived

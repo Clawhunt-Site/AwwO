@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -593,5 +595,152 @@ func TestPostgresJimengImageRunEndToEnd(t *testing.T) {
 		if id := raw.(map[string]any)["id"].(string); strings.HasPrefix(id, "jm.") {
 			t.Fatal("a workspace the operator did not name is offered", id)
 		}
+	}
+}
+
+// A result's download that Jimeng answers with a passing failure is tried again (it is free and names its resource),
+// so a generation made and paid for is not lost; one that keeps failing gives up after jimengDownloadTries.
+func TestJimengDownloadTriesAPassingFailureAgain(t *testing.T) {
+	wait := jimengDownloadWait
+	jimengDownloadWait = time.Millisecond
+	t.Cleanup(func() { jimengDownloadWait = wait })
+	png := append([]byte("\x89PNG\r\n\x1a\n"), 1, 2, 3)
+	var mu sync.Mutex
+	failures := 2
+	cli := &fakeJimengCLI{}
+	cli.handle = func(args []string) (string, string, int) {
+		mu.Lock()
+		defer mu.Unlock()
+		if failures > 0 {
+			failures--
+			return "", errEnvelope("service.503", "retryable_failure", "retry", true), 21
+		}
+		out := flagValue(args, "--output")
+		_ = os.WriteFile(out, png, 0o600)
+		return okEnvelope(map[string]any{"path": out, "size": len(png)}), "", 0
+	}
+	j := testJimengClient(t, cli)
+	result := "jimeng:" + jimengUUID("canvas/x") + "/" + jimengUUID("result/x")
+	var got bytes.Buffer
+	if n, err := j.download(context.Background(), result, &got); err != nil || n != int64(len(png)) || !bytes.Equal(got.Bytes(), png) {
+		t.Fatal("the third try stores the file", n, err)
+	}
+	if calls := cli.commands(); len(calls) != 3 || calls[0] != calls[2] {
+		t.Fatal("the same download, three times", calls)
+	}
+	mu.Lock()
+	failures = 1000
+	mu.Unlock()
+	if _, err := j.download(context.Background(), result, &bytes.Buffer{}); mediaFailureCode(err) != "media_provider_busy" || len(cli.commands()) != 3+jimengDownloadTries {
+		t.Fatal("a download that keeps failing stops after its tries", err, len(cli.commands()))
+	}
+}
+
+// A failed call is logged by its structured fields alone (the command, exit code, the CLI's code, class and request
+// id), never by the CLI's message, which can echo a prompt, nor by an argument.
+func TestJimengFailureIsLoggedByItsFieldsOnly(t *testing.T) {
+	cli := &fakeJimengCLI{}
+	cli.handle = func([]string) (string, string, int) {
+		raw, _ := json.Marshal(map[string]any{"schemaVersion": "1", "ok": false, "meta": map[string]any{"requestId": "20261012ABCDEF<x>"},
+			"error": map[string]any{"code": "service.6", "class": "invalid_input", "requiredAction": "none", "retryable": false, "message": "secret prompt text"}})
+		return "", string(raw), 2
+	}
+	j := testJimengClient(t, cli)
+	var logs bytes.Buffer
+	j.log = slog.New(slog.NewJSONHandler(&logs, nil))
+	if _, err := j.call(context.Background(), time.Second, "resource", "upload", "--file", "/tmp/a secret file name.png"); mediaFailureCode(err) != "media_params_invalid" {
+		t.Fatal("the closed code", err)
+	}
+	line := logs.String()
+	for _, want := range []string{`"level":"WARN"`, `"event":"jimeng_cli_failed"`, `"command":"resource upload"`, `"exit":2`, `"code":"media_params_invalid"`,
+		`"cli_code":"service.6"`, `"cli_class":"invalid_input"`, `"retryable":false`, `"request_id":"20261012ABCDEFx"`} {
+		if !strings.Contains(line, want) {
+			t.Fatal("logged", want, line)
+		}
+	}
+	if strings.Contains(line, "secret") || strings.Contains(line, "--file") {
+		t.Fatal("the message or an argument reached the log", line)
+	}
+	logs.Reset()
+	cli.handle = func([]string) (string, string, int) {
+		return "", errEnvelope("service.503", "retryable_failure", "retry", true), 21
+	}
+	if _, err := j.call(context.Background(), time.Second, "operation", "status", jimengUUID("s")); mediaFailureCode(err) != "media_provider_busy" ||
+		!strings.Contains(logs.String(), `"level":"INFO"`) {
+		t.Fatal("a passing failure, which is sent again, is information", err, logs.String())
+	}
+}
+
+// An image-to-image run from a picture Jimeng itself made for the workspace names that picture's own resource on
+// Jimeng's canvas (res:<id>, on that canvas) instead of uploading it again; nothing is uploaded.
+func TestPostgresJimengReferenceUsesItsOwnPicture(t *testing.T) {
+	h, _ := newMediaHarness(t)
+	jpeg := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, bytes.Repeat([]byte{0x33}, 512)...)
+	var mu sync.Mutex
+	results := map[string]string{} // submit id -> the resource it made
+	creates := [][]string{}
+	cli := &fakeJimengCLI{}
+	cli.handle = func(args []string) (string, string, int) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch strings.Join(args[5:7], " ") {
+		case "auth refresh", "canvas create":
+			return okEnvelope(map[string]any{}), "", 0
+		case "node create":
+			creates = append(creates, append([]string(nil), args...))
+			submit := flagValue(args, "--submit-id")
+			results[submit] = jimengUUID(fmt.Sprintf("result/%d", len(creates)))
+			return okEnvelope(map[string]any{"node": map[string]any{"nodeId": flagValue(args, "--node-id")}}), "", 0
+		case "operation status":
+			resource, ok := results[args[7]]
+			if !ok {
+				return "", errEnvelope("cli.operation_submission_absent", "operation_incomplete", "resume", false), 20
+			}
+			return okEnvelope(map[string]any{"state": "succeeded", "resources": []any{map[string]any{"resourceId": resource, "state": "succeeded"}}}), "", 0
+		case "resource download":
+			out := flagValue(args, "--output")
+			_ = os.WriteFile(out, jpeg, 0o600)
+			return okEnvelope(map[string]any{"resourceId": args[7], "path": out, "size": len(jpeg)}), "", 0
+		}
+		return "", errEnvelope("service.6", "invalid_input", "none", false), 2
+	}
+	h.a.cfg.JimengCLI, h.a.cfg.JimengHome, h.a.cfg.JimengProfile, h.a.cfg.JimengCreditCeiling = filepath.Join(t.TempDir(), "dreamina-canvas"), t.TempDir(), "awwo", 700
+	h.a.cfg.JimengStateDir = filepath.Join(h.a.cfg.JimengHome, "state")
+	h.a.cfg.MediaPollInterval = 50 * time.Millisecond
+	c, tid, _ := h.register(t, "jimeng-refs@example.test")
+	h.a.cfg.JimengWorkspaces = []string{tid}
+	h.a.jimeng = newJimeng(h.a.cfg)
+	h.a.jimeng.run = cli.run
+	_, canvas := mediaCanvas(t, h, c, tid, mediaNode("white", mediaKindImage, "jm.image-express", nil), mediaNode("red", mediaKindImage, "jm.image-express", nil))
+	white := setupNodeAt(canvas, 0)["issueId"].(string)
+	red := setupNodeAt(canvas, 1)["issueId"].(string)
+
+	first := h.mediaRun(t, c, tid, white, "a white sports car", 202)
+	done := h.awaitRun(t, c, tid, first["id"].(string), "completed")
+	var out mediaOutput
+	if e := json.Unmarshal([]byte(done["output"].(string)), &out); e != nil || len(out.Items) != 1 {
+		t.Fatal("first output", done["output"], e)
+	}
+	second := h.mediaRun(t, c, tid, red, "[附件] "+out.Items[0].Name+" · "+artifactRefPrefix+out.Items[0].ArtifactID+"\nthe same car in ruby red", 202)
+	h.awaitRun(t, c, tid, second["id"].(string), "completed")
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, call := range cli.commands() {
+		if strings.HasPrefix(call, "resource upload") {
+			t.Fatal("a picture Jimeng made is not uploaded again", cli.commands())
+		}
+	}
+	if len(creates) != 2 {
+		t.Fatal("two generations", len(creates))
+	}
+	madeBy := results[jimengUUID("submit/"+first["id"].(string))]
+	day := flagValue(creates[0], "--project-id")
+	if flagValue(creates[1], "--mode") != "i2i" || flagValue(creates[1], "--ref") != "res:"+madeBy || flagValue(creates[1], "--project-id") != day ||
+		flagValue(creates[1], "--prompt") != "the same car in ruby red" {
+		t.Fatal("the second run edits the first one's own resource on its canvas", creates[1])
+	}
+	if flagValue(creates[0], "--mode") != "t2i" || flagValue(creates[0], "--ref") != "" {
+		t.Fatal("the first run is text to image", creates[0])
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -142,6 +143,10 @@ func (a *App) uploadMediaReferences(ctx context.Context, hub mediaProvider, tid,
 	}
 	ids := make([]string, 0, len(refs))
 	for _, ref := range refs {
+		if id, ok := a.reusedJimengReference(ctx, hub, tid, ref); ok {
+			ids = append(ids, id)
+			continue
+		}
 		data, err := a.readMediaReference(tid, ref)
 		if err != nil {
 			return nil, err
@@ -170,6 +175,33 @@ func (a *App) uploadMediaReferences(ctx context.Context, hub mediaProvider, tid,
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// reusedJimengReference: a picture Jimeng itself generated for this workspace (the media-N file of a jm.* run) is
+// named by its own resource on Jimeng's canvas instead of being uploaded again (owner request 2026-10-12: the red and
+// blue cars of 极光 GT, made from the white one, failed on the upload). It is the same bytes Jimeng made, checked by
+// the artifact's SHA-256; any doubt (another provider, no task recorded, a result Jimeng no longer reports) uploads the
+// picture as before.
+func (a *App) reusedJimengReference(ctx context.Context, hub mediaProvider, tid string, ref mediaReference) (string, bool) {
+	j, ok := hub.(*jimengClient)
+	if !ok || j == nil {
+		return "", false
+	}
+	var taskID, model, field string
+	e := a.db.QueryRow(ctx, `SELECT COALESCE(r.media_task->>'taskId',''), g.model, a.field_id FROM artifacts a
+		JOIN runs r ON r.tenant_id=a.tenant_id AND r.id=a.run_id
+		JOIN media_generations g ON g.tenant_id=a.tenant_id AND g.run_id=a.run_id
+		WHERE a.tenant_id=$1 AND a.id=$2 AND a.sha256=$3`, tid, ref.ArtifactID, ref.SHA256).Scan(&taskID, &model, &field)
+	if e != nil || !jimengModelID.MatchString(model) || taskID == "" || !strings.HasPrefix(field, "media-") {
+		return "", false
+	}
+	index, err := strconv.Atoi(strings.TrimPrefix(field, "media-"))
+	if err != nil {
+		return "", false
+	}
+	lookup, cancel := context.WithTimeout(ctx, jimengQueryTimeout)
+	defer cancel()
+	return j.existingReference(lookup, taskID, index)
 }
 
 // referenceFileName is the neutral name a reference goes to a provider under: never the user's own file name.
