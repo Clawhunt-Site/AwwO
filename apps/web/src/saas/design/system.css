@@ -398,19 +398,19 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   margin: max(-64px, -7vh) min(-28px, calc((1200px - 100vw) / 2 + 12px)) -40px;
   border-radius: 32px;
   background:
-    radial-gradient(60% 70% at 78% 30%, rgb(95 227 232 / 16%), transparent 70%),
-    radial-gradient(50% 60% at 18% 100%, rgb(118 100 236 / 14%), transparent 72%),
-    linear-gradient(160deg, #06202b 0%, #041219 58%, #030d14 100%);
-  box-shadow: 0 0 0 1px rgb(140 200 220 / 10%) inset, 0 28px 80px -28px rgb(4 18 25 / 60%);
+    radial-gradient(60% 70% at 78% 30%, rgb(var(--saas-glow-1-rgb, 95 227 232) / 16%), transparent 70%),
+    radial-gradient(50% 60% at 18% 100%, rgb(var(--saas-glow-2-rgb, 118 100 236) / 14%), transparent 72%),
+    linear-gradient(160deg, var(--saas-tank-1, #06202b) 0%, var(--saas-tank-2, #041219) 58%, var(--saas-tank-3, #030d14) 100%);
+  box-shadow: 0 0 0 1px rgb(var(--saas-tank-line-rgb, 140 200 220) / 10%) inset, 0 28px 80px -28px color-mix(in srgb, var(--saas-tank-2, #041219) 60%, transparent);
 }
 .saas-login::after {
   content: ''; grid-row: 1; grid-column: 2; align-self: start; justify-self: center; z-index: 0;
   width: min(560px, 40vw); aspect-ratio: 1; margin-top: -64px; border-radius: 50%; pointer-events: none;
   background:
     radial-gradient(circle at 33% 25%, rgb(255 255 255 / 80%) 0 2%, rgb(255 255 255 / 0%) 12%),
-    radial-gradient(circle at 50% 57%, rgb(236 253 255 / 70%) 0 3%, rgb(95 227 232 / 45%) 12%, rgb(118 100 236 / 20%) 34%, transparent 60%),
-    radial-gradient(circle at 50% 50%, rgb(18 56 90 / 70%) 0 48%, rgb(10 28 51 / 0%) 72%);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 10%), 0 0 120px -20px rgb(63 214 224 / 30%);
+    radial-gradient(circle at 50% 57%, rgb(var(--saas-orb-hi-rgb, 236 253 255) / 70%) 0 3%, rgb(var(--saas-glow-1-rgb, 95 227 232) / 45%) 12%, rgb(var(--saas-glow-2-rgb, 118 100 236) / 20%) 34%, transparent 60%),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--saas-orb-core, #12385a) 70%, transparent) 0 48%, transparent 72%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 10%), 0 0 120px -20px rgb(var(--saas-glow-1-rgb, 63 214 224) / 30%);
   opacity: .9;
 }
 .saas-login > :not(.saas-preferences) { position: relative; z-index: 1; }
@@ -418,26 +418,26 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
    below them): the brand on the left, whatever follows it (the card or the choices) on the right. */
 .saas-login > .saas-login-brand { grid-row: 1; grid-column: 1; }
 .saas-login > .saas-login-brand + * { grid-row: 1; grid-column: 2; }
-.saas-login-brand { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; color: #eaf3f5; }
-.saas-login-brand > span, .saas-login .saas-login-brand .saas-main-site { color: #eaf3f5; }
-.saas-login .saas-login-brand .saas-main-site { color: #aec3ca; }
+.saas-login-brand { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; color: var(--saas-tank-ink, #eaf3f5); }
+.saas-login-brand > span, .saas-login .saas-login-brand .saas-main-site { color: var(--saas-tank-ink, #eaf3f5); }
+.saas-login .saas-login-brand .saas-main-site { color: var(--saas-tank-muted, #aec3ca); }
 .saas-login-brand h1, .saas-login h1 {
   max-width: none; margin: 28px 0 14px;
   font-size: clamp(40px, 4.6vw, 60px); line-height: var(--saas-display-leading, .98); font-weight: 690;
   font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track);
 }
-.saas-login-brand h1 { color: #eaf3f5; }
-.saas-login-brand > p { max-width: 480px; margin: 0; font-size: var(--saas-text-lg); line-height: 1.7; color: #aec3ca; }
+.saas-login-brand h1 { color: var(--saas-tank-ink, #eaf3f5); }
+.saas-login-brand > p { max-width: 480px; margin: 0; font-size: var(--saas-text-lg); line-height: 1.7; color: var(--saas-tank-muted, #aec3ca); }
 /* The preview is a window into the canvas: glass over the tank. */
 .saas-login-preview {
   width: 100%; max-width: 560px; margin-top: 36px; padding: 12px;
-  border: 1px solid rgb(140 200 220 / 16%); border-radius: var(--saas-radius-xl);
-  background: rgb(9 30 45 / 62%); box-shadow: 0 18px 48px -16px rgb(0 0 0 / 62%); backdrop-filter: blur(10px);
+  border: 1px solid rgb(var(--saas-tank-line-rgb, 140 200 220) / 16%); border-radius: var(--saas-radius-xl);
+  background: rgb(var(--saas-tank-glass-rgb, 9 30 45) / 62%); box-shadow: 0 18px 48px -16px rgb(0 0 0 / 62%); backdrop-filter: blur(10px);
 }
 .saas-login-preview .saas-canvas-thumb { height: 196px; border: 0; border-radius: var(--saas-radius); }
-.saas-login-preview ul { display: grid; gap: 8px; margin: 14px 8px 4px; padding: 0; list-style: none; font-size: var(--saas-text-sm); color: #aec3ca; }
+.saas-login-preview ul { display: grid; gap: 8px; margin: 14px 8px 4px; padding: 0; list-style: none; font-size: var(--saas-text-sm); color: var(--saas-tank-muted, #aec3ca); }
 .saas-login-preview li { display: flex; align-items: center; gap: 10px; }
-.saas-login-preview li::before { content: ''; width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: #5fe3e8; box-shadow: 0 0 8px #5fe3e8; }
+.saas-login-preview li::before { content: ''; width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: rgb(var(--saas-glow-1-rgb, 95 227 232)); box-shadow: 0 0 8px rgb(var(--saas-glow-1-rgb, 95 227 232)); }
 .saas-auth-choices { gap: 14px; }
 .saas-login .saas-card { gap: 16px; padding: 28px; border: 0; box-shadow: var(--saas-shadow-xl), 0 0 0 1px var(--saas-hairline) inset; }
 .saas-login .saas-card h2 { margin: 0 0 4px; font-size: var(--saas-text-2xl); }
@@ -449,11 +449,11 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-login a.saas-sso-action { padding-left: 9px; gap: 10px; }
 .saas-sso-choice { border-color: color-mix(in srgb, var(--saas-accent) 35%, var(--saas-border)); }
 .saas-login > .saas-preferences { position: absolute; top: 40px; right: 40px; z-index: 2; }
-.saas-login > .saas-preferences button { border-color: rgb(140 200 220 / 22%); background: rgb(9 30 45 / 62%); color: #eaf3f5; }
-.saas-login > .saas-preferences button:not(:disabled):hover { border-color: rgb(140 200 220 / 40%); background: rgb(255 255 255 / 10%); color: #fff; }
+.saas-login > .saas-preferences button { border-color: rgb(var(--saas-tank-line-rgb, 140 200 220) / 22%); background: rgb(var(--saas-tank-glass-rgb, 9 30 45) / 62%); color: var(--saas-tank-ink, #eaf3f5); }
+.saas-login > .saas-preferences button:not(:disabled):hover { border-color: rgb(var(--saas-tank-line-rgb, 140 200 220) / 40%); background: rgb(255 255 255 / 10%); color: #fff; }
 .saas-login > .saas-preferences button:not(:disabled):active { background: rgb(255 255 255 / 14%); }
-/* On the dark tank, focus is the night-dive teal (the paper teal would all but vanish there). */
-.saas-login > :is(.saas-preferences, .saas-login-brand) :focus-visible { outline-color: #6cc6c8; }
+/* On the dark tank, focus is the tank's own light colour (the paper teal would all but vanish there). */
+.saas-login > :is(.saas-preferences, .saas-login-brand) :focus-visible { outline-color: var(--saas-tank-focus, #6cc6c8); }
 
 /* ── Workspace home: one prompt, recent canvases, cases ─────────────────────────────────────── */
 /* The main site's AwwO welcome: the orb, the workspace as a lit pill, the condensed title, the composer
@@ -463,11 +463,11 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   position: relative; width: 96px; aspect-ratio: 1; margin: 0 0 18px; border-radius: 50%;
   background:
     radial-gradient(circle at 33% 25%, rgb(255 255 255 / 95%) 0 2.5%, rgb(255 255 255 / 0%) 13%),
-    radial-gradient(circle at 50% 57%, rgb(236 253 255 / 95%) 0 4%, rgb(95 227 232 / 75%) 12%, rgb(118 100 236 / 32%) 34%, transparent 58%),
-    radial-gradient(circle at 50% 50%, #12385a 0 46%, #0a1c33 72%);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%), inset -6px -10px 18px rgb(0 0 0 / 38%), 0 18px 40px -18px rgb(63 214 224 / 60%);
+    radial-gradient(circle at 50% 57%, rgb(var(--saas-orb-hi-rgb, 236 253 255) / 95%) 0 4%, rgb(var(--saas-glow-1-rgb, 95 227 232) / 75%) 12%, rgb(var(--saas-glow-2-rgb, 118 100 236) / 32%) 34%, transparent 58%),
+    radial-gradient(circle at 50% 50%, var(--saas-orb-core, #12385a) 0 46%, var(--saas-orb-edge, #0a1c33) 72%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%), inset -6px -10px 18px rgb(0 0 0 / 38%), 0 18px 40px -18px rgb(var(--saas-glow-1-rgb, 63 214 224) / 60%);
 }
-.saas-home-orb::after { content: ''; position: absolute; inset: 41% -22%; border-radius: 50%; border: 1px solid rgb(169 155 255 / 55%); transform: rotate(-10deg); }
+.saas-home-orb::after { content: ''; position: absolute; inset: 41% -22%; border-radius: 50%; border: 1px solid rgb(var(--saas-orb-ring-rgb, 169 155 255) / 55%); transform: rotate(-10deg); }
 .saas-home-workspace {
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 28px; margin: 0 0 16px; padding: 0 12px;
   border: 0; border-radius: var(--saas-radius-pill); background: color-mix(in oklab, var(--saas-bio) 12%, transparent);
@@ -482,13 +482,13 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-home-composer {
   width: 100%; padding: 12px 10px 10px 16px;
   border: 0; border-radius: 22px;
-  background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-border) inset, 0 14px 36px -20px rgb(11 34 48 / 40%); text-align: left;
+  background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-border) inset, 0 14px 36px -20px rgb(var(--saas-shadow-rgb, 11 34 48) / 40%); text-align: left;
   transition: box-shadow var(--saas-dur-3) var(--saas-ease);
 }
 /* Writing lights the composer: a focus-teal ring that reads as focus, inside the AwwO glow. */
 .saas-home-composer:focus-within {
   border-color: transparent;
-  box-shadow: 0 0 0 1.5px var(--saas-focus) inset, 0 0 0 5px color-mix(in oklab, var(--saas-bio) 16%, transparent), 0 18px 42px -20px rgb(11 34 48 / 40%);
+  box-shadow: 0 0 0 1.5px var(--saas-focus) inset, 0 0 0 5px color-mix(in oklab, var(--saas-bio) 16%, transparent), 0 18px 42px -20px rgb(var(--saas-shadow-rgb, 11 34 48) / 40%);
 }
 .saas-home-composer textarea, :root[data-theme='dark'] .saas-home-composer textarea {
   display: block; width: 100%; min-height: 96px; max-height: 280px; margin: 0; padding: 4px 6px 4px 0; overflow-y: auto; resize: none;

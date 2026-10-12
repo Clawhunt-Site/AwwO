@@ -71,6 +71,25 @@ export function AppearanceScope({ userId, children }: { userId: string; children
   return <Context.Provider value={{ appearance, error, busy, reload: () => setRevision(v => v + 1), save }}>{children}</Context.Provider>;
 }
 
+/**
+ * An account colour scheme (运行设置 → 配色设置) is painted over whichever appearance style is on screen, so a style
+ * picked in the header would show only partly. Picking a style therefore switches the account back to its default
+ * scheme (the picker calls restoreDefault); the account's custom colours stay saved. Null outside a signed-in page, or
+ * while the scheme loads.
+ */
+export function useAccountColorScheme(): { overriding: boolean; label: string; busy: boolean; restoreDefault: () => Promise<unknown> } | null {
+  const state = useContext(Context);
+  if (!state?.appearance) return null;
+  const { appearance, busy, save } = state;
+  const active = appearance.active_preset;
+  return {
+    overriding: active !== appearance.default_preset,
+    label: active === appearance.custom_preset_id ? '' : appearance.presets.find(preset => preset.id === active)?.label || '',
+    busy,
+    restoreDefault: () => save(current => ({ active_preset: current.default_preset, custom: current.custom })),
+  };
+}
+
 export function SaaSAppearanceControl({ standalone = false, onClose, onOpenDialog }: { standalone?: boolean; onClose?: () => void; onOpenDialog?: () => void } = {}) {
   const state = useContext(Context);
   const { themePreference, locale, t } = useSaaSPreferences();

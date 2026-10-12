@@ -1,0 +1,141 @@
+/* The 外观 (appearance) button in the header and the style picker it opens (ThemePicker.tsx).
+ *
+ * The button takes the header utilities' quiet shape wherever it sits (.saas-account-actions, .saas-preferences, the
+ * sign-in tank); its swatch is the style on screen, half card, half accent. The panel is a floating surface like the
+ * More menu, portalled to <body>, so every rule here sets its own font, colour and border instead of inheriting a
+ * page's button rules. Each preview is drawn by the style it names (.awwo-theme-preview[data-awwo-theme] takes that
+ * style's values in design/themes.css), so a preview can never disagree with the style it stands for. */
+
+.saas-theme-trigger { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.saas-theme-trigger-swatch {
+  width: 14px; height: 14px; flex: none; border-radius: 50%;
+  background: linear-gradient(135deg, var(--saas-card) 0 50%, var(--accent) 50% 100%);
+  box-shadow: 0 0 0 1px var(--saas-border-strong);
+}
+.saas-login > .saas-preferences .saas-theme-trigger-swatch { box-shadow: 0 0 0 1px rgb(var(--saas-tank-line-rgb, 140 200 220) / 40%); }
+@media (max-width: 1100px) { .saas-canvas-page-header .saas-theme-trigger-label { display: none; } }
+@media (max-width: 760px) { .saas-theme-trigger-label { display: none; } }
+
+/* ── The panel ─────────────────────────────────────────────────────────────────────────────────── */
+.saas-theme-panel.sc-popover {
+  box-sizing: border-box;
+  display: block;
+  width: min(640px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 96px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px;
+  border: 1px solid var(--saas-hairline);
+  border-radius: var(--saas-radius-xl);
+  background: var(--saas-raised);
+  color: var(--saas-text);
+  box-shadow: var(--saas-shadow-xl);
+  font: 400 var(--saas-text-sm)/1.45 var(--saas-font);
+  z-index: 1000;
+}
+.saas-theme-panel *, .saas-theme-panel *::before, .saas-theme-panel *::after { box-sizing: border-box; }
+.saas-theme-panel-head { display: grid; gap: 4px; margin: 0 2px 14px; }
+.saas-theme-panel-head h2 {
+  margin: 0; color: var(--saas-text);
+  font: 680 var(--saas-text-lg)/1.25 var(--saas-font-display); font-stretch: var(--saas-head-stretch); letter-spacing: var(--saas-head-track);
+}
+.saas-theme-panel-head p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+.saas-theme-choices { display: grid; gap: 14px; }
+.saas-theme-group { display: grid; gap: 8px; }
+.saas-theme-group-label { margin: 0 2px; color: var(--saas-muted); font: 600 var(--saas-text-xs)/1.2 var(--saas-font); }
+.saas-theme-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 640px) { .saas-theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* An option: the preview on top, the name and one line under it. Checked is the accent ring and a tick. */
+.saas-theme-option, .saas-theme-auto {
+  position: relative; display: grid; align-content: start; gap: 8px; min-width: 0; margin: 0; padding: 6px 6px 10px;
+  border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius);
+  background: var(--saas-card); color: var(--saas-text); text-align: left; cursor: pointer;
+  font: inherit; box-shadow: none;
+  transition: border-color var(--saas-dur-1), box-shadow var(--saas-dur-1), transform var(--saas-dur-1) var(--saas-ease);
+}
+.saas-theme-option:hover, .saas-theme-auto:hover { border-color: var(--saas-border-strong); transform: translateY(-1px); }
+.saas-theme-option[aria-checked='true'], .saas-theme-auto[aria-checked='true'] {
+  border-color: var(--saas-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--saas-accent) 28%, transparent);
+}
+/* Following the system: the style it shows right now is marked, quietly. */
+.saas-theme-option.is-shown { border-color: color-mix(in srgb, var(--saas-accent) 45%, var(--saas-hairline)); }
+.saas-theme-option:focus-visible, .saas-theme-auto:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
+.saas-theme-option-text { display: grid; gap: 2px; min-width: 0; padding: 0 4px; }
+.saas-theme-option-text strong { color: var(--saas-text); font: 650 var(--saas-text-sm)/1.3 var(--saas-font); }
+.saas-theme-option-text small { color: var(--saas-muted); font: 400 11px/1.45 var(--saas-font); }
+.saas-theme-option-check {
+  position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--saas-accent); color: var(--saas-accent-text);
+  box-shadow: 0 0 0 2px var(--saas-card);
+}
+/* Follow system: the day and night pair side by side, the text beside them. */
+.saas-theme-auto { grid-template-columns: minmax(150px, 40%) minmax(0, 1fr); align-items: center; gap: 14px; padding: 6px 40px 6px 6px; }
+.saas-theme-auto-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.saas-theme-auto-pair .awwo-theme-preview { height: 52px; }
+@media (max-width: 640px) { .saas-theme-auto { grid-template-columns: 1fr; padding-right: 6px; } }
+
+.saas-theme-note {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px; padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--saas-warning-dot) 30%, transparent); border-radius: var(--saas-radius);
+  background: color-mix(in srgb, var(--saas-warning-dot) 8%, var(--saas-card)); color: var(--saas-text); font-size: var(--saas-text-xs);
+}
+.saas-theme-note > span { flex: 1 1 260px; }
+.saas-theme-note > span[role='alert'] { flex-basis: 100%; color: var(--saas-danger); }
+.saas-theme-note > button {
+  min-height: 30px; padding: 0 12px; border: 1px solid var(--saas-border-strong); border-radius: var(--saas-radius-pill);
+  background: var(--saas-card); color: var(--saas-text); font: 600 var(--saas-text-xs)/1 var(--saas-font); cursor: pointer;
+}
+.saas-theme-note > button:disabled { opacity: .5; cursor: progress; }
+.saas-theme-note.is-done {
+  border-color: color-mix(in srgb, var(--saas-success-dot) 30%, transparent);
+  background: color-mix(in srgb, var(--saas-success-dot) 8%, var(--saas-card));
+}
+
+/* ── A preview, drawn by its own style ────────────────────────────────────────────────────────── */
+.awwo-theme-preview {
+  display: grid; grid-template-rows: 15px 1fr; height: 76px; overflow: hidden;
+  border-radius: 10px; background: var(--bg-base);
+  box-shadow: 0 0 0 1px var(--border-light) inset;
+}
+/* The header: the orb, a title, the action pill in ink. */
+.awwo-theme-preview-bar {
+  display: flex; align-items: center; gap: 4px; padding: 0 6px;
+  background: var(--bg-card); border-bottom: 1px solid var(--border-light);
+}
+.awwo-theme-preview-bar > i:first-child {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgb(var(--saas-orb-hi-rgb) / 95%) 0 12%, rgb(var(--saas-glow-1-rgb) / 90%) 30%, var(--saas-orb-core) 75%);
+}
+.awwo-theme-preview-bar > i:nth-child(2) { width: 22px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--text-primary) 55%, transparent); }
+.awwo-theme-preview-bar > b { width: 16px; height: 7px; margin-left: auto; border-radius: 4px; background: var(--text-primary); }
+/* The canvas: its dots, two cards and the wire between them. */
+.awwo-theme-preview-canvas {
+  position: relative;
+  background: radial-gradient(var(--saas-canvas-dot) 0.8px, transparent 1.1px) 0 0 / 7px 7px, var(--saas-canvas);
+}
+.awwo-theme-preview-node {
+  position: absolute; display: grid; align-content: start; gap: 3px; width: 38%; height: 30px; padding: 5px;
+  border-radius: 6px; background: var(--bg-card); box-shadow: var(--saas-shadow-sm), 0 0 0 1px var(--border-light) inset;
+}
+.awwo-theme-preview-node.is-first { top: 9px; left: 8%; }
+.awwo-theme-preview-node.is-second { top: 20px; right: 8%; }
+.awwo-theme-preview-node > i { height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--text-primary) 62%, transparent); }
+.awwo-theme-preview-node > i + i { width: 70%; background: color-mix(in srgb, var(--text-secondary) 55%, transparent); }
+/* The selection accent as a chip, live work as a glowing dot. */
+.awwo-theme-preview-node > em { position: absolute; right: 5px; bottom: 5px; width: 13px; height: 5px; border-radius: 3px; background: var(--accent); }
+.awwo-theme-preview-node > u {
+  position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--saas-bio); box-shadow: 0 0 5px var(--saas-bio);
+}
+.awwo-theme-preview-wire {
+  position: absolute; top: 24px; left: calc(8% + 38%); width: calc(100% - 2 * 8% - 2 * 38%); height: 11px;
+  border-top: 1.5px solid var(--saas-wire); border-right: 1.5px solid var(--saas-wire); border-top-right-radius: 7px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .saas-theme-option, .saas-theme-auto { transition: none; }
+  .saas-theme-option:hover, .saas-theme-auto:hover { transform: none; }
+}

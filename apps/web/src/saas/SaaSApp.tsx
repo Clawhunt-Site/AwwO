@@ -20,7 +20,7 @@ import { GraphRunPanel } from './GraphRunPanel';
 import { createCanvasRuntimeReader } from '../canvasRuntimeReader';
 import { CanvasAccountControl } from '../CanvasAccountControl';
 import { createSaaSAccountApi } from './accountApi';
-import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls, UiModeSwitch } from './preferences';
+import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls, UiModeSwitch, LanguageSwitch } from './preferences';
 import { BootSurface } from './BootSurface';
 import { navigateTo } from './navigation';
 import { InviteAcceptance } from './InviteAcceptance';
@@ -40,6 +40,7 @@ import { routeAssistantMessage } from './assistantRouteApi';
 import type { RouteAssistant } from '../canvas/assistantRouting';
 import { useManagedExecution } from './useManagedExecution';
 import { AppearanceScope } from './SaaSAppearance';
+import { ThemePicker } from './ThemePicker';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from './SaaSOnboarding';
 import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
@@ -328,8 +329,9 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
       workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi,
         ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined, invitesUrl: accountURL('invites'), plansUrl: accountURL('plans') } } : {}) }} />
+    <ThemePicker />
     <ActionMenu label={t('更多选项', 'More options')}>{close => <>
-      <PreferenceControls />
+      <LanguageSwitch variant="menu" />
       <UiModeSwitch onSwitched={close} />
       <TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>

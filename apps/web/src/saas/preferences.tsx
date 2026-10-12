@@ -1,18 +1,19 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Code2, MessageSquare } from 'lucide-react';
+import { Code2, Languages, MessageSquare } from 'lucide-react';
 import { LOCALE_STORAGE_KEY, localeHtmlLang, readInitialLocale, type UiLocale } from '../locale';
 import { LocaleProvider } from '../canvas/i18n';
 import { CanvasUiModeProvider, isUiMode, readUiMode, UI_MODE_STORAGE_KEY, writeUiMode, type CanvasUiMode } from '../canvas/uiMode';
+import { applyTheme, isThemeChoice, readThemeChoice, resolveTheme, systemPrefersDark, THEME_STORAGE_KEY, writeThemeChoice, type ThemeChoice, type ThemeDefinition, type ThemeScheme } from './themes';
+import { ThemePicker } from './ThemePicker';
 
-export const SAAS_THEME_STORAGE_KEY = 'superclaw_theme';
-type ThemePreference = 'light' | 'dark';
-function readTheme(): ThemePreference {
-  try { const value = localStorage.getItem(SAAS_THEME_STORAGE_KEY); if (value === 'light' || value === 'dark') return value; } catch { /* Browser storage can be unavailable. */ }
-  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
 type Preferences = {
   locale: UiLocale; setLocale: (locale: UiLocale) => void;
-  themePreference: ThemePreference; setThemePreference: (theme: ThemePreference) => void;
+  /** The appearance style the reader chose (外观风格), or `auto` to follow the system. */
+  themeChoice: ThemeChoice; setThemeChoice: (choice: ThemeChoice) => void;
+  /** The style on screen now. */
+  theme: ThemeDefinition;
+  /** Its light or dark side, for code that only needs that (the account colour scheme picks its canvas by it). */
+  themePreference: ThemeScheme;
   /** 普通用户模式 (simple) or 开发者模式 (developer); presentation only. */
   uiMode: CanvasUiMode; setUiMode: (mode: CanvasUiMode) => void;
   t: (zh: string, en: string) => string;
@@ -20,17 +21,26 @@ type Preferences = {
 const Context = createContext<Preferences | null>(null);
 export function SaaSPreferencesProvider({ children }: { children: ReactNode }) {
   const [locale, setLocale] = useState(readInitialLocale);
-  const [themePreference, setThemePreference] = useState(readTheme);
+  const [prefersDark, setPrefersDark] = useState(systemPrefersDark);
+  const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() => readThemeChoice());
   const [uiMode, setUiMode] = useState<CanvasUiMode>(() => readUiMode());
+  const theme = resolveTheme(themeChoice, prefersDark);
   useEffect(() => {
     document.documentElement.lang = localeHtmlLang(locale);
     try { localStorage.setItem(LOCALE_STORAGE_KEY, locale); } catch { /* Keep the current page usable. */ }
   }, [locale]);
   useEffect(() => {
-    document.documentElement.dataset.theme = themePreference;
-    document.documentElement.style.colorScheme = themePreference;
-    try { localStorage.setItem(SAAS_THEME_STORAGE_KEY, themePreference); } catch { /* Keep the current page usable. */ }
-  }, [themePreference]);
+    applyTheme(theme);
+    writeThemeChoice(themeChoice, theme);
+  }, [themeChoice, theme]);
+  useEffect(() => {
+    // `auto` follows the system while the page is open, not only when it loads.
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const change = () => setPrefersDark(query.matches);
+    query.addEventListener?.('change', change);
+    return () => query.removeEventListener?.('change', change);
+  }, []);
   useEffect(() => {
     document.documentElement.dataset.uiMode = uiMode;
     writeUiMode(uiMode);
@@ -38,13 +48,13 @@ export function SaaSPreferencesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const sync = (event: StorageEvent) => {
       if (event.key === LOCALE_STORAGE_KEY && (event.newValue === 'zh' || event.newValue === 'en')) setLocale(event.newValue);
-      if (event.key === SAAS_THEME_STORAGE_KEY && (event.newValue === 'light' || event.newValue === 'dark')) setThemePreference(event.newValue);
+      if (event.key === THEME_STORAGE_KEY && isThemeChoice(event.newValue)) setThemeChoice(event.newValue);
       if (event.key === UI_MODE_STORAGE_KEY && isUiMode(event.newValue)) setUiMode(event.newValue);
     };
     window.addEventListener('storage', sync); return () => window.removeEventListener('storage', sync);
   }, []);
-  const value = useMemo<Preferences>(() => ({ locale, setLocale, themePreference, setThemePreference, uiMode, setUiMode,
-    t: (zh, en) => locale === 'zh' ? zh : en }), [locale, themePreference, uiMode]);
+  const value = useMemo<Preferences>(() => ({ locale, setLocale, themeChoice, setThemeChoice, theme, themePreference: theme.scheme, uiMode, setUiMode,
+    t: (zh, en) => locale === 'zh' ? zh : en }), [locale, themeChoice, theme, uiMode]);
   return <Context.Provider value={value}><LocaleProvider locale={locale}><CanvasUiModeProvider mode={uiMode}>{children}</CanvasUiModeProvider></LocaleProvider></Context.Provider>;
 }
 export function useSaaSPreferences(): Preferences {
@@ -52,12 +62,16 @@ export function useSaaSPreferences(): Preferences {
   if (!value) throw new Error('SaaSPreferencesProvider is required');
   return value;
 }
-export function PreferenceControls() {
-  const { locale, setLocale, themePreference, setThemePreference, t } = useSaaSPreferences();
-  return <div className="saas-preferences">
-    <button type="button" aria-label={t('切换为英文', 'Switch to Chinese')} onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}>{locale === 'zh' ? 'EN' : '中'}</button>
-    <button type="button" aria-label={t(themePreference === 'dark' ? '切换浅色主题' : '切换深色主题', themePreference === 'dark' ? 'Use light theme' : 'Use dark theme')} onClick={() => setThemePreference(themePreference === 'dark' ? 'light' : 'dark')}>{t(themePreference === 'dark' ? '浅色' : '深色', themePreference === 'dark' ? 'Light' : 'Dark')}</button>
-  </div>;
+export function LanguageSwitch({ variant = 'button' }: { variant?: 'button' | 'menu' } = {}) {
+  const { locale, setLocale, t } = useSaaSPreferences();
+  const label = t('切换为英文', 'Switch to Chinese');
+  const toggle = () => setLocale(locale === 'zh' ? 'en' : 'zh');
+  if (variant === 'menu') return <button type="button" className="saas-language-row" aria-label={label} onClick={toggle}><Languages size={16} aria-hidden="true" />{locale === 'zh' ? 'English' : '中文'}</button>;
+  return <button type="button" aria-label={label} onClick={toggle}>{locale === 'zh' ? 'EN' : '中'}</button>;
+}
+/** The language switch and the appearance-style button, for pages whose header has no account controls. */
+export function PreferenceControls({ appearance = true }: { appearance?: boolean } = {}) {
+  return <div className="saas-preferences"><LanguageSwitch />{appearance && <ThemePicker />}</div>;
 }
 
 /**

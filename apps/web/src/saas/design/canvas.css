@@ -488,7 +488,7 @@ html:root .saas-canvas-shell {
     & .awwo-node .canvas-composer { gap: 6px; padding: 6px 14px 14px; background: transparent; }
     & .awwo-node .canvas-composer-row {
       border: 0; border-radius: 18px; background: var(--saas-card);
-      box-shadow: 0 0 0 1px var(--saas-border) inset, 0 10px 28px -18px rgb(11 34 48 / 40%);
+      box-shadow: 0 0 0 1px var(--saas-border) inset, 0 10px 28px -18px rgb(var(--saas-shadow-rgb, 11 34 48) / 40%);
       transition: box-shadow var(--saas-dur-3) var(--saas-ease);
       &:focus-within { box-shadow: 0 0 0 1.5px var(--saas-focus) inset, 0 0 0 4px color-mix(in oklab, var(--saas-bio) 16%, transparent); }
     }
@@ -530,27 +530,33 @@ html:root .saas-canvas-shell {
   .canvas-root .awwo-node-delivery-drawer { border-left-color: var(--saas-hairline); background: color-mix(in srgb, var(--saas-text) 2%, var(--saas-node)); }
   .canvas-root:is([data-node-style='default'], :not([data-node-style])) .awwo-node-delivery-drawer:has(.awwo-deliverables) {
     color-scheme: dark;
-    --saas-text: #eaf3f5; --saas-muted: #aec3ca; --saas-subtle: #93aab2; --saas-link: #6cc6c8; --saas-focus: #6cc6c8;
-    --saas-border: rgb(140 200 220 / 18%); --saas-hairline: rgb(140 200 220 / 12%); --saas-border-strong: rgb(140 200 220 / 30%);
-    --saas-card: #0c2230; --saas-node: #0c2230; --saas-input: rgb(255 255 255 / 4%); --saas-raised: #12293a; --saas-field: rgb(255 255 255 / 6%);
+    /* The frame is the appearance style's tank (themes.css); the fallbacks are 深潜's. */
+    --saas-text: var(--saas-tank-ink, #eaf3f5); --saas-muted: var(--saas-tank-muted, #aec3ca);
+    --saas-subtle: color-mix(in srgb, var(--saas-tank-muted, #aec3ca) 84%, var(--saas-tank-2, #041219));
+    --saas-link: var(--saas-tank-focus, #6cc6c8); --saas-focus: var(--saas-tank-focus, #6cc6c8);
+    --saas-border: rgb(var(--saas-tank-line-rgb, 140 200 220) / 18%); --saas-hairline: rgb(var(--saas-tank-line-rgb, 140 200 220) / 12%); --saas-border-strong: rgb(var(--saas-tank-line-rgb, 140 200 220) / 30%);
+    --saas-card: var(--saas-tank-card, #0c2230); --saas-node: var(--saas-tank-card, #0c2230); --saas-input: rgb(255 255 255 / 4%); --saas-raised: var(--saas-tank-raised, #12293a); --saas-field: rgb(255 255 255 / 6%);
     --saas-soft: rgb(255 255 255 / 6%); --saas-soft-strong: rgb(255 255 255 / 10%);
-    --saas-primary: #eaf3f5; --saas-primary-hover: #fff; --saas-primary-active: #d3e3e7; --saas-on-primary: #041219;
-    --saas-accent: #4c9cf5; --saas-accent-soft: #11294a; --saas-accent-text: #041219;
+    --saas-primary: var(--saas-tank-ink, #eaf3f5); --saas-primary-hover: #fff; --saas-primary-active: color-mix(in srgb, var(--saas-tank-ink, #eaf3f5) 88%, var(--saas-tank-2, #041219)); --saas-on-primary: var(--saas-tank-2, #041219);
+    --saas-accent: var(--saas-tank-accent, #4c9cf5); --saas-accent-soft: var(--saas-tank-accent-soft, #11294a); --saas-accent-text: var(--saas-tank-2, #041219);
     --saas-success: #5cc28f; --saas-success-bg: #12352a; --saas-success-dot: #4cb581;
     --saas-warning: #e0a84a; --saas-warning-bg: #3a2c12; --saas-warning-dot: #e0a84a;
     --saas-danger: #ff7a70; --saas-danger-bg: #3d1a1c; --saas-on-danger: #041219;
-    --saas-signal: #5fe3e8; --saas-signal-soft: rgb(95 227 232 / 16%);
-    --text: #eaf3f5; --muted: #aec3ca; --faint: #93aab2; --line: rgb(140 200 220 / 18%); --card: #0c2230; --panel: #12293a; --soft: rgb(255 255 255 / 4%);
-    --awwo-ink: #eaf3f5; --awwo-muted: #aec3ca; --awwo-line: rgb(140 200 220 / 18%); --awwo-border: rgb(140 200 220 / 18%);
-    --awwo-card: #0c2230; --awwo-surface: #0c2230; --awwo-soft: rgb(255 255 255 / 4%); --awwo-bg: #041219; --awwo-hover: rgb(255 255 255 / 6%);
-    --awwo-teal: #7db8ff; --awwo-tint: #11294a; --awwo-accent: #7db8ff; --awwo-accent-soft: #11294a; --awwo-error: #ff7a70;
-    --bg-base: #041219; --bg-card: #0c2230; --text-primary: #eaf3f5; --text-secondary: #aec3ca; --border-light: rgb(140 200 220 / 18%);
-    --accent: #4c9cf5; --accent-soft: #11294a; --fg: #eaf3f5;
-    border-left: 1px solid rgb(140 200 220 / 16%); color: var(--saas-text);
-    background: radial-gradient(80% 40% at 50% 0%, rgb(95 227 232 / 10%), transparent 70%), #041219;
-    & .awwo-deliverables-receipt::before { background: #5fe3e8; box-shadow: 0 0 8px #5fe3e8; }
+    --saas-signal: rgb(var(--saas-glow-1-rgb, 95 227 232)); --saas-signal-soft: rgb(var(--saas-glow-1-rgb, 95 227 232) / 16%);
+    --text: var(--saas-tank-ink, #eaf3f5); --muted: var(--saas-tank-muted, #aec3ca); --faint: color-mix(in srgb, var(--saas-tank-muted, #aec3ca) 84%, var(--saas-tank-2, #041219));
+    --line: rgb(var(--saas-tank-line-rgb, 140 200 220) / 18%); --card: var(--saas-tank-card, #0c2230); --panel: var(--saas-tank-raised, #12293a); --soft: rgb(255 255 255 / 4%);
+    --awwo-ink: var(--saas-tank-ink, #eaf3f5); --awwo-muted: var(--saas-tank-muted, #aec3ca); --awwo-line: rgb(var(--saas-tank-line-rgb, 140 200 220) / 18%); --awwo-border: rgb(var(--saas-tank-line-rgb, 140 200 220) / 18%);
+    --awwo-card: var(--saas-tank-card, #0c2230); --awwo-surface: var(--saas-tank-card, #0c2230); --awwo-soft: rgb(255 255 255 / 4%); --awwo-bg: var(--saas-tank-2, #041219); --awwo-hover: rgb(255 255 255 / 6%);
+    --awwo-teal: color-mix(in srgb, var(--saas-tank-accent, #4c9cf5) 72%, #fff); --awwo-tint: var(--saas-tank-accent-soft, #11294a);
+    --awwo-accent: color-mix(in srgb, var(--saas-tank-accent, #4c9cf5) 72%, #fff); --awwo-accent-soft: var(--saas-tank-accent-soft, #11294a); --awwo-error: #ff7a70;
+    --bg-base: var(--saas-tank-2, #041219); --bg-card: var(--saas-tank-card, #0c2230); --text-primary: var(--saas-tank-ink, #eaf3f5); --text-secondary: var(--saas-tank-muted, #aec3ca);
+    --border-light: rgb(var(--saas-tank-line-rgb, 140 200 220) / 18%);
+    --accent: var(--saas-tank-accent, #4c9cf5); --accent-soft: var(--saas-tank-accent-soft, #11294a); --fg: var(--saas-tank-ink, #eaf3f5);
+    border-left: 1px solid rgb(var(--saas-tank-line-rgb, 140 200 220) / 16%); color: var(--saas-text);
+    background: radial-gradient(80% 40% at 50% 0%, rgb(var(--saas-glow-1-rgb, 95 227 232) / 10%), transparent 70%), var(--saas-tank-2, #041219);
+    & .awwo-deliverables-receipt::before { background: rgb(var(--saas-glow-1-rgb, 95 227 232)); box-shadow: 0 0 8px rgb(var(--saas-glow-1-rgb, 95 227 232)); }
     & .awwo-deliverables-receipt.is-caveat::before { background: var(--saas-warning-dot); box-shadow: none; }
-    & .awwo-deliverable { border: 0; border-radius: 14px; background: #fff; color: #0b2230; box-shadow: 0 0 0 1px rgb(140 200 220 / 12%), 0 18px 48px -16px rgb(0 0 0 / 62%); overflow: hidden; }
+    & .awwo-deliverable { border: 0; border-radius: 14px; background: #fff; color: #0b2230; box-shadow: 0 0 0 1px rgb(var(--saas-tank-line-rgb, 140 200 220) / 12%), 0 18px 48px -16px rgb(0 0 0 / 62%); overflow: hidden; }
     /* The sheet is paper in both themes. */
     & .awwo-deliverable {
       color-scheme: light;
@@ -573,13 +579,13 @@ html:root .saas-canvas-shell {
     }
     & .awwo-deliverable-files { gap: 6px; }
     & .awwo-deliverable-files button {
-      min-height: 32px; padding: 0 12px; border: 0; border-radius: 12px; background: rgb(255 255 255 / 4%); color: #cfe3e8;
-      box-shadow: 0 0 0 1px rgb(140 200 220 / 10%) inset; font: 500 var(--saas-text-xs)/1 var(--saas-font-mono);
-      &:hover { background: rgb(255 255 255 / 8%); color: #eaf3f5; }
-      &[aria-pressed='true'] { background: rgb(95 227 232 / 14%); color: #eaf3f5; box-shadow: 0 0 0 1px rgb(95 227 232 / 40%) inset; }
+      min-height: 32px; padding: 0 12px; border: 0; border-radius: 12px; background: rgb(255 255 255 / 4%); color: color-mix(in srgb, var(--saas-tank-ink, #eaf3f5) 88%, var(--saas-tank-muted, #aec3ca));
+      box-shadow: 0 0 0 1px rgb(var(--saas-tank-line-rgb, 140 200 220) / 10%) inset; font: 500 var(--saas-text-xs)/1 var(--saas-font-mono);
+      &:hover { background: rgb(255 255 255 / 8%); color: var(--saas-tank-ink, #eaf3f5); }
+      &[aria-pressed='true'] { background: rgb(var(--saas-glow-1-rgb, 95 227 232) / 14%); color: var(--saas-tank-ink, #eaf3f5); box-shadow: 0 0 0 1px rgb(var(--saas-glow-1-rgb, 95 227 232) / 40%) inset; }
     }
-    & .awwo-expected-deliverables { border-color: rgb(140 200 220 / 14%); border-radius: 14px; background: rgb(255 255 255 / 4%); color: #cfe3e8; }
-    & .awwo-expected-deliverables li { border-bottom-color: rgb(140 200 220 / 10%); }
+    & .awwo-expected-deliverables { border-color: rgb(var(--saas-tank-line-rgb, 140 200 220) / 14%); border-radius: 14px; background: rgb(255 255 255 / 4%); color: color-mix(in srgb, var(--saas-tank-ink, #eaf3f5) 88%, var(--saas-tank-muted, #aec3ca)); }
+    & .awwo-expected-deliverables li { border-bottom-color: rgb(var(--saas-tank-line-rgb, 140 200 220) / 10%); }
   }
   .canvas-root .awwo-node-delivery-drawer > header { min-height: 44px; border-bottom-color: var(--saas-hairline); color: var(--saas-text); font: 650 var(--saas-text-sm)/1.3 var(--saas-font); }
   /* A long delivery scrolls inside the drawer: its last lines fade at the edge while more is below, and the
@@ -743,22 +749,22 @@ html:root .saas-canvas-shell {
     content: ''; width: 84px; aspect-ratio: 1; margin-bottom: 18px; border-radius: 50%;
     background:
       radial-gradient(circle at 33% 25%, rgb(255 255 255 / 95%) 0 2.5%, rgb(255 255 255 / 0%) 13%),
-      radial-gradient(circle at 50% 57%, rgb(236 253 255 / 95%) 0 4%, rgb(95 227 232 / 75%) 12%, rgb(118 100 236 / 32%) 34%, transparent 58%),
-      radial-gradient(circle at 50% 50%, #12385a 0 46%, #0a1c33 72%);
-    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%), inset -5px -8px 15px rgb(0 0 0 / 38%), 0 16px 36px -16px rgb(63 214 224 / 60%);
+      radial-gradient(circle at 50% 57%, rgb(var(--saas-orb-hi-rgb, 236 253 255) / 95%) 0 4%, rgb(var(--saas-glow-1-rgb, 95 227 232) / 75%) 12%, rgb(var(--saas-glow-2-rgb, 118 100 236) / 32%) 34%, transparent 58%),
+      radial-gradient(circle at 50% 50%, var(--saas-orb-core, #12385a) 0 46%, var(--saas-orb-edge, #0a1c33) 72%);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%), inset -5px -8px 15px rgb(0 0 0 / 38%), 0 16px 36px -16px rgb(var(--saas-glow-1-rgb, 63 214 224) / 60%);
   }
   .awwo-canvas-assistant--welcome .awwo-assistant-header::after {
     content: ''; position: absolute; top: 34px; left: 50%; width: 121px; height: 15px; translate: -50% 0; rotate: -10deg;
-    border-radius: 50%; border: 1px solid rgb(169 155 255 / 55%); pointer-events: none;
+    border-radius: 50%; border: 1px solid rgb(var(--saas-orb-ring-rgb, 169 155 255) / 55%); pointer-events: none;
   }
   .awwo-canvas-assistant--welcome .awwo-assistant-header h1 { font: 690 clamp(30px, 3.4vw, 46px)/var(--saas-display-leading, 1.02) var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track); }
   .awwo-assistant-icon-button { width: 32px; height: 32px; border-radius: 50%; color: var(--saas-muted); }
   .awwo-assistant-icon-button:hover { background: var(--saas-soft); color: var(--saas-text); }
   .awwo-assistant-composer {
     padding: 12px 10px 10px 16px; border: 0; border-radius: 22px;
-    background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-border) inset, 0 14px 36px -20px rgb(11 34 48 / 40%);
+    background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-border) inset, 0 14px 36px -20px rgb(var(--saas-shadow-rgb, 11 34 48) / 40%);
     transition: box-shadow var(--saas-dur-3) var(--saas-ease);
-    &:focus-within { box-shadow: 0 0 0 1.5px var(--saas-focus) inset, 0 0 0 5px color-mix(in oklab, var(--saas-bio) 16%, transparent), 0 18px 42px -20px rgb(11 34 48 / 40%); }
+    &:focus-within { box-shadow: 0 0 0 1.5px var(--saas-focus) inset, 0 0 0 5px color-mix(in oklab, var(--saas-bio) 16%, transparent), 0 18px 42px -20px rgb(var(--saas-shadow-rgb, 11 34 48) / 40%); }
   }
   .awwo-canvas-assistant--panel .awwo-assistant-composer { padding: 10px 8px 8px 12px; border-radius: 18px; }
   .awwo-canvas-assistant .awwo-assistant-composer textarea { color: var(--saas-text); font: 400 var(--saas-text-md)/1.65 var(--saas-font); }

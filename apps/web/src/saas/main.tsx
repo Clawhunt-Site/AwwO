@@ -8,6 +8,8 @@ import { installNavigationFeedback } from './navigation';
 import '../canvas/ios-theme.css';
 // The hosted app's design system, after the shared sheets it refines: tokens first, then components.
 import './design/tokens.css';
+// The appearance styles (外观风格): each one's values, over the tokens' defaults.
+import './design/themes.css';
 import './design/system.css';
 import './design/canvas.css';
 import './design/surfaces.css';

@@ -1,0 +1,210 @@
+/* AwwO appearance styles (外观风格): eight complete presets, four light and four dark.
+ *
+ * A style is a whole look, not an accent swap: page, sidebar, card and line colours, ink and muted text, the
+ * selection accent, links and focus, the live colour of running work, success / warning / danger, depth (shadows
+ * and the scrim), the canvas and its wires, the call-to-action gradient, and the deep "tank" and the AwwO orb that
+ * frame sign-in, the home page and the delivery drawer. Everything else in the app derives from these (tokens.css,
+ * section 2), so a style reaches every surface.
+ *
+ * How it is applied: `<html data-awwo-theme="<id>" data-theme="light|dark">`, set before the first paint by the
+ * script in saas.html and kept by SaaSPreferencesProvider (themes.ts holds the catalogue and the names). The light /
+ * dark attribute keeps every existing `[data-theme='dark']` rule working; this sheet only supplies the values.
+ * `.awwo-theme-preview[data-awwo-theme]` takes the same values on any element, so the picker's previews show each
+ * style for real. Selectors are `html:root[...]` so they outrank tokens.css's `:root[data-theme='dark']`.
+ *
+ * Contrast: every style keeps ink on page and card at 7:1 or more, muted text, the text accent and links at 4.5:1 or
+ * more on page, sidebar and card, and status text at 4.5:1 or more on its own soft chip
+ * (tests/saas-themes.test.ts checks every pair). 潮汐 and 深潜 are the values tokens.css always had. */
+
+/* ── Shared shapes ─────────────────────────────────────────────────────────────────────────────── */
+/* Light styles: depth is the style's own ink at low alpha (--saas-shadow-rgb), the canvas a step under the page. */
+html:root[data-awwo-theme], .awwo-theme-preview {
+  --saas-shadow-xs: 0 1px 2px rgb(var(--saas-shadow-rgb) / 6%);
+  --saas-shadow-sm: 0 1px 2px rgb(var(--saas-shadow-rgb) / 5%), 0 2px 6px rgb(var(--saas-shadow-rgb) / 6%);
+  --saas-shadow-md: 0 12px 32px -14px rgb(var(--saas-shadow-rgb) / 22%), 0 2px 6px rgb(var(--saas-shadow-rgb) / 5%);
+  --saas-shadow-lg: 0 18px 48px -18px rgb(var(--saas-shadow-rgb) / 28%), 0 2px 6px rgb(var(--saas-shadow-rgb) / 6%);
+  --saas-shadow-xl: 0 28px 80px -24px rgb(var(--saas-shadow-rgb) / 42%);
+  --saas-canvas: color-mix(in srgb, var(--bg-base) 96%, var(--text-primary));
+  --saas-canvas-dot: color-mix(in srgb, var(--text-primary) 13%, transparent);
+  --saas-canvas-shadow: rgb(var(--saas-shadow-rgb) / 9%);
+  --saas-wire: color-mix(in srgb, var(--text-primary) 38%, transparent);
+  --saas-raised: var(--bg-card);
+}
+/* Dark styles: depth reads as light (raised surfaces a step above the card), shadows are black. */
+html:root[data-awwo-theme][data-theme='dark'], .awwo-theme-preview[data-scheme='dark'] {
+  --saas-shadow-xs: 0 1px 2px rgb(0 0 0 / 40%);
+  --saas-shadow-sm: 0 1px 2px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 24%);
+  --saas-shadow-md: inset 0 1px 0 rgb(255 255 255 / 3%), 0 12px 32px -12px rgb(0 0 0 / 55%);
+  --saas-shadow-lg: inset 0 1px 0 rgb(255 255 255 / 3%), 0 18px 48px -16px rgb(0 0 0 / 60%);
+  --saas-shadow-xl: inset 0 1px 0 rgb(255 255 255 / 4%), 0 28px 80px -20px rgb(0 0 0 / 72%);
+  --saas-canvas: color-mix(in srgb, var(--bg-base) 72%, #000);
+  --saas-canvas-dot: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  --saas-canvas-shadow: rgb(0 0 0 / 45%);
+  --saas-wire: color-mix(in srgb, var(--text-primary) 34%, transparent);
+  --saas-raised: color-mix(in srgb, var(--bg-card) 92%, #fff);
+  --saas-accent: var(--accent);
+}
+
+/* ── 潮汐 Tide (light): salt paper, abyss ink, blue selection, tide-pool teal. The ClawHunt main site's look. ── */
+html:root[data-awwo-theme='tide'], .awwo-theme-preview[data-awwo-theme='tide'] {
+  color-scheme: light;
+  --bg-base: #eef0ef; --bg-sidebar: #f7f8f8; --bg-card: #ffffff; --border-light: #dde3e2;
+  --text-primary: #0b2230; --text-secondary: #4b5d65;
+  --accent: #2b7ad8; --accent-soft: #e1ecfb; --sc-accent: #2b7ad8;
+  --saas-accent: color-mix(in oklab, var(--accent) 74%, var(--text-primary));
+  --saas-link: #1c6f76; --saas-link-hover: #13545a;
+  --agent-running: #2bb3bb; --agent-running-soft: rgb(43 179 187 / 14%);
+  --saas-bio: #2bb3bb; --saas-bio-lilac: #8b78e6;
+  --saas-success: #1d7049; --saas-success-dot: #2f9e6b; --saas-success-soft: #dcefe4;
+  --warn: #8f5a0c; --warn-soft: #f6ead3; --saas-warning-dot: #c98a1e; --danger-bg: #c8382f;
+  --saas-shadow-rgb: 11 34 48; --saas-scrim: rgb(7 22 31 / 46%);
+  --saas-brand-grad: linear-gradient(105deg, #2f7be0 0%, #2593c8 52%, #1aa3a8 100%);
+  --saas-tank-1: #06202b; --saas-tank-2: #041219; --saas-tank-3: #030d14; --saas-tank-card: #0c2230; --saas-tank-raised: #12293a;
+  --saas-tank-ink: #eaf3f5; --saas-tank-muted: #aec3ca; --saas-tank-focus: #6cc6c8; --saas-tank-accent: #4c9cf5; --saas-tank-accent-soft: #11294a;
+  --saas-tank-line-rgb: 140 200 220; --saas-tank-glass-rgb: 9 30 45;
+  --saas-glow-1-rgb: 95 227 232; --saas-glow-2-rgb: 118 100 236;
+  --saas-orb-core: #12385a; --saas-orb-edge: #0a1c33; --saas-orb-hi-rgb: 236 253 255; --saas-orb-ring-rgb: 169 155 255;
+}
+
+/* ── 云白 Cloud (light): neutral white and grey, no tint at all; indigo selection, sky-blue live work. ── */
+html:root[data-awwo-theme='cloud'], .awwo-theme-preview[data-awwo-theme='cloud'] {
+  color-scheme: light;
+  --bg-base: #f3f4f7; --bg-sidebar: #f9fafb; --bg-card: #ffffff; --border-light: #e1e4ea;
+  --text-primary: #141821; --text-secondary: #596173;
+  --accent: #4258e8; --accent-soft: #e7eafd; --sc-accent: #4258e8;
+  --saas-accent: #3346c4;
+  --saas-link: #3346c4; --saas-link-hover: #2635a3;
+  --agent-running: #0e9bd8; --agent-running-soft: rgb(14 155 216 / 14%);
+  --saas-bio: #0e9bd8; --saas-bio-lilac: #8b7cf6;
+  --saas-success: #17784a; --saas-success-dot: #20a067; --saas-success-soft: #ddf2e6;
+  --warn: #875700; --warn-soft: #f6ebd5; --saas-warning-dot: #d08a12; --danger-bg: #c4352b;
+  --saas-shadow-rgb: 20 24 33; --saas-scrim: rgb(12 15 22 / 44%);
+  --saas-brand-grad: linear-gradient(105deg, #4258e8 0%, #5a63f0 52%, #7b61f2 100%);
+  --saas-tank-1: #1a1f2d; --saas-tank-2: #10131c; --saas-tank-3: #0b0d14; --saas-tank-card: #181c29; --saas-tank-raised: #1f2433;
+  --saas-tank-ink: #eef1f8; --saas-tank-muted: #aab2c5; --saas-tank-focus: #9db0ff; --saas-tank-accent: #8c9bff; --saas-tank-accent-soft: #1f2650;
+  --saas-tank-line-rgb: 160 172 210; --saas-tank-glass-rgb: 22 27 42;
+  --saas-glow-1-rgb: 99 132 255; --saas-glow-2-rgb: 56 189 248;
+  --saas-orb-core: #1d2a5c; --saas-orb-edge: #10152e; --saas-orb-hi-rgb: 238 242 255; --saas-orb-ring-rgb: 125 211 252;
+}
+
+/* ── 暖纸 Paper (light): cream paper and espresso ink, terracotta selection, petrol-blue live work. ── */
+html:root[data-awwo-theme='paper'], .awwo-theme-preview[data-awwo-theme='paper'] {
+  color-scheme: light;
+  --bg-base: #f3eee4; --bg-sidebar: #f9f5ec; --bg-card: #fffcf6; --border-light: #e4dac8;
+  --text-primary: #2a2017; --text-secondary: #67584a;
+  --accent: #b4532c; --accent-soft: #f5e2d6; --sc-accent: #b4532c;
+  --saas-accent: #97421f;
+  --saas-link: #97421f; --saas-link-hover: #7a3418;
+  --agent-running: #2d82a3; --agent-running-soft: rgb(45 130 163 / 14%);
+  --saas-bio: #2d82a3; --saas-bio-lilac: #c96f4a;
+  --saas-success: #2e6b3c; --saas-success-dot: #3f8f53; --saas-success-soft: #e1ecd9;
+  --warn: #8a560a; --warn-soft: #f2e3c7; --saas-warning-dot: #c48416; --danger-bg: #b0372b;
+  --saas-shadow-rgb: 42 32 23; --saas-scrim: rgb(30 22 15 / 44%);
+  --saas-brand-grad: linear-gradient(105deg, #b4532c 0%, #cf6a2f 52%, #e0913c 100%);
+  --saas-tank-1: #2c2118; --saas-tank-2: #1f1711; --saas-tank-3: #17110c; --saas-tank-card: #2a2018; --saas-tank-raised: #33281e;
+  --saas-tank-ink: #f7eee2; --saas-tank-muted: #cdbba5; --saas-tank-focus: #f0b56e; --saas-tank-accent: #f0a46b; --saas-tank-accent-soft: #42291a;
+  --saas-tank-line-rgb: 214 180 140; --saas-tank-glass-rgb: 46 34 24;
+  --saas-glow-1-rgb: 232 154 60; --saas-glow-2-rgb: 196 92 60;
+  --saas-orb-core: #5a2c18; --saas-orb-edge: #2a160c; --saas-orb-hi-rgb: 255 244 228; --saas-orb-ring-rgb: 240 181 110;
+}
+
+/* ── 樱雾 Blossom (light): a rose-tinted page and plum ink, rose selection, violet live work. ── */
+html:root[data-awwo-theme='blossom'], .awwo-theme-preview[data-awwo-theme='blossom'] {
+  color-scheme: light;
+  --bg-base: #f8f0f2; --bg-sidebar: #fcf6f8; --bg-card: #ffffff; --border-light: #eedbe2;
+  --text-primary: #2a1520; --text-secondary: #6d5260;
+  --accent: #d6336c; --accent-soft: #fbe1ea; --sc-accent: #d6336c;
+  --saas-accent: #b0255a;
+  --saas-link: #b0255a; --saas-link-hover: #8e1c48;
+  --agent-running: #8257e6; --agent-running-soft: rgb(130 87 230 / 14%);
+  --saas-bio: #8257e6; --saas-bio-lilac: #e8608f;
+  --saas-success: #1d774b; --saas-success-dot: #2b9a64; --saas-success-soft: #ddf1e5;
+  --warn: #8c570b; --warn-soft: #f7e8cf; --saas-warning-dot: #cf8a1b; --danger-bg: #b42318;
+  --saas-shadow-rgb: 42 21 32; --saas-scrim: rgb(32 12 22 / 44%);
+  --saas-brand-grad: linear-gradient(105deg, #e8457e 0%, #d6336c 50%, #a347d4 100%);
+  --saas-tank-1: #2c1422; --saas-tank-2: #1e0f18; --saas-tank-3: #160a12; --saas-tank-card: #2a1521; --saas-tank-raised: #341b2a;
+  --saas-tank-ink: #faeaf1; --saas-tank-muted: #d6b5c4; --saas-tank-focus: #f39ac0; --saas-tank-accent: #f58ab3; --saas-tank-accent-soft: #4a1a31;
+  --saas-tank-line-rgb: 230 170 195; --saas-tank-glass-rgb: 44 20 33;
+  --saas-glow-1-rgb: 240 101 149; --saas-glow-2-rgb: 151 117 250;
+  --saas-orb-core: #5c1a3a; --saas-orb-edge: #2a0c1c; --saas-orb-hi-rgb: 255 236 245; --saas-orb-ring-rgb: 196 170 255;
+}
+
+/* ── 深潜 Night dive (dark): abyss navy, blue selection, bright teal live work. The main site's dark look. ── */
+html:root[data-awwo-theme='night'], .awwo-theme-preview[data-awwo-theme='night'] {
+  color-scheme: dark;
+  --bg-base: #07161f; --bg-sidebar: #0a1c27; --bg-card: #0c2230; --border-light: #1f3a4b;
+  --text-primary: #e7eef0; --text-secondary: #a3b5bc;
+  --accent: #4c9cf5; --accent-soft: #11294a; --sc-accent: #4c9cf5;
+  --saas-link: #6cc6c8; --saas-link-hover: #93dcdd;
+  --agent-running: #5fe3e8; --agent-running-soft: rgb(95 227 232 / 16%);
+  --saas-bio: #5fe3e8; --saas-bio-lilac: #a99bff;
+  --saas-success: #5cc28f; --saas-success-dot: #4cb581; --saas-success-soft: #12352a;
+  --warn: #e0a84a; --warn-soft: #3a2c12; --saas-warning-dot: #e0a84a; --danger-bg: #ff7a70;
+  --saas-shadow-rgb: 0 0 0; --saas-scrim: rgb(2 8 12 / 62%);
+  --saas-brand-grad: linear-gradient(105deg, #2f7be0 0%, #2593c8 52%, #1aa3a8 100%);
+  --saas-tank-1: #06202b; --saas-tank-2: #041219; --saas-tank-3: #030d14; --saas-tank-card: #0c2230; --saas-tank-raised: #12293a;
+  --saas-tank-ink: #eaf3f5; --saas-tank-muted: #aec3ca; --saas-tank-focus: #6cc6c8; --saas-tank-accent: #4c9cf5; --saas-tank-accent-soft: #11294a;
+  --saas-tank-line-rgb: 140 200 220; --saas-tank-glass-rgb: 9 30 45;
+  --saas-glow-1-rgb: 95 227 232; --saas-glow-2-rgb: 118 100 236;
+  --saas-orb-core: #12385a; --saas-orb-edge: #0a1c33; --saas-orb-hi-rgb: 236 253 255; --saas-orb-ring-rgb: 169 155 255;
+}
+
+/* ── 石墨 Graphite (dark): neutral charcoal with no hue, soft blue selection, cyan live work. ── */
+html:root[data-awwo-theme='graphite'], .awwo-theme-preview[data-awwo-theme='graphite'] {
+  color-scheme: dark;
+  --bg-base: #121316; --bg-sidebar: #16171b; --bg-card: #1b1d21; --border-light: #2d3037;
+  --text-primary: #ececf0; --text-secondary: #a2a7b3;
+  --accent: #7ea4ff; --accent-soft: #1e2842; --sc-accent: #7ea4ff;
+  --saas-link: #8fb3ff; --saas-link-hover: #b3cbff;
+  --agent-running: #5ad1e6; --agent-running-soft: rgb(90 209 230 / 16%);
+  --saas-bio: #5ad1e6; --saas-bio-lilac: #b4a7ff;
+  --saas-success: #5cc28f; --saas-success-dot: #4cb581; --saas-success-soft: #15301f;
+  --warn: #e5a84b; --warn-soft: #3a2d16; --saas-warning-dot: #e5a84b; --danger-bg: #ff7b72;
+  --saas-shadow-rgb: 0 0 0; --saas-scrim: rgb(4 4 6 / 64%);
+  --saas-brand-grad: linear-gradient(105deg, #5f8dff 0%, #6f7cff 52%, #8d7bff 100%);
+  --saas-tank-1: #1d1f24; --saas-tank-2: #121316; --saas-tank-3: #0b0c0e; --saas-tank-card: #1b1d21; --saas-tank-raised: #23262b;
+  --saas-tank-ink: #ececf0; --saas-tank-muted: #a2a7b3; --saas-tank-focus: #8fb3ff; --saas-tank-accent: #7ea4ff; --saas-tank-accent-soft: #1e2842;
+  --saas-tank-line-rgb: 160 170 190; --saas-tank-glass-rgb: 30 32 38;
+  --saas-glow-1-rgb: 126 164 255; --saas-glow-2-rgb: 90 209 230;
+  --saas-orb-core: #22304d; --saas-orb-edge: #111622; --saas-orb-hi-rgb: 236 242 255; --saas-orb-ring-rgb: 143 179 255;
+}
+
+/* ── 极光 Aurora (dark): a deep violet night, violet selection, cyan light for live work. ── */
+html:root[data-awwo-theme='aurora'], .awwo-theme-preview[data-awwo-theme='aurora'] {
+  color-scheme: dark;
+  --bg-base: #0d0b1e; --bg-sidebar: #110e26; --bg-card: #17142f; --border-light: #2c2752;
+  --text-primary: #efebff; --text-secondary: #b0a8d8;
+  --accent: #a08fff; --accent-soft: #251f4f; --sc-accent: #a08fff;
+  --saas-link: #7fcbff; --saas-link-hover: #a8dcff;
+  --agent-running: #4fd8f0; --agent-running-soft: rgb(79 216 240 / 16%);
+  --saas-bio: #4fd8f0; --saas-bio-lilac: #c3a6ff;
+  --saas-success: #5fd39a; --saas-success-dot: #46c486; --saas-success-soft: #133024;
+  --warn: #f0b35b; --warn-soft: #3b2c15; --saas-warning-dot: #f0b35b; --danger-bg: #ff7e8a;
+  --saas-shadow-rgb: 0 0 0; --saas-scrim: rgb(4 2 14 / 64%);
+  --saas-brand-grad: linear-gradient(105deg, #7c5cff 0%, #a45cff 48%, #3ec5ff 100%);
+  --saas-tank-1: #1c1444; --saas-tank-2: #0d0b24; --saas-tank-3: #07051a; --saas-tank-card: #17142f; --saas-tank-raised: #201c3d;
+  --saas-tank-ink: #f1edff; --saas-tank-muted: #b2a9de; --saas-tank-focus: #a08fff; --saas-tank-accent: #a08fff; --saas-tank-accent-soft: #251f4f;
+  --saas-tank-line-rgb: 170 155 255; --saas-tank-glass-rgb: 28 22 60;
+  --saas-glow-1-rgb: 124 92 255; --saas-glow-2-rgb: 62 197 255;
+  --saas-orb-core: #2a1f6b; --saas-orb-edge: #120d33; --saas-orb-hi-rgb: 240 236 255; --saas-orb-ring-rgb: 79 216 240;
+}
+
+/* ── 琥珀夜 Ember (dark): warm brown-black, amber selection, cool sky-blue live work. ── */
+html:root[data-awwo-theme='ember'], .awwo-theme-preview[data-awwo-theme='ember'] {
+  color-scheme: dark;
+  --bg-base: #15100b; --bg-sidebar: #1a140f; --bg-card: #211a13; --border-light: #3b2f23;
+  --text-primary: #f5ede3; --text-secondary: #c3b29d;
+  --accent: #f0a04b; --accent-soft: #3f2a14; --sc-accent: #f0a04b;
+  --saas-link: #f3b36b; --saas-link-hover: #f8cd94;
+  --agent-running: #6fc3df; --agent-running-soft: rgb(111 195 223 / 16%);
+  --saas-bio: #6fc3df; --saas-bio-lilac: #e8833a;
+  --saas-success: #7cc98f; --saas-success-dot: #5fb877; --saas-success-soft: #1f3022;
+  --warn: #f5c451; --warn-soft: #3a2f14; --saas-warning-dot: #f5c451; --danger-bg: #ff8a75;
+  --saas-shadow-rgb: 0 0 0; --saas-scrim: rgb(8 5 2 / 64%);
+  --saas-brand-grad: linear-gradient(105deg, #e8590c 0%, #f08c2b 52%, #f5b041 100%);
+  --saas-tank-1: #2b1e13; --saas-tank-2: #1a120b; --saas-tank-3: #120c07; --saas-tank-card: #211a13; --saas-tank-raised: #2a2118;
+  --saas-tank-ink: #f6ede1; --saas-tank-muted: #cbb89f; --saas-tank-focus: #f3b36b; --saas-tank-accent: #f0a04b; --saas-tank-accent-soft: #3f2a14;
+  --saas-tank-line-rgb: 214 180 140; --saas-tank-glass-rgb: 44 30 18;
+  --saas-glow-1-rgb: 240 160 75; --saas-glow-2-rgb: 232 89 12;
+  --saas-orb-core: #5a3412; --saas-orb-edge: #2a1708; --saas-orb-hi-rgb: 255 241 222; --saas-orb-ring-rgb: 255 196 120;
+}
