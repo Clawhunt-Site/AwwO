@@ -20,10 +20,26 @@ MAX_CATALOG_BYTES = 512 * 1024
 EFFORT_LEVELS = ["low", "medium", "high"]
 PROTOCOLS = {"chat_completions", "responses"}
 DEFAULT_BASE_URLS = {"openai": "https://api.openai.com/v1", "llmgate": "https://api.clawhunt.site/v1"}
+# A run's pictures (vision): at most six, each at most 3.75 MiB, for the final user turn only. Six of the largest are
+# 31.5 MB as base64, so the body bound leaves room for the largest text besides.
+MAX_IMAGES = 6
+MAX_IMAGE_BYTES = 3_932_160
+BODY_BYTES = 34 * 1024 * 1024
 
 
 class ConfigError(ValueError):
     pass
+
+
+def _parse_input(value, where: str) -> tuple:
+    """What a profile's model takes: text, unless it names ["text", "image"]. Anything else is refused at start, so a
+    misspelt list never sends pictures to a text model."""
+    if value is None:
+        return ("text",)
+    if (not isinstance(value, list) or not 1 <= len(value) <= 2 or len(set(value)) != len(value)
+            or any(kind not in ("text", "image") for kind in value) or "text" not in value):
+        raise ConfigError(f"Invalid input in {where}")
+    return tuple(value)
 
 
 @dataclass(frozen=True)
@@ -47,6 +63,8 @@ class ModelProfile:
     region: str = ""
     # Claude Bedrock catalog models only: explicit prompt-cache checkpoints (AWWO_BEDROCK_PROMPT_CACHE_MODELS).
     prompt_cache: bool = False
+    # What the model takes: ("text",), or ("text", "image") for one that sees a run's pictures (vision).
+    input: tuple = ("text",)
 
     def to_health(self) -> dict:
         return {
@@ -66,6 +84,8 @@ class ModelProfile:
             "messageOverheadBytes": 32,
             "reasoningEfforts": list(self.reasoning_efforts),
             "defaultReasoningEffort": self.default_reasoning_effort,
+            # The API shows pictures only to a model listing "image" here (vision).
+            "input": list(self.input),
         }
 
 
@@ -130,14 +150,16 @@ def _flag(env: dict, key: str) -> bool:
 
 
 BEDROCK_PROFILE_FIELDS = {"id", "provider", "model", "region", "apiKeyEnv", "contextWindow", "maxTokens", "name",
-                          "reasoningEfforts", "defaultReasoningEffort", "structuredOutput"}
+                          "reasoningEfforts", "defaultReasoningEffort", "structuredOutput", "input"}
 
 
-def _bedrock_profile(entry_id: str, name: str, target: str, region: str, api_key: str, context_window: int, max_tokens: int) -> ModelProfile:
+def _bedrock_profile(entry_id: str, name: str, target: str, region: str, api_key: str, context_window: int, max_tokens: int,
+                     input_kinds: tuple = ("text",)) -> ModelProfile:
     # Bedrock is reached only through the Converse bridge, as an OpenAI-compatible endpoint;
     # it never advertises effort (the bridge refuses it).
     return ModelProfile(id=entry_id, provider="bedrock", model=target, base_url=bridge_base_url(region), api_key=api_key,
-                        protocol="chat_completions", context_window=context_window, max_tokens=max_tokens, name=name, region=region)
+                        protocol="chat_completions", context_window=context_window, max_tokens=max_tokens, name=name, region=region,
+                        input=input_kinds)
 
 
 def _bedrock_models_json_profile(value: dict, env: dict, ids: set, default: ModelProfile, missing: list) -> ModelProfile:
@@ -168,7 +190,8 @@ def _bedrock_models_json_profile(value: dict, env: dict, ids: set, default: Mode
         region = value.get("region") or bedrock_region(env)
     except CatalogError as e:
         raise ConfigError(str(e))
-    return _bedrock_profile(value["id"], value.get("name", value["model"]), value["model"], region, api_key, context_window, max_tokens)
+    input_kinds = _parse_input(value.get("input"), "AWWO_OPENAI_AGENTS_MODELS_JSON")
+    return _bedrock_profile(value["id"], value.get("name", value["model"]), value["model"], region, api_key, context_window, max_tokens, input_kinds)
 
 
 def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, missing: list) -> list:
@@ -219,6 +242,7 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
         disable_thinking = value.get("disableThinking", False)
         if not isinstance(disable_thinking, bool):
             raise ConfigError("Invalid disableThinking in AWWO_OPENAI_AGENTS_MODELS_JSON")
+        input_kinds = _parse_input(value.get("input"), "AWWO_OPENAI_AGENTS_MODELS_JSON")
         profiles.append(ModelProfile(
             id=value["id"],
             provider=provider,
@@ -231,6 +255,7 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
             reasoning_efforts=efforts,
             default_reasoning_effort=default_effort,
             thinking=not disable_thinking,
+            input=input_kinds,
         ))
         ids.add(value["id"])
     return profiles
@@ -283,13 +308,18 @@ def load_config(env: dict | None = None) -> Config:
     except ConfigError as e:
         raise ConfigError(str(e))
     disable_thinking = _flag(env, "AWWO_OPENAI_AGENTS_DISABLE_THINKING")
+    raw_input = (env.get("AWWO_OPENAI_AGENTS_INPUT") or "").strip()
+    try:
+        default_input = _parse_input([kind.strip() for kind in raw_input.split(",")] if raw_input else None, "AWWO_OPENAI_AGENTS_INPUT")
+    except ConfigError:
+        raise ConfigError("AWWO_OPENAI_AGENTS_INPUT must be text or text,image")
 
     default_profile = ModelProfile(
         id=model, provider=provider, model=model,
         base_url=base_url, api_key=api_key, protocol=protocol,
         context_window=context_window, max_tokens=max_tokens,
         reasoning_efforts=efforts, default_reasoning_effort=default_effort,
-        thinking=not disable_thinking,
+        thinking=not disable_thinking, input=default_input,
     )
     configured = _load_profiles(env.get("AWWO_OPENAI_AGENTS_MODELS_JSON"), env, default_profile, missing)
     try:
@@ -300,7 +330,8 @@ def load_config(env: dict | None = None) -> Config:
         cached = prompt_cache_models(env, selected)
     except CatalogError as e:
         raise ConfigError(f"Bedrock catalog configuration is invalid: {e}")
-    catalog = [replace(_bedrock_profile(entry["id"], entry["name"], entry["target"], region, catalog_key, entry["contextWindow"], entry["maxTokens"]),
+    catalog = [replace(_bedrock_profile(entry["id"], entry["name"], entry["target"], region, catalog_key, entry["contextWindow"], entry["maxTokens"],
+                                        tuple(entry["input"])),
                        prompt_cache=entry["id"] in cached)
                for entry in selected]
     if any(p.id in {c.id for c in configured} for p in catalog) or len(configured) + len(catalog) > MAX_CATALOG_MODELS:
@@ -353,6 +384,8 @@ def public_health(config: Config, active_runs: int = 0) -> dict:
         "supportsEffortSelection": any(p.reasoning_efforts for p in config.models),
         "tools": [tool_metadata(name) for name in config.enabled_tools],
         "models": [p.to_health() for p in config.models if p.id and p.provider],
+        # This worker takes a run's pictures ("images") and shows them to the models whose input lists "image".
+        "imageInput": True,
         "activeRuns": active_runs,
         "version": "0.1.0",
         "telemetryProtocolVersion": 1,
@@ -361,7 +394,9 @@ def public_health(config: Config, active_runs: int = 0) -> dict:
         "sdkVersion": "python",
         "modelConnectivityVerified": False,
         "limits": {
-            "bodyBytes": 2_097_152,
+            "bodyBytes": BODY_BYTES,
+            "images": MAX_IMAGES,
+            "imageBytes": MAX_IMAGE_BYTES,
             "promptChars": 200_000,
             "systemPromptChars": 200_000,
             "historyMessages": 200,

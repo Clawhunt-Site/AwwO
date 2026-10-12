@@ -11,13 +11,16 @@ Nothing is invented: content the bridge cannot map faithfully is refused with a
 400, and a stream that ends without a stop reason, or carries an event or content type
 the bridge does not know, is an error. The deliberate adaptations (an empty tool result
 sent as "(empty result)", ``parallel_tool_calls: false`` enforced by relaying only the
-first tool call of a turn, request metadata without a Converse counterpart) are the same
+first tool call of a turn, request metadata without a Converse counterpart, a user turn's
+base64 pictures sent as Converse image blocks without their ``detail`` hint) are the same
 as the TypeScript bridge's and are listed in docs/awwo-bedrock.md.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import re
 import threading
@@ -35,7 +38,8 @@ BEDROCK_REGIONS = (
 BRIDGE_PATH = "/awwo-bedrock-converse/v1"
 # The OpenAI SDK requires an API key string; the bridge ignores the header it produces.
 BRIDGE_API_KEY = "awwo-bedrock-bridge"
-MAX_REQUEST_BYTES = 32 * 1024 * 1024
+# Six pictures of 3.75 MiB are 31.5 MB as base64; the rest is room for the largest text the worker accepts.
+MAX_REQUEST_BYTES = 40 * 1024 * 1024
 TOOL_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 TOOL_USE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 BEARER = re.compile(r"[\x21-\x7e]{16,8192}")
@@ -136,6 +140,51 @@ def _text_block(text: str) -> list:
     return [{"text": text}] if text.strip() else []
 
 
+# A picture the worker sends in a user turn (vision): a data: URL of a Converse image format, decoded here. Bedrock
+# takes at most 20 per request and 3.75 MB each; a remote URL is never fetched. botocore does not check the format.
+IMAGE_DATA_URL = re.compile(r"data:image/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/]+={0,2})")
+MAX_IMAGE_BYTES = 3_932_160
+MAX_IMAGES = 20
+
+
+def _image_block(part: dict) -> dict:
+    image = part.get("image_url")
+    if set(part) - {"type", "image_url"} or not isinstance(image, dict) or set(image) - {"url", "detail"} \
+            or image.get("detail", "auto") not in ("auto", "low", "high"):
+        _reject("Invalid image content")
+    match = IMAGE_DATA_URL.fullmatch(image["url"]) if isinstance(image.get("url"), str) else None
+    if not match or len(match.group(2)) % 4:
+        _reject("Only PNG, JPEG, GIF or WebP images sent as base64 data URLs are supported")
+    try:
+        raw = base64.b64decode(match.group(2), validate=True)
+    except (binascii.Error, ValueError):
+        _reject("Only PNG, JPEG, GIF or WebP images sent as base64 data URLs are supported")
+    if not 1 <= len(raw) <= MAX_IMAGE_BYTES:
+        _reject("An image is empty or larger than 3.75 MiB")
+    # `detail` has no Converse counterpart: the model reads the picture as it is (docs/awwo-bedrock.md).
+    return {"image": {"format": match.group(1), "source": {"bytes": raw}}}
+
+
+def _user_blocks(content: Any, images: list) -> list:
+    """A user turn's blocks: its text (adjacent text parts joined, as before) and its pictures, in order."""
+    if not isinstance(content, list) or not any(isinstance(p, dict) and p.get("type") == "image_url" for p in content):
+        return _text_block(_message_text(content, "user"))
+    blocks: list = []
+    text = ""
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "image_url":
+            blocks.extend(_text_block(text))
+            text = ""
+            images.append(None)
+            if len(images) > MAX_IMAGES:
+                _reject(f"At most {MAX_IMAGES} images are supported in one request")
+            blocks.append(_image_block(part))
+        else:
+            text += _message_text([part], "user")
+    blocks.extend(_text_block(text))
+    return blocks
+
+
 def _tool_use_block(call: Any) -> dict:
     if (not isinstance(call, dict) or call.get("type") != "function" or not isinstance(call.get("function"), dict)
             or not isinstance(call.get("id"), str) or not TOOL_USE_ID.fullmatch(call["id"])
@@ -205,6 +254,7 @@ def to_converse_input(body: Any, model_id: str) -> dict:
             messages.append({"role": role, "content": list(blocks)})
 
     tool_blocks = False
+    images: list = []
     for message in messages_in:
         if not isinstance(message, dict) or not isinstance(message.get("role"), str):
             _reject("Invalid message")
@@ -212,7 +262,7 @@ def to_converse_input(body: Any, model_id: str) -> dict:
         if role in ("system", "developer"):
             system.extend(_text_block(_message_text(message.get("content"), "system")))
         elif role == "user":
-            push("user", _text_block(_message_text(message.get("content"), "user")))
+            push("user", _user_blocks(message.get("content"), images))
         elif role == "assistant":
             if message.get("refusal") is not None:
                 _reject("Assistant refusals cannot be replayed")

@@ -13,7 +13,7 @@
 // The AWS SDK is injected by the caller, so this file imports no package and both
 // workers can load it with Node's type stripping (erasable syntax only).
 //
-// Nothing is invented: content the bridge cannot map faithfully (images, JSON-schema
+// Nothing is invented: content the bridge cannot map faithfully (remote images, JSON-schema
 // output, reasoning effort, sampling penalties, seeds) is refused with a 400 instead of
 // being dropped, and a stream that ends without a stop reason, or carries an event or
 // content type the bridge does not know, is an error. The adaptations it does make are
@@ -21,7 +21,9 @@
 // "(empty result)" because Converse rejects blank text; `parallel_tool_calls: false` is
 // enforced by relaying only the first tool call of a turn; request metadata such as
 // `store`, `user` or `prompt_cache_key` and a tool's `strict` flag have no Converse
-// counterpart and do not change the answer (the workers validate tool arguments).
+// counterpart and do not change the answer (the workers validate tool arguments); a user
+// turn's pictures, sent as base64 data URLs, become Converse image blocks without their
+// `detail` hint, which Converse has no counterpart for.
 
 /** Commercial regions with a Bedrock runtime endpoint. GovCloud and China are excluded. */
 export const BEDROCK_REGIONS: readonly string[] = Object.freeze([
@@ -31,7 +33,8 @@ export const BEDROCK_REGIONS: readonly string[] = Object.freeze([
 ]);
 /** Path of the bridge's synthetic base URL. It names this adapter and is never sent over the network. */
 export const BEDROCK_BRIDGE_PATH = '/awwo-bedrock-converse/v1';
-const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
+// Six pictures of 3.75 MiB are 31.5 MB as base64; the rest is room for the largest text a worker accepts.
+const MAX_REQUEST_BYTES = 40 * 1024 * 1024;
 const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const TOOL_USE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -165,6 +168,43 @@ function textBlock(text: string): ConverseBlock[] {
   return text.trim() ? [{ text }] : [];
 }
 
+// A picture the workers send in a user turn (vision): a data: URL of a Converse image format, decoded here. Bedrock
+// takes at most 20 per request and 3.75 MB each; a remote URL is never fetched.
+const IMAGE_DATA_URL = /^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
+const MAX_IMAGE_BYTES = 3_932_160;
+const MAX_IMAGES = 20;
+
+function imageBlock(part: Json): ConverseBlock {
+  const keys = Object.keys(part);
+  const image = part.image_url;
+  if (keys.some(key => key !== 'type' && key !== 'image_url') || !plain(image)
+    || Object.keys(image).some(key => key !== 'url' && key !== 'detail')
+    || (image.detail !== undefined && !['auto', 'low', 'high'].includes(image.detail as string))) return reject('Invalid image content');
+  const match = typeof image.url === 'string' ? IMAGE_DATA_URL.exec(image.url) : null;
+  if (!match || match[2].length % 4 !== 0) return reject('Only PNG, JPEG, GIF or WebP images sent as base64 data URLs are supported');
+  const bytes = Buffer.from(match[2], 'base64');
+  if (bytes.length < 1 || bytes.length > MAX_IMAGE_BYTES) return reject('An image is empty or larger than 3.75 MiB');
+  // `detail` has no Converse counterpart: the model reads the picture as it is (docs/awwo-bedrock.md).
+  return { image: { format: match[1], source: { bytes: new Uint8Array(bytes) } } };
+}
+
+// A user turn's blocks: its text (adjacent text parts joined, as before) and its pictures, in order.
+function userBlocks(content: unknown, images: { count: number }): ConverseBlock[] {
+  if (!Array.isArray(content) || !content.some(part => plain(part) && part.type === 'image_url')) return textBlock(messageText(content, 'user'));
+  const blocks: ConverseBlock[] = [];
+  let text = '';
+  for (const part of content) {
+    if (plain(part) && part.type === 'image_url') {
+      blocks.push(...textBlock(text));
+      text = '';
+      if (++images.count > MAX_IMAGES) reject(`At most ${MAX_IMAGES} images are supported in one request`);
+      blocks.push(imageBlock(part));
+    } else text += messageText([part], 'user');
+  }
+  blocks.push(...textBlock(text));
+  return blocks;
+}
+
 function toolUseBlock(call: unknown): ConverseBlock {
   if (!plain(call) || call.type !== 'function' || !plain(call.function)
     || typeof call.id !== 'string' || !TOOL_USE_ID.test(call.id)
@@ -208,6 +248,7 @@ export function toConverseInput(body: unknown, modelId: string): Json {
     else messages.push({ role, content: blocks });
   };
   let toolBlocks = false;
+  const images = { count: 0 };
   for (const message of body.messages as unknown[]) {
     if (!plain(message) || typeof message.role !== 'string') reject('Invalid message');
     const m = message as Json;
@@ -217,7 +258,7 @@ export function toConverseInput(body: unknown, modelId: string): Json {
         system.push(...textBlock(messageText(m.content, 'system')));
         break;
       case 'user':
-        push('user', textBlock(messageText(m.content, 'user')));
+        push('user', userBlocks(m.content, images));
         break;
       case 'assistant': {
         if (m.refusal !== undefined && m.refusal !== null) reject('Assistant refusals cannot be replayed');

@@ -14,8 +14,8 @@ import secrets
 
 from aiohttp import web
 
-from config import bind_user_model, load_config, public_health
-from runner import RunRequest, stream_run, validate_request
+from config import BODY_BYTES, bind_user_model, load_config, public_health
+from runner import RunRequest, model_takes_images, stream_run, validate_request
 
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
@@ -23,7 +23,8 @@ RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 def create_app() -> web.Application:
     config = load_config()
     state = {"active": 0, "runs": {}}
-    app = web.Application()
+    # aiohttp's default bound is 1 MiB; a run may carry six pictures (health publishes the same bound).
+    app = web.Application(client_max_size=BODY_BYTES)
     app["config"] = config
     app["state"] = state
     app.router.add_get("/health", handle_health)
@@ -66,6 +67,8 @@ async def handle_run(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "invalid_request", "message": str(e)}, status=400)
     if not RUN_ID.fullmatch(run_request.run_id):
         return web.json_response({"error": "invalid_request"}, status=400)
+    if run_request.images and not model_takes_images(run_config, run_request.model):
+        return web.json_response({"error": "images_unsupported", "message": "The selected model does not take images"}, status=400)
 
     # Reasoning activity is a count the caller opts in to with a header. A caller that
     # predates it never asks, so it keeps receiving exactly the stream it always did.

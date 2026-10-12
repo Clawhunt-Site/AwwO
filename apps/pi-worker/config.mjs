@@ -14,8 +14,16 @@ export const INPUT_LIMITS = Object.freeze({
   historyMessageChars: 32_768,
   historyMessages: 100,
   totalTextChars: 262_144,
-  bodyBytes: 1_048_576,
+  // Six pictures of 3.75 MiB are 31.5 MB as base64; the rest is room for the largest text.
+  bodyBytes: 34 * 1024 * 1024,
+  // A run's pictures (vision): at most six, each at most 3.75 MiB, for the final user turn only.
+  images: 6,
+  imageBytes: 3_932_160,
 });
+
+// The picture types Bedrock Converse and the providers take.
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 function integer(value, fallback, minimum, maximum, name) {
   if (value === undefined || value === '') return fallback;
@@ -27,8 +35,17 @@ function integer(value, fallback, minimum, maximum, name) {
   return parsed;
 }
 
-const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens']);
-const BEDROCK_PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'region', 'name']);
+const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'input']);
+const BEDROCK_PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'region', 'name', 'input']);
+
+// What a profile's model takes: text, unless it names ["text","image"] (a model that sees pictures). Anything else is
+// a configuration error, so a misspelt list never sends pictures to a text model.
+function profileInput(value) {
+  if (value === undefined) return Object.freeze(['text']);
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2 || new Set(value).size !== value.length
+    || value.some((kind) => kind !== 'text' && kind !== 'image') || !value.includes('text')) throw new Error('Invalid model input');
+  return Object.freeze([...value]);
+}
 const MAX_CATALOG_MODELS = 256; // Includes the required default profile.
 const MAX_CATALOG_BYTES = 512 * 1024;
 const MODEL_SELECTOR = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$/;
@@ -77,7 +94,7 @@ function bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing) {
   const contextWindow = profileInteger(value.contextWindow, defaultProfile.contextWindow, 4096, 2_000_000);
   const maxTokens = profileInteger(value.maxTokens, defaultProfile.maxTokens, 128, 32_768);
   if (maxTokens + 256 >= contextWindow) throw new Error();
-  return workerBedrockProfile(bedrockProfile({ id: value.id, name: value.name ?? value.model, vendor: '', target: value.model, contextWindow, maxTokens },
+  return workerBedrockProfile(bedrockProfile({ id: value.id, name: value.name ?? value.model, vendor: '', target: value.model, contextWindow, maxTokens, input: profileInput(value.input) },
     value.region ?? bedrockRegion(env), apiKey));
 }
 
@@ -141,7 +158,9 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
       const contextWindow = profileInteger(value.contextWindow, defaultProfile.contextWindow, 4096, 2_000_000);
       const maxTokens = profileInteger(value.maxTokens, defaultProfile.maxTokens, 128, 32_768);
       if (maxTokens + 256 >= contextWindow) throw new Error();
-      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, protocol: providerProtocol(value.provider), baseURL, apiKey, contextWindow, maxTokens }));
+      problem = `profile ${index + 1} has an invalid input list`;
+      const input = profileInput(value.input);
+      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, protocol: providerProtocol(value.provider), baseURL, apiKey, contextWindow, maxTokens, input }));
       ids.add(value.id);
     }
     return Object.freeze(profiles);
@@ -168,7 +187,10 @@ export function loadConfig(env = process.env) {
   const contextWindow = integer(env.AWWO_PI_CONTEXT_WINDOW, 32_768, 4096, 2_000_000, 'AWWO_PI_CONTEXT_WINDOW');
   const maxTokens = integer(env.AWWO_PI_MAX_TOKENS, 4096, 128, 32_768, 'AWWO_PI_MAX_TOKENS');
   if (maxTokens + 256 >= contextWindow) missing.push('AWWO_PI_MAX_TOKENS');
-  const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens }), missing);
+  let defaultInput;
+  try { defaultInput = profileInput(env.AWWO_PI_INPUT === undefined || env.AWWO_PI_INPUT.trim() === '' ? undefined : env.AWWO_PI_INPUT.split(',').map((kind) => kind.trim())); }
+  catch { throw new Error('AWWO_PI_INPUT must be text or text,image'); }
+  const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens, input: defaultInput }), missing);
   let catalog;
   const thinking = thinkingSetting(env);
   try {
@@ -233,7 +255,11 @@ export function publicHealth(config, activeRuns = 0) {
       maxOutputTokens: profile.maxTokens,
       maxContextTextBytes: Math.max(0, profile.contextWindow - profile.maxTokens - 256),
       messageOverheadBytes: 32,
+      // What the model takes; the API shows pictures only to a model listing 'image' (vision).
+      input: [...(profile.input ?? ['text'])],
     })),
+    // This worker takes a run's pictures ("images") and shows them to the models whose input lists 'image'.
+    imageInput: true,
     activeRuns,
     version: '0.1.0',
     telemetryProtocolVersion: 1,
@@ -253,9 +279,19 @@ export function publicHealth(config, activeRuns = 0) {
 }
 
 export function validateRequest(value) {
-  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime']);
+  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime', 'images']);
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error('Invalid request fields');
+  }
+  if (value.images !== undefined) {
+    if (!Array.isArray(value.images) || value.images.length < 1 || value.images.length > INPUT_LIMITS.images) throw new Error('Invalid images');
+    for (const image of value.images) {
+      if (!image || typeof image !== 'object' || Array.isArray(image) || Object.keys(image).some((key) => !['name', 'mimeType', 'data'].includes(key))
+        || typeof image.name !== 'string' || !image.name || image.name.length > 200 || !IMAGE_TYPES.has(image.mimeType)
+        || typeof image.data !== 'string' || image.data.length % 4 !== 0 || !BASE64.test(image.data)) throw new Error('Invalid images');
+      const bytes = Buffer.byteLength(image.data, 'base64');
+      if (bytes < 1 || bytes > INPUT_LIMITS.imageBytes) throw new Error('Invalid images');
+    }
   }
   if (value.model !== undefined && (typeof value.model !== 'string' || !MODEL_SELECTOR.test(value.model))) throw new Error('Invalid model selector');
   if (value.runtime !== undefined && value.runtime !== 'pi') throw new Error('Invalid runtime selector');

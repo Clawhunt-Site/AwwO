@@ -74,7 +74,8 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
         id: modelConfig.model,
         name: modelConfig.model,
         reasoning: false,
-        input: ['text'],
+        // Pi drops a picture for a model that does not list 'image', so the profile decides (vision).
+        input: modelConfig.input?.includes('image') ? ['text', 'image'] : ['text'],
         // No pricing claim: this adapter does not expose calculated charges.
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: modelConfig.contextWindow,
@@ -189,7 +190,10 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
         }
       }
     });
-    await activeSession.prompt(request.prompt, { expandPromptTemplates: false });
+    // The run's pictures go with the final user turn only, to a model that takes them (the server refused others).
+    const images = Array.isArray(request.images) && modelConfig.input?.includes('image')
+      ? request.images.map((image) => ({ type: 'image', data: image.data, mimeType: image.mimeType })) : [];
+    await activeSession.prompt(request.prompt, { expandPromptTemplates: false, ...(images.length ? { images } : {}) });
     await eventQueue;
     if (forbiddenTool) return await terminal({ type: 'failed', code: 'TOOLS_DISABLED', message: 'Tool execution is disabled.' });
     if (cancelled || finalMessage?.stopReason === 'aborted') return await terminal({ type: 'cancelled' });

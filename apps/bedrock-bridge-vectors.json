@@ -1141,7 +1141,7 @@
    "message": "Unsupported request field: verbosity"
   },
   {
-   "name": "image-part",
+   "name": "remote-image-part",
    "body": {
     "model": "global.anthropic.claude-opus-5-5",
     "stream": true,
@@ -1157,7 +1157,7 @@
        {
         "type": "image_url",
         "image_url": {
-         "url": "data:image/png;base64,AAAA"
+         "url": "https://example.test/cat.png"
         }
        }
       ]
@@ -1165,7 +1165,7 @@
     ]
    },
    "status": 400,
-   "message": "Only text content is supported in user messages"
+   "message": "Only PNG, JPEG, GIF or WebP images sent as base64 data URLs are supported"
   },
   {
    "name": "leading-assistant",

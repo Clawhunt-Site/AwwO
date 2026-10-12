@@ -11,7 +11,7 @@ from agents import Agent, FunctionTool, ModelSettings, OpenAIChatCompletionsMode
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
 from bedrock_bridge import BRIDGE_API_KEY, BedrockConverseTransport
-from config import PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
+from config import MAX_IMAGE_BYTES, MAX_IMAGES, PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
 from errors import RuntimeError, classify_error
 from provider_observation import ProviderObservation
 from tools import TOOL_SCHEMAS, ToolInputError, execute_tool, tool_definition_bytes, validate_tool_names
@@ -66,12 +66,41 @@ class RunRequest:
     runtime: str | None = None
     tools: list | None = None
     effort: str | None = None
+    # The run's pictures for the final user turn: [{name, mimeType, data (base64)}] (vision).
+    images: list | None = None
 
+
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+
+
+def _validate_images(images) -> list:
+    import re
+    if not isinstance(images, list) or not 1 <= len(images) <= MAX_IMAGES:
+        raise ValueError("Invalid images")
+    for image in images:
+        if (not isinstance(image, dict) or set(image) != {"name", "mimeType", "data"}
+                or not isinstance(image["name"], str) or not 1 <= len(image["name"]) <= 200
+                or image["mimeType"] not in IMAGE_TYPES or not isinstance(image["data"], str)
+                or len(image["data"]) % 4 or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", image["data"])):
+            raise ValueError("Invalid images")
+        size = len(image["data"]) // 4 * 3 - (len(image["data"]) - len(image["data"].rstrip("=")))
+        if not 1 <= size <= MAX_IMAGE_BYTES:
+            raise ValueError("Invalid images")
+    return images
+
+
+def model_takes_images(config: Config, selector: str | None) -> bool:
+    """Whether the model a run selects lists "image" in what it takes; an unknown model takes none."""
+    try:
+        return "image" in resolve_model_config(config, selector).input
+    except Exception:
+        return False
 
 def validate_request(value: dict, config: Config) -> RunRequest:
-    allowed = {"runId", "tenantId", "sessionId", "prompt", "messages", "systemPrompt", "model", "runtime", "tools", "effort"}
+    allowed = {"runId", "tenantId", "sessionId", "prompt", "messages", "systemPrompt", "model", "runtime", "tools", "effort", "images"}
     if not isinstance(value, dict) or any(key not in allowed for key in value):
         raise ValueError("Invalid request fields")
+    images = _validate_images(value["images"]) if value.get("images") is not None else None
     import re
     for field_name in ("runId", "tenantId", "sessionId"):
         if not isinstance(value.get(field_name), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", value[field_name]):
@@ -114,6 +143,7 @@ def validate_request(value: dict, config: Config) -> RunRequest:
         runtime=value.get("runtime"),
         tools=tools,
         effort=value.get("effort"),
+        images=images,
     )
 
 
@@ -145,6 +175,9 @@ def _build_tools(request: RunRequest, config: Config) -> list:
 def _prepare(request: RunRequest, config: Config) -> tuple[ModelProfile, str]:
     profile = resolve_model_config(config, request.model)
     effort = authorize_effort(profile, request.effort)
+    # The server refused pictures for a text model already; a bound personal model is never one that takes them.
+    if request.images and "image" not in profile.input:
+        raise ValueError("Images are not supported by this model")
     text_bytes = len(request.prompt.encode("utf-8")) + len((request.system_prompt or "").encode("utf-8"))
     for message in request.messages:
         text_bytes += len(message["content"].encode("utf-8"))
@@ -188,10 +221,13 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
     observation.protocol = profile.protocol
 
     input_messages = [{"role": m["role"], "content": m["content"]} for m in request.messages]
-    if input_messages:
-        input_messages.append({"role": "user", "content": request.prompt})
-    else:
-        input_messages = [{"role": "user", "content": request.prompt}]
+    final_turn: dict = {"role": "user", "content": request.prompt}
+    if request.images:
+        # The SDK's chat converter makes each input_image an image_url part; the Bedrock bridge, an image block.
+        final_turn = {"role": "user", "content": [{"type": "input_text", "text": request.prompt}] + [
+            {"type": "input_image", "image_url": f"data:{image['mimeType']};base64,{image['data']}", "detail": "auto"}
+            for image in request.images]}
+    input_messages.append(final_turn)
 
     settings = {"max_tokens": profile.max_tokens, "parallel_tool_calls": False}
     if profile.protocol == "chat_completions":

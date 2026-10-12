@@ -83,6 +83,9 @@ export function createPiServer(config, { startRun = startIsolatedRun } = {}) {
     try { modelConfig = resolveModelConfig(runConfig, body.model); } catch {
       return json(response, 400, { error: { code: 'MODEL_NOT_FOUND', message: 'Select a model from the configured model catalog.' } });
     }
+    if (body.images?.length && !modelConfig.input?.includes('image')) return json(response, 400, { error: {
+      code: 'IMAGES_UNSUPPORTED', message: 'The selected model does not take images.',
+    } });
     if (!fitsContextBudget(body, modelConfig)) return json(response, 413, { error: {
       code: 'CONTEXT_LIMIT', message: 'The prompt and history exceed the configured model context budget. Shorten the conversation or configure a model with a larger supported context window.',
     } });

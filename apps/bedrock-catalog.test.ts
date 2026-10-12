@@ -69,7 +69,9 @@ test('the catalog is off unless enabled, and contributes each worker only its ow
   assert.equal(agents.length + pi.length, entries.length, 'every catalog model is offered exactly once by default');
   const claude = agents.find(profile => profile.id === 'bedrock.claude-opus-5-5')!;
   assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', provider: 'bedrock', model: 'global.anthropic.claude-opus-5-5', name: 'Claude Opus 5.5', vendor: 'anthropic',
-    region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 32000 });
+    region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 32000, input: ['text', 'image'] });
+  // A model the catalog lists as text-only stays so.
+  assert.deepEqual(agents.find(profile => profile.id === 'bedrock.deepseek-v3-2')!.input, ['text']);
 });
 
 test('an explicit model list selects in catalog order and refuses unknown or tool-less Agents models', () => {

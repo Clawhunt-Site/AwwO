@@ -185,7 +185,7 @@ test('model catalog preserves the default, resolves only IDs, and exposes safe m
   assert.equal(resolveModelConfig(config, 'reviewer').protocol, health.models[1].protocol);
   assert.deepEqual(health.models[1], {
     id: 'reviewer', name: 'review-model', providerModel: 'review-model', protocol: 'anthropic_messages', provider: 'anthropic', runtime: 'pi',
-    contextWindow: 8192, maxOutputTokens: 512, maxContextTextBytes: 7424, messageOverheadBytes: 32,
+    contextWindow: 8192, maxOutputTokens: 512, maxContextTextBytes: 7424, messageOverheadBytes: 32, input: ['text'],
   });
   const serialized = JSON.stringify(health);
   for (const secret of [TOKEN, ENV.AWWO_PI_API_KEY, 'catalog-provider-secret', profile.baseURL, 'REVIEW_KEY', 'apiKey', 'baseURL']) {

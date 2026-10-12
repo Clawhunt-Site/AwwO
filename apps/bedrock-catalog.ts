@@ -24,6 +24,8 @@ export type BedrockCatalogEntry = Readonly<{
 export type BedrockProfile = Readonly<{
   id: string; provider: 'bedrock'; model: string; name: string; vendor: string;
   region: string; baseURL: string; apiKey: string; contextWindow: number; maxTokens: number;
+  // What the model takes: 'text', and 'image' for one that sees pictures (only where a worker claims imageInput).
+  input?: readonly string[];
 }>;
 
 export const PLATFORM_PROVIDERS: readonly string[] = Object.freeze(['llmgate', 'bedrock']);
@@ -137,9 +139,10 @@ export function bedrockApiKey(env: Record<string, string | undefined>, name = 'A
   return key;
 }
 
-export function bedrockProfile(entry: Pick<BedrockCatalogEntry, 'id' | 'name' | 'vendor' | 'target' | 'contextWindow' | 'maxTokens'>, region: string, apiKey: string): BedrockProfile {
+export function bedrockProfile(entry: Pick<BedrockCatalogEntry, 'id' | 'name' | 'vendor' | 'target' | 'contextWindow' | 'maxTokens'> & { input?: readonly string[] }, region: string, apiKey: string): BedrockProfile {
   return Object.freeze({ id: entry.id, provider: 'bedrock', model: entry.target, name: entry.name, vendor: entry.vendor,
-    region, baseURL: bedrockBridgeBaseURL(region), apiKey, contextWindow: entry.contextWindow, maxTokens: entry.maxTokens });
+    region, baseURL: bedrockBridgeBaseURL(region), apiKey, contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
+    input: Object.freeze([...(entry.input ?? ['text'])]) });
 }
 
 /** Profiles the built-in catalog contributes to one worker, or none when the catalog is off. */

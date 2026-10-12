@@ -62,6 +62,25 @@ test('max_completion_tokens wins, blank text is dropped, and forced tool choices
   assert.equal(none.toolConfig, undefined);
 });
 
+test('a user turn\'s pictures become Converse image blocks between its text', () => {
+  const signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+  const command = toConverseInput(request({ messages: [{ role: 'user', content: [
+    { type: 'text', text: 'What is ' }, { type: 'text', text: 'this?' },
+    { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=', detail: 'auto' } },
+    { type: 'image_url', image_url: { url: 'data:image/webp;base64,UklGRg==' } }, { type: 'text', text: 'And that.' },
+  ] }] }), MODEL);
+  const content = (command.messages as Array<{ content: Array<Record<string, any>> }>)[0].content;
+  assert.equal(content.length, 4);
+  assert.deepEqual(content[0], { text: 'What is this?' });
+  assert.equal(content[1].image.format, 'png');
+  assert.ok(content[1].image.source.bytes instanceof Uint8Array);
+  assert.deepEqual([...content[1].image.source.bytes], signature);
+  assert.equal(content[2].image.format, 'webp');
+  assert.deepEqual(content[3], { text: 'And that.' });
+  // A text-only turn maps exactly as before.
+  assert.deepEqual((toConverseInput(request(), MODEL).messages as unknown[])[0], { role: 'user', content: [{ text: 'Hello' }] });
+});
+
 test('anything the bridge cannot map faithfully is refused instead of dropped', () => {
   rejects(request({ model: 'other.model' }), /does not match/);
   rejects(request({ stream: false }), /streaming/);
@@ -73,7 +92,16 @@ test('anything the bridge cannot map faithfully is refused instead of dropped', 
   rejects(request({ parallel_tool_calls: 'no' }), /parallel_tool_calls/);
   rejects(request({ seed: 7 }), /seed/);
   rejects(request({ verbosity: 'low' }), /Unsupported request field: verbosity/);
-  rejects(request({ messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] }] }), /Only text/);
+  const picture = (url: string, extra: Record<string, unknown> = {}) => ({ type: 'image_url', image_url: { url, ...extra } });
+  rejects(request({ messages: [{ role: 'user', content: [picture('https://example.test/cat.png')] }] }), /base64 data URLs/);
+  rejects(request({ messages: [{ role: 'user', content: [picture('data:image/bmp;base64,AAAA')] }] }), /base64 data URLs/);
+  rejects(request({ messages: [{ role: 'user', content: [picture('data:image/png;base64,AAA')] }] }), /base64 data URLs/);
+  rejects(request({ messages: [{ role: 'user', content: [picture('data:image/png;base64,AAAA', { size: 1 })] }] }), /Invalid image/);
+  rejects(request({ messages: [{ role: 'user', content: [picture('data:image/png;base64,AAAA', { detail: 'max' })] }] }), /Invalid image/);
+  rejects(request({ messages: [{ role: 'user', content: [picture('data:image/png;base64,' + 'A'.repeat(5_242_884))] }] }), /larger than 3.75 MiB/);
+  rejects(request({ messages: [{ role: 'user', content: Array.from({ length: 21 }, () => picture('data:image/png;base64,AAAA')) }] }), /At most 20 images/);
+  rejects(request({ messages: [{ role: 'user', content: 'Q' }, { role: 'assistant', content: [picture('data:image/png;base64,AAAA')] }, { role: 'user', content: 'go' }] }), /Only text content is supported in assistant/);
+  rejects(request({ messages: [{ role: 'system', content: [picture('data:image/png;base64,AAAA')] }, { role: 'user', content: 'Q' }] }), /Only text content is supported in system/);
   rejects(request({ messages: [{ role: 'assistant', content: 'Hi' }, { role: 'user', content: 'Hello' }] }), /start with a user/);
   rejects(request({ messages: [{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Prefill' }] }), /end with a user/);
   rejects(request({ messages: [{ role: 'system', content: 'Only rules' }] }), /start with a user/);
