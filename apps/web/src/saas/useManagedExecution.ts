@@ -30,6 +30,23 @@ const PENDING_KEY = 'awwo.execution.pending-submission.v1';
 const STARTED_KEY = 'awwo.execution.started-submission.v1';
 const canvasKey = (userId: string, tenantId: string, canvasId: string, name: string) =>
   `awwo.saas:${[userId, tenantId, canvasId].map(encodeURIComponent).join(':')}:${name}`;
+// The model the reader chose for the canvas assistant, kept for the account in this workspace (every canvas of it), so
+// a choice made once holds on the next canvas and after a reload. Only a choice the reader made is kept: until then the
+// service's first model is used and the components a plan adds keep the workspace default.
+const MODEL_KEY = 'awwo.assistant.model.v1';
+const workspaceKey = (userId: string, tenantId: string, name: string) => `awwo.saas:${[userId, tenantId].map(encodeURIComponent).join(':')}:${name}`;
+function readStoredModel(key: string | null): string {
+  if (!key) return '';
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || 'null') as unknown;
+    return Array.isArray(raw) && raw.length === 2 && raw.every(part => typeof part === 'string' && part !== '' && part.length <= 256) ? JSON.stringify(raw) : '';
+  } catch { return ''; }
+}
+function storeModel(key: string | null, model: string) {
+  if (!key) return;
+  try { if (model) localStorage.setItem(key, model); else localStorage.removeItem(key); }
+  catch { /* The choice holds for this page only. */ }
+}
 function readPending(key: string | null): ExecutionInput | null {
   if (!key) return null;
   try {
@@ -109,6 +126,8 @@ export interface ManagedExecution {
   needsModel: boolean;
   choice: ExecutionModelChoice;
   chooseModel: (key: string) => void;
+  /** The model the reader chose (not the default the service lists first): the components a plan adds start on it. */
+  componentModel?: { runtime: string; model: string };
   effort: string;
   setEffort: (effort: string) => void;
   knowledgeCount: number;
@@ -198,6 +217,9 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   const chooseKey = useCallback((key: string) => { modelKeyRef.current = key; setModelKey(key); }, []);
   // The label of a chosen model the latest catalogue no longer lists, so it stays visible and must be changed.
   const [staleLabel, setStaleLabel] = useState('');
+  // Whether the chosen model is the reader's own choice (kept for the workspace), not the service's first model.
+  const [chosenByReader, setChosenByReader] = useState(false);
+  const modelStoreKey = !readOnly && userId ? workspaceKey(userId, tenantId, MODEL_KEY) : null;
   const [effort, setEffort] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [preview, setPreview] = useState<{ run: string; artifact: string } | null>(null);
@@ -287,7 +309,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     window.clearTimeout(settledRead.current); startedTasks.current.clear(); quietRead.current = false;
     controllers.current.forEach(controller => controller.abort()); controllers.current.clear();
     importOperations.current.clear(); lock.current = false; shownBefore.current = false;
-    runtimeRef.current = null; setRuntime(null); setHistory({ items: [] }); chooseKey(''); setStaleLabel(''); setEffort('');
+    runtimeRef.current = null; setRuntime(null); setHistory({ items: [] }); chooseKey(''); setChosenByReader(false); setStaleLabel(''); setEffort('');
     setSelectedId(''); setPreview(null); setRun(null); setDetailLoading(false); setPollingPaused(false); setBusy(false);
     setError(null); setNotice(''); setNoticeWarning(false); setPendingSubmission(readPending(storeKey)); setStartRefusal(null); setAnswers({}); setUncertainResponses({});
     setPendingImport(null); setImportTitle(''); setKnowledgeCount(0); setHistoryFailed(false); setConfirmedTask(null);
@@ -322,7 +344,12 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
         const earlier = runtimeRef.current; runtimeRef.current = service.value;
         setRuntime(service.value);
         const previous = modelKeyRef.current;
-        if (!previous) { chooseKey(models[0] ? executionModelKey(models[0].runtime, models[0].id) : ''); setStaleLabel(''); }
+        if (!previous) {
+          // The reader's earlier choice in this workspace, where the service still offers it; else its first model.
+          const stored = readStoredModel(modelStoreKey);
+          const kept = stored && models.some(item => executionModelKey(item.runtime, item.id) === stored) ? stored : '';
+          chooseKey(kept || (models[0] ? executionModelKey(models[0].runtime, models[0].id) : '')); setChosenByReader(Boolean(kept)); setStaleLabel('');
+        }
         else if (models.some(item => executionModelKey(item.runtime, item.id) === previous)) setStaleLabel('');
         else {
           // An earlier choice the catalogue dropped stays chosen and visible until the user picks another.
@@ -338,7 +365,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
       setLoading(false);
     });
     return () => controller.abort();
-  }, [activated, tenantId, canvasId, catalogueRevision, handleError, chooseKey]);
+  }, [activated, tenantId, canvasId, catalogueRevision, handleError, chooseKey, modelStoreKey]);
 
   // The canvas's knowledge selection (made in the knowledge map) goes with each task.
   useEffect(() => {
@@ -575,8 +602,11 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     tenantId,
     activated, activate: () => setActivatedScope(scope), setVisible, readOnly, loading, runtime, ready, serviceReason, needsModel,
     choice: { key: modelKey, model: choiceModel, ...(staleLabel ? { unavailableLabel: staleLabel } : {}) },
-    // Effort belongs to one model: choosing another starts again from the model's default.
-    chooseModel: key => { if (key !== modelKeyRef.current) setEffort(''); chooseKey(key); setStaleLabel(''); }, effort, setEffort, knowledgeCount,
+    // Effort belongs to one model: choosing another starts again from the model's default. A choice the reader makes is
+    // kept for this workspace and becomes the model of the components a plan adds.
+    chooseModel: key => { if (key !== modelKeyRef.current) setEffort(''); chooseKey(key); setStaleLabel(''); setChosenByReader(Boolean(key)); storeModel(modelStoreKey, key); },
+    ...(chosenByReader && choiceModel && !staleLabel ? { componentModel: { runtime: choiceModel.runtime, model: choiceModel.id } } : {}),
+    effort, setEffort, knowledgeCount,
     history, historyFailed, confirmedTask, startRefusal, selectedId,
     select: id => { setSelectedId(id); setDetailRevision(value => value + 1); setError(null); setPendingImport(null); setPreview(null); },
     run: currentRun, detailLoading, pollingPaused,

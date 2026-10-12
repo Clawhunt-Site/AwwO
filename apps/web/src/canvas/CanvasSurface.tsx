@@ -47,6 +47,7 @@ import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
 import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, type CanvasPlanMedia } from './canvasPlan';
+import { withAssistantModel } from './assistantModel';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
   readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
@@ -2494,7 +2495,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const applied = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia);
+      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia);
+      // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own).
+      const applied = jev ? planned : { ...planned, doc: withAssistantModel(planned.doc, planned.addedNodeIds, assistantExecution?.componentModel, paletteRef.current?.models ?? []) };
       // Every step skipped (each one said in the adjustments) leaves the canvas as it was: nothing to patch, undo
       // or select, and the reply says so instead of calling it applied.
       const changed = canvasPlanRevision(applied.doc) !== canvasPlanRevision(before);

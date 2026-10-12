@@ -72,6 +72,7 @@ export function executionHost(execution: ManagedExecution): AssistantExecutionHo
     renderEarlier: (mentioned, open) => <ExecutionEarlier execution={execution} mentioned={mentioned} open={open} />,
     renderNotices: planAvailable => <ExecutionNotices execution={execution} planAvailable={planAvailable} />,
     settings: <ExecutionSettings execution={execution} />,
+    ...(execution.componentModel ? { componentModel: execution.componentModel } : {}),
     ...(execution.confirmedTask ? { confirmedTask: execution.confirmedTask } : {}),
     ...(execution.pendingSubmission ? { pendingOperation: execution.pendingSubmission.operationId } : {}),
     ...(execution.startRefusal ? { startRefusal: execution.startRefusal } : {}),
@@ -360,13 +361,13 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
   const chosen = execution.choice.model;
   // A model the workspace's plan does not include is refused when the task starts; say so while it can still be changed.
   const needsPlan = chosen?.requiresUpgrade === true;
-  const settingsSummary = execution.choice.unavailableLabel ? t(`直接执行用：${execution.choice.unavailableLabel}（已不可用）`, `Direct tasks use: ${execution.choice.unavailableLabel} (unavailable)`)
-    : chosen ? `${t('直接执行用', 'Direct tasks use')}：${optionLabel(chosen)}${execution.effort ? ` · ${execution.effort}` : ''}` : t('选择直接执行的模型', 'Choose a model for direct tasks');
+  const settingsSummary = execution.choice.unavailableLabel ? t(`画布助手用：${execution.choice.unavailableLabel}（已不可用）`, `Canvas assistant uses: ${execution.choice.unavailableLabel} (unavailable)`)
+    : chosen ? `${t('画布助手用', 'Canvas assistant uses')}：${optionLabel(chosen)}${execution.effort ? ` · ${execution.effort}` : ''}` : t('选择画布助手的模型', 'Choose the canvas assistant’s model');
   if (execution.readOnly || (!models.length && !execution.choice.unavailableLabel && execution.knowledgeCount === 0)) return null;
   return <div className="awwo-execution-setup">
     {(models.length > 0 || execution.choice.unavailableLabel) && <details className="awwo-execution-settings">
       <summary>{settingsSummary}</summary>
-      <label>{t('直接执行的模型', 'Model for direct tasks')}
+      <label>{t('画布助手的模型', 'Canvas assistant model')}
         <select value={execution.choice.key} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.chooseModel(event.target.value)}>
           {execution.choice.unavailableLabel && <option value={execution.choice.key} disabled>{t(`${execution.choice.unavailableLabel}（已不可用）`, `${execution.choice.unavailableLabel} (unavailable)`)}</option>}
           {!execution.choice.key && <option value="">{t('选择模型', 'Choose a model')}</option>}
@@ -379,6 +380,8 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
           {chosen.efforts.map(level => <option key={level} value={level}>{level}</option>)}
         </select>
       </label>}
+      <p className="awwo-execution-model-note">{t('选好后，直接执行的任务和画布助手新加的组件都用这个模型；规划画布本身仍由平台免费完成。',
+        'Once chosen, direct tasks and the components the assistant adds run on this model; planning the canvas itself stays free.')}</p>
       {/* Engines are managed in the account; a change there shows here once the list is read again. */}
       <div className="awwo-execution-settings-actions">
         <a href={accountURL('engines')}>{t('管理我的引擎', 'Manage my engines')}</a>

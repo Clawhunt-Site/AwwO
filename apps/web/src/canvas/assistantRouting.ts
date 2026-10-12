@@ -51,8 +51,11 @@ export interface AssistantExecutionHost {
   /** Above the composer: the service's notices, saying where messages go while tasks cannot start when the canvas
    *  can take them (`planAvailable`). */
   renderNotices: (planAvailable: boolean) => ReactNode;
-  /** Under the composer: the model a direct task uses. */
+  /** Under the composer: the model the canvas assistant uses (its direct tasks, and the components a plan adds). */
   settings: ReactNode;
+  /** The model the reader chose under the composer, once chosen there: the Agent components a plan adds start on it,
+   *  as the direct tasks run on it. Absent while the reader keeps the default. */
+  componentModel?: { runtime: string; model: string };
   /** The task the last reconcile in this page confirmed, with the submission it was. */
   confirmedTask?: { taskId: string; operationId: string };
   /** The submission whose outcome is unknown and waits to be reconciled (kept across reloads and tabs). */
