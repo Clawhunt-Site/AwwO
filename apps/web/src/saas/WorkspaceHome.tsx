@@ -20,8 +20,9 @@ import { OfficialCopySetup, createOfficialCopyDocument, type OfficialCopyModel }
 import { loadProductionRun, PRODUCTION_RUN_SUMMARY } from './productionRuns';
 import { readOfficialSelection, clearOfficialSelection } from './examples/officialSelection';
 
-/** Recent canvases shown before the operator expands the full list. */
-export const RECENT_CANVAS_COUNT = 4;
+/** Recent canvases shown before the operator expands the full list: two rows of four at desktop width, four rows of two
+ * on a tablet (owner 2026-10-13 17:20 +08: 首页默认多显示几张画布; it was one row of four). */
+export const RECENT_CANVAS_COUNT = 8;
 
 type HomeProps = { identity: Identity; tenant: Tenant; onOpen: (canvasId: string) => void };
 type RuntimeStatus = { available?: boolean; plannerAvailable?: boolean; reason?: string; models?: unknown[] };

@@ -258,6 +258,22 @@ it('shows no planning warning when the engine and planner are ready', async () =
   expect(screen.queryByText(/规划暂不可用/)).toBeNull();
 });
 
+it('shows the 8 most recently updated canvases on the home, and the rest after 查看全部', async () => {
+  // Out of order on purpose: the list sorts by the last update, newest first.
+  const canvases = Array.from({ length: 10 }, (_, index) => record(`c${index + 1}`, `画布 ${index + 1}`, `2026-10-${String(10 - index).padStart(2, '0')}T00:00:00Z`)).reverse();
+  server({ canvases });
+  view();
+  const section = (await screen.findByRole('heading', { name: '继续工作' })).closest('section')!;
+  await waitFor(() => expect(within(section).getAllByRole('heading', { level: 3 })).toHaveLength(8));
+  expect(within(section).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(
+    ['画布 1', '画布 2', '画布 3', '画布 4', '画布 5', '画布 6', '画布 7', '画布 8']);
+  expect(within(section).getByText('10 张画布')).toBeVisible();
+  fireEvent.click(within(section).getByRole('button', { name: '查看全部 10 张' }));
+  expect(within(section).getAllByRole('heading', { level: 3 })).toHaveLength(10);
+  fireEvent.click(within(section).getByRole('button', { name: '收起' }));
+  expect(within(section).getAllByRole('heading', { level: 3 })).toHaveLength(8);
+});
+
 it('keeps an unsent request in this tab, and a page restored from the back/forward cache is usable again', async () => {
   saveHomeDraft(draftScope, '上次没发的需求');
   let release!: (response: Response) => void;

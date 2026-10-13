@@ -115,7 +115,7 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
     {Boolean(listing.error) && <p role="alert" className="saas-error">{saasErrorMessage(listing.error, locale)}</p>}
     <p id={searchStatusId} className="saas-list-search-status" role="status">{searchStatus}</p>
     <div id={listId}>
-      {listing.loading ? <div className={`saas-canvas-list is-loading${showingAll ? '' : ' is-recent'}`} role="status" aria-label={t('正在加载画布…', 'Loading canvases…')}>{Array.from({ length: showingAll ? 3 : Math.min(limit, 4) }, (_, index) => <div key={index} className="saas-canvas-card saas-canvas-skeleton" aria-hidden="true"><span /><i /><i /></div>)}</div>
+      {listing.loading ? <div className={`saas-canvas-list is-loading${showingAll ? '' : ' is-recent'}`} role="status" aria-label={t('正在加载画布…', 'Loading canvases…')}>{Array.from({ length: showingAll ? 3 : Math.min(limit, 8) }, (_, index) => <div key={index} className="saas-canvas-card saas-canvas-skeleton" aria-hidden="true"><span /><i /><i /></div>)}</div>
         : listing.page && <div data-onboarding="canvas-list" className={`saas-canvas-list${showingAll || needle ? '' : ' is-recent'}`}>{visible.map(card)}{items.length === 0 && <section className="saas-empty-guide">
           <div className="saas-empty-art" aria-hidden="true"><span /><span /><span /></div>
           <h3>{listing.pageNumber === 1 ? t('从第一张画布开始', 'Start with your first canvas') : t('当前页没有画布', 'No canvases on this page')}</h3>
