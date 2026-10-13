@@ -14,14 +14,14 @@ beforeAll(async () => { await import('../src/saas/ProductionShowcase'); }, 300_0
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/'); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 
-it('puts the cases on the signed-out homepage, between the welcome and the examples to try', async () => {
+it('puts the cases on the signed-out homepage, after the welcome, with no other examples', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/options')
     ? new Response(JSON.stringify({ clawhuntSSO: true, localAuth: false }))
     : new Response(JSON.stringify({ error: { code: 'unauthenticated' } }), { status: 401 })));
   render(<SaaSApp />);
   const cases = await screen.findByRole('heading', { level: 2, name: '一句话需求，交给一支 Agent 团队。' });
-  const tryOne = screen.getByRole('heading', { level: 2, name: '从一个作品开始' });
-  expect(cases.compareDocumentPosition(tryOne) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // The 18 official examples (「从一个作品开始」) were taken off the homepage on 2026-10-14.
+  expect(screen.queryByRole('heading', { level: 2, name: '从一个作品开始' })).toBeNull();
   expect(screen.getByRole('heading', { level: 1 }).compareDocumentPosition(cases) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(cards()).toHaveLength(PRODUCTION_CASES.length);
   expect(screen.queryByRole('button', { name: /查看全部 \d+ 个制作案例/ })).toBeNull();
@@ -29,16 +29,16 @@ it('puts the cases on the signed-out homepage, between the welcome and the examp
 
 const tenant: Tenant = { id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const identity: Identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' }, tenants: [tenant] };
-it.each(['owner', 'reader'] as const)('shows one row of cases on the %s workspace home, before the examples to try', async role => {
+it.each(['owner', 'reader'] as const)('shows one row of cases on the %s workspace home, with no other examples', async role => {
   vi.stubGlobal('fetch', vi.fn(async (input: string) => new Response(JSON.stringify(new URL(input, 'http://localhost').pathname.endsWith('/runtime')
     ? { available: true, configured: true, plannerAvailable: true, models: [] } : { items: [], nextCursor: null }))));
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role }} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
   const cases = await screen.findByRole('heading', { level: 2, name: '一句话需求，交给一支 Agent 团队。' });
-  expect(cases.compareDocumentPosition(screen.getByRole('heading', { level: 2, name: '从一个作品开始' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByRole('heading', { level: 2, name: '从一个作品开始' })).toBeNull();
   expect(cards()).toHaveLength(COMPACT_CASE_COUNT);
   expect(screen.getByRole('button', { name: `查看全部 ${PRODUCTION_CASES.length} 个制作案例` })).toHaveAttribute('aria-expanded', 'false');
   for (const title of ['团队知识库 SaaS', '霓虹之城', '山海异闻录']) expect(screen.getByRole('button', { name: title })).toBeVisible();
-  // Members copy a case's canvas the way they copy an official example; readers cannot copy. The row leads with the
+  // Members copy a case's canvas; readers cannot copy. The row leads with the
   // knowledge base and the two media cases, so the pixel case is one click away.
   fireEvent.click(screen.getByRole('button', { name: `查看全部 ${PRODUCTION_CASES.length} 个制作案例` }));
   fireEvent.click(screen.getByRole('button', { name: '像素平台跳跃' }));

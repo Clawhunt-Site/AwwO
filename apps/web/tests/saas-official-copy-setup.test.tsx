@@ -1,12 +1,14 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { OfficialCopySetup, createOfficialCopyDocument, readOfficialCopyModels } from '../src/saas/examples/OfficialCopySetup';
-import { createOfficialDocument, OFFICIAL_WORKFLOWS } from '../src/saas/examples/officialWorkflows';
+import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
+import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { WorkspaceHome } from '../src/saas/WorkspaceHome';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { Identity, Tenant } from '../src/saas/api';
 
-const workflow = OFFICIAL_WORKFLOWS.find(item => item.id === 'grid-balance')!;
+// A case without media nodes, so every node of its copy is an agent.
+const workflow = PRODUCTION_WORKFLOWS['pixel-platformer'];
 const tenant: Tenant = { id: 'copy-workspace', name: 'Copy workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
 const identity: Identity = {user:{id:'copy-user',name:'Copy user',email:'copy@example.invalid',platformRole:'user'},tenants:[tenant]};
 const catalog = {
@@ -38,6 +40,7 @@ const chooser = () => screen.getByRole('combobox', {name:'执行模型'});
 const choose = async (runtime = 'pi') => {await screen.findByRole('option',{name:runtime === 'pi'?'Pi · Catalog model':'OpenAI Agents · Python catalog model'});fireEvent.change(chooser(),{target:{value:key(runtime)}});};
 beforeEach(()=>{localStorage.clear();sessionStorage.clear();localStorage.setItem('superclaw_locale','zh');history.replaceState({},'','/');});
 afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.restoreAllMocks();});
+beforeAll(async()=>{await import('../src/saas/ProductionShowcase');},300_000);
 
 it('defaults to a clean draft even when a runtime and model are available, without any paid endpoint',async()=>{
   const {fetcher}=server(),{onConfirm}=setup();
@@ -59,8 +62,8 @@ it('binds the explicit runtime/model pair to every newly minted node without cha
   for(const doc of [original,createOfficialDocument(workflow,'zh'),createOfficialCopyDocument(workflow,'en',null)]) expect(doc.nodes.every(node=>node.kind==='session'&&node.model===''&&node.runtime===''&&node.binding===null)).toBe(true);
 });
 
-it('keeps an example’s image, video and 3D nodes on their own media models when agents get the chosen model',()=>{
-  const studio=OFFICIAL_WORKFLOWS.find(item=>item.id==='studio-pipeline')!;
+it('keeps a case’s image and video nodes on their own media models when agents get the chosen model',()=>{
+  const studio=PRODUCTION_WORKFLOWS['aurora-gt'];
   const result=createOfficialCopyDocument(studio,'zh',{runtime:'openai-agents',model:'shared-model',label:'ignored'});
   const media=result.nodes.filter(node=>node.kind==='session'&&['image','video','model3d'].includes(node.agentKind));
   expect(media.map(node=>node.kind==='session'&&[node.agentKind,node.model,node.runtime])).toEqual(studio.media!.map(spec=>[spec.kind,spec.model,'']));
@@ -120,13 +123,6 @@ it('does not create anything when unmounted during the fresh catalog read',async
   await act(async()=>release(json(catalog)));expect(onConfirm).not.toHaveBeenCalled();
 });
 
-it('prevents reader actions and reads no model catalog',()=>{
-  const {fetcher}=server(),{onConfirm,onClose}=setup({readOnly:true});
-  expect(chooser()).toBeDisabled();expect(screen.getByRole('button',{name:'创建草稿'})).toBeDisabled();
-  fireEvent.submit(chooser().closest('form')!);expect(onConfirm).not.toHaveBeenCalled();expect(fetcher).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button',{name:'取消'}));expect(onClose).toHaveBeenCalledOnce();
-});
-
 it('supports English and refreshes a failed catalog without choosing its first model',async()=>{
   let reads=0;server(()=>++reads===1?json({},503):json(catalog));setup({locale:'en'});
   expect(screen.getByRole('dialog',{name:'Copy example to my canvases'})).toBeVisible();
@@ -135,11 +131,15 @@ it('supports English and refreshes a failed catalog without choosing its first m
   expect(screen.getByText(/does not initialize nodes or run models/)).toBeVisible();
 });
 
-it('creates and opens exactly one model-configured official copy through WorkspaceHome without planning or execution',async()=>{
-  const {posts,fetcher}=server(),onOpen=vi.fn();history.replaceState({},'',`/?official=${workflow.id}`);
+it('creates and opens exactly one model-configured case copy through WorkspaceHome without planning or execution',async()=>{
+  const {posts,fetcher}=server(),onOpen=vi.fn();
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen}/></SaaSPreferencesProvider>);
-  fireEvent.click(screen.getByRole('button',{name:'复制到我的画布'}));expect(posts).toHaveLength(0);await choose();
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'带模型复制'}));
+  // The first row shows three cases; the pixel platformer is one click away.
+  fireEvent.click(await screen.findByRole('button',{name:/^查看全部 \d+ 个制作案例$/}));
+  fireEvent.click(screen.getByRole('button',{name:'像素平台跳跃'}));
+  fireEvent.click(await within(screen.getByRole('dialog',{name:'像素平台跳跃'})).findByRole('button',{name:'复制这张画布'},{timeout:20000}));
+  const setupDialog=screen.getByRole('dialog',{name:'复制案例到我的画布'});expect(posts).toHaveLength(0);await choose();
+  fireEvent.click(within(setupDialog).getByRole('button',{name:'带模型复制'}));
   await waitFor(()=>expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
   expect(posts).toHaveLength(1);expect(posts[0].url).toBe('/api/v1/tenants/copy-workspace/canvases');
   expect(posts[0].body.document.nodes.every((node:any)=>node.runtime==='pi'&&node.model==='shared-model'&&node.binding===null)).toBe(true);

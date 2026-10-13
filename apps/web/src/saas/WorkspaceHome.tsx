@@ -13,12 +13,10 @@ import { HomeAttachButton, HomeFileChips, PLAN_PROMPT_MAX_BYTES, requestBytes, u
 import { HOME_PROMPT_MAX_CHARACTERS, canvasNameFromPrompt, clearHomeDraft, readHomeDraft, saveHomeDraft } from './homePrompt';
 import { savePlanHandoff } from './planHandoff';
 import { STARTER_CASES, type StarterCase } from './starterCases';
-import { OfficialExamples } from './examples/OfficialExamples';
 import { ProductionCases } from './ProductionCases';
 import { type OfficialWorkflow } from './examples/officialWorkflows';
-import { OfficialCopySetup, createOfficialCopyDocument, type OfficialCopyModel } from './examples/OfficialCopySetup';
+import { OfficialCopySetup, type OfficialCopyModel } from './examples/OfficialCopySetup';
 import { loadProductionRun, PRODUCTION_RUN_SUMMARY } from './productionRuns';
-import { readOfficialSelection, clearOfficialSelection } from './examples/officialSelection';
 
 /** Recent canvases shown before the operator expands the full list: two rows of four at desktop width, four rows of two
  * on a tablet (owner 2026-10-13 17:20 +08: 首页默认多显示几张画布; it was one row of four). */
@@ -39,7 +37,8 @@ const isExamplePrompt = (text: string) => exampleTitle(text.trim()) !== undefine
 const prefersReducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** The workspace landing page: a prompt box that starts a planned canvas (files of any type can go with it), the most
- * recently updated canvases, and examples to start from. Readers, who cannot create canvases, get the list only.
+ * recently updated canvases, and the production cases to copy from. Readers, who cannot create canvases, get the list
+ * and the cases only.
  * 「继续工作」 is the one list of the workspace's canvases here: the 最近的成果 gallery showed the same canvases again
  * by their results (owner 2026-10-13: 内容有点重叠保留一个就行了), and a canvas's results stay one click away in it.
  * It came back instead of 最近的成果 once that had been tried alone (owner 2026-10-13 15:28: 最近的成果这一栏既没有缩略图，
@@ -54,7 +53,6 @@ function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
     <ProductionCases compact />
-    <OfficialExamples compact readOnly />
   </>;
 }
 
@@ -72,8 +70,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
-  // `production`: a homepage production case, whose copy carries its recorded run (productionCopy.ts).
-  const [officialCopy, setOfficialCopy] = useState<{ item: OfficialWorkflow; production: boolean } | null>(null);
+  // A homepage production case being copied; the copy carries its recorded run (productionCopy.ts).
+  const [caseCopy, setCaseCopy] = useState<OfficialWorkflow | null>(null);
   // The operator's own text, set aside when an example replaced it.
   const [replaced, setReplaced] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
@@ -154,9 +152,9 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     if (!record) throw unavailable();
     return copy.createProductionCopyDocument(official, record, locale, model);
   };
-  const create = async (prompt: string | null, official?: OfficialWorkflow, model: OfficialCopyModel | null = null, production = false) => {
+  const create = async (prompt: string | null, official?: OfficialWorkflow, model: OfficialCopyModel | null = null) => {
     if (sending.current || tenant.role === 'reader' || tenant.status !== 'active') return;
-    // Files go with a typed request only: a blank canvas and a copied example take none.
+    // Files go with a typed request only: a blank canvas and a copied case take none.
     const typed = prompt !== null && !official;
     const carried = typed ? files.snapshot() : [];
     // The planner takes 8000 bytes of request, the files' lines included. Said before anything is created.
@@ -175,7 +173,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     try {
       let canvasId = typed && prepared.current?.tenant === tenant.id ? prepared.current.id : '';
       if (!canvasId) {
-        const document = !official ? emptyDocument() : production ? await productionCopyDocument(official, model) : createOfficialCopyDocument(official, locale, model);
+        const document = official ? await productionCopyDocument(official, model) : emptyDocument();
         if (!mounted.current) return;
         const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document }) });
         if (!mounted.current) return;
@@ -220,7 +218,6 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
         prepared.current = null;
         files.clear();
       }
-      if (official) clearOfficialSelection();
       // The page is leaving now; the box keeps its text until then.
       onOpen(canvasId);
     } catch (cause) {
@@ -257,9 +254,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     setFocusRequest(value => value + 1);
   };
 
-  // A production case's canvas and an official example are copied the same way.
-  const copyOfficial = (item: OfficialWorkflow) => { if (!sending.current) { setError(null); setOfficialCopy({ item, production: false }); } };
-  const copyProduction = (item: OfficialWorkflow) => { if (!sending.current) { setError(null); setOfficialCopy({ item, production: true }); } };
+  const copyCase = (item: OfficialWorkflow) => { if (!sending.current) { setError(null); setCaseCopy(item); } };
   const example = notice?.kind === 'case' ? STARTER_CASES.find(item => item.id === notice.caseId) : undefined;
   const noticeText = example ? t(`已填入案例「${example.title.zh}」，可以直接生成，也可以先修改。`, `Filled in the “${example.title.en}” example. Generate it as is, or edit it first.`)
     : notice?.kind === 'restored' ? t('已恢复原来的输入。', 'Your earlier text is back.') : '';
@@ -321,13 +316,10 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <ProductionCases compact onReuse={copyProduction} />
-    <OfficialExamples compact onReuse={copyOfficial} disabled={busy}
-      initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}
-      error={error !== null ? saasErrorMessage(error, locale) : undefined} />
-    {officialCopy && <OfficialCopySetup key={`${tenant.id}:${officialCopy.item.id}`} item={officialCopy.item} tenantId={tenant.id} locale={locale} busy={busy}
-      recording={officialCopy.production ? PRODUCTION_RUN_SUMMARY[officialCopy.item.id] : undefined}
-      error={error !== null ? saasErrorMessage(error, locale) : undefined} onClose={() => setOfficialCopy(null)}
-      onConfirm={model => create(null, officialCopy.item, model, officialCopy.production)} />}
+    <ProductionCases compact onReuse={copyCase} />
+    {caseCopy && <OfficialCopySetup key={`${tenant.id}:${caseCopy.id}`} item={caseCopy} tenantId={tenant.id} locale={locale} busy={busy}
+      recording={PRODUCTION_RUN_SUMMARY[caseCopy.id]}
+      error={error !== null ? saasErrorMessage(error, locale) : undefined} onClose={() => setCaseCopy(null)}
+      onConfirm={model => create(null, caseCopy, model)} />}
   </>;
 }

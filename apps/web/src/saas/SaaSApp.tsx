@@ -29,9 +29,7 @@ import { AdminPanel } from './AdminPanel';
 import { RouteUsageMeter } from './RouteUsageMeter';
 import { RuntimeSettings } from './RuntimeSettings';
 import { WorkspaceHome } from './WorkspaceHome';
-import { OfficialExamples, PublicOfficialExamples } from './examples/OfficialExamples';
 import { ProductionCases } from './ProductionCases';
-import { rememberOfficialSelection } from './examples/officialSelection';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
@@ -77,10 +75,9 @@ function CanvasTitle({ tenant, name, status, tone }: { tenant: Tenant; name: str
 function CanvasPageHeader({ tenantId, controls }: { tenantId: string; controls: React.ReactNode }) {
   return <header className="saas-canvas-page-header"><div className="saas-canvas-page-navigation"><a href="/" className="saas-logo">AwwO</a><CanvasBackLink tenantId={tenantId} /></div>{controls}</header>;
 }
-export function SaaSApp() { return <SaaSPreferencesProvider>{new URLSearchParams(window.location.search).get('examples') === '1' ? <PublicOfficialExamples /> : <AuthenticatedApp />}</SaaSPreferencesProvider>; }
+export function SaaSApp() { return <SaaSPreferencesProvider><AuthenticatedApp /></SaaSPreferencesProvider>; }
 function AuthenticatedApp() {
   const { locale, t } = useSaaSPreferences();
-  useEffect(() => { const id = new URLSearchParams(window.location.search).get('official'); if (id) rememberOfficialSelection(id); }, []);
   const [ssoReturn, setSSOReturn] = useState<SSOReturn | null>(() => readSSOReturn(location.search));
   // A sign-in error, an account link or a password reset holds its own screen, so a stored
   // invitation waits: a completed link or login restores it through onAuthenticated instead.
@@ -300,7 +297,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
     </form>}
     {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
-    </div>}<ProductionCases /><OfficialExamples compact initialId={new URLSearchParams(window.location.search).get('official') || undefined} /></main>;
+    </div>}<ProductionCases /></main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
   const { t } = useSaaSPreferences();

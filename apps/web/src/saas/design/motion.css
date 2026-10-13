@@ -80,7 +80,7 @@
   html:root .saas-canvas-shell :is(.canvas-run-btn, .canvas-run-timeline-toggle, .awwo-primary, .awwo-secondary, .awwo-assistant-send, .awwo-view-tools button, .awwo-icon-button):not(:disabled):active {
     scale: .97;
   }
-  :is(.saas-login, .saas-dashboard) :is(.official-card-open, .saas-canvas-open):not(:disabled):active,
+  :is(.saas-login, .saas-dashboard) .saas-canvas-open:not(:disabled):active,
   :is(.saas-login, .saas-dashboard) .production-card:has(.production-card-open:active),
   :is(.saas-login, .saas-dashboard) .saas-case-card:has(.saas-case-pick:not(:disabled):active) {
     scale: .99;

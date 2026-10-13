@@ -167,7 +167,7 @@ describe('the canvas result model', () => {
     expect(result.review).toBeNull();
   });
 
-  it('knows the review policy’s reviewer and the official examples’ checks as acceptance steps', () => {
+  it('knows the review policy’s reviewer and checks named the way people name them as acceptance steps', () => {
     const page = step('页面', 'html', '<!doctype html><html><head><title>p</title></head><body></body></html>');
     const check = step('最后看一眼', 'markdown', '没问题');
     const result = canvasResult({ nodes: [page, check], edges: [wire(page, check)],

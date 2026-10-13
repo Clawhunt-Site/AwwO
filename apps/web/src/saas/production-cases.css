@@ -4,7 +4,6 @@
 .production-cases { margin: 62px 0 20px; color: var(--saas-text); }
 .production-cases *, .production-dialog * { box-sizing: border-box; }
 .saas-login > .production-cases { grid-column: 1 / -1; width: 100%; margin: 35px 0 0; }
-.saas-login > .production-cases + .official-examples { margin-top: 0; }   /* the login grid's row gap already parts them */
 .production-cases.is-compact { margin-top: 40px; }
 
 .production-cases .production-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 28px; padding-bottom: 26px; }

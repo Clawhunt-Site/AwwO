@@ -1,5 +1,3 @@
-import { htmlPreviewDocument } from '../../canvas/htmlDeliverable';
-
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
@@ -13,14 +11,4 @@ export function showcasePage(page: string, media: Readonly<Record<string, string
     html = html.replace(new RegExp(`(?:\\./|/)?${escapeRegExp(reference)}`, 'g'), () => url);
   }
   return html;
-}
-
-/**
- * The document the homepage runs for an official example's generated result: the canvas's interactive preview
- * (inline code only, no requests, no navigation; htmlDeliverable.ts), in which the page may also play the one kind of
- * media it carries inline, a clip as a data: URL. The preview's policy comes first in the document, so the first
- * `media-src 'none'` is that policy's.
- */
-export function showcaseDocument(page: string, media: Readonly<Record<string, string>>): string {
-  return htmlPreviewDocument(showcasePage(page, media), true).replace("media-src 'none'", 'media-src data:');
 }

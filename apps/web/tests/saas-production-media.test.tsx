@@ -5,9 +5,17 @@ import { ProductionCases } from '../src/saas/ProductionCases';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import { showcasePage } from '../src/saas/examples/showcaseDocument';
 
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => cleanup());
+
+it('puts each named file in place, after ./ or / too, and leaves a page without files as it is', () => {
+  const page = '<img src="n1/image-1.jpg"><img src="./n1/image-1.jpg"><script>clip.src = "/n2/video-1.mp4";</script><p>n3/model-1.glb</p>';
+  expect(showcasePage(page, { 'n1/image-1.jpg': 'data:image/jpeg;base64,AA==', 'n2/video-1.mp4': 'data:video/mp4;base64,BB==' })).toBe(
+    '<img src="data:image/jpeg;base64,AA=="><img src="data:image/jpeg;base64,AA=="><script>clip.src = "data:video/mp4;base64,BB==";</script><p>n3/model-1.glb</p>');
+  expect(showcasePage(page, {})).toBe(page);
+});
 
 it.each(['neon-city', 'shanhai-vn', 'aurora-gt'])('runs %s with the pictures and the clip its media nodes made, inlined in place of their paths', async id => {
   const item = PRODUCTION_CASES.find(value => value.id === id)!, media = PRODUCTION_WORKFLOWS[id].media!;

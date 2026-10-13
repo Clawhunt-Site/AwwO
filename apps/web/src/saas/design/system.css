@@ -45,13 +45,13 @@ html { scrollbar-color: color-mix(in srgb, var(--saas-text) 20%, transparent) tr
 .saas-login p, .saas-page-intro p { color: var(--saas-muted); }
 
 /* Small section labels: a dot and plain words, never tracked-out monospace. */
-.saas-eyebrow, .production-eyebrow, .official-eyebrow, .awwo-eyebrow {
+.saas-eyebrow, .production-eyebrow, .awwo-eyebrow {
   display: inline-flex; align-items: center; gap: 8px;
   font: 500 var(--saas-text-xs)/1.5 var(--saas-font);
   letter-spacing: 0; text-transform: none;
   color: var(--saas-muted);
 }
-.production-eyebrow > span, .official-eyebrow > span { width: 6px; height: 6px; border-radius: 50%; background: var(--saas-bio); box-shadow: 0 0 8px var(--saas-bio); }
+.production-eyebrow > span { width: 6px; height: 6px; border-radius: 50%; background: var(--saas-bio); box-shadow: 0 0 8px var(--saas-bio); }
 
 /* ── Controls ───────────────────────────────────────────────────────────────────────────────── */
 /* Every button on these pages starts as a quiet secondary control. Only the properties the older
@@ -669,32 +669,31 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 :is(.first-run-tour .first-run-tour-next, a.saas-buy-link:not(.saas-primary), dialog.saas-tutorial-unavailable button):hover { background: var(--saas-primary-hover); }
 .first-run-tour .first-run-tour-back { border-radius: 50%; }
 
-/* ── Cases and examples (component styles live beside their components; these align them) ──── */
+/* ── Cases (component styles live beside their components; these align them) ─────────────────── */
 /* "Ran for real" in the light theme is the app's success ink, AA on its own tint (the dark theme keeps
    the cases' own light green). */
 .production-cases, .production-dialog { --production-real: var(--saas-success); }
 /* The 真实运行 label on a filled chip, not a 13% wash of the page (that left it at 4.4:1 in the light theme). */
 :is(.production-legend, .production-dialog-meta) .production-label.is-real { background: var(--saas-success-soft); }
-.production-cases .production-heading h2, .official-heading :is(h1, h2) {
+.production-cases .production-heading h2 {
   font: 690 clamp(28px, 3.4vw, 40px)/var(--saas-display-leading, 1.08) var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track); text-wrap: balance;
 }
-.production-cases .production-heading p, .official-heading p { font-size: var(--saas-text-md); line-height: 1.75; }
-.production-cases button.production-toggle, .saas-dashboard .official-library-toggle, .saas-login .official-library-toggle {
+.production-cases .production-heading p { font-size: var(--saas-text-md); line-height: 1.75; }
+.production-cases button.production-toggle {
   min-height: 36px; padding: 0 16px; border: 1px solid var(--saas-border); border-radius: var(--saas-radius-pill);
   background: var(--saas-card); box-shadow: none; color: var(--saas-text); font: 600 var(--saas-text-sm)/1 var(--saas-font);
 }
 .production-cases button.production-toggle:hover { border-color: var(--saas-border-strong); background: var(--saas-card); }
-.production-card, .official-card {
+.production-card {
   border-color: var(--saas-hairline); border-radius: var(--saas-radius-lg); box-shadow: none;
   transition: border-color var(--saas-dur-2) var(--saas-ease), box-shadow var(--saas-dur-2) var(--saas-ease);
 }
-.production-card:hover, .production-card:focus-within, .official-card:hover { transform: none; border-color: var(--saas-border); box-shadow: var(--saas-shadow-lg); }
+.production-card:hover, .production-card:focus-within { transform: none; border-color: var(--saas-border); box-shadow: var(--saas-shadow-lg); }
 .production-card.is-real { border-color: color-mix(in srgb, var(--production-real) 38%, var(--saas-border)); }
-.production-card h3, .official-card h3 { font: 600 16px/1.4 var(--saas-font); letter-spacing: 0; }
+.production-card h3 { font: 600 16px/1.4 var(--saas-font); letter-spacing: 0; }
 .production-team li { border-radius: var(--saas-radius-xs); font-size: var(--saas-text-xs); }
-.production-card-footer, .official-card-footer { font-size: var(--saas-text-xs); }
+.production-card-footer { font-size: var(--saas-text-xs); }
 .production-card-open:focus-visible::after { outline-color: var(--saas-focus); border-radius: var(--saas-radius-lg); }
-.official-card-meta, .official-card-footer, .official-card p { font-size: var(--saas-text-xs); letter-spacing: 0; }
 
 /* ── Small screens ──────────────────────────────────────────────────────────────────────────── */
 @media (max-width: 1080px) { .saas-canvas-list.is-recent { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

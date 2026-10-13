@@ -38,7 +38,7 @@ export async function readOfficialCopyModels(tenantId: string, signal?: AbortSig
 
 /** Apply only an explicit, validated choice to a freshly minted copy. The source
  * compiler and download/export path continue producing clean, unbound drafts. An image, video or 3D node keeps the
- * media model the example chose: the agent model a member picks is not one that generates pictures. */
+ * media model the case chose: the agent model a member picks is not one that generates pictures. */
 export function createOfficialCopyDocument(item: OfficialWorkflow, locale: UiLocale, model: OfficialCopyModel | null): CanvasDocument {
   const document = createOfficialDocument(item, locale);
   if (!model) return document;
@@ -51,11 +51,11 @@ export type OfficialCopyRecording = { capturedOn: string; completed: number; tot
 
 type Props = {
   item: OfficialWorkflow; tenantId: string; locale: UiLocale; busy: boolean;
-  readOnly?: boolean; error?: string; recording?: OfficialCopyRecording; onClose: () => void;
+  error?: string; recording?: OfficialCopyRecording; onClose: () => void;
   onConfirm: (model: OfficialCopyModel | null) => Promise<void>;
 };
 
-export function OfficialCopySetup({ item, tenantId, locale, busy, readOnly = false, error, recording, onClose, onConfirm }: Props) {
+export function OfficialCopySetup({ item, tenantId, locale, busy, error, recording, onClose, onConfirm }: Props) {
   const t = (zh: string, en: string) => locale === 'zh' ? zh : en;
   const id = useId(), dialog = useRef<HTMLDialogElement>(null);
   const [models, setModels] = useState<OfficialCopyModel[]>([]);
@@ -75,14 +75,13 @@ export function OfficialCopySetup({ item, tenantId, locale, busy, readOnly = fal
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setCatalogError(false); setModels([]);
-    if (readOnly) { setLoading(false); return () => controller.abort(); }
     void readOfficialCopyModels(tenantId, controller.signal).then(values => {
       if (!controller.signal.aborted) { setModels(values); setLoading(false); }
     }).catch(() => { if (!controller.signal.aborted) { setCatalogError(true); setLoading(false); } });
     return () => controller.abort();
-  }, [tenantId, readOnly, revision]);
+  }, [tenantId, revision]);
   const chosen = models.find(model => modelKey(model) === selection);
-  const locked = busy || checking || readOnly;
+  const locked = busy || checking;
   const invalidChoice = selection !== '' && (!chosen || loading || catalogError);
   const close = () => { if (!busy && !checking && !submitting.current) onClose(); };
   const confirm = async () => {
@@ -107,7 +106,7 @@ export function OfficialCopySetup({ item, tenantId, locale, busy, readOnly = fal
   return <dialog ref={dialog} className="official-copy-setup" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
     onCancel={event => { event.preventDefault(); close(); }}>
     <form onSubmit={event => { event.preventDefault(); void confirm(); }}>
-      <header><span>{recording ? t('制作案例', 'PRODUCTION CASE') : t('官方工作流', 'OFFICIAL WORKFLOW')}</span><h2 id={`${id}-title`}>{t('复制案例到我的画布', 'Copy example to my canvases')}</h2><p>{item.title[locale]}</p></header>
+      <header><span>{t('制作案例', 'PRODUCTION CASE')}</span><h2 id={`${id}-title`}>{t('复制案例到我的画布', 'Copy example to my canvases')}</h2><p>{item.title[locale]}</p></header>
       <p id={`${id}-description`}>{recording && item.canvas
         ? t(`复制 ${recording.capturedOn} 真实运行的那张画布（${item.nodes.length} 个节点）：每个 Agent 的人设、它当时收到的任务和字段说明以及连线都与那次运行一致，并带上每个 Agent 收到和交付的内容（${recording.completed}/${recording.total} 个节点，标为「案例实录」）。可为所有新节点选择同一个执行模型。`,
           `Copy the canvas of the real run on ${recording.capturedOn} (${item.nodes.length} nodes): every agent’s persona, the task and field descriptions it received, and the wires are as they were in that run, with what every agent received and delivered (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`)
@@ -126,7 +125,7 @@ export function OfficialCopySetup({ item, tenantId, locale, busy, readOnly = fal
       <div className="official-copy-catalog" aria-live="polite">
         {loading ? <p role="status">{t('正在读取当前工作区模型…', 'Loading models for this workspace…')}</p>
           : catalogError ? <p role="alert">{t('暂时无法读取模型目录。可刷新重试，或仅复制未配置的草稿。', 'Could not load the model catalog. Refresh it, or copy an unconfigured draft.')}</p>
-            : !models.length && !readOnly ? <p role="status">{t('当前工作区没有可选模型，仍可复制草稿。', 'No model is available to this workspace. You can still copy a draft.')}</p> : null}
+            : !models.length ? <p role="status">{t('当前工作区没有可选模型，仍可复制草稿。', 'No model is available to this workspace. You can still copy a draft.')}</p> : null}
         <button type="button" className="saas-link" disabled={locked || loading} onClick={() => { setSubmitError(null); setRevision(value => value + 1); }}>{t('刷新模型目录', 'Refresh model catalog')}</button>
       </div>
       <p className="official-copy-note">{t('此次只创建画布，不初始化、不运行模型。进入画布后检查配置，再开始运行。', 'This only creates a canvas; it does not initialize nodes or run models. Check the configuration in your canvas before starting a run.')}
@@ -135,7 +134,6 @@ export function OfficialCopySetup({ item, tenantId, locale, busy, readOnly = fal
         {recording && (item.canvas ? item.canvas.locale !== locale : recording.outputLocale !== locale) && ` ${item.canvas
           ? t('这个案例的画布和实录都是英文原文，按原样复制。', 'This case’s canvas and recordings are in Chinese, as they ran, and are copied as they are.')
           : t('这个案例的 Agent 用英文完成，实录按原文显示；画布的任务按中文复制，与 Agent 当时读到的英文原文措辞不同。', 'This case’s agents worked in Chinese, so the recordings are shown as delivered; the canvas’s tasks are copied in English, worded differently from the Chinese the agents read.')}`}</p>
-      {readOnly && <p role="alert">{t('复制画布需要工作区编辑权限。', 'Editing access is required to copy a canvas.')}</p>}
       {displayedError && <p className="saas-error" role="alert">{displayedError}</p>}
       <footer><button type="button" disabled={busy || checking} onClick={close}>{t('取消', 'Cancel')}</button><button type="submit" className="saas-primary" disabled={locked || invalidChoice}>
         {busy ? t('正在创建…', 'Creating…') : checking ? t('正在核对模型…', 'Checking model…') : selection ? t('带模型复制', 'Copy with model') : t('创建草稿', 'Create draft')}
