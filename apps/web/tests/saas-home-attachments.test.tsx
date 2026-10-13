@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('../src/saas/canvasBridge', async importOriginal => ({
@@ -53,33 +53,15 @@ const picker = () => document.querySelector<HTMLInputElement>('form.saas-home-co
 const attach = (...files: File[]) => fireEvent.change(picker(), { target: { files } });
 const chips = () => within(screen.getByRole('list', { name: '要一起发送的文件' })).getAllByRole('listitem');
 
-beforeAll(() => {
-  // jsdom has no modal dialogs; 全部画布 opens one.
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
-});
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); upload.mockReset(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
-it('keeps 最近的成果 as the home’s one canvas section, without 继续工作, and 全部画布 opens every canvas', async () => {
+it('keeps one list of canvases on the home: 继续工作, without 最近的成果', async () => {
   server();
-  const onOpen = vi.fn();
-  view(onOpen);
-  expect(await screen.findByRole('heading', { name: '最近的成果' })).toBeVisible();
-  expect(screen.queryByRole('heading', { name: '继续工作' })).toBeNull();
-  // A canvas that has delivered nothing is not a result; it is one click away under 全部画布.
-  expect(screen.queryByRole('heading', { name: 'An older canvas' })).toBeNull();
-  // The home's tutorial waits for this anchor, and the tour points at it.
-  expect(document.querySelectorAll('[data-onboarding="canvas-list"]')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: '全部画布' }));
-  const dialog = await screen.findByRole('dialog', { name: '全部画布' });
-  expect(await within(dialog).findByRole('heading', { name: 'An older canvas' })).toBeVisible();
-  expect(within(dialog).queryByRole('heading', { name: '继续工作' })).toBeNull();
-  expect(document.querySelectorAll('[data-onboarding="canvas-list"]')).toHaveLength(1);
-  fireEvent.click(within(dialog).getByRole('button', { name: /^An older canvas/ }));
-  expect(onOpen).toHaveBeenCalledWith('old');
-  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
-  await waitFor(() => expect(screen.queryByRole('dialog', { name: '全部画布' })).toBeNull());
+  view();
+  expect(await screen.findByRole('heading', { name: '继续工作' })).toBeVisible();
+  expect(await screen.findByRole('heading', { name: 'An older canvas' })).toBeVisible();
+  expect(screen.queryByRole('heading', { name: '最近的成果' })).toBeNull();
 });
 
 it('takes files of any type, uploads them to the canvas it creates, and hands the request over with their lines', async () => {

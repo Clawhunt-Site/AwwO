@@ -6,7 +6,7 @@ import { joinAttachments, type UploadedCanvasFile } from '../canvas/attachments'
 import { useCanvasI18n } from '../canvas/i18n';
 import { useEnterToSend } from '../canvas/composerKeys';
 import { useSaaSPreferences } from './preferences';
-import { HomeResults } from './HomeResults';
+import { CanvasList } from './CanvasList';
 import { CaseGallery } from './CaseGallery';
 import { uploadFileToCanvas } from './canvasBridge';
 import { HomeAttachButton, HomeFileChips, PLAN_PROMPT_MAX_BYTES, requestBytes, useHomeFiles } from './homeAttachments';
@@ -37,10 +37,12 @@ function exampleTitle(prompt: string): string | undefined {
 const isExamplePrompt = (text: string) => exampleTitle(text.trim()) !== undefined;
 const prefersReducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** The workspace landing page: a prompt box that starts a planned canvas (files of any type can go with it), the
- * canvases' recent results, and examples to start from. Readers, who cannot create canvases, get the results only.
- * 最近的成果 is the one canvas section here (owner 2026-10-13 12:58: 最近的成果留下，去掉继续工作; the two showed the same
- * canvases twice), and its 全部画布 opens every canvas, so one that has delivered nothing is still in reach (HomeResults). */
+/** The workspace landing page: a prompt box that starts a planned canvas (files of any type can go with it), the most
+ * recently updated canvases, and examples to start from. Readers, who cannot create canvases, get the list only.
+ * 「继续工作」 is the one list of the workspace's canvases here: the 最近的成果 gallery showed the same canvases again
+ * by their results (owner 2026-10-13: 内容有点重叠保留一个就行了), and a canvas's results stay one click away in it.
+ * It came back instead of 最近的成果 once that had been tried alone (owner 2026-10-13 15:28: 最近的成果这一栏既没有缩略图，
+ * 也没有画布的预览结构……还不如保留那个工作中的画布更好): every canvas is here, each drawn by its own structure. */
 export function WorkspaceHome(props: HomeProps) {
   return props.tenant.role === 'reader' || props.tenant.status !== 'active' ? <ReaderHome {...props} /> : <PromptHome {...props} />;
 }
@@ -49,7 +51,7 @@ function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
   const { t } = useSaaSPreferences();
   return <>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
-    <HomeResults userId={identity.user.id} tenant={tenant} onOpen={onOpen} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
     <ProductionCases compact />
     <OfficialExamples compact readOnly />
   </>;
@@ -317,7 +319,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     <section id={examplesId} className="saas-home-prompt-ideas" aria-label={t('案例灵感', 'Example ideas')} hidden={!examplesOpen}>
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
-    <HomeResults userId={identity.user.id} tenant={tenant} onOpen={onOpen} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
     <ProductionCases compact onReuse={copyProduction} />
     <OfficialExamples compact onReuse={copyOfficial} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}

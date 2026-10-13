@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { WorkspaceHome } from '../src/saas/WorkspaceHome';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
@@ -40,11 +40,6 @@ const openExamples = () => fireEvent.click(screen.getByRole('button', { name: '�
 
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); sessionStorage.clear(); });
-beforeAll(() => {
-  // jsdom has no modal dialogs; the home's 全部画布 opens one.
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
-});
 
 it('keeps the request on the page when the browser refuses to store it for the new canvas', async () => {
   const { posts } = server();
@@ -217,20 +212,16 @@ it('sets the operator’s own text aside when an example replaces it, and restor
   expect(screen.queryByRole('button', { name: '恢复原输入' })).toBeNull();
 });
 
-it('gives readers the results and every canvas without a prompt box or examples, and reads no runtime', async () => {
+it('gives readers the canvas list without a prompt box or examples, and reads no runtime', async () => {
   const { fetcher } = server({ canvases: [record('canvas-1', 'Reader canvas')] });
   view({ role: 'reader' });
-  expect(await screen.findByRole('heading', { name: '最近的成果' })).toBeVisible();
-  expect(screen.getByText('还没有交付。成员运行画布后，成果会出现在这里。')).toBeVisible();
+  expect(await screen.findByRole('heading', { name: 'Reader canvas' })).toBeVisible();
   expect(screen.getByRole('heading', { level: 1, name: 'Workspace A' })).toBeVisible();
   expect(screen.queryByRole('textbox', { name: '画布需求' })).toBeNull();
   expect(screen.queryByRole('button', { name: '空白画布' })).toBeNull();
   expect(screen.queryByRole('button', { name: '需要灵感？看看案例' })).toBeNull();
   expect(screen.queryByRole('region', { name: '从案例开始' })).toBeNull();
   expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual(['/api/v1/tenants/tenant-a/canvases?limit=50']);
-  fireEvent.click(screen.getByRole('button', { name: '全部画布' }));
-  expect(await within(screen.getByRole('dialog', { name: '全部画布' })).findByRole('heading', { name: 'Reader canvas' })).toBeVisible();
-  expect(fetcher.mock.calls.every(([url]) => String(url) === '/api/v1/tenants/tenant-a/canvases?limit=50')).toBe(true);
 });
 
 it('reads in English', async () => {
@@ -241,8 +232,7 @@ it('reads in English', async () => {
   expect(screen.getByRole('textbox', { name: 'Canvas request' })).toHaveAttribute('placeholder', 'Describe your goal, required capabilities, and deliverables…');
   expect(screen.getByRole('button', { name: 'Generate canvas' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Blank canvas' })).toBeEnabled();
-  expect(await screen.findByRole('heading', { name: 'Recent results' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'All canvases' })).toBeVisible();
+  expect(await screen.findByRole('heading', { name: 'Continue working' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Need inspiration? Explore examples' }));
   const gallery = within(screen.getByRole('region', { name: 'Start from an example' }));
   fireEvent.click(gallery.getByRole('button', { name: 'Research reports' }));
@@ -264,7 +254,7 @@ it('shows no planning warning when the engine and planner are ready', async () =
   const { fetcher } = server();
   view();
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/runtime'))).toBe(true));
-  await screen.findByRole('heading', { name: '从第一张画布开始' });
+  await screen.findByRole('heading', { name: '继续工作' });
   expect(screen.queryByText(/规划暂不可用/)).toBeNull();
 });
 
