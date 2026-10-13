@@ -116,13 +116,19 @@ export function canvasUploadsAvailable(): boolean {
  * mounted when it starts, so a file never lands on the canvas the page switched to meanwhile. */
 export function uploadCanvasFile(file: File, options: { nodeId?: string; onProgress?: (fraction: number) => void; signal?: AbortSignal } = {}): Promise<UploadedCanvasFile> {
   const scope = active;
+  if (!scope) return Promise.reject(new Error(canvasText('请先打开一张云端画布再上传文件。', 'Open a cloud canvas to upload files.')));
+  return uploadFileToCanvas(scope.tenant.id, scope.canvasId, file, options);
+}
+
+/** Upload one file of any type to a named cloud canvas, reporting progress: the canvas mounted here, or the one the
+ * workspace home has just created for a request whose files go with it (the canvas is not open yet). */
+export function uploadFileToCanvas(tenantId: string, canvasId: string, file: File, options: { nodeId?: string; onProgress?: (fraction: number) => void; signal?: AbortSignal } = {}): Promise<UploadedCanvasFile> {
   return new Promise((resolve, reject) => {
-    if (!scope) { reject(new Error(canvasText('请先打开一张云端画布再上传文件。', 'Open a cloud canvas to upload files.'))); return; }
     if (options.signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
     const query = new URLSearchParams({ name: file.name || 'file' });
     if (options.nodeId) query.set('node', options.nodeId);
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE}${tenantPath(scope.tenant.id)}/canvases/${encodeURIComponent(scope.canvasId)}/uploads?${query}`);
+    xhr.open('POST', `${API_BASE}${tenantPath(tenantId)}/canvases/${encodeURIComponent(canvasId)}/uploads?${query}`);
     xhr.withCredentials = true;
     xhr.setRequestHeader('Accept', 'application/json');
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');

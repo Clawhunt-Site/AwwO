@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, ChevronDown, Plus } from 'lucide-react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, ChevronDown, Plus, X } from 'lucide-react';
 import { api, tenantPath, saasErrorMessage, SaaSApiError, type CanvasRecord, type Identity, type Tenant } from './api';
 import { emptyDocument } from '../canvas/canvasDoc';
+import { joinAttachments, type UploadedCanvasFile } from '../canvas/attachments';
 import { useCanvasI18n } from '../canvas/i18n';
 import { useEnterToSend } from '../canvas/composerKeys';
 import { useSaaSPreferences } from './preferences';
 import { CanvasList } from './CanvasList';
-import { ResultsGallery } from './ResultsGallery';
 import { CaseGallery } from './CaseGallery';
+import { uploadFileToCanvas } from './canvasBridge';
+import { HomeAttachButton, HomeFileChips, PLAN_PROMPT_MAX_BYTES, requestBytes, useHomeFiles } from './homeAttachments';
 import { HOME_PROMPT_MAX_CHARACTERS, canvasNameFromPrompt, clearHomeDraft, readHomeDraft, saveHomeDraft } from './homePrompt';
 import { savePlanHandoff } from './planHandoff';
 import { STARTER_CASES, type StarterCase } from './starterCases';
@@ -35,40 +37,29 @@ function exampleTitle(prompt: string): string | undefined {
 const isExamplePrompt = (text: string) => exampleTitle(text.trim()) !== undefined;
 const prefersReducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** The home's newest canvases, shared by the canvas list and 最近的成果. A canvas 最近的成果 deletes leaves
- * both at once, and the list reads the server again. The callback is stable for the memoised gallery. */
-function useHomeCanvases() {
-  const [canvases, setCanvases] = useState<ReadonlyArray<CanvasRecord> | null>(null);
-  const [reloadSignal, setReloadSignal] = useState(0);
-  const onCanvasesDeleted = useCallback((canvasIds: ReadonlyArray<string>) => {
-    const gone = new Set(canvasIds);
-    setCanvases(value => value && value.filter(canvas => !gone.has(canvas.id)));
-    setReloadSignal(value => value + 1);
-  }, []);
-  return { canvases, setCanvases, reloadSignal, onCanvasesDeleted };
-}
-
-/** The workspace landing page: a prompt box that starts a planned canvas, the most recently updated
- * canvases, and examples to start from. Readers, who cannot create canvases, get the list only. */
+/** The workspace landing page: a prompt box that starts a planned canvas (files of any type can go with it), the most
+ * recently updated canvases, and examples to start from. Readers, who cannot create canvases, get the list only.
+ * 「继续工作」 is the one list of the workspace's canvases here: the 最近的成果 gallery showed the same canvases again
+ * by their results (owner 2026-10-13: 内容有点重叠保留一个就行了), and a canvas's results stay one click away in it. */
 export function WorkspaceHome(props: HomeProps) {
   return props.tenant.role === 'reader' || props.tenant.status !== 'active' ? <ReaderHome {...props} /> : <PromptHome {...props} />;
 }
 
 function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
   const { t } = useSaaSPreferences();
-  const { canvases, setCanvases, reloadSignal, onCanvasesDeleted } = useHomeCanvases();
   return <>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
-    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onFirstPage={setCanvases} reloadSignal={reloadSignal} />
-    <ResultsGallery tenant={tenant} canvases={canvases} userId={identity.user.id} onCanvasesDeleted={onCanvasesDeleted} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
     <ProductionCases compact />
     <OfficialExamples compact readOnly />
   </>;
 }
 
+/** A file that could not be uploaded, named with the reason; the canvas made for it is kept for the next send. */
+class HomeUploadError extends Error {}
+
 function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const { locale, t } = useSaaSPreferences();
-  const { canvases, setCanvases, reloadSignal, onCanvasesDeleted } = useHomeCanvases();
   const { t: text } = useCanvasI18n();
   const scope = useMemo(() => ({ user: identity.user.id, tenant: tenant.id }), [identity.user.id, tenant.id]);
   const [draft, setDraft] = useState(() => readHomeDraft(scope));
@@ -87,6 +78,11 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   // store it. The request stays here instead of being lost on the way.
   const [stranded, setStranded] = useState<{ id: string; name: string } | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
+  const files = useHomeFiles({ disabled: busy, t, locale });
+  // The canvas made for a request whose files did not all upload: the next send uses it again and uploads only what
+  // is missing, so a retry never leaves a second canvas behind.
+  const prepared = useRef<{ tenant: string; id: string } | null>(null);
+  const [uploading, setUploading] = useState<{ index: number; total: number } | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const mounted = useRef(true);
   const titleId = useId();
@@ -113,11 +109,15 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       if (!event.persisted) return;
       sending.current = false;
       setBusy(false);
+      setUploading(null);
       setDraft(readHomeDraft(scope));
     };
     window.addEventListener('pageshow', restored);
     return () => window.removeEventListener('pageshow', restored);
   }, [scope]);
+  // Adding or taking back a file answers the failure that named it (or the length a file added).
+  const fileCount = files.files.length;
+  useEffect(() => { setError(null); }, [fileCount]);
   // The box grows with its request (CSS bounds it), so an example can be read in full before sending.
   // A new width (a rotated phone, a resized window) rewraps the text, so it is measured again then too.
   useLayoutEffect(() => {
@@ -153,6 +153,16 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   };
   const create = async (prompt: string | null, official?: OfficialWorkflow, model: OfficialCopyModel | null = null, production = false) => {
     if (sending.current || tenant.role === 'reader' || tenant.status !== 'active') return;
+    // Files go with a typed request only: a blank canvas and a copied example take none.
+    const typed = prompt !== null && !official;
+    const carried = typed ? files.snapshot() : [];
+    // The planner takes 8000 bytes of request, the files' lines included. Said before anything is created.
+    if (typed && requestBytes(prompt, carried, locale) > PLAN_PROMPT_MAX_BYTES) {
+      setError(new Error(carried.length
+        ? t('需求加上附件的说明行，超过了画布规划能接收的长度（8000 字节）。请缩短文字，或少带几个文件。', 'With its files’ lines the request is longer than canvas planning takes (8,000 bytes). Shorten the text or attach fewer files.')
+        : t('需求超过了画布规划能接收的长度（8000 字节，约 2600 个汉字）。请缩短一些再生成。', 'The request is longer than canvas planning takes (8,000 bytes). Shorten it, then generate.')));
+      return;
+    }
     sending.current = true;
     setBusy(true);
     setError(null);
@@ -160,28 +170,61 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     const untitled = t('未命名', 'Untitled');
     const name = official ? official.title[locale] : prompt === null ? untitled : exampleTitle(prompt) ?? canvasNameFromPrompt(prompt, untitled);
     try {
-      const document = !official ? emptyDocument() : production ? await productionCopyDocument(official, model) : createOfficialCopyDocument(official, locale, model);
-      if (!mounted.current) return;
-      const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document }) });
-      if (!mounted.current) return;
-      if (prompt !== null) {
+      let canvasId = typed && prepared.current?.tenant === tenant.id ? prepared.current.id : '';
+      if (!canvasId) {
+        const document = !official ? emptyDocument() : production ? await productionCopyDocument(official, model) : createOfficialCopyDocument(official, locale, model);
+        if (!mounted.current) return;
+        const canvas = await api<CanvasRecord>(tenantPath(tenant.id, '/canvases'), { method: 'POST', body: JSON.stringify({ name, document }) });
+        if (!mounted.current) return;
+        canvasId = canvas.id;
+      }
+      let request = prompt;
+      if (typed && carried.length) {
+        prepared.current = { tenant: tenant.id, id: canvasId };
+        const sent: UploadedCanvasFile[] = [];
+        for (const [index, item] of carried.entries()) {
+          if (item.uploaded) { sent.push(item.uploaded); continue; }
+          setUploading({ index: index + 1, total: carried.length });
+          try {
+            const result = await uploadFileToCanvas(tenant.id, canvasId, item.file, { onProgress: fraction => { if (mounted.current) files.progress(item.key, fraction); } });
+            if (!mounted.current) return;
+            files.uploaded(item.key, result);
+            sent.push(result);
+          } catch (cause) {
+            if (!mounted.current) return;
+            const reason = saasErrorMessage(cause, locale);
+            files.failed(item.key, reason);
+            throw new HomeUploadError(t(`「${item.file.name}」没有上传成功：${reason} 画布已经建好，再点「生成画布」会接着上传没传上的文件；也可以先把它移除。`,
+              `“${item.file.name}” did not upload: ${reason} The canvas is ready: generate again to upload what is missing, or remove the file first.`));
+          }
+        }
+        setUploading(null);
+        request = joinAttachments(prompt, sent.map(file => ({ id: file.id, name: file.name })), locale);
+      }
+      if (request !== null) {
         // Leaving now would lose the request: the canvas could only open with an empty prompt box.
         // Stay, keep the text, and let the operator open the canvas once they have it.
-        if (!savePlanHandoff({ user: identity.user.id, tenant: tenant.id, canvas: canvas.id }, prompt)) {
+        if (!savePlanHandoff({ user: identity.user.id, tenant: tenant.id, canvas: canvasId }, request)) {
           sending.current = false;
           setBusy(false);
-          setStranded({ id: canvas.id, name });
+          setStranded({ id: canvasId, name });
           return;
         }
         clearHomeDraft(scope);
       }
+      if (typed) {
+        // The files are the canvas's now; a page restored from the back/forward cache starts empty.
+        prepared.current = null;
+        files.clear();
+      }
       if (official) clearOfficialSelection();
       // The page is leaving now; the box keeps its text until then.
-      onOpen(canvas.id);
+      onOpen(canvasId);
     } catch (cause) {
       if (!mounted.current) return;
       sending.current = false;
       setBusy(false);
+      setUploading(null);
       setError(cause);
     }
   };
@@ -229,16 +272,25 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       <p className="saas-home-workspace">{tenant.name}</p>
       <h1 id={titleId}>{text('assistant.title')}</h1>
       <p className="saas-home-lead">{t('描述你想交付的成果。先确认分工，再开始执行。', 'Describe what you want to deliver. Review the plan, then run it.')}</p>
-      <form className="saas-home-composer" data-onboarding="canvas-create" aria-labelledby={titleId} onSubmit={event => { event.preventDefault(); send(); }}>
+      <form className={`saas-home-composer${files.dragging ? ' is-dropping' : ''}`} data-onboarding="canvas-create" aria-labelledby={titleId}
+        onSubmit={event => { event.preventDefault(); send(); }} {...files.dropProps}>
+        {files.notice && <p className="saas-home-files-note" role="status">{files.notice}
+          <button type="button" aria-label={t('关闭提示', 'Dismiss')} onClick={files.clearNotice}><X size={12} aria-hidden="true" /></button></p>}
+        <HomeFileChips state={files} disabled={busy} t={t} locale={locale} />
         <textarea ref={input} aria-label={text('assistant.input')} aria-describedby={describedBy}
-          placeholder={text('assistant.welcomePlaceholder')} value={draft} rows={3} maxLength={HOME_PROMPT_MAX_CHARACTERS}
+          placeholder={files.files.length ? t('写一句想用这些文件做什么…', 'Say what to do with these files…') : text('assistant.welcomePlaceholder')}
+          value={draft} rows={3} maxLength={HOME_PROMPT_MAX_CHARACTERS}
           enterKeyHint="send" readOnly={busy} aria-busy={busy || undefined}
-          onChange={event => update(event.target.value)} {...composerKeys} />
+          onChange={event => update(event.target.value)} onPaste={files.onPaste} {...composerKeys} />
         <div className="saas-home-composer-actions">
+          <HomeAttachButton state={files} disabled={busy} t={t} />
           <button type="button" className="saas-home-blank" disabled={busy} onClick={() => void create(null)}><Plus size={15} aria-hidden="true" />{t('空白画布', 'Blank canvas')}</button>
           <span id={hintId} className="saas-home-hint">{t('Enter 发送 · Shift+Enter 换行', 'Enter to send · Shift+Enter for a new line')}</span>
-          <button type="submit" className="saas-primary saas-home-send" disabled={busy || !draft.trim()}><span>{busy ? t('正在创建…', 'Creating…') : text('assistant.generate')}</span><ArrowUp size={15} aria-hidden="true" /></button>
+          <button type="submit" className="saas-primary saas-home-send" disabled={busy || !draft.trim()}><span>{uploading
+            ? t(`正在上传文件 ${uploading.index}/${uploading.total}…`, `Uploading file ${uploading.index} of ${uploading.total}…`)
+            : busy ? t('正在创建…', 'Creating…') : text('assistant.generate')}</span><ArrowUp size={15} aria-hidden="true" /></button>
         </div>
+        {files.dragging && <div className="saas-home-drop" aria-hidden="true">{t('松开即可添加文件', 'Drop to add the files')}</div>}
       </form>
       <small id={disclaimerId} className="saas-home-disclaimer" title={text('composer.disclaimerFull')}>
         <span aria-hidden="true">{text('composer.disclaimer')}</span><span className="sr-only">{text('composer.disclaimerFull')}</span>
@@ -265,8 +317,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     <section id={examplesId} className="saas-home-prompt-ideas" aria-label={t('案例灵感', 'Example ideas')} hidden={!examplesOpen}>
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
-    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onFirstPage={setCanvases} reloadSignal={reloadSignal} />
-    <ResultsGallery tenant={tenant} canvases={canvases} userId={identity.user.id} onCanvasesDeleted={onCanvasesDeleted} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
     <ProductionCases compact onReuse={copyProduction} />
     <OfficialExamples compact onReuse={copyOfficial} disabled={busy}
       initialId={new URLSearchParams(window.location.search).get('official') || readOfficialSelection()}

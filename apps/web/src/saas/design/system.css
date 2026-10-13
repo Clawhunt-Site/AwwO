@@ -506,6 +506,50 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   .saas-home-composer:focus-within .saas-home-composer-actions .saas-home-send { margin-left: 0; }
 }
 .saas-home-composer-actions .saas-home-send { margin-left: auto; }
+/* Files sent with the request (homeAttachments.tsx): chips over the text, the "+" first in the toolbar, a drop hint
+   over the whole box. Theme tokens only, so every preset and the dark theme read the same. */
+.saas-home-composer { position: relative; }
+.saas-dashboard button.saas-home-attach {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 34px; height: 34px; min-height: 34px; margin: 0; padding: 0; border-color: transparent; border-radius: 50%; box-shadow: none;
+  background: var(--saas-field); color: var(--saas-muted);
+}
+.saas-dashboard button.saas-home-attach:not(:disabled):hover { border-color: transparent; background: color-mix(in srgb, var(--saas-text) 9%, var(--saas-field)); color: var(--saas-text); }
+.saas-dashboard button.saas-home-attach:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
+.saas-dashboard button.saas-home-attach:disabled { opacity: .45; cursor: not-allowed; }
+.saas-home-files { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; min-width: 0; }
+.saas-home-file {
+  display: inline-flex; align-items: center; gap: 6px; max-width: min(280px, 100%); min-width: 0; height: 34px;
+  padding: 0 4px 0 4px; border-radius: 10px; background: var(--saas-field); color: var(--saas-text); font-size: var(--saas-text-xs); line-height: 1.2;
+}
+.saas-home-file.is-failed { background: var(--saas-danger-bg); color: var(--saas-danger); }
+.saas-home-file-icon, .saas-home-file-thumb { flex: none; width: 26px; height: 26px; border-radius: 7px; }
+.saas-home-file-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--saas-bio); background: color-mix(in srgb, var(--saas-bio) 14%, transparent); }
+.saas-home-file.is-failed .saas-home-file-icon { color: var(--saas-danger); background: transparent; }
+.saas-home-file-thumb { object-fit: cover; }
+.saas-home-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saas-home-file-meta { display: inline-flex; align-items: center; gap: 3px; flex: none; color: var(--saas-muted); font-variant-numeric: tabular-nums; }
+.saas-home-file.is-failed .saas-home-file-meta { color: inherit; }
+.saas-dashboard .saas-home-file button.saas-home-file-remove {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; min-height: 22px; margin: 0; padding: 0;
+  border: 0; border-radius: 6px; box-shadow: none; background: transparent; color: var(--saas-muted);
+}
+.saas-dashboard .saas-home-file button.saas-home-file-remove:not(:disabled):hover { background: color-mix(in srgb, var(--saas-text) 9%, transparent); color: var(--saas-text); }
+.saas-home-file-spin { animation: saas-home-file-spin 1s linear infinite; }
+@keyframes saas-home-file-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .saas-home-file-spin { animation: none; } }
+.saas-home-files-note {
+  display: flex; align-items: flex-start; gap: 6px; margin: 0 0 8px; padding: 6px 8px; border-radius: 10px;
+  background: var(--saas-warning-bg); color: var(--saas-text); font-size: var(--saas-text-xs); line-height: 1.5;
+}
+.saas-dashboard .saas-home-files-note button {
+  display: inline-flex; flex: none; margin: 0 0 0 auto; padding: 2px; min-height: 0; border: 0; border-radius: 4px; box-shadow: none; background: transparent; color: inherit;
+}
+.saas-home-drop {
+  position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; pointer-events: none;
+  border: 2px dashed var(--saas-focus); border-radius: inherit; color: var(--saas-text);
+  background: color-mix(in srgb, var(--saas-card) 88%, transparent); font-size: var(--saas-text-sm, 14px); font-weight: 600;
+}
 .saas-dashboard button.saas-home-blank {
   display: inline-flex; align-items: center; gap: 6px;
   min-height: 34px; margin: 0; padding: 0 12px; border-color: transparent; border-radius: var(--saas-radius-pill); box-shadow: none;
