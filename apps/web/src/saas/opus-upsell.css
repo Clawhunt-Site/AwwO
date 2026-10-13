@@ -1,0 +1,26 @@
+/* The Opus 5.5 invitation in the canvas assistant's model menu (OpusUpsell.tsx), and the spark on the model chip that
+ * says the menu has it. Hosted only, on the design system's tokens; scoped like assistant-execution.css so it outranks
+ * the canvas skin. */
+html:root .saas-canvas-shell .awwo-canvas-assistant {
+  .saas-opus-upsell {
+    display: grid; gap: 6px; margin: 0 12px; padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--saas-bio-lilac, var(--saas-bio)) 38%, var(--saas-border)); border-radius: 12px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--saas-bio-lilac, var(--saas-bio)) 14%, var(--saas-raised)), color-mix(in srgb, var(--saas-bio) 10%, var(--saas-raised)));
+    color: var(--saas-text); font-size: var(--saas-text-xs); line-height: 1.55;
+    & p { margin: 0; }
+    & .saas-opus-upsell-title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: var(--saas-text-sm, 13px); }
+    & .saas-opus-upsell-title svg { flex: none; color: var(--saas-bio-lilac, var(--saas-bio)); }
+    & .saas-opus-upsell-allowance { color: var(--saas-muted); }
+    & .saas-opus-upsell-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; }
+    & .saas-opus-upsell-upgrade, & .saas-opus-upsell-choose {
+      display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; border-radius: var(--saas-radius-pill);
+      font: 600 var(--saas-text-xs)/1 var(--saas-font); text-decoration: none; cursor: pointer;
+    }
+    & .saas-opus-upsell-upgrade { border: 0; background: var(--saas-primary); color: var(--saas-on-primary); }
+    & .saas-opus-upsell-upgrade:hover { background: var(--saas-primary-hover, var(--saas-primary)); }
+    & .saas-opus-upsell-choose { border: 1px solid var(--saas-border); background: var(--saas-raised); color: var(--saas-text); }
+    & .saas-opus-upsell-choose:hover { background: var(--saas-soft); }
+    & :is(.saas-opus-upsell-upgrade, .saas-opus-upsell-choose):focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
+  }
+  .awwo-execution-settings > summary .awwo-execution-spark { flex: none; color: var(--saas-bio-lilac, var(--saas-bio)); }
+}

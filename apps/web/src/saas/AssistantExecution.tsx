@@ -4,7 +4,7 @@
 // the canvas's earlier tasks, the service's notices above the composer and the execution model under it. State and
 // every request live in useManagedExecution; `executionHost` hands them to the canvas.
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, RefreshCw, Square, X } from 'lucide-react';
+import { Check, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, RefreshCw, Sparkles, Square, X } from 'lucide-react';
 import { StoredArtifactPreview } from '../canvas/ArtifactPreview';
 import type { AssistantExecutionHost } from '../canvas/assistantRouting';
 import { ARTIFACT_REF_PREFIX } from './canvasBridge';
@@ -12,6 +12,7 @@ import { renderInertMarkdown } from './inertMarkdown';
 import { saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
 import { PlanUpsell, planUpsellCode, upsellReason } from './PlanUpsell';
+import { OPUS_MODEL_ID, OpusUpsell, modelRoute, useFreeAllowance } from './OpusUpsell';
 import { withPlanTag } from './runtimeCatalog';
 import type { UiLocale } from '../locale';
 import { accountURL } from './PersonalAccount';
@@ -379,6 +380,10 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
     return () => { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', key); };
   }, [open]);
   const models = execution.runtime?.models ?? [];
+  // The strongest model, offered to a free workspace with the way to use it past the free calls (OpusUpsell.tsx).
+  const opus = models.find(model => model.id === OPUS_MODEL_ID);
+  const allowance = useFreeAllowance(execution.tenantId, !execution.readOnly && opus !== undefined);
+  const invite = allowance.free && allowance.usage !== null && opus !== undefined;
   const labelCounts = models.reduce<Record<string, number>>((counts, model) => ({ ...counts, [model.label || model.id]: (counts[model.label || model.id] ?? 0) + 1 }), {});
   const optionLabel = (model: typeof models[number]) => withPlanTag(labelCounts[model.label || model.id] > 1 ? `${model.label || model.id} · ${model.runtime}` : (model.label || model.id), model);
   const chosen = execution.choice.model;
@@ -387,14 +392,21 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
     : chosen ? `${optionLabel(chosen)}${execution.effort ? ` · ${execution.effort}` : ''}` : '';
   const needsPlan = chosen?.requiresUpgrade === true;
   if (execution.readOnly || (!models.length && !execution.choice.unavailableLabel)) return null;
+  const opusKey = opus ? executionModelKey(opus.runtime, opus.id) : '';
+  const canChoose = !execution.busy && !execution.pendingSubmission;
+  const sparkTitle = invite ? t(' · 升级 Pro / Max 畅用 Claude Opus 5.5', ' · Upgrade to Pro or Max for Claude Opus 5.5') : '';
   return <div className="awwo-execution-setup">
     <details ref={details} className={`awwo-execution-settings${needsPlan || execution.choice.unavailableLabel ? ' is-warning' : ''}`} open={open}
-      onToggle={event => setOpen(event.currentTarget.open)}>
-      <summary title={label ? `${prefix}${label}` : t('选择画布助手的模型', 'Choose the canvas assistant’s model')}>
+      onToggle={event => { const opened = event.currentTarget.open; setOpen(opened); if (opened && invite) allowance.refresh(); }}>
+      <summary title={label ? `${prefix}${label}${sparkTitle}` : `${t('选择画布助手的模型', 'Choose the canvas assistant’s model')}${sparkTitle}`}>
+        {invite && <Sparkles size={12} className="awwo-execution-spark" aria-hidden="true" />}
         {label ? <><span className="sr-only">{prefix}</span><span className="awwo-execution-model">{label}</span></>
           : <span className="awwo-execution-model">{t('选择画布助手的模型', 'Choose the canvas assistant’s model')}</span>}
       </summary>
       <div className="awwo-execution-settings-panel">
+        {invite && <OpusUpsell tenantId={execution.tenantId} usage={allowance.usage!} route={modelRoute(opus)}
+          chosen={execution.choice.key === opusKey} available={opus.requiresUpgrade !== true}
+          onChoose={canChoose ? () => execution.chooseModel(opusKey) : undefined} />}
         <label>{t('画布助手的模型', 'Canvas assistant model')}
           <select value={execution.choice.key} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.chooseModel(event.target.value)}>
             {execution.choice.unavailableLabel && <option value={execution.choice.key} disabled>{t(`${execution.choice.unavailableLabel}（已不可用）`, `${execution.choice.unavailableLabel} (unavailable)`)}</option>}
