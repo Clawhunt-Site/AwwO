@@ -65,7 +65,9 @@ export const PREVIEW_LIBRARIES: readonly PreviewLibrary[] = [{
   sha256: '9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2',
   // A separate chunk, fetched only when a running page needs it.
   load: () => import('three-r128/build/three.min.js?raw').then(module => module.default),
-  additions: [{ label: 'CapsuleGeometry', used: /\bTHREE\.CapsuleGeometry\b/, code: CAPSULE_GEOMETRY }],
+  // Any mention counts: pages often reach the library through an alias (`const T = THREE`, then `new T.CapsuleGeometry`),
+  // and the addition only defines what THREE lacks, so supplying it to a page that never builds one changes nothing.
+  additions: [{ label: 'CapsuleGeometry', used: /\bCapsuleGeometry\b/, code: CAPSULE_GEOMETRY }],
 }, {
   id: 'figure-kit-1',
   label: 'Figure kit',

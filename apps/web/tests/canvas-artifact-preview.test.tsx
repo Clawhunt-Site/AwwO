@@ -391,6 +391,9 @@ describe('libraries AwwO supplies to a running page', () => {
     expect(previewScriptNeeds('<script>inline()</script><p>no external scripts</p>')).toBe(NO_PREVIEW_SCRIPT_NEEDS);
     const capsules = previewScriptNeeds(`<script src="${three}"></script><script>new THREE.CapsuleGeometry(0.3, 0.8, 4, 8)</script>`);
     expect(capsules.additions.map(addition => addition.label)).toEqual(['CapsuleGeometry']);
+    // A page that reaches three.js through an alias still gets it (Mars mission control's page: `const T=THREE`).
+    const aliased = previewScriptNeeds(`<script src="${three}"></script><script>const T=THREE;new T.CapsuleGeometry(.25,.5,4,10)</script>`);
+    expect(aliased.additions.map(addition => addition.label)).toEqual(['CapsuleGeometry']);
     expect(previewScriptNeeds('<script>new THREE.CapsuleGeometry(1, 1)</script><script src="https://cdn.test/x.js"></script>').additions).toEqual([]);
   });
 
