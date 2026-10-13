@@ -186,7 +186,7 @@ it('reuses the existing language key, keeps the chosen appearance style and both
   fireEvent.click(screen.getByRole('button', { name: /^Appearance/ }));
   fireEvent.click(screen.getByRole('radio', { name: 'Night dive' }));
   expect(document.documentElement.dataset.theme).toBe('dark'); expect(document.documentElement.dataset.awwoTheme).toBe('night'); expect(document.documentElement.lang).toBe('en');
-  expect(localStorage.getItem('awwo.theme.v1')).toBe('night'); expect(localStorage.getItem('superclaw_theme')).toBe('dark'); expect(localStorage.getItem('superclaw_locale')).toBe('en');
+  expect(localStorage.getItem('awwo.theme.v2')).toBe('night'); expect(localStorage.getItem('superclaw_theme')).toBe('dark'); expect(localStorage.getItem('superclaw_locale')).toBe('en');
   first.unmount(); render(<SaaSApp />); expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Appearance: Night dive' })).toBeVisible();
 });

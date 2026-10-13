@@ -3,10 +3,16 @@
  * the choice a reader makes, and how that choice reaches the page.
  *
  * A choice is a style id, or `auto`: follow the system's light / dark setting with 潮汐 by day and 深潜 by night (the
- * main site's pair, and what AwwO always did). It is kept per browser under THEME_STORAGE_KEY; saas.html reads the
- * same key before the first paint (its inline script carries the same ids, tests/saas-themes.test.ts keeps the two in
- * step). The older key `superclaw_theme` ('light' | 'dark') is still written, and read once to carry an earlier
- * choice over.
+ * main site's pair). A reader who has not picked one sees DEFAULT_THEME, 云白 (owner decision 2026-10-13).
+ *
+ * Only a pick is saved, per browser, under THEME_STORAGE_KEY, so a later change of the default reaches everyone who
+ * never picked. saas.html reads the same keys before the first paint (its inline script carries the same ids and
+ * rules; tests/saas-themes.test.tsx keeps the two in step). Two older keys are read to carry an earlier choice over:
+ * - PREVIOUS_THEME_STORAGE_KEY (2026-10-12): it was written on every visit, so its `auto` was nobody's choice and
+ *   now means the default; a style id there was picked (or carried over from the switch below) and is kept.
+ * - LEGACY_THEME_STORAGE_KEY `superclaw_theme` ('light' | 'dark'), the switch before styles, also written on every
+ *   visit: a value that differs from the system now was a real choice and keeps its look as 潮汐 or 深潜. It is
+ *   read only when the 2026-10-12 key is absent, and still written on a pick for older pages.
  */
 export type ThemeScheme = 'light' | 'dark';
 export type ThemeId = 'tide' | 'cloud' | 'paper' | 'blossom' | 'night' | 'graphite' | 'aurora' | 'ember';
@@ -15,8 +21,10 @@ export type ThemeChoice = ThemeId | 'auto';
 type Text = { zh: string; en: string };
 export type ThemeDefinition = { id: ThemeId; scheme: ThemeScheme; name: Text; description: Text };
 
-export const THEME_STORAGE_KEY = 'awwo.theme.v1';
+export const THEME_STORAGE_KEY = 'awwo.theme.v2';
+export const PREVIOUS_THEME_STORAGE_KEY = 'awwo.theme.v1';
 export const LEGACY_THEME_STORAGE_KEY = 'superclaw_theme';
+export const DEFAULT_THEME: ThemeId = 'cloud';
 export const AUTO_THEMES: Record<ThemeScheme, ThemeId> = { light: 'tide', dark: 'night' };
 
 /** Light styles first, then dark; the picker shows them in this order. */
@@ -54,21 +62,22 @@ export function resolveTheme(choice: ThemeChoice, prefersDark: boolean): ThemeDe
   return themeById(choice === 'auto' ? AUTO_THEMES[prefersDark ? 'dark' : 'light'] : choice);
 }
 
-/**
- * The saved choice. Before this key existed the app kept only 'light' or 'dark' (and wrote it on every visit, so it
- * may only echo the system setting of the day it was written): a value that matches the system now becomes `auto`,
- * one that differs was a real choice and keeps its look as 潮汐 or 深潜.
- */
+/** The reader's choice: their pick, else one carried over from an older key (see the top of this file), else 云白. */
 export function readThemeChoice(prefersDark = systemPrefersDark()): ThemeChoice {
   try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (isThemeChoice(saved)) return saved;
-    const legacy = localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
-    if (legacy === 'light' || legacy === 'dark') return (legacy === 'dark') === prefersDark ? 'auto' : AUTO_THEMES[legacy];
+    const picked = localStorage.getItem(THEME_STORAGE_KEY);
+    if (isThemeChoice(picked)) return picked;
+    const previous = localStorage.getItem(PREVIOUS_THEME_STORAGE_KEY);
+    if (isThemeId(previous)) return previous;
+    if (previous === null) {
+      const legacy = localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
+      if ((legacy === 'light' || legacy === 'dark') && (legacy === 'dark') !== prefersDark) return AUTO_THEMES[legacy];
+    }
   } catch { /* Browser storage can be unavailable. */ }
-  return 'auto';
+  return DEFAULT_THEME;
 }
 
+/** Save a pick (only the picker calls this): the choice, and its light or dark side for older pages. */
 export function writeThemeChoice(choice: ThemeChoice, shown: ThemeDefinition): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, choice);

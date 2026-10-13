@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Code2, Languages, MessageSquare } from 'lucide-react';
 import { LOCALE_STORAGE_KEY, localeHtmlLang, readInitialLocale, type UiLocale } from '../locale';
 import { LocaleProvider } from '../canvas/i18n';
@@ -8,7 +8,7 @@ import { ThemePicker } from './ThemePicker';
 
 type Preferences = {
   locale: UiLocale; setLocale: (locale: UiLocale) => void;
-  /** The appearance style the reader chose (外观风格), or `auto` to follow the system. */
+  /** The appearance style the reader picked (外观风格), `auto` to follow the system, or 云白 until they pick. */
   themeChoice: ThemeChoice; setThemeChoice: (choice: ThemeChoice) => void;
   /** The style on screen now. */
   theme: ThemeDefinition;
@@ -22,17 +22,19 @@ const Context = createContext<Preferences | null>(null);
 export function SaaSPreferencesProvider({ children }: { children: ReactNode }) {
   const [locale, setLocale] = useState(readInitialLocale);
   const [prefersDark, setPrefersDark] = useState(systemPrefersDark);
-  const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() => readThemeChoice());
+  const [themeChoice, setChoice] = useState<ThemeChoice>(() => readThemeChoice());
   const [uiMode, setUiMode] = useState<CanvasUiMode>(() => readUiMode());
   const theme = resolveTheme(themeChoice, prefersDark);
   useEffect(() => {
     document.documentElement.lang = localeHtmlLang(locale);
     try { localStorage.setItem(LOCALE_STORAGE_KEY, locale); } catch { /* Keep the current page usable. */ }
   }, [locale]);
-  useEffect(() => {
-    applyTheme(theme);
-    writeThemeChoice(themeChoice, theme);
-  }, [themeChoice, theme]);
+  useEffect(() => { applyTheme(theme); }, [theme]);
+  // Only a pick is saved: a reader who never picks keeps the default (云白), whatever it becomes.
+  const setThemeChoice = useCallback((choice: ThemeChoice) => {
+    setChoice(choice);
+    writeThemeChoice(choice, resolveTheme(choice, prefersDark));
+  }, [prefersDark]);
   useEffect(() => {
     // `auto` follows the system while the page is open, not only when it loads.
     if (typeof window.matchMedia !== 'function') return;
@@ -48,13 +50,13 @@ export function SaaSPreferencesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const sync = (event: StorageEvent) => {
       if (event.key === LOCALE_STORAGE_KEY && (event.newValue === 'zh' || event.newValue === 'en')) setLocale(event.newValue);
-      if (event.key === THEME_STORAGE_KEY && isThemeChoice(event.newValue)) setThemeChoice(event.newValue);
+      if (event.key === THEME_STORAGE_KEY && isThemeChoice(event.newValue)) setChoice(event.newValue);
       if (event.key === UI_MODE_STORAGE_KEY && isUiMode(event.newValue)) setUiMode(event.newValue);
     };
     window.addEventListener('storage', sync); return () => window.removeEventListener('storage', sync);
   }, []);
   const value = useMemo<Preferences>(() => ({ locale, setLocale, themeChoice, setThemeChoice, theme, themePreference: theme.scheme, uiMode, setUiMode,
-    t: (zh, en) => locale === 'zh' ? zh : en }), [locale, themeChoice, theme, uiMode]);
+    t: (zh, en) => locale === 'zh' ? zh : en }), [locale, themeChoice, setThemeChoice, theme, uiMode]);
   return <Context.Provider value={value}><LocaleProvider locale={locale}><CanvasUiModeProvider mode={uiMode}>{children}</CanvasUiModeProvider></LocaleProvider></Context.Provider>;
 }
 export function useSaaSPreferences(): Preferences {

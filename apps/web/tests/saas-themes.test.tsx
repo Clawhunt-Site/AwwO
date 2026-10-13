@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import catalog from '../../../backend/internal/app/appearance_catalog.json';
-import { AUTO_THEMES, AWWO_THEMES, LEGACY_THEME_STORAGE_KEY, readThemeChoice, resolveTheme, THEME_STORAGE_KEY } from '../src/saas/themes';
+import { AUTO_THEMES, AWWO_THEMES, DEFAULT_THEME, LEGACY_THEME_STORAGE_KEY, PREVIOUS_THEME_STORAGE_KEY, readThemeChoice, resolveTheme, THEME_STORAGE_KEY } from '../src/saas/themes';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { ThemePicker } from '../src/saas/ThemePicker';
 import { AppearanceScope } from '../src/saas/SaaSAppearance';
@@ -49,6 +49,7 @@ describe('the eight styles', () => {
     for (const theme of AWWO_THEMES) for (const text of [theme.name, theme.description]) { expect(text.zh.trim()).not.toBe(''); expect(text.en.trim()).not.toBe(''); }
     expect(new Set(AWWO_THEMES.map(theme => theme.name.zh)).size).toBe(8);
     expect(AUTO_THEMES).toEqual({ light: 'tide', dark: 'night' });
+    expect(DEFAULT_THEME).toBe('cloud');
   });
 
   it.each(AWWO_THEMES.map(theme => [theme.id, theme] as const))('%s declares a whole look in themes.css, on its own light or dark side', (id, theme) => {
@@ -98,9 +99,10 @@ describe('the eight styles', () => {
 });
 
 describe('the choice before the first paint (saas.html) and in the app', () => {
-  function prepaint(saved: string | null, legacy: string | null, dark: boolean) {
+  function prepaint(picked: string | null, previous: string | null, legacy: string | null, dark: boolean) {
     localStorage.clear();
-    if (saved !== null) localStorage.setItem(THEME_STORAGE_KEY, saved);
+    if (picked !== null) localStorage.setItem(THEME_STORAGE_KEY, picked);
+    if (previous !== null) localStorage.setItem(PREVIOUS_THEME_STORAGE_KEY, previous);
     if (legacy !== null) localStorage.setItem(LEGACY_THEME_STORAGE_KEY, legacy);
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: dark && query.includes('dark'), addEventListener() {}, removeEventListener() {} }));
     const root = document.documentElement;
@@ -109,35 +111,52 @@ describe('the choice before the first paint (saas.html) and in the app', () => {
     return [root.dataset.awwoTheme, root.dataset.theme];
   }
 
-  it('carries the same styles, light or dark side and follow-system pair as the catalogue', () => {
+  it('carries the same styles, light or dark side, keys, default and follow-system pair as the catalogue', () => {
     const map = Object.fromEntries([...prepaintScript.match(/S=\{([^}]*)\}/)![1].matchAll(/(\w+):'(light|dark)'/g)].map(([, id, scheme]) => [id, scheme]));
     expect(map).toEqual(Object.fromEntries(AWWO_THEMES.map(theme => [theme.id, theme.scheme])));
-    expect(prepaintScript).toContain(`'${THEME_STORAGE_KEY}'`);
-    expect(prepaintScript).toContain(`'${LEGACY_THEME_STORAGE_KEY}'`);
+    for (const key of [THEME_STORAGE_KEY, PREVIOUS_THEME_STORAGE_KEY, LEGACY_THEME_STORAGE_KEY]) expect(prepaintScript).toContain(`'${key}'`);
     expect(prepaintScript).toContain(`k?'${AUTO_THEMES.dark}':'${AUTO_THEMES.light}'`);
+    expect(prepaintScript).toContain(`:'${DEFAULT_THEME}';`);
   });
 
   it.each([
-    ['a saved style', 'paper', null, false, 'paper', 'light'],
-    ['a saved dark style on a light system', 'aurora', null, false, 'aurora', 'dark'],
-    ['follow system, dark', 'auto', null, true, 'night', 'dark'],
-    ['nothing saved, light system', null, null, false, 'tide', 'light'],
-    ['an old dark choice on a light system', null, 'dark', false, 'night', 'dark'],
-    ['an old light choice on a dark system', null, 'light', true, 'tide', 'light'],
-    ['an old value that only echoes the system', null, 'dark', true, 'night', 'dark'],
-    ['an unknown value', 'neon', null, false, 'tide', 'light'],
-    ['a prototype key', '__proto__', 'light', true, 'tide', 'light'],
-  ])('%s: the page script and the app agree', (_case, saved, legacy, dark, id, scheme) => {
-    expect(prepaint(saved as string | null, legacy as string | null, dark as boolean)).toEqual([id, scheme]);
+    ['nothing saved, light system', null, null, null, false, 'cloud', 'light'],
+    ['nothing saved, dark system', null, null, null, true, 'cloud', 'light'],
+    ['a picked style', 'paper', null, null, false, 'paper', 'light'],
+    ['a picked dark style on a light system', 'aurora', null, null, false, 'aurora', 'dark'],
+    ['follow system picked, dark', 'auto', null, null, true, 'night', 'dark'],
+    ['follow system picked, light', 'auto', null, null, false, 'tide', 'light'],
+    ['a pick wins over the older keys', 'ember', 'night', 'light', false, 'ember', 'dark'],
+    ['a style picked under the 2026-10-12 key', null, 'graphite', null, false, 'graphite', 'dark'],
+    ['the 2026-10-12 key saved on a visit (auto), dark system', null, 'auto', null, true, 'cloud', 'light'],
+    ['the 2026-10-12 auto over an old dark switch', null, 'auto', 'dark', false, 'cloud', 'light'],
+    ['an old dark switch on a light system', null, null, 'dark', false, 'night', 'dark'],
+    ['an old light switch on a dark system', null, null, 'light', true, 'tide', 'light'],
+    ['an old value that only echoes the system', null, null, 'dark', true, 'cloud', 'light'],
+    ['an unknown pick', 'neon', null, null, false, 'cloud', 'light'],
+    ['a prototype key as the pick', '__proto__', null, 'light', true, 'tide', 'light'],
+    ['a prototype key in the 2026-10-12 key', null, '__proto__', 'dark', false, 'cloud', 'light'],
+  ])('%s: the page script and the app agree', (_case, picked, previous, legacy, dark, id, scheme) => {
+    expect(prepaint(picked as string | null, previous as string | null, legacy as string | null, dark as boolean)).toEqual([id, scheme]);
     expect(resolveTheme(readThemeChoice(dark as boolean), dark as boolean)).toMatchObject({ id, scheme });
   });
 
-  it('migrates an old explicit choice once and follows the system when the old value only echoed it', () => {
+  it('paints the default when browser storage is blocked, as the app shows it', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('blocked', 'SecurityError'); });
+    expect(prepaint(null, null, null, true)).toEqual(['cloud', 'light']);
+    expect(readThemeChoice(true)).toBe('cloud');
+  });
+
+  it('carries an earlier choice over and gives everyone else the default', () => {
     localStorage.setItem(LEGACY_THEME_STORAGE_KEY, 'dark');
     expect(readThemeChoice(false)).toBe('night');
+    expect(readThemeChoice(true)).toBe('cloud');
+    localStorage.setItem(PREVIOUS_THEME_STORAGE_KEY, 'auto');
+    expect(readThemeChoice(false)).toBe('cloud');
+    localStorage.setItem(PREVIOUS_THEME_STORAGE_KEY, 'blossom');
+    expect(readThemeChoice(true)).toBe('blossom');
+    localStorage.setItem(THEME_STORAGE_KEY, 'auto');
     expect(readThemeChoice(true)).toBe('auto');
-    localStorage.setItem(THEME_STORAGE_KEY, 'ember');
-    expect(readThemeChoice(false)).toBe('ember');
   });
 });
 
@@ -145,13 +164,17 @@ describe('the 外观 picker', () => {
   beforeEach(() => localStorage.setItem('superclaw_locale', 'zh'));
   const openPicker = () => { fireEvent.click(screen.getByRole('button', { name: /外观风格/ })); return screen.getByRole('dialog', { name: '外观风格' }); };
 
-  it('offers follow-system and the eight styles, applies a choice at once and remembers it', () => {
+  it('offers follow-system and the eight styles, starts on 云白, applies a choice at once and saves only a pick', () => {
     const view = render(<SaaSPreferencesProvider><ThemePicker /></SaaSPreferencesProvider>);
-    expect(document.documentElement.dataset.awwoTheme).toBe('tide');
+    expect(document.documentElement.dataset.awwoTheme).toBe('cloud');
+    expect(screen.getByRole('button', { name: '外观风格：云白' })).toBeVisible();
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LEGACY_THEME_STORAGE_KEY)).toBeNull();
     const dialog = openPicker();
     const group = within(dialog).getByRole('radiogroup', { name: '外观风格' });
     expect(within(group).getAllByRole('radio')).toHaveLength(9);
-    expect(within(group).getByRole('radio', { name: '跟随系统' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(group).getByRole('radio', { name: '云白' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(group).getByRole('radio', { name: '跟随系统' })).toHaveAttribute('aria-checked', 'false');
     for (const theme of AWWO_THEMES) expect(within(group).getByRole('radio', { name: theme.name.zh })).toHaveAccessibleDescription(new RegExp(theme.description.zh));
     fireEvent.click(within(group).getByRole('radio', { name: '暖纸' }));
     expect(document.documentElement.dataset.awwoTheme).toBe('paper');
@@ -186,6 +209,7 @@ describe('the 外观 picker', () => {
   });
 
   it('follows the system while the page is open when set to follow it', () => {
+    localStorage.setItem(THEME_STORAGE_KEY, 'auto');
     let listener: (() => void) | undefined; let dark = false;
     vi.stubGlobal('matchMedia', (query: string) => ({ get matches() { return dark && query.includes('dark'); }, addEventListener: (_: string, fn: () => void) => { listener = fn; }, removeEventListener() {} }));
     render(<SaaSPreferencesProvider><ThemePicker /></SaaSPreferencesProvider>);
@@ -193,6 +217,21 @@ describe('the 外观 picker', () => {
     dark = true; act(() => listener?.());
     expect(document.documentElement.dataset.awwoTheme).toBe('night');
     expect(screen.getByRole('button', { name: '外观风格：跟随系统（深潜）' })).toBeVisible();
+  });
+
+  it('keeps 云白 for a reader who never picked, whatever the system does, and saves nothing for them', () => {
+    let listener: (() => void) | undefined; let dark = true;
+    vi.stubGlobal('matchMedia', (query: string) => ({ get matches() { return dark && query.includes('dark'); }, addEventListener: (_: string, fn: () => void) => { listener = fn; }, removeEventListener() {} }));
+    // What the 2026-10-12 release saved on a visit: not a choice.
+    localStorage.setItem(PREVIOUS_THEME_STORAGE_KEY, 'auto');
+    render(<SaaSPreferencesProvider><ThemePicker /></SaaSPreferencesProvider>);
+    expect(document.documentElement.dataset.awwoTheme).toBe('cloud');
+    expect(document.documentElement.dataset.theme).toBe('light');
+    dark = false; act(() => listener?.());
+    expect(document.documentElement.dataset.awwoTheme).toBe('cloud');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LEGACY_THEME_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(PREVIOUS_THEME_STORAGE_KEY)).toBe('auto');
   });
 
   it('hands the colours back to the style when the account still paints an older colour scheme over it', async () => {

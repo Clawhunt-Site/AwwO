@@ -23,7 +23,7 @@ it('persists a preset through the API, projects both themes and reloads the save
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
   view.unmount(); expect(document.documentElement.style.getPropertyValue('--accent')).toBe('');
   // Reopened in a light style, the saved scheme projects its light canvas.
-  localStorage.setItem('awwo.theme.v1', 'tide');
+  localStorage.setItem('awwo.theme.v2', 'tide');
   render(wrap()); await waitFor(() => expect(document.documentElement.style.getPropertyValue('--accent')).toBe(emerald.overrides.light.accent));
 });
 it('keeps the confirmed palette on CAS failure and offers reload without retrying the write', async () => {
