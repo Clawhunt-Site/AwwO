@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "papercraft-puzzle",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-11",
   "seconds": 641,
   "completed": 7,
   "total": 7,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "design",
-      "title": {
-        "zh": "谜题规则",
-        "en": "Puzzle rules"
-      },
+      "title": "Puzzle rules",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "art",
-      "title": {
-        "zh": "纸艺场景代码",
-        "en": "Paper scene code"
-      },
+      "title": "Paper scene code",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "levels",
-      "title": {
-        "zh": "三个关卡",
-        "en": "Three levels"
-      },
+      "title": "Three levels",
       "column": 1,
       "row": 1,
       "status": "done",
@@ -70,10 +57,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "sound",
-      "title": {
-        "zh": "纸张音效",
-        "en": "Paper sounds"
-      },
+      "title": "Paper sounds",
       "column": 1,
       "row": 2,
       "status": "done",
@@ -83,10 +67,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "physics",
-      "title": {
-        "zh": "旋转与滚动算法",
-        "en": "Rotate-and-roll algorithm"
-      },
+      "title": "Rotate-and-roll algorithm",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -96,10 +77,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "build",
-      "title": {
-        "zh": "可玩谜题",
-        "en": "Playable puzzle"
-      },
+      "title": "Playable puzzle",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -109,10 +87,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 4,
       "row": 0,
       "status": "done",
@@ -125,107 +100,65 @@ const record: ProductionRunRecord = {
     {
       "from": "design",
       "to": "art",
-      "label": {
-        "zh": "画面元素",
-        "en": "Visual elements"
-      }
+      "label": "Visual elements"
     },
     {
       "from": "design",
       "to": "levels",
-      "label": {
-        "zh": "规则与难度目标",
-        "en": "Rules and difficulty goals"
-      }
+      "label": "Rules and difficulty goals"
     },
     {
       "from": "design",
       "to": "sound",
-      "label": {
-        "zh": "音效清单",
-        "en": "Sound list"
-      }
+      "label": "Sound list"
     },
     {
       "from": "design",
       "to": "physics",
-      "label": {
-        "zh": "移动规则",
-        "en": "Movement rules"
-      }
+      "label": "Movement rules"
     },
     {
       "from": "levels",
       "to": "physics",
-      "label": {
-        "zh": "关卡与解法",
-        "en": "Levels and solutions"
-      }
+      "label": "Levels and solutions"
     },
     {
       "from": "design",
       "to": "build",
-      "label": {
-        "zh": "规则与流程",
-        "en": "Rules and flow"
-      }
+      "label": "Rules and flow"
     },
     {
       "from": "levels",
       "to": "build",
-      "label": {
-        "zh": "关卡数据",
-        "en": "Level data"
-      }
+      "label": "Level data"
     },
     {
       "from": "physics",
       "to": "build",
-      "label": {
-        "zh": "旋转与滚动代码",
-        "en": "Rotate-and-roll code"
-      }
+      "label": "Rotate-and-roll code"
     },
     {
       "from": "art",
       "to": "build",
-      "label": {
-        "zh": "纸艺场景代码",
-        "en": "Paper scene code"
-      }
+      "label": "Paper scene code"
     },
     {
       "from": "sound",
       "to": "build",
-      "label": {
-        "zh": "音效代码",
-        "en": "Sound code"
-      }
+      "label": "Sound code"
     },
     {
       "from": "levels",
       "to": "review",
-      "label": {
-        "zh": "解法",
-        "en": "Solutions"
-      }
+      "label": "Solutions"
     },
     {
       "from": "build",
       "to": "review",
-      "label": {
-        "zh": "游戏源码",
-        "en": "Game source"
-      }
+      "label": "Game source"
     }
   ],
-  "note": {
-    "zh": "2026-10-11 在线上 AwwO 用运营者自己的账号与工作区运行：7 个 Agent 中 7 个完成，用时 10 分 41 秒，每个 Agent 都由 Claude Opus 5.5 一次生成。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 7 of 7 agents finished in 10 min 41 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Chrome 里打开交付的页面（960×540）实际试玩：按 E 键顺时针转动纸板，小球受重力滚到墙边停下，步数随每次转动增加；用最少步数（2、3、4 步）依次通过第 1、2、3 关，每关弹出“过关”面板并洒下纸屑，按 Enter 进入下一关，第 3 关后显示“全部通关”；全程没有脚本错误。逆时针转动、重置按钮和声音没有单独验证。",
-    "en": "Before publishing, the delivered page was played in Chrome (960×540): E turns the board clockwise, the marble rolls under gravity until a wall stops it, and the step count rises with each turn; all three levels were cleared in the fewest moves (2, 3 and 4), each showing its cleared panel with falling confetti, Enter moving on, and “all cleared” after level 3; no script errors. Turning anticlockwise, the reset button and the sound were not checked separately."
-  }
+  "note": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 7 of 7 agents finished in 10 min 41 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was played in Chrome (960×540): E turns the board clockwise, the marble rolls under gravity until a wall stops it, and the step count rises with each turn; all three levels were cleared in the fewest moves (2, 3 and 4), each showing its cleared panel with falling confetti, Enter moving on, and “all cleared” after level 3; no script errors. Turning anticlockwise, the reset button and the sound were not checked separately."
 };
 export default record;

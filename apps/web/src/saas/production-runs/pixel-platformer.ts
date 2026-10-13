@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "pixel-platformer",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-11",
   "seconds": 777,
   "completed": 6,
   "total": 6,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "design",
-      "title": {
-        "zh": "玩法与数值",
-        "en": "Gameplay and tuning"
-      },
+      "title": "Gameplay and tuning",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "art",
-      "title": {
-        "zh": "像素美术",
-        "en": "Pixel art"
-      },
+      "title": "Pixel art",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "levels",
-      "title": {
-        "zh": "关卡地图",
-        "en": "Level map"
-      },
+      "title": "Level map",
       "column": 1,
       "row": 1,
       "status": "done",
@@ -70,10 +57,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "sound",
-      "title": {
-        "zh": "音效",
-        "en": "Sound effects"
-      },
+      "title": "Sound effects",
       "column": 1,
       "row": 2,
       "status": "done",
@@ -83,10 +67,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "build",
-      "title": {
-        "zh": "可玩试玩关",
-        "en": "Playable level"
-      },
+      "title": "Playable level",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -96,10 +77,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "试玩验收",
-        "en": "Playtest review"
-      },
+      "title": "Playtest review",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -112,83 +90,50 @@ const record: ProductionRunRecord = {
     {
       "from": "design",
       "to": "art",
-      "label": {
-        "zh": "画面尺寸与需要的精灵",
-        "en": "Screen size and sprites needed"
-      }
+      "label": "Screen size and sprites needed"
     },
     {
       "from": "design",
       "to": "levels",
-      "label": {
-        "zh": "数值与关卡规则",
-        "en": "Tuning and level rules"
-      }
+      "label": "Tuning and level rules"
     },
     {
       "from": "design",
       "to": "sound",
-      "label": {
-        "zh": "音效清单",
-        "en": "Sound list"
-      }
+      "label": "Sound list"
     },
     {
       "from": "design",
       "to": "build",
-      "label": {
-        "zh": "玩法与数值",
-        "en": "Gameplay and tuning"
-      }
+      "label": "Gameplay and tuning"
     },
     {
       "from": "art",
       "to": "build",
-      "label": {
-        "zh": "调色板与精灵",
-        "en": "Palette and sprites"
-      }
+      "label": "Palette and sprites"
     },
     {
       "from": "levels",
       "to": "build",
-      "label": {
-        "zh": "关卡地图",
-        "en": "Level map"
-      }
+      "label": "Level map"
     },
     {
       "from": "sound",
       "to": "build",
-      "label": {
-        "zh": "音效代码",
-        "en": "Sound code"
-      }
+      "label": "Sound code"
     },
     {
       "from": "design",
       "to": "review",
-      "label": {
-        "zh": "验收标准",
-        "en": "Acceptance criteria"
-      }
+      "label": "Acceptance criteria"
     },
     {
       "from": "build",
       "to": "review",
-      "label": {
-        "zh": "游戏源码",
-        "en": "Game source"
-      }
+      "label": "Game source"
     }
   ],
-  "note": {
-    "zh": "2026-10-11 在线上 AwwO 用运营者自己的账号与工作区运行：6 个 Agent 中 6 个完成，用时 12 分 57 秒，每个 Agent 都由 Claude Opus 5.5 一次生成。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 12 min 57 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Chrome 里打开交付的页面（960×540）实际试玩：奔跑、按住更久跳得更高的跳跃、跟随狐狸的横向镜头和三层视差背景都正常，灯笼有暖色光晕，掉进缺口后画面淡出并重新开始，计时与信件计数在走；全程没有脚本错误。没有跑通三封信与邮筒的全部路线，检查点的回位没有单独验证。",
-    "en": "Before publishing, the delivered page was played in Chrome (960×540): running, jumps that go higher the longer the key is held, the side-scrolling camera following the fox and the three parallax layers all work, the lanterns glow warmly, falling into a gap fades out and restarts, and the timer and letter count run; no script errors. The full route through all three letters to the mailbox was not played, and returning to a checkpoint was not checked on its own."
-  }
+  "note": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 12 min 57 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was played in Chrome (960×540): running, jumps that go higher the longer the key is held, the side-scrolling camera following the fox and the three parallax layers all work, the lanterns glow warmly, falling into a gap fades out and restarts, and the timer and letter count run; no script errors. The full route through all three letters to the mailbox was not played, and returning to a checkpoint was not checked on its own."
 };
 export default record;

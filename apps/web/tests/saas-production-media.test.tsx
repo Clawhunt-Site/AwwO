@@ -17,10 +17,11 @@ it('puts each named file in place, after ./ or / too, and leaves a page without 
   expect(showcasePage(page, {})).toBe(page);
 });
 
+// The run view reads in English in both interface languages, as the cases do; these tests run in the Chinese interface.
 it.each(['neon-city', 'shanhai-vn', 'aurora-gt'])('runs %s with the pictures and the clip its media nodes made, inlined in place of their paths', async id => {
   const item = PRODUCTION_CASES.find(value => value.id === id)!, media = PRODUCTION_WORKFLOWS[id].media!;
   render(<SaaSPreferencesProvider><ProductionShowcase item={item} /></SaaSPreferencesProvider>);
-  const frame = await screen.findByTitle(`${item.title.zh}：AwwO 运行交付的成品`, undefined, { timeout: 20000 });
+  const frame = await screen.findByTitle(`${item.title}: the result an AwwO run delivered`, undefined, { timeout: 20000 });
   const source = frame.getAttribute('srcdoc')!;
   // The homepage has no canvas files: every path the page names became its file's data: URL, and the clip is kept.
   expect(source).toContain("media-src data: blob: https:");
@@ -30,27 +31,27 @@ it.each(['neon-city', 'shanhai-vn', 'aurora-gt'])('runs %s with the pictures and
   expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-forms allow-modals allow-pointer-lock allow-downloads');
   expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin');
   // The media nodes are shown beside the agents, not counted as agents.
-  const strip = screen.getByRole('region', { name: '媒体节点在这次运行里生成的素材' });
+  const strip = screen.getByRole('region', { name: 'What the media nodes generated in this run' });
   expect(within(strip).getAllByRole('listitem')).toHaveLength(media.length);
-  for (const value of media) expect(within(strip).getByText(value.title.zh)).toBeVisible();
+  for (const value of media) expect(within(strip).getByText(value.title)).toBeVisible();
   // The run counts as the team above does: its agents are agents, its media column is a stage, its nodes include the media.
   const agents = PRODUCTION_WORKFLOWS[id].nodes.length, nodes = agents + media.length;
-  expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent(`${agents} 个 Agent，3 个阶段，`);
-  expect(screen.getByText(`${nodes}/${nodes} 个节点完成`)).toBeVisible();
-  expect(within(strip).getByText(`阶段 01 · 媒体节点 · ${media.length} 个，和 Agent 同一次运行生成`)).toBeVisible();
-  const stages = screen.getByRole('list', { name: '按阶段查看每个 Agent' });
+  expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent(`${agents} agents, 3 stages, `);
+  expect(screen.getByText(`${nodes}/${nodes} nodes done`)).toBeVisible();
+  expect(within(strip).getByText(`Stage 01 · ${media.length} media nodes, generated in the same run`)).toBeVisible();
+  const stages = screen.getByRole('list', { name: 'Every agent, stage by stage' });
   expect([...stages.querySelectorAll('.production-made-stage')].map(label => label.firstChild?.textContent)).toEqual(id === 'shanhai-vn' ? ['01', '02', '03'] : ['02', '03']);
 });
 
 it('counts a media case’s agents without its media slot, which still shows as a stage, and its media among its nodes', async () => {
   render(<SaaSPreferencesProvider><ProductionCases /></SaaSPreferencesProvider>);
-  for (const [title, chip] of [['霓虹之城', '真实运行 · 6/6 节点完成'], ['山海异闻录', '真实运行 · 9/9 节点完成'], ['极光 GT', '真实运行 · 6/6 节点完成']] as const)
+  for (const [title, chip] of [['Neon City', 'Real run · 6/6 nodes done'], ['Tales of Mountains and Seas', 'Real run · 9/9 nodes done'], ['Aurora GT', 'Real run · 6/6 nodes done']] as const)
     expect(within(screen.getByRole('button', { name: title }).closest<HTMLElement>('.production-card')!).getByText(chip)).toBeVisible();
-  for (const [title, line] of [['霓虹之城', '2 个 Agent · 3 个阶段'], ['山海异闻录', '3 个 Agent · 3 个阶段'], ['极光 GT', '2 个 Agent · 3 个阶段']] as const) {
+  for (const [title, line] of [['Neon City', '2 agents · 3 stages'], ['Tales of Mountains and Seas', '3 agents · 3 stages'], ['Aurora GT', '2 agents · 3 stages']] as const) {
     fireEvent.click(screen.getByRole('button', { name: title }));
     const dialog = screen.getByRole('dialog', { name: title });
     expect(within(dialog).getByText(line)).toBeVisible();
-    expect(within(dialog).getAllByText('媒体').length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText('Media').length).toBeGreaterThan(0);
     fireEvent.keyDown(dialog, { key: 'Escape' });
     cleanup();
     render(<SaaSPreferencesProvider><ProductionCases /></SaaSPreferencesProvider>);

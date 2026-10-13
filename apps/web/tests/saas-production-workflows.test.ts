@@ -26,7 +26,7 @@ it('shows on each card exactly the team its canvas has, stage by stage', () => {
     expect(item.stages.map(stage => stage.length), item.id).toEqual(stagesOf(item.id));
 });
 
-it('is a valid DAG that runs left to right and compiles in both languages', () => {
+it('is a valid DAG that runs left to right and compiles into its one English canvas', () => {
   for (const item of WORKFLOWS) {
     const ids = item.nodes.map(node => node.id);
     expect(new Set(ids).size, item.id).toBe(ids.length);
@@ -54,23 +54,21 @@ it('is a valid DAG that runs left to right and compiles in both languages', () =
     // A column is a stage: each node past the first stage receives something from the stage right before it.
     for (const node of item.nodes.filter(value => value.column > 0))
       expect([...item.edges, ...feeds].some(edge => edge.to === node.id && column.get(edge.from) === node.column - 1), `${item.id}/${node.id}`).toBe(true);
-    for (const locale of ['zh', 'en'] as const) {
-      const document = createOfficialDocument(item, locale);
-      expect(document.nodes).toHaveLength(item.nodes.length + media.length);
-      expect(document.edges).toHaveLength(item.edges.length + feeds.length + references.length);
-      // The media nodes follow the agents in the workflow's order; a reference is the picture's result into the node's
-      // reference input.
-      const mediaNode = (id: string) => document.nodes[item.nodes.length + media.findIndex(value => value.id === id)];
-      for (const reference of references)
-        expect(document.edges.filter(edge => edge.fromNode === mediaNode(reference.from).id && edge.fromPort === 'result'
-          && edge.toNode === mediaNode(reference.to).id && edge.toPort === 'reference' && edge.dataType === 'image'), `${item.id}: ${reference.from}->${reference.to}`).toHaveLength(1);
-      for (const node of (document.nodes as SessionNode[]).filter(value => value.contract)) {
-        const inputs = node.contract!.inputs.map(field => field.id);
-        expect(new Set(inputs).size).toBe(inputs.length);
-        // One source per input port, as the server's DAG check requires.
-        for (const input of inputs.filter(value => value !== 'brief'))
-          expect(document.edges.filter(edge => edge.toNode === node.id && edge.toPort === `in:${input}`)).toHaveLength(1);
-      }
+    const document = createOfficialDocument(item);
+    expect(document.nodes).toHaveLength(item.nodes.length + media.length);
+    expect(document.edges).toHaveLength(item.edges.length + feeds.length + references.length);
+    // The media nodes follow the agents in the workflow's order; a reference is the picture's result into the node's
+    // reference input.
+    const mediaNode = (id: string) => document.nodes[item.nodes.length + media.findIndex(value => value.id === id)];
+    for (const reference of references)
+      expect(document.edges.filter(edge => edge.fromNode === mediaNode(reference.from).id && edge.fromPort === 'result'
+        && edge.toNode === mediaNode(reference.to).id && edge.toPort === 'reference' && edge.dataType === 'image'), `${item.id}: ${reference.from}->${reference.to}`).toHaveLength(1);
+    for (const node of (document.nodes as SessionNode[]).filter(value => value.contract)) {
+      const inputs = node.contract!.inputs.map(field => field.id);
+      expect(new Set(inputs).size).toBe(inputs.length);
+      // One source per input port, as the server's DAG check requires.
+      for (const input of inputs.filter(value => value !== 'brief'))
+        expect(document.edges.filter(edge => edge.toNode === node.id && edge.toPort === `in:${input}`)).toHaveLength(1);
     }
   }
 });
@@ -78,9 +76,9 @@ it('is a valid DAG that runs left to right and compiles in both languages', () =
 it('refuses a media reference that names no picture of the same canvas', () => {
   const item = PRODUCTION_WORKFLOWS['aurora-gt'];
   const pointing = (to: string) => item.media!.map(value => value.id === 'red' ? { ...value, references: [to] } : value);
-  expect(() => createOfficialDocument({ ...item, media: pointing('drive') }, 'zh')).toThrow('Invalid official media reference: drive -> red');
-  expect(() => createOfficialDocument({ ...item, media: pointing('red') }, 'zh')).toThrow('Invalid official media reference: red -> red');
-  expect(() => createOfficialDocument({ ...item, media: pointing('page') }, 'zh')).toThrow('Invalid official media reference: page -> red');
+  expect(() => createOfficialDocument({ ...item, media: pointing('drive') })).toThrow('Invalid official media reference: drive -> red');
+  expect(() => createOfficialDocument({ ...item, media: pointing('red') })).toThrow('Invalid official media reference: red -> red');
+  expect(() => createOfficialDocument({ ...item, media: pointing('page') })).toThrow('Invalid official media reference: page -> red');
 });
 
 it('ends every canvas in a review and delivers exactly one self-contained HTML build', () => {
@@ -92,39 +90,43 @@ it('ends every canvas in a review and delivers exactly one self-contained HTML b
     // Sized for Claude Opus 5.5: one call of at most 32,000 output tokens, its own thinking included. A 2D build writes the
     // page itself (16,000 characters); a 3D build pastes the scene code an upstream node delivered and only wires it
     // (24,000), or, where the scene is split into two half-size modules (7,000 each), pastes both (28,000).
-    const limit = ['28000', '24000', '16000'].find(size => builds[0].task.zh.includes(`整页不超过 ${size} 个字符`));
+    const limit = [28000, 24000, 16000].find(size => builds[0].task.includes(`Delivery: one HTML file of at most ${size.toLocaleString('en-US')} characters.`));
     expect(limit, item.id).toBeDefined();
-    const assembly = limit !== '16000';
-    expect(builds[0].task.en, item.id).toContain(`at most ${Number(limit).toLocaleString('en-US')} characters`);
-    const halves = item.nodes.filter(node => node.task.zh.includes('只输出代码，不超过 7000 个字符') && node.task.en.includes('at most 7,000 characters'));
-    expect(halves.length, item.id).toBe(limit === '28000' ? 2 : 0);
-    expect(builds[0].task.zh).toContain(assembly ? '这一步只做组装' : '这一步只负责把它们实现并组装成页面');
-    expect(builds[0].task.en).toContain(assembly ? 'This step only assembles' : 'this step only implements and assembles them');
-    expect(builds[0].task.zh).toMatch(/不使用 localStorage、cookie、网络请求/);
+    const assembly = limit !== 16000;
+    expect(builds[0].task, item.id).toContain('this node makes one call of at most about 32,000 output tokens');
+    const halves = item.nodes.filter(node => node.task.includes('Output only the code, at most 7,000 characters.'));
+    expect(halves.length, item.id).toBe(limit === 28000 ? 2 : 0);
+    expect(builds[0].task).toContain(assembly ? 'This step only assembles' : 'this step only implements and assembles them');
+    expect(builds[0].task).toMatch(/no localStorage, cookies or network requests/);
     // The one external script a build may name is the three.js release AwwO's previews supply.
-    expect(builds[0].task.zh).toContain('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
+    expect(builds[0].task).toContain('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
     expect(item.edges.some(edge => edge.from === builds[0].id && item.nodes.find(node => node.id === edge.to)?.role === 'review'), item.id).toBe(true);
   }
 });
 
-it('writes every text in both languages and claims no real brand, footage or production system', () => {
+it('writes every text in English and claims no real brand, footage or production system', () => {
   for (const item of WORKFLOWS) {
-    const texts = [item.title, item.summary, item.description, item.pattern, item.brief, item.limitations, ...item.artifacts,
-      ...item.nodes.flatMap(node => [node.title, node.task, node.output, ...node.acceptance]), ...item.edges.map(edge => edge.label)];
-    for (const text of texts) { expect(text.zh.trim(), item.id).not.toBe(''); expect(text.en.trim(), item.id).not.toBe(''); }
-    expect(item.limitations.zh).toContain('Claude Opus 5.5');
-    expect(item.limitations.zh).toContain('单次最多输出 32000 token');
+    const texts = [item.title, item.brief, ...item.nodes.flatMap(node => [node.title, node.task, node.output, ...node.acceptance]),
+      ...item.edges.map(edge => edge.label), ...(item.media ?? []).flatMap(value => [value.title, value.prompt])];
+    for (const text of texts) {
+      expect(text.trim(), item.id).not.toBe('');
+      // English throughout: the only Chinese is a page title the page itself shows, quoted (“霓虹之城”, “极光 GT”).
+      expect(text.replace(/“[^”]*”/g, ''), item.id).not.toMatch(/\p{Script=Han}/u);
+    }
+    // Only a canvas kept as it ran (recordedCanvases.ts) says before copying what its recordings refer to; a compiled
+    // case's limits are told to its nodes, in their tasks (the 32,000-token call above).
+    expect(item.limitations, item.id).toBeUndefined();
     expect(JSON.stringify(item)).not.toMatch(/paperclip/i);
   }
   const ad = PRODUCTION_WORKFLOWS['summer-ad'];
-  expect(ad.brief.zh).toContain('不生成、也不冒称拍摄或生成了真实视频素材');
-  expect(ad.limitations.zh).toContain('不是成片');
-  expect(PRODUCTION_WORKFLOWS['3d-configurator'].brief.zh).toContain('虚构品牌 Orvia');
-  expect(PRODUCTION_WORKFLOWS['port-twin'].brief.zh).toContain('模拟数据');
+  expect(ad.brief).toContain('Pre-produce a 30-second summer ad for a fictional brand’s blood-orange sparkling drink');
+  expect(ad.brief).toContain('do not generate, or claim to have filmed or generated, real footage');
+  expect(PRODUCTION_WORKFLOWS['3d-configurator'].brief).toContain('the fictional brand Orvia');
+  expect(PRODUCTION_WORKFLOWS['port-twin'].brief).toContain('label the page “simulated data”');
 });
 
 it('keeps every node’s fixed prompt well inside what Claude Opus 5.5 leaves for input', () => {
-  for (const item of WORKFLOWS) for (const node of (createOfficialDocument(item, 'zh').nodes as SessionNode[]).filter(value => value.contract?.inputs.length)) {
+  for (const item of WORKFLOWS) for (const node of (createOfficialDocument(item).nodes as SessionNode[]).filter(value => value.contract?.inputs.length)) {
     // Persona, brief and output policy are sent twice (system and user); upstream outputs add the rest. The runtime's
     // system prompt allows 32,768 characters, so the fixed part stays far below it.
     const fixed = new TextEncoder().encode(node.persona + node.contract!.inputs[0].value).byteLength;

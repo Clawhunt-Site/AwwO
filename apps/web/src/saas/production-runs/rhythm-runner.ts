@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "rhythm-runner",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-11",
   "seconds": 404,
   "completed": 6,
   "total": 6,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "design",
-      "title": {
-        "zh": "节拍与判定",
-        "en": "Beats and judging"
-      },
+      "title": "Beats and judging",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "art",
-      "title": {
-        "zh": "琴键画面",
-        "en": "Piano-key visuals"
-      },
+      "title": "Piano-key visuals",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "music",
-      "title": {
-        "zh": "音乐与谱面",
-        "en": "Music and chart"
-      },
+      "title": "Music and chart",
       "column": 1,
       "row": 1,
       "status": "done",
@@ -70,10 +57,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "build",
-      "title": {
-        "zh": "可玩关卡",
-        "en": "Playable level"
-      },
+      "title": "Playable level",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -83,10 +67,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "test",
-      "title": {
-        "zh": "节奏测试",
-        "en": "Rhythm testing"
-      },
+      "title": "Rhythm testing",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -96,10 +77,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 4,
       "row": 0,
       "status": "done",
@@ -112,91 +90,55 @@ const record: ProductionRunRecord = {
     {
       "from": "design",
       "to": "art",
-      "label": {
-        "zh": "画面元素",
-        "en": "Visual elements"
-      }
+      "label": "Visual elements"
     },
     {
       "from": "design",
       "to": "music",
-      "label": {
-        "zh": "节拍与谱面规则",
-        "en": "Beat and chart rules"
-      }
+      "label": "Beat and chart rules"
     },
     {
       "from": "design",
       "to": "build",
-      "label": {
-        "zh": "判定与流程",
-        "en": "Judging and flow"
-      }
+      "label": "Judging and flow"
     },
     {
       "from": "art",
       "to": "build",
-      "label": {
-        "zh": "画面方案",
-        "en": "Look"
-      }
+      "label": "Look"
     },
     {
       "from": "music",
       "to": "build",
-      "label": {
-        "zh": "音乐与谱面代码",
-        "en": "Music and chart code"
-      }
+      "label": "Music and chart code"
     },
     {
       "from": "design",
       "to": "test",
-      "label": {
-        "zh": "判定标准",
-        "en": "Judging rules"
-      }
+      "label": "Judging rules"
     },
     {
       "from": "build",
       "to": "test",
-      "label": {
-        "zh": "游戏源码",
-        "en": "Game source"
-      }
+      "label": "Game source"
     },
     {
       "from": "design",
       "to": "review",
-      "label": {
-        "zh": "验收标准",
-        "en": "Acceptance criteria"
-      }
+      "label": "Acceptance criteria"
     },
     {
       "from": "build",
       "to": "review",
-      "label": {
-        "zh": "游戏源码",
-        "en": "Game source"
-      }
+      "label": "Game source"
     },
     {
       "from": "test",
       "to": "review",
-      "label": {
-        "zh": "测试记录",
-        "en": "Test record"
-      }
+      "label": "Test record"
     }
   ],
-  "note": {
-    "zh": "2026-10-11 在线上 AwwO 用运营者自己的账号与工作区运行：6 个 Agent 中 6 个完成，用时 6 分 44 秒，每个 Agent 都由 Claude Opus 5.5 一次生成。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 6 min 44 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Chrome 里打开交付的页面（960×540）实际试玩：按空格开始后，琴键跑道、两侧城市、纸屑和音符宝石都在动，女孩的奔跑、跳跃与滑铲正常，音符横梁按谱面出现，踩准拍点时得到 Perfect、Good 等判定，连击（试玩中升到 x9）和得分随之增加，错过时显示 Miss，倒计时在走；全程没有脚本错误。声音没有用耳朵核对，障碍与拍点的时间误差也没有逐拍测量。",
-    "en": "Before publishing, the delivered page was played in Chrome (960×540): after Space starts it, the piano-key road, the city, the confetti and the note gems all move, the girl runs, jumps and slides, note bars arrive by the chart, actions on the beat get judgments such as Perfect and Good with the combo (up to x9 in the test) and score rising, misses show Miss, and the countdown runs; no script errors. The sound was not checked by ear, and obstacle timing against the beats was not measured beat by beat."
-  }
+  "note": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 6 min 44 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was played in Chrome (960×540): after Space starts it, the piano-key road, the city, the confetti and the note gems all move, the girl runs, jumps and slides, note bars arrive by the chart, actions on the beat get judgments such as Perfect and Good with the combo (up to x9 in the test) and score rising, misses show Miss, and the countdown runs; no script errors. The sound was not checked by ear, and obstacle timing against the beats was not measured beat by beat."
 };
 export default record;

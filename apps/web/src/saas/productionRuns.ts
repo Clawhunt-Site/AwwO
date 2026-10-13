@@ -1,14 +1,13 @@
 import type { UiLocale } from '../locale';
 import summary from './production-runs/summary.json';
 
-type Localized = Readonly<Record<UiLocale, string>>;
 export type ProductionNodeStatus = 'done' | 'failed' | 'blocked' | 'cancelled' | 'cached';
 
 /** One node of a recorded case run, as the run stored it. Outputs are verbatim: the published
  * record is generated from the raw run (scripts/showcase/publish-run.mjs) and never edited. */
 export interface ProductionRunNode {
   readonly id: string;
-  readonly title: Localized;
+  readonly title: string;
   readonly column: number;
   readonly row: number;
   readonly status: ProductionNodeStatus;
@@ -27,7 +26,7 @@ export interface ProductionRunNode {
 /** One image or video node of a recorded case run, as the run stored it. */
 export interface ProductionRunMedia {
   readonly id: string;
-  readonly title: Localized;
+  readonly title: string;
   readonly kind: 'image' | 'video';
   readonly status: ProductionNodeStatus;
   readonly seconds?: number;
@@ -39,7 +38,7 @@ export interface ProductionRunMedia {
 export interface ProductionRunRecord {
   readonly caseId: string;
   /** Where it ran, for the receipt. */
-  readonly edition: Localized;
+  readonly edition: string;
   readonly runtime: string;
   readonly model: string;
   /** YYYY-MM-DD, UTC. */
@@ -48,8 +47,6 @@ export interface ProductionRunRecord {
   readonly seconds: number;
   readonly completed: number;
   readonly total: number;
-  /** The language the agents worked in; the outputs are shown as delivered. */
-  readonly outputLocale: UiLocale;
   /** `thinking: false` when the runtime switched the model's hidden reasoning off. */
   readonly limits?: { readonly contextWindow: number; readonly maxOutputTokens: number; readonly modelCallsPerNode: number; readonly concurrency: number; readonly thinking: boolean };
   readonly source?: { readonly api: string; readonly worker: string };
@@ -59,14 +56,14 @@ export interface ProductionRunRecord {
   readonly artifactNodeId?: string;
   readonly artifactSHA256?: string;
   readonly nodes: ReadonlyArray<ProductionRunNode>;
-  readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: Localized }>;
+  readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: string }>;
   /** The canvas's image and video nodes (not agents, so not in `nodes`): what each generated in this run. Their files,
    * shrunk, are in production-runs/<case>.media.ts, keyed by the `<node id>/<file>` paths the page names. */
   readonly media?: ReadonlyArray<ProductionRunMedia>;
   /** What happened in the run, failures included. */
-  readonly note: Localized;
+  readonly note: string;
   /** What was checked in a browser before publishing, and only that. */
-  readonly verification: Localized;
+  readonly verification: string;
 }
 
 /** 44 分 24 秒 / 44 min 24 s; under a minute in seconds only. */
@@ -86,12 +83,10 @@ export interface ProductionRunSummary {
   readonly capturedOn: string;
   readonly model: string;
   readonly runtime: string;
-  /** The language the agents worked in. */
-  readonly outputLocale: UiLocale;
   /** A case with image or video nodes: how many of them completed (nodes, but not agents). */
   readonly media?: { readonly completed: number; readonly total: number };
 }
-// summary.json types its locale as a plain string; tests pin every entry to its published record.
+// Tests pin every summary.json entry to its published record.
 export const PRODUCTION_RUN_SUMMARY = summary as Readonly<Record<string, ProductionRunSummary>>;
 
 /** Each record loads on its own when its case opens; none is in the homepage bundle. */

@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "summer-ad",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-11",
   "seconds": 615,
   "completed": 6,
   "total": 6,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "script",
-      "title": {
-        "zh": "广告脚本",
-        "en": "Script"
-      },
+      "title": "Script",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "boards",
-      "title": {
-        "zh": "分镜",
-        "en": "Storyboard"
-      },
+      "title": "Storyboard",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "edit",
-      "title": {
-        "zh": "剪辑节奏表",
-        "en": "Edit timing sheet"
-      },
+      "title": "Edit timing sheet",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -70,10 +57,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "grade",
-      "title": {
-        "zh": "三维物件与布光代码",
-        "en": "3D props and lighting code"
-      },
+      "title": "3D props and lighting code",
       "column": 2,
       "row": 1,
       "status": "done",
@@ -83,10 +67,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "animatic",
-      "title": {
-        "zh": "动态分镜",
-        "en": "Animatic"
-      },
+      "title": "Animatic",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -96,10 +77,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 4,
       "row": 0,
       "status": "done",
@@ -112,99 +90,60 @@ const record: ProductionRunRecord = {
     {
       "from": "script",
       "to": "boards",
-      "label": {
-        "zh": "脚本与节拍",
-        "en": "Script and beats"
-      }
+      "label": "Script and beats"
     },
     {
       "from": "script",
       "to": "edit",
-      "label": {
-        "zh": "BPM 与段落",
-        "en": "BPM and parts"
-      }
+      "label": "BPM and parts"
     },
     {
       "from": "boards",
       "to": "edit",
-      "label": {
-        "zh": "镜头与时长",
-        "en": "Shots and durations"
-      }
+      "label": "Shots and durations"
     },
     {
       "from": "script",
       "to": "grade",
-      "label": {
-        "zh": "情绪与色彩",
-        "en": "Mood and colour"
-      }
+      "label": "Mood and colour"
     },
     {
       "from": "boards",
       "to": "grade",
-      "label": {
-        "zh": "画面内容",
-        "en": "Picture content"
-      }
+      "label": "Picture content"
     },
     {
       "from": "boards",
       "to": "animatic",
-      "label": {
-        "zh": "镜头内容",
-        "en": "Shot content"
-      }
+      "label": "Shot content"
     },
     {
       "from": "edit",
       "to": "animatic",
-      "label": {
-        "zh": "剪辑节奏表",
-        "en": "Edit sheet"
-      }
+      "label": "Edit sheet"
     },
     {
       "from": "grade",
       "to": "animatic",
-      "label": {
-        "zh": "三维物件与布光代码",
-        "en": "3D props and lighting code"
-      }
+      "label": "3D props and lighting code"
     },
     {
       "from": "boards",
       "to": "review",
-      "label": {
-        "zh": "分镜表",
-        "en": "Storyboard"
-      }
+      "label": "Storyboard"
     },
     {
       "from": "edit",
       "to": "review",
-      "label": {
-        "zh": "剪辑表",
-        "en": "Edit sheet"
-      }
+      "label": "Edit sheet"
     },
     {
       "from": "animatic",
       "to": "review",
-      "label": {
-        "zh": "动态分镜源码",
-        "en": "Animatic source"
-      }
+      "label": "Animatic source"
     }
   ],
-  "note": {
-    "zh": "2026-10-11 在线上 AwwO 用运营者自己的账号与工作区运行：6 个 Agent 中 6 个完成，用时 10 分 15 秒，每个 Agent 都由 Claude Opus 5.5 一次生成。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 10 min 15 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Chrome 里打开交付的页面（960×540）实际播放：30 秒的三维动态分镜按 10 个镜头依次推进——开场“热到冒泡？”、罐身特写与“血橙 × 薄荷 × 气泡”、血橙片与薄荷叶环绕罐身、“炸开夏天”时果片爆开，最后是红底包装定格；镜头编号与时间码随播放变化，空格能暂停和继续，点时间轴能跳到对应时间；全程没有脚本错误。页面不含声音；各镜头的入出点没有逐镜核对。",
-    "en": "Before publishing, the delivered page was played in Chrome (960×540): the 30-second 3D animatic moves through its 10 shots in order — the “Hot enough to fizz?” opening, the can close-up with “blood orange × mint × fizz”, orange slices and mint leaves circling the can, the slices bursting on “burst into summer”, and the red packshot at the end; the shot number and timecode follow playback, Space pauses and resumes, and clicking the timeline jumps there; no script errors. The page has no sound, and each shot’s in and out points were not checked one by one."
-  }
+  "note": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 10 min 15 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was played in Chrome (960×540): the 30-second 3D animatic moves through its 10 shots in order — the “Hot enough to fizz?” opening, the can close-up with “blood orange × mint × fizz”, orange slices and mint leaves circling the can, the slices bursting on “burst into summer”, and the red packshot at the end; the shot number and timecode follow playback, Space pauses and resumes, and clicking the timeline jumps there; no script errors. The page has no sound, and each shot’s in and out points were not checked one by one."
 };
 export default record;

@@ -89,21 +89,27 @@ it('names its nodes and wires the way the published record does, and keeps no ma
   }
 });
 
-it('copies it word for word in the language it ran in, whatever the interface language', () => {
-  const zh = createOfficialDocument(KNOWLEDGE_BASE_WORKFLOW, 'zh'), en = createOfficialDocument(KNOWLEDGE_BASE_WORKFLOW, 'en');
-  expect(canonicalCanvasText(en)).toBe(canonicalCanvasText(zh));
-  const nodes = zh.nodes as SessionNode[];
+it('copies it word for word in the language it ran in, whatever the interface language, while the case’s own texts are English', () => {
+  // A copy takes no interface language: every reader gets the canvas as it ran, and it ran in Chinese.
+  expect(canvas.locale).toBe('zh');
+  const copy = createOfficialDocument(KNOWLEDGE_BASE_WORKFLOW);
+  expect(canonicalCanvasText(createOfficialDocument(KNOWLEDGE_BASE_WORKFLOW))).toBe(canonicalCanvasText(copy));
+  const nodes = copy.nodes as SessionNode[];
   nodes.forEach((node, index) => {
     const recorded = canvas.nodes[index];
     expect([node.title, node.persona], recorded.id).toEqual([recorded.title, recorded.persona]);
     expect(node.contract).toEqual({ version: 1, inputs: recorded.inputs, outputs: recorded.outputs });
     expect([node.model, node.runtime, node.binding, node.lastOutput]).toEqual(['', '', null, undefined]);
   });
+  // What the case and copy dialogs say about it is English, as for every case; only the canvas keeps its own words.
+  const own = [KNOWLEDGE_BASE_WORKFLOW.title, KNOWLEDGE_BASE_WORKFLOW.brief, KNOWLEDGE_BASE_WORKFLOW.limitations ?? '',
+    ...KNOWLEDGE_BASE_WORKFLOW.nodes.flatMap(node => [node.title, node.task, node.output]), ...KNOWLEDGE_BASE_WORKFLOW.edges.map(edge => edge.label)];
+  for (const text of own) { expect(text.trim()).not.toBe(''); expect(text).not.toMatch(/\p{Script=Han}/u); }
   const at = new Map(nodes.map((node, index) => [node.id, canvas.nodes[index].id]));
-  expect(zh.edges.map(edge => ({ from: at.get(edge.fromNode), output: edge.fromPort.slice('out:'.length), to: at.get(edge.toNode), input: edge.toPort.slice('in:'.length) }))).toEqual(canvas.wires);
+  expect(copy.edges.map(edge => ({ from: at.get(edge.fromNode), output: edge.fromPort.slice('out:'.length), to: at.get(edge.toNode), input: edge.toPort.slice('in:'.length) }))).toEqual(canvas.wires);
   // One source per input, and every port is a declared field: the SaaS runner accepts it as it is.
-  expect(new Set(zh.edges.map(edge => `${edge.toNode}/${edge.toPort}`)).size).toBe(zh.edges.length);
-  for (const edge of zh.edges) {
+  expect(new Set(copy.edges.map(edge => `${edge.toNode}/${edge.toPort}`)).size).toBe(copy.edges.length);
+  for (const edge of copy.edges) {
     expect(nodes.find(node => node.id === edge.fromNode)!.contract!.outputs.some(field => `out:${field.id}` === edge.fromPort)).toBe(true);
     expect(nodes.find(node => node.id === edge.toNode)!.contract!.inputs.some(field => `in:${field.id}` === edge.toPort)).toBe(true);
   }

@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "glider-adventure",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-11",
   "seconds": 999,
   "completed": 6,
   "total": 6,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "design",
-      "title": {
-        "zh": "飞行手感与生成规则",
-        "en": "Flight feel and generation"
-      },
+      "title": "Flight feel and generation",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "sky",
-      "title": {
-        "zh": "天空与云海代码",
-        "en": "Sky and cloud code"
-      },
+      "title": "Sky and cloud code",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "world",
-      "title": {
-        "zh": "浮岛与滑翔机代码",
-        "en": "Island and glider code"
-      },
+      "title": "Island and glider code",
       "column": 1,
       "row": 1,
       "status": "done",
@@ -70,10 +57,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "sound",
-      "title": {
-        "zh": "音效",
-        "en": "Sound"
-      },
+      "title": "Sound",
       "column": 1,
       "row": 2,
       "status": "done",
@@ -83,10 +67,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "build",
-      "title": {
-        "zh": "可玩试玩版",
-        "en": "Playable build"
-      },
+      "title": "Playable build",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -96,10 +77,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -112,83 +90,50 @@ const record: ProductionRunRecord = {
     {
       "from": "design",
       "to": "sky",
-      "label": {
-        "zh": "画面元素",
-        "en": "Scene elements"
-      }
+      "label": "Scene elements"
     },
     {
       "from": "design",
       "to": "world",
-      "label": {
-        "zh": "尺寸与碰撞",
-        "en": "Sizes and collision"
-      }
+      "label": "Sizes and collision"
     },
     {
       "from": "design",
       "to": "sound",
-      "label": {
-        "zh": "音效时机",
-        "en": "Sound cues"
-      }
+      "label": "Sound cues"
     },
     {
       "from": "design",
       "to": "build",
-      "label": {
-        "zh": "飞行与生成规格",
-        "en": "Flight and generation spec"
-      }
+      "label": "Flight and generation spec"
     },
     {
       "from": "sky",
       "to": "build",
-      "label": {
-        "zh": "天空与云海代码",
-        "en": "Sky and cloud code"
-      }
+      "label": "Sky and cloud code"
     },
     {
       "from": "world",
       "to": "build",
-      "label": {
-        "zh": "浮岛与滑翔机代码",
-        "en": "Island and glider code"
-      }
+      "label": "Island and glider code"
     },
     {
       "from": "sound",
       "to": "build",
-      "label": {
-        "zh": "音效代码",
-        "en": "Sound code"
-      }
+      "label": "Sound code"
     },
     {
       "from": "design",
       "to": "review",
-      "label": {
-        "zh": "验收标准",
-        "en": "Acceptance criteria"
-      }
+      "label": "Acceptance criteria"
     },
     {
       "from": "build",
       "to": "review",
-      "label": {
-        "zh": "游戏源码",
-        "en": "Game source"
-      }
+      "label": "Game source"
     }
   ],
-  "note": {
-    "zh": "2026-10-11 在线上 AwwO 用运营者自己的账号与工作区运行：6 个 Agent 中 6 个完成，用时 16 分 39 秒，每个 Agent 都由 Claude Opus 5.5 一次生成。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 16 min 39 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Chrome 里打开交付的页面（960×540）实际试玩：开场是“云海滑翔”的待机画面，按住空格起飞，按住爬升、松开俯冲，←/→ 转向时机身滚转；夕阳、云海、带草顶与石拱门、风车和瀑布的浮岛、金色光点与上升气流都在画面里，左上角的得分、距离、速度与高度随飞行变化，穿过上升气流时那里会提示；高度耗尽坠入云海后显示“坠入云海”结算（这次飞了 570 m、得分 57）；全程没有脚本错误。撞上浮岛的结束方式、上升气流补回多少高度和按空格重开没有单独验证。",
-    "en": "Before publishing, the delivered page was played in Chrome (960×540): it opens on a “Cloud-Sea Glide” ready screen, holding Space takes off, holding climbs and releasing dives, and ←/→ banks the glider into turns; the sunset, the sea of clouds, floating islands with grass, stone arches, windmills and waterfalls, golden orbs and updrafts are all in the scene, the corner shows score, distance, speed and height as they change and flags an updraft when the glider flies through one; when the glider sank into the clouds the summary showed (570 m and 57 points this time); no script errors. Ending by hitting an island, how much height an updraft restores and restarting with Space were not checked."
-  }
+  "note": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 16 min 39 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was played in Chrome (960×540): it opens on a “Cloud-Sea Glide” ready screen, holding Space takes off, holding climbs and releasing dives, and ←/→ banks the glider into turns; the sunset, the sea of clouds, floating islands with grass, stone arches, windmills and waterfalls, golden orbs and updrafts are all in the scene, the corner shows score, distance, speed and height as they change and flags an updraft when the glider flies through one; when the glider sank into the clouds the summary showed (570 m and 57 points this time); no script errors. Ending by hitting an island, how much height an updraft restores and restarting with Space were not checked."
 };
 export default record;

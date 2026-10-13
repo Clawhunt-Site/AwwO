@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "party-game",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-11",
   "seconds": 708,
   "completed": 6,
   "total": 6,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "design",
-      "title": {
-        "zh": "规则与键位",
-        "en": "Rules and keys"
-      },
+      "title": "Rules and keys",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "characters",
-      "title": {
-        "zh": "角色与场景代码",
-        "en": "Character and scene code"
-      },
+      "title": "Character and scene code",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "physics",
-      "title": {
-        "zh": "冰面物理",
-        "en": "Ice physics"
-      },
+      "title": "Ice physics",
       "column": 1,
       "row": 1,
       "status": "done",
@@ -70,10 +57,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "sound",
-      "title": {
-        "zh": "音效",
-        "en": "Sound"
-      },
+      "title": "Sound",
       "column": 1,
       "row": 2,
       "status": "done",
@@ -83,10 +67,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "build",
-      "title": {
-        "zh": "四人可玩版",
-        "en": "Four-player build"
-      },
+      "title": "Four-player build",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -96,10 +77,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -112,83 +90,50 @@ const record: ProductionRunRecord = {
     {
       "from": "design",
       "to": "characters",
-      "label": {
-        "zh": "角色与布局",
-        "en": "Characters and layout"
-      }
+      "label": "Characters and layout"
     },
     {
       "from": "design",
       "to": "physics",
-      "label": {
-        "zh": "移动与掉落规则",
-        "en": "Movement and falling rules"
-      }
+      "label": "Movement and falling rules"
     },
     {
       "from": "design",
       "to": "sound",
-      "label": {
-        "zh": "音效时机",
-        "en": "Sound cues"
-      }
+      "label": "Sound cues"
     },
     {
       "from": "design",
       "to": "build",
-      "label": {
-        "zh": "规则与流程",
-        "en": "Rules and flow"
-      }
+      "label": "Rules and flow"
     },
     {
       "from": "characters",
       "to": "build",
-      "label": {
-        "zh": "角色与场景代码",
-        "en": "Character and scene code"
-      }
+      "label": "Character and scene code"
     },
     {
       "from": "physics",
       "to": "build",
-      "label": {
-        "zh": "物理代码",
-        "en": "Physics code"
-      }
+      "label": "Physics code"
     },
     {
       "from": "sound",
       "to": "build",
-      "label": {
-        "zh": "音效代码",
-        "en": "Sound code"
-      }
+      "label": "Sound code"
     },
     {
       "from": "design",
       "to": "review",
-      "label": {
-        "zh": "验收标准",
-        "en": "Acceptance criteria"
-      }
+      "label": "Acceptance criteria"
     },
     {
       "from": "build",
       "to": "review",
-      "label": {
-        "zh": "游戏源码",
-        "en": "Game source"
-      }
+      "label": "Game source"
     }
   ],
-  "note": {
-    "zh": "2026-10-11 在线上 AwwO 用运营者自己的账号与工作区运行：6 个 Agent 中 6 个完成，用时 11 分 48 秒，每个 Agent 都由 Claude Opus 5.5 一次生成。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 11 min 48 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Chrome 里打开交付的页面（960×540）实际试玩：开局画面有 2、3、4 人可选（默认 4 人，只试了 4 人），按空格后显示 3、2、1 倒计时再开局；四组键位（WASD、方向键、IJKL、小键盘 8456）同时按住时四只企鹅各自滑行，迎面相遇会被弹开，滑出浮冰后溅起水花并在中心复活；鱼跳上冰面，接到时冒出分数（金鱼 +3），角落计分牌随之增加；60 秒结束后显示获胜者与排名，同分的并列名次；全程没有脚本错误。声音没有核对。",
-    "en": "Before publishing, the delivered page was played in Chrome (960×540): the start screen offers 2, 3 or 4 players (4 by default; only 4 was tried), and Space shows a 3, 2, 1 countdown before play; with all four key sets (WASD, arrows, IJKL, numpad 8456) held at once the four penguins slide independently, bounce apart when they meet, splash when they slide off the floe and respawn in the centre; fish leap onto the ice, a catch pops up its points (+3 for a golden fish) and the corner scoreboard rises; after 60 seconds the winner and the ranking show, with ties sharing a place; no script errors. The sound was not checked."
-  }
+  "note": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 11 min 48 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was played in Chrome (960×540): the start screen offers 2, 3 or 4 players (4 by default; only 4 was tried), and Space shows a 3, 2, 1 countdown before play; with all four key sets (WASD, arrows, IJKL, numpad 8456) held at once the four penguins slide independently, bounce apart when they meet, splash when they slide off the floe and respawn in the centre; fish leap onto the ice, a catch pops up its points (+3 for a golden fish) and the corner scoreboard rises; after 60 seconds the winner and the ranking show, with ties sharing a place; no script errors. The sound was not checked."
 };
 export default record;

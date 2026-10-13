@@ -16,7 +16,7 @@ it('inlines exactly the generated files a media case’s page names, and records
     const workflow = PRODUCTION_WORKFLOWS[record.caseId];
     const files = MEDIA[`../src/saas/production-runs/${record.caseId}.media.ts`];
     if (!workflow?.media?.length) { expect(record.media, record.caseId).toBeUndefined(); expect(files, record.caseId).toBeUndefined(); continue; }
-    expect(record.media?.map(item => item.id), record.caseId).toEqual(workflow.media.map(item => item.id));
+    expect(record.media?.map(item => [item.id, item.title]), record.caseId).toEqual(workflow.media.map(item => [item.id, item.title]));
     const page = record.nodes.find(node => node.id === record.artifactNodeId)?.output ?? '';
     const named = record.media!.flatMap(item => item.files).filter(path => page.includes(path));
     expect(Object.keys(files ?? {}).sort(), record.caseId).toEqual(named.sort());
@@ -38,7 +38,7 @@ it('publishes a record for real cases only, and summarises each one exactly', ()
     const delivery = record.nodes.find(node => node.id === record.artifactNodeId);
     expect(PRODUCTION_RUN_SUMMARY[record.caseId], record.caseId).toEqual({ completed: record.completed, total: record.total, seconds: record.seconds,
       delivered: record.caseId === 'knowledge-base' ? true : delivery?.status === 'done' && delivery.outputType === 'html' && Boolean(delivery.output),
-      capturedOn: record.capturedOn, model: record.model, runtime: record.runtime, outputLocale: record.outputLocale,
+      capturedOn: record.capturedOn, model: record.model, runtime: record.runtime,
       ...(record.media?.length ? { media: { completed: record.media.filter(item => item.status === 'done').length, total: record.media.length } } : {}) });
   }
 });
@@ -53,7 +53,11 @@ it('keeps every record internally consistent: counts, statuses, outputs and the 
     expect(record.completed, record.caseId).toBe(record.nodes.filter(node => node.status === 'done').length);
     expect(record.capturedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(record.seconds).toBeGreaterThan(0);
-    for (const text of [record.edition, record.note, record.verification]) { expect(text.zh.trim()).not.toBe(''); expect(text.en.trim()).not.toBe(''); }
+    // English, as every case is: a delivered page's own Chinese wording appears only quoted or in brackets.
+    for (const text of [record.edition, record.note, record.verification]) {
+      expect(text.trim(), record.caseId).not.toBe('');
+      expect(text.replace(/“[^”]*”|\([^)]*\)/g, ''), record.caseId).not.toMatch(/\p{Script=Han}/u);
+    }
     for (const node of record.nodes) {
       if (node.status === 'done') {
         if (node.outputType === 'fields') expect(node.fields?.length, `${record.caseId}/${node.id}`).toBeGreaterThan(0);
@@ -76,7 +80,7 @@ it('records each SaaS case run on the very canvas a member can copy today', () =
       workflow.nodes.map(node => [node.id, node.title, node.column, node.row, node.outputType ?? 'markdown']));
     expect(record.edges).toEqual(workflow.edges);
     // Every task, persona, brief, contract and wire the run used is the copyable canvas today, word for word.
-    expect(createHash('sha256').update(canonicalCanvasText(createOfficialDocument(workflow, record.outputLocale))).digest('hex'), record.caseId).toBe(record.canvasSHA256);
+    expect(createHash('sha256').update(canonicalCanvasText(createOfficialDocument(workflow))).digest('hex'), record.caseId).toBe(record.canvasSHA256);
     expect(record.artifactNodeId === undefined || record.artifactNodeId === workflow.nodes.find(node => node.outputType === 'html')!.id).toBe(true);
     // The settings it ran with on production: Claude Opus 5.5's own limits, one model call per node, its thinking on.
     expect(record.model, record.caseId).toBe('Claude Opus 5.5');
@@ -90,9 +94,9 @@ it('records each SaaS case run on the very canvas a member can copy today', () =
 
 it('changes the canvas digest when any task or wire changes, but not with the fresh node IDs of a copy', () => {
   const workflow = PRODUCTION_WORKFLOWS['party-game'];
-  const document = createOfficialDocument(workflow, 'zh');
+  const document = createOfficialDocument(workflow);
   const text = canonicalCanvasText(document);
-  expect(canonicalCanvasText(createOfficialDocument(workflow, 'zh'))).toBe(text);
+  expect(canonicalCanvasText(createOfficialDocument(workflow))).toBe(text);
   expect(canonicalCanvasText({ ...document, edges: document.edges.slice(1) })).not.toBe(text);
   expect(canonicalCanvasText({ ...document, edges: document.edges.map((edge, index) => index ? edge : { ...edge, toPort: 'in:brief' }) })).not.toBe(text);
   expect(canonicalCanvasText({ ...document, nodes: document.nodes.map((node, index) => index ? node : { ...node, persona: `${(node as { persona?: string }).persona} ` }) })).not.toBe(text);

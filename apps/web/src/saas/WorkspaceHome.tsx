@@ -150,7 +150,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     const unavailable = () => new SaaSApiError(0, 'case_record_unavailable', 'The case run recording could not be loaded.');
     const [record, copy] = await Promise.all([loadProductionRun(official.id), import('./productionCopy')]).catch(() => { throw unavailable(); });
     if (!record) throw unavailable();
-    return copy.createProductionCopyDocument(official, record, locale, model);
+    return copy.createProductionCopyDocument(official, record, model);
   };
   const create = async (prompt: string | null, official?: OfficialWorkflow, model: OfficialCopyModel | null = null) => {
     if (sending.current || tenant.role === 'reader' || tenant.status !== 'active') return;
@@ -169,7 +169,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     setError(null);
     setStranded(null);
     const untitled = t('未命名', 'Untitled');
-    const name = official ? official.title[locale] : prompt === null ? untitled : exampleTitle(prompt) ?? canvasNameFromPrompt(prompt, untitled);
+    const name = official ? official.title : prompt === null ? untitled : exampleTitle(prompt) ?? canvasNameFromPrompt(prompt, untitled);
     try {
       let canvasId = typed && prepared.current?.tenant === tenant.id ? prepared.current.id : '';
       if (!canvasId) {
@@ -317,9 +317,9 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     </section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
     <ProductionCases compact onReuse={copyCase} />
-    {caseCopy && <OfficialCopySetup key={`${tenant.id}:${caseCopy.id}`} item={caseCopy} tenantId={tenant.id} locale={locale} busy={busy}
+    {caseCopy && <OfficialCopySetup key={`${tenant.id}:${caseCopy.id}`} item={caseCopy} tenantId={tenant.id} busy={busy}
       recording={PRODUCTION_RUN_SUMMARY[caseCopy.id]}
-      error={error !== null ? saasErrorMessage(error, locale) : undefined} onClose={() => setCaseCopy(null)}
+      error={error !== null ? saasErrorMessage(error, 'en') : undefined} onClose={() => setCaseCopy(null)}
       onConfirm={model => create(null, caseCopy, model)} />}
   </>;
 }

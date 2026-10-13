@@ -42,7 +42,19 @@ const STEPS: ReadonlyArray<{ key: string; title: Copy; body: Copy; readOnlyBody?
 ];
 
 const text = (copy: Copy, locale: UiLocale) => copy[locale === 'zh' ? 0 : 1];
-const nodeTitle = (id: string, locale: UiLocale) => EXAMPLE.nodes.find(node => node.id === id)?.title[locale] ?? id;
+// The case is English in both interface languages; this tutorial follows the interface language, so the Chinese
+// interface shows the same canvas with these Chinese titles and excerpts (the case's own wording before 2026-10-14).
+const ZH_TITLES: Readonly<Record<string, string>> = {
+  design: '玩法与数值', art: '像素美术', levels: '关卡地图', sound: '音效', build: '可玩试玩关', review: '试玩验收',
+};
+const ZH_EXAMPLE = {
+  brief: '做一款像素风平台跳跃试玩关《狐狸邮差》：画面对标高品质独立像素',
+  levelsTask: '按玩法数值设计一张 17 行 × 90 列的图块地图，用字符串数组表示：# 石砖地面，= 木板平台，A 遮阳篷屋顶（可站立），^ 尖刺，L ',
+  levelsAcceptance: '每行恰好 90 个字符；L 恰好 3 个，C 恰好 2 个；S、M 各一个',
+  levelsOutput: '图块地图与可达性说明',
+  buildOutput: '可玩试玩关 HTML',
+};
+const nodeTitle = (id: string, locale: UiLocale) => locale === 'zh' ? ZH_TITLES[id] ?? id : EXAMPLE.nodes.find(node => node.id === id)?.title ?? id;
 
 /** The example canvas as columns, from the real workflow behind the pixel platformer case. */
 function MiniCanvas({ locale, highlight, states, labels }: { locale: UiLocale; highlight?: number; states?: Readonly<Record<string, 'done' | 'running' | 'waiting' | 'failed' | 'blocked'>>; labels?: Readonly<Record<string, string>> }) {
@@ -51,7 +63,7 @@ function MiniCanvas({ locale, highlight, states, labels }: { locale: UiLocale; h
     {columns.map((column, index) => <div key={column} className={`wmt-column${highlight === index ? ' is-lit' : ''}`} style={{ '--wmt-index': index } as CSSProperties}>
       <small>{String(index + 1).padStart(2, '0')}</small>
       {EXAMPLE.nodes.filter(node => node.column === column).map(node => <span key={node.id} className={`wmt-node${states?.[node.id] ? ` is-${states[node.id]}` : ''}`}>
-        <b>{node.title[locale]}</b>{labels?.[node.id] && <i>{labels[node.id]}</i>}</span>)}
+        <b>{nodeTitle(node.id, locale)}</b>{labels?.[node.id] && <i>{labels[node.id]}</i>}</span>)}
     </div>)}
   </div>;
 }
@@ -65,16 +77,16 @@ function Scene({ step, locale, record }: { step: string; locale: UiLocale; recor
         .map(([title, detail], index) => <span key={title} style={{ '--wmt-index': index } as CSSProperties}><b>{title}</b><small>{detail}</small></span>)}
     </div>;
     case 'plan': return <div className="wmt-scene wmt-plan">
-      <p className="wmt-prompt"><span>{EXAMPLE.brief[locale].slice(0, zh ? 34 : 96)}…</span><b>{zh ? '生成画布' : 'Generate canvas'}<ArrowRight size={12} aria-hidden="true" /></b></p>
+      <p className="wmt-prompt"><span>{zh ? ZH_EXAMPLE.brief : EXAMPLE.brief.slice(0, 96)}…</span><b>{zh ? '生成画布' : 'Generate canvas'}<ArrowRight size={12} aria-hidden="true" /></b></p>
       <MiniCanvas locale={locale} />
     </div>;
     case 'node': {
       const node = EXAMPLE.nodes.find(value => value.id === 'levels')!;
       return <div className="wmt-scene wmt-anatomy">
         <span className="wmt-port is-in">{zh ? '输入' : 'Input'}<b>{nodeTitle('design', locale)}</b></span>
-        <article><header><b>{node.title[locale]}</b><small>{zh ? `数据 · ${record ? `模型 ${record.model}` : '模型由工作区选择'}` : `Data · ${record ? `model ${record.model}` : 'model chosen by the workspace'}`}</small></header>
-          <p>{node.task[locale].slice(0, zh ? 58 : 150)}…</p><p className="wmt-check"><Check size={11} aria-hidden="true" />{node.acceptance[0][locale]}</p></article>
-        <span className="wmt-port is-out">{zh ? '输出' : 'Output'}<b>{node.output[locale]}</b></span>
+        <article><header><b>{nodeTitle(node.id, locale)}</b><small>{zh ? `数据 · ${record ? `模型 ${record.model}` : '模型由工作区选择'}` : `Data · ${record ? `model ${record.model}` : 'model chosen by the workspace'}`}</small></header>
+          <p>{zh ? ZH_EXAMPLE.levelsTask.slice(0, 58) : node.task.slice(0, 150)}…</p><p className="wmt-check"><Check size={11} aria-hidden="true" />{zh ? ZH_EXAMPLE.levelsAcceptance : node.acceptance[0]}</p></article>
+        <span className="wmt-port is-out">{zh ? '输出' : 'Output'}<b>{zh ? ZH_EXAMPLE.levelsOutput : node.output}</b></span>
       </div>;
     }
     case 'handoff': return <div className="wmt-scene wmt-handoff">
@@ -96,7 +108,7 @@ function Scene({ step, locale, record }: { step: string; locale: UiLocale; recor
         <span className="is-pass"><Check size={11} aria-hidden="true" />{zh ? '确认通过的项' : 'Confirmed'}</span>
         <span className="is-fail"><TriangleAlert size={11} aria-hidden="true" />{zh ? '发现的缺陷' : 'Defects found'}</span>
         <span className="is-open"><CircleSlash size={11} aria-hidden="true" />{zh ? '未验证的项' : 'Not verified'}</span></article>
-      <article className="wmt-delivery"><b>{zh ? '交付成品' : 'Delivered'}</b><span>{EXAMPLE.nodes.find(node => node.id === 'build')!.output[locale]}</span>
+      <article className="wmt-delivery"><b>{zh ? '交付成品' : 'Delivered'}</b><span>{zh ? ZH_EXAMPLE.buildOutput : EXAMPLE.nodes.find(node => node.id === 'build')!.output}</span>
         <small>{zh ? '在节点交付区预览、下载' : 'Preview and download it in the node’s deliverables'}</small></article>
       <p className="wmt-caption">{zh ? '示意：验收与交付在画布上的样子' : 'Illustration: how review and delivery look on a canvas'}</p>
     </div>;

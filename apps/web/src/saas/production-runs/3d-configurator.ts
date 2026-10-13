@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "3d-configurator",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-11",
   "seconds": 786,
   "completed": 5,
   "total": 5,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "product",
-      "title": {
-        "zh": "配置项与价格",
-        "en": "Options and pricing"
-      },
+      "title": "Options and pricing",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "modelling",
-      "title": {
-        "zh": "车体三维结构",
-        "en": "3D bike structure"
-      },
+      "title": "3D bike structure",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "rendering",
-      "title": {
-        "zh": "建模与舞台代码",
-        "en": "Bike and stage code"
-      },
+      "title": "Bike and stage code",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -70,10 +57,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "frontend",
-      "title": {
-        "zh": "配置器页面",
-        "en": "Configurator page"
-      },
+      "title": "Configurator page",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -83,10 +67,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "交付验收",
-        "en": "Delivery review"
-      },
+      "title": "Delivery review",
       "column": 4,
       "row": 0,
       "status": "done",
@@ -99,75 +80,45 @@ const record: ProductionRunRecord = {
     {
       "from": "product",
       "to": "modelling",
-      "label": {
-        "zh": "部件与选项",
-        "en": "Parts and options"
-      }
+      "label": "Parts and options"
     },
     {
       "from": "modelling",
       "to": "rendering",
-      "label": {
-        "zh": "几何数据",
-        "en": "Geometry data"
-      }
+      "label": "Geometry data"
     },
     {
       "from": "product",
       "to": "rendering",
-      "label": {
-        "zh": "颜色与外观",
-        "en": "Colours and appearance"
-      }
+      "label": "Colours and appearance"
     },
     {
       "from": "product",
       "to": "frontend",
-      "label": {
-        "zh": "配置表与价格",
-        "en": "Options and prices"
-      }
+      "label": "Options and prices"
     },
     {
       "from": "modelling",
       "to": "frontend",
-      "label": {
-        "zh": "几何数据",
-        "en": "Geometry data"
-      }
+      "label": "Geometry data"
     },
     {
       "from": "rendering",
       "to": "frontend",
-      "label": {
-        "zh": "建模与舞台代码",
-        "en": "Bike and stage code"
-      }
+      "label": "Bike and stage code"
     },
     {
       "from": "product",
       "to": "review",
-      "label": {
-        "zh": "验收标准",
-        "en": "Acceptance criteria"
-      }
+      "label": "Acceptance criteria"
     },
     {
       "from": "frontend",
       "to": "review",
-      "label": {
-        "zh": "页面源码",
-        "en": "Page source"
-      }
+      "label": "Page source"
     }
   ],
-  "note": {
-    "zh": "2026-10-11 在线上 AwwO 用运营者自己的账号与工作区运行：5 个 Agent 中 5 个完成，用时 13 分 6 秒，每个 Agent 都由 Claude Opus 5.5 一次生成。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 5 of 5 agents finished in 13 min 6 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Chrome 里打开交付的页面（960×540）实际操作：依次换车架颜色（珊瑚橙、薄荷绿、天蓝、石墨黑）、长续航电池、前车筐和舒适车座，三维车身的颜色、车筐与车座即时变化，价格从 ¥8,999 依次变为 ¥10,199、¥10,498、¥10,648，续航从 60 km 变为 100 km，与各选项标注的加价一致；拖拽能旋转车身，滚轮能缩放；全程没有脚本错误。双击复位没有单独验证。",
-    "en": "Before publishing, the delivered page was operated in Chrome (960×540): switching the frame colour (coral, mint, sky blue, graphite), the long-range battery, the front basket and the comfort seat changes the 3D bike at once — its colour, basket and seat — while the price goes from ¥8,999 to ¥10,199, ¥10,498 and ¥10,648 and the range from 60 km to 100 km, matching each option’s listed surcharge; dragging rotates the bike and the wheel zooms; no script errors. Double-click to reset was not checked."
-  }
+  "note": "Run on 2026-10-11 on the live AwwO, in the operator’s own account and workspace: 5 of 5 agents finished in 13 min 6 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was operated in Chrome (960×540): switching the frame colour (coral, mint, sky blue, graphite), the long-range battery, the front basket and the comfort seat changes the 3D bike at once — its colour, basket and seat — while the price goes from ¥8,999 to ¥10,199, ¥10,498 and ¥10,648 and the range from 60 km to 100 km, matching each option’s listed surcharge; dragging rotates the bike and the wheel zooms; no script errors. Double-click to reset was not checked."
 };
 export default record;

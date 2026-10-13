@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "port-twin",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-12",
   "seconds": 1215,
   "completed": 6,
   "total": 6,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "layout",
-      "title": {
-        "zh": "港口场景结构",
-        "en": "Port layout"
-      },
+      "title": "Port layout",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "sim",
-      "title": {
-        "zh": "模拟数据模型",
-        "en": "Simulation model"
-      },
+      "title": "Simulation model",
       "column": 0,
       "row": 1,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "yard",
-      "title": {
-        "zh": "码头与堆场代码",
-        "en": "Quay and yard code"
-      },
+      "title": "Quay and yard code",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -70,10 +57,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "fleet",
-      "title": {
-        "zh": "岸桥与船舶代码",
-        "en": "Crane and ship code"
-      },
+      "title": "Crane and ship code",
       "column": 1,
       "row": 1,
       "status": "done",
@@ -83,10 +67,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "frontend",
-      "title": {
-        "zh": "驾驶舱页面",
-        "en": "Cockpit page"
-      },
+      "title": "Cockpit page",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -96,10 +77,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -112,83 +90,50 @@ const record: ProductionRunRecord = {
     {
       "from": "layout",
       "to": "yard",
-      "label": {
-        "zh": "场景几何",
-        "en": "Scene geometry"
-      }
+      "label": "Scene geometry"
     },
     {
       "from": "layout",
       "to": "fleet",
-      "label": {
-        "zh": "泊位与岸桥位置",
-        "en": "Berth and crane positions"
-      }
+      "label": "Berth and crane positions"
     },
     {
       "from": "sim",
       "to": "fleet",
-      "label": {
-        "zh": "模拟状态",
-        "en": "Simulation state"
-      }
+      "label": "Simulation state"
     },
     {
       "from": "layout",
       "to": "frontend",
-      "label": {
-        "zh": "场景数据",
-        "en": "Layout data"
-      }
+      "label": "Layout data"
     },
     {
       "from": "sim",
       "to": "frontend",
-      "label": {
-        "zh": "模拟代码",
-        "en": "Simulation code"
-      }
+      "label": "Simulation code"
     },
     {
       "from": "yard",
       "to": "frontend",
-      "label": {
-        "zh": "码头与堆场代码",
-        "en": "Quay and yard code"
-      }
+      "label": "Quay and yard code"
     },
     {
       "from": "fleet",
       "to": "frontend",
-      "label": {
-        "zh": "岸桥与船舶代码",
-        "en": "Crane and ship code"
-      }
+      "label": "Crane and ship code"
     },
     {
       "from": "sim",
       "to": "review",
-      "label": {
-        "zh": "指标定义",
-        "en": "Metric definitions"
-      }
+      "label": "Metric definitions"
     },
     {
       "from": "frontend",
       "to": "review",
-      "label": {
-        "zh": "页面源码",
-        "en": "Page source"
-      }
+      "label": "Page source"
     }
   ],
-  "note": {
-    "zh": "2026-10-12 在线上 AwwO 用运营者自己的账号与工作区运行：6 个 Agent 中 6 个完成，用时 20 分 15 秒，每个 Agent 都由 Claude Opus 5.5 一次生成。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-12 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 20 min 15 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Chrome 里打开交付的页面（1280×720 和 960×540）实际运行：模拟时钟每拍（2 秒）推进 20 模拟分钟，1× 时每秒 10 模拟分钟，4× 时每秒 40 模拟分钟；船舶抵达锚地、靠泊、开始作业，完工后离泊并驶离港区，新船陆续到来；泊位占用率、岸桥作业量、堆场占用率、等待船数和当天吞吐随模拟变化并画出折线，跨天时当天吞吐清零，事件日志逐条记录；“暂停/继续”按钮和空格键都生效，页面醒目标注“模拟数据”；全程没有脚本错误。在 4 台岸桥的门架中部和顶部（横梁、前伸臂）各点一次，每次都弹出这台岸桥自己的详情卡片（QC-1 至 QC-4）并用黄色框高亮；点船弹出这艘船的卡片。等待的船多了以后，锚地和泊位附近的船会互相重叠；960×540 时右侧的事件日志会挡住一部分船。",
-    "en": "Before publishing, the delivered page was run in Chrome (1280×720 and 960×540): the simulated clock advances 20 simulated minutes a tick (2 s), 10 simulated minutes a second at 1× and 40 at 4×; ships reach the anchorage, berth and start working, then leave their berths and the port when done while new ships keep coming; berth occupancy, crane moves, yard occupancy, ships waiting and throughput today change with the simulation and are drawn as sparklines, today’s throughput resets at the day boundary, and the event log records each step; the pause/continue button and the space bar both work, and the page is prominently labelled “simulated data”; no script error throughout. Each of the four cranes was clicked in the middle of its gantry and at its top (girders and boom), and every click opened that crane’s own card (QC-1 to QC-4), framed in yellow; clicking a ship opened that ship’s card. Once many ships wait, ships near the anchorage and the berths overlap one another, and at 960×540 the event log on the right covers part of the ships."
-  }
+  "note": "Run on 2026-10-12 on the live AwwO, in the operator’s own account and workspace: 6 of 6 agents finished in 20 min 15 s, each one a single Claude Opus 5.5 call. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was run in Chrome (1280×720 and 960×540): the simulated clock advances 20 simulated minutes a tick (2 s), 10 simulated minutes a second at 1× and 40 at 4×; ships reach the anchorage, berth and start working, then leave their berths and the port when done while new ships keep coming; berth occupancy, crane moves, yard occupancy, ships waiting and throughput today change with the simulation and are drawn as sparklines, today’s throughput resets at the day boundary, and the event log records each step; the pause/continue button and the space bar both work, and the page is prominently labelled “simulated data”; no script error throughout. Each of the four cranes was clicked in the middle of its gantry and at its top (girders and boom), and every click opened that crane’s own card (QC-1 to QC-4), framed in yellow; clicking a ship opened that ship’s card. Once many ships wait, ships near the anchorage and the berths overlap one another, and at 960×540 the event log on the right covers part of the ships."
 };
 export default record;

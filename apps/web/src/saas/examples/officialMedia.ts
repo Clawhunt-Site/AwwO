@@ -1,5 +1,4 @@
 import type { MediaParams } from '../../canvas/canvasDoc';
-import type { Localized } from './officialWorkflows';
 
 /** An image, video or 3D node of a case canvas: it generates from its own prompt (its draft) when the canvas
  * runs, or alone when a member presses Send, and its result is wired into the pages that show it (`feeds`): each of
@@ -9,8 +8,8 @@ import type { Localized } from './officialWorkflows';
 export interface OfficialMediaNode {
   readonly id: string;
   readonly kind: 'image' | 'video' | 'model3d';
-  readonly title: Localized;
-  readonly prompt: Localized;
+  readonly title: string;
+  readonly prompt: string;
   readonly model: string;
   readonly params?: MediaParams;
   readonly column: number;

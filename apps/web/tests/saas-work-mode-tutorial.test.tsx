@@ -33,12 +33,22 @@ it('explains the work mode in seven steps on a native modal, starting with the h
   expect(screen.getByText('第 7 / 7 步')).toBeVisible();
 });
 
-it('shows its example from the real pixel-platformer canvas', () => {
+it('shows its example from the real pixel-platformer canvas, in the interface language', () => {
+  // The case itself is English in both interface languages; the tutorial is not: in Chinese it names the same six
+  // nodes in Chinese, in English by the case's own titles.
+  const example = PRODUCTION_WORKFLOWS['pixel-platformer'];
   render(<WorkModeTutorial {...base} />);
   dwell(); fireEvent.click(next());
-  const example = PRODUCTION_WORKFLOWS['pixel-platformer'];
-  for (const node of example.nodes) expect(screen.getByText(node.title.zh)).toBeInTheDocument();
+  expect(document.querySelectorAll('.wmt-node')).toHaveLength(example.nodes.length);
+  for (const title of ['玩法与数值', '像素美术', '关卡地图', '音效', '可玩试玩关', '试玩验收']) expect(screen.getByText(title)).toBeInTheDocument();
+  for (const node of example.nodes) expect(screen.queryByText(node.title)).toBeNull();
   expect(screen.getByText(/画布(与用时)?来自「像素平台跳跃」/)).toBeInTheDocument();
+  cleanup();
+  render(<WorkModeTutorial {...base} locale="en" />);
+  dwell(); fireEvent.click(next());
+  expect(document.querySelectorAll('.wmt-node')).toHaveLength(example.nodes.length);
+  for (const node of example.nodes) expect(screen.getByText(node.title)).toBeInTheDocument();
+  expect(screen.getByText(/^Canvas (and timings )?from the .*pixel platformer/)).toBeInTheDocument();
 });
 
 it('unlocks each step only after its scene has played, and never locks a step again', () => {

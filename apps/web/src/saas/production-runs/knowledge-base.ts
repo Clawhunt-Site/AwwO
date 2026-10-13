@@ -3,25 +3,18 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "knowledge-base",
-  "edition": {
-    "zh": "AwwO 本地开发预览 · Codex 本地执行器（每个节点是一个可读写本地工作目录的 Codex 会话）",
-    "en": "AwwO local development preview · Codex local runtime (each node is a Codex session with its own local working directory)"
-  },
+  "edition": "AwwO local development preview · Codex local runtime (each node is a Codex session with its own local working directory)",
   "runtime": "codex_local",
   "model": "Codex",
   "capturedOn": "2026-09-04",
   "seconds": 2664,
   "completed": 7,
   "total": 7,
-  "outputLocale": "zh",
   "artifactNodeId": "frontend",
   "nodes": [
     {
       "id": "product",
-      "title": {
-        "zh": "产品边界与架构需求",
-        "en": "Product scope & architecture"
-      },
+      "title": "Product scope & architecture",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -40,10 +33,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "users",
-      "title": {
-        "zh": "用户登录与工作区权限",
-        "en": "Login & workspace permissions"
-      },
+      "title": "Login & workspace permissions",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -66,10 +56,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "data",
-      "title": {
-        "zh": "文档数据治理",
-        "en": "Document data governance"
-      },
+      "title": "Document data governance",
       "column": 1,
       "row": 1,
       "status": "done",
@@ -92,10 +79,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "materials",
-      "title": {
-        "zh": "知识库上线物料",
-        "en": "Knowledge-base launch assets"
-      },
+      "title": "Knowledge-base launch assets",
       "column": 1,
       "row": 2,
       "status": "done",
@@ -118,10 +102,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "backend",
-      "title": {
-        "zh": "后端接口与业务规则",
-        "en": "Backend API & business rules"
-      },
+      "title": "Backend API & business rules",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -144,10 +125,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "frontend",
-      "title": {
-        "zh": "知识库 Web 工作台",
-        "en": "Knowledge-base web workspace"
-      },
+      "title": "Knowledge-base web workspace",
       "column": 3,
       "row": 0,
       "status": "done",
@@ -170,10 +148,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "交付验收",
-        "en": "Delivery review"
-      },
+      "title": "Delivery review",
       "column": 4,
       "row": 0,
       "status": "done",
@@ -199,107 +174,65 @@ const record: ProductionRunRecord = {
     {
       "from": "product",
       "to": "users",
-      "label": {
-        "zh": "用户与权限需求",
-        "en": "User and permission requirements"
-      }
+      "label": "User and permission requirements"
     },
     {
       "from": "product",
       "to": "data",
-      "label": {
-        "zh": "业务需求",
-        "en": "Business requirements"
-      }
+      "label": "Business requirements"
     },
     {
       "from": "product",
       "to": "materials",
-      "label": {
-        "zh": "产品与品牌要求",
-        "en": "Product and brand requirements"
-      }
+      "label": "Product and brand requirements"
     },
     {
       "from": "product",
       "to": "backend",
-      "label": {
-        "zh": "业务规则",
-        "en": "Business rules"
-      }
+      "label": "Business rules"
     },
     {
       "from": "users",
       "to": "backend",
-      "label": {
-        "zh": "用户系统契约",
-        "en": "User system contract"
-      }
+      "label": "User system contract"
     },
     {
       "from": "data",
       "to": "backend",
-      "label": {
-        "zh": "数据字典",
-        "en": "Data dictionary"
-      }
+      "label": "Data dictionary"
     },
     {
       "from": "users",
       "to": "frontend",
-      "label": {
-        "zh": "用户与权限契约",
-        "en": "User and permission contract"
-      }
+      "label": "User and permission contract"
     },
     {
       "from": "data",
       "to": "frontend",
-      "label": {
-        "zh": "文档数据字典",
-        "en": "Document data dictionary"
-      }
+      "label": "Document data dictionary"
     },
     {
       "from": "backend",
       "to": "frontend",
-      "label": {
-        "zh": "接口契约",
-        "en": "API contract"
-      }
+      "label": "API contract"
     },
     {
       "from": "materials",
       "to": "frontend",
-      "label": {
-        "zh": "文案与素材清单",
-        "en": "Copy and asset list"
-      }
+      "label": "Copy and asset list"
     },
     {
       "from": "backend",
       "to": "review",
-      "label": {
-        "zh": "接口契约",
-        "en": "API contract"
-      }
+      "label": "API contract"
     },
     {
       "from": "frontend",
       "to": "review",
-      "label": {
-        "zh": "待验收交付物",
-        "en": "Deliverable to review"
-      }
+      "label": "Deliverable to review"
     }
   ],
-  "note": {
-    "zh": "7 个节点全部完成。交付验收如实写了“部分通过，整体验收未通过”：它退回了两处演示缺陷（Straße 搜不到 STRASSE；标签恢复后旧的失败质检仍计入阻断），前端修复后复验通过。路径中的本机目录与内部 ID 已隐去，其余为节点原文。",
-    "en": "All 7 nodes completed. The delivery review recorded “partly passed, overall not accepted”: it sent back two demo defects (Straße not matching STRASSE; an old failed quality check still blocking after a tag was restored), and they passed re-verification after the front end fixed them. Local directories and internal IDs in paths are hidden; everything else is the nodes’ own text."
-  },
-  "verification": {
-    "zh": "封面是交付的知识库工作台在演示模式（模拟数据）下的录屏。2026-09-05 的复验：模型与 Unicode 回归 31/31、应用 DOM 4/4、焦点回归 8/8 通过，两处被退回的缺陷复验通过；真实账号、后端服务与生产环境不在验收范围内。",
-    "en": "The cover is a recording of the delivered knowledge-base workspace in its demo mode with simulated data. Re-acceptance on 2026-09-05: model and Unicode regressions 31/31, app DOM 4/4 and focus regressions 8/8 passed, and both defects sent back passed re-verification; real accounts, backend services and production were outside its scope."
-  }
+  "note": "All 7 nodes completed. The delivery review recorded “partly passed, overall not accepted”: it sent back two demo defects (Straße not matching STRASSE; an old failed quality check still blocking after a tag was restored), and they passed re-verification after the front end fixed them. Local directories and internal IDs in paths are hidden; everything else is the nodes’ own text.",
+  "verification": "The cover is a recording of the delivered knowledge-base workspace in its demo mode with simulated data. Re-acceptance on 2026-09-05: model and Unicode regressions 31/31, app DOM 4/4 and focus regressions 8/8 passed, and both defects sent back passed re-verification; real accounts, backend services and production were outside its scope."
 };
 export default record;

@@ -2,7 +2,7 @@
 // apps/web/src/saas/production-runs/<case>.ts. Each node's delivered value is read from the frozen
 // graph run with the canvas's own contract parser; nothing is rewritten except identifier redaction.
 //   node scripts/showcase/publish-run.mjs <raw-record.json> <notes.json>
-// notes.json: { "note": { "zh": "…", "en": "…" }, "verification": { "zh": "…", "en": "…" }, "edition": { "zh": "…", "en": "…" },
+// notes.json: { "note": "…", "verification": "…", "edition": "…" (English: every case is English, in both interface languages),
 //   "source": { "api": "<commit>", "worker": "<commit>" }, "thinking": false, "model": "<label shown>" (optional),
 //   "limits": { "contextWindow": n, "maxOutputTokens": n, "modelCallsPerNode": n, "concurrency": n } } — what happened in
 // the run, what was checked in a browser before publishing, where it ran, the revisions that ran, whether thinking was
@@ -19,7 +19,9 @@ const [rawFile, notesFile] = process.argv.slice(2);
 if (!rawFile || !notesFile) throw new Error('Usage: publish-run.mjs <raw-record.json> <notes.json>');
 const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
 const notes = JSON.parse(fs.readFileSync(notesFile, 'utf8'));
-for (const key of ['note', 'verification', 'edition']) if (!notes[key]?.zh?.trim() || !notes[key]?.en?.trim()) throw new Error(`notes.${key} needs zh and en`);
+for (const key of ['note', 'verification', 'edition']) if (typeof notes[key] !== 'string' || !notes[key].trim()) throw new Error(`notes.${key} must be a non-empty English string`);
+// Every case runs in English (owner 2026-10-14); a run in any other language is never published.
+if (raw.locale !== 'en') throw new Error(`${raw.caseId}: the run's locale is ${raw.locale}, not en; run the case in English`);
 // The revisions that ran and whether the model's thinking was off are part of the receipt, never assumed.
 if (!/^[0-9a-f]{8,40}$/.test(notes.source?.api || '') || !/^[0-9a-f]{8,40}$/.test(notes.source?.worker || '') || typeof notes.thinking !== 'boolean')
   throw new Error('notes.source.api, notes.source.worker (commit hashes) and notes.thinking (boolean) are required');
@@ -48,7 +50,7 @@ const CANVAS_IDS = new Map([...workflow.nodes.map((spec, index) => [frozen[index
 const plain = text => [...CANVAS_IDS].reduce((value, [from, to]) => value.split(from).join(to), text);
 // The homepage says a case ran on the canvas a member copies, so a run of any other text is never published.
 const ranText = canonicalCanvasText(raw.graph.document);
-if (ranText !== canonicalCanvasText(createOfficialDocument(workflow, raw.locale)))
+if (ranText !== canonicalCanvasText(createOfficialDocument(workflow)))
   throw new Error(`${raw.caseId}: this run used a different canvas (tasks, contracts or wires) from productionWorkflows.ts today; run the case again`);
 const states = new Map((raw.graph.nodes || []).map(node => [node.nodeId, node]));
 const STATUS = new Set(['done', 'failed', 'blocked', 'cancelled', 'cached']);
@@ -61,7 +63,7 @@ const usage = item => {
 };
 const nodes = workflow.nodes.map((spec, index) => {
   const document = frozen[index];
-  if (document.title !== spec.title[raw.locale]) throw new Error(`Node ${index} is “${document.title}”, expected “${spec.title[raw.locale]}”`);
+  if (document.title !== spec.title) throw new Error(`Node ${index} is “${document.title}”, expected “${spec.title}”`);
   const state = states.get(document.id);
   if (!state || !STATUS.has(state.state)) throw new Error(`${spec.id} ended as ${state?.state}`);
   const invocation = raw.invocations[spec.id] ?? raw.invocations[document.id];
@@ -85,7 +87,7 @@ const artifactOutput = nodes.find(node => node.id === artifact?.id)?.output;
 // the page. They are not agents, so they stay out of `nodes` (a copy pins agents only).
 const media = mediaSpecs.map((spec, index) => {
   const document = frozen[workflow.nodes.length + index];
-  if (document.title !== spec.title[raw.locale]) throw new Error(`Media node ${index} is “${document.title}”, expected “${spec.title[raw.locale]}”`);
+  if (document.title !== spec.title) throw new Error(`Media node ${index} is “${document.title}”, expected “${spec.title}”`);
   const state = states.get(document.id);
   if (!state || !STATUS.has(state.state)) throw new Error(`${spec.id} ended as ${state?.state}`);
   let files = [];
@@ -105,7 +107,6 @@ const record = {
   edition: notes.edition,
   runtime: raw.runtime, model: notes.model || raw.model, capturedOn: raw.startedAt.slice(0, 10),
   seconds: seconds(raw.graph.createdAt, raw.graph.updatedAt), completed: nodes.filter(node => node.status === 'done').length, total: nodes.length,
-  outputLocale: raw.locale,
   limits: { contextWindow: notes.limits.contextWindow, maxOutputTokens: notes.limits.maxOutputTokens, modelCallsPerNode: notes.limits.modelCallsPerNode,
     concurrency: notes.limits.concurrency, thinking: notes.thinking },
   source: notes.source,

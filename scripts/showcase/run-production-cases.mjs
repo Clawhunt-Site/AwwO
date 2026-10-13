@@ -5,7 +5,7 @@
 //
 //   AWWO_SHOWCASE_EMAIL=… AWWO_SHOWCASE_PASSWORD=… node scripts/showcase/run-production-cases.mjs \
 //     --api http://127.0.0.1:58821 --out .local/showcase/runs [--cases pixel-platformer,party-game]
-//     [--locale zh] [--runtime openai-agents] [--model qwen3.8-27b-p6]
+//     [--runtime openai-agents] [--model qwen3.8-27b-p6]   (every case runs in English)
 //
 // The account is registered when it does not exist yet (local sign-in only). It refuses any API that is
 // not on this machine: every case creates a canvas and spends model calls. Requires apps/web/node_modules (rolldown).
@@ -20,7 +20,7 @@ const API = (args.api || 'http://127.0.0.1:58821').replace(/\/$/, '');
 // machine: never production, never a shared environment.
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(API).hostname)) throw new Error(`Refusing ${API}: point --api at a private stack on this machine.`);
 const OUT = path.resolve(args.out || '.local/showcase/runs');
-const LOCALE = args.locale || 'zh', RUNTIME = args.runtime || 'openai-agents', MODEL = args.model || 'qwen3.8-27b-p6';
+const LOCALE = 'en', RUNTIME = args.runtime || 'openai-agents', MODEL = args.model || 'qwen3.8-27b-p6';
 const EMAIL = process.env.AWWO_SHOWCASE_EMAIL, PASSWORD = process.env.AWWO_SHOWCASE_PASSWORD;
 if (!EMAIL || !PASSWORD) throw new Error('Set AWWO_SHOWCASE_EMAIL and AWWO_SHOWCASE_PASSWORD (at least 12 characters).');
 fs.mkdirSync(OUT, { recursive: true });
@@ -46,7 +46,7 @@ async function documents() {
   const file = path.join(OUT, '.case-documents.mjs');
   await build({ input: path.join(ROOT, 'scripts/showcase/case-documents.ts'), platform: 'node', output: { file, format: 'esm' }, logLevel: 'warn' });
   const module = await import(`${pathToFileURL(file).href}?${Date.now()}`);
-  return module.caseDocuments(LOCALE, RUNTIME, MODEL);
+  return module.caseDocuments(RUNTIME, MODEL);
 }
 
 async function signIn() {

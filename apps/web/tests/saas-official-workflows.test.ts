@@ -8,12 +8,12 @@ import { createOfficialDocument, type OfficialWorkflow } from '../src/saas/examp
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 
 // createOfficialDocument mints the canvas a member copies from every production case compiled from tasks
-// (productionWorkflows.ts); the knowledge base's recorded canvas has its own test (saas-knowledge-base-canvas). No case
-// has a 3D model node yet, so one copy of a media case gets one here, to keep the builder's 3D wiring covered.
-const locales = ['zh', 'en'] as const;
+// (productionWorkflows.ts); the knowledge base's recorded canvas has its own test (saas-knowledge-base-canvas). Every
+// case is English, so there is one canvas whatever the interface language. No case has a 3D model node yet, so one copy
+// of a media case gets one here, to keep the builder's 3D wiring covered.
 const gt = PRODUCTION_WORKFLOWS['aurora-gt'];
 const WITH_MODEL: OfficialWorkflow = { ...gt, id: 'aurora-gt-with-model', media: [...gt.media!, {
-  id: 'model', kind: 'model3d', title: { zh: '三维模型', en: '3D model' }, prompt: { zh: '这辆车的三维模型', en: 'A 3D model of the car' },
+  id: 'model', kind: 'model3d', title: '3D model', prompt: 'A 3D model of the car',
   model: 'tripo.p1', params: { texture: true, pbr: true, textureQuality: 'detailed', faceLimit: 12000 }, column: 0, row: 4, feeds: ['page'] }] };
 const WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...Object.values(PRODUCTION_WORKFLOWS), WITH_MODEL];
 
@@ -22,8 +22,8 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
   const agents = (document: ReturnType<typeof createOfficialDocument>) => (document.nodes as SessionNode[]).filter(node => !mediaKindOf(node.agentKind));
   const media = (document: ReturnType<typeof createOfficialDocument>) => (document.nodes as SessionNode[]).filter(node => mediaKindOf(node.agentKind));
 
-  it.each(locales)('creates a connected, acyclic, compatible %s graph with distinct fan-in fields', locale => {
-    const document = createOfficialDocument(item, locale);
+  it('creates a connected, acyclic, compatible graph with distinct fan-in fields, in English', () => {
+    const document = createOfficialDocument(item);
     expect(document.version).toBe(2);
     expect(document.execution).toBeUndefined();
     expect(findCycle(document.nodes, document.edges)).toEqual([]);
@@ -38,12 +38,13 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
     const touched = new Set(document.edges.flatMap(edge => [edge.fromNode, edge.toNode]));
     expect(touched.size).toBe(agents(document).length + media(document).length);
     expect(agents(document)).toHaveLength(item.nodes.length);
-    expect(media(document).map(node => node.title)).toEqual((item.media ?? []).map(spec => spec.title[locale]));
+    expect(media(document).map(node => node.title)).toEqual((item.media ?? []).map(spec => spec.title));
     // A merge: some node takes several hand-offs, its upstream agents' or its media nodes'.
     expect(document.nodes.some(node => document.edges.filter(edge => edge.toNode === node.id).length > 1)).toBe(true);
     for (const node of agents(document)) {
       expect(normalizeContract(node.contract)).toEqual(node.contract);
-      expect(node.contract!.inputs.find(field => field.id === 'brief')?.value).toContain(item.brief[locale]);
+      expect(node.contract!.inputs.find(field => field.id === 'brief')).toMatchObject({ label: 'Task and boundaries', value: expect.stringContaining(item.brief) });
+      expect(node.persona).toMatch(/^Acceptance:$/m);
       for (const field of node.contract!.inputs) {
         const upstream = document.edges.filter(edge => edge.toNode === node.id && edge.toPort === `in:${field.id}`);
         if (field.value === '') expect(upstream).toHaveLength(1);
@@ -51,7 +52,7 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
       }
       // A page a media node feeds is told how to show its files, and a 3D model by its preview; any other page uses none.
       const fed = node.contract!.inputs.filter(field => field.id.startsWith('media_'));
-      expect(node.persona.includes(locale === 'zh' ? '媒体节点会把它生成的文件交给你' : 'media nodes hand you the files')).toBe(fed.length > 0);
+      expect(node.persona.includes('media nodes hand you the files')).toBe(fed.length > 0);
       const model = fed.some(field => item.media?.find(spec => `media_${spec.id}` === field.id)?.kind === 'model3d');
       expect(node.persona.includes('preview-1.*')).toBe(model);
     }
@@ -75,14 +76,14 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
       expect(node.contract).toBeUndefined();
       expect(node.persona).toBe('');
       expect(node.mediaParams).toEqual(spec.params);
-      expect(node.threads?.map(thread => thread.draft)).toEqual([spec.prompt[locale]]);
+      expect(node.threads?.map(thread => thread.draft)).toEqual([spec.prompt]);
     }
     expect(agents(document).some(node => node.contract!.outputs.some(field => field.type === 'html' && field.required))).toBe(true);
     expect(preflightGraphIssue(document.nodes, document.edges)?.code).toBe('unbound_nodes');
   });
 
   it('survives JSON persistence and sanitization without dropping fields, nodes or connections', () => {
-    const document = createOfficialDocument(item, 'zh');
+    const document = createOfficialDocument(item);
     const restored = sanitizeDocument(JSON.parse(JSON.stringify(document)));
     expect(restored.edges).toEqual(document.edges);
     expect(restored.nodes).toHaveLength(document.nodes.length);
@@ -95,7 +96,7 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
 
   it('creates fresh IDs and independent contracts without copying model choices, history or results', () => {
     const before = JSON.stringify(item);
-    const first = createOfficialDocument(item, 'zh');
+    const first = createOfficialDocument(item);
     const initial = first.nodes[0] as SessionNode;
     initial.binding = { companyId: 'private-tenant', agentId: 'private-agent', agentName: 'Private agent' };
     initial.runtime = 'private-runtime'; initial.model = 'private-model'; initial.effort = 'high';
@@ -105,7 +106,7 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
     initial.contract!.outputs[0].value = 'Private published value';
     first.edges[0].toPort = 'in:mutated';
     for (const node of media(first)) node.threads![0].draft = 'Private prompt';
-    const second = createOfficialDocument(item, 'en');
+    const second = createOfficialDocument(item);
     const firstIDs = new Set(first.nodes.map(node => node.id));
     expect(second.nodes.every(node => !firstIDs.has(node.id))).toBe(true);
     for (const node of second.nodes as SessionNode[]) {
@@ -131,7 +132,7 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
   });
 
   it('runs through the real graph scheduler with fixture outputs and passes every upstream result into its consumer', async () => {
-    const document = createOfficialDocument(item, 'en');
+    const document = createOfficialDocument(item);
     const nodes = document.nodes as SessionNode[];
     for (const node of nodes) node.binding = { companyId: 'test-tenant', agentId: `test-${node.id}`, agentName: node.title };
     expect(preflightGraph(nodes, document.edges)).toBeNull();
@@ -181,7 +182,7 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
 });
 
 it('blocks the review when the build fails the real HTML output contract', async () => {
-  const document = createOfficialDocument(PRODUCTION_WORKFLOWS['pixel-platformer'], 'en');
+  const document = createOfficialDocument(PRODUCTION_WORKFLOWS['pixel-platformer']);
   const nodes = document.nodes as SessionNode[];
   for (const node of nodes) node.binding = { companyId: 'test', agentId: node.id, agentName: node.title };
   const builder = nodes.find(node => node.contract!.outputs[0].type === 'html')!;

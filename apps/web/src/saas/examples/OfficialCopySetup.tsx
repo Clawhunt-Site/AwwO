@@ -3,7 +3,6 @@ import { api, SaaSApiError, saasErrorMessage, tenantPath } from '../api';
 import { runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeStatus } from '../runtimeCatalog';
 import type { CanvasDocument } from '../../canvas/canvasDoc';
 import { mediaKindOf } from '../../canvas/mediaCatalog';
-import type { UiLocale } from '../../locale';
 import { createOfficialDocument, type OfficialWorkflow } from './officialWorkflows';
 import './official-copy-setup.css';
 
@@ -39,24 +38,24 @@ export async function readOfficialCopyModels(tenantId: string, signal?: AbortSig
 /** Apply only an explicit, validated choice to a freshly minted copy. The source
  * compiler and download/export path continue producing clean, unbound drafts. An image, video or 3D node keeps the
  * media model the case chose: the agent model a member picks is not one that generates pictures. */
-export function createOfficialCopyDocument(item: OfficialWorkflow, locale: UiLocale, model: OfficialCopyModel | null): CanvasDocument {
-  const document = createOfficialDocument(item, locale);
+export function createOfficialCopyDocument(item: OfficialWorkflow, model: OfficialCopyModel | null): CanvasDocument {
+  const document = createOfficialDocument(item);
   if (!model) return document;
   return { ...document, nodes: document.nodes.map(node => node.kind === 'session' && !mediaKindOf(node.agentKind)
     ? { ...node, runtime: model.runtime, model: model.model, effort: '' } : node) };
 }
 
 /** A production case's recorded run, whose deliveries the copy carries (productionCopy.ts). */
-export type OfficialCopyRecording = { capturedOn: string; completed: number; total: number; model: string; outputLocale: UiLocale };
+export type OfficialCopyRecording = { capturedOn: string; completed: number; total: number; model: string };
 
+/** The copy dialog is part of the case flow, which reads in English in both interface languages (owner 2026-10-14). */
 type Props = {
-  item: OfficialWorkflow; tenantId: string; locale: UiLocale; busy: boolean;
+  item: OfficialWorkflow; tenantId: string; busy: boolean;
   error?: string; recording?: OfficialCopyRecording; onClose: () => void;
   onConfirm: (model: OfficialCopyModel | null) => Promise<void>;
 };
 
-export function OfficialCopySetup({ item, tenantId, locale, busy, error, recording, onClose, onConfirm }: Props) {
-  const t = (zh: string, en: string) => locale === 'zh' ? zh : en;
+export function OfficialCopySetup({ item, tenantId, busy, error, recording, onClose, onConfirm }: Props) {
   const id = useId(), dialog = useRef<HTMLDialogElement>(null);
   const [models, setModels] = useState<OfficialCopyModel[]>([]);
   const [selection, setSelection] = useState('');
@@ -101,42 +100,38 @@ export function OfficialCopySetup({ item, tenantId, locale, busy, error, recordi
     finally { submitting.current = false; if (!lifetime.current?.signal.aborted) setChecking(false); }
   };
   const displayedError = submitError instanceof SaaSApiError && submitError.code === 'invalid_copy_catalog'
-    ? t('模型目录返回异常，请刷新后重新选择。', 'The model catalog is invalid. Refresh it and choose again.')
-    : submitError ? saasErrorMessage(submitError, locale) : error;
-  return <dialog ref={dialog} className="official-copy-setup" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
+    ? 'The model catalog is invalid. Refresh it and choose again.'
+    : submitError ? saasErrorMessage(submitError, 'en') : error;
+  return <dialog ref={dialog} className="official-copy-setup" lang="en" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
     onCancel={event => { event.preventDefault(); close(); }}>
     <form onSubmit={event => { event.preventDefault(); void confirm(); }}>
-      <header><span>{t('制作案例', 'PRODUCTION CASE')}</span><h2 id={`${id}-title`}>{t('复制案例到我的画布', 'Copy example to my canvases')}</h2><p>{item.title[locale]}</p></header>
+      <header><span>PRODUCTION CASE</span><h2 id={`${id}-title`}>Copy example to my canvases</h2><p>{item.title}</p></header>
       <p id={`${id}-description`}>{recording && item.canvas
-        ? t(`复制 ${recording.capturedOn} 真实运行的那张画布（${item.nodes.length} 个节点）：每个 Agent 的人设、它当时收到的任务和字段说明以及连线都与那次运行一致，并带上每个 Agent 收到和交付的内容（${recording.completed}/${recording.total} 个节点，标为「案例实录」）。可为所有新节点选择同一个执行模型。`,
-          `Copy the canvas of the real run on ${recording.capturedOn} (${item.nodes.length} nodes): every agent’s persona, the task and field descriptions it received, and the wires are as they were in that run, with what every agent received and delivered (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`)
+        ? `Copy the canvas of the real run on ${recording.capturedOn} (${item.nodes.length} nodes): every agent’s persona, the task and field descriptions it received, and the wires are as they were in that run, with what every agent received and delivered (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`
         : recording
-        ? t(`保留 ${item.nodes.length} 个节点、依赖和交付要求，并带上 ${recording.capturedOn} 真实运行中每个 Agent 收到和交付的内容（${recording.completed}/${recording.total} 个节点，标为「案例实录」）。可为所有新节点选择同一个执行模型。`,
-          `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`)
-        : t(`保留 ${item.nodes.length} 个节点、依赖和交付要求。可为所有新节点选择同一个执行模型。`, `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements. Optionally choose one execution model for every new node.`)}</p>
-      <label className="official-copy-model" htmlFor={`${id}-model`}>{t('执行模型', 'Execution model')}
+        ? `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`
+        : `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements. Optionally choose one execution model for every new node.`}</p>
+      <label className="official-copy-model" htmlFor={`${id}-model`}>Execution model
         <select id={`${id}-model`} autoFocus value={selection} disabled={locked} onChange={event => { setSelection(event.target.value); setSubmitError(null); }}>
-          <option value="">{t('仅复制草稿 · 稍后配置模型', 'Draft only · choose models later')}</option>
-          {selection && !chosen && <option value={selection} disabled>{t('原选择暂不可用 · 请重新选择', 'Previous selection unavailable · choose again')}</option>}
+          <option value="">Draft only · choose models later</option>
+          {selection && !chosen && <option value={selection} disabled>Previous selection unavailable · choose again</option>}
           {models.map(model => <option key={modelKey(model)} value={modelKey(model)}>{model.label}</option>)}
         </select>
       </label>
-      {chosen && <div className="official-copy-selection"><strong>{t('应用于所有新节点', 'Applies to every new node')}</strong><span>{chosen.label}</span></div>}
+      {chosen && <div className="official-copy-selection"><strong>Applies to every new node</strong><span>{chosen.label}</span></div>}
       <div className="official-copy-catalog" aria-live="polite">
-        {loading ? <p role="status">{t('正在读取当前工作区模型…', 'Loading models for this workspace…')}</p>
-          : catalogError ? <p role="alert">{t('暂时无法读取模型目录。可刷新重试，或仅复制未配置的草稿。', 'Could not load the model catalog. Refresh it, or copy an unconfigured draft.')}</p>
-            : !models.length ? <p role="status">{t('当前工作区没有可选模型，仍可复制草稿。', 'No model is available to this workspace. You can still copy a draft.')}</p> : null}
-        <button type="button" className="saas-link" disabled={locked || loading} onClick={() => { setSubmitError(null); setRevision(value => value + 1); }}>{t('刷新模型目录', 'Refresh model catalog')}</button>
+        {loading ? <p role="status">Loading models for this workspace…</p>
+          : catalogError ? <p role="alert">Could not load the model catalog. Refresh it, or copy an unconfigured draft.</p>
+            : !models.length ? <p role="status">No model is available to this workspace. You can still copy a draft.</p> : null}
+        <button type="button" className="saas-link" disabled={locked || loading} onClick={() => { setSubmitError(null); setRevision(value => value + 1); }}>Refresh model catalog</button>
       </div>
-      <p className="official-copy-note">{t('此次只创建画布，不初始化、不运行模型。进入画布后检查配置，再开始运行。', 'This only creates a canvas; it does not initialize nodes or run models. Check the configuration in your canvas before starting a run.')}
-        {recording && ` ${t(`案例实录由 ${recording.model} 生成，没有在你的工作区运行；运行整张图会换成你自己的结果。`, `The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`)}`}
-        {recording && item.canvas && ` ${item.limitations[locale]}`}
-        {recording && (item.canvas ? item.canvas.locale !== locale : recording.outputLocale !== locale) && ` ${item.canvas
-          ? t('这个案例的画布和实录都是英文原文，按原样复制。', 'This case’s canvas and recordings are in Chinese, as they ran, and are copied as they are.')
-          : t('这个案例的 Agent 用英文完成，实录按原文显示；画布的任务按中文复制，与 Agent 当时读到的英文原文措辞不同。', 'This case’s agents worked in Chinese, so the recordings are shown as delivered; the canvas’s tasks are copied in English, worded differently from the Chinese the agents read.')}`}</p>
+      <p className="official-copy-note">This only creates a canvas; it does not initialize nodes or run models. Check the configuration in your canvas before starting a run.
+        {recording && ` The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`}
+        {recording && item.canvas && item.limitations && ` ${item.limitations}`}
+        {recording && item.canvas && item.canvas.locale !== 'en' && ' This case’s canvas and recordings are in Chinese, as they ran, and are copied as they are.'}</p>
       {displayedError && <p className="saas-error" role="alert">{displayedError}</p>}
-      <footer><button type="button" disabled={busy || checking} onClick={close}>{t('取消', 'Cancel')}</button><button type="submit" className="saas-primary" disabled={locked || invalidChoice}>
-        {busy ? t('正在创建…', 'Creating…') : checking ? t('正在核对模型…', 'Checking model…') : selection ? t('带模型复制', 'Copy with model') : t('创建草稿', 'Create draft')}
+      <footer><button type="button" disabled={busy || checking} onClick={close}>Cancel</button><button type="submit" className="saas-primary" disabled={locked || invalidChoice}>
+        {busy ? 'Creating…' : checking ? 'Checking model…' : selection ? 'Copy with model' : 'Create draft'}
       </button></footer>
     </form>
   </dialog>;

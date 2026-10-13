@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "aurora-gt",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-13",
   "seconds": 308,
   "completed": 2,
   "total": 2,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "page",
-      "title": {
-        "zh": "发布官网",
-        "en": "Launch site"
-      },
+      "title": "Launch site",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -60,19 +50,13 @@ const record: ProductionRunRecord = {
     {
       "from": "page",
       "to": "review",
-      "label": {
-        "zh": "官网源码",
-        "en": "Site source"
-      }
+      "label": "Site source"
     }
   ],
   "media": [
     {
       "id": "drive",
-      "title": {
-        "zh": "疾驰镜头",
-        "en": "Driving shot"
-      },
+      "title": "Driving shot",
       "kind": "video",
       "status": "done",
       "seconds": 106,
@@ -82,10 +66,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "white",
-      "title": {
-        "zh": "珍珠白",
-        "en": "Pearl white"
-      },
+      "title": "Pearl white",
       "kind": "image",
       "status": "done",
       "seconds": 58,
@@ -95,10 +76,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "red",
-      "title": {
-        "zh": "宝石红",
-        "en": "Ruby red"
-      },
+      "title": "Ruby red",
       "kind": "image",
       "status": "done",
       "seconds": 78,
@@ -108,10 +86,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "blue",
-      "title": {
-        "zh": "午夜蓝",
-        "en": "Midnight blue"
-      },
+      "title": "Midnight blue",
       "kind": "image",
       "status": "done",
       "seconds": 26,
@@ -120,13 +95,7 @@ const record: ProductionRunRecord = {
       ]
     }
   ],
-  "note": {
-    "zh": "2026-10-13 在线上 AwwO 用运营者自己的账号与工作区运行：2 个 Agent 全部完成，4 个媒体节点（1 段 5 秒视频、3 张图片）全部生成，整张画布用时 5 分 8 秒；每个 Agent 都由 Claude Opus 5.5 一次生成。先生成珍珠白车图，宝石红、午夜蓝两张和疾驰镜头都以它为参考生成，所以三种配色和视频里是同一辆车。这次运行的媒体节点用的是运营者工作区里的「图片 · 电影质感」「图片 · 极速」与「视频 · 标准」；复制这张画布后，媒体节点用你的工作区里的图片与视频模型。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-13 on the live AwwO, in the operator’s own account and workspace: both agents finished and all 4 media nodes (one 5-second clip, three pictures) generated, in 5 min 8 s for the whole canvas, each agent a single Claude Opus 5.5 call. The pearl-white picture came first, and the ruby-red and midnight-blue versions and the driving clip were all made from it, so the three colours and the clip show one car. In this run the media nodes used the operator workspace’s Image · Cinematic, Image · Express and Video · Standard; in a copy of the canvas they use the picture and video models of your workspace. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Edge 里打开交付的页面（1440×810）实际运行：开场视频铺满并循环播放，标题“极光 GT”与“为夜色而生”叠在上面；点“探索配色”进入配色器，三枚色块依次换成珍珠白、宝石红、午夜蓝，车图、色名和性能页的虚化背景一起换色；轮毂热点弹出参数卡，点 ✕ 关闭；性能页的四组数字滚动到 2.1、720、1020、400；↓ 键切到预约页，表单拦下错误的手机号和没选的日期，填对后显示预约成功（演示，不发送任何数据）；四个媒体文件都按画布交给页面的路径载入；全程没有脚本错误。热点按画面比例摆在固定位置，轮毂热点落在前保险杠下方；滚轮切换和漂浮粒子没有专门测试。",
-    "en": "Before publishing, the delivered page was run in Edge (1440×810): the opening clip fills the screen and loops under the title “极光 GT” and “为夜色而生”; “探索配色” opens the configurator, whose three swatches switch to pearl white, ruby red and midnight blue, the car picture, the colour name and the blurred background of the performance act changing together; the wheel hotspot opens its spec card and ✕ closes it; the four performance figures count up to 2.1, 720, 1020 and 400; ↓ moves to the booking act, where the form refuses a bad mobile number and a missing date and, filled in correctly, shows the booking confirmation (a demo; nothing is sent); all four media files load by the paths the canvas handed the page; no script error throughout. The hotspots sit at fixed positions in the frame, and the wheel hotspot lands below the front bumper; switching by the mouse wheel and the floating particles were not checked."
-  }
+  "note": "Run on 2026-10-13 on the live AwwO, in the operator’s own account and workspace: both agents finished and all 4 media nodes (one 5-second clip, three pictures) generated, in 5 min 8 s for the whole canvas, each agent a single Claude Opus 5.5 call. The pearl-white picture came first, and the ruby-red and midnight-blue versions and the driving clip were all made from it, so the three colours and the clip show one car. In this run the media nodes used the operator workspace’s Image · Cinematic, Image · Express and Video · Standard; in a copy of the canvas they use the picture and video models of your workspace. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was run in Edge (1440×810): the opening clip fills the screen and loops under the title “极光 GT” and “为夜色而生”; “探索配色” opens the configurator, whose three swatches switch to pearl white, ruby red and midnight blue, the car picture, the colour name and the blurred background of the performance act changing together; the wheel hotspot opens its spec card and ✕ closes it; the four performance figures count up to 2.1, 720, 1020 and 400; ↓ moves to the booking act, where the form refuses a bad mobile number and a missing date and, filled in correctly, shows the booking confirmation (a demo; nothing is sent); all four media files load by the paths the canvas handed the page; no script error throughout. The hotspots sit at fixed positions in the frame, and the wheel hotspot lands below the front bumper; switching by the mouse wheel and the floating particles were not checked."
 };
 export default record;

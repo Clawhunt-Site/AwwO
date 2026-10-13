@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "neon-city",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-12",
   "seconds": 376,
   "completed": 2,
   "total": 2,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "page",
-      "title": {
-        "zh": "全屏品牌页",
-        "en": "Full-screen brand page"
-      },
+      "title": "Full-screen brand page",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -60,19 +50,13 @@ const record: ProductionRunRecord = {
     {
       "from": "page",
       "to": "review",
-      "label": {
-        "zh": "品牌页源码",
-        "en": "Brand page source"
-      }
+      "label": "Brand page source"
     }
   ],
   "media": [
     {
       "id": "clip",
-      "title": {
-        "zh": "开场镜头",
-        "en": "Opening shot"
-      },
+      "title": "Opening shot",
       "kind": "video",
       "status": "done",
       "seconds": 269,
@@ -82,10 +66,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "rooftop",
-      "title": {
-        "zh": "天台花园",
-        "en": "Rooftop garden"
-      },
+      "title": "Rooftop garden",
       "kind": "image",
       "status": "done",
       "seconds": 46,
@@ -95,10 +76,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "market",
-      "title": {
-        "zh": "地下夜市",
-        "en": "Underground night market"
-      },
+      "title": "Underground night market",
       "kind": "image",
       "status": "done",
       "seconds": 65,
@@ -108,10 +86,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "dawn",
-      "title": {
-        "zh": "黎明",
-        "en": "Dawn"
-      },
+      "title": "Dawn",
       "kind": "image",
       "status": "done",
       "seconds": 72,
@@ -120,13 +95,7 @@ const record: ProductionRunRecord = {
       ]
     }
   ],
-  "note": {
-    "zh": "2026-10-12 在线上 AwwO 用运营者自己的账号与工作区运行：2 个 Agent 全部完成，4 个媒体节点（1 段 5 秒视频、3 张图片）全部生成，整张画布用时 6 分 16 秒；每个 Agent 都由 Claude Opus 5.5 一次生成。这次运行的媒体节点用的是运营者工作区里的「视频 · 极速」与「图片 · 电影质感」；复制这张画布后，媒体节点用你的工作区里的图片与视频模型。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-12 on the live AwwO, in the operator’s own account and workspace: both agents finished and all 4 media nodes (one 5-second clip, three pictures) generated, in 6 min 16 s for the whole canvas, each agent a single Claude Opus 5.5 call. In this run the media nodes used the operator workspace’s Video · Express and Image · Cinematic; in a copy of the canvas they use the picture and video models of your workspace. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Edge 里打开交付的页面（1440×810）实际运行：开场视频铺满并循环播放，霓虹标题与雨丝粒子叠在上面；→ 键依次切到「天台花园」「地下夜市」「黎明」三幕，每幕的图片铺满，章节编号、中英文标题与两行文案正确，底部圆点与计数同步；停在最后一幕约 8 秒后自动回到开场；四个媒体文件都按画布交给页面的路径载入；全程没有脚本错误。声音开关与鼠标视差没有测试。",
-    "en": "Before publishing, the delivered page was run in Edge (1440×810): the opening clip fills the screen and loops under the neon title and the rain particles; → moves through the three chapters, Rooftop Garden, Underground Night Market and Dawn, each filling the screen with its picture, with the right chapter number, Chinese and English titles and two lines of copy, the dots and counter in step; left on the last chapter, the page returns to the opening after about 8 seconds; all four media files load by the paths the canvas handed the page; no script error throughout. The sound toggle and the mouse parallax were not tested."
-  }
+  "note": "Run on 2026-10-12 on the live AwwO, in the operator’s own account and workspace: both agents finished and all 4 media nodes (one 5-second clip, three pictures) generated, in 6 min 16 s for the whole canvas, each agent a single Claude Opus 5.5 call. In this run the media nodes used the operator workspace’s Video · Express and Image · Cinematic; in a copy of the canvas they use the picture and video models of your workspace. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was run in Edge (1440×810): the opening clip fills the screen and loops under the neon title and the rain particles; → moves through the three chapters, Rooftop Garden, Underground Night Market and Dawn, each filling the screen with its picture, with the right chapter number, Chinese and English titles and two lines of copy, the dots and counter in step; left on the last chapter, the page returns to the opening after about 8 seconds; all four media files load by the paths the canvas handed the page; no script error throughout. The sound toggle and the mouse parallax were not tested."
 };
 export default record;

@@ -3,17 +3,13 @@ import type { ProductionRunRecord } from '../productionRuns';
 
 const record: ProductionRunRecord = {
   "caseId": "shanhai-vn",
-  "edition": {
-    "zh": "线上 AwwO（awwo.clawhunt.store），运营者自己的账号与工作区；API 与执行器为当时在线的版本",
-    "en": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production"
-  },
+  "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
   "model": "Claude Opus 5.5",
   "capturedOn": "2026-10-12",
   "seconds": 361,
   "completed": 3,
   "total": 3,
-  "outputLocale": "zh",
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -31,10 +27,7 @@ const record: ProductionRunRecord = {
   "nodes": [
     {
       "id": "script",
-      "title": {
-        "zh": "剧本与分支",
-        "en": "Script and branches"
-      },
+      "title": "Script and branches",
       "column": 0,
       "row": 0,
       "status": "done",
@@ -44,10 +37,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "page",
-      "title": {
-        "zh": "视觉小说试玩章",
-        "en": "Visual-novel chapter"
-      },
+      "title": "Visual-novel chapter",
       "column": 1,
       "row": 0,
       "status": "done",
@@ -57,10 +47,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "review",
-      "title": {
-        "zh": "验收",
-        "en": "Review"
-      },
+      "title": "Review",
       "column": 2,
       "row": 0,
       "status": "done",
@@ -73,27 +60,18 @@ const record: ProductionRunRecord = {
     {
       "from": "script",
       "to": "page",
-      "label": {
-        "zh": "剧本 JSON",
-        "en": "Script JSON"
-      }
+      "label": "Script JSON"
     },
     {
       "from": "page",
       "to": "review",
-      "label": {
-        "zh": "页面源码",
-        "en": "Page source"
-      }
+      "label": "Page source"
     }
   ],
   "media": [
     {
       "id": "opening",
-      "title": {
-        "zh": "开场镜头",
-        "en": "Opening shot"
-      },
+      "title": "Opening shot",
       "kind": "video",
       "status": "done",
       "seconds": 183,
@@ -103,10 +81,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "town",
-      "title": {
-        "zh": "云中古镇",
-        "en": "Town in the clouds"
-      },
+      "title": "Town in the clouds",
       "kind": "image",
       "status": "done",
       "seconds": 87,
@@ -116,10 +91,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "forest",
-      "title": {
-        "zh": "青丘狐林",
-        "en": "Qingqiu fox forest"
-      },
+      "title": "Qingqiu fox forest",
       "kind": "image",
       "status": "done",
       "seconds": 81,
@@ -129,10 +101,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "temple",
-      "title": {
-        "zh": "昆仑神殿",
-        "en": "Kunlun temple"
-      },
+      "title": "Kunlun temple",
       "kind": "image",
       "status": "done",
       "seconds": 66,
@@ -142,10 +111,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "hero",
-      "title": {
-        "zh": "云川立绘",
-        "en": "Yunchuan portrait"
-      },
+      "title": "Yunchuan portrait",
       "kind": "image",
       "status": "done",
       "seconds": 80,
@@ -155,10 +121,7 @@ const record: ProductionRunRecord = {
     },
     {
       "id": "fox",
-      "title": {
-        "zh": "白绫立绘",
-        "en": "Bailing portrait"
-      },
+      "title": "Bailing portrait",
       "kind": "image",
       "status": "done",
       "seconds": 65,
@@ -167,13 +130,7 @@ const record: ProductionRunRecord = {
       ]
     }
   ],
-  "note": {
-    "zh": "2026-10-12 在线上 AwwO 用运营者自己的账号与工作区运行：3 个 Agent 全部完成，6 个媒体节点（1 段 5 秒视频、3 张场景图、2 张立绘）全部生成，整张画布用时 6 分 1 秒；每个 Agent 都由 Claude Opus 5.5 一次生成。这次运行的媒体节点用的是运营者工作区里的「视频 · 极速」与「图片 · 电影质感」；复制这张画布后，媒体节点用你的工作区里的图片与视频模型。交付的页面原样运行，没有经过人工修改。",
-    "en": "Run on 2026-10-12 on the live AwwO, in the operator’s own account and workspace: all 3 agents finished and all 6 media nodes (one 5-second clip, three scenes, two portraits) generated, in 6 min 1 s for the whole canvas, each agent a single Claude Opus 5.5 call. In this run the media nodes used the operator workspace’s Video · Express and Image · Cinematic; in a copy of the canvas they use the picture and video models of your workspace. The delivered page runs exactly as delivered, with no manual edits."
-  },
-  "verification": {
-    "zh": "发布前在 Edge 里打开交付的页面（1440×810）实际运行：标题画面全屏播放开场视频；按空格进入「云中古镇」并显示场景名；连续按空格推进台词，到「青丘狐林」结尾出现两个选项「接过心珠，赶回救师父」与「推回心珠，另寻他法」，两侧是两张立绘；选第一项后进入结局画面，显示结局文字与“重新开始”；六个媒体文件都按画布交给页面的路径载入；全程没有脚本错误。第二个选项、“自动”与声音开关没有测试。",
-    "en": "Before publishing, the delivered page was run in Edge (1440×810): the title screen plays the opening clip full screen; Space enters the Town in the Clouds and shows the scene name; pressing Space on through the lines reaches the end of the Qingqiu fox forest, where two options appear, “接过心珠，赶回救师父” and “推回心珠，另寻他法”, with the two portraits on either side; the first leads to the ending screen with its text and “Play again” (重新开始); all six media files load by the paths the canvas handed the page; no script error throughout. The second option and the Auto and sound toggles were not tested."
-  }
+  "note": "Run on 2026-10-12 on the live AwwO, in the operator’s own account and workspace: all 3 agents finished and all 6 media nodes (one 5-second clip, three scenes, two portraits) generated, in 6 min 1 s for the whole canvas, each agent a single Claude Opus 5.5 call. In this run the media nodes used the operator workspace’s Video · Express and Image · Cinematic; in a copy of the canvas they use the picture and video models of your workspace. The delivered page runs exactly as delivered, with no manual edits.",
+  "verification": "Before publishing, the delivered page was run in Edge (1440×810): the title screen plays the opening clip full screen; Space enters the Town in the Clouds and shows the scene name; pressing Space on through the lines reaches the end of the Qingqiu fox forest, where two options appear, “接过心珠，赶回救师父” and “推回心珠，另寻他法”, with the two portraits on either side; the first leads to the ending screen with its text and “Play again” (重新开始); all six media files load by the paths the canvas handed the page; no script error throughout. The second option and the Auto and sound toggles were not tested."
 };
 export default record;

@@ -1,7 +1,6 @@
 import type { CanvasDocument, CanvasNode, SessionNode } from '../canvas/canvasDoc';
 import { parseContractOutput } from '../canvas/nodeContracts';
 import { validateNodeOutput } from '../canvas/runGraph';
-import type { UiLocale } from '../locale';
 import { createOfficialCopyDocument, type OfficialCopyModel } from './examples/OfficialCopySetup';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import type { ProductionRunRecord } from './productionRuns';
@@ -38,13 +37,13 @@ function recordedFields(node: SessionNode, fields: ReadonlyArray<{ readonly id: 
  * what it received and what it handed over. Each output is marked `source: 'case'` with the run's
  * date and model, never as this workspace's run; running the graph replaces it.
  */
-export function createProductionCopyDocument(workflow: OfficialWorkflow, record: ProductionRunRecord, locale: UiLocale, model: OfficialCopyModel | null): CanvasDocument {
+export function createProductionCopyDocument(workflow: OfficialWorkflow, record: ProductionRunRecord, model: OfficialCopyModel | null): CanvasDocument {
   // The record must be the run of this very canvas: the same agents and the same wires.
   const ids = (values: ReadonlyArray<{ id: string }>) => values.map(value => value.id).sort().join('\n');
   const wires = (values: ReadonlyArray<{ from: string; to: string }>) => values.map(value => `${value.from}>${value.to}`).sort().join('\n');
   if (record.caseId !== workflow.id || ids(record.nodes) !== ids(workflow.nodes) || wires(record.edges) !== wires(workflow.edges))
     throw new Error(`The run record of ${record.caseId} does not match the canvas of ${workflow.id}.`);
-  const document = createOfficialCopyDocument(workflow, locale, model);
+  const document = createOfficialCopyDocument(workflow, model);
   const at = Date.parse(`${record.capturedOn}T00:00:00Z`);
   // A media case's image and video nodes follow the agents and generate afresh in the copy; a page they feed names the
   // case run's own files, which the copy does not have, so its delivery is not pinned either: it is made on the first run.
