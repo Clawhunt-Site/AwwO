@@ -18,13 +18,15 @@ type CanvasListProps = { tenant: Tenant; onOpen: (canvasId: string) => void; rec
   /** The newest canvases as loaded (the first page), for views built from the same list (the home's 最近的成果). */
   onFirstPage?: (canvases: ReadonlyArray<CanvasRecord>) => void;
   /** Changing it reloads the list: a view built from it (最近的成果) deleted canvases. */
-  reloadSignal?: number };
+  reloadSignal?: number;
+  /** Shown inside a dialog that names it (the home's 全部画布, HomeResults.tsx): no heading or onboarding anchor of its own. */
+  bare?: boolean };
 export function CanvasList(props: CanvasListProps) {
   // A changed identity must never inherit another account's search or in-flight list request.
   return <ScopedCanvasList key={JSON.stringify([props.userId ?? null, props.tenant.id])} {...props} />;
 }
 
-function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, reloadSignal }: CanvasListProps) {
+function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, reloadSignal, bare = false }: CanvasListProps) {
   const { locale, t } = useSaaSPreferences();
   const path = tenantPath(tenant.id, '/canvases');
   const listing = usePagedList<CanvasRecord>(path);
@@ -95,10 +97,10 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
     </article>;
   };
 
-  return <section className="saas-home-section saas-home-recent" aria-labelledby={titleId}>
+  return <section className="saas-home-section saas-home-recent" aria-labelledby={bare ? undefined : titleId}>
     <div className="saas-home-section-header">
       <div className="saas-home-section-title">
-        <h2 id={titleId}>{t('继续工作', 'Continue working')}</h2>
+        {!bare && <h2 id={titleId}>{t('继续工作', 'Continue working')}</h2>}
         {count && <span className="saas-library-count">{t(`${count} 张画布`, `${count} ${count === '1' ? 'canvas' : 'canvases'}`)}</span>}
       </div>
       <div className="saas-library-meta">
@@ -116,7 +118,7 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
     <p id={searchStatusId} className="saas-list-search-status" role="status">{searchStatus}</p>
     <div id={listId}>
       {listing.loading ? <div className={`saas-canvas-list is-loading${showingAll ? '' : ' is-recent'}`} role="status" aria-label={t('正在加载画布…', 'Loading canvases…')}>{Array.from({ length: showingAll ? 3 : Math.min(limit, 4) }, (_, index) => <div key={index} className="saas-canvas-card saas-canvas-skeleton" aria-hidden="true"><span /><i /><i /></div>)}</div>
-        : listing.page && <div data-onboarding="canvas-list" className={`saas-canvas-list${showingAll || needle ? '' : ' is-recent'}`}>{visible.map(card)}{items.length === 0 && <section className="saas-empty-guide">
+        : listing.page && <div data-onboarding={bare ? undefined : 'canvas-list'} className={`saas-canvas-list${showingAll || needle ? '' : ' is-recent'}`}>{visible.map(card)}{items.length === 0 && <section className="saas-empty-guide">
           <div className="saas-empty-art" aria-hidden="true"><span /><span /><span /></div>
           <h3>{listing.pageNumber === 1 ? t('从第一张画布开始', 'Start with your first canvas') : t('当前页没有画布', 'No canvases on this page')}</h3>
           <p>{readOnly ? t('请工作区成员创建画布后，刷新列表查看。', 'Ask a workspace member to create a canvas, then refresh this list.') : listing.pageNumber > 1 ? t('返回上一页，或新建一张画布。', 'Go to the previous page or create a canvas.') : t('在上方写下目标，AwwO 会新建画布并规划分工；也可以新建空白画布，从左侧添加模型，或从右侧 Bot 清单选择协作者。', 'Describe a goal above and AwwO creates a canvas and plans the work. Or start a blank canvas: add a model from the left, or choose a collaborator from the Bot list on the right.')}</p>

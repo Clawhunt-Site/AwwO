@@ -1,6 +1,7 @@
-// The workspace home's 最近的成果: canvases that have delivered something, each shown by its result (picked
-// exactly as the canvas's 成果 view picks it) and opening straight into that view. Built from the canvas
-// list the home has already loaded, so it fetches nothing to show; a page's thumbnail is that page rendered
+// The workspace home's 最近的成果, its one canvas section (owner 2026-10-13: 最近的成果留下，去掉继续工作; HomeResults.tsx):
+// canvases that have delivered something, each shown by its result (picked exactly as the canvas's 成果 view picks it)
+// and opening straight into that view, with 全部画布 for every canvas. Built from the newest canvases the home has
+// already read, so it fetches nothing to show; a page's thumbnail is that page rendered
 // static, in the same sandbox as every preview (no scripts, no network, opaque origin).
 // Each card's menu takes its result off this list (kept per person in this browser; the canvas is untouched)
 // or, for a member, deletes the canvas; 管理 does either for several cards at once.
@@ -40,6 +41,8 @@ type GalleryProps = {
   /** The canvases this list deleted on the server, for the page around it to drop and reload. Keep it
    *  stable: the gallery is memoised against the home's per-keystroke renders. */
   onCanvasesDeleted?: (canvasIds: ReadonlyArray<string>) => void;
+  /** Opens every canvas of the workspace (the home's 全部画布); stable, like onCanvasesDeleted. */
+  onShowAll?: () => void;
 };
 type Notice = { text: string; undo?: ReadonlyArray<HiddenResult> };
 
@@ -49,7 +52,7 @@ export const ResultsGallery = memo(function ResultsGallery(props: GalleryProps) 
   return <ScopedResultsGallery key={JSON.stringify([props.userId ?? null, props.tenant.id])} {...props} />;
 });
 
-function ScopedResultsGallery({ tenant, canvases, userId, onCanvasesDeleted }: GalleryProps) {
+function ScopedResultsGallery({ tenant, canvases, userId, onCanvasesDeleted, onShowAll }: GalleryProps) {
   const { locale, t } = useSaaSPreferences();
   const titleId = useId();
   // Reading results waits for the rest of the home to paint.
@@ -165,7 +168,7 @@ function ScopedResultsGallery({ tenant, canvases, userId, onCanvasesDeleted }: G
         <h2 id={titleId} ref={heading} tabIndex={-1}>{t('最近的成果', 'Recent results')}</h2>
         <p>{t('这个工作区的画布交付的成果，最新的在前。打开就是它的成果页，可以看到每一步怎么来的。', 'What this workspace’s canvases delivered, newest first. Each opens on its results, with every step that made it.')}</p>
       </div>
-      {(shown.length > 0 || removedHere > 0) && <div className="saas-library-meta saas-results-tools" role="group" aria-label={t('管理最近的成果', 'Manage recent results')}>
+      {(shown.length > 0 || removedHere > 0 || onShowAll) && <div className="saas-library-meta saas-results-tools" role="group" aria-label={t('管理最近的成果', 'Manage recent results')}>
         {managing ? <>
           <span className="saas-results-count">{t(`已选 ${chosen.length} 项`, `${chosen.length} selected`)}</span>
           <button type="button" className="saas-results-tool" onClick={() => setSelected(allChosen ? new Set() : new Set(shown.map(entry => entry.canvas.id)))}>{allChosen ? t('取消全选', 'Clear selection') : t('全选', 'Select all')}</button>
@@ -175,6 +178,7 @@ function ScopedResultsGallery({ tenant, canvases, userId, onCanvasesDeleted }: G
         </> : <>
           {removedHere > 0 && <button type="button" className="saas-link" onClick={restoreAll}>{t(`已移除 ${removedHere} 项 · 全部恢复`, `${removedHere} removed · Restore all`)}</button>}
           {shown.length > 0 && <button type="button" className="saas-results-tool" onClick={() => { setNotice(null); setSelecting(true); }}>{t('管理', 'Manage')}</button>}
+          {onShowAll && <button type="button" className="saas-results-tool" aria-haspopup="dialog" onClick={onShowAll}>{t('全部画布', 'All canvases')}</button>}
         </>}
       </div>}
     </div>
@@ -197,7 +201,8 @@ function ScopedResultsGallery({ tenant, canvases, userId, onCanvasesDeleted }: G
         </>}
       </li>;
     })}</ul>
-      : <p className="saas-results-empty">{removedHere > 0 ? t('这里的成果都移除了，画布还在上面的「继续工作」里。', 'Every result here was removed; the canvases are still under Continue working above.')
+      : <p className="saas-results-empty">{removedHere > 0 ? (onShowAll ? t('这里的成果都移除了，画布都还在「全部画布」里。', 'Every result here was removed; the canvases are all still under All canvases.')
+        : t('这里的成果都移除了，画布都还在。', 'Every result here was removed; the canvases are all still there.'))
         : tenant.role === 'reader' ? t('还没有交付。成员运行画布后，成果会出现在这里。', 'Nothing delivered yet. When a member runs a canvas, its result appears here.')
         : t('还没有交付。运行一张画布后，它交付的东西会出现在这里。', 'Nothing delivered yet. Run a canvas and what it delivers appears here.')}</p>}
     {confirming && canDelete && <DeleteCanvasesDialog key={confirming.map(canvas => canvas.id).join(' ')} tenantId={tenant.id} canvases={confirming}

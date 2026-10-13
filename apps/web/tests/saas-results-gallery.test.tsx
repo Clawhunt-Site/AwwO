@@ -187,7 +187,7 @@ describe('removing and deleting in the home’s 最近的成果', () => {
     render(show(delivered(1)));
     openMenu('画布 0');
     fireEvent.click(screen.getByRole('button', { name: '从最近的成果中移除' }));
-    expect(screen.getByText('这里的成果都移除了，画布还在上面的「继续工作」里。')).toBeVisible();
+    expect(screen.getByText('这里的成果都移除了，画布都还在。')).toBeVisible();
     expect(screen.queryByRole('button', { name: '管理' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '已移除 1 项 · 全部恢复' }));
     expect(names()).toEqual(['画布 0']);
