@@ -46,6 +46,41 @@ const MEDIA = MEDIA_ROLE;
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
   {
+    id: 'car-plant', kind: 'twin', recording: true, footage: 'car-plant-real',
+    title: 'EV plant digital twin',
+    brief: 'Turn a whole EV plant into a live 3D digital twin: 14 stations, buffers, rework and faults, every car changing as it moves down the line.',
+    stages: [['Layout', 'Simulation'], ['Plant', 'Equipment', 'Vehicles', 'Interface'], [FRONT_END], [REVIEW]],
+    deliverable: 'A live 3D digital twin of a car plant',
+  },
+  {
+    id: 'neon-circuit', kind: 'game', recording: true, footage: 'neon-circuit-real',
+    title: 'Neon Circuit racer',
+    brief: 'A synthwave 3D racer: three laps against five AI rivals, drifting through banked corners to fill the boost meter.',
+    stages: [[DESIGN], ['Track', 'City', 'Cars', PHYSICS, 'Interface', SOUND], ['Wiring'], ['Build'], [REVIEW]],
+    deliverable: 'A three-lap 3D race against five rivals',
+  },
+  {
+    id: 'crystal-keep', kind: 'game', recording: true, footage: 'crystal-keep-real',
+    title: 'Crystal Keep tower defense',
+    brief: 'A ten-wave 3D tower defense: build, upgrade and sell towers on a floating island to keep the crystal alive.',
+    stages: [[DESIGN], ['Map', 'Island', 'Units', 'Combat', SOUND, 'Interface'], ['Wiring'], ['Build'], [REVIEW]],
+    deliverable: 'A playable ten-wave tower defense',
+  },
+  {
+    id: 'mars-mission', kind: 'interactive', recording: true, footage: 'mars-mission-real',
+    title: 'Mars mission control',
+    brief: 'Plan and fly a Mars mission: pick a launch window on a live porkchop plot, build the rocket, fly the transfer and land by hand.',
+    stages: [['Mission design'], ['Orbits', 'Scene', 'Lander', 'Console'], ['Wiring'], ['Build'], [REVIEW]],
+    deliverable: 'A Mars mission you plan and fly',
+  },
+  {
+    id: 'beat-studio', kind: 'product', recording: true, footage: 'beat-studio-real',
+    title: 'Beat Studio music workstation',
+    brief: 'A music workstation in the browser: drum machine, bass and chords, four patterns, a song chain and a mixer, all synthesized live.',
+    stages: [[PRODUCT], ['Drums', 'Synths', 'Sequencer', 'Songs', 'Editor', 'Mixer'], ['Wiring'], ['Build'], [REVIEW]],
+    deliverable: 'A working browser music workstation',
+  },
+  {
     id: 'knowledge-base', kind: 'product', recording: true, footage: 'kb-real-en', footageTranslated: true,
     caption: 'Recorded: the knowledge-base workspace a real AwwO run delivered on 2026-09-04, in its demo mode with simulated data. UI translated from Chinese.',
     title: 'Team knowledge-base SaaS',

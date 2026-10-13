@@ -21,6 +21,33 @@
       "total": 4
     }
   },
+  "beat-studio": {
+    "completed": 10,
+    "total": 10,
+    "seconds": 439,
+    "delivered": true,
+    "capturedOn": "2026-10-13",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents"
+  },
+  "car-plant": {
+    "completed": 8,
+    "total": 8,
+    "seconds": 507,
+    "delivered": true,
+    "capturedOn": "2026-10-13",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents"
+  },
+  "crystal-keep": {
+    "completed": 10,
+    "total": 10,
+    "seconds": 697,
+    "delivered": true,
+    "capturedOn": "2026-10-13",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents"
+  },
   "glider-adventure": {
     "completed": 6,
     "total": 6,
@@ -38,6 +65,24 @@
     "capturedOn": "2026-09-04",
     "model": "Codex",
     "runtime": "codex_local"
+  },
+  "mars-mission": {
+    "completed": 8,
+    "total": 8,
+    "seconds": 646,
+    "delivered": true,
+    "capturedOn": "2026-10-13",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents"
+  },
+  "neon-circuit": {
+    "completed": 10,
+    "total": 10,
+    "seconds": 577,
+    "delivered": true,
+    "capturedOn": "2026-10-13",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents"
   },
   "neon-city": {
     "completed": 2,

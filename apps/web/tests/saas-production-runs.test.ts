@@ -85,7 +85,9 @@ it('records each SaaS case run on the very canvas a member can copy today', () =
     // The settings it ran with on production: Claude Opus 5.5's own limits, one model call per node, its thinking on.
     expect(record.model, record.caseId).toBe('Claude Opus 5.5');
     expect(record.limits, record.caseId).toMatchObject({ contextWindow: 200000, maxOutputTokens: 32000, modelCallsPerNode: 1, thinking: true });
-    expect([1, 2, 3, 4], record.caseId).toContain(record.limits?.concurrency);
+    // The most agents that ran at once: the larger cases run six modules side by side.
+    expect([1, 2, 3, 4, 5, 6], record.caseId).toContain(record.limits?.concurrency);
+    expect(record.limits!.concurrency, record.caseId).toBeLessThanOrEqual(workflow.nodes.length);
     expect(record.source?.api).toMatch(/^[0-9a-f]{8,40}$/);
     expect(record.source?.worker).toMatch(/^[0-9a-f]{8,40}$/);
     expect(record.runtime).toBe('openai-agents');

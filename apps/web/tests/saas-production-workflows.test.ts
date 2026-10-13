@@ -89,14 +89,25 @@ it('ends every canvas in a review and delivers exactly one self-contained HTML b
     expect(builds, item.id).toHaveLength(1);
     // Sized for Claude Opus 5.5: one call of at most 32,000 output tokens, its own thinking included. A 2D build writes the
     // page itself (16,000 characters); a 3D build pastes the scene code an upstream node delivered and only wires it
-    // (24,000), or, where the scene is split into two half-size modules (7,000 each), pastes both (28,000).
-    const limit = [28000, 24000, 16000].find(size => builds[0].task.includes(`Delivery: one HTML file of at most ${size.toLocaleString('en-US')} characters.`));
+    // (24,000), or, where the scene is split into two half-size modules (7,000 each), pastes both (28,000). The car plant's
+    // page pastes its six modules (36,000); the largest cases build in two steps, a wiring node writing only the code that
+    // connects the modules and a page that only pastes the modules and the wiring (56,000).
+    const limit = [56000, 36000, 28000, 24000, 16000].find(size => builds[0].task.includes(`Delivery: one HTML file of at most ${size.toLocaleString('en-US')} characters.`));
     expect(limit, item.id).toBeDefined();
-    const assembly = limit !== 16000;
+    const pastes = limit === 56000;
     expect(builds[0].task, item.id).toContain('this node makes one call of at most about 32,000 output tokens');
-    const halves = item.nodes.filter(node => node.task.includes('Output only the code, at most 7,000 characters.'));
-    expect(halves.length, item.id).toBe(limit === 28000 ? 2 : 0);
-    expect(builds[0].task).toContain(assembly ? 'This step only assembles' : 'this step only implements and assembles them');
+    // Half-size scene modules belong to the 28,000-character assembly; the larger cases size every module on its own.
+    if (limit === 24000 || limit === 28000) {
+      const halves = item.nodes.filter(node => node.task.includes('Output only the code, at most 7,000 characters.'));
+      expect(halves.length, item.id).toBe(limit === 28000 ? 2 : 0);
+    }
+    expect(builds[0].task).toContain(pastes ? 'This step only pastes' : limit !== 16000 ? 'This step only assembles' : 'this step only implements and assembles them');
+    if (pastes) {
+      // The page that only pastes takes its glue from the one wiring node, in the stage right before it.
+      const wiring = item.nodes.filter(node => node.task.includes('it is the program’s entry point'));
+      expect(wiring.map(node => node.column), item.id).toEqual([builds[0].column - 1]);
+      expect(item.edges.some(edge => edge.from === wiring[0].id && edge.to === builds[0].id), item.id).toBe(true);
+    }
     expect(builds[0].task).toMatch(/no localStorage, cookies or network requests/);
     // The one external script a build may name is the three.js release AwwO's previews supply.
     expect(builds[0].task).toContain('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
