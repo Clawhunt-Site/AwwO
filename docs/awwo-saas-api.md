@@ -92,7 +92,7 @@
 | PUT /agents/{id} | 同创建字段 | 更新定义 |
 | PUT /agents/{id}/instructions | content | 保存纯文本指令，不能上传可执行扩展 |
 | DELETE /agents/{id} | 无 | 已被 session 引用时拒绝 |
-| GET /runtime | 无 | Pi 兼容字段及 runtimes[{id,name,configured,available,supportsEffortSelection,effortInputMode:"select",tools,reason?}]、models[{id,name,provider,runtime,reasoningEfforts[],defaultReasoningEffort,route,requiresUpgrade?}]；route 为准入对该模型的分类（`free` 免费默认模型、`gate`、`bedrock`），requiresUpgrade 仅在本工作区当前套餐不含该模型时为 true（免费版、有路由限额且该路由为 0；有套餐或无路由限额的工作区从不出现），前端据此在选择器里标「Pro」，`GET /computer-runtime` 的 models 同样带这两个字段；supportsEffortSelection 仅在该 runtime 至少一个模型发布了思考强度档位时为 true，档位按模型给出且是封闭枚举，defaultReasoningEffort 只用于展示、不会写入请求；reader 即可读，目录已按本工作区模型清单过滤 |
+| GET /runtime | 无 | Pi 兼容字段及 runtimes[{id,name,configured,available,supportsEffortSelection,effortInputMode:"select",tools,reason?}]、models[{id,name,provider,runtime,reasoningEfforts[],defaultReasoningEffort,route,requiresUpgrade?}]；route 为准入对该模型的分类（`free` 免费默认模型、`gate`、`bedrock`），requiresUpgrade 仅在本工作区当前套餐不含该模型时为 true（免费版、有路由限额且该路由为 0；或该模型在部署设置 `AWWO_PLAN_ONLY_MODELS` 里（默认 Claude Opus 5.5，只给付费套餐），而工作区没有付费套餐、也不归平台管理员所有；有套餐的工作区从不出现），前端据此在选择器里标「Pro」，`GET /computer-runtime` 的 models 同样带这两个字段；supportsEffortSelection 仅在该 runtime 至少一个模型发布了思考强度档位时为 true，档位按模型给出且是封闭枚举，defaultReasoningEffort 只用于展示、不会写入请求；reader 即可读，目录已按本工作区模型清单过滤 |
 
 Agent 写入（POST / PUT `/agents`）在保存前按本工作区模型清单授权：清单外的 model 返回 `403 model_not_allowed`。这是授权检查而非可用性检查，只读数据库、不探测 worker，所以 worker 故障不会阻挡编辑；模型是否真实存在仍由运行准入判定。
 

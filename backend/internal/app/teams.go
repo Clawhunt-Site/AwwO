@@ -318,6 +318,15 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		if e == nil {
 			e = requiresPlan(ctx, tx, tid, needsPlan, plan)
 		}
+		// A plan-only model (plan_only_models.go) is outside the free allowance the way a closed route is: refused
+		// with the same premium_quota_exceeded, which the web answers with the way to Pro and Max. A workspace on a
+		// requires-plan row already said plan_required above.
+		if e == nil && !operatorPaid && a.cfg.planOnlyModel(model) {
+			var closed bool
+			if closed, e = a.planOnlyClosed(ctx, tx, tid, plan); e == nil && closed {
+				e = errRouteQuota
+			}
+		}
 		var reserve *int
 		if e == nil && plan != nil && !operatorPaid {
 			var size int64

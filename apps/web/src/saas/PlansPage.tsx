@@ -108,7 +108,7 @@ export function PlansPage({ identity }: { identity: Identity }) {
         <p className="saas-plans-current-name">{planName(held.id)}</p>
         <p>{t('订阅还没有生效：付款没有完成或续费扣款失败。请在管理订阅中完成付款或更新付款方式，付款成功后点数会自动到账。', 'The subscription is not in effect yet: its payment has not gone through. Complete it or update the payment method in Manage subscription; the credits arrive once it is paid.')}</p>
         <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{busy === 'portal' ? t('正在打开…', 'Opening…') : t('管理订阅', 'Manage subscription')}</button>
-      </> : <p>{t('免费版：每天有固定的总次数，默认模型和 Claude / GPT、Bedrock 等高级模型都能用（高级模型全站每天共享一份免费名额），图片视频另有免费次数；详见工作区顶部的「今日额度」，标着「不含」的才需要 Pro 或 Max。', 'Free: a daily number of calls for the default model and for premium models such as Claude / GPT and Bedrock (premium calls share one service-wide daily number), plus free image or video calls; see Today’s allowance at the top of a workspace. Only what is marked Not included needs Pro or Max.')}</p>}
+      </> : <p>{t('免费版：每天有固定的总次数，默认模型和 Claude / GPT、Bedrock 等高级模型都能用（高级模型全站每天共享一份免费名额），图片视频另有免费次数；详见工作区顶部的「今日额度」。Claude Opus 5.5 和标着「不含」的模型需要 Pro 或 Max。', 'Free: a daily number of calls for the default model and for premium models such as Claude / GPT and Bedrock (premium calls share one service-wide daily number), plus free image or video calls; see Today’s allowance at the top of a workspace. Claude Opus 5.5, and what is marked Not included, need Pro or Max.')}</p>}
     </section>
     <div className="saas-plans-grid">
       {billing.catalog.map(plan => {

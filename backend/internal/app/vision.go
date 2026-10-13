@@ -167,7 +167,9 @@ func showablePicture(item *uploadAttachment) bool {
 // already applied to the snapshot's health), the free models first, then the planner's model, then catalog order. For
 // a workspace with route limits (routes non-nil: a free one) a model whose route has no call left today, or is closed
 // to it, is passed over, asked without locks, so the switch does not turn the message into a premium_quota_exceeded
-// refusal; the reservation still decides. With no such model nothing changes and the pictures are described in words.
+// refusal; so is a plan-only model for a workspace without a paid plan that no platform administrator owns
+// (plan_only_models.go). The reservation still decides. With no such model nothing changes and the pictures are
+// described in words.
 // It must run before freezeVisionImages.
 func (a *App) switchToSeeingModel(ctx context.Context, tx pgx.Tx, tid string, routes []byte, s *executionSnapshot, attached *uploadAttachments) error {
 	if attached == nil || s.Team != nil || s.Workspace != nil || s.Computer != nil || s.Media != nil ||
@@ -177,7 +179,25 @@ func (a *App) switchToSeeingModel(ctx context.Context, tx pgx.Tx, tid string, ro
 		return nil
 	}
 	limits := readRouteLimits(routes)
+	// A plan-only model (plan_only_models.go) is passed over the same way for a workspace without a paid plan that no
+	// platform administrator owns; whether that holds is read once, only if such a model is a candidate.
+	planOnlyKnown, planOnlyOutside := false, false
 	for _, model := range a.seeingModels(s.Health, s.Model) {
+		if a.cfg.planOnlyModel(model) {
+			if !planOnlyKnown {
+				plan, e := ownerPlan(ctx, tx, tid, false)
+				if e == nil {
+					planOnlyOutside, e = a.planOnlyClosed(ctx, tx, tid, plan)
+				}
+				if e != nil {
+					return e
+				}
+				planOnlyKnown = true
+			}
+			if planOnlyOutside {
+				continue
+			}
+		}
 		if routes != nil {
 			switch e := a.routeLimit(ctx, tx, tid, model, limits, false); {
 			case errors.Is(e, errRouteQuota) || errors.Is(e, errRouteCapacity) || errors.Is(e, errFreeCapacity):

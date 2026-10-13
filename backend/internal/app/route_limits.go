@@ -171,7 +171,7 @@ func (c *Config) routeSettingsFromEnv() error {
 		c.RouteFreeModels = append([]string{}, list...)
 		sort.Strings(c.RouteFreeModels)
 	}
-	return nil
+	return c.planOnlySettingFromEnv()
 }
 
 // Route limits name worker model ids, which personal catalogues replace with per-connection ids,

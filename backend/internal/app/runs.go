@@ -185,39 +185,43 @@ func (a *App) runtime(w http.ResponseWriter, r *http.Request) {
 	a.runtimeCatalogue(w, r, entitlement, closed)
 }
 
-// closedRoutes are the paid model routes this workspace cannot call on its current plan: a free workspace's routes
-// limited to 0 (route_limits.go). The catalogue marks their models requiresUpgrade, so a picker can say that Pro or
-// Max is needed before a run is refused with premium_quota_exceeded. A workspace whose owner has an entitled plan,
-// or that has no route limits (the operator's own), has none; a route with a small allowance left is not closed.
-func (a *App) closedRoutes(ctx context.Context, tid string) (map[string]bool, error) {
+// closedRoutes are what this workspace cannot call on its current plan (modelClosures, plan_only_models.go): a free
+// workspace's paid routes limited to 0 (route_limits.go), and the plan-only models for a workspace without a paid plan
+// that no platform administrator owns. The catalogue marks their models requiresUpgrade, so a picker can say that Pro
+// or Max is needed before a run is refused with premium_quota_exceeded. A workspace whose owner has an entitled plan
+// has none; a route with a small allowance left is not closed.
+func (a *App) closedRoutes(ctx context.Context, tid string) (modelClosures, error) {
 	var raw []byte
 	if e := a.db.QueryRow(ctx, "SELECT route_limits FROM tenants WHERE id=$1", tid).Scan(&raw); e != nil {
 		if noRows(e) {
-			return nil, nil
+			return modelClosures{}, nil
 		}
-		return nil, e
+		return modelClosures{}, e
+	}
+	plan, e := ownerPlan(ctx, a.db, tid, false)
+	if e != nil || plan != nil {
+		return modelClosures{}, e
+	}
+	var out modelClosures
+	if out.planOnly, e = a.planOnlyClosed(ctx, a.db, tid, nil); e != nil {
+		return modelClosures{}, e
 	}
 	limits := readRouteLimits(raw)
-	if len(limits) == 0 {
-		return nil, nil
-	}
-	if plan, e := ownerPlan(ctx, a.db, tid, false); e != nil || plan != nil {
-		return nil, e
-	}
-	closed := map[string]bool{}
 	for _, route := range []string{routeGate, routeBedrock} {
 		if limit, ok := limits[route]; ok && limit == 0 {
-			closed[route] = true
+			if out.routes == nil {
+				out.routes = map[string]bool{}
+			}
+			out.routes[route] = true
 		}
 	}
-	return closed, nil
+	return out, nil
 }
 
-// catalogueModel is one advertised model: its route, and requiresUpgrade when that route is closed to the workspace.
-func (a *App) catalogueModel(model map[string]any, id string, closed map[string]bool) map[string]any {
-	route := a.cfg.modelRoute(id)
-	model["route"] = route
-	if closed[route] {
+// catalogueModel is one advertised model: its route, and requiresUpgrade when the workspace cannot call it on its plan.
+func (a *App) catalogueModel(model map[string]any, id string, closed modelClosures) map[string]any {
+	model["route"] = a.cfg.modelRoute(id)
+	if closed.closes(a.cfg, id) {
 		model["requiresUpgrade"] = true
 	}
 	return model
@@ -225,7 +229,7 @@ func (a *App) catalogueModel(model map[string]any, id string, closed map[string]
 
 // Worker discovery is separated from resolving whose entitlement applies so the
 // two concerns stay independently testable.
-func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitlement modelEntitlement, closed map[string]bool) {
+func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitlement modelEntitlement, closed modelClosures) {
 	type discovery struct {
 		h   piHealth
 		err error

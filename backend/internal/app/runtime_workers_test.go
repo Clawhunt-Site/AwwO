@@ -245,7 +245,7 @@ func TestRuntimeDiscoveryAndStrictWorkerIdentity(t *testing.T) {
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = oa.URL, strings.Repeat("o", 32)
 	a := New(nil, c)
 	w := httptest.NewRecorder()
-	a.runtimeCatalogue(w, httptest.NewRequest("GET", "/api/v1/tenants/t/runtime", nil), modelEntitlement{}, nil)
+	a.runtimeCatalogue(w, httptest.NewRequest("GET", "/api/v1/tenants/t/runtime", nil), modelEntitlement{}, modelClosures{})
 	var body struct {
 		Available, PlannerAvailable bool
 		Runtimes                    []struct {

@@ -398,10 +398,11 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
     return () => window.removeEventListener('resize', measure);
   }, [open]);
   const models = execution.runtime?.models ?? [];
-  // The strongest model, offered to a free workspace with the way to use it past the free calls (OpusUpsell.tsx).
+  // The strongest model, offered with the way to it (OpusUpsell.tsx): to a workspace without a paid plan that the server
+  // says cannot run it (Pro and Max only, plan_only_models.go), and to a route-limited free one while it still runs there.
   const opus = models.find(model => model.id === OPUS_MODEL_ID);
   const allowance = useFreeAllowance(execution.tenantId, !execution.readOnly && opus !== undefined);
-  const invite = allowance.free && allowance.usage !== null && opus !== undefined;
+  const invite = opus !== undefined && allowance.usage !== null && (allowance.free || (allowance.unpaid && opus.requiresUpgrade === true));
   const labelCounts = models.reduce<Record<string, number>>((counts, model) => ({ ...counts, [model.label || model.id]: (counts[model.label || model.id] ?? 0) + 1 }), {});
   const optionLabel = (model: typeof models[number]) => withPlanTag(labelCounts[model.label || model.id] > 1 ? `${model.label || model.id} · ${model.runtime}` : (model.label || model.id), model);
   const chosen = execution.choice.model;
@@ -412,7 +413,7 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
   if (execution.readOnly || (!models.length && !execution.choice.unavailableLabel)) return null;
   const opusKey = opus ? executionModelKey(opus.runtime, opus.id) : '';
   const canChoose = !execution.busy && !execution.pendingSubmission;
-  const sparkTitle = invite ? t(' · 升级 Pro / Max 畅用 Claude Opus 5.5', ' · Upgrade to Pro or Max for Claude Opus 5.5') : '';
+  const sparkTitle = invite ? t(' · 升级 Pro / Max 使用 Claude Opus 5.5', ' · Upgrade to Pro or Max for Claude Opus 5.5') : '';
   return <div className="awwo-execution-setup">
     <details ref={details} className={`awwo-execution-settings${needsPlan || execution.choice.unavailableLabel ? ' is-warning' : ''}`} open={open}
       onToggle={event => { const opened = event.currentTarget.open; setOpen(opened); if (opened && invite) allowance.refresh(); }}>
@@ -429,7 +430,9 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
           <select value={execution.choice.key} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.chooseModel(event.target.value)}>
             {execution.choice.unavailableLabel && <option value={execution.choice.key} disabled>{t(`${execution.choice.unavailableLabel}（已不可用）`, `${execution.choice.unavailableLabel} (unavailable)`)}</option>}
             {!execution.choice.key && <option value="">{t('选择模型', 'Choose a model')}</option>}
-            {models.map(model => <option key={executionModelKey(model.runtime, model.id)} value={executionModelKey(model.runtime, model.id)}>{optionLabel(model)}</option>)}
+            {/* A model this workspace's plan does not include (tagged Pro) cannot be picked; the one already chosen stays shown. */}
+            {models.map(model => { const key = executionModelKey(model.runtime, model.id);
+              return <option key={key} value={key} disabled={model.requiresUpgrade === true && key !== execution.choice.key}>{optionLabel(model)}</option>; })}
           </select>
         </label>
         {!!chosen?.efforts?.length && <label>{t('思考强度', 'Reasoning effort')}

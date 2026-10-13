@@ -1,8 +1,9 @@
-// Invites a free workspace to pay for Claude Opus 5.5 where the model is chosen in the canvas (owner request
-// 2026-10-13: 在画布里面鼓励用户支付付费享受opus5.5的模型能力). Opus 5.5 stays usable on the free allowance (owner
-// 2026-10-11: every advanced model open to free users); what Pro and Max add is using it on credits, past the free daily
-// calls. So it is shown only where that is true, a route-limited workspace without a paid plan: a paid or an unlimited
-// workspace never sees it, and nothing here refuses or gates a model.
+// Invites a workspace without a paid plan to Claude Opus 5.5 where the model is chosen in the canvas (owner requests
+// 2026-10-13: 在画布里面鼓励用户支付付费享受opus5.5的模型能力, then Opus 5.5 改成只给付费用户). Opus 5.5 runs only on
+// Pro and Max, or in the operator's own workspaces: the server marks it requiresUpgrade for every other workspace and
+// refuses a call on it (plan_only_models.go). So the card says it is Pro and Max's and opens the plans; a paid or an
+// operator workspace never sees it. Only where the server still offers it on the free allowance (AWWO_PLAN_ONLY_MODELS
+// set to "none") does the card count today's free calls and switch to it.
 import { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { accountURL } from './PersonalAccount';
@@ -20,7 +21,8 @@ export function modelRoute(model: { id: string; route?: string }): RouteName | u
 }
 
 /** This workspace's allowance, read when the canvas opens and again on request (a menu opening); not read at all while
- * `enabled` is false. `free` is a route-limited workspace without a paid plan; an unreadable allowance is never free. */
+ * `enabled` is false. `free` is a route-limited workspace without a paid plan, `unpaid` any workspace without one (a
+ * reader is never told the plan, so it reads as unpaid too); an unreadable allowance is neither. */
 export function useFreeAllowance(tenantId: string, enabled = true) {
   const [usage, setUsage] = useState<RouteUsage | null>(null);
   const [revision, setRevision] = useState(0);
@@ -30,7 +32,8 @@ export function useFreeAllowance(tenantId: string, enabled = true) {
     fetchRouteUsage(tenantId, controller.signal).then(value => { if (!controller.signal.aborted) setUsage(value); }).catch(() => {});
     return () => controller.abort();
   }, [tenantId, revision, enabled]);
-  return { usage, free: enabled && usage !== null && usage.limited === true && !usage.plan, refresh: () => setRevision(value => value + 1) };
+  const unpaid = enabled && usage !== null && !usage.plan;
+  return { usage, free: unpaid && usage?.limited === true, unpaid, refresh: () => setRevision(value => value + 1) };
 }
 
 /** The invitation: what Opus 5.5 is for, what is left of today's free calls, and the way to a plan. The plans page opens in
@@ -45,7 +48,7 @@ export function OpusUpsell({ tenantId, usage, route, chosen, available, onChoose
   const allowance = route ? usage.routes?.[route] : undefined;
   const left = allowance && allowance.limit > 0 ? Math.max(0, allowance.limit - allowance.used) : null;
   const included = available && allowance?.limit !== 0;
-  const today = !included ? t('这个工作区的免费额度不含它；升级 Pro / Max 就能用。', 'This workspace’s free allowance does not include it; Pro and Max do.')
+  const today = !included ? t('Pro / Max 专享：升级后按点数使用，不受次数限制。', 'Pro and Max only: upgrade and run it on credits, with no daily limit.')
     : left === 0 ? t('今天的免费次数已用完；升级 Pro / Max 用点数接着用。', 'Today’s free calls are used up; Pro and Max carry on with credits.')
       : left !== null ? t(`今天还能免费用 ${left} 次；升级 Pro / Max 用点数畅用，不受次数限制。`, `${left} free ${left === 1 ? 'call' : 'calls'} left today; Pro and Max run it on credits, past that limit.`)
         : t('免费版每天有少量次数；升级 Pro / Max 用点数畅用。', 'The free plan has a few calls a day; Pro and Max run it on credits.');

@@ -75,6 +75,9 @@ type Config struct {
 	NewWorkspaceRouteLimits routeLimits
 	RouteTotalsPerDay       routeLimits
 	RouteFreeModels         []string
+	// PlanOnlyModels are the sorted model ids only a paid plan or the operator's own workspaces run
+	// (plan_only_models.go, AWWO_PLAN_ONLY_MODELS; empty: Claude Opus 5.5, "none": no model).
+	PlanOnlyModels []string
 	// FreeModelTotalPerDay is the deployment-wide daily ceiling on free default-model calls across route-limited
 	// workspaces (checkFreeModelCeiling); 0 sets none.
 	FreeModelTotalPerDay int
