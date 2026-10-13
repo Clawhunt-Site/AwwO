@@ -3,7 +3,7 @@
 // one-line status while it runs, the requests it needs answered, then the result and its files. Also drawn here:
 // the canvas's earlier tasks, the service's notices above the composer and the execution model under it. State and
 // every request live in useManagedExecution; `executionHost` hands them to the canvas.
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, RefreshCw, Sparkles, Square, X } from 'lucide-react';
 import { StoredArtifactPreview } from '../canvas/ArtifactPreview';
 import type { AssistantExecutionHost } from '../canvas/assistantRouting';
@@ -379,6 +379,24 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
     document.addEventListener('keydown', key);
     return () => { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', key); };
   }, [open]);
+  // The menu opens above the box. Where the box sits low with little room above it (the centred welcome of an empty
+  // canvas), the nearest clipping ancestor would cut its top off, so its height is capped to that room and it scrolls.
+  const [room, setRoom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const box = details.current?.closest('form') ?? details.current;
+      if (!box) return;
+      let clip = 0;
+      for (let element = box.parentElement; element; element = element.parentElement) {
+        if (getComputedStyle(element).overflowY !== 'visible') clip = Math.max(clip, element.getBoundingClientRect().top);
+      }
+      setRoom(Math.floor(box.getBoundingClientRect().top - clip - 16));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [open]);
   const models = execution.runtime?.models ?? [];
   // The strongest model, offered to a free workspace with the way to use it past the free calls (OpusUpsell.tsx).
   const opus = models.find(model => model.id === OPUS_MODEL_ID);
@@ -403,7 +421,7 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
         {label ? <><span className="sr-only">{prefix}</span><span className="awwo-execution-model">{label}</span></>
           : <span className="awwo-execution-model">{t('选择画布助手的模型', 'Choose the canvas assistant’s model')}</span>}
       </summary>
-      <div className="awwo-execution-settings-panel">
+      <div className="awwo-execution-settings-panel" style={room !== null && room > 0 ? { maxHeight: `${Math.max(room, 180)}px` } : undefined}>
         {invite && <OpusUpsell tenantId={execution.tenantId} usage={allowance.usage!} route={modelRoute(opus)}
           chosen={execution.choice.key === opusKey} available={opus.requiresUpgrade !== true}
           onChoose={canChoose ? () => execution.chooseModel(opusKey) : undefined} />}

@@ -3,7 +3,7 @@
  * the canvas skin. */
 html:root .saas-canvas-shell .awwo-canvas-assistant {
   .saas-opus-upsell {
-    display: grid; gap: 6px; margin: 0 12px; padding: 10px 12px;
+    display: grid; gap: 4px; margin: 0 12px; padding: 9px 11px;
     border: 1px solid color-mix(in srgb, var(--saas-bio-lilac, var(--saas-bio)) 38%, var(--saas-border)); border-radius: 12px;
     background: linear-gradient(135deg, color-mix(in srgb, var(--saas-bio-lilac, var(--saas-bio)) 14%, var(--saas-raised)), color-mix(in srgb, var(--saas-bio) 10%, var(--saas-raised)));
     color: var(--saas-text); font-size: var(--saas-text-xs); line-height: 1.55;
@@ -23,4 +23,7 @@ html:root .saas-canvas-shell .awwo-canvas-assistant {
     & :is(.saas-opus-upsell-upgrade, .saas-opus-upsell-choose):focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 2px; }
   }
   .awwo-execution-settings > summary .awwo-execution-spark { flex: none; color: var(--saas-bio-lilac, var(--saas-bio)); }
+  /* The menu opens above the box; where the box sits low in little room (the centred welcome), its height is capped to
+     the room above it (ExecutionSettings measures it) and it scrolls inside itself instead of passing under the edge. */
+  .awwo-execution-settings > .awwo-execution-settings-panel { overflow-y: auto; overscroll-behavior: contain; }
 }

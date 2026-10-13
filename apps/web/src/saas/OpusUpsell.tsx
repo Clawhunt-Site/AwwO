@@ -45,15 +45,14 @@ export function OpusUpsell({ tenantId, usage, route, chosen, available, onChoose
   const allowance = route ? usage.routes?.[route] : undefined;
   const left = allowance && allowance.limit > 0 ? Math.max(0, allowance.limit - allowance.used) : null;
   const included = available && allowance?.limit !== 0;
-  const today = !included ? t('这个工作区的免费额度不含它。', 'This workspace’s free allowance does not include it.')
-    : left === 0 ? t('今天的免费次数已经用完。', 'Today’s free calls are used up.')
-      : left !== null ? t(`这个工作区今天还能免费用 ${left} 次。`, `This workspace has ${left} free ${left === 1 ? 'call' : 'calls'} left today.`)
-        : t('免费版每天有少量次数。', 'The free plan has a few calls a day.');
+  const today = !included ? t('这个工作区的免费额度不含它；升级 Pro / Max 就能用。', 'This workspace’s free allowance does not include it; Pro and Max do.')
+    : left === 0 ? t('今天的免费次数已用完；升级 Pro / Max 用点数接着用。', 'Today’s free calls are used up; Pro and Max carry on with credits.')
+      : left !== null ? t(`今天还能免费用 ${left} 次；升级 Pro / Max 用点数畅用，不受次数限制。`, `${left} free ${left === 1 ? 'call' : 'calls'} left today; Pro and Max run it on credits, past that limit.`)
+        : t('免费版每天有少量次数；升级 Pro / Max 用点数畅用。', 'The free plan has a few calls a day; Pro and Max run it on credits.');
   return <div className="saas-opus-upsell" role="note">
     <p className="saas-opus-upsell-title"><Sparkles size={14} aria-hidden="true" />{t('Claude Opus 5.5 · 这里最强的模型', 'Claude Opus 5.5 · the strongest model here')}</p>
-    <p>{t('复杂的网页、游戏、3D 和长流程交给它，做得更完整，返工更少。', 'Give it complex pages, games, 3D and long workflows: more complete results, less rework.')}</p>
-    <p className="saas-opus-upsell-allowance">{today}{' '}
-      {t('升级 Pro / Max，用点数畅用 Opus 5.5，不受每天免费次数的限制。', 'Pro and Max run Opus 5.5 on credits, past the free daily calls.')}</p>
+    <p>{t('复杂网页、游戏和 3D 交给它，做得更完整。', 'Complex pages, games and 3D come out more complete.')}{' '}
+      <span className="saas-opus-upsell-allowance">{today}</span></p>
     <div className="saas-opus-upsell-actions">
       {included && !chosen && left !== 0 && onChoose && <button type="button" className="saas-opus-upsell-choose" onClick={onChoose}>{t('换成 Opus 5.5', 'Switch to Opus 5.5')}</button>}
       <a className="saas-opus-upsell-upgrade" href={accountURL('plans')} target="_blank" rel="noopener noreferrer"

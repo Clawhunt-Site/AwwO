@@ -49,7 +49,7 @@ describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () =>
     expect(chip().querySelector('.awwo-execution-spark')).not.toBeNull();
     expect(chip()).toHaveAttribute('title', expect.stringContaining('升级 Pro / Max 畅用 Claude Opus 5.5'));
     const note = within(invitation()!);
-    expect(note.getByText(/这个工作区今天还能免费用 15 次。/)).toHaveTextContent('升级 Pro / Max，用点数畅用 Opus 5.5，不受每天免费次数的限制。');
+    expect(note.getByText('今天还能免费用 15 次；升级 Pro / Max 用点数畅用，不受次数限制。')).toBeInTheDocument();
     expect(screen.getByTestId('choice')).toHaveTextContent(executionModelKey('pi', qwen.id));
     fireEvent.click(note.getByRole('button', { name: '换成 Opus 5.5' }));
     expect(screen.getByTestId('choice')).toHaveTextContent(executionModelKey('pi', OPUS_MODEL_ID));
@@ -67,7 +67,7 @@ describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () =>
     server(free(20));
     view();
     await waitFor(() => expect(invitation()).not.toBeNull());
-    expect(within(invitation()!).getByText(/今天的免费次数已经用完。/)).toBeInTheDocument();
+    expect(within(invitation()!).getByText('今天的免费次数已用完；升级 Pro / Max 用点数接着用。')).toBeInTheDocument();
     expect(within(invitation()!).queryByRole('button', { name: '换成 Opus 5.5' })).toBeNull();
     expect(within(invitation()!).getByRole('link', { name: '升级 Pro / Max' })).toBeInTheDocument();
   });
