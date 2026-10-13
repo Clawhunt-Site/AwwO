@@ -9,7 +9,7 @@ import { SaaSPreferencesProvider } from '../src/saas/preferences';
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => cleanup());
 
-it.each(['neon-city', 'shanhai-vn'])('runs %s with the pictures and the clip its media nodes made, inlined in place of their paths', async id => {
+it.each(['neon-city', 'shanhai-vn', 'aurora-gt'])('runs %s with the pictures and the clip its media nodes made, inlined in place of their paths', async id => {
   const item = PRODUCTION_CASES.find(value => value.id === id)!, media = PRODUCTION_WORKFLOWS[id].media!;
   render(<SaaSPreferencesProvider><ProductionShowcase item={item} /></SaaSPreferencesProvider>);
   const frame = await screen.findByTitle(`${item.title.zh}：AwwO 运行交付的成品`, undefined, { timeout: 20000 });
@@ -31,14 +31,14 @@ it.each(['neon-city', 'shanhai-vn'])('runs %s with the pictures and the clip its
   expect(screen.getByText(`${nodes}/${nodes} 个节点完成`)).toBeVisible();
   expect(within(strip).getByText(`阶段 01 · 媒体节点 · ${media.length} 个，和 Agent 同一次运行生成`)).toBeVisible();
   const stages = screen.getByRole('list', { name: '按阶段查看每个 Agent' });
-  expect([...stages.querySelectorAll('.production-made-stage')].map(label => label.firstChild?.textContent)).toEqual(id === 'neon-city' ? ['02', '03'] : ['01', '02', '03']);
+  expect([...stages.querySelectorAll('.production-made-stage')].map(label => label.firstChild?.textContent)).toEqual(id === 'shanhai-vn' ? ['01', '02', '03'] : ['02', '03']);
 });
 
 it('counts a media case’s agents without its media slot, which still shows as a stage, and its media among its nodes', async () => {
   render(<SaaSPreferencesProvider><ProductionCases /></SaaSPreferencesProvider>);
-  for (const [title, chip] of [['霓虹之城', '真实运行 · 6/6 节点完成'], ['山海异闻录', '真实运行 · 9/9 节点完成']] as const)
+  for (const [title, chip] of [['霓虹之城', '真实运行 · 6/6 节点完成'], ['山海异闻录', '真实运行 · 9/9 节点完成'], ['极光 GT', '真实运行 · 6/6 节点完成']] as const)
     expect(within(screen.getByRole('button', { name: title }).closest<HTMLElement>('.production-card')!).getByText(chip)).toBeVisible();
-  for (const [title, line] of [['霓虹之城', '2 个 Agent · 3 个阶段'], ['山海异闻录', '3 个 Agent · 3 个阶段']] as const) {
+  for (const [title, line] of [['霓虹之城', '2 个 Agent · 3 个阶段'], ['山海异闻录', '3 个 Agent · 3 个阶段'], ['极光 GT', '2 个 Agent · 3 个阶段']] as const) {
     fireEvent.click(screen.getByRole('button', { name: title }));
     const dialog = screen.getByRole('dialog', { name: title });
     expect(within(dialog).getByText(line)).toBeVisible();

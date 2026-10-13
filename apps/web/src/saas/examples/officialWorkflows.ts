@@ -364,7 +364,16 @@ export function createOfficialDocument(item: OfficialWorkflow, locale: UiLocale)
     return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId, toNode: to.nodeId, toPort: to.portId,
       dataType: spec.kind === 'model3d' ? 'file' as const : spec.kind };
   }));
-  return { ...emptyDocument(), nodes: [...nodes, ...media.map(entry => entry.node)], edges: [...edges, ...mediaEdges] };
+  // A media node made from another one's picture (a colour version, a clip of the same subject): that picture's result
+  // into its reference input, an ordinary image wire, so it waits for the picture.
+  const referenceEdges = media.flatMap(({ spec, node }) => (spec.references ?? []).map(source => {
+    const picture = media.find(entry => entry.spec.id === source);
+    if (!picture || picture.spec.kind !== 'image' || picture.node === node) throw new Error(`Invalid official media reference: ${source} -> ${spec.id}`);
+    const from = { nodeId: picture.node.id, portId: 'result' };
+    const to = { nodeId: node.id, portId: 'reference' };
+    return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId, toNode: to.nodeId, toPort: to.portId, dataType: 'image' as const };
+  }));
+  return { ...emptyDocument(), nodes: [...nodes, ...media.map(entry => entry.node)], edges: [...edges, ...mediaEdges, ...referenceEdges] };
 }
 
 /** A media node as the canvas makes one: its model and parameters chosen, its prompt in the draft a run or a Send

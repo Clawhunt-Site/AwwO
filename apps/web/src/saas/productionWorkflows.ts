@@ -483,7 +483,54 @@ const SHANHAI: OfficialWorkflow = {
   ],
 };
 
+// 极光 GT: one original car in three colours and a clip of that same car. The pearl-white picture comes first; the two
+// colour versions and the clip are made from it (`references`), so the configurator switches, and the clip drives, one
+// car. The picture prompts are those of the fourth GT run (2026-10-12): a closed, smooth nose and centreless wheels leave
+// no place for an emblem. The clip is a tracking shot that keeps the car at the reference picture's angle: every driving
+// clip that let the car turn towards the camera (the fourth run, then three runs of this canvas on 2026-10-13) grew an
+// emblem on the bonnet, a ringed three-pointed star in the last three, where the video model fills a front it never saw.
+const GT_LOOK = l('高端汽车广告摄影，电影级布光，车身漆面有锐利的高光与反射，低角度三分之二侧前方视角，背景虚化，超高细节，写实，画面里没有任何文字和水印；车头、引擎盖、轮毂、车尾和车身上都没有任何品牌标志、车标、徽章、字母或铭牌，前脸和车尾光洁；这是一款原创概念车，不像任何现有汽车品牌',
+  'premium car advertising photography, cinematic lighting, crisp highlights and reflections on the paint, a low three-quarter front view, a blurred background, ultra detailed, photorealistic, no text or watermark anywhere; no brand mark, emblem, badge, letters or nameplate on the nose, bonnet, wheels, tail or body, the nose and tail clean; an original concept car that looks like no existing car brand');
+const gtShot = (zh: string, en: string) => l(`${zh}，${GT_LOOK.zh}`, `${en}, ${GT_LOOK.en}`);
+
+const AURORA: OfficialWorkflow = {
+  id: 'aurora-gt', category: 'design', categoryLabel: l('新品发布', 'Launch'), accent: '#38bdf8',
+  title: l('极光 GT · 电动超跑发布官网', 'Aurora GT · An electric supercar launch site'),
+  summary: l('媒体节点先生成一辆原创超跑的珍珠白车图，再以它为参考生成宝石红、午夜蓝两色和一段疾驰镜头；前端 Agent 把它们做成四幕的全屏发布官网。',
+    'Media nodes generate a pearl-white picture of an original supercar, then from it a ruby-red and a midnight-blue version and a driving clip; a front-end agent turns them into a four-act full-screen launch site.'),
+  description: l('为一款虚构的电动超跑做发布官网：先生成一张珍珠白车图，宝石红、午夜蓝两种配色和 5 秒的极光疾驰镜头都以它为参考生成，所以配色器里换色的、视频里飞驰的是同一辆车；前端 Agent 把它们排成开场、配色器、性能、预约试驾四幕，带高光扫过、细节热点、数字滚动和表单校验；最后由验收 Agent 逐条核对。',
+    'A launch site for a fictional electric supercar: a pearl-white picture is generated first, and the ruby-red and midnight-blue versions and a 5-second clip racing under the aurora are all made from it, so the configurator recolours, and the clip drives, one and the same car; a front-end agent lays them out as four acts — opening, configurator, performance and a test-drive booking — with a sweep of light, detail hotspots, counting figures and form checks; a review agent then checks it point by point.'),
+  pattern: l('珍珠白车图 → 两种配色与疾驰镜头 → 发布官网 → 验收', 'Pearl-white picture → two colours and the driving clip → launch site → review'),
+  brief: l('做一个电动超跑新车发布官网《极光 GT》：开场全屏循环播放超跑在极光下疾驰的镜头，大标题“极光 GT”与一句“为夜色而生”；第二幕是配色器，三张同角度的实拍级车图（珍珠白、宝石红、午夜蓝）随色块切换，切换时有一道高光扫过车身；车图上有 3 个可点击的细节热点（前大灯、轮毂、尾翼），点开显示参数卡；第三幕是性能数据，进入时数字滚动增长（0-100 km/h 2.1 秒、续航 720 公里、峰值功率 1020 千瓦、充电 10 分钟 400 公里）；第四幕是预约试驾表单，校验姓名和手机号后显示预约成功动画（演示数据，不发送任何请求）。← → 键、滚轮或右侧导航切换。车型与品牌都是虚构的。',
+    'Make a launch site for a new electric supercar, AURORA GT: it opens on a full-screen looping shot of the car racing under the aurora, with a big title, “极光 GT”, and the line “Born for the night”; act two is a configurator where three photo-real pictures of the car at the same angle (pearl white, ruby red, midnight blue) switch with colour swatches under a sweep of light across the body; three clickable detail hotspots on the car (headlight, wheel, rear wing) open spec cards; act three shows performance figures that count up on entry (0–100 km/h in 2.1 s, 720 km of range, 1,020 kW peak power, 400 km in 10 minutes of charging); act four is a test-drive form that checks the name and mobile number and then shows a booking animation (demo data, nothing is sent). ←/→, the wheel or the dots on the right switch acts. The car and the brand are fictional.'),
+  nodes: [
+    n('page', l('发布官网', 'Launch site'), 'frontend', 1, 0,
+      mediaBuild('把疾驰视频和三张配色车图组装成四幕的全屏发布官网：第一幕视频铺满并循环，暗角渐变上叠加超大细字标题“极光 GT”、英文 AURORA GT 与一句标语，按钮“探索配色”；第二幕配色器：车图铺满，下方三枚色块（珍珠白/宝石红/午夜蓝），切换时新图淡入并有一道斜向高光扫过；车图上 3 个呼吸光点热点（前大灯、轮毂、尾翼），点击弹出玻璃质感的参数卡；第三幕性能：深色背景叠用当前配色的车图作为虚化背景，四组数字进入视野时从 0 滚动到目标值，配细线图形；第四幕预约试驾表单：姓名、手机号（11 位校验）、城市下拉、日期，提交后显示勾选动画与“预约成功”（不发送任何请求）。右侧导航点与 ← → 键、滚轮切换，切换有滑动与淡入。',
+        'Assemble the driving clip and the three colour pictures into a four-act full-screen launch site: in act one the clip fills the screen and loops under a vignette gradient carrying a huge thin title, “极光 GT”, the English AURORA GT, a one-line tagline and a button, “Explore the colours”; act two is the configurator: the car picture fills the screen above three colour swatches (pearl white / ruby red / midnight blue), and a new picture fades in under a diagonal sweep of light; three breathing hotspots on the car (headlight, wheel, rear wing) open glass-like spec cards; act three is performance: the current colour’s picture, blurred, behind a dark overlay, with four figures counting up from 0 when they come into view and fine-line graphics; act four is a test-drive form: name, mobile number (an 11-digit check), a city drop-down and a date, and on submit a tick animation and “Booked” (nothing is sent). Navigation dots on the right, ←/→ and the wheel switch acts with a slide and a fade.'),
+      l('发布官网 HTML', 'Launch site HTML'), l('四段素材都按给定路径用上；配色切换、热点、数字滚动和表单校验真实生效', 'All four media files are used by their given paths; the colour switch, the hotspots, the counting figures and the form checks really work'), 'html'),
+    n('review', REVIEW_TITLE, 'review', 2, 0,
+      review('逐条对照任务检查页面源码：四段素材是否全部按给定路径用上，开场视频是否铺满循环，三色切换与高光扫过、三个热点与参数卡、性能数字滚动、预约表单的校验与成功动画、右侧导航与键盘和滚轮切换是否真实生效，是否在 16000 字符内写完整。用列表，不超过 300 字；发现问题时写清楚在哪里。',
+        'Check the page source point by point against the task: all four media files used by their given paths, the opening clip filling the screen and looping, the three-colour switch with its sweep of light, the three hotspots and their cards, the counting figures, the form checks and the success animation, and switching by the dots, keys and wheel really working, and the page complete within 16,000 characters. Use a list of at most 200 words; say where any problem is.'),
+      REVIEW_OUTPUT, KEPT_APART),
+  ],
+  edges: [e('page', 'review', '官网源码', 'Site source')],
+  artifacts: [l('四幕的全屏发布官网', 'A four-act full-screen launch site'), l('同一辆车的三种配色与一段疾驰镜头', 'One car in three colours and a driving clip')],
+  limitations: limits('车型与品牌都是虚构的；图片和视频由媒体节点生成，页面不联网、不发送表单、不收集任何信息。',
+    'The car and the brand are fictional; the pictures and the clip are generated by media nodes, and the page makes no requests, sends no form and collects nothing.'),
+  media: [
+    { ...media('drive', 'video', l('疾驰镜头', 'Driving shot'), 0, l('参考图里的这辆珍珠白原创概念电动超跑在夜晚的湖边公路上疾驰，头顶是绿色与紫色的极光。跟车拍摄：镜头与车同速平行移动，整段视频里车在画面中的位置、大小和角度都和参考图保持一致（低角度三分之二侧前方视角），车头始终不转向镜头、也不靠近镜头，只有路面、湖面倒影、远处的雪山和极光在流动，车灯划出光轨，路面微湿反光。车的外形、前脸那条贯穿全宽的细长灯带、涡轮叶片式轮毂和珍珠白漆面都和参考图完全一致；引擎盖是一整块连续的镜面漆，只倒映着极光。高端汽车广告摄影，电影级布光，车身漆面有锐利的高光与反射，背景动态模糊，超高细节，写实，画面里没有文字和水印',
+      'The pearl-white original electric concept supercar from the reference picture races along a lakeside road at night under green and violet auroras. A tracking shot: the camera moves alongside at the car’s speed, so for the whole clip the car keeps the place, size and angle it has in the reference picture (a low three-quarter front view), its nose never turning towards the camera or coming closer, while only the road, the reflections on the lake, the snowy peaks in the distance and the aurora stream past, its lights drawing trails on the slightly wet, reflective road. The car’s shape, the slim light bar across its whole front, the turbine-blade wheels and the pearl-white paint match the reference picture exactly; the bonnet is one continuous mirror of paint, reflecting only the aurora. Premium car advertising photography, cinematic lighting, crisp highlights and reflections on the paint, a motion-blurred background, ultra detailed, photorealistic, no text or watermark in the frame')),
+      references: ['white'] },
+    media('white', 'image', l('珍珠白', 'Pearl white'), 1, gtShot('一辆珍珠白的原创概念双门电动超跑，极低的楔形车身，整块封闭的光滑前脸，前脸只有一条贯穿全宽的细长灯带，没有进气格栅；引擎盖光洁平整，没有任何装饰件；轮毂是没有中心盖的涡轮叶片式轮毂，停在夜晚湖边，天空有绿色与紫色的极光倒映在湖面，车身干净完整，居中构图',
+      'An original pearl-white two-door electric concept supercar with a very low wedge body and a closed, smooth nose carrying a single slim light bar across its whole width and no air intake grille; a clean, flat bonnet with no trim; turbine-blade wheels without centre caps; parked by a lake at night under green and violet auroras mirrored in the water, the car clean and whole, centred')),
+    { ...media('red', 'image', l('宝石红', 'Ruby red'), 2, gtShot('把这辆车的车漆改成深邃的宝石红金属漆，车型、角度、构图、背景、极光和灯光完全保持不变，车头和车身上依然没有任何车标、徽章、字母或铭牌',
+      'Repaint this car in a deep ruby-red metallic, keeping its shape, angle, composition, background, aurora and lighting exactly as they are, still with no emblem, badge, letters or nameplate on the nose or the body')), references: ['white'] },
+    { ...media('blue', 'image', l('午夜蓝', 'Midnight blue'), 3, gtShot('把这辆车的车漆改成带细腻金属颗粒的午夜蓝，车型、角度、构图、背景、极光和灯光完全保持不变，车头和车身上依然没有任何车标、徽章、字母或铭牌',
+      'Repaint this car in a midnight blue with a fine metallic flake, keeping its shape, angle, composition, background, aurora and lighting exactly as they are, still with no emblem, badge, letters or nameplate on the nose or the body')), references: ['white'] },
+  ],
+};
+
 /** Keyed by production case id. The knowledge-base case is not here: it ran on 2026-09-04 with
  * its own canvas, kept as it ran in recordedCanvases.ts, and its record lives in production-runs/knowledge-base.ts. */
 export const PRODUCTION_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries(
-  [NEON, SHANHAI, PIXEL, CONFIGURATOR, PAPER, AD, PORT, GLIDER, PARTY, RHYTHM].map(item => [item.id, item]));
+  [NEON, SHANHAI, AURORA, PIXEL, CONFIGURATOR, PAPER, AD, PORT, GLIDER, PARTY, RHYTHM].map(item => [item.id, item]));

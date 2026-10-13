@@ -37,6 +37,14 @@ it('is a valid DAG that runs left to right and compiles in both languages', () =
     expect(new Set(keys).size, item.id).toBe(keys.length);
     // A media node's result reaches the pages it feeds as a soft wire: a hand-off like any edge.
     const feeds = media.flatMap(value => (value.feeds ?? []).map(to => ({ from: value.id, to })));
+    // A media node made from another one's picture (a colour version, a clip of the same car) waits for that picture
+    // inside the media stage: the picture is an image node of the same canvas, in the same column.
+    const references = media.flatMap(value => (value.references ?? []).map(from => ({ from, to: value.id })));
+    for (const reference of references) {
+      expect(media.find(value => value.id === reference.from)?.kind, `${item.id}: ${reference.from}->${reference.to}`).toBe('image');
+      expect(reference.from, item.id).not.toBe(reference.to);
+      expect(column.get(reference.to), `${item.id}: ${reference.from}->${reference.to}`).toBe(column.get(reference.from));
+    }
     for (const edge of [...item.edges, ...feeds]) {
       expect(column.has(edge.from) && column.has(edge.to), `${item.id}: ${edge.from}->${edge.to}`).toBe(true);
       // Every handoff goes to a later stage, so stages are the dependency order and there is no cycle.
@@ -49,7 +57,13 @@ it('is a valid DAG that runs left to right and compiles in both languages', () =
     for (const locale of ['zh', 'en'] as const) {
       const document = createOfficialDocument(item, locale);
       expect(document.nodes).toHaveLength(item.nodes.length + media.length);
-      expect(document.edges).toHaveLength(item.edges.length + feeds.length);
+      expect(document.edges).toHaveLength(item.edges.length + feeds.length + references.length);
+      // The media nodes follow the agents in the workflow's order; a reference is the picture's result into the node's
+      // reference input.
+      const mediaNode = (id: string) => document.nodes[item.nodes.length + media.findIndex(value => value.id === id)];
+      for (const reference of references)
+        expect(document.edges.filter(edge => edge.fromNode === mediaNode(reference.from).id && edge.fromPort === 'result'
+          && edge.toNode === mediaNode(reference.to).id && edge.toPort === 'reference' && edge.dataType === 'image'), `${item.id}: ${reference.from}->${reference.to}`).toHaveLength(1);
       for (const node of (document.nodes as SessionNode[]).filter(value => value.contract)) {
         const inputs = node.contract!.inputs.map(field => field.id);
         expect(new Set(inputs).size).toBe(inputs.length);
@@ -59,6 +73,14 @@ it('is a valid DAG that runs left to right and compiles in both languages', () =
       }
     }
   }
+});
+
+it('refuses a media reference that names no picture of the same canvas', () => {
+  const item = PRODUCTION_WORKFLOWS['aurora-gt'];
+  const pointing = (to: string) => item.media!.map(value => value.id === 'red' ? { ...value, references: [to] } : value);
+  expect(() => createOfficialDocument({ ...item, media: pointing('drive') }, 'zh')).toThrow('Invalid official media reference: drive -> red');
+  expect(() => createOfficialDocument({ ...item, media: pointing('red') }, 'zh')).toThrow('Invalid official media reference: red -> red');
+  expect(() => createOfficialDocument({ ...item, media: pointing('page') }, 'zh')).toThrow('Invalid official media reference: page -> red');
 });
 
 it('ends every canvas in a review and delivers exactly one self-contained HTML build', () => {

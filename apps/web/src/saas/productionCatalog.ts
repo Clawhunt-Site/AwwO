@@ -71,6 +71,13 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     deliverable: { zh: '可玩的视觉小说试玩章', en: 'A playable visual-novel chapter' },
   },
   {
+    id: 'aurora-gt', kind: 'interactive', recording: true, footage: 'gt-real',
+    title: { zh: '极光 GT', en: 'Aurora GT' },
+    brief: { zh: '做一个电动超跑新车发布官网：极光下疾驰的开场、三色配色器、性能数据和预约试驾。', en: 'A launch site for an electric supercar: an opening race under the aurora, a three-colour configurator, performance figures and a test-drive booking.' },
+    stages: [[MEDIA], [FRONT_END], [REVIEW]],
+    deliverable: { zh: '电动超跑发布官网', en: 'An electric supercar launch site' },
+  },
+  {
     id: 'pixel-platformer', kind: 'game', recording: true, footage: 'pixel-real',
     title: { zh: '像素平台跳跃', en: 'Pixel platformer' },
     brief: { zh: '做一款像素风平台跳跃：狐狸邮差在空中集市里送信。', en: 'A pixel-art platformer: a fox courier delivering letters across a sky market.' },

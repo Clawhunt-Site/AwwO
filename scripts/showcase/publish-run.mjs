@@ -40,10 +40,12 @@ const mediaSpecs = workflow.media ?? [];
 if (mediaSpecs.some(spec => spec.kind !== 'image' && spec.kind !== 'video')) throw new Error(`${raw.caseId}: only image and video media nodes are published`);
 const frozen = raw.graph.document.nodes.filter(node => node.kind === 'session');
 if (frozen.length !== workflow.nodes.length + mediaSpecs.length) throw new Error('The frozen canvas does not have the workflow’s nodes');
-// A media node's canvas id (minted afresh for every canvas) names its files in the page it feeds; the public record names
-// them by the media node's own id instead (identifier redaction), so no canvas identifier is published.
+// A node's canvas id (minted afresh for every canvas) names a media node's files in the page it feeds, and an agent may
+// name any node by it (a review listing the files it checked); the public record names each node by its own id instead
+// (identifier redaction), so no canvas identifier is published.
 const MEDIA_IDS = new Map(mediaSpecs.map((spec, index) => [frozen[workflow.nodes.length + index].id, spec.id]));
-const plain = text => [...MEDIA_IDS].reduce((value, [from, to]) => value.split(`${from}/`).join(`${to}/`), text);
+const CANVAS_IDS = new Map([...workflow.nodes.map((spec, index) => [frozen[index].id, spec.id]), ...MEDIA_IDS]);
+const plain = text => [...CANVAS_IDS].reduce((value, [from, to]) => value.split(from).join(to), text);
 // The homepage says a case ran on the canvas a member copies, so a run of any other text is never published.
 const ranText = canonicalCanvasText(raw.graph.document);
 if (ranText !== canonicalCanvasText(createOfficialDocument(workflow, raw.locale)))

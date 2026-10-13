@@ -17,6 +17,10 @@ export interface OfficialMediaNode {
   readonly row: number;
   /** The example's nodes whose page shows this asset (a page and the node that repairs it). */
   readonly feeds?: ReadonlyArray<string>;
+  /** Image nodes of the same example whose picture this one starts from, wired into its `reference` input: a colour
+   * version of that picture, or a clip of the subject it shows. The wire is a hard one: without the picture there is
+   * nothing to start from, so this node waits for it. */
+  readonly references?: ReadonlyArray<string>;
 }
 
 const l = (zh: string, en: string): Localized => ({ zh, en });

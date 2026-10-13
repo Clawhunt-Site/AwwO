@@ -9,6 +9,20 @@
     "runtime": "openai-agents",
     "outputLocale": "zh"
   },
+  "aurora-gt": {
+    "completed": 2,
+    "total": 2,
+    "seconds": 308,
+    "delivered": true,
+    "capturedOn": "2026-10-13",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents",
+    "outputLocale": "zh",
+    "media": {
+      "completed": 4,
+      "total": 4
+    }
+  },
   "glider-adventure": {
     "completed": 6,
     "total": 6,
