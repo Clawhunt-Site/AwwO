@@ -57,10 +57,24 @@ export interface ModuleNeeds {
 /** The specifiers a module script names: static imports and exports, side-effect imports, and literal dynamic imports. */
 export function scriptSpecifiers(source: string): string[] {
   const found = new Set<string>();
-  for (const match of source.matchAll(/\bfrom\s*(['"])([^'"\n]+)\1|\bimport\s*\(\s*(['"])([^'"\n]+)\3\s*\)|\bimport\s*(['"])([^'"\n]+)\5/g)) {
+  // Whitespace or comments, which JavaScript allows between `from` / `import` / `(` and the specifier string.
+  const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*`;
+  const pattern = new RegExp(String.raw`\bfrom${gap}(['"])([^'"\n]+)\1|\bimport${gap}\(${gap}(['"])([^'"\n]+)\3${gap}[,)]|\bimport${gap}(['"])([^'"\n]+)\5`, 'g');
+  for (const match of source.matchAll(pattern)) {
     found.add(match[2] ?? match[4] ?? match[6]);
   }
   return [...found];
+}
+
+/** Every import map's entries in document order, the first map's winning (as browsers merge several maps). */
+function pageImports(scripts: readonly Element[]): Record<string, unknown> {
+  const merged: Record<string, unknown> = Object.create(null);
+  for (const element of scripts.filter(isImportMap)) {
+    const imports = readImportMap(element)?.imports;
+    if (!imports || typeof imports !== 'object' || Array.isArray(imports)) continue;
+    for (const [key, value] of Object.entries(imports)) if (!Object.prototype.hasOwnProperty.call(merged, key)) merged[key] = value;
+  }
+  return merged;
 }
 
 /** The pinned modules a page needs, or null when it imports none. `root` is a parsed document or template content. */
@@ -68,7 +82,7 @@ export function moduleNeeds(root: ParentNode): ModuleNeeds | null {
   const scripts = Array.from(root.querySelectorAll('script'));
   const modules = scripts.filter(isModuleScript);
   if (!modules.length) return null;
-  const imports = readImportMap(scripts.find(isImportMap) ?? null)?.imports ?? {};
+  const imports = pageImports(scripts);
   const specifiers: Array<{ specifier: string; file: string }> = [];
   const blocked = new Set<string>();
   const wanted = new Set<string>();
@@ -101,7 +115,8 @@ export function moduleNeeds(root: ParentNode): ModuleNeeds | null {
     else for (const specifier of scriptSpecifiers(script.textContent || '')) named(specifier);
   }
   if (!wanted.size) return blocked.size ? { files: [], specifiers: [], bare: false, blocked: [...blocked] } : null;
-  // 'three' must be the pinned core when anything loaded imports it by name, unless the page sends it elsewhere.
+  // 'three' must be the pinned core when anything loaded imports it by name, unless the page sends it elsewhere: to
+  // another pinned file (supplied under that name too) or to something AwwO cannot supply (reported).
   const own = imports.three;
   const ownFile = typeof own === 'string' ? pinnedModuleFile(own) : null;
   const ownsCore = own === undefined || ownFile === CORE;
@@ -111,12 +126,18 @@ export function moduleNeeds(root: ParentNode): ModuleNeeds | null {
     files.add(file);
     const entry = fileEntry(file)!;
     for (const dependency of entry.imports) visit(dependency.file);
-    if (entry.bare && ownsCore) visit(CORE);
+    if (entry.bare) {
+      if (ownsCore) visit(CORE);
+      else if (ownFile) visit(ownFile);
+    }
   };
   for (const file of wanted) visit(file);
   const importsBare = [...files].some(file => fileEntry(file)!.bare);
-  // A pinned addon imports 'three' by name: where the page sends that name elsewhere, the addon loads it from there.
-  if (importsBare && !ownsCore && !ownFile) report(typeof own === 'string' ? own : 'three');
+  if (importsBare && !ownsCore) {
+    if (ownFile) {
+      if (!specifiers.some(entry => entry.specifier === 'three')) specifiers.push({ specifier: 'three', file: ownFile });
+    } else report(typeof own === 'string' ? own : 'three');
+  }
   return { files: [...files].sort(), specifiers, bare: importsBare && ownsCore, blocked: [...blocked] };
 }
 
@@ -153,7 +174,8 @@ export function moduleDataUrl(file: string): Promise<string> {
 /** The import-map entries a page needs (JSON), for loadPreviewLibraries to hand to the document builders. */
 export async function moduleImportEntries(needs: ModuleNeeds): Promise<string> {
   const urls = new Map(await Promise.all(needs.files.map(async file => [file, await moduleDataUrl(file)] as const)));
-  const entries: Record<string, string> = {};
+  // No prototype: a page may name a module '__proto__', which a plain object would swallow.
+  const entries: Record<string, string> = Object.create(null);
   // A file another pinned file imports is named by its canonical URL; the core is named 'three' by the addons.
   for (const file of needs.files) {
     for (const dependency of fileEntry(file)!.imports) entries[THREE_MODULES_BASE + dependency.file] = urls.get(dependency.file)!;

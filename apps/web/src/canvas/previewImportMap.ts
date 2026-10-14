@@ -51,6 +51,23 @@ export function moduleImport(src: string): string {
 }
 
 /**
+ * Remove the scopes whose prefix is a data: URL as the browser parses it (the URL parser drops tabs and newlines
+ * anywhere and leading or trailing spaces and controls, so 'da\tta:' is one too). Returns whether any was removed.
+ */
+function dropDataScopes(map: ImportMap): boolean {
+  if (!map.scopes || typeof map.scopes !== 'object' || Array.isArray(map.scopes)) return false;
+  const isData = (prefix: string) => {
+    try { return new URL(prefix, 'https://awwo.invalid/').protocol === 'data:'; } catch { return false; }
+  };
+  const all = Object.entries(map.scopes as Record<string, unknown>);
+  const kept = all.filter(([prefix]) => !isData(prefix));
+  if (kept.length === all.length) return false;
+  if (kept.length) map.scopes = Object.fromEntries(kept);
+  else delete map.scopes;
+  return true;
+}
+
+/**
  * Put the supplied modules into a page: its import map (created before its first module script when it has none) gains
  * an exact entry for every pinned file it loads, which wins over any "prefix/" entry, and a module script that names a
  * pinned file by its src imports it through that entry instead. The page's other entries, scopes and scripts stay,
@@ -69,16 +86,12 @@ export function applyModuleEntries(root: ParentNode, entriesJson: string | undef
   const map = readImportMap(mapElement) ?? {};
   const imports = map.imports && typeof map.imports === 'object' && !Array.isArray(map.imports) ? map.imports : {};
   map.imports = { ...imports, ...entries };
-  if (map.scopes && typeof map.scopes === 'object' && !Array.isArray(map.scopes)) {
-    // URL parsing drops leading C0 controls and spaces, so " data:" is a data: prefix too.
-    const isDataPrefix = (prefix: string) => {
-      let start = 0;
-      while (start < prefix.length && prefix.charCodeAt(start) <= 0x20) start++;
-      return /^data:/i.test(prefix.slice(start));
-    };
-    const scopes = Object.fromEntries(Object.entries(map.scopes as Record<string, unknown>).filter(([prefix]) => !isDataPrefix(prefix)));
-    if (Object.keys(scopes).length) map.scopes = scopes;
-    else delete map.scopes;
+  dropDataScopes(map);
+  // Browsers merge every import map of a page, so a later one's data: scopes are dropped too.
+  for (const other of scripts.filter(isImportMap)) {
+    if (other === mapElement) continue;
+    const parsed = readImportMap(other);
+    if (parsed && dropDataScopes(parsed)) other.textContent = importMapText(parsed);
   }
   if (!mapElement) {
     mapElement = documentRef.createElement('script');

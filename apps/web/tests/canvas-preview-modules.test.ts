@@ -170,6 +170,43 @@ describe('three.js as ES modules, supplied through the page import map', () => {
     }
   });
 
+  it('drops a data: scope however the URL parser spells it, in every import map of the page', async () => {
+    const scope = JSON.stringify({ three: 'https://unpkg.com/three@0.170.0/build/three.module.js' });
+    const page = `<!doctype html><html><head>
+      <script type="importmap">{"imports":{"three":"${THREE_MODULES_BASE}build/three.module.js","three/addons/":"${THREE_MODULES_BASE}examples/jsm/"},"scopes":{"da\\tta:text/":${scope}," DATA:":${scope}}}</script>
+      <script type="importmap">{"scopes":{"data:text/":${scope},"https://example.test/":${scope}}}</script></head>
+      <body><script type="module">import { OrbitControls } from 'three/addons/controls/OrbitControls.js';</script></body></html>`;
+    const html = htmlPreviewDocument(page, true, await loadPreviewLibraries(previewScriptNeeds(page)));
+    const maps = importMapOf(html).maps.map(map => JSON.parse(map.textContent!) as { scopes?: Record<string, unknown> });
+    expect(maps).toHaveLength(2);
+    expect(maps[0].scopes).toBeUndefined();
+    expect(Object.keys(maps[1].scopes!)).toEqual(['https://example.test/']);
+  });
+
+  it('finds imports with comments before the specifier, and supplies three where the page maps it to another pinned file', async () => {
+    expect(scriptSpecifiers("import * as THREE from /* the engine */ 'three';\nimport { A } from // addon\n  'three/addons/a.js';\nimport(/* lazy */ 'z');")
+      .sort()).toEqual(['three', 'three/addons/a.js', 'z']);
+    const core = `${THREE_MODULES_BASE}build/three.core.js`;
+    const page = `<script type="importmap">{"imports":{"three":"${core}","three/addons/":"${THREE_MODULES_BASE}examples/jsm/"}}</script>
+      <script type="module">import { OrbitControls } from 'three/addons/controls/OrbitControls.js';</script>`;
+    const needs = previewScriptNeeds(page);
+    expect(needs.blocked).toEqual([]);
+    expect(needs.modules!.files).toContain('build/three.core.js');
+    const entries = JSON.parse((await loadPreviewLibraries(needs)).get(PREVIEW_IMPORT_MAP_KEY)!) as Record<string, string>;
+    expect(decode(entries.three)).toBe(await THREE_MODULE_FILES['build/three.core.js'].load());
+  });
+
+  it('keeps a module the page names "__proto__"', async () => {
+    const page = `<script type="importmap">{"imports":{"__proto__":"${THREE_MODULES_BASE}build/three.module.js"}}</script>
+      <script type="module">import * as THREE from '__proto__';</script>`;
+    const needs = previewScriptNeeds(page);
+    const json = (await loadPreviewLibraries(needs)).get(PREVIEW_IMPORT_MAP_KEY)!;
+    expect(Object.prototype.hasOwnProperty.call(JSON.parse(json), '__proto__')).toBe(true);
+    const imports = importMapOf(htmlPreviewDocument(page, true, await loadPreviewLibraries(needs))).imports;
+    expect(Object.prototype.hasOwnProperty.call(imports, '__proto__')).toBe(true);
+    expect(imports['__proto__']).toMatch(/^data:text\/javascript;base64,/);
+  });
+
   it('never lets a module src close the script element it is turned into', async () => {
     const src = `${THREE_MODULES_BASE}build/three.module.js?x=</script><div id=owned>owned</div><script>`;
     const page = `<html><body><script type="module" src="${src.replace(/</g, '&lt;').replace(/>/g, '&gt;')}"></script></body></html>`;
@@ -239,11 +276,20 @@ describe('canvas files a page script loads by path', () => {
     const fetched: unknown[] = [];
     const sandbox = { fetch: (input: unknown) => { fetched.push(input); return Promise.resolve(input); } } as Record<string, unknown>;
     Object.assign(sandbox, { HTMLImageElement: undefined, HTMLMediaElement: undefined, HTMLSourceElement: undefined, Audio: undefined });
-    new Function('window', 'XMLHttpRequest', 'Element', assetScript({ '/hero/model-1.glb': 'data:,root', 'hero/model-1.glb': 'data:,page' }))(
-      sandbox, class { open() { /* noop */ } }, class { setAttribute() { /* noop */ } });
+    // The page's own base, as a canvas page in a folder has it: a root-relative path and a page-relative one differ.
+    const base = document.createElement('base');
+    base.href = 'https://awwo.example/w/1/canvas/pages/';
+    document.head.append(base);
+    try {
+      new Function('window', 'XMLHttpRequest', 'Element', assetScript({ '/hero/model-1.glb': 'data:,root', 'hero/model-1.glb': 'data:,page' }))(
+        sandbox, class { open() { /* noop */ } }, class { setAttribute() { /* noop */ } });
+    } finally { base.remove(); }
     const fetch = sandbox.fetch as (input: unknown) => Promise<unknown>;
     await fetch('/hero/model-1.glb');
     await fetch('./hero/model-1.glb');
-    expect(fetched).toEqual(['data:,root', 'data:,page']);
+    // three.js's FileLoader hands fetch a Request, whose url is absolute.
+    await fetch({ url: 'https://awwo.example/w/1/canvas/pages/hero/model-1.glb' });
+    await fetch({ url: 'https://awwo.example/hero/model-1.glb' });
+    expect(fetched).toEqual(['data:,root', 'data:,page', 'data:,page', 'data:,root']);
   });
 });

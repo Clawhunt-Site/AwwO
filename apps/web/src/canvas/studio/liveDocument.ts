@@ -141,15 +141,18 @@ async function scriptAssets(parsed: Document, path: string, resolve: AssetResolv
 
 /**
  * Run ahead of the page: fetch, XMLHttpRequest, `new Audio()` and the src of images, media and sources get the file
- * for a path the page names (as written, or resolved to an absolute URL ending in it). three.js's loaders go through
- * these (GLTFLoader and FileLoader fetch, TextureLoader sets an image's src), so a page loads a generated model or
- * texture by its canvas path. Every other URL passes through unchanged, under the page's policy.
+ * for a path the page names (as written, or as the page's own document resolves it: three.js's FileLoader hands fetch
+ * a Request with the absolute URL). three.js's loaders go through these (GLTFLoader and FileLoader fetch,
+ * TextureLoader sets an image's src), so a page loads a generated model or texture by its canvas path. Every other URL
+ * passes through unchanged, under the page's policy.
  */
 export function assetScript(assets: Readonly<Record<string, string>>): string {
   return ';(()=>{const F=' + JSON.stringify(assets).replace(/</g, '\\u003c') + ';'
+    + "const H=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);const U=s=>{try{return new URL(s,document.baseURI).href.split(/[?#]/)[0]}catch(e){return''}};"
+    + 'const B=Object.create(null);for(const n in F){const a=U(n);if(a&&!H(B,a))B[a]=F[n]}'
     + "const L=u=>{if(u==null)return;let s;try{s=typeof u==='string'?u:String(u.url||u)}catch(e){return}s=s.split(/[?#]/)[0];"
-    + "const H=k=>Object.prototype.hasOwnProperty.call(F,k);if(H(s))return F[s];"
-    + "const k=s.replace(/^\\.?\\//,'');const R=/^\\/(?!\\/)/.test(s);if(!R&&H(k))return F[k];if(!R)for(const n in F)if(s.endsWith('/'+n.replace(/^\\//,'')))return F[n]};"
+    + "if(H(F,s))return F[s];const k=s.replace(/^\\.?\\//,'');const R=/^\\/(?!\\/)/.test(s);if(!R&&H(F,k))return F[k];"
+    + "const a=U(s);if(a&&H(B,a))return B[a];if(!R)for(const n in F)if(s.endsWith('/'+n.replace(/^\\//,'')))return F[n]};"
     + 'const f=window.fetch;if(f)window.fetch=function(i,o){const d=L(i);return f.call(this,d||i,o)};'
     + 'const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){const d=L(u);if(d)arguments[1]=d;return x.apply(this,arguments)};'
     + 'const p=(C,n)=>{const s=C&&Object.getOwnPropertyDescriptor(C.prototype,n);if(!s||!s.set)return;'
