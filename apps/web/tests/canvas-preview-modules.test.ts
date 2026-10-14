@@ -255,6 +255,8 @@ describe('three.js as ES modules, supplied through the page import map', () => {
     expect(namesRelativeMedia('<script src="./boot.js"></script>')).toBe(true);
     expect(namesRelativeMedia(`${THREE_MODULES_IMPORT_MAP}<script type="module">import * as THREE from 'three';</script>`)).toBe(false);
     expect(namesRelativeMedia('<script src="https://cdn.example/lib.js"></script><script src="//cdn.example/x.js"></script>')).toBe(false);
+    // A dashboard that fetches its data file from the canvas goes there too.
+    expect(namesRelativeMedia("<script>fetch('data/metrics.json').then(r => r.json()).then(render);</script>")).toBe(true);
   });
 
   it('never lets a module src close the script element it is turned into', async () => {
