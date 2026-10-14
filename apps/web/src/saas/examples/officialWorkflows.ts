@@ -3,7 +3,7 @@ import { createSessionNode, emptyDocument, type CanvasDocument, type SessionNode
 import type { ContractField } from '../../canvas/nodeContracts';
 import { updateNodeDraft } from '../../canvas/nodeThreads';
 import { edgeId } from '../../canvas/ports';
-import { THREE_MODULES_IMPORT_MAP } from '../../canvas/previewModules';
+import { THREE_MODULES_IMPORT_MAP } from '../../canvas/previewImportMap';
 import type { OfficialMediaNode } from './officialMedia';
 
 /** Every production case is English, in both interface languages (owner 2026-10-14): its canvas, tasks and

@@ -1,5 +1,5 @@
 import { PAGE_ERROR_SCRIPT } from './pageErrors';
-import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from './previewModules';
+import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from './previewImportMap';
 
 /** Strip only a complete HTML fence; preserve every byte of the document inside it. */
 export function htmlDocumentSource(value: string): string {

@@ -16,7 +16,7 @@
 // so a multi-file site or a page that uses an image another node generated renders without a server.
 import { htmlDocumentSource, PREVIEW_HOST_SCRIPT } from '../htmlDeliverable';
 import { loadPreviewLibraries, previewScriptNeeds } from '../previewLibraries';
-import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from '../previewModules';
+import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from '../previewImportMap';
 import { dataUrl, decodeText, mimeOfName } from './studioData';
 
 /** Public CDNs that pages commonly load libraries, styles and fonts from (including mainland-China mirrors). */

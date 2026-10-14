@@ -8,6 +8,7 @@ import { loadPreviewLibraries, previewScriptNeeds, THREE_MODULES_LIBRARY } from 
 import { moduleSpecifiers } from '../../../scripts/preview-modules.mjs';
 import { pinnedModuleFile, PREVIEW_IMPORT_MAP_KEY, scriptSpecifiers, THREE_MODULES_BASE, THREE_MODULES_IMPORT_MAP } from '../src/canvas/previewModules';
 import { THREE_MODULE_FILES, THREE_MODULES_VERSION } from '../src/canvas/previewModules.generated';
+import { THREE_MODULES_VERSION as RELEASE_VERSION } from '../src/canvas/previewImportMap';
 import { assetScript, buildLiveDocument } from '../src/canvas/studio/liveDocument';
 
 const THREE_DIR = path.resolve(__dirname, '../node_modules/three');
@@ -31,6 +32,8 @@ window.started = [THREE.REVISION, typeof EffectComposer, typeof UnrealBloomPass,
 describe('three.js as ES modules, supplied through the page import map', () => {
   it('pins every generated file to the npm release installed for the web app', () => {
     expect(JSON.parse(readFileSync(path.join(THREE_DIR, 'package.json'), 'utf8')).version).toBe(THREE_MODULES_VERSION);
+    // The release node instructions and build scripts name (previewImportMap.ts) is the one the files pin.
+    expect(RELEASE_VERSION).toBe(THREE_MODULES_VERSION);
     for (const [file, entry] of Object.entries(THREE_MODULE_FILES)) {
       const bytes = readFileSync(path.join(THREE_DIR, file));
       expect(bytes.length, file).toBe(entry.bytes);

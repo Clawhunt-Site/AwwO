@@ -12,22 +12,17 @@
  * sha256) except that its relative imports name the canonical CDN URL of the file they mean, which the import map then
  * supplies too: a data: module cannot resolve a relative path. Anything else the page imports is left as it wrote it.
  */
-import { THREE_MODULE_FILES, THREE_MODULES_VERSION } from './previewModules.generated';
+import { THREE_MODULE_FILES } from './previewModules.generated';
+import { isImportMap, isModuleScript, readImportMap, resolveSpecifier, THREE_MODULES_BASE, THREE_MODULES_VERSION } from './previewImportMap';
 
-/** The URL every pinned file is known by inside a preview; a page may also name the same release on these hosts. */
-export const THREE_MODULES_BASE = `https://cdn.jsdelivr.net/npm/three@${THREE_MODULES_VERSION}/`;
+export { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY, resolveSpecifier, THREE_MODULES_BASE, THREE_MODULES_ID, THREE_MODULES_IMPORT_MAP, THREE_MODULES_LABEL } from './previewImportMap';
+/** The hosts a page may name the supplied release on; every pinned file is known by its THREE_MODULES_BASE URL. */
 const BASES = [
   THREE_MODULES_BASE,
   `https://fastly.jsdelivr.net/npm/three@${THREE_MODULES_VERSION}/`,
   `https://gcore.jsdelivr.net/npm/three@${THREE_MODULES_VERSION}/`,
   `https://unpkg.com/three@${THREE_MODULES_VERSION}/`,
 ];
-/** The import map a page uses to load the supplied release (what node instructions tell a page to write). */
-export const THREE_MODULES_IMPORT_MAP = `<script type="importmap">{"imports":{"three":"${THREE_MODULES_BASE}build/three.module.js","three/addons/":"${THREE_MODULES_BASE}examples/jsm/"}}</script>`;
-export const THREE_MODULES_LABEL = `three.js r${THREE_MODULES_VERSION.split('.')[1]}`;
-export const THREE_MODULES_ID = `three-modules-${THREE_MODULES_VERSION}`;
-/** The key under which loadPreviewLibraries hands the import-map entries to the document builders. */
-export const PREVIEW_IMPORT_MAP_KEY = 'awwo:importmap';
 const CORE = 'build/three.module.js';
 
 /** The pinned file a URL names, or null. A `.min.js` URL names the same file (the CDN minifies it on request). */
@@ -62,30 +57,6 @@ export function scriptSpecifiers(source: string): string[] {
   }
   return [...found];
 }
-
-type ImportMap = { imports?: Record<string, unknown>; scopes?: unknown; integrity?: unknown; [key: string]: unknown };
-
-function readImportMap(element: Element | null): ImportMap | null {
-  if (!element) return null;
-  try {
-    const value = JSON.parse(element.textContent || '{}');
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as ImportMap : null;
-  } catch { return null; }
-}
-
-/** Where an import map sends a specifier: an exact entry, else the longest "prefix/" entry; URLs stand for themselves. */
-export function resolveSpecifier(specifier: string, imports: Record<string, unknown>): string | null {
-  if (/^https?:\/\//i.test(specifier)) return specifier;
-  const exact = imports[specifier];
-  if (typeof exact === 'string') return exact;
-  let best = '';
-  for (const key of Object.keys(imports)) if (key.endsWith('/') && specifier.startsWith(key) && key.length > best.length) best = key;
-  const prefix = best ? imports[best] : undefined;
-  return typeof prefix === 'string' ? prefix + specifier.slice(best.length) : null;
-}
-
-const isModuleScript = (element: Element) => (element.getAttribute('type') || '').trim().toLowerCase() === 'module';
-const isImportMap = (element: Element) => (element.getAttribute('type') || '').trim().toLowerCase() === 'importmap';
 
 /** The pinned modules a page needs, or null when it imports none. `root` is a parsed document or template content. */
 export function moduleNeeds(root: ParentNode): ModuleNeeds | null {
@@ -171,41 +142,4 @@ export async function moduleImportEntries(needs: ModuleNeeds): Promise<string> {
   if (needs.bare) entries.three = urls.get(CORE)!;
   for (const { specifier, file } of needs.specifiers) entries[specifier] = urls.get(file)!;
   return JSON.stringify(entries);
-}
-
-/** Serialize an import map so nothing in it can close the script element that holds it. */
-function importMapText(map: ImportMap): string {
-  return JSON.stringify(map).replace(/</g, '\\u003c');
-}
-
-/**
- * Put the supplied modules into a page: its import map (created before its first module script when it has none) gains
- * an exact entry for every pinned file it loads, which wins over any "prefix/" entry, and a module script that names a
- * pinned file by its src imports it through that entry instead. The page's other entries, scopes and scripts stay.
- */
-export function applyModuleEntries(root: ParentNode, entriesJson: string | undefined, documentRef: Document): void {
-  if (!entriesJson) return;
-  let entries: Record<string, string>;
-  try { entries = JSON.parse(entriesJson) as Record<string, string>; } catch { return; }
-  if (!Object.keys(entries).length) return;
-  const scripts = Array.from(root.querySelectorAll('script'));
-  const firstModule = scripts.find(isModuleScript);
-  if (!firstModule) return;
-  let mapElement = scripts.find(isImportMap) ?? null;
-  const map = readImportMap(mapElement) ?? {};
-  const imports = map.imports && typeof map.imports === 'object' && !Array.isArray(map.imports) ? map.imports : {};
-  map.imports = { ...imports, ...entries };
-  if (!mapElement) {
-    mapElement = documentRef.createElement('script');
-    mapElement.setAttribute('type', 'importmap');
-    firstModule.parentNode!.insertBefore(mapElement, firstModule);
-  }
-  mapElement.textContent = importMapText(map);
-  for (const script of scripts.filter(isModuleScript)) {
-    const src = script.getAttribute('src')?.trim();
-    if (!src || entries[src] === undefined) continue;
-    script.removeAttribute('src');
-    for (const attribute of ['integrity', 'crossorigin', 'async', 'defer']) script.removeAttribute(attribute);
-    script.textContent = `import ${JSON.stringify(src)};`;
-  }
 }
