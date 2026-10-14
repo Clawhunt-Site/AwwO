@@ -136,6 +136,17 @@ describe('a page that uses the pictures and the clip of media nodes', () => {
     expect(applied.adjustments).toEqual([expect.stringContaining('“Hero shot” on')]);
   });
 
+  it('keeps a picture wired into a text input when the plan edits that page again afterwards', () => {
+    // A later add_field on the page re-checks its wires (disconnectBroken): the media wire must pass the same rule.
+    const applied = applyCanvasPlan(doc(), plan([
+      { type: 'add_field', nodeId: page.id, side: 'input', field: { id: 'cover', label: 'Cover', type: 'markdown', required: true, value: '' } },
+      { type: 'connect', fromNode: image.id, fromField: 'result', toNode: page.id, toField: 'cover' },
+      { type: 'add_field', nodeId: page.id, side: 'input', field: { id: 'caption', label: 'Caption', type: 'markdown', required: false, value: '' } },
+    ]), 'en', '', media2);
+    expect(applied.doc.edges).toEqual([expect.objectContaining({ fromNode: image.id, toPort: 'in:cover', dataType: 'image' })]);
+    expect(applied.adjustments).toEqual([]);
+  });
+
   it('gives the page a text input of its own for a clip when the plan names an input it does not have', () => {
     const applied = applyCanvasPlan(doc(), plan([
       { type: 'connect', fromNode: video.id, fromField: 'result', toNode: page.id, toField: 'opening_clip' },

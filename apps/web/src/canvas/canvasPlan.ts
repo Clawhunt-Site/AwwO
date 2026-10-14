@@ -453,7 +453,7 @@ function disconnectBroken(draft: CanvasDocument, nodeId: string, adjust: Adjust)
     const from = byId.get(edge.fromNode); const to = byId.get(edge.toNode);
     const output = from && portsFor(from).find(port => port.side === 'output' && port.id === edge.fromPort);
     const input = to && portsFor(to).find(port => port.side === 'input' && port.id === edge.toPort);
-    if (output && input && output.dataType === input.dataType && output.dataType === edge.dataType) return true;
+    if (from && output && input && canFeed(from, output, input) && output.dataType === edge.dataType) return true;
     const left = from ? titleOf(from) : edge.fromNode; const right = to ? titleOf(to) : edge.toNode;
     adjust(`已断开「${left}」→「${right}」：相连的字段被删除或改了类型`, `Disconnected “${left}” → “${right}”: a field it used was removed or changed type`);
     return false;
