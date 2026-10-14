@@ -33,9 +33,9 @@
   "car-plant": {
     "completed": 8,
     "total": 8,
-    "seconds": 507,
+    "seconds": 473,
     "delivered": true,
-    "capturedOn": "2026-10-13",
+    "capturedOn": "2026-10-14",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
@@ -78,9 +78,9 @@
   "neon-circuit": {
     "completed": 10,
     "total": 10,
-    "seconds": 577,
+    "seconds": 631,
     "delivered": true,
-    "capturedOn": "2026-10-13",
+    "capturedOn": "2026-10-14",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
