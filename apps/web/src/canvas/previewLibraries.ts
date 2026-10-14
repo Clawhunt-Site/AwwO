@@ -110,8 +110,11 @@ export interface PreviewScriptNeeds {
 
 export const NO_PREVIEW_SCRIPT_NEEDS: PreviewScriptNeeds = { libraries: [], additions: [], blocked: [] };
 
-/** The external scripts a page asks for, split into the ones AwwO can supply and the ones it cannot. */
-export function previewScriptNeeds(source: string): PreviewScriptNeeds {
+/**
+ * The external scripts a page asks for, split into the ones AwwO can supply and the ones it cannot. `inlined` are the
+ * import specifiers of modules the caller put into the page itself (the live page's canvas JavaScript files).
+ */
+export function previewScriptNeeds(source: string, inlined: readonly string[] = []): PreviewScriptNeeds {
   const template = document.createElement('template');
   template.innerHTML = source;
   const libraries = new Set<PreviewLibrary>();
@@ -125,7 +128,7 @@ export function previewScriptNeeds(source: string): PreviewScriptNeeds {
     if (library) libraries.add(library);
     else blocked.add(scriptOrigin(reference));
   }
-  const modules = moduleNeeds(template.content);
+  const modules = moduleNeeds(template.content, inlined);
   if (modules?.files.length) libraries.add(THREE_MODULES_LIBRARY);
   for (const host of modules?.blocked ?? []) blocked.add(host);
   if (!libraries.size && !blocked.size) return NO_PREVIEW_SCRIPT_NEEDS;

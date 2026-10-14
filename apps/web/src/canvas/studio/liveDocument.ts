@@ -17,6 +17,7 @@
 import { htmlDocumentSource, PREVIEW_HOST_SCRIPT } from '../htmlDeliverable';
 import { loadPreviewLibraries, previewScriptNeeds } from '../previewLibraries';
 import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from '../previewImportMap';
+import { scriptSpecifiers } from '../previewModules';
 import { dataUrl, decodeText, mimeOfName } from './studioData';
 
 /** Public CDNs that pages commonly load libraries, styles and fonts from (including mainland-China mirrors). */
@@ -94,8 +95,11 @@ async function inlineCss(css: string, cssPath: string, resolve: AssetResolver, b
   return result;
 }
 
-async function inlineModule(source: string, modulePath: string, resolve: AssetResolver, budget: { left: number }, depth: number): Promise<string> {
+async function inlineModule(source: string, modulePath: string, resolve: AssetResolver, budget: { left: number }, depth: number,
+  found: Set<string>): Promise<string> {
   if (depth > 6) return source;
+  // What every inlined module imports by name, so the page is supplied the modules its canvas files need too.
+  for (const specifier of scriptSpecifiers(source)) found.add(specifier);
   const specifiers = [...new Set([...source.matchAll(/(?:import|export)\s[^'"]*?from\s*(['"])([^'"]+)\1|import\s*\(\s*(['"])([^'"]+)\3\s*\)|import\s+(['"])([^'"]+)\5/g)]
     .map(match => match[2] ?? match[4] ?? match[6]).filter(specifier => specifier && /^\.{0,2}\//.test(specifier)))];
   let result = source;
@@ -105,7 +109,7 @@ async function inlineModule(source: string, modulePath: string, resolve: AssetRe
     const text = asset ? decodeText(asset.bytes) : null;
     if (!asset || text === null || asset.bytes.length > budget.left) continue;
     budget.left -= asset.bytes.length;
-    const inlined = await inlineModule(text, path!, resolve, budget, depth + 1);
+    const inlined = await inlineModule(text, path!, resolve, budget, depth + 1, found);
     result = result.split(`'${specifier}'`).join(`'${dataUrl(new TextEncoder().encode(inlined), 'text/javascript')}'`)
       .split(`"${specifier}"`).join(`"${dataUrl(new TextEncoder().encode(inlined), 'text/javascript')}"`);
   }
@@ -140,19 +144,18 @@ async function scriptAssets(parsed: Document, path: string, resolve: AssetResolv
 }
 
 /**
- * Run ahead of the page: fetch, XMLHttpRequest, `new Audio()` and the src of images, media and sources get the file
- * for a path the page names (as written, or as the page's own document resolves it: three.js's FileLoader hands fetch
- * a Request with the absolute URL). three.js's loaders go through these (GLTFLoader and FileLoader fetch,
- * TextureLoader sets an image's src), so a page loads a generated model or texture by its canvas path. Every other URL
- * passes through unchanged, under the page's policy.
+ * Run ahead of the page: fetch, `new Request()`, XMLHttpRequest, `new Audio()` and the src of images, media and sources
+ * get the file for a path the page names, exactly as it wrote it (a leading ./ aside). three.js's loaders go through
+ * these with the path as the page gave it (FileLoader builds a Request from it, which GLTFLoader uses; TextureLoader
+ * sets an image's src), so a page loads a generated model or texture by its canvas path. Absolute URLs, and every
+ * other URL, pass through unchanged, under the page's policy: a suffix match could hand an unrelated file over.
  */
 export function assetScript(assets: Readonly<Record<string, string>>): string {
   return ';(()=>{const F=' + JSON.stringify(assets).replace(/</g, '\\u003c') + ';'
-    + "const H=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);const U=s=>{try{return new URL(s,document.baseURI).href.split(/[?#]/)[0]}catch(e){return''}};"
-    + 'const B=Object.create(null);for(const n in F){const a=U(n);if(a&&!H(B,a))B[a]=F[n]}'
-    + "const L=u=>{if(u==null)return;let s;try{s=typeof u==='string'?u:String(u.url||u)}catch(e){return}s=s.split(/[?#]/)[0];"
-    + "if(H(F,s))return F[s];const k=s.replace(/^\\.?\\//,'');const R=/^\\/(?!\\/)/.test(s);if(!R&&H(F,k))return F[k];"
-    + "const a=U(s);if(a&&H(B,a))return B[a];if(!R)for(const n in F)if(s.endsWith('/'+n.replace(/^\\//,'')))return F[n]};"
+    + 'const H=k=>Object.prototype.hasOwnProperty.call(F,k);'
+    + "const L=u=>{if(u==null||(typeof u!=='string'&&!(u instanceof URL)))return;const s=String(u).split(/[?#]/)[0];"
+    + "if(H(s))return F[s];const k=s.replace(/^\\.\\//,'');return k!==s&&H(k)?F[k]:undefined};"
+    + 'const Q=window.Request;if(Q){const W=function(i,o){const d=L(i);return new Q(d||i,o)};W.prototype=Q.prototype;Object.setPrototypeOf(W,Q);window.Request=W}'
     + 'const f=window.fetch;if(f)window.fetch=function(i,o){const d=L(i);return f.call(this,d||i,o)};'
     + 'const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){const d=L(u);if(d)arguments[1]=d;return x.apply(this,arguments)};'
     + 'const p=(C,n)=>{const s=C&&Object.getOwnPropertyDescriptor(C.prototype,n);if(!s||!s.set)return;'
@@ -179,6 +182,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   const path = options.path ?? 'index.html';
   const budget = { left: options.inlineBudget ?? 24 * 1024 * 1024 };
+  const inlinedSpecifiers = new Set<string>();
   // The preview cannot be sent elsewhere by the page's own metadata.
   parsed.querySelectorAll('meta[http-equiv="refresh" i], base').forEach(element => element.remove());
   if (options.resolve) {
@@ -195,7 +199,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
           const text = decodeText(asset.bytes);
           if (text === null) continue;
           element.removeAttribute('src');
-          element.textContent = element.getAttribute('type') === 'module' ? await inlineModule(text, target!, resolve, budget, 0) : text;
+          element.textContent = element.getAttribute('type') === 'module' ? await inlineModule(text, target!, resolve, budget, 0, inlinedSpecifiers) : text;
         } else if (tag === 'link' && /stylesheet/i.test(element.getAttribute('rel') ?? '')) {
           const text = decodeText(asset.bytes);
           if (text === null) continue;
@@ -210,7 +214,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
     for (const element of Array.from(parsed.querySelectorAll('img[srcset], source[srcset]'))) element.removeAttribute('srcset');
     for (const style of Array.from(parsed.querySelectorAll('style'))) style.textContent = await inlineCss(style.textContent ?? '', path, resolve, budget);
     for (const script of Array.from(parsed.querySelectorAll('script[type="module"]:not([src])'))) {
-      script.textContent = await inlineModule(script.textContent ?? '', path, resolve, budget, 0);
+      script.textContent = await inlineModule(script.textContent ?? '', path, resolve, budget, 0, inlinedSpecifiers);
     }
   }
   // A library AwwO supplies (previewLibraries.ts, e.g. three.js r128) runs from its pinned copy, byte for byte the
@@ -221,7 +225,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   // handed to fetch, XMLHttpRequest and media elements by that path (scriptAssets below); read before any library is
   // inlined, so only the page's own scripts are searched.
   const assets = options.resolve ? await scriptAssets(parsed, path, options.resolve, budget) : {};
-  const needs = previewScriptNeeds(source);
+  const needs = previewScriptNeeds(source, [...inlinedSpecifiers]);
   const supplied = needs.libraries.length ? await loadPreviewLibraries(needs).catch(() => null) : null;
   if (supplied) {
     for (const script of Array.from(parsed.querySelectorAll('script[src]'))) {

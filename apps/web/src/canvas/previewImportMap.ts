@@ -39,6 +39,11 @@ export function resolveSpecifier(specifier: string, imports: Record<string, unkn
 
 export const isModuleScript = (element: Element) => (element.getAttribute('type') || '').trim().toLowerCase() === 'module';
 export const isImportMap = (element: Element) => (element.getAttribute('type') || '').trim().toLowerCase() === 'importmap';
+/** A classic script: no type, or a JavaScript MIME type (it may still import modules dynamically). */
+export const isClassicScript = (element: Element) => {
+  const type = (element.getAttribute('type') || '').trim().toLowerCase();
+  return !type || /^(?:text|application)\/(?:x-)?(?:java|ecma)script$/.test(type);
+};
 
 /** Serialize an import map so nothing in it can close the script element that holds it. */
 function importMapText(map: ImportMap): string {
@@ -80,7 +85,8 @@ export function applyModuleEntries(root: ParentNode, entriesJson: string | undef
   try { entries = JSON.parse(entriesJson) as Record<string, string>; } catch { return; }
   if (!Object.keys(entries).length) return;
   const scripts = Array.from(root.querySelectorAll('script'));
-  const firstModule = scripts.find(isModuleScript);
+  // A new map goes before the first script that may import: a module, or a classic script (dynamic import()).
+  const firstModule = scripts.find(script => isModuleScript(script) || isClassicScript(script));
   if (!firstModule) return;
   let mapElement = scripts.find(isImportMap) ?? null;
   const map = readImportMap(mapElement) ?? {};

@@ -13,7 +13,7 @@
  * supplies too: a data: module cannot resolve a relative path. Anything else the page imports is left as it wrote it.
  */
 import { THREE_MODULE_FILES, type GeneratedModuleFile } from './previewModules.generated';
-import { isImportMap, isModuleScript, readImportMap, resolveSpecifier, THREE_MODULES_BASE, THREE_MODULES_VERSION } from './previewImportMap';
+import { isClassicScript, isImportMap, isModuleScript, readImportMap, resolveSpecifier, THREE_MODULES_BASE, THREE_MODULES_VERSION } from './previewImportMap';
 
 export { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY, resolveSpecifier, THREE_MODULES_BASE, THREE_MODULES_ID, THREE_MODULES_IMPORT_MAP, THREE_MODULES_LABEL } from './previewImportMap';
 /** The hosts a page may name the supplied release on; every pinned file is known by its THREE_MODULES_BASE URL. */
@@ -54,14 +54,22 @@ export interface ModuleNeeds {
   readonly blocked: readonly string[];
 }
 
-/** The specifiers a module script names: static imports and exports, side-effect imports, and literal dynamic imports. */
-export function scriptSpecifiers(source: string): string[] {
+/**
+ * The specifiers a module script names: static imports and exports, side-effect imports, and literal dynamic imports
+ * (a template literal without substitutions included). With `dynamicOnly`, the dynamic imports alone: what a classic
+ * script may use, since only a module may import statically.
+ */
+export function scriptSpecifiers(source: string, dynamicOnly = false): string[] {
   const found = new Set<string>();
   // Whitespace or comments, which JavaScript allows between `from` / `import` / `(` and the specifier string.
   const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*`;
-  const pattern = new RegExp(String.raw`\bfrom${gap}(['"])([^'"\n]+)\1|\bimport${gap}\(${gap}(['"])([^'"\n]+)\3${gap}[,)]|\bimport${gap}(['"])([^'"\n]+)\5`, 'g');
+  // Groups: from 'x' (1, 2), import('x') (3, 4), import 'x' (5, 6); in the dynamic-only pattern import('x') is (1, 2).
+  const pattern = dynamicOnly
+    ? new RegExp(String.raw`\bimport${gap}\(${gap}(['"\x60])([^'"\x60\n$]+)\1${gap}[,)]`, 'g')
+    : new RegExp(String.raw`\bfrom${gap}(['"])([^'"\n]+)\1|\bimport${gap}\(${gap}(['"\x60])([^'"\x60\n$]+)\3${gap}[,)]|\bimport${gap}(['"])([^'"\n]+)\5`, 'g');
   for (const match of source.matchAll(pattern)) {
-    found.add(match[2] ?? match[4] ?? match[6]);
+    const specifier = dynamicOnly ? match[2] : match[2] ?? match[4] ?? match[6];
+    if (specifier) found.add(specifier);
   }
   return [...found];
 }
@@ -77,11 +85,16 @@ function pageImports(scripts: readonly Element[]): Record<string, unknown> {
   return merged;
 }
 
-/** The pinned modules a page needs, or null when it imports none. `root` is a parsed document or template content. */
-export function moduleNeeds(root: ParentNode): ModuleNeeds | null {
+/**
+ * The pinned modules a page needs, or null when it imports none. `root` is a parsed document or template content;
+ * `extra` are specifiers of modules the caller inlined into the page (the live page's canvas JavaScript files).
+ */
+export function moduleNeeds(root: ParentNode, extra: readonly string[] = []): ModuleNeeds | null {
   const scripts = Array.from(root.querySelectorAll('script'));
   const modules = scripts.filter(isModuleScript);
-  if (!modules.length) return null;
+  const classic = scripts.filter(script => !script.hasAttribute('src') && isClassicScript(script));
+  const dynamic = classic.flatMap(script => scriptSpecifiers(script.textContent || '', true));
+  if (!modules.length && !dynamic.length && !extra.length) return null;
   const imports = pageImports(scripts);
   const specifiers: Array<{ specifier: string; file: string }> = [];
   const blocked = new Set<string>();
@@ -114,6 +127,7 @@ export function moduleNeeds(root: ParentNode): ModuleNeeds | null {
     if (src !== null) named(src.trim(), true);
     else for (const specifier of scriptSpecifiers(script.textContent || '')) named(specifier);
   }
+  for (const specifier of [...dynamic, ...extra]) named(specifier);
   if (!wanted.size) return blocked.size ? { files: [], specifiers: [], bare: false, blocked: [...blocked] } : null;
   // 'three' must be the pinned core when anything loaded imports it by name, unless the page sends it elsewhere: to
   // another pinned file (supplied under that name too) or to something AwwO cannot supply (reported).

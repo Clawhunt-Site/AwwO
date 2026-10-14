@@ -207,6 +207,30 @@ describe('three.js as ES modules, supplied through the page import map', () => {
     expect(imports['__proto__']).toMatch(/^data:text\/javascript;base64,/);
   });
 
+  it('supplies lazy imports too: a template literal, and a classic script\'s import()', async () => {
+    const lazy = `${THREE_MODULES_IMPORT_MAP}<script type="module">const THREE = await import(\`three\`);</script>`;
+    const classic = `${THREE_MODULES_IMPORT_MAP}<script>import('three').then(THREE => { window.revision = THREE.REVISION; });</script>`;
+    for (const page of [lazy, classic]) {
+      const needs = previewScriptNeeds(page);
+      expect(needs.libraries).toEqual([THREE_MODULES_LIBRARY]);
+      expect(importMapOf(htmlPreviewDocument(page, true, await loadPreviewLibraries(needs))).imports.three).toMatch(/^data:text\/javascript;base64,/);
+    }
+    // A page with only a classic script and no import map gets one before that script.
+    const bare = `<script>import('${THREE_MODULES_BASE}build/three.module.js');</script>`;
+    const { doc, maps } = importMapOf(htmlPreviewDocument(bare, true, await loadPreviewLibraries(previewScriptNeeds(bare))));
+    const scripts = Array.from(doc.body.querySelectorAll('script'));
+    expect(maps).toHaveLength(1);
+    expect(scripts.indexOf(maps[0])).toBe(0);
+  });
+
+  it('supplies the modules a live page\'s own canvas JavaScript files import', async () => {
+    const page = `<!doctype html><html><head>${THREE_MODULES_IMPORT_MAP}</head><body><script type="module" src="./main.js"></script></body></html>`;
+    const files: Record<string, string> = { 'main.js': "import { start } from './game.js'; start();", 'game.js': "import * as THREE from 'three'; export const start = () => THREE.REVISION;" };
+    const resolve = async (target: string) => files[target] ? { bytes: new TextEncoder().encode(files[target]), name: target } : null;
+    const { imports } = importMapOf(await buildLiveDocument(page, { resolve }));
+    expect(imports.three).toMatch(/^data:text\/javascript;base64,/);
+  });
+
   it('never lets a module src close the script element it is turned into', async () => {
     const src = `${THREE_MODULES_BASE}build/three.module.js?x=</script><div id=owned>owned</div><script>`;
     const page = `<html><body><script type="module" src="${src.replace(/</g, '&lt;').replace(/>/g, '&gt;')}"></script></body></html>`;
@@ -246,18 +270,24 @@ describe('canvas files a page script loads by path', () => {
     expect(live).toContain("new GLTFLoader().load('hero/model-1.glb'");
   });
 
-  it('maps a path as written or resolved to an absolute URL, and leaves every other URL alone', async () => {
+  it('maps a path as written, also when a Request is built from it, and leaves absolute and other URLs alone', async () => {
     const fetched: unknown[] = [];
     const sandbox = { fetch: (input: unknown) => { fetched.push(input); return Promise.resolve(input); } } as Record<string, unknown>;
     class Img { private value = ''; get src() { return this.value; } set src(next: string) { this.value = next; } }
+    class Req { readonly url: string; constructor(input: unknown) { this.url = input instanceof Req ? input.url : String(input); } }
     const scope = { window: sandbox, XMLHttpRequest: class { open(..._args: unknown[]) { fetched.push(_args[1]); } }, Element: class { setAttribute() { /* noop */ } } };
-    Object.assign(sandbox, { HTMLImageElement: Img, HTMLMediaElement: undefined, HTMLSourceElement: undefined, Audio: undefined });
+    Object.assign(sandbox, { HTMLImageElement: Img, HTMLMediaElement: undefined, HTMLSourceElement: undefined, Audio: undefined, Request: Req });
     new Function('window', 'XMLHttpRequest', 'Element', assetScript({ 'hero/model-1.glb': 'data:model/gltf-binary;base64,AA==' }))(sandbox, scope.XMLHttpRequest, scope.Element);
     const fetch = sandbox.fetch as (input: unknown) => Promise<unknown>;
     await fetch('hero/model-1.glb');
-    await fetch({ url: 'https://awwo.example/w/1/canvas/hero/model-1.glb' });
+    await fetch('https://awwo.example/w/1/canvas/hero/model-1.glb');
     await fetch('https://cdn.example/other.glb');
-    expect(fetched).toEqual(['data:model/gltf-binary;base64,AA==', 'data:model/gltf-binary;base64,AA==', 'https://cdn.example/other.glb']);
+    expect(fetched).toEqual(['data:model/gltf-binary;base64,AA==', 'https://awwo.example/w/1/canvas/hero/model-1.glb', 'https://cdn.example/other.glb']);
+    // three.js's FileLoader builds a Request from the path the page gave it.
+    const Request = sandbox.Request as typeof Req;
+    expect(new Request('hero/model-1.glb').url).toBe('data:model/gltf-binary;base64,AA==');
+    expect(new Request('https://cdn.example/x/hero/model-1.glb').url).toBe('https://cdn.example/x/hero/model-1.glb');
+    expect(new Request('hero/model-1.glb')).toBeInstanceOf(Request);
     const image = new (sandbox.HTMLImageElement as typeof Img)();
     image.src = './hero/model-1.glb';
     expect(image.src).toBe('data:model/gltf-binary;base64,AA==');
@@ -275,21 +305,16 @@ describe('canvas files a page script loads by path', () => {
     expect(guard).toContain('"hero/model-1.glb":"data:model/gltf-binary;base64,Ag=="');
     const fetched: unknown[] = [];
     const sandbox = { fetch: (input: unknown) => { fetched.push(input); return Promise.resolve(input); } } as Record<string, unknown>;
-    Object.assign(sandbox, { HTMLImageElement: undefined, HTMLMediaElement: undefined, HTMLSourceElement: undefined, Audio: undefined });
-    // The page's own base, as a canvas page in a folder has it: a root-relative path and a page-relative one differ.
-    const base = document.createElement('base');
-    base.href = 'https://awwo.example/w/1/canvas/pages/';
-    document.head.append(base);
-    try {
-      new Function('window', 'XMLHttpRequest', 'Element', assetScript({ '/hero/model-1.glb': 'data:,root', 'hero/model-1.glb': 'data:,page' }))(
-        sandbox, class { open() { /* noop */ } }, class { setAttribute() { /* noop */ } });
-    } finally { base.remove(); }
+    class Req { readonly url: string; constructor(input: unknown) { this.url = String(input); } }
+    Object.assign(sandbox, { HTMLImageElement: undefined, HTMLMediaElement: undefined, HTMLSourceElement: undefined, Audio: undefined, Request: Req });
+    new Function('window', 'XMLHttpRequest', 'Element', assetScript({ '/hero/model-1.glb': 'data:,root', 'hero/model-1.glb': 'data:,page' }))(
+      sandbox, class { open() { /* noop */ } }, class { setAttribute() { /* noop */ } });
     const fetch = sandbox.fetch as (input: unknown) => Promise<unknown>;
     await fetch('/hero/model-1.glb');
     await fetch('./hero/model-1.glb');
-    // three.js's FileLoader hands fetch a Request, whose url is absolute.
-    await fetch({ url: 'https://awwo.example/w/1/canvas/pages/hero/model-1.glb' });
-    await fetch({ url: 'https://awwo.example/hero/model-1.glb' });
-    expect(fetched).toEqual(['data:,root', 'data:,page', 'data:,page', 'data:,root']);
+    expect(fetched).toEqual(['data:,root', 'data:,page']);
+    // The same through a Request, as three.js's FileLoader makes one: the path as the page wrote it decides.
+    const Request = sandbox.Request as typeof Req;
+    expect([new Request('/hero/model-1.glb').url, new Request('hero/model-1.glb').url]).toEqual(['data:,root', 'data:,page']);
   });
 });
