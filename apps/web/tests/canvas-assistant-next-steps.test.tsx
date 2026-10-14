@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
@@ -59,6 +61,19 @@ describe('the assistant offers what to do next without being asked', () => {
     expect(notes.getByText('提问会用掉今天的次数：改画布约 1 次，直接执行任务最多 16 次。')).toBeVisible();
     expect(notes.getByText('「接下来」里的建议是在本地检查出来的，不用次数。')).toBeVisible();
     expect(notes.getByText('请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。')).toBeVisible();
+  });
+
+  it('puts a row’s node over the inputs it needs, so a long node title never squeezes them to a letter a line', () => {
+    // jsdom has no layout; the rule found in a real browser (2026-10-13, developer mode: a long node title took the
+    // whole row and left “API contract” a 0 px column) is checked.
+    const css = readFileSync(resolve(process.cwd(), 'src/canvas/canvas-assistant.css'), 'utf8');
+    const row = css.match(/\.awwo-assistant-next-items li \{([^}]*)\}/)?.[1] ?? '';
+    expect(row).toMatch(/display: grid;/);
+    expect(row).toMatch(/grid-template-columns: minmax\(0, 1fr\) auto;/);
+    expect(row).toMatch(/grid-template-areas: 'title action' 'detail action';/);
+    expect(css).toMatch(/\.awwo-assistant-next-item-title \{ grid-area: title;/);
+    expect(css).toMatch(/\.awwo-assistant-next-item-detail \{ grid-area: detail;/);
+    expect(css).toMatch(/\.awwo-assistant-next-items :is\(button, a\) \{ grid-area: action;/);
   });
 
   it('steps aside while a message is handled, on the welcome screen, and when there is nothing to offer', () => {

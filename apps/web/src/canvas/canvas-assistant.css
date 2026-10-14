@@ -131,12 +131,14 @@
 .awwo-assistant-next-actions :is(button, a).is-primary { border-color: var(--awwo-accent, #286454); background: var(--awwo-accent, #286454); color: var(--assistant-on-accent); }
 .awwo-assistant-next-actions :is(button, a).is-primary:hover { filter: brightness(.95); }
 .awwo-assistant-next-actions a:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 3px; }
-/* Everything a run still needs, one row per node with the step that settles it. */
+/* Everything a run still needs, one row per node with the step that settles it: the node over the inputs it still
+ * needs, both as wide as the row less the step. Side by side, a long node title took the whole row and left the
+ * inputs a column too narrow for one letter (2026-10-13, developer mode). */
 .awwo-assistant-next-items { display: grid; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
-.awwo-assistant-next-items li { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding: 6px 8px; border-radius: 9px; background: var(--awwo-soft, #f4f6f2); font-size: 12px; line-height: 1.45; }
-.awwo-assistant-next-item-title { color: var(--awwo-ink, #232c29); font-weight: 600; overflow-wrap: anywhere; }
-.awwo-assistant-next-item-detail { color: var(--awwo-muted, #68736d); overflow-wrap: anywhere; }
-.awwo-assistant-next-items :is(button, a) { min-height: 28px; padding: 3px 10px; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 999px; background: var(--awwo-surface, #fff); color: var(--awwo-ink, #232c29); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.awwo-assistant-next-items li { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'title action' 'detail action'; align-items: center; gap: 2px 8px; padding: 6px 8px; border-radius: 9px; background: var(--awwo-soft, #f4f6f2); font-size: 12px; line-height: 1.45; }
+.awwo-assistant-next-item-title { grid-area: title; color: var(--awwo-ink, #232c29); font-weight: 600; overflow-wrap: anywhere; }
+.awwo-assistant-next-item-detail { grid-area: detail; color: var(--awwo-muted, #68736d); overflow-wrap: anywhere; }
+.awwo-assistant-next-items :is(button, a) { grid-area: action; min-height: 28px; padding: 3px 10px; border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 999px; background: var(--awwo-surface, #fff); color: var(--awwo-ink, #232c29); font-size: 12px; white-space: nowrap; cursor: pointer; }
 .awwo-assistant-next-items :is(button, a):hover { border-color: var(--awwo-accent, #286454); }
 .awwo-assistant-next-items :is(button, a).is-primary { border-color: var(--awwo-accent, #286454); background: var(--awwo-accent, #286454); color: var(--assistant-on-accent); }
 .awwo-assistant-next-footnote { margin: 0; color: var(--awwo-muted, #68736d); font-size: 12px; line-height: 1.5; }
