@@ -6,7 +6,7 @@ import { normalizeContract, validateContractFields, type ContractField, type Con
 import { arrangeNodePositions } from './nodePresentation';
 import { updateNodeDraft } from './nodeThreads';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
-import { canConnect, edgeId, portsFor, reconcileEdges, type PortSpec } from './ports';
+import { canConnect, canFeed, edgeId, isMediaSessionNode, portsFor, reconcileEdges, type PortSpec } from './ports';
 import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
 import { TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH } from './taskFrame';
@@ -261,8 +261,10 @@ function checkGraph(doc: CanvasDocument): void {
     const to = nodes.get(edge.toNode);
     const output = from && portsFor(from).find(port => port.side === 'output' && port.id === edge.fromPort);
     const input = to && portsFor(to).find(port => port.side === 'input' && port.id === edge.toPort);
-    if (!output || !input) fail(`连线「${edge.id}」引用的节点或字段不存在；请先显式 disconnect。`);
-    if (output.dataType !== input.dataType || output.dataType !== edge.dataType) fail(`连线「${edge.id}」类型不匹配；请先显式 disconnect 后修改字段并重新连接。`);
+    if (!from || !output || !input) fail(`连线「${edge.id}」引用的节点或字段不存在；请先显式 disconnect。`);
+    // The rule the canvas and the run use (canFeed here, edgeTypesFit in the API): the same type, or a picture, clip or
+    // 3D model from a media node into a text input. The edge keeps its source's type.
+    if (!canFeed(from, output, input) || edge.dataType !== output.dataType) fail(`连线「${edge.id}」类型不匹配；请先显式 disconnect 后修改字段并重新连接。`);
     if (!canConnect(doc.nodes, checked, { nodeId: edge.fromNode, portId: edge.fromPort }, { nodeId: edge.toNode, portId: edge.toPort })) fail(`连线「${edge.id}」重复、自连接或目标输入已被占用。`);
     checked.push(edge);
   }
@@ -353,6 +355,8 @@ function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adju
 function inputTypeFor(from: CanvasNode, output: PortSpec): ContractFieldType | null {
   if (from.kind === 'session' && from.contract) return from.contract.outputs.find(field => `out:${field.id}` === output.id)?.type ?? null;
   if (output.dataType === 'text') return 'markdown';
+  // A picture or a clip from a media node is read through a text input (canFeed): the page gets the files' paths.
+  if (isMediaSessionNode(from) && output.id === 'result' && (output.dataType === 'image' || output.dataType === 'video')) return 'markdown';
   return output.dataType === 'number' || output.dataType === 'boolean' || output.dataType === 'file' ? output.dataType : null;
 }
 
@@ -385,6 +389,23 @@ function connectPlanned(draft: CanvasDocument, from: CanvasNode, to: CanvasNode,
     // The same wire again changes nothing.
     if (draft.edges.some(edge => edge.fromNode === from.id && edge.fromPort === output.id && edge.toNode === to.id && edge.toPort === wanted.id)) return;
     if (canConnect(draft.nodes, draft.edges, start, { nodeId: to.id, portId: wanted.id })) { if (!link(wanted.id)) skipLoop(); return; }
+  }
+  // A picture or a clip into an input the plan typed as a file: a media result feeds a text input (canFeed), so that
+  // input, still empty and unwired, becomes a text input under the plan's own name, instead of a second input beside
+  // it that nothing would ever fill.
+  const retyped = wanted && to.kind === 'session' && isMediaSessionNode(from) && output.id === 'result'
+    && (output.dataType === 'image' || output.dataType === 'video')
+    ? to.contract?.inputs.find(field => `in:${field.id}` === wanted.id && field.type === 'file' && !String(field.value ?? '').trim())
+    : undefined;
+  if (wanted && retyped && !draft.edges.some(edge => edge.toNode === to.id && edge.toPort === wanted.id)) {
+    retyped.type = 'markdown';
+    if (canConnect(draft.nodes, draft.edges, start, { nodeId: to.id, portId: wanted.id }) && link(wanted.id)) {
+      const name = retyped.label || retyped.id;
+      adjust(`「${toTitle}」的「${name}」改为文本输入，用来接收「${fromTitle}」的图片或视频`,
+        `“${name}” on “${toTitle}” is now a text input, so it takes the picture or clip from “${fromTitle}”`);
+      return;
+    }
+    retyped.type = 'file';
   }
   // The plan named an input that already has another source, and this delivery already reaches the node through an
   // input of its own (an earlier repair, or the same plan sent again): nothing to add, rather than another copy of

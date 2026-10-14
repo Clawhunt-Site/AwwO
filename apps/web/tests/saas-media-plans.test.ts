@@ -101,6 +101,51 @@ describe('media nodes in canvas plans', () => {
   });
 });
 
+describe('a page that uses the pictures and the clip of media nodes', () => {
+  // The rule the canvas and the run share (canFeed, edgeTypesFit in the API): a media result feeds a text input.
+  // A plan used to be held to exact types instead, so every plan that wired a picture into a page was refused whole.
+  const media2: CanvasPlanMedia = { models: { image: 'xt.seedream-5-pro', video: 'xt.xtasy-v3' }, promptMax: () => 32000 };
+  const image = { ...createSessionNode('image', { x: 0, y: 0 }), model: 'xt.seedream-5-pro' };
+  const video = { ...createSessionNode('video', { x: 0, y: 300 }), model: 'xt.xtasy-v3' };
+  const page = createAgentTemplate('frontend', { x: 600, y: 0 });
+  const doc = () => ({ ...emptyDocument(), nodes: [image, video, page] });
+  const field = (applied: { doc: CanvasDocument }, id: string) =>
+    (applied.doc.nodes.find(node => node.id === page.id) as SessionNode).contract!.inputs.find(item => item.id === id);
+
+  it('wires a picture and a clip into text inputs of the page, the edges keeping their source type', () => {
+    const applied = applyCanvasPlan(doc(), plan([
+      { type: 'add_field', nodeId: page.id, side: 'input', field: { id: 'hero_clip', label: 'Hero clip', type: 'markdown', required: true, value: '' } },
+      { type: 'add_field', nodeId: page.id, side: 'input', field: { id: 'cover', label: 'Cover picture', type: 'text', required: true, value: '' } },
+      { type: 'connect', fromNode: video.id, fromField: 'result', toNode: page.id, toField: 'hero_clip' },
+      { type: 'connect', fromNode: image.id, fromField: 'result', toNode: page.id, toField: 'cover' },
+    ]), 'en', '', media2);
+    expect(applied.doc.edges).toEqual([
+      expect.objectContaining({ fromNode: video.id, fromPort: 'result', toNode: page.id, toPort: 'in:hero_clip', dataType: 'video' }),
+      expect.objectContaining({ fromNode: image.id, fromPort: 'result', toNode: page.id, toPort: 'in:cover', dataType: 'image' }),
+    ]);
+    expect(applied.adjustments).toEqual([]);
+  });
+
+  it('makes an empty input the plan typed as a file a text input for a picture, under its own name', () => {
+    const applied = applyCanvasPlan(doc(), plan([
+      { type: 'add_field', nodeId: page.id, side: 'input', field: { id: 'hero_shot', label: 'Hero shot', type: 'file', required: true, value: '' } },
+      { type: 'connect', fromNode: image.id, fromField: 'result', toNode: page.id, toField: 'hero_shot' },
+    ]), 'en', '', media2);
+    expect(field(applied, 'hero_shot')).toMatchObject({ type: 'markdown', label: 'Hero shot', required: true });
+    expect(applied.doc.edges).toEqual([expect.objectContaining({ fromNode: image.id, toPort: 'in:hero_shot', dataType: 'image' })]);
+    expect(applied.adjustments).toEqual([expect.stringContaining('“Hero shot” on')]);
+  });
+
+  it('gives the page a text input of its own for a clip when the plan names an input it does not have', () => {
+    const applied = applyCanvasPlan(doc(), plan([
+      { type: 'connect', fromNode: video.id, fromField: 'result', toNode: page.id, toField: 'opening_clip' },
+    ]), 'en', '', media2);
+    expect(field(applied, 'opening_clip')).toMatchObject({ type: 'markdown' });
+    expect(applied.doc.edges).toEqual([expect.objectContaining({ fromNode: video.id, toPort: 'in:opening_clip', dataType: 'video' })]);
+    expect(applied.adjustments.join('\n')).not.toMatch(/Skipped a connection/);
+  });
+});
+
 describe('canvas runs and media nodes', () => {
   const text = createAgentTemplate('general', { x: 0, y: 0 });
   const image = { ...createSessionNode('image', { x: 0, y: 300 }), model: 'xt.seedream-5-pro' };
