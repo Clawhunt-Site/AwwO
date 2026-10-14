@@ -16,6 +16,7 @@
 // so a multi-file site or a page that uses an image another node generated renders without a server.
 import { htmlDocumentSource, PREVIEW_HOST_SCRIPT } from '../htmlDeliverable';
 import { loadPreviewLibraries, previewScriptNeeds } from '../previewLibraries';
+import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from '../previewModules';
 import { dataUrl, decodeText, mimeOfName } from './studioData';
 
 /** Public CDNs that pages commonly load libraries, styles and fonts from (including mainland-China mirrors). */
@@ -111,6 +112,48 @@ async function inlineModule(source: string, modulePath: string, resolve: AssetRe
   return result;
 }
 
+// A canvas file a script names in a string literal: `<node id>/<file>` (after an optional ./ or /), of a kind a page
+// loads at run time rather than shows from markup: a model, a texture or picture, a clip, a sound, an HDR or data file.
+const SCRIPT_ASSET = /(['"`])(?:\.\/|\/)?([A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_.%-]+\.(?:glb|gltf|bin|png|jpe?g|webp|gif|avif|hdr|mp4|webm|mov|mp3|wav|ogg|m4a|json))\1/gi;
+
+/** The canvas files a page's own scripts name, each as a data: URL keyed by the path as the script wrote it. */
+async function scriptAssets(parsed: Document, path: string, resolve: AssetResolver, budget: { left: number }): Promise<Record<string, string>> {
+  const names = new Set<string>();
+  for (const script of Array.from(parsed.querySelectorAll('script:not([src])'))) {
+    const type = (script.getAttribute('type') || '').trim().toLowerCase();
+    if (type && type !== 'module' && !/^(?:text|application)\/(?:java|ecma)script$/.test(type)) continue;
+    for (const match of (script.textContent || '').matchAll(SCRIPT_ASSET)) names.add(match[2]);
+  }
+  const assets: Record<string, string> = {};
+  for (const name of names) {
+    const target = joinPath(path, name);
+    const asset = target ? await resolve(target) : null;
+    if (!asset || asset.bytes.length > budget.left) continue;
+    budget.left -= asset.bytes.length;
+    assets[name] = dataUrl(asset.bytes, mimeOfName(asset.name));
+  }
+  return assets;
+}
+
+/**
+ * Run ahead of the page: fetch, XMLHttpRequest, `new Audio()` and the src of images, media and sources get the file
+ * for a path the page names (as written, or resolved to an absolute URL ending in it). three.js's loaders go through
+ * these (GLTFLoader and FileLoader fetch, TextureLoader sets an image's src), so a page loads a generated model or
+ * texture by its canvas path. Every other URL passes through unchanged, under the page's policy.
+ */
+export function assetScript(assets: Readonly<Record<string, string>>): string {
+  return ';(()=>{const F=' + JSON.stringify(assets).replace(/</g, '\\u003c') + ';'
+    + "const L=u=>{if(u==null)return;let s;try{s=typeof u==='string'?u:String(u.url||u)}catch(e){return}s=s.split(/[?#]/)[0];"
+    + "const k=s.replace(/^\\.?\\//,'');if(Object.prototype.hasOwnProperty.call(F,k))return F[k];for(const n in F)if(s.endsWith('/'+n))return F[n]};"
+    + 'const f=window.fetch;if(f)window.fetch=function(i,o){const d=L(i);return f.call(this,d||i,o)};'
+    + 'const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){const d=L(u);if(d)arguments[1]=d;return x.apply(this,arguments)};'
+    + 'const p=(C,n)=>{const s=C&&Object.getOwnPropertyDescriptor(C.prototype,n);if(!s||!s.set)return;'
+    + 'Object.defineProperty(C.prototype,n,{configurable:true,enumerable:s.enumerable,get:s.get,set(v){s.set.call(this,L(v)||v)}})};'
+    + "p(window.HTMLImageElement,'src');p(window.HTMLMediaElement,'src');p(window.HTMLSourceElement,'src');"
+    + 'const a=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){if(/^(?:src|href|poster)$/i.test(n)){const d=L(v);if(d)v=d}return a.call(this,n,v)};'
+    + 'const A=window.Audio;if(A){const B=function(u){const e=new A();if(u!==undefined)e.src=u;return e};B.prototype=A.prototype;window.Audio=B}})();';
+}
+
 export interface LiveDocumentOptions {
   /** The page's own path (an archive member's path, or its file name) for resolving relative URLs. */
   path?: string;
@@ -165,6 +208,11 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   // A library AwwO supplies (previewLibraries.ts, e.g. three.js r128) runs from its pinned copy, byte for byte the
   // CDN file: no network needed, and the additions a generated page calls although its release lacks them (r128 has
   // no CapsuleGeometry) come with it. If the copy cannot be loaded the page keeps its CDN script, which the CSP allows.
+  // three.js as ES modules (previewModules.ts) comes the same way, through the page's import map.
+  // Files a script loads by a canvas path (a model, a texture, a sound: `hero/model-1.glb`) come from the same bytes,
+  // handed to fetch, XMLHttpRequest and media elements by that path (scriptAssets below); read before any library is
+  // inlined, so only the page's own scripts are searched.
+  const assets = options.resolve ? await scriptAssets(parsed, path, options.resolve, budget) : {};
   const needs = previewScriptNeeds(source);
   const supplied = needs.libraries.length ? await loadPreviewLibraries(needs).catch(() => null) : null;
   if (supplied) {
@@ -174,12 +222,13 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
       for (const attribute of ['src', 'integrity', 'crossorigin', 'async', 'defer']) script.removeAttribute(attribute);
       script.textContent = code;
     }
+    applyModuleEntries(parsed, supplied.get(PREVIEW_IMPORT_MAP_KEY), parsed);
   }
   const head = parsed.head;
   const guard = parsed.createElement('script');
   // With the link guard: a page that started in a 0×0 frame is told its real size, and a page that fails says so
   // (htmlDeliverable.ts, pageErrors.ts).
-  guard.textContent = LINK_GUARD + PREVIEW_HOST_SCRIPT;
+  guard.textContent = LINK_GUARD + PREVIEW_HOST_SCRIPT + (Object.keys(assets).length ? assetScript(assets) : '');
   const csp = parsed.createElement('meta');
   csp.setAttribute('http-equiv', 'Content-Security-Policy');
   csp.setAttribute('content', LIVE_PAGE_CSP);

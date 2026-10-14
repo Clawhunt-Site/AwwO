@@ -75,10 +75,12 @@ export interface ArtifactPreviewProps extends DownloadProps {
 
 // A relative URL of a picture, clip or model in an attribute or a CSS url(): what a page wired to a media node names.
 const RELATIVE_MEDIA = /(?:\b(?:src|poster|href)\s*=\s*["']|url\(\s*["']?)(?![a-z][a-z0-9+.-]*:|\/\/|#|data:|blob:)[^"'()\s<>]+\.(?:png|jpe?g|webp|gif|avif|mp4|webm|mov|glb)(?:[?#][^"')\s]*)?["')]/i;
+// A canvas file (`<node id>/<file>`) a script loads by its path: a model, texture, clip or sound (liveDocument.ts).
+const SCRIPT_MEDIA = /(['"`])(?:\.\/|\/)?[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_.%-]+\.(?:glb|gltf|png|jpe?g|webp|gif|avif|hdr|mp4|webm|mov|mp3|wav|ogg|m4a)\1/i;
 
 /** Does a page name a picture, clip or model by a relative path, which only the canvas's files can supply? */
 export function namesRelativeMedia(page: string): boolean {
-  return RELATIVE_MEDIA.test(page);
+  return RELATIVE_MEDIA.test(page) || SCRIPT_MEDIA.test(page);
 }
 
 /** Native modal isolation also contains focus inside an opaque-origin preview iframe. The

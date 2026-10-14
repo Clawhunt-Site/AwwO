@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
+import { THREE_MODULES_IMPORT_MAP } from '../src/canvas/previewModules';
 import type { SessionNode } from '../src/canvas/canvasDoc';
 
 const WORKFLOWS = Object.values(PRODUCTION_WORKFLOWS);
@@ -108,8 +109,14 @@ it('ends every canvas in a review and delivers exactly one self-contained HTML b
       expect(item.edges.some(edge => edge.from === wiring[0].id && edge.to === builds[0].id), item.id).toBe(true);
     }
     expect(builds[0].task).toMatch(/no localStorage, cookies or network requests/);
-    // The one external script a build may name is the three.js release AwwO's previews supply.
-    expect(builds[0].task).toContain('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
+    // The one external script a build may name is the three.js release AwwO's previews supply: r128 by its tag, or
+    // r186 as ES modules through the import map (a canvas on `stack: 'r186'`), which its one module script imports from.
+    if (item.stack === 'r186') {
+      expect(builds[0].task, item.id).toContain(THREE_MODULES_IMPORT_MAP);
+      expect(builds[0].task, item.id).toContain("import * as THREE from 'three';");
+      expect(builds[0].task, item.id).not.toContain('three.js/r128');
+      for (const node of item.nodes) expect(node.task, `${item.id}/${node.id}`).not.toMatch(/three\.js r128|global THREE/);
+    } else expect(builds[0].task).toContain('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
     expect(item.edges.some(edge => edge.from === builds[0].id && item.nodes.find(node => node.id === edge.to)?.role === 'review'), item.id).toBe(true);
   }
 });

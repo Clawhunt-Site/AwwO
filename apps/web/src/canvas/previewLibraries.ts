@@ -5,6 +5,7 @@
  * are pinned here and checked by tests/canvas-artifact-preview.test.tsx.
  */
 import { FIGURE_KIT_BYTES, FIGURE_KIT_SHA256, FIGURE_KIT_URL } from './figureKit/figureKit';
+import { moduleImportEntries, moduleNeeds, pinnedModuleFile, PREVIEW_IMPORT_MAP_KEY, THREE_MODULES_ID, THREE_MODULES_LABEL, type ModuleNeeds } from './previewModules';
 
 export interface PreviewAddition {
   /** Shown to the user, e.g. "CapsuleGeometry". */
@@ -28,6 +29,8 @@ export interface PreviewLibrary {
   readonly load: () => Promise<string>;
   /** Later APIs generated pages call although they load this release. Supplied only to a page that uses them. */
   readonly additions?: readonly PreviewAddition[];
+  /** ES modules supplied through the page's import map rather than a script tag (previewModules.ts): `urls` is empty. */
+  readonly modules?: true;
 }
 
 // three.js r139's CapsuleGeometry (src/geometries/CapsuleGeometry.js), which r128 does not have yet. Generated games
@@ -83,6 +86,17 @@ export const PREVIEW_LIBRARIES: readonly PreviewLibrary[] = [{
 const BY_URL = new Map(PREVIEW_LIBRARIES.flatMap(library => library.urls.map(url => [url, library] as const)));
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
+/** three.js as ES modules (previewModules.ts): listed with the libraries a page gets, loaded file by file. */
+export const THREE_MODULES_LIBRARY: PreviewLibrary = {
+  id: THREE_MODULES_ID,
+  label: THREE_MODULES_LABEL,
+  urls: [],
+  bytes: 0,
+  sha256: '',
+  load: () => Promise.resolve(''),
+  modules: true,
+};
+
 export interface PreviewScriptNeeds {
   /** Libraries AwwO supplies for this page, in first-use order. */
   readonly libraries: readonly PreviewLibrary[];
@@ -90,6 +104,8 @@ export interface PreviewScriptNeeds {
   readonly additions: readonly PreviewAddition[];
   /** Where the page's other external scripts come from. The preview never loads them. */
   readonly blocked: readonly string[];
+  /** The ES modules AwwO supplies through the page's import map, when it imports any. */
+  readonly modules?: ModuleNeeds;
 }
 
 export const NO_PREVIEW_SCRIPT_NEEDS: PreviewScriptNeeds = { libraries: [], additions: [], blocked: [] };
@@ -103,13 +119,18 @@ export function previewScriptNeeds(source: string): PreviewScriptNeeds {
   for (const script of Array.from(template.content.querySelectorAll('script'))) {
     const reference = (script.getAttribute('src') ?? script.getAttribute('href') ?? script.getAttribute('xlink:href'))?.trim();
     if (reference === undefined) continue;
+    // A module script naming a pinned module file is supplied through the import map (moduleNeeds, below).
+    if ((script.getAttribute('type') || '').trim().toLowerCase() === 'module' && pinnedModuleFile(reference)) continue;
     const library = script.namespaceURI === HTML_NAMESPACE && script.hasAttribute('src') ? BY_URL.get(reference) : undefined;
     if (library) libraries.add(library);
     else blocked.add(scriptOrigin(reference));
   }
+  const modules = moduleNeeds(template.content);
+  if (modules?.files.length) libraries.add(THREE_MODULES_LIBRARY);
+  for (const host of modules?.blocked ?? []) blocked.add(host);
   if (!libraries.size && !blocked.size) return NO_PREVIEW_SCRIPT_NEEDS;
   const additions = [...libraries].flatMap(library => (library.additions ?? []).filter(addition => addition.used.test(source)));
-  return { libraries: [...libraries], additions, blocked: [...blocked] };
+  return { libraries: [...libraries], additions, blocked: [...blocked], ...(modules?.files.length ? { modules } : {}) };
 }
 
 function scriptOrigin(reference: string): string {
@@ -123,15 +144,21 @@ function scriptOrigin(reference: string): string {
 const loaded = new Map<string, Promise<string>>();
 
 /** The inline code for each supplied library (its pinned copy, then the additions this page uses), keyed by every
- * URL that names it. Rejects when any copy is unusable. */
-export async function loadPreviewLibraries(needs: Pick<PreviewScriptNeeds, 'libraries' | 'additions'>): Promise<ReadonlyMap<string, string>> {
-  const entries = await Promise.all(needs.libraries.map(async library => [library, await loadLibrary(library)] as const));
+ * URL that names it, and, for a page that imports pinned ES modules, their import-map entries as JSON under
+ * PREVIEW_IMPORT_MAP_KEY (applyModuleEntries puts them in the page). Rejects when any copy is unusable. */
+export async function loadPreviewLibraries(needs: Pick<PreviewScriptNeeds, 'libraries' | 'additions' | 'modules'>): Promise<ReadonlyMap<string, string>> {
+  const classic = needs.libraries.filter(library => !library.modules);
+  const [entries, modules] = await Promise.all([
+    Promise.all(classic.map(async library => [library, await loadLibrary(library)] as const)),
+    needs.modules?.files.length ? moduleImportEntries(needs.modules) : Promise.resolve(undefined),
+  ]);
   const code = new Map<string, string>();
   for (const [library, text] of entries) {
     const additions = (library.additions ?? []).filter(addition => needs.additions.includes(addition));
     const inline = additions.length ? `${text}\n;${additions.map(addition => addition.code).join('\n;')}` : text;
     for (const url of library.urls) code.set(url, inline);
   }
+  if (modules !== undefined) code.set(PREVIEW_IMPORT_MAP_KEY, modules);
   return code;
 }
 

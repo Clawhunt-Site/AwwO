@@ -1,4 +1,5 @@
 import { PAGE_ERROR_SCRIPT } from './pageErrors';
+import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from './previewModules';
 
 /** Strip only a complete HTML fence; preserve every byte of the document inside it. */
 export function htmlDocumentSource(value: string): string {
@@ -67,8 +68,10 @@ export const MAX_ARTIFACT_PREVIEW_BYTES = 2 * 1024 * 1024;
 export const ARTIFACT_PREVIEW_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 
 /** Inline scripts are an explicit opt-in, inside an opaque-origin sandbox. This limits
- * resources and capability access, but is not a guarantee against frame self-navigation. */
-export const ARTIFACT_INTERACTIVE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
+ * resources and capability access, but is not a guarantee against frame self-navigation.
+ * data: scripts are the ES modules AwwO supplies through a page's import map (previewModules.ts); a page that can run
+ * inline script gains nothing from them, and they make no request. */
+export const ARTIFACT_INTERACTIVE_CSP = "default-src 'none'; script-src 'unsafe-inline' data:; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
 
 /**
  * AwwO's own script, run ahead of a delivered page wherever one runs (here and in the studio's live page). A sandboxed
@@ -137,6 +140,10 @@ export function htmlPreviewDocument(value: string, interactive = false, librarie
   if (new TextEncoder().encode(source).byteLength > MAX_ARTIFACT_PREVIEW_BYTES) throw new Error('preview_too_large');
   const template = document.createElement('template');
   template.innerHTML = source;
+  // three.js as ES modules (previewModules.ts): the import-map entries AwwO supplies for this page, if any.
+  const moduleJson = interactive ? libraries?.get(PREVIEW_IMPORT_MAP_KEY) : undefined;
+  let modules: Record<string, string> = {};
+  try { if (moduleJson) modules = JSON.parse(moduleJson) as Record<string, string>; } catch { modules = {}; }
   for (const element of Array.from(template.content.querySelectorAll('*'))) {
     const name = element.localName.toLowerCase();
     if (!PREVIEW_ELEMENTS.has(name) && !(interactive && (name === 'canvas' || name === 'script'))) {
@@ -147,14 +154,19 @@ export function htmlPreviewDocument(value: string, interactive = false, librarie
     // imported module URLs do not gain authority from the source document. The one
     // exception is an HTML script naming a library AwwO supplies (previewLibraries.ts):
     // its body becomes AwwO's pinned copy, so it still runs inline, with no request.
+    // A module script naming a pinned module file imports it through the import map instead.
     if (name === 'script') {
-      const library = interactive && element.namespaceURI === 'http://www.w3.org/1999/xhtml' && !element.hasAttribute('href') && !element.hasAttribute('xlink:href')
-        ? libraries?.get((element.getAttribute('src') ?? '').trim()) : undefined;
+      const html = interactive && element.namespaceURI === 'http://www.w3.org/1999/xhtml' && !element.hasAttribute('href') && !element.hasAttribute('xlink:href');
+      const src = (element.getAttribute('src') ?? '').trim();
+      const library = html ? libraries?.get(src) : undefined;
+      const pinnedModule = html && src !== '' && (element.getAttribute('type') || '').trim().toLowerCase() === 'module' && modules[src] !== undefined;
       if (library !== undefined) element.textContent = library;
+      else if (pinnedModule) element.textContent = `import ${JSON.stringify(src)};`;
       else if (element.hasAttribute('src') || element.hasAttribute('href') || element.hasAttribute('xlink:href')) { element.remove(); continue; }
       for (const attribute of Array.from(element.attributes)) if (attribute.name !== 'type') element.removeAttribute(attribute.name);
     } else filterPreviewAttributes(element, interactive);
   }
+  if (moduleJson) applyModuleEntries(template.content, moduleJson, document);
   const root = previewRootAttributes(source, 'html');
   const body = previewRootAttributes(source, 'body', interactive);
   // Escaping '<' in CSS prevents a model-supplied style value from closing the trusted style tag.
