@@ -229,6 +229,25 @@ describe('three.js as ES modules, supplied through the page import map', () => {
     const resolve = async (target: string) => files[target] ? { bytes: new TextEncoder().encode(files[target]), name: target } : null;
     const { imports } = importMapOf(await buildLiveDocument(page, { resolve }));
     expect(imports.three).toMatch(/^data:text\/javascript;base64,/);
+    // A classic canvas script that imports lazily is supplied too.
+    const classic = `<!doctype html><html><head>${THREE_MODULES_IMPORT_MAP}</head><body><script src="./boot.js"></script></body></html>`;
+    const boot = async (target: string) => target === 'boot.js' ? { bytes: new TextEncoder().encode("import('three').then(T => T.REVISION);"), name: target } : null;
+    expect(importMapOf(await buildLiveDocument(classic, { resolve: boot })).imports.three).toMatch(/^data:text\/javascript;base64,/);
+  });
+
+  it('finds canvas files named inside the modules a live page imports, and behind a cache-busting suffix', async () => {
+    const page = `<!doctype html><html><head>${THREE_MODULES_IMPORT_MAP}</head><body><script type="module">import './scene.js';</script>
+      <script>const sky = new Image(); sky.src = 'sky/image-1.jpg?v=2';</script></body></html>`;
+    const files: Record<string, Uint8Array> = {
+      'scene.js': new TextEncoder().encode("import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'; new GLTFLoader().load('hero/model-1.glb', () => {});"),
+      'hero/model-1.glb': new Uint8Array([0x67, 0x6c, 0x54, 0x46]), 'sky/image-1.jpg': new Uint8Array([0xff, 0xd8, 0xff]),
+    };
+    const resolve = async (target: string) => files[target] ? { bytes: files[target], name: target.split('/').pop()! } : null;
+    const live = await buildLiveDocument(page, { resolve });
+    const guard = new DOMParser().parseFromString(live, 'text/html').head.querySelector('script')!.textContent!;
+    expect(guard).toContain('"hero/model-1.glb":"data:model/gltf-binary;base64,');
+    expect(guard).toContain('"sky/image-1.jpg":"data:image/jpeg;base64,');
+    expect(namesRelativeMedia("<script>new GLTFLoader().load('hero/model.glb?v=1', show)</script>")).toBe(true);
   });
 
   it('never lets a module src close the script element it is turned into', async () => {

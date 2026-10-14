@@ -95,11 +95,16 @@ async function inlineCss(css: string, cssPath: string, resolve: AssetResolver, b
   return result;
 }
 
+/** What the live page took from the canvas files into itself: the import specifiers and the sources of its scripts. */
+interface Inlined { readonly specifiers: Set<string>; readonly sources: string[] }
+
 async function inlineModule(source: string, modulePath: string, resolve: AssetResolver, budget: { left: number }, depth: number,
-  found: Set<string>): Promise<string> {
+  found: Inlined): Promise<string> {
   if (depth > 6) return source;
-  // What every inlined module imports by name, so the page is supplied the modules its canvas files need too.
-  for (const specifier of scriptSpecifiers(source)) found.add(specifier);
+  // What every inlined module imports by name, so the page is supplied the modules its canvas files need too, and its
+  // source, so the canvas files it loads by path are found as well.
+  for (const specifier of scriptSpecifiers(source)) found.specifiers.add(specifier);
+  found.sources.push(source);
   const specifiers = [...new Set([...source.matchAll(/(?:import|export)\s[^'"]*?from\s*(['"])([^'"]+)\1|import\s*\(\s*(['"])([^'"]+)\3\s*\)|import\s+(['"])([^'"]+)\5/g)]
     .map(match => match[2] ?? match[4] ?? match[6]).filter(specifier => specifier && /^\.{0,2}\//.test(specifier)))];
   let result = source;
@@ -119,19 +124,25 @@ async function inlineModule(source: string, modulePath: string, resolve: AssetRe
 // A canvas file a script names in a string literal: `<node id>/<file>` (after an optional ./ or /), of a kind a page
 // loads at run time rather than shows from markup: a model, a texture or picture, a clip, a sound, an HDR or data file.
 // A leading / names it from the canvas root, as a page served there would; ./ or nothing, from the page's own folder.
-const SCRIPT_ASSET = /(['"`])(\.\/|\/)?([A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_.%-]+\.(?:glb|gltf|bin|png|jpe?g|webp|gif|avif|hdr|mp4|webm|mov|mp3|wav|ogg|m4a|json))\1/gi;
+// A ?query or #hash after the name (a cache-busting suffix) is allowed; the file is the path before it.
+const SCRIPT_ASSET = /(['"`])(\.\/|\/)?([A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_.%-]+\.(?:glb|gltf|bin|png|jpe?g|webp|gif|avif|hdr|mp4|webm|mov|mp3|wav|ogg|m4a|json))(?:[?#][^'"`\s]*)?\1/gi;
 
 /**
  * The canvas files a page's own scripts name, each as a data: URL keyed by the path as the script wrote it (without a
  * leading ./, which names the same file; with a leading /, which may not).
  */
-async function scriptAssets(parsed: Document, path: string, resolve: AssetResolver, budget: { left: number }): Promise<Record<string, string>> {
+async function scriptAssets(parsed: Document, path: string, resolve: AssetResolver, budget: { left: number },
+  inlinedSources: readonly string[] = []): Promise<Record<string, string>> {
   const names = new Set<string>();
+  const texts = [...inlinedSources];
   for (const script of Array.from(parsed.querySelectorAll('script:not([src])'))) {
     const type = (script.getAttribute('type') || '').trim().toLowerCase();
     if (type && type !== 'module' && !/^(?:text|application)\/(?:java|ecma)script$/.test(type)) continue;
-    for (const match of (script.textContent || '').matchAll(SCRIPT_ASSET)) names.add(match[2] === '/' ? `/${match[3]}` : match[3]);
+    texts.push(script.textContent || '');
   }
+  // A path in a module the page imports is still resolved by the page's document (fetch and the loaders resolve
+  // against it, not against the module), so every source is read against the page's own path.
+  for (const text of texts) for (const match of text.matchAll(SCRIPT_ASSET)) names.add(match[2] === '/' ? `/${match[3]}` : match[3]);
   const assets: Record<string, string> = {};
   for (const name of names) {
     const target = joinPath(path, name);
@@ -182,7 +193,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   const path = options.path ?? 'index.html';
   const budget = { left: options.inlineBudget ?? 24 * 1024 * 1024 };
-  const inlinedSpecifiers = new Set<string>();
+  const inlined: Inlined = { specifiers: new Set<string>(), sources: [] };
   // The preview cannot be sent elsewhere by the page's own metadata.
   parsed.querySelectorAll('meta[http-equiv="refresh" i], base').forEach(element => element.remove());
   if (options.resolve) {
@@ -199,7 +210,13 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
           const text = decodeText(asset.bytes);
           if (text === null) continue;
           element.removeAttribute('src');
-          element.textContent = element.getAttribute('type') === 'module' ? await inlineModule(text, target!, resolve, budget, 0, inlinedSpecifiers) : text;
+          if (element.getAttribute('type') === 'module') element.textContent = await inlineModule(text, target!, resolve, budget, 0, inlined);
+          else {
+            // A classic canvas script may still import modules (import()) and load canvas files by path.
+            for (const specifier of scriptSpecifiers(text, true)) inlined.specifiers.add(specifier);
+            inlined.sources.push(text);
+            element.textContent = text;
+          }
         } else if (tag === 'link' && /stylesheet/i.test(element.getAttribute('rel') ?? '')) {
           const text = decodeText(asset.bytes);
           if (text === null) continue;
@@ -214,7 +231,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
     for (const element of Array.from(parsed.querySelectorAll('img[srcset], source[srcset]'))) element.removeAttribute('srcset');
     for (const style of Array.from(parsed.querySelectorAll('style'))) style.textContent = await inlineCss(style.textContent ?? '', path, resolve, budget);
     for (const script of Array.from(parsed.querySelectorAll('script[type="module"]:not([src])'))) {
-      script.textContent = await inlineModule(script.textContent ?? '', path, resolve, budget, 0, inlinedSpecifiers);
+      script.textContent = await inlineModule(script.textContent ?? '', path, resolve, budget, 0, inlined);
     }
   }
   // A library AwwO supplies (previewLibraries.ts, e.g. three.js r128) runs from its pinned copy, byte for byte the
@@ -224,8 +241,8 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   // Files a script loads by a canvas path (a model, a texture, a sound: `hero/model-1.glb`) come from the same bytes,
   // handed to fetch, XMLHttpRequest and media elements by that path (scriptAssets below); read before any library is
   // inlined, so only the page's own scripts are searched.
-  const assets = options.resolve ? await scriptAssets(parsed, path, options.resolve, budget) : {};
-  const needs = previewScriptNeeds(source, [...inlinedSpecifiers]);
+  const assets = options.resolve ? await scriptAssets(parsed, path, options.resolve, budget, inlined.sources) : {};
+  const needs = previewScriptNeeds(source, [...inlined.specifiers]);
   const supplied = needs.libraries.length ? await loadPreviewLibraries(needs).catch(() => null) : null;
   if (supplied) {
     for (const script of Array.from(parsed.querySelectorAll('script[src]'))) {
