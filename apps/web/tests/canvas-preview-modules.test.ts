@@ -138,6 +138,49 @@ describe('three.js as ES modules, supplied through the page import map', () => {
     expect(imports.three).toMatch(/^data:text\/javascript;base64,/);
     expect(imports['three/addons/postprocessing/UnrealBloomPass.js']).toMatch(/^data:/);
   });
+
+  it('never takes an inherited property for a pinned file', () => {
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      expect(pinnedModuleFile(`${THREE_MODULES_BASE}${name}`), name).toBeNull();
+      const needs = previewScriptNeeds(`<script type="module">import '${THREE_MODULES_BASE}${name}';</script>`);
+      expect(needs.modules, name).toBeUndefined();
+    }
+  });
+
+  it('reports imports it cannot satisfy: a bare name mapped nowhere or to a file, and three sent elsewhere under pinned addons', () => {
+    const relative = previewScriptNeeds(`<script type="importmap">{"imports":{"three":"./three.module.js"}}</script><script type="module">import * as THREE from 'three';</script>`);
+    expect(relative.blocked).toEqual(['./three.module.js']);
+    const unmapped = previewScriptNeeds(`<script type="module">import * as THREE from 'three';</script>`);
+    expect(unmapped.blocked).toEqual(['three']);
+    const elsewhere = previewScriptNeeds(`<script type="importmap">{"imports":{"three":"https://esm.sh/three@0.170.0","three/addons/":"${THREE_MODULES_BASE}examples/jsm/"}}</script>
+      <script type="module">import { OrbitControls } from 'three/addons/controls/OrbitControls.js';</script>`);
+    expect(elsewhere.libraries).toEqual([THREE_MODULES_LIBRARY]);
+    expect(elsewhere.blocked).toEqual(['esm.sh']);
+    // A relative module the live page may inline from the canvas files, and a page's own data: module, are not reported.
+    expect(previewScriptNeeds(`<script type="module">import './game.js'; import 'data:text/javascript,export default 1';</script>`).blocked).toEqual([]);
+  });
+
+  it('keeps a page scope from sending the supplied modules\' own imports elsewhere', async () => {
+    const page = `<!doctype html><html><head><script type="importmap">{"imports":{"three":"${THREE_MODULES_BASE}build/three.module.js","three/addons/":"${THREE_MODULES_BASE}examples/jsm/"},
+      "scopes":{"data:text/":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js"},"https://example.test/":{"x":"https://example.test/x.js"}}}</script></head>
+      <body><script type="module">import { OrbitControls } from 'three/addons/controls/OrbitControls.js';</script></body></html>`;
+    for (const html of [htmlPreviewDocument(page, true, await loadPreviewLibraries(previewScriptNeeds(page))), await buildLiveDocument(page)]) {
+      const map = JSON.parse(importMapOf(html).maps[0].textContent!) as { scopes?: Record<string, unknown> };
+      expect(map.scopes).toEqual({ 'https://example.test/': { x: 'https://example.test/x.js' } });
+    }
+  });
+
+  it('never lets a module src close the script element it is turned into', async () => {
+    const src = `${THREE_MODULES_BASE}build/three.module.js?x=</script><div id=owned>owned</div><script>`;
+    const page = `<html><body><script type="module" src="${src.replace(/</g, '&lt;').replace(/>/g, '&gt;')}"></script></body></html>`;
+    const code = await loadPreviewLibraries(previewScriptNeeds(page));
+    for (const html of [htmlPreviewDocument(page, true, code), await buildLiveDocument(page)]) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      expect(doc.getElementById('owned')).toBeNull();
+      const module = Array.from(doc.querySelectorAll('script[type="module"]')).find(script => script.textContent?.startsWith('import '))!;
+      expect(module.textContent).toContain('\\u003c/script>');
+    }
+  });
 });
 
 describe('canvas files a page script loads by path', () => {
@@ -183,5 +226,24 @@ describe('canvas files a page script loads by path', () => {
     expect(image.src).toBe('data:model/gltf-binary;base64,AA==');
     image.src = 'https://cdn.example/a.png';
     expect(image.src).toBe('https://cdn.example/a.png');
+  });
+
+  it('resolves a root-relative path from the canvas root, and keeps it apart from the page-relative one', async () => {
+    const nested = `<!doctype html><html><body><script>fetch("/hero/model-1.glb"); fetch("hero/model-1.glb");</script></body></html>`;
+    const tree: Record<string, Uint8Array> = { 'hero/model-1.glb': new Uint8Array([1]), 'pages/hero/model-1.glb': new Uint8Array([2]) };
+    const lookup = async (target: string) => tree[target] ? { bytes: tree[target], name: target.split('/').pop()! } : null;
+    const guard = new DOMParser().parseFromString(await buildLiveDocument(nested, { path: 'pages/index.html', resolve: lookup }), 'text/html')
+      .head.querySelector('script')!.textContent!;
+    expect(guard).toContain('"/hero/model-1.glb":"data:model/gltf-binary;base64,AQ=="');
+    expect(guard).toContain('"hero/model-1.glb":"data:model/gltf-binary;base64,Ag=="');
+    const fetched: unknown[] = [];
+    const sandbox = { fetch: (input: unknown) => { fetched.push(input); return Promise.resolve(input); } } as Record<string, unknown>;
+    Object.assign(sandbox, { HTMLImageElement: undefined, HTMLMediaElement: undefined, HTMLSourceElement: undefined, Audio: undefined });
+    new Function('window', 'XMLHttpRequest', 'Element', assetScript({ '/hero/model-1.glb': 'data:,root', 'hero/model-1.glb': 'data:,page' }))(
+      sandbox, class { open() { /* noop */ } }, class { setAttribute() { /* noop */ } });
+    const fetch = sandbox.fetch as (input: unknown) => Promise<unknown>;
+    await fetch('/hero/model-1.glb');
+    await fetch('./hero/model-1.glb');
+    expect(fetched).toEqual(['data:,root', 'data:,page']);
   });
 });

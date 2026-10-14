@@ -1,5 +1,5 @@
 import { PAGE_ERROR_SCRIPT } from './pageErrors';
-import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from './previewImportMap';
+import { applyModuleEntries, moduleImport, PREVIEW_IMPORT_MAP_KEY } from './previewImportMap';
 
 /** Strip only a complete HTML fence; preserve every byte of the document inside it. */
 export function htmlDocumentSource(value: string): string {
@@ -161,7 +161,7 @@ export function htmlPreviewDocument(value: string, interactive = false, librarie
       const library = html ? libraries?.get(src) : undefined;
       const pinnedModule = html && src !== '' && (element.getAttribute('type') || '').trim().toLowerCase() === 'module' && modules[src] !== undefined;
       if (library !== undefined) element.textContent = library;
-      else if (pinnedModule) element.textContent = `import ${JSON.stringify(src)};`;
+      else if (pinnedModule) element.textContent = moduleImport(src);
       else if (element.hasAttribute('src') || element.hasAttribute('href') || element.hasAttribute('xlink:href')) { element.remove(); continue; }
       for (const attribute of Array.from(element.attributes)) if (attribute.name !== 'type') element.removeAttribute(attribute.name);
     } else filterPreviewAttributes(element, interactive);

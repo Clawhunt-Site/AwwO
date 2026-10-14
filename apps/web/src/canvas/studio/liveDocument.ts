@@ -114,15 +114,19 @@ async function inlineModule(source: string, modulePath: string, resolve: AssetRe
 
 // A canvas file a script names in a string literal: `<node id>/<file>` (after an optional ./ or /), of a kind a page
 // loads at run time rather than shows from markup: a model, a texture or picture, a clip, a sound, an HDR or data file.
-const SCRIPT_ASSET = /(['"`])(?:\.\/|\/)?([A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_.%-]+\.(?:glb|gltf|bin|png|jpe?g|webp|gif|avif|hdr|mp4|webm|mov|mp3|wav|ogg|m4a|json))\1/gi;
+// A leading / names it from the canvas root, as a page served there would; ./ or nothing, from the page's own folder.
+const SCRIPT_ASSET = /(['"`])(\.\/|\/)?([A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_.%-]+\.(?:glb|gltf|bin|png|jpe?g|webp|gif|avif|hdr|mp4|webm|mov|mp3|wav|ogg|m4a|json))\1/gi;
 
-/** The canvas files a page's own scripts name, each as a data: URL keyed by the path as the script wrote it. */
+/**
+ * The canvas files a page's own scripts name, each as a data: URL keyed by the path as the script wrote it (without a
+ * leading ./, which names the same file; with a leading /, which may not).
+ */
 async function scriptAssets(parsed: Document, path: string, resolve: AssetResolver, budget: { left: number }): Promise<Record<string, string>> {
   const names = new Set<string>();
   for (const script of Array.from(parsed.querySelectorAll('script:not([src])'))) {
     const type = (script.getAttribute('type') || '').trim().toLowerCase();
     if (type && type !== 'module' && !/^(?:text|application)\/(?:java|ecma)script$/.test(type)) continue;
-    for (const match of (script.textContent || '').matchAll(SCRIPT_ASSET)) names.add(match[2]);
+    for (const match of (script.textContent || '').matchAll(SCRIPT_ASSET)) names.add(match[2] === '/' ? `/${match[3]}` : match[3]);
   }
   const assets: Record<string, string> = {};
   for (const name of names) {
@@ -144,7 +148,8 @@ async function scriptAssets(parsed: Document, path: string, resolve: AssetResolv
 export function assetScript(assets: Readonly<Record<string, string>>): string {
   return ';(()=>{const F=' + JSON.stringify(assets).replace(/</g, '\\u003c') + ';'
     + "const L=u=>{if(u==null)return;let s;try{s=typeof u==='string'?u:String(u.url||u)}catch(e){return}s=s.split(/[?#]/)[0];"
-    + "const k=s.replace(/^\\.?\\//,'');if(Object.prototype.hasOwnProperty.call(F,k))return F[k];for(const n in F)if(s.endsWith('/'+n))return F[n]};"
+    + "const H=k=>Object.prototype.hasOwnProperty.call(F,k);if(H(s))return F[s];"
+    + "const k=s.replace(/^\\.?\\//,'');const R=/^\\/(?!\\/)/.test(s);if(!R&&H(k))return F[k];if(!R)for(const n in F)if(s.endsWith('/'+n.replace(/^\\//,'')))return F[n]};"
     + 'const f=window.fetch;if(f)window.fetch=function(i,o){const d=L(i);return f.call(this,d||i,o)};'
     + 'const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){const d=L(u);if(d)arguments[1]=d;return x.apply(this,arguments)};'
     + 'const p=(C,n)=>{const s=C&&Object.getOwnPropertyDescriptor(C.prototype,n);if(!s||!s.set)return;'
