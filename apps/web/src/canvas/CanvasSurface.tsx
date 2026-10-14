@@ -63,6 +63,7 @@ import { AddNodeMenu, type AddNodeKind } from './AddNodeMenu';
 import { InspectorPanel } from './InspectorPanel';
 import { mediaCatalogueOf, type MediaCatalogueState } from './MediaNodeSettings';
 import { mediaGroupLabel, mediaKindOf, mediaModelLabel, mediaModelsOf, readMediaCatalogue, type MediaKind } from './mediaCatalog';
+import type { ModelNameSources } from './modelNames';
 import { replaceRetiredMediaModels } from './retiredMediaModels';
 import { runScopeWithoutMedia } from './runScope';
 import type { NodeModelChoice } from './NodeModelPicker';
@@ -308,8 +309,8 @@ function useLiveCompanies(apiBase: string): { companies: Array<{ id: string; nam
 }
 
 export interface CanvasResultsOptions {
-  /** The host's record of the run behind the result. */
-  receipt?: (final: CanvasNode | null) => ReactNode;
+  /** The host's record of the run behind the result, given what this canvas can name models with. */
+  receipt?: (final: CanvasNode | null, names: ModelNameSources) => ReactNode;
   /** Open in the 成果 view (a link to a canvas's results). */
   initialView?: 'canvas' | 'results';
   /** The view changed; a host can keep it in the address. */
@@ -3287,6 +3288,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const currentModelCatalogue = cloudScope && palette?.tenantId === cloudScope.tenant.id && palette.canvasId === cloudScope.canvasId
     ? palette.models : undefined;
+  // What a run report names models with (the 成果 view's receipt): this workspace's chat models and media catalogue.
+  const modelNames = useMemo<ModelNameSources>(() => ({ models: currentModelCatalogue, media: mediaCatalogueOf(mediaState) }),
+    [currentModelCatalogue, mediaState]);
   // The models a node's own chat can switch to, in its composer: the workspace's chat models for an agent, the
   // media catalogue's models of its kind for an image, video or 3D node. Stable arrays, so cards stay memoised.
   const chatModelChoices = useMemo<NodeModelChoice[]>(() => (currentModelCatalogue ?? []).map(model => ({
@@ -3365,7 +3369,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         notice={initializing ? { kind: 'status', text: locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…' }
           : handoffNote ? { kind: 'alert', text: handoffNote, onDismiss: () => setHandoffNote('') } : undefined}
         onOpenNode={id => { focusNode(id); refocus('.awwo-view-switch button'); }}
-        onBack={() => { changeStageView('canvas'); refocus('.awwo-view-switch button'); }} receipt={results?.receipt}
+        onBack={() => { changeStageView('canvas'); refocus('.awwo-view-switch button'); }} receipt={results?.receipt} modelNames={modelNames}
         studio={results?.studio} studioTitle={t('studio.heading')} /> : undefined}
       accountControl={<div className="awwo-account-controls" inert={bindingLocked || initializing}>{accountControl}</div>}
       toolbar={<>{!cloudScope && <GraphSettings doc={doc} selectedNodeId={selection[0]} selectedEdgeId={selectedEdgeId}
@@ -3528,6 +3532,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           nodes={nodes}
           runs={runs}
           modelCatalogue={currentModelCatalogue}
+          mediaCatalogue={mediaCatalogueOf(mediaState)}
           runStartedAt={runStartedAt}
           now={now}
           onClose={() => setTimelineOpen(false)}

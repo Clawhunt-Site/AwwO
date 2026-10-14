@@ -15,7 +15,9 @@
 
 import type { CSSProperties } from 'react';
 import type { CanvasNode } from './canvasDoc';
+import { mediaGroupLabel, type MediaCatalogue } from './mediaCatalog';
 import type { ModelPaletteSelection } from './modelPalette';
+import { nodeModelName, runsOnMediaModel } from './modelNames';
 import type { RunNodeStatus } from './runGraph';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
 import { recoveryDetailMessage } from './surfaceMessages';
@@ -80,6 +82,7 @@ export function RunTimeline({
   onClose,
   onOpenNode,
   modelCatalogue,
+  mediaCatalogue,
   style,
 }: {
   nodes: ReadonlyArray<CanvasNode>;
@@ -93,6 +96,8 @@ export function RunTimeline({
   onOpenNode?: (nodeId: string) => void;
   /** A scope-checked catalogue lets cloud model selectors render as their public labels. */
   modelCatalogue?: readonly ModelPaletteSelection[];
+  /** The workspace's media catalogue, for the generic names of its image, video and 3D models. */
+  mediaCatalogue?: MediaCatalogue | null;
   style?: CSSProperties;
 }) {
   const { t, locale } = useCanvasI18n();
@@ -131,18 +136,17 @@ export function RunTimeline({
           const barLeft = started ? ((started - origin) / span) * 100 : 0;
           const barWidth = started ? (((ended ?? now) - started) / span) * 100 : 0;
           const elapsed = started != null ? fmtElapsed((ended ?? now) - started) : '—';
-          const modelLabel = node.kind === 'session' && node.model
-            ? modelCatalogue?.find(model => model.runtime === node.runtime && model.model === node.model)?.label
-              || (/^byok_[a-zA-Z0-9_-]+$/.test(node.model)
-                ? `${locale === 'zh' ? '当前目录未包含该模型' : 'Model not in current catalogue'} · ${node.model.slice(-8)}`
-                : node.model)
-            : '';
+          const modelLabel = node.kind === 'session' ? nodeModelName(node, { models: modelCatalogue, media: mediaCatalogue }, locale) : '';
+          // A media node runs on AwwO's media generation, whatever runtime field it carries: its row says 媒体 and the
+          // model's generic name, never a runtime it does not use or the id that names who generates it.
           const runtime =
             node.kind === 'form'
               ? t('timeline.form')
-              : node.runtime
-                ? `${node.runtime}${modelLabel ? ` · ${modelLabel}` : ''}`
-                : t('timeline.runtimeUnset');
+              : runsOnMediaModel(node)
+                ? [mediaGroupLabel(locale), modelLabel].filter(Boolean).join(' · ')
+                : node.runtime
+                  ? `${node.runtime}${modelLabel ? ` · ${modelLabel}` : ''}`
+                  : t('timeline.runtimeUnset');
           return (
             <div key={node.id} className="canvas-runline-row" data-testid={`runline-${node.id}`}>
               <span className="canvas-runline-name">

@@ -4,6 +4,7 @@
 // completed this step"). It reads the run panel's poll (graphRuns feed) instead of polling again.
 import { useEffect, useState } from 'react';
 import { caseRunLabel, type CanvasNode } from '../canvas/canvasDoc';
+import { nodeModelName, type ModelNameSources } from '../canvas/modelNames';
 import { api } from './api';
 import { graphPath, latestGraphRuns, publishGraphRuns, subscribeGraphRuns, validGraphRunList, type GraphRunSnapshot } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
@@ -20,7 +21,9 @@ function duration(t: T, from: string, to?: string): string {
   return minutes < 60 ? t(`${minutes} 分 ${seconds % 60} 秒`, `${minutes}m ${seconds % 60}s`) : t(`${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`, `${Math.floor(minutes / 60)}h ${minutes % 60}m`);
 }
 
-export function CanvasRunReceipt({ tenantId, canvasId, final }: { tenantId: string; canvasId: string; final: CanvasNode | null }) {
+export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantId: string; canvasId: string; final: CanvasNode | null;
+  /** What the canvas names models with (its chat models and media catalogue); without it a media model is named by its kind. */
+  names?: ModelNameSources }) {
   const { locale, t } = useSaaSPreferences();
   const [runs, setRuns] = useState(() => latestGraphRuns(tenantId, canvasId));
   const [failed, setFailed] = useState(false);
@@ -57,12 +60,14 @@ export function CanvasRunReceipt({ tenantId, canvasId, final }: { tenantId: stri
       else if (node.state === 'cached') counts.cached++;
       else if (node.state === 'failed' || node.state === 'blocked' || node.state === 'cancelled') counts.failed++;
     }
-    // The models of the steps that actually ran in it, as the run recorded them.
+    // The models of the steps that actually ran in it, as the run recorded them, named as the canvas names them: a media
+    // model only by its generic name (图片 · 高清), never by the id that says who generates it.
     const ran = new Set(run.nodes.filter(node => node.state === 'done' || node.state === 'failed').map(node => node.nodeId));
     const models = new Map<string, number>();
     for (const node of run.document?.nodes ?? []) {
       if (!node || node.kind !== 'session' || !ran.has(node.id) || typeof node.model !== 'string' || !node.model) continue;
-      models.set(node.model, (models.get(node.model) ?? 0) + 1);
+      const name = nodeModelName(node, names ?? {}, locale);
+      if (name) models.set(name, (models.get(name) ?? 0) + 1);
     }
     const scope = Array.isArray(run.scope) ? run.scope : [];
     const whole = Boolean(run.document?.nodes.length) && run.document!.nodes.every(node => node && scope.includes(node.id));

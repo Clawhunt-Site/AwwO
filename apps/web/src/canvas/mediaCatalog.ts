@@ -135,6 +135,10 @@ export async function readMediaCatalogue(signal?: AbortSignal): Promise<MediaCat
 export const mediaKindOf = (agentKind: string): MediaKind | null =>
   agentKind === 'image' || agentKind === 'video' || agentKind === 'model3d' ? agentKind : null;
 
+/** Whether a selector is a media model's id. Such an id names the service and model family behind it, so it is never
+ *  shown to users: see modelNames.ts. */
+export const isMediaModelId = (model: unknown): model is string => typeof model === 'string' && MODEL_ID.test(model);
+
 export function mediaModelsOf(catalogue: MediaCatalogue | null | undefined, kind: MediaKind): MediaModel[] {
   return catalogue?.available ? catalogue.models.filter(model => model.kind === kind) : [];
 }

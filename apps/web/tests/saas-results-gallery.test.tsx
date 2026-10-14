@@ -8,6 +8,7 @@ import { publishGraphRuns, type GraphRunSnapshot } from '../src/saas/graphRuns';
 import { createSessionNode, type CanvasNode, type NodeOutput, type SessionNode } from '../src/canvas/canvasDoc';
 import type { CanvasRecord, Tenant } from '../src/saas/api';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
+import { parseMediaCatalogue } from '../src/canvas/mediaCatalog';
 
 const tenant: Tenant = { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const now = Date.now();
@@ -329,6 +330,36 @@ describe('the 成果 view’s run receipt', () => {
     expect(within(region).getByText('done-run-1')).toBeVisible();
     expect(within(region).getByText('运行完成不等于人工验收通过。完整过程见「运行记录」。')).toBeVisible();
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('names a media step’s model only generically and the others by the canvas’s labels, never by a media model’s id', () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const media = (id: string, kind: 'image' | 'video', model: string): SessionNode =>
+      ({ ...createSessionNode(kind, { x: 0, y: 0 }), id, title: id, runtime: 'openai-agents', model });
+    const made = run('media-run', 'done', {
+      scope: ['build', 'clip', 'still-1', 'still-2'],
+      nodes: [{ nodeId: 'build', state: 'done' }, { nodeId: 'clip', state: 'done' }, { nodeId: 'still-1', state: 'done' }, { nodeId: 'still-2', state: 'failed' }],
+      document: { version: 2, updatedAt: 1, waypoints: [], view: null, edges: [], nodes: [{ ...finalNode, runtime: 'pi', model: 'bedrock.claude-opus-5-5' },
+        media('clip', 'video', 'xt.xtasy-v3'), media('still-1', 'image', 'xt.seedream-5-pro'), media('still-2', 'image', 'xt.seedream-5-pro')] },
+    });
+    publishGraphRuns('tenant-a', 'canvas-media', [made]);
+    const names = {
+      models: [{ key: 'opus', runtime: 'pi' as const, model: 'bedrock.claude-opus-5-5', label: 'Claude Opus 5.5', providerGroup: 'claude' as const, available: true }],
+      media: parseMediaCatalogue({ configured: true, available: true, models: [{ id: 'xt.seedream-5-pro', name: 'seedream 5 pro', label: ['图片 · 高清', 'Image · HD'],
+        vendor: 'xtasy', kind: 'image', prompt: { minLength: 1, maxLength: 2000 }, params: [] }] }),
+    };
+    const shown = (withNames: boolean) => <SaaSPreferencesProvider><CanvasRunReceipt tenantId="tenant-a" canvasId="canvas-media" final={finalNode}
+      {...(withNames ? { names } : {})} /></SaaSPreferencesProvider>;
+    const { rerender } = render(shown(true));
+    let region = screen.getByRole('region', { name: '运行回执' });
+    // The clip's model is not in this catalogue, so its kind names it; the two pictures share one generic name.
+    expect(within(region).getByText('Claude Opus 5.5（1 步），视频（1 步），图片 · 高清（2 步）')).toBeVisible();
+    expect(region.innerHTML).not.toMatch(/xt\.|xtasy|seedream|bedrock/i);
+    // A host that cannot name models still never shows a media model's id; a chat model keeps its selector, as before.
+    rerender(shown(false));
+    region = screen.getByRole('region', { name: '运行回执' });
+    expect(within(region).getByText('bedrock.claude-opus-5-5（1 步），视频（1 步），图片（2 步）')).toBeVisible();
+    expect(region.innerHTML).not.toMatch(/xt\.|xtasy|seedream/i);
   });
 
   it('reads the runs itself, once, when nothing has read them yet, and follows later polls', async () => {

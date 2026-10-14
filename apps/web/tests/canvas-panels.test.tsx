@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { InspectorPanel } from '../src/canvas/InspectorPanel';
 import { RunControls, summaryNote } from '../src/canvas/RunControls';
 import { RunTimeline, type RunView } from '../src/canvas/RunTimeline';
+import { parseMediaCatalogue } from '../src/canvas/mediaCatalog';
 import { CommandBar } from '../src/canvas/CommandBar';
 import { createFormNode, createSessionNode, type FormNode, type SessionNode } from '../src/canvas/canvasDoc';
 import type { NodeSession } from '../src/canvas/sessions';
@@ -394,6 +395,24 @@ describe('RunTimeline', () => {
     const missingRow = within(screen.getByTestId('runline-missing'));
     expect(missingRow.getByText('pi · 当前目录未包含该模型 · 87654321')).toBeVisible();
     expect(missingRow.queryByText(/byok_scope_missing/)).toBeNull();
+  });
+
+  it('names a media node’s model only generically, under 媒体, never by its id or a runtime it does not use', () => {
+    const clip = sessionNode({ id: 'clip', title: 'Opening shot', agentKind: 'video', runtime: 'openai-agents', model: 'xt.xtasy-v3' });
+    const still = sessionNode({ id: 'still', title: 'Rooftop garden', agentKind: 'image', runtime: 'openai-agents', model: 'xt.seedream-5-pro' });
+    const page = sessionNode({ id: 'page', title: 'Brand page', runtime: 'pi', model: 'bedrock.claude-opus-5-5' });
+    const media = parseMediaCatalogue({ configured: true, available: true, models: [{ id: 'xt.xtasy-v3', name: 'xtasy v3', label: ['视频 · 标准', 'Video · Standard'],
+      vendor: 'xtasy', kind: 'video', prompt: { minLength: 1, maxLength: 2000 }, params: [] }] });
+    render(<RunTimeline nodes={[clip, still, page]} runs={{ clip: { state: 'done' }, still: { state: 'done' }, page: { state: 'running' } }}
+      modelCatalogue={[{ key: 'opus', runtime: 'pi', model: 'bedrock.claude-opus-5-5', label: 'Claude Opus 5.5', providerGroup: 'claude', available: true }]}
+      mediaCatalogue={media} runStartedAt={1_000} now={2_000} onClose={vi.fn()} />);
+    // In the catalogue: its generic name. Not in it (a model this workspace is not offered, or an unread catalogue): its kind.
+    const clipName = within(screen.getByTestId('runline-clip')).getByText('媒体 · 视频 · 标准');
+    expect(clipName).toBeVisible();
+    expect(clipName.getAttribute('title')).toBe('媒体 · 视频 · 标准');
+    expect(within(screen.getByTestId('runline-still')).getByText('媒体 · 图片')).toBeVisible();
+    expect(within(screen.getByTestId('runline-page')).getByText('pi · Claude Opus 5.5')).toBeVisible();
+    expect(screen.getByRole('region', { name: '执行时间线' }).innerHTML).not.toMatch(/xt\.|xtasy|seedream|openai-agents/i);
   });
 });
 

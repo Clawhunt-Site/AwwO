@@ -60,7 +60,7 @@ function canvasResultsOptions(tenantId: string, canvasId: string): CanvasResults
       if (view === 'results') url.searchParams.set('view', 'results'); else url.searchParams.delete('view');
       history.replaceState(history.state, '', url.pathname + url.search + url.hash);
     },
-    receipt: final => <CanvasRunReceipt tenantId={tenantId} canvasId={canvasId} final={final} />,
+    receipt: (final, names) => <CanvasRunReceipt tenantId={tenantId} canvasId={canvasId} final={final} names={names} />,
     studio: true,
   };
 }

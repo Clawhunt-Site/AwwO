@@ -57,8 +57,16 @@ describe('the 成果 view', () => {
     expect(screen.queryByText('添加交付要求')).toBeNull();
     const steps = within(screen.getByRole('complementary', { name: '怎么做出来的' }));
     expect(steps.getAllByRole('button').map(button => button.textContent)).toEqual(['玩法与数值运行交付', '可玩试玩关成果运行交付', '试玩验收运行交付']);
-    expect(receipt).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'build' }));
+    // The host's receipt gets the result's step and what the canvas names models with (nothing, in this bare view).
+    expect(receipt).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'build' }), {});
     expect(screen.getByText('回执内容')).toBeVisible();
+  });
+
+  it('hands the receipt the canvas’s model-name sources, so it names models as the canvas does', () => {
+    const receipt = vi.fn(() => null);
+    const modelNames = { models: [], media: null };
+    view({ receipt, modelNames });
+    expect(receipt).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'build' }), modelNames);
   });
 
   it('shows the acceptance step as an agent’s check, never as a person’s sign-off', () => {

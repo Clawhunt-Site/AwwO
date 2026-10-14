@@ -36,6 +36,7 @@ import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
+import { unlistedModelLabel } from './modelNames';
 import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
@@ -921,7 +922,7 @@ export const SessionTile = memo(function SessionTile({
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
                     accessory={node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team
-                      ? <NodeModelPicker choices={modelChoices} value={modelChoiceKey(node)} currentLabel={node.model || undefined}
+                      ? <NodeModelPicker choices={modelChoices} value={modelChoiceKey(node)} currentLabel={unlistedModelLabel(node, locale)}
                         disabled={busy || readOnly} disabledReason={busy ? t('tile.taskRunning') : undefined} onChange={key => onChangeModel(nodeId, key)} /> : undefined}
                     blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(conversationError)}
                     blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : conversationError || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}

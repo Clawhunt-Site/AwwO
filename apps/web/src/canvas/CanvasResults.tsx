@@ -8,6 +8,7 @@ import { caseRunLabel, type CanvasEdge, type CanvasNode, type ReviewGraphPolicy 
 import { canvasResult, deliveredItems, type DeliveredItem, type StepDelivery } from './canvasResultModel';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { DeliverableMarkdown, NodeDeliverables } from './NodeDeliverables';
+import type { ModelNameSources } from './modelNames';
 import type { RunNodeStatus } from './runGraph';
 import { storedArtifactUrl } from '../saas/canvasBridge';
 import { DeliverableStudio } from './studio/DeliverableStudio';
@@ -31,8 +32,10 @@ export interface CanvasResultsProps {
   /** Back to building, with this node open. */
   onOpenNode: (nodeId: string) => void;
   onBack: () => void;
-  /** The host's record of the run behind the result. */
-  receipt?: (final: CanvasNode | null) => ReactNode;
+  /** The host's record of the run behind the result, given what the canvas can name models with. */
+  receipt?: (final: CanvasNode | null, names: ModelNameSources) => ReactNode;
+  /** The workspace's chat models and media catalogue, so the receipt names models as the canvas does. */
+  modelNames?: ModelNameSources;
   /** Show the deliverables in the results studio (file tree, search, every file running or rendered) instead of the
    *  single-result viewer. The hosted app opts in. */
   studio?: boolean;
@@ -44,6 +47,7 @@ const RUN_STATE_KEY: Record<RunNodeStatus['state'], CanvasTextKey> = {
   waiting: 'results.stateWaiting', running: 'results.stateRunning', done: 'results.stateRun', failed: 'results.stateFailed',
   blocked: 'results.stateBlocked', cancelled: 'results.stateCancelled', cached: 'results.stateCached',
 };
+const NO_MODEL_NAMES: ModelNameSources = {};
 const DELIVERY_KEY: Record<StepDelivery['state'], CanvasTextKey> = {
   run: 'results.stateRun', partial: 'results.statePartial', manual: 'results.stateManual', case: 'results.stateCase', none: 'results.stateNone',
 };
@@ -64,7 +68,7 @@ function stepChip(step: StepDelivery, runs: CanvasResultsProps['runs'], running:
   return { tone: step.state === 'run' ? 'run' : step.state === 'none' ? 'idle' : 'caveat', label: t(DELIVERY_KEY[step.state]) };
 }
 
-export function CanvasResults({ nodes, edges, execution, runs, running, readOnly, runUnavailableReason, onRun, notice, onOpenNode, onBack, receipt, studio = false, studioTitle }: CanvasResultsProps) {
+export function CanvasResults({ nodes, edges, execution, runs, running, readOnly, runUnavailableReason, onRun, notice, onOpenNode, onBack, receipt, modelNames, studio = false, studioTitle }: CanvasResultsProps) {
   const { t } = useCanvasI18n();
   const result = useMemo(() => canvasResult({ nodes: [...nodes], edges: [...edges], execution }), [nodes, edges, execution]);
   // Every file of the canvas, so a step's page shows the pictures other nodes made for it (NodeDeliverables).
@@ -157,7 +161,7 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
             })}</ul>
           </li>)}</ol>
         </section>
-        {receipt?.(result.final?.node ?? null)}
+        {receipt?.(result.final?.node ?? null, modelNames ?? NO_MODEL_NAMES)}
       </aside>
     </div>
   </section>;
