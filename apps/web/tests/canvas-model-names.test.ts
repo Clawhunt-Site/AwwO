@@ -2,7 +2,9 @@
 // it (owner decisions 2026-10-11). These pin the shared rule the execution timeline, the run receipt and a node's
 // model chip use.
 import { describe, expect, it } from 'vitest';
+import { caseRunLabel } from '../src/canvas/canvasDoc';
 import { parseMediaCatalogue } from '../src/canvas/mediaCatalog';
+import { hideMediaModelIds, isMediaModelId } from '../src/canvas/mediaModelIds';
 import { mediaModelName, nodeModelName, runsOnMediaModel, unlistedModelLabel } from '../src/canvas/modelNames';
 import type { ModelPaletteSelection } from '../src/canvas/modelPalette';
 
@@ -51,5 +53,28 @@ describe('the name a node’s model is reported by', () => {
     expect(unlistedModelLabel({ agentKind: 'video', model: 'xt.xtasy-v3' }, 'zh')).toBe('视频');
     expect(unlistedModelLabel({ agentKind: 'llm', runtime: 'pi', model: 'qwen3.8-27b-p6' }, 'zh')).toBe('qwen3.8-27b-p6');
     expect(unlistedModelLabel({ agentKind: 'image', model: '' }, 'zh')).toBeUndefined();
+  });
+
+  it('knows every generator the API names media models after, the Jimeng models (jm.*) included', () => {
+    for (const id of ['xt.seedream-5-pro', 'rh.nano-banana-2', 'tripo.p1', 'jm.image-cinema', 'jm.video-express']) expect(isMediaModelId(id)).toBe(true);
+    for (const id of ['bedrock.claude-opus-5-5', 'qwen3.8-27b-p6', 'xtasy-v3', 'xt.', 'jm.Image', ' xt.seedream-5-pro', 42, undefined]) expect(isMediaModelId(id)).toBe(false);
+    expect(nodeModelName({ agentKind: 'llm', runtime: 'pi', model: 'jm.image-cinema' }, { models: chat }, 'en')).toBe('Media model');
+    expect(nodeModelName({ agentKind: 'image', model: 'jm.image-cinema' }, { media }, 'zh')).toBe('图片');
+  });
+
+  it('hides media model ids in a raw record, and only those', () => {
+    const record = JSON.stringify({ type: 'awwo.media', version: 1, kind: 'image', model: 'xt.seedream-5-pro', items: [{ artifactId: 'a1', name: 'image.png' }] });
+    expect(hideMediaModelIds(record)).toBe(record.replace('xt.seedream-5-pro', '[media model]'));
+    expect(hideMediaModelIds('made by jm.video-cinema and rh.gpt-image-2; then tripo.p1.')).toBe('made by [media model] and [media model]; then [media model].');
+    // Not an id: inside a word, a host name, or a chat model.
+    const kept = 'next.example.com, context.xt.seedream-5-pro, bedrock.claude-opus-5-5, xt.seedream-5-pro.v2, file_xt.a';
+    expect(hideMediaModelIds(kept)).toBe(kept);
+  });
+
+  it('leaves a media model’s id out of a copied case recording’s label', () => {
+    const at = Date.UTC(2026, 9, 14);
+    expect(caseRunLabel({ text: '', at, source: 'case', model: 'Claude Opus 5.5' })).toBe('Claude Opus 5.5 · 2026-10-14');
+    expect(caseRunLabel({ text: '', at, source: 'case', model: 'xt.seedream-5-pro' })).toBe('2026-10-14');
+    expect(caseRunLabel({ text: '', at: 0, source: 'case', model: 'jm.image-cinema' })).toBe('');
   });
 });

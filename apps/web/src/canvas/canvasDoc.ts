@@ -1,4 +1,5 @@
 import { canvasStorage } from './canvasStorage';
+import { isMediaModelId } from './mediaModelIds';
 // The persisted canvas document.
 //
 // Product model (owner, 2026-08): THE NODE IS THE AGENT SESSION. Each tile on the infinite
@@ -147,10 +148,11 @@ export interface NodeOutput {
   model?: string;
 }
 
-/** "qwen3.8-27b-p6 · 2026-10-03": the model that made a case recording and the day it ran (UTC). */
+/** "qwen3.8-27b-p6 · 2026-10-03": the model that made a case recording and the day it ran (UTC). A media model's id is
+ *  left out (it names who generates the media), so such a recording says only its day. */
 export function caseRunLabel(output: NodeOutput): string {
   const day = output.at > 0 && output.at < 8.64e15 ? new Date(output.at).toISOString().slice(0, 10) : '';
-  return [output.model, day].filter(Boolean).join(' · ');
+  return [isMediaModelId(output.model) ? '' : output.model, day].filter(Boolean).join(' · ');
 }
 
 export interface FormField {

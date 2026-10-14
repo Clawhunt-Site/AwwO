@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { isTaskFrame } from '../canvas/taskFrame';
+import { hideMediaModelIds } from '../canvas/mediaModelIds';
 import { SaaSApiError, saasErrorMessage } from './api';
 import { readRunEvidence, readRunInvocations, downloadRunArchive, type RunEvidenceSummary, type RunInvocation } from './runEvidenceApi';
 import { useSaaSPreferences } from './preferences';
@@ -60,7 +61,7 @@ function RunEvidenceView({ tenantId, runId, runStatus }: Props) {
             {frame[field].length ? <ul>{frame[field].map((entry, index) => <li key={index}>{entry}</li>)}</ul> : <p>{t('未填写', 'Not specified')}</p>}</div>)}
         </div>}
         {summary.taskFrame !== undefined && !frame && <p>{t('此记录的任务要求版本暂不支持展示。', 'This requirement version cannot be displayed here.')}</p>}
-        {summary.preview && <details><summary>{t('查看输出预览', 'View output preview')}</summary><pre>{summary.preview}</pre></details>}
+        {summary.preview && <details><summary>{t('查看输出预览', 'View output preview')}</summary><pre>{hideMediaModelIds(summary.preview)}</pre></details>}
         {summary.previewTruncated && <p>{t('预览已截取；可下载脱敏记录继续核对。', 'The preview is truncated. Download the redacted record for further review.')}</p>}
         <button type="button" disabled={downloading} onClick={async () => {
           if (download.current) return;

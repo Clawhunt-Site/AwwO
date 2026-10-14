@@ -30,6 +30,14 @@ it('reads only on demand with credentials and never treats completion or contrac
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
+it('hides media model ids in the output preview of a media node’s run', async () => {
+  const preview = '{"type":"awwo.media","version":1,"kind":"video","model":"xt.xtasy-v3","items":[{"artifactId":"a1","name":"video-1.mp4"';
+  vi.stubGlobal('fetch', vi.fn(async () => json(evidence({ preview, previewTruncated: true }))));
+  render(view()); fireEvent.click(screen.getByRole('button', { name: '证据摘要' }));
+  expect(await screen.findByText(/awwo\.media/)).toHaveTextContent('"model":"[media model]"');
+  expect(document.body.innerHTML).not.toMatch(/xt\.xtasy|xtasy-v3/);
+});
+
 it.each(['failed', 'cancelled', 'interrupted'])('shows %s partial evidence without presenting an accepted result', async status => {
   vi.stubGlobal('fetch', vi.fn(async () => json(evidence({ status, contract: { declared: false, validated: false }, previewTruncated: true }))));
   render(view()); fireEvent.click(screen.getByRole('button', { name: '证据摘要' }));

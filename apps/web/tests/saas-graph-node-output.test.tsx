@@ -33,6 +33,15 @@ it.each([undefined, null, ''])('renders historical report with an omitted option
   expect(screen.getByText('Original response').closest('details')?.querySelector('pre')?.textContent).toBe(output);
 });
 
+it('hides the id of the media model a media node’s record names, where its raw output is shown', () => {
+  const output = JSON.stringify({ type: 'awwo.media', version: 1, kind: 'image', model: 'xt.seedream-5-pro',
+    items: [{ artifactId: 'a1', name: 'image.png', contentType: 'image/png', size: 100 }] });
+  const snapshot: GraphRunSnapshot = { ...graph(), document: { ...emptyDocument(), nodes: [{ ...createSessionNode('image', { x: 0, y: 0 }), id: 'a', model: 'xt.seedream-5-pro' }] } };
+  const { container } = render(view(snapshot, result({ output })));
+  expect(container.querySelector('pre')?.textContent).toContain('"model":"[media model]"');
+  expect(container.innerHTML).not.toMatch(/xt\.|seedream/);
+});
+
 it('opens a historical file through the scoped artifact reader rather than showing only its handle', async () => {
   configureSaaSCanvas({ tenant: { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 }, canvasId: 'canvas-a' });
   const id = `a${'B'.repeat(32)}`;

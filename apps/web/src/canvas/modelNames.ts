@@ -6,7 +6,8 @@
 // name for it (图片 · 高清 / Image · HD), else by its kind (图片 / Image). Never by its id: `xt.seedream-5-pro` names the
 // service and the model family that produce it, and users see neither (owner decisions 2026-10-11, mediaCatalog.ts).
 import type { UiLocale } from '../locale';
-import { isMediaModelId, mediaKindOf, mediaModelLabel, type MediaCatalogue, type MediaKind } from './mediaCatalog';
+import { mediaKindOf, mediaModelLabel, type MediaCatalogue, type MediaKind } from './mediaCatalog';
+import { isMediaModelId } from './mediaModelIds';
 import type { ModelPaletteSelection } from './modelPalette';
 
 /** What a host can name models with: the workspace's chat models and its media catalogue. Either may be missing. */

@@ -4,6 +4,7 @@ import { readableOutput, type ReadableOutput } from '../canvas/readableTranscrip
 import type { GraphNodeResult, GraphRunSnapshot } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
 import { fileSafeDisplaySource } from '../canvas/fileDeliveryPresentation';
+import { hideMediaModelIds } from '../canvas/mediaModelIds';
 import { PendingFileDelivery } from '../canvas/PendingFileDelivery';
 import { renderInertMarkdown as renderMarkdown } from './inertMarkdown';
 
@@ -39,7 +40,9 @@ export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node
   const output = readableOutput({ id: 0, role: 'agent', text: node.output,
     presentation: { outputState: final ? 'final' : 'failed', outputContract: historicalContract } });
   const fields = output.fields.length || !final || output.invalid ? output.fields : plainHistoricalFields(node.output, historicalContract);
-  const displaySource = fileSafeDisplaySource(node.output);
+  const fileSafe = fileSafeDisplaySource(node.output);
+  // A media node's record names the model that made it by id ("xt.seedream-5-pro"): shown here, it is hidden.
+  const displaySource = hideMediaModelIds(fileSafe);
   return <details className="saas-graph-node-output" open>
     <summary>{label}</summary>
     {output.invalid && <p className="saas-graph-output-notice" role="status">{t('输出未通过历史交付格式校验，保留原始响应。', 'Output does not match the historical delivery format. The original response is preserved.')}</p>}
@@ -54,7 +57,7 @@ export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node
               : <div className="saas-graph-output-value">{value}</div>}
         </section>)}
       </div>
-      <details className="saas-graph-output-raw"><summary>{displaySource === node.output ? t('原始响应', 'Original response')
+      <details className="saas-graph-output-raw"><summary>{fileSafe === node.output ? t('原始响应', 'Original response')
         : t('回复内容（文件内容已隐藏）', 'Response (attachment content omitted)')}</summary><pre>{displaySource}</pre></details>
     </> : <pre>{displaySource}</pre>}
   </details>;
