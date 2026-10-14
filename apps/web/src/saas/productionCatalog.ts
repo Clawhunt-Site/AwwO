@@ -1,6 +1,6 @@
 /** Cases for the homepage, each laid out the AwwO way: the brief, a team of agents in stages, and
- * the deliverable. Every case has a real canvas (productionWorkflows.ts, or for the knowledge base
- * the 2026-09-04 canvas in recordedCanvases.ts) that ran in AwwO; its record is in production-runs/ and the case dialog
+ * the deliverable. Every case has a real canvas (productionWorkflows.ts) that ran in AwwO; its record is in
+ * production-runs/ and the case dialog
  * shows what each agent delivered. A cover marked `recording` is a screen recording of what that run delivered, played
  * with scripted input; any other cover would be an illustration, and the cards say which it is. Every case is
  * English, in both interface languages (owner 2026-10-14). */
@@ -13,19 +13,14 @@ export interface ProductionCase {
   kind: ProductionKind;
   /** The cover footage records what the run delivered, not an illustration. */
   recording?: true;
-  /** What the case dialog says a recording shows, where the generic wording for a delivered page does not fit. */
-  caption?: string;
   title: string;
   brief: string;
   /** Short role names of the canvas's agents, stage by stage; the roles in one stage work in parallel. */
   stages: ReadonlyArray<Stage>;
   /** What the canvas delivers; the card marks it delivered only when the published run did. */
   deliverable: string;
-  facts?: ReadonlyArray<string>;
   /** File stem under /showcase/ (.mp4 loop and .jpg poster). */
   footage: string;
-  /** The footage shows an interface translated from the language the run delivered it in. */
-  footageTranslated?: true;
 }
 
 export const PRODUCTION_KIND_LABELS: Readonly<Record<ProductionKind, string>> = {
@@ -81,14 +76,12 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     deliverable: 'A working browser music workstation',
   },
   {
-    id: 'knowledge-base', kind: 'product', recording: true, footage: 'kb-real-en', footageTranslated: true,
-    caption: 'Recorded: the knowledge-base workspace a real AwwO run delivered on 2026-09-04, in its demo mode with simulated data. UI translated from Chinese.',
+    id: 'knowledge-base', kind: 'product', recording: true, footage: 'kb-app-real',
     title: 'Team knowledge-base SaaS',
-    brief: 'Build a team knowledge-base SaaS: login, permissions, data governance, the API, search and dashboards, launch assets, review.',
-    stages: [['Architecture'], ['Access', 'Data', 'Assets'],
+    brief: 'Build a team knowledge-base SaaS: sign-in and roles, document governance, search, a dashboard and an audit log, on simulated data.',
+    stages: [['Architecture'], ['Access', 'Data', 'Copy'],
       [BACKEND], ['Frontend'], [REVIEW]],
-    deliverable: 'A runnable knowledge-base web workspace',
-    facts: ['42/42 tests passing', 'Independent review sent back 2 defects → re-verified'],
+    deliverable: 'A working knowledge-base web workspace',
   },
   {
     id: 'neon-city', kind: 'interactive', recording: true, footage: 'neon-real',

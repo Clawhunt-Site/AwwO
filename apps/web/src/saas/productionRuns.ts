@@ -13,11 +13,9 @@ export interface ProductionRunNode {
   readonly status: ProductionNodeStatus;
   /** From admission to completion, in seconds. */
   readonly seconds?: number;
-  readonly outputType: 'markdown' | 'html' | 'fields';
+  readonly outputType: 'markdown' | 'html';
   /** The delivered field value: Markdown text or a complete HTML document. */
   readonly output?: string;
-  /** Several named output fields, for a record whose nodes delivered more than one. */
-  readonly fields?: ReadonlyArray<{ readonly id: string; readonly value: string }>;
   /** Why the node did not complete, exactly as recorded. */
   readonly detail?: string;
   readonly tokens?: { readonly input?: number; readonly output?: number };
@@ -48,11 +46,10 @@ export interface ProductionRunRecord {
   readonly completed: number;
   readonly total: number;
   /** `thinking: false` when the runtime switched the model's hidden reasoning off. */
-  readonly limits?: { readonly contextWindow: number; readonly maxOutputTokens: number; readonly modelCallsPerNode: number; readonly concurrency: number; readonly thinking: boolean };
-  readonly source?: { readonly api: string; readonly worker: string };
-  /** SHA-256 of the canvas text the run ran with (productionCanvasText.ts); absent for a record that
-   * did not run on a canvas from productionWorkflows.ts. */
-  readonly canvasSHA256?: string;
+  readonly limits: { readonly contextWindow: number; readonly maxOutputTokens: number; readonly modelCallsPerNode: number; readonly concurrency: number; readonly thinking: boolean };
+  readonly source: { readonly api: string; readonly worker: string };
+  /** SHA-256 of the canvas text the run ran with (productionCanvasText.ts). */
+  readonly canvasSHA256: string;
   readonly artifactNodeId?: string;
   readonly artifactSHA256?: string;
   readonly nodes: ReadonlyArray<ProductionRunNode>;

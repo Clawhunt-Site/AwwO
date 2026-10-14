@@ -14,7 +14,6 @@ import { createProductionCopyDocument } from '../src/saas/productionCopy';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
 import { loadProductionRun, type ProductionRunRecord } from '../src/saas/productionRuns';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
-import { RECORDED_CASE_WORKFLOWS } from '../src/saas/recordedCanvases';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { WorkspaceHome } from '../src/saas/WorkspaceHome';
 import type { Identity, Tenant } from '../src/saas/api';
@@ -24,8 +23,8 @@ vi.mock('../src/saas/productionRuns', async importOriginal => {
   return { ...actual, loadProductionRun: vi.fn(actual.loadProductionRun) };
 });
 
-// Every published case: the canvases compiled from tasks and the knowledge base's recorded one.
-const WORKFLOWS = { ...PRODUCTION_WORKFLOWS, ...RECORDED_CASE_WORKFLOWS };
+// Every published case: every canvas is compiled from tasks, the knowledge base's too.
+const WORKFLOWS = PRODUCTION_WORKFLOWS;
 const CASES = Object.keys(WORKFLOWS);
 // A media case's image and video nodes generate afresh in a copy, and the page they feed is made on its first run.
 const RECORDED = CASES.filter(id => !WORKFLOWS[id].media?.length);
@@ -52,14 +51,12 @@ it('carries every agent’s recorded delivery into its copy, as the case’s, on
     copy.nodes.forEach((node, index) => {
       const recorded = record.nodes.find(value => value.id === workflow.nodes[index].id)!;
       const session = node as SessionNode;
-      expect(session.lastOutput, `${id}/${recorded.id}`).toEqual({ text: recorded.outputType === 'fields' ? expect.any(String) : recorded.output,
+      expect(session.lastOutput, `${id}/${recorded.id}`).toEqual({ text: recorded.output,
         at: Date.parse(`${record.capturedOn}T00:00:00Z`), source: 'case', model: record.model });
       expect(session.deliverablesOpen).toBe(true);
       const parsed = parseContractOutput(session.contract!, session.lastOutput!.text);
       expect(parsed.errors).toEqual([]);
-      // Several named fields each come back exactly as the agent delivered them.
-      if (recorded.outputType === 'fields') expect({ ...parsed.values }).toEqual(Object.fromEntries(recorded.fields!.map(field => [field.id, field.value])));
-      else if (recorded.outputType === 'markdown') expect(parsed.values.result).toBe(recorded.output);
+      if (recorded.outputType === 'markdown') expect(parsed.values.result).toBe(recorded.output);
       else expect(parsed.values.result).toMatch(/^<!doctype html>/i);
     });
   }
@@ -162,7 +159,7 @@ it('keeps the recordings through settings, task and wire edits and undo, and cle
 it('names a case recording for what it is, with its model and day, and never as a run of this workspace', () => {
   const node = copyOf('pixel-platformer').nodes[0] as SessionNode;
   render(<NodeDeliverables node={node} readOnly onUpdateNode={() => {}} />);
-  expect(screen.getByText('案例实录 · Claude Opus 5.5 · 2026-10-11 真实运行')).toBeVisible();
+  expect(screen.getByText('案例实录 · Claude Opus 5.5 · 2026-10-13 真实运行')).toBeVisible();
   expect(screen.getByText('没有在你的工作区运行；运行整张图会换成你自己的结果')).toBeVisible();
   expect(screen.queryByText(/来自运行|交付$/)).toBeNull();
   cleanup();
@@ -175,12 +172,12 @@ it('marks a recording on the collapsed card and opens a node on what it was aske
   resetAllSessions();
   const art = copyOf('pixel-platformer').nodes[1] as SessionNode;
   const { unmount } = render(<SessionTile node={art} compact scale={1} focused={false} onToggleFocus={vi.fn()} />);
-  expect(screen.getByRole('button', { name: `打开 ${art.title}` })).toHaveTextContent(/^.*案例实录 · \/\/ 状态：以下 12 个精灵/);
+  expect(screen.getByRole('button', { name: `打开 ${art.title}` })).toHaveTextContent(/^.*案例实录 · \/\/ 24 colours \(0–9, a–n\)\. Warm highlights; shadows lean purple\./);
   unmount();
   const { container, rerender } = render(<SessionTile node={art} scale={1} focused onToggleFocus={vi.fn()} />);
   expect(container.querySelector('.awwo-node-workbench')).toHaveClass('is-case-intro');
   expect(screen.getByRole('region', { name: '输入表单' })).toBeVisible();
-  expect(within(screen.getByRole('region', { name: '交付物' })).getByText('案例实录 · Claude Opus 5.5 · 2026-10-11 真实运行')).toBeVisible();
+  expect(within(screen.getByRole('region', { name: '交付物' })).getByText('案例实录 · Claude Opus 5.5 · 2026-10-13 真实运行')).toBeVisible();
   // The member's own result is not a recording: the node lays out as any other.
   rerender(<SessionTile node={{ ...art, lastOutput: { text: art.lastOutput!.text, at: Date.now(), source: 'run' } }} scale={1} focused onToggleFocus={vi.fn()} />);
   expect(container.querySelector('.awwo-node-workbench')).not.toHaveClass('is-case-intro');
@@ -215,7 +212,7 @@ it('copies a case from the workspace home with every agent’s recording, and sa
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
   const setup = await openCopy();
   expect(setup).toHaveAttribute('lang', 'en');
-  expect(within(setup).getByText(/with what every agent received and delivered in the real run on 2026-10-11 \(6\/6 nodes, marked “case recording”\)/)).toBeVisible();
+  expect(within(setup).getByText(/with what every agent received and delivered in the real run on 2026-10-13 \(6\/6 nodes, marked “case recording”\)/)).toBeVisible();
   expect(within(setup).getByText(/The case recordings were made by Claude Opus 5\.5, not run in your workspace; running the graph replaces them with your own results\./)).toBeVisible();
   fireEvent.click(within(setup).getByRole('button', { name: 'Create draft' }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
@@ -231,7 +228,7 @@ it('says the same to an English member, with no note on the language the agents 
   server();
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
   const setup = await openCopy();
-  expect(within(setup).getByText(/with what every agent received and delivered in the real run on 2026-10-11 \(6\/6 nodes, marked “case recording”\)/)).toBeVisible();
+  expect(within(setup).getByText(/with what every agent received and delivered in the real run on 2026-10-13 \(6\/6 nodes, marked “case recording”\)/)).toBeVisible();
   // A case compiled in English is copied as it is: nothing about a language follows the note on the recordings.
   expect(within(setup).getByText(/^This only creates a canvas; .* The case recordings were made by Claude Opus 5\.5, not run in your workspace; running the graph replaces them with your own results\.$/)).toBeVisible();
   expect(within(setup).queryByText(/worked in Chinese|copied in English|in Chinese, as they ran/)).toBeNull();
@@ -262,60 +259,28 @@ it('creates nothing when the recording cannot be read, rather than an empty copy
   } finally { load.mockImplementation(actual); }
 });
 
-it('copies the knowledge base as it ran: its Chinese canvas in either interface language, each wire carrying one recorded field', () => {
-  // A copy takes no interface language: every reader gets the canvas as it ran.
-  const copy = copyOf('knowledge-base'), record = records.get('knowledge-base')!;
-  expect(canonicalCanvasText(copyOf('knowledge-base'))).toBe(canonicalCanvasText(copy));
-  const nodes = copy.nodes as SessionNode[];
-  expect(nodes.map(node => node.title)).toEqual(['产品边界与架构需求', '用户登录与工作区权限', '文档数据治理', '知识库上线物料', '后端接口与业务规则', '知识库 Web 工作台', '交付验收']);
-  expect(nodes.every(node => node.lastOutput?.source === 'case' && node.lastOutput.model === 'Codex')).toBe(true);
-  // The workspace received the governance agent's data dictionary in the field it had added for it.
-  const context = prepareNodeConversation(nodes[5], copy.nodes, copy.edges);
-  expect(context.inputs!.find(input => input.label === '文档数据字典')!.value).toBe(record.nodes.find(node => node.id === 'data')!.fields!.find(field => field.id === 'schema')!.value);
-  expect(context.recorded?.documentSchema).toBe(true);
-  render(<NodeDeliverables node={nodes[6]} readOnly onUpdateNode={() => {}} />);
-  // A delivery of several fields counts them after the run it came from.
-  expect(screen.getByText('案例实录 · Codex · 2026-09-04 真实运行 · 3/3 项')).toBeVisible();
-});
-
-it('copies the knowledge base from the workspace home as it ran, and says where and in which language it ran before it does', async () => {
+it('copies the knowledge base from the workspace home like any case, with every agent’s recording', async () => {
   const posts = server(), onOpen = vi.fn();
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
   const setup = await openCopy('Team knowledge-base SaaS');
-  expect(within(setup).getByText(/^Copy the canvas of the real run on 2026-09-04 \(7 nodes\): every agent’s persona, the task and field descriptions it received, and the wires are as they were in that run, with what every agent received and delivered \(7\/7 nodes, marked “case recording”\)\. Optionally choose one execution model for every new node\.$/)).toBeVisible();
-  // In this Chinese interface too, the dialog says that the canvas and its recordings come over in Chinese.
-  expect(within(setup).getByText(/The case recordings were made by Codex, not run in your workspace; running the graph replaces them with your own results\. This canvas ran on 2026-09-04 in AwwO’s local development preview, where every agent was a Codex session with its own working directory on that computer\. The recordings hide local directories and internal IDs; the artifacts\/ files and the front-end prototype they mention stayed on that computer and are not copied\. The canvas’s tasks were written for that local Codex runtime; a rerun in your workspace uses the model you choose and may turn out differently\. This case’s canvas and recordings are in Chinese, as they ran, and are copied as they are\.$/)).toBeVisible();
+  expect(within(setup).getByText(/^Keep all 7 nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on 2026-10-13 \(7\/7 nodes, marked “case recording”\)\. Optionally choose one execution model for every new node\.$/)).toBeVisible();
+  expect(within(setup).getByText(/^This only creates a canvas; .* The case recordings were made by Claude Opus 5\.5, not run in your workspace; running the graph replaces them with your own results\.$/)).toBeVisible();
+  expect(within(setup).queryByText(/Codex|in Chinese|2026-09-04/)).toBeNull();
   fireEvent.click(within(setup).getByRole('button', { name: 'Create draft' }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
   expect(posts).toHaveLength(1);
   expect(posts[0].body.name).toBe('Team knowledge-base SaaS');
   const sent = posts[0].body.document;
   expect([sent.nodes.length, sent.edges.length]).toEqual([7, 12]);
-  expect(sent.nodes.every((node: any) => node.lastOutput?.source === 'case' && node.lastOutput.model === 'Codex' && node.lastOutput.text)).toBe(true);
+  expect(sent.nodes.every((node: any) => node.lastOutput?.source === 'case' && node.lastOutput.model === 'Claude Opus 5.5' && node.lastOutput.text)).toBe(true);
 });
 
-it('tells an English member that the knowledge base comes over in Chinese, canvas and recordings alike', async () => {
-  localStorage.setItem('superclaw_locale', 'en');
-  server();
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
-  const setup = await openCopy('Team knowledge-base SaaS');
-  expect(within(setup).getByText(/^Copy the canvas of the real run on 2026-09-04 \(7 nodes\): every agent’s persona, the task and field descriptions it received, and the wires are as they were in that run/)).toBeVisible();
-  expect(within(setup).getByText(/the artifacts\/ files and the front-end prototype they mention stayed on that computer and are not copied\. The canvas’s tasks were written for that local Codex runtime; a rerun in your workspace uses the model you choose and may turn out differently\. This case’s canvas and recordings are in Chinese, as they ran, and are copied as they are\.$/)).toBeVisible();
-  expect(within(setup).queryByText(/copied in English/)).toBeNull();
-});
-
-it('stops the copy when a delivered node cannot hold its recording, rather than copying it blank under a 7/7 claim', () => {
-  const record = records.get('knowledge-base')!, workflow = WORKFLOWS['knowledge-base'];
-  const renamed = { ...record, nodes: record.nodes.map(node => node.id === 'review' ? { ...node, fields: node.fields!.map((field, index) => index ? field : { ...field, id: 'verdict' }) } : node) };
-  expect(() => createProductionCopyDocument(workflow, renamed, null)).toThrow(/review its canvas cannot hold/);
-});
-
-it('carries an optional file a recording left empty as no file, the way the contract and the server read it', () => {
-  const record = records.get('knowledge-base')!, workflow = WORKFLOWS['knowledge-base'];
-  const empty = { ...record, nodes: record.nodes.map(node => node.id === 'frontend' ? { ...node, fields: node.fields!.map(field => field.id === 'preview' ? { ...field, value: '' } : field) } : node) };
-  const frontend = createProductionCopyDocument(workflow, empty, null).nodes[workflow.nodes.findIndex(node => node.id === 'frontend')] as SessionNode;
-  const parsed = parseContractOutput(frontend.contract!, frontend.lastOutput!.text);
-  expect(parsed.errors).toEqual([]);
-  expect('preview' in parsed.values).toBe(false);
-  expect(parsed.values.delivery).toBe(record.nodes.find(node => node.id === 'frontend')!.fields!.find(field => field.id === 'delivery')!.value);
+it('stops the copy when a delivered node has no recording its canvas can hold, rather than copying it blank under a 6/6 claim', () => {
+  const record = records.get('pixel-platformer')!, workflow = WORKFLOWS['pixel-platformer'];
+  const build = workflow.nodes.find(node => node.outputType === 'html')!;
+  const blank = { ...record, nodes: record.nodes.map(node => node.id === build.id ? { ...node, output: '' } : node) };
+  expect(() => createProductionCopyDocument(workflow, blank, null)).toThrow(new RegExp(`${build.id} its canvas cannot hold`));
+  // A delivery its contract rejects stops it too: here the page, cut off before it ends.
+  const cut = { ...record, nodes: record.nodes.map(node => node.id === build.id ? { ...node, output: node.output!.slice(0, 2000) } : node) };
+  expect(() => createProductionCopyDocument(workflow, cut, null)).toThrow(new RegExp(`${build.id} its canvas cannot hold`));
 });

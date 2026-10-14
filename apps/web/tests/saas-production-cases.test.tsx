@@ -6,7 +6,6 @@ import { ProductionCases, COMPACT_CASE_COUNT } from '../src/saas/ProductionCases
 import { PRODUCTION_CASES, PRODUCTION_KIND_LABELS } from '../src/saas/productionCatalog';
 import { PRODUCTION_RUN_SUMMARY } from '../src/saas/productionRuns';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
-import { KNOWLEDGE_BASE_WORKFLOW } from '../src/saas/recordedCanvases';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { OfficialWorkflow } from '../src/saas/examples/officialWorkflows';
 
@@ -46,27 +45,28 @@ it('tells every case in English as a brief, a staged team and a deliverable, wit
   // Every cover is a recording of what its case's run delivered; none is an AI illustration any more.
   expect(PRODUCTION_CASES.filter(item => !item.recording).map(item => item.id)).toEqual([]);
   for (const item of PRODUCTION_CASES) {
-    for (const text of [item.title, item.brief, item.deliverable, ...(item.caption === undefined ? [] : [item.caption]), ...item.stages.flat(), ...(item.facts ?? [])]) {
+    for (const text of [item.title, item.brief, item.deliverable, ...(item.caption === undefined ? [] : [item.caption]), ...item.stages.flat()]) {
       expect(text.trim(), item.id).not.toBe(''); expect(text, item.id).not.toMatch(CHINESE);
     }
     expect(item.stages.length).toBeGreaterThanOrEqual(3);
     expect(item.stages.at(-1), item.id).toEqual(['Review']);
-    if (item.id !== 'knowledge-base') expect(item.facts).toBeUndefined();   // what a run did is read from its record, not written here
+    expect('facts' in item, item.id).toBe(false);   // what a run did is read from its record, not written here
     for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}${item.footage}.${extension}`), `${item.footage}.${extension}`).toBe(true);
   }
   for (const label of Object.values(PRODUCTION_KIND_LABELS)) { expect(label.trim()).not.toBe(''); expect(label).not.toMatch(CHINESE); }
-  // One cover is a recording of an interface translated from the language its run delivered it in, and says so.
-  expect(PRODUCTION_CASES.filter(item => item.footageTranslated).map(item => item.id)).toEqual(['knowledge-base']);
-  expect(PRODUCTION_CASES[KB].footage).toBe('kb-real-en');
+  // Every cover records what its English run delivered; none shows an interface translated from another language.
+  expect(PRODUCTION_CASES.filter(item => 'footageTranslated' in item).map(item => item.id)).toEqual([]);
+  expect(PRODUCTION_CASES[KB].footage).toBe('kb-app-real');
   // The AI-generated covers these recordings replaced are no longer shipped.
   for (const stem of ['pixel', 'config', 'paper', 'film-ad', 'port-twin', 'glider', 'party', 'rhythm'])
     for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}${stem}.${extension}`), `${stem}.${extension}`).toBe(false);
-  // Nor is the Chinese recording of the knowledge base that the English one replaced.
-  for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}kb-real.${extension}`), `kb-real.${extension}`).toBe(false);
+  // Nor are the knowledge base's recordings of its 2026-09-04 Chinese run, nor their translated version.
+  for (const stem of ['kb-real', 'kb-real-en'])
+    for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}${stem}.${extension}`), `${stem}.${extension}`).toBe(false);
   // The playable mock-ups made outside AwwO are gone; what plays now is what an AwwO run delivered.
   expect(existsSync(`${SHOWCASE}play`)).toBe(false);
   for (const stem of ['play-fox', 'play-bike', 'play-paper']) expect(existsSync(`${SHOWCASE}${stem}.mp4`)).toBe(false);
-  // The real run: seven agents over five stages, three in parallel after the architecture.
+  // Its canvas: seven agents over five stages, three in parallel after the architecture.
   expect(PRODUCTION_CASES[KB].stages.map(stage => stage.length)).toEqual([1, 3, 1, 1, 1]);
 });
 
@@ -96,11 +96,10 @@ it('labels the cover footage for what it is, and claims delivery only where a pu
     else expect(card.querySelector('.production-run-chip')).toBeNull();
   });
   expect(PRODUCTION_RUN_SUMMARY['knowledge-base']).toMatchObject({ completed: 7, total: 7, delivered: true });
-  // The label is part of what a screen reader hears for the card, not only what it shows; so is the note that a
-  // recording shows an interface translated from Chinese, in this interface too.
-  expect(within(recording).getByRole('button', { name: 'Team knowledge-base SaaS' })).toHaveAccessibleDescription('Recorded delivery UI translated from Chinese “Build a team knowledge-base SaaS: login, permissions, data governance, the API, search and dashboards, launch assets, review.”');
+  // The label is part of what a screen reader hears for the card, not only what it shows.
+  expect(within(recording).getByRole('button', { name: 'Team knowledge-base SaaS' })).toHaveAccessibleDescription('Recorded delivery “Build a team knowledge-base SaaS: sign-in and roles, document governance, search, a dashboard and an audit log, on simulated data.”');
   expect(within(pixelCard).getByRole('button', { name: 'Pixel platformer' })).toHaveAccessibleDescription('Recorded delivery “A pixel-art platformer: a fox courier delivering letters across a sky market.”');
-  expect(within(recording).getByText('Access · Data · Assets')).toBeVisible();
+  expect(within(recording).getByText('Access · Data · Copy')).toBeVisible();
   expect(within(pixelCard).getByText('Art · Levels · Sound')).toBeVisible();
   // Without IntersectionObserver the posters show at once; nothing autoplays or preloads.
   for (const video of document.querySelectorAll<HTMLVideoElement>('.production-card video')) {
@@ -135,24 +134,22 @@ it('opens a case as brief → team → delivery, then shows how it was made from
   expect(within(dialog).getByRole('heading', { level: 3, name: 'Agent team' })).toBeVisible();
   expect(within(dialog).getByText('7 agents · 5 stages')).toBeVisible();
   expect(within(dialog).getByText('Delivered')).toBeVisible();
-  expect(within(dialog).getByText('42/42 tests passing')).toBeVisible();
-  expect(within(dialog).getByText('Independent review sent back 2 defects → re-verified')).toBeVisible();
-  expect(within(dialog).getByText('Recorded: the knowledge-base workspace a real AwwO run delivered on 2026-09-04, in its demo mode with simulated data. UI translated from Chinese.')).toBeVisible();
-  expect(dialog.querySelector('video')).toHaveAttribute('src', '/showcase/kb-real-en.mp4');
-  const made = await within(dialog).findByRole('region', { name: '7 agents, 5 stages, 44 min 24 s end to end' });
+  expect(within(dialog).getByText('Recorded: the page a real AwwO run delivered on 2026-10-13, running as delivered and played by a script; try it yourself below, under “How it was made”.')).toBeVisible();
+  expect(dialog.querySelector('video')).toHaveAttribute('src', '/showcase/kb-app-real.mp4');
+  const made = await within(dialog).findByRole('region', { name: '7 agents, 5 stages, 6 min 39 s end to end' });
   expect(made).toHaveAttribute('lang', 'en');
   expect(within(made).getByText('7/7 nodes done')).toBeVisible();
-  expect(within(made).getByText('2026-09-04')).toBeVisible();
+  expect(within(made).getByText('2026-10-13')).toBeVisible();
   const rail = within(made).getByRole('list', { name: 'Every agent, stage by stage' });
-  for (const title of ['Product scope & architecture', 'Login & workspace permissions', 'Document data governance', 'Knowledge-base launch assets', 'Backend API & business rules', 'Knowledge-base web workspace', 'Delivery review'])
+  for (const title of ['Product scope & architecture', 'Login & workspace permissions', 'Document data governance', 'Launch assets & interface copy', 'Business layer & rules', 'Knowledge-base web workspace', 'Review'])
     expect(within(rail).getByRole('button', { name: new RegExp(`^${title}`) })).toBeVisible();
   expect(within(rail).getAllByText('3 in parallel')).toHaveLength(1);
   // A node shows what that agent actually handed over, as it wrote it: here the review's own verdict.
-  fireEvent.click(within(rail).getByRole('button', { name: /^Delivery review/ }));
-  expect(within(rail).getByRole('button', { name: /^Delivery review/ })).toHaveAttribute('aria-pressed', 'true');
-  expect(within(within(made).getByRole('article')).getByText(/^部分通过，整体验收未通过。/)).toBeVisible();
-  expect(within(made).getByText(/^This case delivered a multi-file app/)).toBeVisible();
-  expect(within(made).getByText(/sent back two demo defects/)).toBeVisible();
+  fireEvent.click(within(rail).getByRole('button', { name: /^Review/ }));
+  expect(within(rail).getByRole('button', { name: /^Review/ })).toHaveAttribute('aria-pressed', 'true');
+  expect(within(within(made).getByRole('article')).getByRole('heading', { name: 'Review record: static source review, not actually run' })).toBeVisible();
+  expect(within(made).getByText(/^Run on 2026-10-13 on the live AwwO, in the operator’s own account and workspace: 7 of 7 agents finished in 6 min 39 s/)).toBeVisible();
+  expect(within(made).getByText(/^Before publishing, the delivered page was operated in Chrome/)).toBeVisible();
   expect(made.textContent).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-|[A-Za-z]:\/tmp/);   // no private identifiers or machine paths
   expect(within(made).queryByRole('button', { name: 'Copy this canvas' })).toBeNull();     // no workspace to copy into here
   within(dialog).getByRole('button', { name: 'Close' }).focus();   // focus inside the dialog, as showModal leaves it
@@ -163,7 +160,7 @@ it('opens a case as brief → team → delivery, then shows how it was made from
   const pixel = screen.getByRole('button', { name: 'Pixel platformer' });
   fireEvent.click(pixel);
   const game = screen.getByRole('dialog', { name: 'Pixel platformer' });
-  expect(within(game).getByText('Recorded: the page a real AwwO run delivered on 2026-10-11, running as delivered and played by a script; try it yourself below, under “How it was made”.')).toBeVisible();
+  expect(within(game).getByText('Recorded: the page a real AwwO run delivered on 2026-10-13, running as delivered and played by a script; try it yourself below, under “How it was made”.')).toBeVisible();
   expect(game.querySelector('video')).toHaveAttribute('src', '/showcase/pixel-real.mp4');
   expect(within(game).getByText('6 agents · 4 stages')).toBeVisible();
   expect(within(game).getByText('3 in parallel')).toBeVisible();
@@ -184,21 +181,22 @@ it('copies an illustrated case’s real canvas through the workspace’s copy fl
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-it('copies the knowledge base’s recorded canvas too, and describes each node from it', async () => {
+it('copies the knowledge base’s compiled canvas too, and describes each node from its task', async () => {
   const onReuse = vi.fn<(workflow: OfficialWorkflow) => void>();
   render(<SaaSPreferencesProvider><ProductionCases onReuse={onReuse} /></SaaSPreferencesProvider>);
   fireEvent.click(screen.getByRole('button', { name: 'Team knowledge-base SaaS' }));
   const dialog = screen.getByRole('dialog', { name: 'Team knowledge-base SaaS' });
-  const made = await within(dialog).findByRole('region', { name: '7 agents, 5 stages, 44 min 24 s end to end' });
-  fireEvent.click(within(within(made).getByRole('list', { name: 'Every agent, stage by stage' })).getByRole('button', { name: /^Backend API & business rules/ }));
+  const made = await within(dialog).findByRole('region', { name: '7 agents, 5 stages, 6 min 39 s end to end' });
+  fireEvent.click(within(within(made).getByRole('list', { name: 'Every agent, stage by stage' })).getByRole('button', { name: /^Business layer & rules/ }));
   const node = within(made).getByRole('article');
   // Its task, the template it was made from, what it hands over, and each input it received by name, all in English.
-  expect(within(node).getByText('Designs the backend business model, API contract, permission checks, search and dashboard APIs and service checks from the data dictionary and the user permission contract.')).toBeVisible();
+  expect(within(node).getByText(/^From the access data and the document data, write the page’s business layer in plain JavaScript/)).toBeVisible();
   expect(within(node).getByText('Backend')).toBeVisible();
-  expect(within(node).getByText('API contract')).toBeVisible();
-  expect(within(node).getByRole('button', { name: 'Login & workspace permissions · User system contract' })).toBeVisible();
+  expect(within(node).getByText('Business layer code')).toBeVisible();
+  expect(within(node).getByRole('button', { name: 'Login & workspace permissions · Access data' })).toBeVisible();
+  expect(within(node).getByRole('button', { name: 'Document data governance · Document data' })).toBeVisible();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Copy this canvas' }));
-  expect(onReuse).toHaveBeenCalledExactlyOnceWith(KNOWLEDGE_BASE_WORKFLOW);
+  expect(onReuse).toHaveBeenCalledExactlyOnceWith(PRODUCTION_WORKFLOWS['knowledge-base']);
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
@@ -227,7 +225,7 @@ it('closes on the backdrop only when the press and the release both land outside
 });
 
 
-it('speaks the same English in the English interface, with the translated recording marked on the card', async () => {
+it('speaks the same English in the English interface', async () => {
   localStorage.setItem('superclaw_locale', 'en');
   view();
   expect(screen.getByRole('heading', { level: 2, name: 'One brief, handed to a team of agents.' })).toBeVisible();
@@ -235,18 +233,16 @@ it('speaks the same English in the English interface, with the translated record
   expect(within(recording).getByText('Recorded delivery')).toBeVisible();
   expect(within(pixel).getByText('Recorded delivery')).toBeVisible();
   expect(within(pixel).queryByText('Cover: AI illustration')).toBeNull();
-  expect(recording.querySelector('video')).toHaveAttribute('src', '/showcase/kb-real-en.mp4');
-  // The translated recording says so on the card itself, not only once the case is opened.
-  expect(within(recording).getByText('UI translated from Chinese')).toBeVisible();
-  expect(within(recording).getByRole('button', { name: 'Team knowledge-base SaaS' })).toHaveAccessibleDescription(/^Recorded delivery UI translated from Chinese “Build a team/);
-  expect(within(pixel).queryByText('UI translated from Chinese')).toBeNull();
+  expect(recording.querySelector('video')).toHaveAttribute('src', '/showcase/kb-app-real.mp4');
+  expect(within(recording).getByRole('button', { name: 'Team knowledge-base SaaS' })).toHaveAccessibleDescription(/^Recorded delivery “Build a team/);
+  expect(document.querySelector('.production-translated')).toBeNull();
   expect(within(recording).getByText('Delivered')).toBeVisible();
   expect(within(recording).getByText('Real run · 7/7 nodes done')).toBeVisible();
   fireEvent.click(within(recording).getByRole('button', { name: 'Team knowledge-base SaaS' }));
   const dialog = screen.getByRole('dialog', { name: 'Team knowledge-base SaaS' });
   expect(within(dialog).getByText('7 agents · 5 stages')).toBeVisible();
-  expect(within(dialog).getByText(/demo mode with simulated data\. UI translated from Chinese\.$/)).toBeVisible();
-  const made = await within(dialog).findByRole('region', { name: '7 agents, 5 stages, 44 min 24 s end to end' });
+  expect(within(dialog).getByText(/^Recorded: the page a real AwwO run delivered on 2026-10-13/)).toBeVisible();
+  const made = await within(dialog).findByRole('region', { name: '7 agents, 5 stages, 6 min 39 s end to end' });
   // The run view no longer notes the language the agents worked in.
   expect(made.querySelector('.production-made-language')).toBeNull();
   expect(within(made).queryByText(/^The agents worked in /)).toBeNull();
@@ -262,7 +258,7 @@ it('loads posters as cards near the viewport, plays loops only on screen, and ho
   expect(io.live('near')).toHaveLength(PRODUCTION_CASES.length);
   expect(io.live('play')).toHaveLength(0);
   io.fire(io.live('near').find(watcher => watcher.targets[0] === videos[KB])!, true);
-  expect(videos[KB]).toHaveAttribute('poster', '/showcase/kb-real-en.jpg');
+  expect(videos[KB]).toHaveAttribute('poster', '/showcase/kb-app-real.jpg');
   expect(videos.filter((_, index) => index !== KB).some(video => video.hasAttribute('poster'))).toBe(false);
   for (const watcher of io.live('near')) io.fire(watcher, true);
   const loops = io.live('play');

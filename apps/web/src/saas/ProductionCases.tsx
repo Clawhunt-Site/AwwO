@@ -68,12 +68,10 @@ function RunChip({ item }: { item: ProductionCase }) {
 
 function CaseCard({ item, active, onOpen }: { item: ProductionCase; active: boolean; onOpen: (item: ProductionCase, trigger: HTMLButtonElement) => void }) {
   const id = useId();
-  const translated = item.footageTranslated === true;
   return <li className={`production-card${item.recording ? ' is-real' : ''}`}>
-    <div className="production-card-media"><Footage stem={item.footage} active={active} /><Label recording={item.recording} id={`${id}-label`} /><span className="production-kind">{PRODUCTION_KIND_LABELS[item.kind]}</span>
-      {translated && <span id={`${id}-translated`} className="production-translated">UI translated from Chinese</span>}</div>
+    <div className="production-card-media"><Footage stem={item.footage} active={active} /><Label recording={item.recording} id={`${id}-label`} /><span className="production-kind">{PRODUCTION_KIND_LABELS[item.kind]}</span></div>
     <div className="production-card-copy">
-      <h3><button type="button" className="production-card-open" aria-haspopup="dialog" aria-describedby={[`${id}-label`, translated && `${id}-translated`, `${id}-brief`].filter(Boolean).join(' ')}
+      <h3><button type="button" className="production-card-open" aria-haspopup="dialog" aria-describedby={`${id}-label ${id}-brief`}
         onClick={event => onOpen(item, event.currentTarget)}>{item.title}</button></h3>
       <p id={`${id}-brief`} className="production-brief">{quote(item.brief)}</p>
       <ol role="list" className="production-team" aria-label="Agent team, by stage">
@@ -110,7 +108,7 @@ function CaseDialog({ item, onClose, onReuse }: { item: ProductionCase; onClose:
           <video src={`/showcase/${item.footage}.mp4`} poster={`/showcase/${item.footage}.jpg`} muted loop playsInline autoPlay={!still} controls={still}
             aria-label={item.recording ? `${item.title}: the delivered interface, recorded` : `${item.title}: AI-generated illustration`} />
           <figcaption>{item.recording
-            ? item.caption ?? `Recorded: the page a real AwwO run delivered on ${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''}, running as delivered and played by a script; try it yourself below, under “How it was made”.`
+            ? `Recorded: the page a real AwwO run delivered on ${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''}, running as delivered and played by a script; try it yourself below, under “How it was made”.`
             : PRODUCTION_RUN_SUMMARY[item.id]
               ? 'Cover: AI illustration. This footage was made by an AI video model and only shows the direction; what an AwwO run actually delivered is below, under “How it was made”.'
               : 'Cover: AI illustration. This footage was made by an AI video model and only shows the direction.'}</figcaption>
@@ -121,8 +119,7 @@ function CaseDialog({ item, onClose, onReuse }: { item: ProductionCase; onClose:
             <p className="production-team-meta">{`${agents} agents · ${item.stages.length} stages`}</p>
             <ol role="list" className="production-stages">{item.stages.map((stage, index) => <li key={index}><b>{String(index + 1).padStart(2, '0')}</b>
               <div>{stage.map(value => <span key={value}>{value}</span>)}</div>{stage.length > 1 && <small>{`${stage.length} in parallel`}</small>}</li>)}</ol></div></li>
-          <li><span className="production-step">03</span><div><h3>Delivery</h3><Deliverable item={item} />
-            {item.facts && <ul role="list" className="production-facts">{item.facts.map(fact => <li key={fact}>{fact}</li>)}</ul>}</div></li>
+          <li><span className="production-step">03</span><div><h3>Delivery</h3><Deliverable item={item} /></div></li>
         </ol>
       </div>
       <LazyBoundary fallback={<p className="production-made-pending" role="alert">The run record could not be loaded.{' '}

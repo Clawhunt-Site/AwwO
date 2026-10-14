@@ -2,16 +2,16 @@
   "3d-configurator": {
     "completed": 5,
     "total": 5,
-    "seconds": 786,
+    "seconds": 496,
     "delivered": true,
-    "capturedOn": "2026-10-11",
+    "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
   "aurora-gt": {
     "completed": 2,
     "total": 2,
-    "seconds": 308,
+    "seconds": 342,
     "delivered": true,
     "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
@@ -51,20 +51,20 @@
   "glider-adventure": {
     "completed": 6,
     "total": 6,
-    "seconds": 999,
+    "seconds": 416,
     "delivered": true,
-    "capturedOn": "2026-10-11",
+    "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
   "knowledge-base": {
     "completed": 7,
     "total": 7,
-    "seconds": 2664,
+    "seconds": 399,
     "delivered": true,
-    "capturedOn": "2026-09-04",
-    "model": "Codex",
-    "runtime": "codex_local"
+    "capturedOn": "2026-10-13",
+    "model": "Claude Opus 5.5",
+    "runtime": "openai-agents"
   },
   "mars-mission": {
     "completed": 8,
@@ -87,9 +87,9 @@
   "neon-city": {
     "completed": 2,
     "total": 2,
-    "seconds": 376,
+    "seconds": 284,
     "delivered": true,
-    "capturedOn": "2026-10-12",
+    "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents",
     "media": {
@@ -100,54 +100,54 @@
   "papercraft-puzzle": {
     "completed": 7,
     "total": 7,
-    "seconds": 641,
+    "seconds": 488,
     "delivered": true,
-    "capturedOn": "2026-10-11",
+    "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
   "party-game": {
     "completed": 6,
     "total": 6,
-    "seconds": 708,
+    "seconds": 443,
     "delivered": true,
-    "capturedOn": "2026-10-11",
+    "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
   "pixel-platformer": {
     "completed": 6,
     "total": 6,
-    "seconds": 777,
+    "seconds": 512,
     "delivered": true,
-    "capturedOn": "2026-10-11",
+    "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
   "port-twin": {
     "completed": 6,
     "total": 6,
-    "seconds": 1215,
+    "seconds": 424,
     "delivered": true,
-    "capturedOn": "2026-10-12",
+    "capturedOn": "2026-10-14",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
   "rhythm-runner": {
     "completed": 6,
     "total": 6,
-    "seconds": 404,
+    "seconds": 348,
     "delivered": true,
-    "capturedOn": "2026-10-11",
+    "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
   "shanhai-vn": {
     "completed": 3,
     "total": 3,
-    "seconds": 361,
+    "seconds": 271,
     "delivered": true,
-    "capturedOn": "2026-10-12",
+    "capturedOn": "2026-10-14",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents",
     "media": {
@@ -158,9 +158,9 @@
   "summer-ad": {
     "completed": 6,
     "total": 6,
-    "seconds": 615,
+    "seconds": 521,
     "delivered": true,
-    "capturedOn": "2026-10-11",
+    "capturedOn": "2026-10-14",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   }

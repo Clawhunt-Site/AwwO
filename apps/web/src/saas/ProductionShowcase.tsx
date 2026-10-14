@@ -7,7 +7,6 @@ import remarkGfm from 'remark-gfm';
 import { formatDuration, loadProductionMedia, loadProductionRun, type ProductionNodeStatus, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
 import { showcasePage } from './examples/showcaseDocument';
 import { PRODUCTION_WORKFLOWS } from './productionWorkflows';
-import { RECORDED_CASE_WORKFLOWS } from './recordedCanvases';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import type { ProductionCase } from './productionCatalog';
 import './production-made.css';
@@ -94,22 +93,20 @@ function MediaStrip({ record, files, stage }: { record: ProductionRunRecord; fil
 
 function NodeOutput({ node }: { node: ProductionRunNode }) {
   if (node.status !== 'done') return node.detail ? <p className="production-made-detail">{node.detail}</p> : null;
-  if (node.outputType === 'fields') return <dl className="production-made-fields">{node.fields?.map(field => <Fragment key={field.id}><dt>{field.id}</dt><dd>{renderRecordMarkdown(field.value)}</dd></Fragment>)}</dl>;
   if (node.outputType === 'html') return <details className="production-made-source"><summary>{`View the page source (${(node.output || '').length.toLocaleString()} characters)`}</summary><pre><code>{node.output}</code></pre></details>;
   return <div className="production-made-markdown">{renderRecordMarkdown(node.output || '')}</div>;
 }
 
 /** How a case was made: its canvas stage by stage, what every agent actually handed over, and the
  * delivered result. Everything shown comes from the run record; the workflow adds only each node's
- * written task and acceptance, which tests pin to the canvas that ran, or for the recorded canvas an
- * English description of each node (recordedCanvases.ts). */
+ * written task and acceptance, which tests pin to the canvas that ran. */
 export default function ProductionShowcase({ item, onReuse }: { item: ProductionCase; onReuse?: (workflow: OfficialWorkflow) => void }) {
   const id = useId();
   const [record, setRecord] = useState<ProductionRunRecord | null | undefined>(undefined);
   const [selected, setSelected] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const [revision, setRevision] = useState(0);
-  const workflow = PRODUCTION_WORKFLOWS[item.id] ?? RECORDED_CASE_WORKFLOWS[item.id];
+  const workflow = PRODUCTION_WORKFLOWS[item.id];
   useEffect(() => {
     let live = true;
     loadProductionRun(item.id).then(value => { if (live) setRecord(value ?? null); }, () => { if (live) setRecord(null); });
@@ -180,8 +177,7 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
             <button type="button" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}Focus the result</button></div>}</header>
         {artifact?.output ? (files ? <Fragment key={revision}><ResultFrame html={artifact.output} media={files} title={`${item.title}: the result an AwwO run delivered`} /></Fragment>
           : <p className="production-made-empty" role="status">Loading the result…</p>)
-          : <p className="production-made-empty">{item.recording && deliveryNode?.status === 'done' ? 'This case delivered a multi-file app; the cover is a recording of it, and each agent’s contracts and notes are on the left.'
-            : 'This run did not deliver the result; the failed and blocked nodes are on the left.'}</p>}
+          : <p className="production-made-empty">This run did not deliver the result; the failed and blocked nodes are on the left.</p>}
         {artifact && <p className="production-made-hint">Click the page, then use the keyboard. The result is model-generated and runs as delivered, without manual edits.</p>}
       </div>
     </div>
@@ -191,8 +187,8 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
       <details><summary>Run receipt</summary><dl>
         <dt>Environment</dt><dd>{record.edition}</dd>
         <dt>Runtime and model</dt><dd>{record.runtime} · {record.model}</dd>
-        {record.limits && <><dt>Execution settings</dt><dd>{`${record.limits.modelCallsPerNode} model call per node${record.limits.thinking ? '' : ' with thinking off'}, at most ${record.limits.maxOutputTokens} output tokens, ${record.limits.contextWindow}-token context, up to ${record.limits.concurrency} nodes at a time`}</dd></>}
-        {record.source && <><dt>Release</dt><dd>API {record.source.api} · runtime {record.source.worker}</dd></>}
+        <dt>Execution settings</dt><dd>{`${record.limits.modelCallsPerNode} model call per node${record.limits.thinking ? '' : ' with thinking off'}, at most ${record.limits.maxOutputTokens} output tokens, ${record.limits.contextWindow}-token context, up to ${record.limits.concurrency} nodes at a time`}</dd>
+        <dt>Release</dt><dd>API {record.source.api} · runtime {record.source.worker}</dd>
         {record.artifactSHA256 && <><dt>Result checksum</dt><dd><code>SHA-256 {record.artifactSHA256}</code></dd></>}
       </dl></details>
     </footer>

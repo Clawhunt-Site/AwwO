@@ -8,9 +8,9 @@ import { createOfficialDocument, type OfficialWorkflow } from '../src/saas/examp
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 
 // createOfficialDocument mints the canvas a member copies from every production case compiled from tasks
-// (productionWorkflows.ts); the knowledge base's recorded canvas has its own test (saas-knowledge-base-canvas). Every
-// case is English, so there is one canvas whatever the interface language. No case has a 3D model node yet, so one copy
-// of a media case gets one here, to keep the builder's 3D wiring covered.
+// (productionWorkflows.ts), the knowledge base's included. Every case is English, so there is one canvas whatever
+// the interface language. No case has a 3D model node yet, so one copy of a media case gets one here, to keep the
+// builder's 3D wiring covered.
 const gt = PRODUCTION_WORKFLOWS['aurora-gt'];
 const WITH_MODEL: OfficialWorkflow = { ...gt, id: 'aurora-gt-with-model', media: [...gt.media!, {
   id: 'model', kind: 'model3d', title: '3D model', prompt: 'A 3D model of the car',

@@ -37,7 +37,7 @@ it('publishes a record for real cases only, and summarises each one exactly', ()
   for (const record of RECORDS) {
     const delivery = record.nodes.find(node => node.id === record.artifactNodeId);
     expect(PRODUCTION_RUN_SUMMARY[record.caseId], record.caseId).toEqual({ completed: record.completed, total: record.total, seconds: record.seconds,
-      delivered: record.caseId === 'knowledge-base' ? true : delivery?.status === 'done' && delivery.outputType === 'html' && Boolean(delivery.output),
+      delivered: delivery?.status === 'done' && delivery.outputType === 'html' && Boolean(delivery.output),
       capturedOn: record.capturedOn, model: record.model, runtime: record.runtime,
       ...(record.media?.length ? { media: { completed: record.media.filter(item => item.status === 'done').length, total: record.media.length } } : {}) });
   }
@@ -53,15 +53,15 @@ it('keeps every record internally consistent: counts, statuses, outputs and the 
     expect(record.completed, record.caseId).toBe(record.nodes.filter(node => node.status === 'done').length);
     expect(record.capturedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(record.seconds).toBeGreaterThan(0);
-    // English, as every case is: a delivered page's own Chinese wording appears only quoted or in brackets.
+    // English, as every case is, down to what each agent delivered.
     for (const text of [record.edition, record.note, record.verification]) {
       expect(text.trim(), record.caseId).not.toBe('');
-      expect(text.replace(/“[^”]*”|\([^)]*\)/g, ''), record.caseId).not.toMatch(/\p{Script=Han}/u);
+      expect(text, record.caseId).not.toMatch(/\p{Script=Han}/u);
     }
+    for (const node of record.nodes) expect(`${node.title}\n${node.output ?? ''}\n${node.detail ?? ''}`, `${record.caseId}/${node.id}`).not.toMatch(/\p{Script=Han}/u);
     for (const node of record.nodes) {
       if (node.status === 'done') {
-        if (node.outputType === 'fields') expect(node.fields?.length, `${record.caseId}/${node.id}`).toBeGreaterThan(0);
-        else expect(node.output?.trim(), `${record.caseId}/${node.id}`).toBeTruthy();
+        expect(node.output?.trim(), `${record.caseId}/${node.id}`).toBeTruthy();
         if (node.outputType === 'html') expect(isCompleteHtmlDocument(node.output!), `${record.caseId}/${node.id}`).toBe(true);
       } else expect(node.output, `${record.caseId}/${node.id}`).toBeUndefined();
     }
@@ -73,7 +73,7 @@ it('keeps every record internally consistent: counts, statuses, outputs and the 
 });
 
 it('records each SaaS case run on the very canvas a member can copy today', () => {
-  for (const record of RECORDS.filter(value => value.caseId !== 'knowledge-base')) {
+  for (const record of RECORDS) {
     const workflow = PRODUCTION_WORKFLOWS[record.caseId];
     expect(workflow, record.caseId).toBeDefined();
     expect(record.nodes.map(node => [node.id, node.title, node.column, node.row, node.outputType])).toEqual(

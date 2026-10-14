@@ -60,7 +60,6 @@
   color: var(--production-real); background: color-mix(in srgb, var(--production-real) 12%, transparent); }
 .production-run-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .production-dialog p.production-made-pending { margin: 26px 0 0; padding-top: 22px; border-top: 1px solid var(--production-line); color: var(--saas-muted); font-size: 12.5px; }
-.production-translated { position: absolute; left: 10px; bottom: 10px; padding: 3px 8px; border-radius: 999px; font-size: 10.5px; line-height: 1.4; color: #fff; background: #0b1220b3; backdrop-filter: blur(6px); white-space: nowrap; }
 
 /* the case, opened: footage beside the three steps */
 .production-dialog.saas-native-dialog { width: min(1120px, 94vw); max-height: 92dvh; }
@@ -87,8 +86,6 @@
 .production-stages > li > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .production-stages span { padding: 3px 8px; border: 1px solid var(--production-line); border-radius: 6px; background: var(--saas-card); font-size: 12px; line-height: 1.5; }
 .production-stages small { color: var(--saas-accent); font-size: 11px; white-space: nowrap; }
-.production-facts { display: grid; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 12.5px; line-height: 1.6; }
-.production-facts li::before { content: '✓'; margin-right: 6px; color: var(--production-real); font-weight: 700; }
 
 @media (max-width: 1050px) { .production-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .production-dialog-grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) {

@@ -106,9 +106,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
     onCancel={event => { event.preventDefault(); close(); }}>
     <form onSubmit={event => { event.preventDefault(); void confirm(); }}>
       <header><span>PRODUCTION CASE</span><h2 id={`${id}-title`}>Copy example to my canvases</h2><p>{item.title}</p></header>
-      <p id={`${id}-description`}>{recording && item.canvas
-        ? `Copy the canvas of the real run on ${recording.capturedOn} (${item.nodes.length} nodes): every agent’s persona, the task and field descriptions it received, and the wires are as they were in that run, with what every agent received and delivered (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`
-        : recording
+      <p id={`${id}-description`}>{recording
         ? `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`
         : `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements. Optionally choose one execution model for every new node.`}</p>
       <label className="official-copy-model" htmlFor={`${id}-model`}>Execution model
@@ -126,9 +124,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
         <button type="button" className="saas-link" disabled={locked || loading} onClick={() => { setSubmitError(null); setRevision(value => value + 1); }}>Refresh model catalog</button>
       </div>
       <p className="official-copy-note">This only creates a canvas; it does not initialize nodes or run models. Check the configuration in your canvas before starting a run.
-        {recording && ` The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`}
-        {recording && item.canvas && item.limitations && ` ${item.limitations}`}
-        {recording && item.canvas && item.canvas.locale !== 'en' && ' This case’s canvas and recordings are in Chinese, as they ran, and are copied as they are.'}</p>
+        {recording && ` The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`}</p>
       {displayedError && <p className="saas-error" role="alert">{displayedError}</p>}
       <footer><button type="button" disabled={busy || checking} onClick={close}>Cancel</button><button type="submit" className="saas-primary" disabled={locked || invalidChoice}>
         {busy ? 'Creating…' : checking ? 'Checking model…' : selection ? 'Copy with model' : 'Create draft'}

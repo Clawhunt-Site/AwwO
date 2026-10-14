@@ -1,7 +1,6 @@
 import { expect, it } from 'vitest';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
-import { RECORDED_CASE_WORKFLOWS } from '../src/saas/recordedCanvases';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import type { SessionNode } from '../src/canvas/canvasDoc';
 
@@ -15,14 +14,13 @@ const stagesOf = (id: string) => {
     .map(column => workflow.nodes.filter(node => node.column === column).length + (media.some(value => value.column === column) ? 1 : 0));
 };
 
-it('gives every case a canvas here, except the one kept as it ran in recordedCanvases.ts', () => {
-  const own = PRODUCTION_CASES.filter(item => !RECORDED_CASE_WORKFLOWS[item.id]).map(item => item.id).sort();
-  expect(Object.keys(PRODUCTION_WORKFLOWS).sort()).toEqual(own);
+it('gives every case its canvas here, the knowledge base’s too', () => {
+  expect(Object.keys(PRODUCTION_WORKFLOWS).sort()).toEqual(PRODUCTION_CASES.map(item => item.id).sort());
   for (const item of WORKFLOWS) expect(PRODUCTION_WORKFLOWS[item.id]).toBe(item);
 });
 
 it('shows on each card exactly the team its canvas has, stage by stage', () => {
-  for (const item of PRODUCTION_CASES.filter(value => PRODUCTION_WORKFLOWS[value.id]))
+  for (const item of PRODUCTION_CASES)
     expect(item.stages.map(stage => stage.length), item.id).toEqual(stagesOf(item.id));
 });
 
@@ -89,7 +87,8 @@ it('ends every canvas in a review and delivers exactly one self-contained HTML b
     expect(builds, item.id).toHaveLength(1);
     // Sized for Claude Opus 5.5: one call of at most 32,000 output tokens, its own thinking included. A 2D build writes the
     // page itself (16,000 characters); a 3D build pastes the scene code an upstream node delivered and only wires it
-    // (24,000), or, where the scene is split into two half-size modules (7,000 each), pastes both (28,000). The car plant's
+    // (24,000), as the knowledge base's page does with its data and business layer, or, where the scene is split into two
+    // half-size modules (7,000 each), pastes both (28,000). The car plant's
     // page pastes its six modules (36,000); the largest cases build in two steps, a wiring node writing only the code that
     // connects the modules and a page that only pastes the modules and the wiring (56,000).
     const limit = [56000, 36000, 28000, 24000, 16000].find(size => builds[0].task.includes(`Delivery: one HTML file of at most ${size.toLocaleString('en-US')} characters.`));
@@ -115,18 +114,26 @@ it('ends every canvas in a review and delivers exactly one self-contained HTML b
   }
 });
 
+it('holds the knowledge base’s workspace to a SaaS product’s look and has it paste code and data, not a 3D scene', () => {
+  // Its page takes the 3D builds' assembly rules with two of them replaced; a replacement that no longer finds its text
+  // would quietly leave the 3D rule in place.
+  const page = PRODUCTION_WORKFLOWS['knowledge-base'].nodes.find(node => node.outputType === 'html')!;
+  expect(page.task).toContain('paste the code and data delivered upstream exactly as delivered');
+  expect(page.task).toContain('The look must reach the standard of a leading SaaS product');
+  expect(page.task).not.toMatch(/3D code delivered upstream|commercial key-art/);
+});
+
 it('writes every text in English and claims no real brand, footage or production system', () => {
   for (const item of WORKFLOWS) {
     const texts = [item.title, item.brief, ...item.nodes.flatMap(node => [node.title, node.task, node.output, ...node.acceptance]),
       ...item.edges.map(edge => edge.label), ...(item.media ?? []).flatMap(value => [value.title, value.prompt])];
     for (const text of texts) {
       expect(text.trim(), item.id).not.toBe('');
-      // English throughout: the only Chinese is a page title the page itself shows, quoted (“霓虹之城”, “极光 GT”).
-      expect(text.replace(/“[^”]*”/g, ''), item.id).not.toMatch(/\p{Script=Han}/u);
+      // English throughout, the titles its pages show included.
+      expect(text, item.id).not.toMatch(/\p{Script=Han}/u);
     }
-    // Only a canvas kept as it ran (recordedCanvases.ts) says before copying what its recordings refer to; a compiled
-    // case's limits are told to its nodes, in their tasks (the 32,000-token call above).
-    expect(item.limitations, item.id).toBeUndefined();
+    // A case's limits are told to its nodes, in their tasks (the 32,000-token call above), not in a note of its own.
+    expect('limitations' in item, item.id).toBe(false);
     expect(JSON.stringify(item)).not.toMatch(/paperclip/i);
   }
   const ad = PRODUCTION_WORKFLOWS['summer-ad'];

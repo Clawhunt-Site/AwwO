@@ -18,19 +18,6 @@ function recordedText(node: SessionNode, output: string): string | null {
   return [output, JSON.stringify({ [field.id]: output })].find(keeps) ?? null;
 }
 
-/** Several named fields become the keyed JSON object the contract parses, in the contract's order;
- * a field the contract does not declare, or a value that would not come back unchanged, pins nothing.
- * An optional file left empty is no file, as the contract parser and the server read it. */
-function recordedFields(node: SessionNode, fields: ReadonlyArray<{ readonly id: string; readonly value: string }>): string | null {
-  const contract = node.contract;
-  if (!contract || !fields.length || fields.some(field => !contract.outputs.some(output => output.id === field.id))) return null;
-  const text = JSON.stringify(Object.fromEntries(contract.outputs.flatMap(output => fields.filter(field => field.id === output.id).map(field => [field.id, field.value]))));
-  if (validateNodeOutput(node, text).length) return null;
-  const values = parseContractOutput(contract, text).values;
-  const absent = (id: string) => contract.outputs.some(output => output.id === id && output.type === 'file' && !output.required);
-  return fields.every(field => values[field.id] === field.value || (field.value === '' && absent(field.id) && !(field.id in values))) ? text : null;
-}
-
 /**
  * The case's canvas, as `createOfficialCopyDocument` mints it, with every node that delivered in the
  * case's recorded run carrying that delivery as its output: a member sees what each agent was asked,
@@ -54,8 +41,7 @@ export function createProductionCopyDocument(workflow: OfficialWorkflow, record:
     if (!spec || fed.has(spec.id)) return node;
     const recorded = record.nodes.find(value => value.id === spec.id);
     if (node.kind !== 'session' || recorded?.status !== 'done') return node;
-    const text = recorded.outputType === 'fields' ? recordedFields(node, recorded.fields ?? [])
-      : recorded.output?.trim() ? recordedText(node, recorded.output) : null;
+    const text = recorded.output?.trim() ? recordedText(node, recorded.output) : null;
     // The copy dialog counts every delivered node as carried, so a delivery the canvas cannot hold stops the copy.
     if (text === null) throw new Error(`The run record of ${record.caseId} has a delivery of ${recorded.id} its canvas cannot hold.`);
     // Opened, the node shows its delivery beside the (still empty) conversation.
