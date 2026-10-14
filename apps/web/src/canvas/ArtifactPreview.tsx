@@ -77,10 +77,13 @@ export interface ArtifactPreviewProps extends DownloadProps {
 const RELATIVE_MEDIA = /(?:\b(?:src|poster|href)\s*=\s*["']|url\(\s*["']?)(?![a-z][a-z0-9+.-]*:|\/\/|#|data:|blob:)[^"'()\s<>]+\.(?:png|jpe?g|webp|gif|avif|mp4|webm|mov|glb)(?:[?#][^"')\s]*)?["')]/i;
 // A canvas file (`<node id>/<file>`) a script loads by its path: a model, texture, clip or sound (liveDocument.ts).
 const SCRIPT_MEDIA = /(['"`])(?:\.\/|\/)?[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_.%-]+\.(?:glb|gltf|png|jpe?g|webp|gif|avif|hdr|mp4|webm|mov|mp3|wav|ogg|m4a)(?:[?#][^'"`\s]*)?\1/i;
+// The page's own JavaScript files: a script src or a module import by a relative path (the live page inlines them,
+// and finds the modules and canvas files they need in turn).
+const RELATIVE_SCRIPT = /\bsrc\s*=\s*["'](?![a-z][a-z0-9+.-]*:|\/\/|#)[^"'\s<>]+\.m?js(?:[?#][^"'\s<>]*)?["']|\b(?:from|import)\s*\(?\s*["'](?:\.{1,2}\/|\/(?!\/))[^"'\s<>]+["']/i;
 
-/** Does a page name a picture, clip or model by a relative path, which only the canvas's files can supply? */
+/** Does a page name a picture, clip, model or script of its own by a relative path, which only the canvas's files can supply? */
 export function namesRelativeMedia(page: string): boolean {
-  return RELATIVE_MEDIA.test(page) || SCRIPT_MEDIA.test(page);
+  return RELATIVE_MEDIA.test(page) || SCRIPT_MEDIA.test(page) || RELATIVE_SCRIPT.test(page);
 }
 
 /** Native modal isolation also contains focus inside an opaque-origin preview iframe. The

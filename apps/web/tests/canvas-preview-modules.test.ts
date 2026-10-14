@@ -248,6 +248,13 @@ describe('three.js as ES modules, supplied through the page import map', () => {
     expect(guard).toContain('"hero/model-1.glb":"data:model/gltf-binary;base64,');
     expect(guard).toContain('"sky/image-1.jpg":"data:image/jpeg;base64,');
     expect(namesRelativeMedia("<script>new GLTFLoader().load('hero/model.glb?v=1', show)</script>")).toBe(true);
+    // A page that loads its own JavaScript files goes to the live preview, which inlines them; a CDN script or a bare
+    // module name does not.
+    expect(namesRelativeMedia(`${THREE_MODULES_IMPORT_MAP}<script type="module">import './scene.js';</script>`)).toBe(true);
+    expect(namesRelativeMedia('<script type="module">import { start } from "../game/main.js";</script>')).toBe(true);
+    expect(namesRelativeMedia('<script src="./boot.js"></script>')).toBe(true);
+    expect(namesRelativeMedia(`${THREE_MODULES_IMPORT_MAP}<script type="module">import * as THREE from 'three';</script>`)).toBe(false);
+    expect(namesRelativeMedia('<script src="https://cdn.example/lib.js"></script><script src="//cdn.example/x.js"></script>')).toBe(false);
   });
 
   it('never lets a module src close the script element it is turned into', async () => {
