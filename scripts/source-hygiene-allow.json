@@ -1,0 +1,117 @@
+[
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/aww-11-browser-failed-20260904T161201Z/snapshot-manifest.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record; .gitattributes marks docs/superpowers/evidence/** -text to keep the original bytes, so its CRLF line endings stay as captured."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/aww-11-browser-passed-20260904T161819Z/actual-app-current-helper/results.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/aww-11-browser-passed-20260904T161819Z/actual-app-old-helper-replay/results.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/aww-11-browser-passed-20260904T161819Z/browser/result.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/aww-11-browser-passed-20260904T161819Z/repair-run-at-capture.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/aww-11-browser-passed-20260904T161819Z/snapshot-manifest.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-bindings.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record; .gitattributes marks docs/superpowers/evidence/** -text to keep the original bytes, so its CRLF line endings stay as captured."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/contract-review-repro.mjs",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/host-provenance-comment.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/issue-readback.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/previous-acceptance-report.md",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/previous-result.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/result.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/review-child-readback.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/review-child.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/source-before.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/upstream-evidence/aww-11-modal-focus/final-evidence-readback.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/upstream-evidence/browser/result.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/reacceptance-20260905/verification.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record whose SHA-256 is recorded elsewhere in the evidence tree; .gitattributes marks docs/superpowers/evidence/** -text, so its original CRLF bytes are kept."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-final-acceptance-20260905/snapshot-manifest.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record; .gitattributes marks docs/superpowers/evidence/** -text to keep the original bytes, so its CRLF line endings stay as captured."
+  },
+  {
+    "path": "docs/superpowers/evidence/2026-09-04-awwo/codex-live-resume-gate.json",
+    "categories": ["cr"],
+    "reason": "Frozen verification record; .gitattributes marks docs/superpowers/evidence/** -text to keep the original bytes, so its CRLF line endings stay as captured."
+  },
+  {
+    "path": "scripts/run-ci-tests.ps1",
+    "categories": ["cr"],
+    "reason": ".gitattributes checks *.ps1 out with eol=crlf (Windows PowerShell), so the working-tree copy is CRLF by design."
+  },
+  {
+    "path": "docs/pglite-feasibility.md",
+    "categories": ["zero-width"],
+    "reason": "Historical feasibility record that quotes a garbled backup file name byte for byte (replacement characters plus U+200B); the record is kept as written."
+  }
+]
