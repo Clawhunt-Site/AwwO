@@ -361,6 +361,14 @@
 .awwo-market-preview p { line-height: 1.7; color: var(--awwo-muted); }
 .awwo-market-preview summary { cursor: pointer; }
 .awwo-market-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 11px; line-height: 1.6; }
+/* Third-party role library: one heading, then collapsible teams that span the whole catalogue grid. */
+.awwo-market-library-heading, .awwo-market-group { grid-column: 1 / -1; margin: 0; }
+.awwo-market-library-heading { margin-top: 10px; font-size: 12px; font-weight: 600; color: var(--awwo-ink); }
+.awwo-market-group { font-size: 12px; font-weight: 600; }
+.awwo-market-group > button, .awwo-catalog-list .awwo-market-group-label { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 2px; border: 0; border-bottom: 1px solid var(--awwo-border); background: transparent; color: var(--awwo-ink); font: inherit; font-size: 12px; text-align: left; }
+.awwo-market-group > button { cursor: pointer; }
+.awwo-catalog-list .awwo-market-group span span, .awwo-market-group > button > span { margin-left: auto; font-weight: 400; }
+.awwo-catalog-list .awwo-market-license, .awwo-market-preview .awwo-market-license { font-size: 10px; font-style: normal; color: var(--awwo-muted); overflow-wrap: anywhere; }
 
 .awwo-field-structure-toggle { align-self:flex-end; border:0; background:transparent; color:var(--awwo-muted); padding:6px 0; font-size:11px; cursor:pointer; }
 .awwo-field-value-label { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; }
