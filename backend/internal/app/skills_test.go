@@ -31,7 +31,7 @@ func TestBuiltinSkillsAreValid(t *testing.T) {
 			t.Fatalf("%s: a built-in skill needs Chinese labels for the zh interface", s.Name)
 		}
 	}
-	for _, want := range []string{"motion-lab", "shot-director", "promo-film", "video-breakdown", "neon-pixel-scene", "web-research", "trend-digest", "critic", "product-spec", "data-analysis", "copy-editor", "handoff-summary"} {
+	for _, want := range []string{"code-motion", "shot-director", "promo-film", "video-breakdown", "neon-pixel-scene", "web-research", "trend-digest", "critic", "product-spec", "data-analysis", "copy-editor", "handoff-summary"} {
 		if !seen[want] {
 			t.Fatalf("starter skill %s missing", want)
 		}

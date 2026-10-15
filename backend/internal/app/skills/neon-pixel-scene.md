@@ -15,12 +15,12 @@ What makes these scenes read as "neon city" is a dark, low-saturation body, a fe
 
 ## 2D path (Canvas 2D)
 
-1. Draw into a low-resolution buffer (about 270 px tall, width by aspect ratio) with image smoothing off, then scale it up by a whole number onto the visible canvas (480x270 becomes exactly 4x at 1080p).
+1. Draw into a low-resolution buffer with image smoothing off, then scale it up by a whole number onto the visible canvas: at 1080p, 320x180 scales by 6 and 480x270 by 4.
 2. Cheap bloom: downscale the buffer to a quarter, multiply it onto itself to keep only bright pixels, downscale again, then add both glow layers back with `globalCompositeOperation = 'lighter'` at about 0.4–0.5 alpha.
-3. Depth: three or four skyline layers moving at different speeds (for example 0.05, 0.13, 0.28, 0.55 of the street speed), each followed by a haze gradient in the scene's colour, stronger far away.
+3. Depth: three or four skyline layers, each moving at roughly twice the speed of the one behind it (for example 1/16, 1/8, 1/4 and 1/2 of the street speed), each followed by a haze gradient in the scene's colour, stronger far away.
 4. Buildings from a seed: hash the building's slot to seed a generator; draw the static facade once into a small cached canvas, and keep only animated details (signs, a few windows) for every frame.
 5. Neon text: render small text, threshold its alpha so edges stay crisp, place it on a dark panel with a one-pixel neon frame, cache the result.
-6. Life: windows mostly warm (about 40% tungsten, 50% accent colours, 10% cool white); a few signs flicker briefly in rare windows of time; rain as two layers of short strokes; the wet road mirrors the rows above it with a slight wobble.
+6. Life: lit windows mostly in the scene's accent colours and warm tungsten, with only a few cool white; a few signs flicker briefly in rare windows of time; rain as two layers of short strokes; the wet road mirrors the rows above it with a slight wobble.
 
 ## 3D path (three.js on AwwO's import map)
 

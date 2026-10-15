@@ -33,7 +33,7 @@ const knowledgeDocument = (patch: Record<string, unknown> = {}) => ({ id: 'sourc
   currentRevisionId: 'revision-a', contentHash: 'hash-a', sourceUri: '', provenance: { origin: 'user' }, createdAt: '2026-10-01T01:00:00Z', updatedAt: '2026-10-01T01:00:00Z', ...patch });
 const note = (patch: Record<string, unknown> = {}) => ({ id: 'm1', canvasId: null, scope: 'workspace', title: '对外文案用简体中文', body: '', kind: 'style', status: 'active', origin: 'user',
   pinned: true, source: {}, contentHash: 'h1', version: 3, useCount: 5, lastUsedAt: null, createdAt: '2026-10-01T01:00:00Z', updatedAt: '2026-10-02T01:00:00Z', ...patch });
-const skill = (patch: Record<string, unknown> = {}) => ({ ref: 'builtin:motion-lab', name: 'motion-lab', title: 'Motion Lab', titleZh: '代码动效实验室', description: 'Animation drawn in code',
+const skill = (patch: Record<string, unknown> = {}) => ({ ref: 'builtin:code-motion', name: 'code-motion', title: 'Motion in code', titleZh: '代码动效', description: 'Animation drawn in code',
   descriptionZh: '用代码绘制的动画', category: 'video', applies: ['html', 'motion'], version: 1, source: 'builtin', bytes: 40, contentHash: 'sh1', ...patch });
 const workspaceSkill = skill({ ref: `workspace:a${'b'.repeat(32)}`, id: `a${'b'.repeat(32)}`, name: 'house-style', title: 'House style', titleZh: undefined, description: 'Our house style',
   descriptionZh: undefined, category: 'writing', applies: ['writing'], source: 'workspace', version: 2 });
@@ -154,7 +154,7 @@ describe('skill library', () => {
     });
     render(preferences(<SkillLibrary tenantId="tenant-a" onClose={() => {}} />));
     expect(await screen.findByRole('heading', { name: 'Render contract' })).toBeVisible();
-    expect(screen.getByText('代码动效实验室', { selector: 'h3' })).toBeVisible();
+    expect(screen.getByText('代码动效', { selector: 'h3' })).toBeVisible();
     expect(screen.getByRole('heading', { name: '视频' })).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: '新建技能' }));
@@ -184,10 +184,34 @@ describe('skill library', () => {
   it('lets a viewer read built-in skills without any way to change them', async () => {
     server(call => call.url === `${tenant}/skills` ? json({ items: [skill()], limits }) : call.url.startsWith(`${tenant}/skills/`) ? json({ ...skill(), body: 'Body\n' }) : undefined);
     render(preferences(<SkillLibrary tenantId="tenant-a" readOnly onClose={() => {}} />));
-    await screen.findByText('代码动效实验室', { selector: 'h3' });
+    await screen.findByText('代码动效', { selector: 'h3' });
     expect(screen.queryByRole('button', { name: '新建技能' })).toBeNull();
     expect(screen.queryByRole('button', { name: '导入 SKILL.md' })).toBeNull();
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();
+  });
+
+  it('links the license texts beside an adapted built-in skill only', async () => {
+    const adapted = skill({ attribution: 'From wshobson/agents@7257c27 (MIT, Copyright (c) 2024 Seth Hobson); trimmed for AwwO' });
+    const plain = skill({ ref: 'builtin:copy-editor', name: 'copy-editor', title: 'Copy editor', titleZh: '文字编辑', category: 'writing' });
+    const own = { ...workspaceSkill, attribution: 'Written by the team' };
+    const items = [adapted, plain, own];
+    server(call => {
+      if (call.url === `${tenant}/skills`) return json({ items, limits });
+      const found = items.find(item => call.url === `${tenant}/skills/${encodeURIComponent(item.ref)}` || call.url === `${tenant}/skills/${item.ref}`);
+      return found ? json({ ...found, body: 'Body\n' }) : undefined;
+    });
+    render(preferences(<SkillLibrary tenantId="tenant-a" readOnly onClose={() => {}} />));
+    await screen.findByText(/From wshobson\/agents@7257c27/);
+    const link = screen.getByRole('link', { name: '许可证全文' });
+    expect(link.getAttribute('href')).toMatch(/skillLicences/);
+    expect(link).toHaveAttribute('target', '_blank');
+    fireEvent.click(screen.getByRole('button', { name: /文字编辑/ }));
+    await screen.findByText('文字编辑', { selector: 'h3' });
+    expect(screen.queryByText(/来源：/)).toBeNull();
+    expect(screen.queryByRole('link', { name: '许可证全文' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /House style/ }));
+    await screen.findByText(/Written by the team/);
+    expect(screen.queryByRole('link', { name: '许可证全文' })).toBeNull();
   });
 });
 
@@ -203,7 +227,7 @@ describe('canvas bar tools and messages', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '技能库' }));
     const skills = await screen.findByRole('dialog', { name: '技能库' });
-    expect(await within(skills).findByText('代码动效实验室', { selector: 'h3' })).toBeVisible();
+    expect(await within(skills).findByText('代码动效', { selector: 'h3' })).toBeVisible();
   });
 
   it('names each new refusal in both languages', () => {

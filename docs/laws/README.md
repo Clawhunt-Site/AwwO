@@ -31,8 +31,8 @@ redesign.
 
 ## How to cite laws
 
-Code and tests MUST conform to the laws. When a change and a law disagree, either the change is wrong, or the
-same change amends the law with the owner's agreement. A law is never broken silently.
+Every change, tests included, MUST keep the laws. When a change and a law disagree, either the change is wrong,
+or the same change amends the law with the owner's agreement. A law is never broken silently.
 
 Every commit body and every review brief lists the laws the change touches:
 

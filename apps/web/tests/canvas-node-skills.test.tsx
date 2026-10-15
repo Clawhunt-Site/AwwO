@@ -16,7 +16,7 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const workspaceRef = `workspace:a${'b'.repeat(32)}`;
 const catalog = {
   items: [
-    { ref: 'builtin:motion-lab', name: 'motion-lab', title: 'Motion Lab', titleZh: '代码动效实验室', description: 'Animation drawn in code', descriptionZh: '用代码绘制的动画', category: 'video', applies: ['html'], version: 1, source: 'builtin', bytes: 10, contentHash: 'a' },
+    { ref: 'builtin:code-motion', name: 'code-motion', title: 'Motion in code', titleZh: '代码动效', description: 'Animation drawn in code', descriptionZh: '用代码绘制的动画', category: 'video', applies: ['html'], version: 1, source: 'builtin', bytes: 10, contentHash: 'a' },
     { ref: 'builtin:critic', name: 'critic', title: 'Critic', titleZh: '批判审稿', description: 'Find what is wrong', descriptionZh: '找出问题', category: 'writing', applies: ['review'], version: 1, source: 'builtin', bytes: 10, contentHash: 'b' },
     { ref: 'builtin:web-research', name: 'web-research', title: 'Web research', titleZh: '网络调研', description: 'Research from sources', descriptionZh: '基于来源调研', category: 'research', applies: ['research'], version: 1, source: 'builtin', bytes: 10, contentHash: 'c' },
     { ref: 'builtin:copy-editor', name: 'copy-editor', title: 'Copy editor', titleZh: '文字编辑', description: 'Tighten copy', descriptionZh: '精简文字', category: 'writing', applies: ['writing'], version: 1, source: 'builtin', bytes: 10, contentHash: 'd' },
@@ -45,9 +45,9 @@ describe('skills on a node', () => {
   it('saves the inspector draft’s skills and clears them from a media node with an explicit empty list', () => {
     const live = session({ skills: ['builtin:critic'] });
     const change = { binding: false, config: false };
-    expect(inspectorSavedNode(live, { ...live, skills: ['builtin:motion-lab'] }, live, change).skills).toEqual(['builtin:motion-lab']);
+    expect(inspectorSavedNode(live, { ...live, skills: ['builtin:code-motion'] }, live, change).skills).toEqual(['builtin:code-motion']);
     // An empty list, not a missing key: the server keeps a node's skills when an older client leaves the key out.
-    const media = inspectorSavedNode(live, { ...live, agentKind: 'image', skills: ['builtin:motion-lab'] }, live, change);
+    const media = inspectorSavedNode(live, { ...live, agentKind: 'image', skills: ['builtin:code-motion'] }, live, change);
     expect(media.skills).toEqual([]);
     const plain = session();
     expect(Object.hasOwn(inspectorSavedNode(plain, { ...plain, agentKind: 'image' }, plain, change), 'skills')).toBe(false);
@@ -77,17 +77,17 @@ describe('skills on a node', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加技能' }));
     const picker = screen.getByRole('group', { name: '为这个节点选择技能' });
     fireEvent.change(within(picker).getByRole('searchbox', { name: '搜索技能' }), { target: { value: '动效' } });
-    const motion = within(picker).getByText('代码动效实验室').closest('li')!;
+    const motion = within(picker).getByText('代码动效').closest('li')!;
     fireEvent.click(within(motion).getByRole('button', { name: '添加' }));
-    expect(changes.at(-1)).toEqual(['builtin:critic', 'builtin:motion-lab']);
+    expect(changes.at(-1)).toEqual(['builtin:critic', 'builtin:code-motion']);
     fireEvent.change(within(picker).getByRole('searchbox', { name: '搜索技能' }), { target: { value: '' } });
     fireEvent.click(within(within(picker).getByText('网络调研').closest('li')!).getByRole('button', { name: '添加' }));
     fireEvent.click(within(within(picker).getByText('House style').closest('li')!).getByRole('button', { name: '添加' }));
-    expect(changes.at(-1)).toEqual(['builtin:critic', 'builtin:motion-lab', 'builtin:web-research', workspaceRef]);
+    expect(changes.at(-1)).toEqual(['builtin:critic', 'builtin:code-motion', 'builtin:web-research', workspaceRef]);
     expect(within(within(picker).getByText('文字编辑').closest('li')!).getByRole('button', { name: '添加' })).toBeDisabled();
     expect(within(picker).getByText('每个节点最多 4 个技能。')).toBeVisible();
     fireEvent.click(within(within(picker).getByText('批判审稿').closest('li')!).getByRole('button', { name: '已添加' }));
-    expect(changes.at(-1)).toEqual(['builtin:motion-lab', 'builtin:web-research', workspaceRef]);
+    expect(changes.at(-1)).toEqual(['builtin:code-motion', 'builtin:web-research', workspaceRef]);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -97,7 +97,7 @@ describe('skills on a node', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url === `${tenant}/skills` ? json(heavy) : json({}, 404)));
     const changes: string[][] = [];
     function Harness() {
-      const [refs, setRefs] = useState<string[]>(['builtin:motion-lab', 'builtin:critic']);
+      const [refs, setRefs] = useState<string[]>(['builtin:code-motion', 'builtin:critic']);
       return <NodeSkillsEditor value={refs} onChange={next => { changes.push(next); setRefs(next); }} />;
     }
     render(<Harness />);
@@ -108,7 +108,7 @@ describe('skills on a node', () => {
     expect(third).toBeDisabled();
     expect(third).toHaveAttribute('title', '加不下了：一个节点的技能合计最多 20.0 KB。');
     fireEvent.click(within(within(picker).getByText('文字编辑').closest('li')!).getByRole('button', { name: '添加' }));
-    expect(changes.at(-1)).toEqual(['builtin:motion-lab', 'builtin:critic', 'builtin:copy-editor']);
+    expect(changes.at(-1)).toEqual(['builtin:code-motion', 'builtin:critic', 'builtin:copy-editor']);
     fireEvent.click(within(picker).getByRole('button', { name: '完成' }));
     expect(screen.getByRole('button', { name: '添加技能' })).toHaveFocus();
   });

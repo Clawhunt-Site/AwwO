@@ -8,9 +8,9 @@ someone attaches it to the node. The folder is embedded into the API binary (`sk
 
 ```
 ---
-name: motion-lab
-title: Motion Lab: animation drawn in code
-title_zh: 代码动效实验室
+name: code-motion
+title: Motion in code: animation AwwO renders to video
+title_zh: 代码动效：可渲染成视频的动画
 description: <English, one line, at most 1,024 characters; says WHEN to use the skill>
 description_zh: <Chinese, one line>
 category: video

@@ -7,7 +7,7 @@ description_zh: 节点产出主要是给下一个节点或人员接手的摘要�
 category: writing
 applies: plan,writing
 version: 1
-attribution: Structure adapted from the Pi coding agent's session summary format (MIT); modified for AwwO
+attribution: Structure adapted from the Pi coding agent's session summary format (MIT, Copyright (c) 2025 Mario Zechner); modified for AwwO
 ---
 # Handoff summary
 

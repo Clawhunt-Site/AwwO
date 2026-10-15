@@ -139,8 +139,8 @@ For every test the diff adds, changes or removes:
 - Was a case deleted, skipped (`t.Skip`, `it.skip`, `test.todo`) or moved behind an environment switch?
 - Were goldens regenerated (`AWWO_UPDATE_GOLDEN=1`), and is every changed golden line explained?
 - Did the PostgreSQL tests really run (`AWWO_TEST_DATABASE_URL` set), or did they skip? A skip is not a pass.
-- **Would the revised test fail if the regression it guards came back?** Say how you know: you reverted the fix,
-  mutated the code, or reasoned through the assertion.
+- **If the bug this test guards against returned, would the changed test catch it?** Say how you know: you
+  reverted the fix, mutated the code, or reasoned through the assertion.
 
 ## 9. Evidence record
 

@@ -7,7 +7,7 @@ description_zh: 规划或审阅 15–90 秒的产品、功能或发布视频时�
 category: video
 applies: video,motion,plan
 version: 1
-attribution: Adapted from video-shotcraft (Apache-2.0, Copyright 2026 Vincentwei1021); modified for AwwO
+attribution: Adapted from video-shotcraft by Vincentwei1021 (Apache-2.0, Copyright 2026 Wei Yihao); modified for AwwO
 ---
 # Promo film pacing
 

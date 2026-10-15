@@ -32,16 +32,19 @@ Write a table before any prompt:
 - Shot size: extreme close-up, close-up, medium close-up, medium, wide, extreme wide.
 - One camera move per shot (static, push in, pull out, pan, tilt, orbit, tracking, crane). Two moves in one clip usually fail.
 - At most about seven named elements per shot.
-- The end state says how the clip settles ("the cup comes to rest centre frame, steam rising"). Clips without one tend to stall or end abruptly.
+- End state: where everything is when the clip ends ("the cup rests centre frame, steam still rising"). A clip given no end tends to drift or freeze before its last second.
 - Typical generation lengths are 4–15 seconds; some models only allow fixed lengths such as 4, 6, 8, 10 or 12 seconds. Generate slightly longer than the edit needs and trim later.
 
-## 3. Prompt structure: Subject, Action, Context, Shot, Colour
+## 3. Writing each prompt
 
-1. Subject: who or what, described by appearance (age range, clothing, material, colour), never by a real person's name.
-2. Action: three to five visible steps with amplitude ("lifts the lid slowly, steam curls up, she smiles").
-3. Context: foreground, midground, background; time of day; weather.
-4. Shot: size, angle, lens feel (wide, normal, telephoto), depth of field, the single camera move and its speed.
-5. Colour and light: key light direction, colour temperature in Kelvin, contrast, saturation.
+Describe the shot the way a camera operator would read it, in this order:
+
+1. Camera: shot size, angle, lens feel (wide, normal, telephoto), depth of field, and the one move with its speed ("slow push in").
+2. Place: what fills the foreground, middle and background; time of day; weather.
+3. Subject: by appearance (age range, clothing, material, colour), never by a real person's name; for a recurring subject, its locked description.
+4. Beats: what happens, in order, as concrete physical actions, each with its size and speed ("slowly lifts the lid a hand's width, steam curls up").
+5. Light: where the key light comes from, colour temperature in Kelvin, contrast and saturation.
+6. Ending: the end state from the shot table.
 
 End every prompt with a stability tail: "steady camera, consistent subject, natural motion, no text, no watermark", adjusted to the shot.
 

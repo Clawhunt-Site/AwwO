@@ -270,7 +270,7 @@ describe('team market picker with the wshobson library', () => {
 });
 
 describe('built-in skills converted from wshobson/agents', () => {
-  const RESERVED = ['motion-lab', 'shot-director', 'promo-film', 'video-breakdown', 'neon-pixel-scene', 'web-research', 'trend-digest', 'critic', 'product-spec', 'data-analysis', 'copy-editor', 'handoff-summary'];
+  const RESERVED = ['code-motion', 'shot-director', 'promo-film', 'video-breakdown', 'neon-pixel-scene', 'web-research', 'trend-digest', 'critic', 'product-spec', 'data-analysis', 'copy-editor', 'handoff-summary'];
   const CATEGORIES = ['video', 'design', 'research', 'writing', 'engineering', 'business', 'data'];
   const APPLIES = ['html', 'motion', 'video', 'image', 'research', 'writing', 'code', 'review', 'design', 'data', 'plan'];
 
