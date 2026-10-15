@@ -382,6 +382,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// A promotion and today's check-in raise a free workspace's stored allowances (promo.go).
+	if daily, routes, e = a.todayAllowance(r.Context(), tx, tid, daily, routes); e != nil {
+		a.dbError(w, e)
+		return
+	}
 	entitlement, e := newModelEntitlement(restricted, allowed)
 	if e != nil {
 		a.dbError(w, e)
@@ -437,7 +442,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if e = tx.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$1 AND mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+countsTowardsDaily("$2")+")+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')", tid, a.cfg.PlannerModel).Scan(&today); e != nil {
+	if e = tx.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$1 AND mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+countsTowardsDaily("$2")+")+(SELECT count(*) FROM media_generations g WHERE g.tenant_id=$1 AND g.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+generationCounts+")", tid, a.cfg.PlannerModel).Scan(&today); e != nil {
 		a.dbError(w, e)
 		return
 	}

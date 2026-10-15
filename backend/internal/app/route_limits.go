@@ -242,7 +242,7 @@ func (a *App) routeLimit(ctx context.Context, tx pgx.Tx, tid, model string, limi
 		route = routeGate
 	}
 	limit, limited := limits[route]
-	ceiling, capped := a.cfg.RouteTotalsPerDay[route]
+	ceiling, capped := a.cfg.routeTotalsNow()[route]
 	free := a.cfg.RouteFreeModels
 	if free == nil {
 		free = []string{}
@@ -325,9 +325,9 @@ func (a *App) mediaRouteLimit(ctx context.Context, tx pgx.Tx, limits routeLimits
 	if limit, ok := limits[routeMedia]; ok && usedToday >= limit {
 		return "media_quota_exceeded", nil
 	}
-	if ceiling, ok := a.cfg.RouteTotalsPerDay[routeMedia]; ok {
+	if ceiling, ok := a.cfg.routeTotalsNow()[routeMedia]; ok {
 		var used int
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM media_generations g JOIN tenants t ON t.id=g.tenant_id WHERE t.route_limits IS NOT NULL AND NOT `+noRouteLimited+` AND g.billed_user_id IS NULL AND g.created_at>=`+todayUTC).Scan(&used); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM media_generations g JOIN tenants t ON t.id=g.tenant_id WHERE t.route_limits IS NOT NULL AND NOT `+noRouteLimited+` AND g.billed_user_id IS NULL AND g.created_at>=`+todayUTC+` AND `+generationCounts).Scan(&used); err != nil {
 			return "", err
 		}
 		if used >= ceiling {

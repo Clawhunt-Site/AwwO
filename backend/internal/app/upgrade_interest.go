@@ -20,35 +20,56 @@ type routeAllowance struct {
 // and for one that limits no route (an empty object, on plans but unlimited), which shows no meter.
 // A workspace whose owner has a paid plan reports the plan (plan is set, routes nil) with the account's daily
 // default-model calls across its workspaces. The deployment-wide ceilings, the media caps and the model allowlist
-// are not counted, so admission can still refuse a call these numbers show room for.
+// are not counted, so admission can still refuse a call these numbers show room for. The limits are today's, with a
+// promotion's floors and today's check-in (todayAllowance), as admission reads them; stored are the workspace's own
+// daily total and route limits, from which check-ins are offered.
 func (a *App) routeUsageToday(ctx context.Context, tid, uid string) (routeAllowance, map[string]routeAllowance, bool, *activePlan, error) {
+	daily, routes, interested, plan, _, e := a.routeUsageWithStored(ctx, tid, uid)
+	return daily, routes, interested, plan, e
+}
+
+// storedAllowance is a workspace's own daily total and route limits, as the tenants row holds them, and its status.
+type storedAllowance struct {
+	daily  int
+	routes []byte
+	status string
+}
+
+func (a *App) routeUsageWithStored(ctx context.Context, tid, uid string) (routeAllowance, map[string]routeAllowance, bool, *activePlan, storedAllowance, error) {
 	var daily routeAllowance
+	var stored storedAllowance
 	var invocations, media, freeMedia int
 	var raw []byte
 	var interested bool
-	if e := a.db.QueryRow(ctx, `SELECT t.max_runs_per_day,t.route_limits,
+	var status string
+	if e := a.db.QueryRow(ctx, `SELECT t.status,t.max_runs_per_day,t.route_limits,
 		(SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=t.id AND mi.created_at>=`+todayUTC+` AND `+countsTowardsDaily("$3")+`),
-		(SELECT count(*) FROM media_generations WHERE tenant_id=t.id AND created_at>=`+todayUTC+`),
-		(SELECT count(*) FROM media_generations WHERE tenant_id=t.id AND billed_user_id IS NULL AND created_at>=`+todayUTC+`),
+		(SELECT count(*) FROM media_generations g WHERE g.tenant_id=t.id AND g.created_at>=`+todayUTC+` AND `+generationCounts+`),
+		(SELECT count(*) FROM media_generations g WHERE g.tenant_id=t.id AND g.billed_user_id IS NULL AND g.created_at>=`+todayUTC+` AND `+generationCounts+`),
 		EXISTS(SELECT 1 FROM upgrade_interests WHERE tenant_id=t.id AND user_id=$2)
-		FROM tenants t WHERE t.id=$1`, tid, uid, a.cfg.PlannerModel).Scan(&daily.Limit, &raw, &invocations, &media, &freeMedia, &interested); e != nil {
-		return daily, nil, false, nil, e
+		FROM tenants t WHERE t.id=$1`, tid, uid, a.cfg.PlannerModel).Scan(&status, &daily.Limit, &raw, &invocations, &media, &freeMedia, &interested); e != nil {
+		return daily, nil, false, nil, stored, e
+	}
+	stored = storedAllowance{daily.Limit, raw, status}
+	var e error
+	if daily.Limit, raw, e = a.todayAllowance(ctx, a.db, tid, daily.Limit, raw); e != nil {
+		return daily, nil, false, nil, stored, e
 	}
 	daily.Used = invocations + media
 	plan, e := ownerPlan(ctx, a.db, tid, false)
 	if e != nil {
-		return daily, nil, false, nil, e
+		return daily, nil, false, nil, stored, e
 	}
 	if plan != nil {
 		usage, e := accountPlanUsage(ctx, a.db, plan.UserID, a.cfg.PlannerModel)
 		if e != nil {
-			return daily, nil, false, nil, e
+			return daily, nil, false, nil, stored, e
 		}
-		return routeAllowance{Limit: plan.Limits.Daily, Used: usage.FreeToday}, nil, interested, plan, nil
+		return routeAllowance{Limit: plan.Limits.Daily, Used: usage.FreeToday}, nil, interested, plan, stored, nil
 	}
 	limits := readRouteLimits(raw)
 	if len(limits) == 0 {
-		return daily, nil, interested, nil, nil
+		return daily, nil, interested, nil, stored, nil
 	}
 	free := a.cfg.RouteFreeModels
 	if free == nil {
@@ -62,25 +83,26 @@ func (a *App) routeUsageToday(ctx context.Context, tid, uid string) (routeAllowa
 		}
 		var used int
 		if e := a.db.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$3 AND mi.created_at>=`+todayUTC+` AND `+routeInvocationFilter, route, free, tid).Scan(&used); e != nil {
-			return daily, nil, false, nil, e
+			return daily, nil, false, nil, stored, e
 		}
 		routes[route] = routeAllowance{limit, used}
 	}
 	if limit, ok := limits[routeMedia]; ok {
 		routes[routeMedia] = routeAllowance{limit, freeMedia}
 	}
-	return daily, routes, interested, nil, nil
+	return daily, routes, interested, nil, stored, nil
 }
 
 // routeUsageView answers GET /tenants/{tenantId}/route-usage for any member. A workspace without route
 // limits reports limited:false and only its daily allowance; one whose owner has a paid plan reports the
 // plan and this period's credits instead of routes. The credits are the account's, shared by everyone who
 // runs things in its workspaces; the renewal date and a pending cancellation are shown to the owner alone,
-// and a reader, who runs nothing, is not shown the plan.
+// and a reader, who runs nothing, is not shown the plan. While a promotion raises the workspace (promo.go) it
+// reports the promotion's floors (promo) and, to a member who may run things, today's check-in (checkin).
 func (a *App) routeUsageView(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tid, uid := r.PathValue("tenantId"), currentUser(r).ID
-	daily, routes, interested, plan, e := a.routeUsageToday(ctx, tid, uid)
+	daily, routes, interested, plan, stored, e := a.routeUsageWithStored(ctx, tid, uid)
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -90,11 +112,36 @@ func (a *App) routeUsageView(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if role == "reader" || role == "" {
+	member := roleLevel(role) >= 2
+	if !member {
 		plan = nil
 	}
 	out := map[string]any{"limited": routes != nil, "daily": daily, "interested": interested,
 		"resetsAt": time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)}
+	if routes != nil {
+		limits := readRouteLimits(stored.routes)
+		offered, e := a.checkinOffered(ctx, a.db, tid, stored.status, stored.daily, stored.routes)
+		if e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if a.cfg.Promo.active(time.Now()) && a.cfg.promoParticipant(stored.daily, limits) {
+			out["promo"] = a.cfg.promoFor(stored.daily, limits)
+		}
+		if offered && member {
+			day, e := checkinToday(ctx, a.db)
+			if e != nil {
+				a.dbError(w, e)
+				return
+			}
+			v, e := a.checkinState(ctx, a.db, tid, uid, day, true, a.cfg.checkinBonusFor(limits))
+			if e != nil {
+				a.dbError(w, e)
+				return
+			}
+			out["checkin"] = v
+		}
+	}
 	// The canvas assistant's plans on the operator's model: outside the daily calls, inside their own ceiling.
 	planner, ok, e := a.plannerAllowanceToday(ctx, a.db, tid)
 	if e != nil {

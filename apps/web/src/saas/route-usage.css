@@ -22,3 +22,14 @@
 .saas-route-usage button.saas-route-usage-ask { display:block; width:100%; margin-top:10px; padding:4px 0; border:0; background:transparent; text-align:center; font:600 13px/1.4 var(--saas-font, inherit); color:var(--saas-link); cursor:pointer; }
 .saas-route-usage button.saas-route-usage-ask:not(:disabled):hover { color:var(--saas-link-hover); text-decoration:underline; text-underline-offset:3px; }
 .saas-route-usage button.saas-route-usage-ask:disabled { opacity:.5; cursor:default; }
+/* The check-in chip beside the meter while a promotion offers check-ins: the meter's own shape, in the accent colour
+   so it reads as something to do today; the same doubled class and :not(:disabled) outrank the header's button rules. */
+.saas-account-actions > button.saas-checkin-trigger.saas-checkin-trigger { border:1px solid var(--saas-accent); background:color-mix(in srgb, var(--saas-accent) 14%, var(--saas-card)); color:var(--saas-text); font-weight:600; white-space:nowrap; }
+.saas-account-actions > button.saas-checkin-trigger.saas-checkin-trigger:not(:disabled):hover { border-color:var(--saas-accent); background:color-mix(in srgb, var(--saas-accent) 26%, var(--saas-card)); color:var(--saas-text); }
+.saas-account-actions > button.saas-checkin-trigger.saas-checkin-trigger:disabled { opacity:.7; cursor:default; }
+.saas-route-usage p.saas-route-usage-promo { padding:8px 10px; border-radius:8px; background:color-mix(in srgb, var(--saas-accent) 10%, var(--saas-card)); color:var(--saas-text); }
+.saas-route-usage p.saas-route-usage-checkin { color:var(--saas-text); }
+.saas-route-usage p.saas-route-usage-checkin.is-done { font-weight:600; }
+.saas-route-usage button.saas-route-usage-checkin-button { display:flex; align-items:center; justify-content:center; gap:6px; width:100%; margin:0 0 12px; padding:8px 10px; border:1px solid var(--saas-accent); border-radius:8px; background:color-mix(in srgb, var(--saas-accent) 14%, var(--saas-card)); color:var(--saas-text); font:600 13px/1.4 var(--saas-font, inherit); text-align:center; cursor:pointer; }
+.saas-route-usage button.saas-route-usage-checkin-button:not(:disabled):hover { background:color-mix(in srgb, var(--saas-accent) 26%, var(--saas-card)); }
+.saas-route-usage button.saas-route-usage-checkin-button:disabled { opacity:.6; cursor:default; }

@@ -326,7 +326,7 @@ func (x *xtasyClient) submit(ctx context.Context, endpoint string, body map[stri
 		return rhTask{}, xtasyResendable(err, 0)
 	}
 	if status < 200 || status > 299 {
-		return rhTask{}, xtasyResendable(xtasyHTTPError(status, data), wait)
+		return rhTask{}, xtasyResendable(refusedAnswer(xtasyHTTPError(status, data)), wait)
 	}
 	task, err := parseXtasyTask(data, "", x.base)
 	if err != nil {

@@ -279,6 +279,10 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 		var allowed []string
 		var routes []byte
 		e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits,requires_plan FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&status, &concurrent, &daily, &restricted, &allowed, &routes, &needsPlan)
+		// A promotion and today's check-in raise a free workspace's stored allowances (promo.go).
+		if e == nil {
+			daily, routes, e = a.todayAllowance(ctx, tx, tid, daily, routes)
+		}
 		// The owner's plan is read without a lock first; it is locked only once a slot is free (below).
 		var plan *activePlan
 		if e == nil {
@@ -378,7 +382,7 @@ func (a *App) admitFreeInvocation(ctx context.Context, tx pgx.Tx, tid, model str
 	var active, today int
 	// Image and video generations spend the same daily run quota.
 	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE mi.status='running'),count(*) FILTER(WHERE mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND `+countsTowardsDaily("$2")+`)
-		+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') FROM model_invocations mi WHERE mi.tenant_id=$1`, tid, a.cfg.PlannerModel).Scan(&active, &today); e != nil {
+		+(SELECT count(*) FROM media_generations g WHERE g.tenant_id=$1 AND g.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND `+generationCounts+`) FROM model_invocations mi WHERE mi.tenant_id=$1`, tid, a.cfg.PlannerModel).Scan(&active, &today); e != nil {
 		return false, e
 	}
 	if today >= daily && !operatorPaid {

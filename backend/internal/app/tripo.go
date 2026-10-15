@@ -214,7 +214,7 @@ func (t *tripoClient) submit(ctx context.Context, endpoint string, body map[stri
 		return rhTask{}, err
 	}
 	if status != 200 {
-		return rhTask{}, tripoRefusal(tripoHTTPError(status, data), wait)
+		return rhTask{}, tripoRefusal(refusedAnswer(tripoHTTPError(status, data)), wait)
 	}
 	var v struct {
 		Code json.RawMessage `json:"code"`
@@ -226,7 +226,7 @@ func (t *tripoClient) submit(ctx context.Context, endpoint string, body map[stri
 		return rhTask{}, &rhError{Code: "media_provider_unavailable", Transient: true}
 	}
 	if code := numericCode(v.Code); code != "" && code != "0" {
-		return rhTask{}, tripoRefusal(tripoCodeError(code), wait)
+		return rhTask{}, tripoRefusal(refusedAnswer(tripoCodeError(code)), wait)
 	}
 	id := strings.TrimSpace(v.Data.TaskID)
 	if !tripoTaskID.MatchString(id) {

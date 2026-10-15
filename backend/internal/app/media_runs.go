@@ -373,6 +373,16 @@ type mediaBilling struct {
 	billedPeriod *time.Time
 }
 
+// generationCounts matches a generation (alias g) that spends a free allowance: one sent to its provider
+// (submitted_at, set before the request goes out) unless the provider refused it outright, creating no task
+// (provider_refused, refusedAnswer); one its provider accepted, even if it failed or was refunded afterwards; and one
+// still queued or running, so concurrent admissions cannot pass a limit together. So a refused generation gives its
+// attempt back, and so does one whose run ended before it was ever sent (a cancel, a failed reference upload), while a
+// submission whose outcome is unknown (a timeout, a lost answer, a cancel or a restart while it was in flight) keeps
+// counting.
+const generationCounts = `(NOT g.provider_refused AND (g.submitted_at IS NOT NULL OR g.provider_accepted IS NOT NULL
+	OR EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=g.tenant_id AND r.id=g.run_id AND r.status IN ('queued','running'))))`
+
 // admitMediaGeneration decides whether one more generation may be paid for, inside the admitting transaction, which
 // already holds the workspace row: with an entitled plan its daily generations, its agents at once (unless the caller
 // already holds one of them: holdsSlot, as a canvas run does through planRunSlot) and its credits; otherwise the
@@ -386,10 +396,11 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 	if _, e := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84321010)"); e != nil {
 		return none, e
 	}
-	// today counts this workspace's free generations only: paid ones never spend a free allowance.
+	// today counts this workspace's free generations only: paid ones never spend a free allowance, and one that cost
+	// nothing gave its attempt back (generationCounts).
 	var today, total int
-	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1 AND billed_user_id IS NULL),count(*) FILTER (WHERE billed_user_id IS NULL) FROM media_generations
-		WHERE created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&today, &total); e != nil {
+	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE g.tenant_id=$1 AND g.billed_user_id IS NULL),count(*) FILTER (WHERE g.billed_user_id IS NULL) FROM media_generations g
+		WHERE g.created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND `+generationCounts, tid).Scan(&today, &total); e != nil {
 		return none, e
 	}
 	// A paid plan's row is locked after the workspace row and the media lock, like every model call's.
@@ -441,21 +452,21 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 	} else if !operator && today >= a.cfg.MediaRunsPerDay {
 		return none, &mediaRefusal{429, "media_quota_exceeded", "This workspace has used today's image and video generations"}
 	}
-	if plan == nil && !operator && total >= a.cfg.MediaTotalRunsPerDay {
+	if plan == nil && !operator && total >= a.cfg.mediaTotalNow() {
 		return none, &mediaRefusal{429, "media_capacity_exceeded", "Today's image and video generations are used up; try again tomorrow"}
 	}
 	// A 3D generation is paid from the operator's Tripo balance: free ones have their own, smaller caps, for the
 	// workspace and across every workspace, counted from durable rows under the same lock.
 	if plan == nil && !operator && snapshot.Media.Provider == mediaProviderTripo {
 		var mine, all int
-		if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE tenant_id=$1),count(*) FROM media_generations
-			WHERE billed_user_id IS NULL AND model LIKE 'tripo.%' AND created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, tid).Scan(&mine, &all); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE g.tenant_id=$1),count(*) FROM media_generations g
+			WHERE g.billed_user_id IS NULL AND g.model LIKE 'tripo.%' AND g.created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND `+generationCounts, tid).Scan(&mine, &all); e != nil {
 			return none, e
 		}
 		if mine >= a.cfg.TripoFreeRunsPerDay {
 			return none, &mediaRefusal{429, "model3d_quota_exceeded", "This workspace has used today's free 3D generations"}
 		}
-		if all >= a.cfg.TripoFreeTotalPerDay {
+		if all >= a.cfg.tripoTotalNow() {
 			return none, &mediaRefusal{429, "model3d_capacity_exceeded", "Today's free 3D generations are used up; try again tomorrow"}
 		}
 	}
@@ -552,8 +563,20 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 	if a.mediaStopped(ctx, id, false) {
 		return
 	}
+	// The generation counts as sent before the provider can bill it (generationCounts); one that cannot be marked so is
+	// not sent at all, and so costs nothing. A run cancelled meanwhile was settled by its cancel.
+	if e := a.markMediaSubmitted(ctx, tid, id); errors.Is(e, errMediaRunEnded) {
+		return
+	} else if e != nil {
+		a.log.Warn("media submission not recorded; not sent", "event", "media_submit_unrecorded")
+		a.finish(tid, id, "failed", "", "media_unavailable")
+		return
+	}
 	task, err := submitMedia(ctx, hub, endpoint, body, func() { a.mediaStatus(ctx, tid, id, "queued") })
 	if err != nil {
+		if e, ok := asRHError(err); ok && e.Refused {
+			a.markMediaRefused(ctx, tid, id)
+		}
 		if a.mediaStopped(ctx, id, false) {
 			return
 		}
@@ -640,9 +663,51 @@ func submitMedia(ctx context.Context, hub mediaProvider, endpoint string, body m
 	}
 }
 
+// errMediaRunEnded says a generation's run ended (a cancel) before it was marked sent: it is not sent at all.
+var errMediaRunEnded = errors.New("media run ended before it was sent")
+
+// markMediaSubmitted records that a generation is about to be sent to its provider, which may bill it from then on.
+// The run's row is locked while it is checked and marked, so a cancel either comes first, and the generation is not
+// sent (errMediaRunEnded), or waits until it already counts as sent: a cancel can never free an allowance that a
+// generation sent afterwards still uses.
+func (a *App) markMediaSubmitted(ctx context.Context, tid, id string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	tx, e := a.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(context.Background())
+	var status string
+	if e = tx.QueryRow(ctx, "SELECT status FROM runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, id).Scan(&status); e != nil {
+		return e
+	}
+	if status != "queued" && status != "running" {
+		return errMediaRunEnded
+	}
+	tag, e := tx.Exec(ctx, "UPDATE media_generations SET submitted_at=COALESCE(submitted_at,clock_timestamp()) WHERE tenant_id=$1 AND run_id=$2", tid, id)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("generation row missing")
+	}
+	return tx.Commit(ctx)
+}
+
+// markMediaRefused records that the provider refused a generation outright, creating no task (refusedAnswer): it cost
+// nothing, so a free one gives its attempt back. If this write fails the generation keeps counting.
+func (a *App) markMediaRefused(ctx context.Context, tid, id string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, e := a.db.Exec(ctx, "UPDATE media_generations SET provider_refused=true WHERE tenant_id=$1 AND run_id=$2 AND provider_accepted IS NULL", tid, id); e != nil {
+		a.log.Warn("refused generation not recorded", "event", "media_refusal_unrecorded")
+	}
+}
+
 // unbillMedia records that the provider returned a generation's frozen credits (Tripo does for a task that failed
 // or was cancelled on its side), so the generation costs its paid plan nothing (creditsSpentSQL). A free
-// allowance stays spent, like every other failure's.
+// allowance stays spent: the provider accepted the task (generationCounts).
 func (a *App) unbillMedia(ctx context.Context, tid, id string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()

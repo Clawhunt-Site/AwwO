@@ -114,6 +114,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 28, "migrations/028_parallel_graph_runs.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 29, "migrations/029_workspace_checkins.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

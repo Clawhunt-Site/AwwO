@@ -50,6 +50,27 @@ type rhError struct {
 	RetryAfter time.Duration
 	// Unbilled marks a task the provider ended on its side without charging for it (Tripo: failed, cancelled).
 	Unbilled bool
+	// Refused marks a submission the provider refused for a reason on the operator's side, creating no task and so
+	// costing nothing (refusedAnswer): a free generation refused this way gives its attempt back (generationCounts).
+	Refused bool
+}
+
+// operatorRefusals are the refusals of a submission that are the operator's, not the request's: the key, the balance,
+// a model the provider no longer has, a request the service itself built wrong, the account's credit ceiling. A
+// refusal of the request's own content or settings keeps counting, so a refused prompt cannot be sent again and again
+// at the operator's key for free.
+var operatorRefusals = map[string]bool{"media_provider_unauthorized": true, "media_provider_balance": true,
+	"media_provider_unavailable": true, "media_request_invalid": true, "media_credit_ceiling": true}
+
+// refusedAnswer marks a provider's own refusal of a submission (an HTTP error status, or an error code in an answer
+// that carries no task) as Refused when it is a definite (non-transient) refusal on the operator's side. A transient
+// one may be sent again, and a failure to read a successful answer may hide a task, so callers apply it only where the
+// answer itself says no task was created.
+func refusedAnswer(err error) error {
+	if e, ok := asRHError(err); ok && !e.Transient && operatorRefusals[e.Code] {
+		e.Refused = true
+	}
+	return err
 }
 
 func (e *rhError) Error() string { return e.Code }
@@ -166,14 +187,16 @@ func resultURLAllowed(hosts []string, u *url.URL) bool {
 // submit starts a task. A request the provider never received fails as transient; anything it
 // answered is reduced to its task or a closed error code.
 func (h *runningHub) submit(ctx context.Context, endpoint string, body map[string]any) (rhTask, error) {
-	return h.call(ctx, endpoint, body)
+	return h.call(ctx, endpoint, body, true)
 }
 
 func (h *runningHub) query(ctx context.Context, taskID string) (rhTask, error) {
-	return h.call(ctx, "/openapi/v2/query", map[string]any{"taskId": taskID})
+	return h.call(ctx, "/openapi/v2/query", map[string]any{"taskId": taskID}, false)
 }
 
-func (h *runningHub) call(ctx context.Context, path string, body map[string]any) (rhTask, error) {
+// call posts to RunningHub. A submission's HTTP error status says no task was created, so for a submission a definite
+// refusal on the operator's side is marked (refusedAnswer); an answer that parses, even a failed one, may carry a task.
+func (h *runningHub) call(ctx context.Context, path string, body map[string]any, submission bool) (rhTask, error) {
 	if ctx.Err() != nil {
 		return rhTask{}, ctx.Err()
 	}
@@ -199,9 +222,15 @@ func (h *runningHub) call(ctx context.Context, path string, body map[string]any)
 	if err != nil || len(data) > rhResponseLimit {
 		return rhTask{}, &rhError{Code: "media_provider_unavailable", Transient: true}
 	}
+	refused := func(err error) error {
+		if submission {
+			return refusedAnswer(err)
+		}
+		return err
+	}
 	switch {
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		return rhTask{}, &rhError{Code: "media_provider_unauthorized"}
+		return rhTask{}, refused(&rhError{Code: "media_provider_unauthorized"})
 	case resp.StatusCode == 429:
 		return rhTask{}, &rhError{Code: "media_provider_busy", Transient: true}
 	case resp.StatusCode >= 500:

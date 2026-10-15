@@ -81,6 +81,8 @@ type Config struct {
 	// FreeModelTotalPerDay is the deployment-wide daily ceiling on free default-model calls across route-limited
 	// workspaces (checkFreeModelCeiling); 0 sets none.
 	FreeModelTotalPerDay int
+	// Promo is a free-allowance promotion with its daily check-ins (promo.go, AWWO_PROMO_*); the zero value runs none.
+	Promo promotion
 	// First ClawHunt sign-ins (clawhunt_signup.go): accounts a client address may create per UTC day (0: no limit),
 	// and whether a new account needs the issuer to report its email verified. Existing accounts are never held.
 	NewAccountsPerIPPerDay int
@@ -205,6 +207,9 @@ func ConfigFromEnv() (Config, error) {
 	if err := c.routeSettingsFromEnv(); err != nil {
 		return c, err
 	}
+	if err := c.promoSettingsFromEnv(); err != nil {
+		return c, err
+	}
 	if err := c.signupSettingsFromEnv(); err != nil {
 		return c, err
 	}
@@ -245,6 +250,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.validateRouteSettings(); err != nil {
+		return err
+	}
+	if err := c.validatePromoSettings(); err != nil {
 		return err
 	}
 	if err := c.validateSignupSettings(); err != nil {

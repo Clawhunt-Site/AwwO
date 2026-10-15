@@ -128,8 +128,8 @@ func TestPostgresRouteUsageAndUpgradeInterest(t *testing.T) {
 		items[0].(map[string]any)["id"] == first["items"].([]any)[0].(map[string]any)["id"] {
 		t.Fatal("second page", second)
 	}
-	// A generation counts in the media route and the daily total, even on a closed route.
-	exec("INSERT INTO media_generations(run_id,tenant_id,model) VALUES($1,$2,'rh.seedream-v5-pro')", randomID(), ta)
+	// A generation its provider accepted counts in the media route and the daily total, even on a closed route.
+	exec("INSERT INTO media_generations(run_id,tenant_id,model,provider_accepted) VALUES($1,$2,'rh.seedream-v5-pro',true)", randomID(), ta)
 	if u = usage(ca, ta); !reflect.DeepEqual(u["routes"].(map[string]any)["media"], allowance(0, 1)) || !reflect.DeepEqual(u["daily"], allowance(6, 7)) {
 		t.Fatal("generation in the meter", u)
 	}

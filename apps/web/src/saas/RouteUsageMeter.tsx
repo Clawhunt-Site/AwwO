@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { Gauge } from 'lucide-react';
+import { CalendarCheck, Gauge } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { saasErrorMessage } from './api';
 import { formatCredits, planName } from './billing';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
-import { fetchRouteUsage, meterState, recordUpgradeInterest, routeOrder, routeUsedUp, type RouteName, type RouteUsage } from './routeUsage';
+import { canCheckIn, checkIn, fetchRouteUsage, meterState, recordUpgradeInterest, routeOrder, routeUsedUp, type CheckinBonus, type CheckinState, type PromoView, type RouteName, type RouteUsage } from './routeUsage';
 import './route-usage.css';
 
 const REFRESH_MS = 120_000;
 
 /** Today's free allowance of a route-limited workspace, and the "I want more calls" that tells the
  * operator who would pay; for a workspace on a paid plan, the owner's credits this period. A workspace with
- * neither shows nothing and stops asking. */
+ * neither shows nothing and stops asking. While a promotion offers check-ins, a chip beside the meter checks
+ * the workspace in for today's bonus, and the meter's popover says what the promotion and the check-in give. */
 export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
   const { t, locale } = useSaaSPreferences();
   const [usage, setUsage] = useState<RouteUsage | null>(null);
@@ -20,6 +21,9 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
   const [busy, setBusy] = useState(false);
   const [recorded, setRecorded] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkedNow, setCheckedNow] = useState(false);
+  const [checkError, setCheckError] = useState<unknown>(null);
   const anchor = useRef<HTMLButtonElement>(null);
   const reload = useRef<() => void>(() => {});
   useEffect(() => {
@@ -60,12 +64,29 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
     catch (cause) { setError(cause); }
     finally { setBusy(false); }
   };
+  // The answer is today's check-in; the meter then reads the raised limits again.
+  const check = async () => {
+    setChecking(true); setCheckError(null);
+    try {
+      const { checkin } = await checkIn(tenantId);
+      setUsage(value => value ? { ...value, checkin } : value);
+      setCheckedNow(true);
+    } catch (cause) { setCheckError(cause); }
+    finally { setChecking(false); reload.current(); }
+  };
+  const checkin = usage.checkin;
   return <>
+    {/* The chip opens the meter's popover too, where the check-in's result or refusal is said. */}
+    {checkin && canCheckIn(checkin) && <button type="button" className="saas-checkin-trigger" disabled={checking} onClick={() => { setOpen(true); void check(); }}
+      title={checkinOffer(checkin, locale)}><CalendarCheck size={16} aria-hidden="true" />{checking ? t('正在签到…', 'Checking in…') : t('签到领次数', 'Check in')}</button>}
     <button ref={anchor} type="button" className={`saas-route-usage-trigger${warn ? ' is-out' : ''}`} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => { if (!open) reload.current(); setOpen(value => !value); }}><Gauge size={16} aria-hidden="true" />{label}</button>
     <Popover containKeyboard open={open} anchorRef={anchor} ariaLabel={t('今日免费额度', 'Today’s free allowance')} className="saas-route-usage" onClose={() => setOpen(false)}>
       <h2>{t('今日免费额度', 'Today’s free allowance')}</h2>
       <p>{t('每天 UTC 0 点重置。默认模型不单独限次，只占总次数。', 'Resets at 00:00 UTC. The default model has no limit of its own and only uses the daily total.')}</p>
+      {usage.promo && <PromoNote promo={usage.promo} />}
+      {checkin && <CheckinRow checkin={checkin} busy={checking} announced={checkedNow} onCheckIn={check} />}
+      {Boolean(checkError) && <p role="alert" className="saas-error">{saasErrorMessage(checkError, locale)}</p>}
       <dl>
         <div className={state.kind === 'daily-out' ? 'is-out' : undefined}><dt>{t('总次数', 'All calls')}</dt><dd>{Math.min(usage.daily.used, usage.daily.limit)} / {usage.daily.limit}</dd></div>
         {usage.planner && <PlannerRow allowance={usage.planner} />}
@@ -95,6 +116,46 @@ function PlannerRow({ allowance }: { allowance: NonNullable<RouteUsage['planner'
     <dt>{t('助手改画布（免费，不占总次数）', 'Assistant canvas changes (free, outside the daily calls)')}</dt>
     <dd>{Math.min(allowance.used, allowance.limit)} / {allowance.limit}</dd>
   </div>;
+}
+
+/** What a bonus adds, in the reader's language: calls, and generations where this workspace gets any. */
+function bonusText({ daily, media }: CheckinBonus, locale: 'zh' | 'en'): string {
+  if (locale === 'zh') return media > 0 ? `${daily} 次调用和 ${media} 次图片 / 视频生成` : `${daily} 次调用`;
+  return media > 0 ? `${daily} more calls and ${media} more image / video generations` : `${daily} more calls`;
+}
+
+/** What one check-in gives this workspace today, in the reader's language. */
+function checkinOffer(checkin: CheckinState, locale: 'zh' | 'en'): string {
+  return locale === 'zh' ? `签到：今天再多 ${bonusText(checkin.bonus, locale)}` : `Check in for ${bonusText(checkin.bonus, locale)} today`;
+}
+
+/** A promotion's limited-time allowances and when they end, in the reader's own time. */
+function PromoNote({ promo }: { promo: PromoView }) {
+  const { t, locale } = useSaaSPreferences();
+  const until = new Date(promo.until).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const media = promo.routes?.media;
+  return <p className="saas-route-usage-promo">{media
+    ? t(`限时放开：到 ${until}，免费版每天 ${promo.daily} 次调用、${media} 次图片 / 视频生成，下面的数字已经算上。`, `Limited time: until ${until}, the free plan has ${promo.daily} calls and ${media} image / video generations a day; the numbers below include it.`)
+    : t(`限时放开：到 ${until}，免费版每天 ${promo.daily} 次调用，下面的数字已经算上。`, `Limited time: until ${until}, the free plan has ${promo.daily} calls a day; the numbers below include it.`)}</p>;
+}
+
+/** Today's check-in: the button while this person can still check in, otherwise what today's check-in gave or why
+ * there is none to make. announced is set once this person checked in from this page, to say so to a screen reader. */
+function CheckinRow({ checkin, busy, announced, onCheckIn }: { checkin: CheckinState; busy: boolean; announced: boolean; onCheckIn: () => void }) {
+  const { t, locale } = useSaaSPreferences();
+  if (checkin.checkedIn) {
+    const got = checkin.today ?? checkin.bonus;
+    return <p role={announced ? 'status' : undefined} className="saas-route-usage-checkin is-done">
+      {locale === 'zh' ? `今天已签到，多了 ${bonusText(got, locale)}` : `Checked in today: ${bonusText(got, locale)}`}
+      {checkin.streak > 1 ? t(` · 已连续签到 ${checkin.streak} 天`, ` · ${checkin.streak} days in a row`) : ''}</p>;
+  }
+  if (checkin.taken) return <p className="saas-route-usage-checkin">{t('这个工作区今天已经有成员签到了，多出的次数已经加上。', 'Another member checked this workspace in today; the extra calls are already added.')}</p>;
+  if (checkin.elsewhere) return <p className="saas-route-usage-checkin">{t('你今天已经在另一个工作区签到了，每人每天签一次。', 'You checked in another workspace today; it is one check-in a person a day.')}</p>;
+  return <>
+    <button type="button" className="saas-route-usage-checkin-button" disabled={busy} onClick={onCheckIn}>
+      <CalendarCheck size={16} aria-hidden="true" />{busy ? t('正在签到…', 'Checking in…') : checkinOffer(checkin, locale)}</button>
+    {checkin.streak > 0 && <p className="saas-route-usage-checkin">{t(`已连续签到 ${checkin.streak} 天，今天签了接着算。`, `${checkin.streak} days in a row so far; check in today to keep it going.`)}</p>}
+  </>;
 }
 
 /** The chip of a workspace on a paid plan: the owner's credits left this period and today's calls. */

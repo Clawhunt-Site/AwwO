@@ -638,6 +638,10 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if e != nil {
 		return e
 	}
+	// A promotion and today's check-in raise a free workspace's stored allowances (promo.go).
+	if daily, routes, e = a.todayAllowance(ctx, tx, tid, daily, routes); e != nil {
+		return e
+	}
 	if tenantStatus != "active" {
 		return errors.New("execution_revoked")
 	}

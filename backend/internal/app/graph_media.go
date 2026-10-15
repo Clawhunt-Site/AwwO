@@ -292,6 +292,6 @@ func (a *App) admitGraphMedia(ctx context.Context, tx pgx.Tx, tid, gid, nid, sid
 // workspaceRunsToday counts the workspace's model calls and generations today, as a Send's admission does (createRun).
 func (a *App) workspaceRunsToday(ctx context.Context, q querier, tid string) (int, error) {
 	var today int
-	err := q.QueryRow(ctx, "SELECT (SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$1 AND mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+countsTowardsDaily("$2")+")+(SELECT count(*) FROM media_generations WHERE tenant_id=$1 AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')", tid, a.cfg.PlannerModel).Scan(&today)
+	err := q.QueryRow(ctx, "SELECT (SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$1 AND mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+countsTowardsDaily("$2")+")+(SELECT count(*) FROM media_generations g WHERE g.tenant_id=$1 AND g.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+generationCounts+")", tid, a.cfg.PlannerModel).Scan(&today)
 	return today, err
 }

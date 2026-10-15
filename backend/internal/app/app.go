@@ -306,6 +306,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/media", a.tenant(a.mediaCatalogue, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/route-usage", a.tenant(a.routeUsageView, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/upgrade-interest", a.tenant(a.recordUpgradeInterest, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/checkin", a.tenant(a.checkIn, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/agents", a.tenant(a.listAgents, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/agents", a.tenant(a.createAgent, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/agents/{id}", a.tenant(a.getAgent, 1))

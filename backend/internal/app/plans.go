@@ -160,7 +160,8 @@ func accountPlan(ctx context.Context, q querier, userID string) (*activePlan, er
 }
 
 // planUsage is what the account has admitted under its plan: model calls running now, today's free default-model
-// calls (UTC) apart from the operator's planner calls (planner_model.go), and today's generations.
+// calls (UTC) apart from the operator's planner calls (planner_model.go), and today's generations (as a free
+// allowance counts them: a refused one gives its attempt back, generationCounts).
 type planUsage struct {
 	Running, FreeToday, MediaToday int
 }
@@ -171,7 +172,7 @@ func accountPlanUsage(ctx context.Context, q querier, userID, plannerModel strin
 	err := q.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM model_invocations WHERE billed_user_id=$1 AND status='running'),
 		(SELECT count(*) FROM model_invocations mi WHERE mi.billed_user_id=$1 AND mi.credit_reserve IS NULL AND mi.created_at>=`+todayUTC+` AND `+countsTowardsDaily("$2")+`),
-		(SELECT count(*) FROM media_generations WHERE billed_user_id=$1 AND created_at>=`+todayUTC+`)`, userID, plannerModel).Scan(&u.Running, &u.FreeToday, &u.MediaToday)
+		(SELECT count(*) FROM media_generations g WHERE g.billed_user_id=$1 AND g.created_at>=`+todayUTC+` AND `+generationCounts+`)`, userID, plannerModel).Scan(&u.Running, &u.FreeToday, &u.MediaToday)
 	return u, err
 }
 
