@@ -79,12 +79,12 @@ describe('SaaS node configuration save', () => {
     render(<InspectorPanel {...p} />);
     expect(screen.getByRole('radio', { name: '图像 Agent' })).toBeDisabled();
     expect(screen.getByRole('radio', { name: '视频 Agent' })).toBeDisabled();
-    expect(screen.getByText('图像与视频节点由媒体生成服务执行，不使用执行框架、人设、团队或交付格式。')).toBeInTheDocument();
+    expect(screen.getByText('图像、视频与 3D 模型节点由媒体生成服务执行，不使用执行框架、人设、团队或交付格式。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存并准备运行' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '保存并准备运行' }));
     expect(p.onInitialize).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('radio', { name: '编程 Agent' }));
-    expect(screen.getByText('Pi 和 OpenAI Agents JS 执行文本与编程任务；工作区开放媒体生成时，图像与视频任务由媒体生成服务执行。仅当所选模型提供思考强度档位时才可选择。')).toBeInTheDocument();
+    expect(screen.getByText('通用和编程 Agent 负责写文字与代码；工作区开放媒体生成时，图像、视频与 3D 模型节点由媒体生成服务执行。')).toBeInTheDocument();
     expect(screen.getByLabelText('人设 / 系统提示词')).toHaveAttribute('placeholder', '这个 Agent 是谁、偏好什么、必须遵守什么…（保存时生效）');
     expect(screen.getByRole('button', { name: '保存并准备运行' })).not.toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '保存并准备运行' }));

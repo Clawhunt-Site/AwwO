@@ -58,7 +58,7 @@ import { activeNodeThread, getNodeThreads, createNodeThread, selectNodeThread, u
 import { prepareNodeConversation, type NodeConversationContext } from './nodeConversation';
 import './awwo-node.css';
 import { NodeViewStylePicker } from './NodeViewStylePicker';
-import { modelChoiceKey, NodeModelPicker, type NodeModelChoice } from './NodeModelPicker';
+import { currentChoiceKey, modelChoiceKey, NodeModelPicker, type NodeModelChoice } from './NodeModelPicker';
 import { useSimpleCanvas } from './uiMode';
 import { CardPreview } from './CardPreview';
 import { showsPreview } from './cardFrames';
@@ -922,7 +922,7 @@ export const SessionTile = memo(function SessionTile({
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
                     accessory={node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team
-                      ? <NodeModelPicker choices={modelChoices} value={modelChoiceKey(node)} currentLabel={unlistedModelLabel(node, locale)}
+                      ? <NodeModelPicker choices={modelChoices} value={currentChoiceKey(node, modelChoices)} currentLabel={unlistedModelLabel(node, locale)}
                         disabled={busy || readOnly} disabledReason={busy ? t('tile.taskRunning') : undefined} onChange={key => onChangeModel(nodeId, key)} /> : undefined}
                     blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(conversationError)}
                     blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : conversationError || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}

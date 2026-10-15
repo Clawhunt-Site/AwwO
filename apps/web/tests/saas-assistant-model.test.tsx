@@ -18,11 +18,12 @@ const palette = [
 const opus = { runtime: 'pi', model: 'bedrock.claude-opus-5-5' };
 
 describe('the components a canvas-assistant plan adds', () => {
-  it('start on the model chosen for the assistant, on its runtime when the workspace offers it there', () => {
+  it('start on the model chosen for the assistant, on the runtime AwwO runs that model on rather than the assistant’s', () => {
     const before = doc([node('kept', { runtime: 'pi', model: 'claude-opus-5' }), node('new-a'), node('new-b'), node('old')]);
     const after = withAssistantModel(before, ['kept', 'new-a', 'new-b'], opus, palette);
     const byId = Object.fromEntries(after.nodes.map(item => [item.id, item as SessionNode]));
-    expect([byId['new-a'].runtime, byId['new-a'].model, byId['new-a'].effort]).toEqual(['pi', 'bedrock.claude-opus-5-5', '']);
+    // The assistant's direct tasks run Opus 5.5 on Pi; a node runs it on openai-agents, where its long call is not cut off.
+    expect([byId['new-a'].runtime, byId['new-a'].model, byId['new-a'].effort]).toEqual(['openai-agents', 'bedrock.claude-opus-5-5', '']);
     expect(byId['new-b'].model).toBe('bedrock.claude-opus-5-5');
     // A node the plan did not add, and one the plan already set, are left as they are.
     expect([byId.old.runtime, byId.old.model]).toEqual(['', '']);
@@ -36,6 +37,12 @@ describe('the components a canvas-assistant plan adds', () => {
     const after = withAssistantModel(doc([image, node('agent')]), ['picture', 'agent'], { runtime: 'pi', model: 'qwen3.8-27b-p6' }, palette);
     expect((after.nodes[0] as SessionNode).model).toBe(image.model);
     expect([(after.nodes[1] as SessionNode).model, (after.nodes[1] as SessionNode).effort]).toEqual(['qwen3.8-27b-p6', 'low']);
+  });
+
+  it('stay on Pi only for a model no ready openai-agents worker offers', () => {
+    const notReady = palette.map(item => item.runtime === 'openai-agents' ? { ...item, available: false } : item);
+    expect(componentModelEntry(opus, notReady)?.runtime).toBe('pi');
+    expect(componentModelEntry({ runtime: 'openai-agents', model: 'qwen3.8-27b-p6' }, palette)?.runtime).toBe('pi');
   });
 
   it('keep the workspace default when no model was chosen or the workspace offers the chosen one to no node', () => {

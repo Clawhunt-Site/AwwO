@@ -33,6 +33,8 @@ import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeL
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
+import { NodeModelSettings } from './NodeModelSettings';
+import type { ModelPaletteGroup } from './modelPalette';
 import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
 import {
   type AgentKind,
@@ -64,6 +66,12 @@ export interface InspectorPanelProps {
   media?: MediaCatalogueState;
   /** Read the media catalogue again after a failed read. */
   onRetryMedia?: () => void;
+  /** A hosted workspace's chat models, each once on the runtime AwwO runs it on (automaticGroups): the node's model is
+   *  picked from these and its runtime is never shown (nodeRuntime.ts). Absent → the runtime picker of a local host. */
+  modelGroups?: ReadonlyArray<ModelPaletteGroup>;
+  modelsLoading?: boolean;
+  modelsError?: string;
+  onRetryModels?: () => void;
   /** A binding landed — the surface can re-project the live world so the new agent appears. */
   onBound?: (node: SessionNode) => void;
   /**
@@ -162,6 +170,10 @@ export function InspectorPanel({
   onInitialize,
   media,
   onRetryMedia,
+  modelGroups,
+  modelsLoading = false,
+  modelsError = '',
+  onRetryModels,
   onBound,
   onCreateCompany,
   onCloseLockChange,
@@ -464,12 +476,27 @@ export function InspectorPanel({
 
             {mediaDraft ? <MediaNodeSettings node={sessionDraft} state={media} disabled={busy} onChange={editDraft} onRetry={onRetryMedia} /> : <>
 
-            <div className="canvas-inspector-label">{t('inspector.runtime')}</div>
+            {!(modelGroups && onInitialize) || sessionDraft.agentRef ? <div className="canvas-inspector-label">{t(modelGroups && onInitialize ? 'inspector.model' : 'inspector.runtime')}</div> : null}
             {sessionDraft.agentRef ? <dl className="canvas-inspector-hint">
-              <dt>Runtime</dt><dd><output aria-label="Runtime">{nodeTeamRuntimeLabel(sessionDraft.runtime || 'pi')}</output></dd>
+              {modelGroups && onInitialize ? null : <><dt>Runtime</dt><dd><output aria-label="Runtime">{nodeTeamRuntimeLabel(sessionDraft.runtime || 'pi')}</output></dd></>}
               <dt>{locale === 'en' ? 'Model' : '模型'}</dt><dd><output aria-label={locale === 'en' ? 'Model' : '模型'}>{sessionDraft.model || (locale === 'en' ? 'Resolved by the server' : '由服务端解析')}</output></dd>
               <dt>{locale === 'en' ? 'Reasoning effort' : '推理强度'}</dt><dd><output aria-label={locale === 'en' ? 'Reasoning effort' : '推理强度'}>{sessionDraft.effort || (locale === 'en' ? 'Not set' : '未设置')}</output></dd>
-            </dl> : readJson ? (
+            </dl> : modelGroups && onInitialize ? <div className="canvas-inspector-runtime">
+                <NodeModelSettings node={sessionDraft} groups={modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels}
+                  disabled={busy}
+                  onChange={next => editDraft({ ...sessionDraft, ...next,
+                    ...(sessionDraft.team && next.model !== sessionDraft.model ? { team: followNodeModel(sessionDraft.team, sessionDraft, { runtime: next.runtime }) } : {}) })} />
+                {teamModelOverrides.length ? (
+                  <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" role="group" aria-label={t('inspector.teamModelOverrideLabel')}>
+                    <div>{t('inspector.teamModelOverride', { count: teamModelOverrides.length })}</div>
+                    <ul>{teamModelOverrides.map(({ index, member }) => <li key={member.id}>{t('inspector.teamModelOverrideMember', { index: index + 1, name: member.name, model: member.model })}</li>)}</ul>
+                    <button type="button" disabled={busy}
+                      onClick={() => { if (sessionDraft.team) editDraft({ ...sessionDraft, team: inheritNodeModel(sessionDraft.team, teamModelOverrides.map(item => item.index)) }); }}>
+                      {t('inspector.teamModelFollow')}
+                    </button>
+                  </div>
+                ) : null}
+              </div> : readJson ? (
               <div className="canvas-inspector-runtime">
                 <RuntimePicker
                   runtimes={runtimes}
@@ -502,7 +529,7 @@ export function InspectorPanel({
             ) : (
               <div className="canvas-inspector-hint">{t('inspector.runtimeUnavailable')}</div>
             )}
-            {onInitialize && !sessionDraft.agentRef && <div className="canvas-inspector-hint">{t('inspector.serviceDefaults')}</div>}
+            {onInitialize && !sessionDraft.agentRef && !modelGroups && <div className="canvas-inspector-hint">{t('inspector.serviceDefaults')}</div>}
 
             {!sessionDraft.agentRef && <PersonaPicker persona={sessionDraft.persona} disabled={busy}
               onChange={persona => editDraft({ ...sessionDraft, persona })} />}

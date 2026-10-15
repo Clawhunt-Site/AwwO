@@ -4,7 +4,8 @@ export type NodeTeamRuntime = 'pi' | 'openai-agents';
 export type NodeTeamTool = 'calculator' | 'current_time';
 export const NODE_TEAM_RUNTIMES: readonly NodeTeamRuntime[] = ['pi', 'openai-agents'];
 export const NODE_TEAM_TOOLS: readonly NodeTeamTool[] = ['calculator', 'current_time'];
-export const nodeTeamRuntimeLabel = (runtime: string): string => runtime === 'pi' ? 'Pi' : runtime === 'openai-agents' ? 'OpenAI Agents JS' : runtime;
+// The production openai-agents runtime is served by the Python SDK worker, so the name says neither language.
+export const nodeTeamRuntimeLabel = (runtime: string): string => runtime === 'pi' ? 'Pi' : runtime === 'openai-agents' ? 'OpenAI Agents' : runtime;
 export type NodeTeamModelCatalogs = Partial<Record<NodeTeamRuntime, readonly string[]>>;
 /** Per runtime, the reasoning-effort levels each listed model advertises. A loaded runtime with no entry for a model offers no level. */
 export type NodeTeamEffortCatalogs = Partial<Record<NodeTeamRuntime, Readonly<Record<string, readonly string[]>>>>;

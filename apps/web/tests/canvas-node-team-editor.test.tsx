@@ -197,7 +197,7 @@ describe('node team configuration', () => {
 const mixedRuntimes: NodeTeamRuntime[] = ['pi', 'openai-agents'];
 const allowedTools: Partial<Record<NodeTeamRuntime, NodeTeamTool[]>> = { 'openai-agents': ['calculator', 'current_time'] };
 const mixedRead = async (path: string) => ({ models: path.includes('/openai-agents/') ? ['agents-only', 'shared-id'] : ['model-a', 'pi-only', 'shared-id'] });
-describe('OpenAI Agents JS team configuration', () => {
+describe('OpenAI Agents team configuration', () => {
   it('loads each member runtime catalog, resets portable settings and allows only advertised tools', async () => {
     const save = vi.fn(); const read = vi.fn(mixedRead);
     render(<Harness read={read} onChange={save} runtimes={mixedRuntimes} runtimeTools={allowedTools} />); await enable();
@@ -243,7 +243,7 @@ describe('OpenAI Agents JS team configuration', () => {
     const node = session(); node.team = createNodeTeam(node); node.team.members[1] = { ...node.team.members[1], runtime: 'openai-agents', model: 'retired-agents', tools: ['calculator'] };
     const validity = vi.fn();
     render(<NodeTeamEditor node={node} available runtimes={mixedRuntimes} runtimeTools={{ 'openai-agents': [] }} readJson={mixedRead} onChange={vi.fn()} onValidityChange={validity} />);
-    await screen.findByText(/此模型不在当前 OpenAI Agents JS 模型清单/);
+    await screen.findByText(/此模型不在当前 OpenAI Agents 模型清单/);
     expect(member(2).getByLabelText('模型')).toHaveValue('retired-agents');
     expect(member(2).getByRole('checkbox', { name: /计算器/ })).toBeChecked();
     expect(screen.getByRole('alert')).toHaveTextContent('当前服务目录未提供此工具');

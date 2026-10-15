@@ -110,7 +110,7 @@ describe('node team persistence and execution freshness', () => {
   });
 });
 
-it('round-trips OpenAI Agents JS models and allowlisted tools with the node and thread runtime', () => {
+it('round-trips OpenAI Agents models and allowlisted tools with the node and thread runtime', () => {
   const original = node(); original.runtime = 'openai-agents'; original.model = 'agents-model'; original.team = createNodeTeam(original);
   original.team.members[0].model = 'agents-model';
   original.team.members[0].tools = ['calculator', 'current_time'];

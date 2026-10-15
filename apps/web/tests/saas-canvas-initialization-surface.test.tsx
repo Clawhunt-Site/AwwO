@@ -84,6 +84,31 @@ it('initializes a draft before graph journaling and executes the returned Agent/
   await waitFor(() => expect(journalAtSubmission?.nodes['Draft node']).toMatchObject({ agentId: 'new-agent', issueId: 'new-session', companyId: tenant.id }));
   expect(initialize).toHaveBeenCalledOnce(); expect(screen.queryByText(/未绑定真实 Agent/)).toBeNull();
 });
+it('sets a node saved on Pi up on openai-agents when a run executes it there, and leaves a Pi-only model on Pi', async () => {
+  const catalogue = { available: true, configured: true,
+    models: [{ id: 'profile-main', runtime: 'pi' }, { id: 'profile-main', runtime: 'openai-agents' }, { id: 'pi-only', runtime: 'pi' }],
+    runtimes: ['pi', 'openai-agents'].map(id => ({ id, name: id, available: true, configured: true, supportsEffortSelection: false, tools: [] })) };
+  for (const [model, expected] of [['profile-main', 'openai-agents'], ['pi-only', 'pi']] as const) {
+    cleanup(); localStorage.clear(); configureCanvasStorage('user', 'workspace', 'canvas'); resetAllSessions(); journalAtSubmission = null;
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' }); configureSaaSCanvasSave(async () => 9);
+    seed(true);
+    const document = loadDocumentWithStatus().doc;
+    (document.nodes[0] as SessionNode).model = model;
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(document));
+    const fallback = (globalThis.fetch as unknown as (input: unknown, init?: RequestInit) => Promise<Response>);
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init: RequestInit = {}) => String(input).endsWith('/runtime')
+      ? new Response(JSON.stringify(catalogue)) : fallback(input, init)));
+    let received!: CanvasDocument;
+    configureSaaSCanvasInitialize(async () => { received = loadDocumentWithStatus().doc; return canonical(received, expected, model); });
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+    // The run waits for the workspace's models, so it knows where each one runs.
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).endsWith('/runtime'))).toBe(true));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+    await waitFor(() => expect(received).toBeDefined());
+    expect(received.nodes[0]).toMatchObject({ runtime: expected, model });
+  }
+});
 it('retains the editable draft and writes no journal when initialization fails; the notice can be dismissed', async () => {
   seed(); configureSaaSCanvasInitialize(async () => { throw new Error('Fixture unavailable'); });
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
@@ -105,22 +130,26 @@ it('saves edited configuration synchronously, preserves the old thread and adopt
   expect(getNodeThreads(received.nodes[0] as SessionNode).some(thread => thread.issueId === 'old-session' && thread.binding?.agentId === 'old-agent')).toBe(true);
   await waitFor(() => expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({ binding: { agentId: 'new-agent' }, issueId: 'new-session', persona: 'Updated persona' }));
 });
-it('persists a node runtime change through initialization and preserves the prior Pi conversation', async () => {
+it('picks a model without a runtime, sets it up where AwwO runs it, and preserves the prior Pi conversation', async () => {
   seed(true); let received!: CanvasDocument;
-  const mixedReader = async (path: string) => path === '/api/agents'
-    ? { agents: ['pi', 'openai-agents'].map(name => ({ name, supports_model_selection: true, supports_node_teams: true, supports_effort_selection: false, model_catalog_source: 'saas_runtime', tools: [] })) }
-    : { source: 'saas_runtime', models: path.includes('/openai-agents/') ? ['agents-only'] : ['profile-main'] };
+  // The workspace offers profile-main on Pi only and agents-only on OpenAI Agents only.
+  const catalogue = { available: true, configured: true, models: [{ id: 'profile-main', runtime: 'pi' }, { id: 'agents-only', runtime: 'openai-agents' }],
+    runtimes: ['pi', 'openai-agents'].map(id => ({ id, name: id, available: true, configured: true, supportsEffortSelection: false, tools: [] })) };
+  const fallback = (globalThis.fetch as unknown as (input: unknown, init?: RequestInit) => Promise<Response>);
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init: RequestInit = {}) => String(input).endsWith('/runtime')
+    ? new Response(JSON.stringify(catalogue)) : fallback(input, init)));
   configureSaaSCanvasInitialize(async scope => {
     expect(scope).toEqual(['Draft node']); received = loadDocumentWithStatus().doc;
     return canonical(received, 'openai-agents', 'agents-only');
   });
-  const view = render(<CanvasSurface storageMode="cloud" runtimeReadJson={mixedReader} />); await openInspector();
-  fireEvent.click(screen.getByLabelText('Runtime'));
-  fireEvent.click(await screen.findByRole('option', { name: 'OpenAI Agents JS' }));
-  await waitFor(() => expect(screen.getByLabelText('模型')).not.toBeDisabled());
-  fireEvent.click(screen.getByLabelText('模型'));
-  expect(screen.queryByRole('option', { name: 'profile-main' })).toBeNull();
-  fireEvent.click(await screen.findByRole('option', { name: 'agents-only' }));
+  const view = render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />); await openInspector();
+  // The panel names models only: no runtime control, and a hint that AwwO picks the engine.
+  expect(screen.queryByLabelText('Runtime')).toBeNull();
+  expect(screen.getByText('AwwO 会为所选模型自动安排执行引擎，无需设置。')).toBeVisible();
+  const model = await screen.findByRole('combobox', { name: '模型' });
+  await waitFor(() => expect(model.querySelector('option[value="agents-only"]')).not.toBeNull());
+  expect(model).toHaveValue('profile-main');
+  fireEvent.change(model, { target: { value: 'agents-only' } });
   fireEvent.click(screen.getByRole('button', { name: /保存配置|保存并准备运行/ }));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: '节点配置 — Draft node' })).toBeNull());
   expect(received.nodes[0]).toMatchObject({ runtime: 'openai-agents', model: 'agents-only', effort: '', binding: null, issueId: null });
@@ -130,9 +159,9 @@ it('persists a node runtime change through initialization and preserves the prio
     expect.objectContaining({ runtime: 'pi', model: 'profile-main', issueId: 'old-session', binding: expect.objectContaining({ agentId: 'old-agent' }) }),
     expect.objectContaining({ runtime: 'openai-agents', model: 'agents-only', issueId: 'new-session', binding: expect.objectContaining({ agentId: 'new-agent' }) }),
   ]));
-  view.unmount(); render(<CanvasSurface storageMode="cloud" runtimeReadJson={mixedReader} />); await openInspector();
-  expect(screen.getByLabelText('Runtime')).toHaveTextContent('OpenAI Agents JS');
-  await waitFor(() => expect(screen.getByLabelText('模型')).toHaveTextContent('agents-only'));
+  view.unmount(); render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />); await openInspector();
+  await waitFor(() => expect(screen.getByRole('combobox', { name: '模型' })).toHaveValue('agents-only'));
+  expect(screen.queryByLabelText('Runtime')).toBeNull();
 });
 it('persists detaching a shared Agent through the full inspector save path without reviving its reference', async () => {
   seed(true);

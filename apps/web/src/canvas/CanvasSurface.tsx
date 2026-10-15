@@ -43,11 +43,12 @@ import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHos
   type RouteAssistant } from './assistantRouting';
 import { CanvasResults } from './CanvasResults';
 import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
-import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
+import { automaticGroups, paletteEfforts, readModelPalette, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
 import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, type CanvasPlanMedia } from './canvasPlan';
 import { withAssistantModel } from './assistantModel';
+import { automaticEntries, withAutomaticRuntimes } from './nodeRuntime';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
   readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
@@ -1435,6 +1436,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     let runDocument = docRef.current;
     try {
       if (currentSaaSCanvas()) {
+        // Every node this run executes runs its model where AwwO runs that model (nodeRuntime.ts), whatever runtime an
+        // older canvas saved: the node is set up again on it as part of this run's preparation. A message typed to a node
+        // keeps its conversation where it is.
+        const live = paletteRef.current; const here = currentSaaSCanvas();
+        const models = live && here && live.tenantId === here.tenant.id && live.canvasId === here.canvasId ? live.models : [];
+        const automatic = manualMessage ? docRef.current : withAutomaticRuntimes(docRef.current, scope, models, paletteEfforts(models));
+        if (automatic !== docRef.current) { docRef.current = automatic; setDoc(automatic); }
         runDocument = await prepareNodes(scope);
         // Keep the live document in sync with the prepared one: the recovery poll re-computes
         // the input fingerprint from docRef.current, so a stale ref would fail the match and
@@ -3268,9 +3276,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const v = viewRef.current;
     addPaletteModel(chosen.model, chosen.personaId, { x: (event.clientX - rect.left - v.x) / (v.scale || 1), y: (event.clientY - rect.top - v.y) / (v.scale || 1) });
   };
+  // The model rail lists each model once, on the runtime AwwO runs it on (nodeRuntime.ts).
+  const shelfGroups = useMemo(() => automaticGroups(palette?.groups ?? []), [palette?.groups]);
   const modelShelf = canInitialize && !readOnly && !simple ? <ModelPersonaShelf modelsOnly
     configureModelsHref={personalCredentialsRequired ? accountURL('engines') : undefined}
-    operatorManaged={!personalCredentialsRequired} groups={palette?.groups ?? []}
+    operatorManaged={!personalCredentialsRequired} groups={shelfGroups}
     loading={paletteLoading} error={paletteError} disabled={!canEdit || planningBusy || initializing || bindingLocked}
     personaId={palettePersona} onPersonaChange={setPalettePersona} onAddModel={addPaletteModel} onModelDragStart={onModelDragStart}
     onOpenWorkspaceAgents={() => setAgentLibraryRequest(value => value + 1)} onRetry={() => setPaletteRefresh(value => value + 1)}
@@ -3293,8 +3303,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     [currentModelCatalogue, mediaState]);
   // The models a node's own chat can switch to, in its composer: the workspace's chat models for an agent, the
   // media catalogue's models of its kind for an image, video or 3D node. Stable arrays, so cards stay memoised.
-  const chatModelChoices = useMemo<NodeModelChoice[]>(() => (currentModelCatalogue ?? []).map(model => ({
-    key: model.key, label: model.displayName || model.label, available: model.available, reason: model.reason,
+  // Each chat model is offered once, on the runtime AwwO runs it on (nodeRuntime.ts): the reader picks a model, never a
+  // runtime.
+  const chatModelChoices = useMemo<NodeModelChoice[]>(() => automaticEntries(currentModelCatalogue ?? []).map(model => ({
+    key: model.key, label: model.displayName || model.label, available: model.available, reason: model.reason, model: model.model,
     group: palette?.groups.find(group => group.id === model.providerGroup)?.label,
   })), [currentModelCatalogue, palette?.groups]);
   const mediaModelChoices = useMemo<Record<MediaKind, NodeModelChoice[]>>(() => {
@@ -3329,6 +3341,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
       readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || busyNow.has(node.id) || exclusiveNow} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       media={canInitialize ? mediaState : undefined} onRetryMedia={() => setMediaRefresh(value => value + 1)}
+      modelGroups={canInitialize ? shelfGroups : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
+      onRetryModels={() => setPaletteRefresh(value => value + 1)}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
       onCreateCompany={!readOnly && onCreateCompany ? () => {
         if (inspectorCloseLocked.current) return;

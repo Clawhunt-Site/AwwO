@@ -2,9 +2,11 @@
 // builds then runs on the model the reader picked there, the same one its direct tasks use. Only the Agent nodes the
 // plan itself created and left unset take it ('' runtime and model, canvasDoc.ts: never back-filled, the picker
 // fills); media nodes keep their media model, nodes on a team or bound to an Agent keep theirs, and Jev's own choices
-// stand (the host does not call this for a Jev plan).
+// stand (the host does not call this for a Jev plan). The runtime is not the assistant's: its direct tasks run on Pi
+// (the only worker that serves them Bedrock), but a node runs the model where AwwO runs every node (nodeRuntime.ts).
 import type { CanvasDocument } from './canvasDoc';
 import { mediaKindOf } from './mediaCatalog';
+import { automaticEntry } from './nodeRuntime';
 
 /** The model the reader chose for the canvas assistant, as its direct tasks name it. */
 export interface AssistantComponentModel { runtime: string; model: string }
@@ -12,12 +14,11 @@ export interface AssistantComponentModel { runtime: string; model: string }
 /** One chat model the workspace offers a node (the palette's catalogue). */
 export interface ComponentModelChoice { runtime: string; model: string; effort?: string; available: boolean }
 
-/** The workspace's entry for the chosen model: on the same runtime when it is offered there, otherwise on the first
- *  runtime that offers it; none when the workspace offers it to no node. */
+/** The workspace's entry for the chosen model on a node: the runtime AwwO runs that model on (automaticEntry); none
+ *  when the workspace offers it to no node, or no runtime offering it is ready. */
 export function componentModelEntry(chosen: AssistantComponentModel | undefined, choices: ReadonlyArray<ComponentModelChoice>): ComponentModelChoice | undefined {
   if (!chosen?.model) return undefined;
-  const offered = choices.filter(choice => choice.available && choice.model === chosen.model && choice.runtime);
-  return offered.find(choice => choice.runtime === chosen.runtime) ?? offered[0];
+  return automaticEntry(chosen.model, choices);
 }
 
 /** The document with the chosen model on the unset Agent nodes among `addedNodeIds`; the same document when there is

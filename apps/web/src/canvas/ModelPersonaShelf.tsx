@@ -120,13 +120,13 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
           {(search || expandedGroups.has(group.id) ? group.models : group.models.slice(0, collapsedGroupSize)).map(model => {
             const canAdd = !blocked && group.available && model.available;
             const reason = model.reason || (!group.available ? group.reason : undefined) || unavailable;
-            const runtimeLabel = model.runtime === 'pi' ? 'Pi' : model.runtime === 'openai-agents' ? 'Agents' : model.runtime;
+            // The runtime is AwwO's choice (nodeRuntime.ts), so a model is named without it.
             const [modelName, ...connection] = model.label.split(' · ');
             const sameNameModels = group.models.filter(item => item.label.split(' · ')[0] === modelName);
             return <button key={model.key} type="button" className="model-persona-shelf-model" disabled={!canAdd}
               draggable={canAdd && Boolean(onModelDragStart)}
-              aria-label={`${en ? 'Add' : '添加'} ${model.label} · ${runtimeLabel}${model.effort ? ` · ${model.effort}` : ''}`}
-              title={`${model.label} · ${runtimeLabel}${model.effort ? ` · ${model.effort}` : ''}`}
+              aria-label={`${en ? 'Add' : '添加'} ${model.label}${model.effort ? ` · ${model.effort}` : ''}`}
+              title={`${model.label}${model.effort ? ` · ${model.effort}` : ''}`}
               onClick={() => { if (canAdd) onAddModel(model, personaId); }}
               onDragStart={event => {
                 if (!canAdd || !onModelDragStart) { event.preventDefault(); return; }
@@ -134,7 +134,6 @@ export function ModelPersonaShelf({ groups, loading, error, disabled = false, pe
               }}>
               <span className="model-persona-shelf-model-title">{modelName}</span>
               <span className="model-persona-shelf-model-details">
-                <span>{runtimeLabel}</span><span aria-hidden="true">·</span>
                 <span className="model-persona-shelf-model-meta" title={model.execution === 'workspace'
                   ? (en ? 'An isolated workspace can read and write files and run project commands.' : '可在隔离工作区读写文件、执行项目命令。')
                   : model.execution === 'workspace-unavailable' ? (en ? 'The project execution environment is not ready.' : '项目执行环境尚未就绪。')

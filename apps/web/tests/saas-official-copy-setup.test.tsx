@@ -38,15 +38,17 @@ function setup(props: Partial<React.ComponentProps<typeof OfficialCopySetup>> = 
   return {onConfirm,onClose};
 }
 const chooser = () => screen.getByRole('combobox', {name:'Execution model'});
-const choose = async (runtime = 'pi') => {await screen.findByRole('option',{name:runtime === 'pi'?'Pi · Catalog model':'OpenAI Agents · Python catalog model'});fireEvent.change(chooser(),{target:{value:key(runtime)}});};
+// The model both runtimes offer is listed once, on the runtime AwwO runs it on (openai-agents), without a runtime name.
+const choose = async () => {await screen.findByRole('option',{name:'Python catalog model'});fireEvent.change(chooser(),{target:{value:key('openai-agents')}});};
 beforeEach(()=>{localStorage.clear();sessionStorage.clear();localStorage.setItem('superclaw_locale','zh');history.replaceState({},'','/');});
 afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.restoreAllMocks();});
 beforeAll(async()=>{await import('../src/saas/ProductionShowcase');},300_000);
 
 it('defaults to a clean draft even when a runtime and model are available, without any paid endpoint',async()=>{
   const {fetcher}=server(),{onConfirm}=setup();
-  await screen.findByRole('option',{name:'Pi · Catalog model'});
+  await screen.findByRole('option',{name:'Python catalog model'});
   expect(chooser()).toHaveValue('');
+  expect(screen.queryByRole('option',{name:'Catalog model'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'Create draft'}));
   await waitFor(()=>expect(onConfirm).toHaveBeenCalledExactlyOnceWith(null));
   expect(fetcher.mock.calls.every(([url,init])=>url==='/api/v1/tenants/copy-workspace/runtime' && !init.method)).toBe(true);
@@ -72,10 +74,10 @@ it('keeps a case’s image and video nodes on their own media models when agents
 });
 
 it('rechecks the exact choice before copying, and does not infer effort from advertised levels',async()=>{
-  const {fetcher}=server(),{onConfirm}=setup();await choose('openai-agents');
-  expect(document.querySelector('.official-copy-selection span')).toHaveTextContent('OpenAI Agents · Python catalog model');
+  const {fetcher}=server(),{onConfirm}=setup();await choose();
+  expect(document.querySelector('.official-copy-selection span')).toHaveTextContent('Python catalog model');
   fireEvent.click(screen.getByRole('button',{name:'Copy with model'}));
-  await waitFor(()=>expect(onConfirm).toHaveBeenCalledExactlyOnceWith({runtime:'openai-agents',model:'shared-model',label:'OpenAI Agents · Python catalog model'}));
+  await waitFor(()=>expect(onConfirm).toHaveBeenCalledExactlyOnceWith({runtime:'openai-agents',model:'shared-model',label:'Python catalog model'}));
   // No effort picker beside the model, though the model advertises a level: the model chooser is the only one.
   expect(fetcher).toHaveBeenCalledTimes(2);expect(screen.getAllByRole('combobox')).toEqual([chooser()]);
 });
@@ -104,7 +106,9 @@ it('does not invent an engine from a malformed or unscoped catalog, but still pe
 
 it('rejects duplicate models while excluding unavailable runtimes and preserves IDs verbatim',async()=>{
   server(()=>json({...catalog,runtimes:catalog.runtimes.map(runtime=>({...runtime,available:runtime.id==='pi'}))}));
-  expect(await readOfficialCopyModels(tenant.id)).toEqual([{runtime:'pi',model:'shared-model',label:'Pi · Catalog model'}]);
+  expect(await readOfficialCopyModels(tenant.id)).toEqual([{runtime:'pi',model:'shared-model',label:'Catalog model'}]);
+  // With both runtimes ready the model is offered once, on openai-agents.
+  server();expect(await readOfficialCopyModels(tenant.id)).toEqual([{runtime:'openai-agents',model:'shared-model',label:'Python catalog model'}]);
   server(()=>json({...catalog,models:[...catalog.models,catalog.models[0]]}));await expect(readOfficialCopyModels(tenant.id)).rejects.toThrow('Invalid runtime model catalog');
 });
 
@@ -132,7 +136,7 @@ it('reads in English in the Chinese interface too, and refreshes a failed catalo
   expect(dialog).toBeVisible();expect(dialog).toHaveAttribute('lang','en');expect(document.documentElement.lang).toBe('zh-CN');
   expect(within(dialog).getByText(workflow.title)).toBeVisible();
   await screen.findByRole('alert');fireEvent.click(screen.getByRole('button',{name:'Refresh model catalog'}));
-  await screen.findByRole('option',{name:'Pi · Catalog model'});expect(chooser()).toHaveValue('');
+  await screen.findByRole('option',{name:'Python catalog model'});expect(chooser()).toHaveValue('');
   expect(screen.getByText(/does not initialize nodes or run models/)).toBeVisible();
 });
 
@@ -148,7 +152,7 @@ it('creates and opens exactly one model-configured case copy through WorkspaceHo
   fireEvent.click(within(setupDialog).getByRole('button',{name:'Copy with model'}));
   await waitFor(()=>expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
   expect(posts).toHaveLength(1);expect(posts[0].url).toBe('/api/v1/tenants/copy-workspace/canvases');expect(posts[0].body.name).toBe(workflow.title);
-  expect(posts[0].body.document.nodes.every((node:any)=>node.runtime==='pi'&&node.model==='shared-model'&&node.binding===null)).toBe(true);
+  expect(posts[0].body.document.nodes.every((node:any)=>node.runtime==='openai-agents'&&node.model==='shared-model'&&node.binding===null)).toBe(true);
   expect(fetcher.mock.calls.filter(([,init])=>init.method==='POST')).toHaveLength(1);
   expect(fetcher.mock.calls.some(([url])=>/initialize|graph-runs|\/runs|\/plan/.test(url))).toBe(false);
 });

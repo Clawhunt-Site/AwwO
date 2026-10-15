@@ -4,6 +4,7 @@ import { runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeStatus 
 import type { CanvasDocument } from '../../canvas/canvasDoc';
 import { mediaKindOf } from '../../canvas/mediaCatalog';
 import { createOfficialDocument, type OfficialWorkflow } from './officialWorkflows';
+import { automaticEntries } from '../../canvas/nodeRuntime';
 import './official-copy-setup.css';
 
 export type OfficialCopyModel = { runtime: string; model: string; label: string };
@@ -24,14 +25,16 @@ export async function readOfficialCopyModels(tenantId: string, signal?: AbortSig
     || status.models.some(model => !model || typeof model.id !== 'string' || !model.id.trim() || model.id.length > 200 || typeof model.runtime !== 'string')) throw invalid();
   const seen = new Set<string>();
   try {
-    return runtimeDefinitions(status).filter(runtime => runtime.available && runtime.configured).flatMap(runtime =>
+    const offered = runtimeDefinitions(status).filter(runtime => runtime.available && runtime.configured).flatMap(runtime =>
       runtimeModels(status, runtime.id).map(model => {
-        const value = { runtime: runtime.id, model: model.id, label: withPlanTag(`${runtime.name} · ${model.label || model.name || model.id}`, model) };
+        const value = { runtime: runtime.id, model: model.id, label: withPlanTag(model.label || model.name || model.id, model) };
         const key = modelKey(value);
         if (seen.has(key)) throw invalid();
         seen.add(key);
         return value;
       }));
+    // Each model once, on the runtime AwwO runs it on (nodeRuntime.ts): a member picks a model, never a runtime.
+    return automaticEntries(offered.map(value => ({ ...value, available: true }))).map(({ available: _available, ...value }) => value);
   } catch { throw invalid(); }
 }
 

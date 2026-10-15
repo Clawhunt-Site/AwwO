@@ -125,7 +125,7 @@ it("selects a supported engine and links to LLM Gate from personal settings", as
   });
   expect(screen.getByLabelText("Execution engine")).toHaveValue("pi");
   expect(
-    screen.queryByRole("option", { name: "OpenAI Agents JS" }),
+    screen.queryByRole("option", { name: "OpenAI Agents" }),
   ).not.toBeInTheDocument();
 });
 

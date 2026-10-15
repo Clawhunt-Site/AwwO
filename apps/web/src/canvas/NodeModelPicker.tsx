@@ -14,6 +14,14 @@ export function modelChoiceKey(node: Pick<SessionNode, 'agentKind' | 'runtime' |
   return mediaKindOf(node.agentKind) ? node.model : JSON.stringify([node.runtime, node.model]);
 }
 
+/** The choice that shows a node's current model. A chat model is offered once, on the runtime AwwO runs it on
+ *  (nodeRuntime.ts), so a node still on another runtime with that model shows the same choice. */
+export function currentChoiceKey(node: Pick<SessionNode, 'agentKind' | 'runtime' | 'model'>, choices: ReadonlyArray<NodeModelChoice>): string {
+  const exact = modelChoiceKey(node);
+  if (mediaKindOf(node.agentKind) || !node.model || choices.some(choice => choice.key === exact)) return exact;
+  return choices.find(choice => choice.model === node.model)?.key ?? exact;
+}
+
 export interface NodeModelChoice {
   /** Stable selector identity, e.g. JSON.stringify([runtime, model]) for a chat model or the media model id. */
   key: string;
@@ -24,6 +32,8 @@ export interface NodeModelChoice {
   reason?: string;
   /** A media model: how many reference pictures it takes (0 or absent: words only). */
   references?: number;
+  /** A chat model: its id, whatever runtime the choice runs it on. */
+  model?: string;
 }
 
 export interface NodeModelPickerProps {

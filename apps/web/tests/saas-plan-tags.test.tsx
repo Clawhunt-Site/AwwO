@@ -62,7 +62,8 @@ it('tags the model shelf and the official-copy picker, but never the title a dro
   expect(opus.displayName).toBe('Claude Opus 5');
   expect(models.find(model => model.model === 'qwen3.8-27b-p6')!.label).toBe('Qwen 3.8');
   setup(freeTier);
-  expect((await readOfficialCopyModels(tenant.id)).map(model => model.label)).toEqual(['Pi · Qwen 3.8', 'Pi · Claude Opus 5 · Pro', 'Pi · Claude Opus 5.5 · Pro']);
+  // The copy dialog names models without the runtime AwwO runs them on (nodeRuntime.ts).
+  expect((await readOfficialCopyModels(tenant.id)).map(model => model.label)).toEqual(['Qwen 3.8', 'Claude Opus 5 · Pro', 'Claude Opus 5.5 · Pro']);
 });
 
 it('shows no tag when the workspace may use every model (a paid plan, or no route limits)', async () => {

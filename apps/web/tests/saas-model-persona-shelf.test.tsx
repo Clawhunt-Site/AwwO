@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { ModelPersonaShelf, type ModelPersonaShelfProps } from '../src/canvas/ModelPersonaShelf';
 import { LocaleProvider } from '../src/canvas/i18n';
-import { groupModels, type ModelPaletteGroup, type ModelPaletteSelection } from '../src/canvas/modelPalette';
+import { automaticGroups, groupModels, type ModelPaletteGroup, type ModelPaletteSelection } from '../src/canvas/modelPalette';
 
 const model: ModelPaletteSelection = { key: 'pi:qwen-fixture', runtime: 'pi', model: 'qwen-fixture', label: 'Qwen fixture', providerGroup: 'clawhunt', available: true };
 const groups: ModelPaletteGroup[] = [
@@ -157,27 +157,32 @@ it('keeps same-model personal connections visibly distinct and selects the inten
   ];
   const groups = groupModels({ configured: true, available: true, models: entries, runtimes: [{ id: 'openai-agents', name: 'Agents', configured: true, available: true, supportsEffortSelection: false, tools: [] }] }, 'en');
   render(<LocaleProvider locale="en"><ModelPersonaShelf {...props({ groups, onAddModel })} /></LocaleProvider>);
-  fireEvent.click(screen.getByRole('button', { name: 'Add gpt-5 · Personal · openai / conn-b · Agents' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add gpt-5 · Personal · openai / conn-b' }));
   expect(onAddModel.mock.calls[0][0]).toMatchObject({ model: 'personal-b', label: entries[1].label });
-  expect(screen.getByRole('button', { name: 'Add gpt-5 · Work · openai / conn-a · Agents' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Add gpt-5 · Work · openai / conn-a' })).toBeEnabled();
 });
 
-it('distinguishes identical model names offered by different runtimes', () => {
+it('lists a model offered by two runtimes once, on the runtime AwwO runs it on, and never names the runtime', () => {
   const group: ModelPaletteGroup = { id: 'clawhunt', label: 'ClawHunt', available: true, models: [
     { ...model, label: 'shared-model', model: 'shared-model', key: 'pi:shared-model' },
     { ...model, label: 'shared-model', model: 'shared-model', key: 'agents:shared-model', runtime: 'openai-agents' },
   ] };
-  render(<ModelPersonaShelf {...props({ groups: [group] })} />);
-  expect(screen.getByText('Pi')).toBeVisible();
-  expect(screen.getByText('Agents')).toBeVisible();
+  const p = props({ groups: automaticGroups([group]) });
+  render(<ModelPersonaShelf {...p} />);
+  const cards = screen.getAllByRole('button', { name: '添加 shared-model' });
+  expect(cards).toHaveLength(1);
+  fireEvent.click(cards[0]);
+  expect(p.onAddModel.mock.calls[0][0]).toMatchObject({ key: 'agents:shared-model', runtime: 'openai-agents' });
+  expect(screen.queryByText('Pi')).toBeNull();
+  expect(screen.queryByText('Agents')).toBeNull();
 });
 
-it('shows runtime and capability even for a model with a unique name and retains its effort', () => {
+it('shows the capability for a model with a unique name and retains its effort, without the runtime', () => {
   const entry: ModelPaletteSelection = { ...model, effort: 'high', execution: 'text' };
   const p = props({ groups: [{ ...groups[4], models: [entry] }] });
   render(<ModelPersonaShelf {...p} />);
-  const card = screen.getByRole('button', { name: '添加 Qwen fixture · Pi · high' });
-  expect(within(card).getByText('Pi')).toBeVisible();
+  const card = screen.getByRole('button', { name: '添加 Qwen fixture · high' });
+  expect(within(card).queryByText('Pi')).toBeNull();
   expect(within(card).getByText('文本生成')).toBeVisible();
   fireEvent.click(card);
   fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn() } });
