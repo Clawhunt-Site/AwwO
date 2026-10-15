@@ -33,11 +33,15 @@
   "car-plant": {
     "completed": 8,
     "total": 8,
-    "seconds": 473,
+    "seconds": 517,
     "delivered": true,
-    "capturedOn": "2026-10-14",
+    "capturedOn": "2026-10-15",
     "model": "Claude Opus 5.5",
-    "runtime": "openai-agents"
+    "runtime": "openai-agents",
+    "media": {
+      "completed": 1,
+      "total": 1
+    }
   },
   "crystal-keep": {
     "completed": 10,
@@ -78,11 +82,15 @@
   "neon-circuit": {
     "completed": 10,
     "total": 10,
-    "seconds": 631,
+    "seconds": 533,
     "delivered": true,
-    "capturedOn": "2026-10-14",
+    "capturedOn": "2026-10-15",
     "model": "Claude Opus 5.5",
-    "runtime": "openai-agents"
+    "runtime": "openai-agents",
+    "media": {
+      "completed": 1,
+      "total": 1
+    }
   },
   "neon-city": {
     "completed": 2,

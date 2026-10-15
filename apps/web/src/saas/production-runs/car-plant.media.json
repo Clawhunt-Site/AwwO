@@ -1,0 +1,14 @@
+{
+ "sedan/model-1.glb": {
+  "src": "/showcase/media/car-plant/2e092c36cd8f5c32.glb",
+  "type": "model/gltf-binary",
+  "bytes": 2553260,
+  "sha256": "2e092c36cd8f5c325d49f15a38745adfb933f298adaae5593168d3c985304527"
+ },
+ "sedan/preview-2.png": {
+  "src": "/showcase/media/car-plant/45dd33e8e59b24d7.webp",
+  "type": "image/webp",
+  "bytes": 17630,
+  "sha256": "45dd33e8e59b24d7d13fa4164c888104bfbc5ca14502d754c82d96c4ac4d3ac3"
+ }
+}

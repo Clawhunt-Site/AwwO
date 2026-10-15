@@ -3,6 +3,7 @@ import { createSessionNode, emptyDocument, type CanvasDocument, type SessionNode
 import type { ContractField } from '../../canvas/nodeContracts';
 import { updateNodeDraft } from '../../canvas/nodeThreads';
 import { edgeId } from '../../canvas/ports';
+import { PREVIEW_FONT_RULE } from '../../canvas/previewFontList';
 import { THREE_MODULES_IMPORT_MAP } from '../../canvas/previewImportMap';
 import type { OfficialMediaNode } from './officialMedia';
 
@@ -29,6 +30,9 @@ export interface OfficialWorkflow {
    * page is held to three.js r128 and shows media from markup only, as every case canvas published before 2026-10-15
    * was: their text, and so their recorded runs' checksums, stay as they ran. */
   readonly stack?: 'r186';
+  /** Its pages may use the brand fonts AwwO supplies to running pages (previewFontList.ts), and its page rule says
+   * which. Opt-in for the same reason as `stack`: a canvas published without it keeps the text it ran with. */
+  readonly fonts?: true;
   readonly brief: string;
   readonly nodes: ReadonlyArray<OfficialWorkflowNode>;
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: string }>;
@@ -41,9 +45,12 @@ const MEDIA_PAGE = '\n\nThe canvas’s media nodes hand you the files they gener
 const MEDIA_MODEL_PAGE = ' A 3D model node hands over a GLB model and a rendered preview picture: the page shows the model by its preview picture (preview-1.*) and never puts the GLB in the page.';
 // The same, for a workflow on three.js r186 (`stack: 'r186'`): a script may load the files by their paths too.
 const MEDIA_PAGE_R186 = '\n\nThe canvas’s media nodes hand you the files they generated (the “… (generated files)” inputs list each file’s relative path, such as node-id/image-1.png): the page uses them as its real models, key visual, textures, pictures or clips, by exactly those paths — in an img, video or source src, a video poster or a CSS url(), or as one whole string literal a script loads (GLTFLoader for a .glb, TextureLoader for a picture used on a surface). Never invent other file names and never assemble a path from pieces. Keep any such path the page already has as it is. When an input says no file was made this time, finish with a design that does not need it.';
-const MEDIA_MODEL_PAGE_R186 = ' A 3D model node hands over a GLB model and a rendered preview picture: a 3D scene loads the GLB with GLTFLoader by its path and shows the real model (scaled and centred from its bounding box, its longest horizontal axis along the direction it faces or travels); a flat page shows the preview picture (preview-1.*).';
-/** The page rule of a workflow on three.js r186: the import map AwwO supplies, and nothing else from outside. */
-const HTML_R186 = (pictures: boolean) => `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data. For 3D use three.js r186, which AwwO supplies with no network, through exactly this import map: ${THREE_MODULES_IMPORT_MAP}, importing 'three' and 'three/addons/…' in one module script; never paste a library’s source. No other external scripts, fonts, ${pictures ? 'images (the media nodes’ files excepted)' : 'images'} or network requests. Interactions must update real state.`;
+// What AwwO's 3D model nodes hand over (seen in their GLBs, 2026-10-15): one textured PBR mesh that faces +X with +Y up,
+// centred on the origin and scaled so its longest side is 1 unit, and a rendered preview picture beside it.
+const MEDIA_MODEL_PAGE_R186 = ' A 3D model node hands over a GLB model and a rendered preview picture: a 3D scene loads the GLB with GLTFLoader by its path and shows the real model. The model faces +X with +Y up, centred on the origin and scaled so its longest side is 1 unit: scale it from its bounding box to its real size, stand it on the ground, and turn it about Y so +X points where it faces or travels; clone it for every copy (its materials are cloned once per tint, never per frame). A flat page shows the preview picture.';
+/** The page rule of a workflow on three.js r186: the import map AwwO supplies, and nothing else from outside. With
+ * `fonts`, the brand fonts AwwO supplies are named too. */
+const HTML_R186 = (pictures: boolean, fonts: boolean) => `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data. For 3D use three.js r186, which AwwO supplies with no network, through exactly this import map: ${THREE_MODULES_IMPORT_MAP}, importing 'three' and 'three/addons/…' in one module script; never paste a library’s source. ${fonts ? `${PREVIEW_FONT_RULE} ` : ''}No other external scripts, fonts, ${pictures ? 'images (the media nodes’ files excepted)' : 'images'} or network requests. Interactions must update real state.`;
 /** Every agent's persona ends with this. */
 const EVIDENCE = 'This is an official reference workflow awaiting execution. Use actual inputs; never present a demo, plan or static check as successful execution. List unverified items when execution or capabilities are unavailable. Do not deploy, send messages or connect production data.';
 
@@ -74,7 +81,7 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
     const outputType = spec.outputType ?? 'markdown';
     const modern = item.stack === 'r186';
     const html = outputType === 'html'
-      ? modern ? HTML_R186(pictures.length > 0)
+      ? modern ? HTML_R186(pictures.length > 0, item.fonts === true)
         : `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data; the only external script allowed is AwwO’s built-in three.js r128 (https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js) — no other external scripts, module imports, fonts, ${pictures.length ? 'external images (the files the media nodes hand you excepted)' : 'images'} or network requests. Interactions must update real state.` : '';
     const models = pictures.some(picture => picture.kind === 'model3d');
     const shows = pictures.length

@@ -44,14 +44,14 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     id: 'car-plant', kind: 'twin', recording: true, footage: 'car-plant-real',
     title: 'EV plant digital twin',
     brief: 'Turn a whole EV plant into a live 3D digital twin: 14 stations, buffers, rework and faults, every car changing as it moves down the line.',
-    stages: [['Layout', 'Simulation'], ['Plant', 'Equipment', 'Vehicles', 'Interface'], [FRONT_END], [REVIEW]],
+    stages: [['Layout', 'Simulation', MEDIA], ['Plant', 'Equipment', 'Vehicles', 'Interface'], [FRONT_END], [REVIEW]],
     deliverable: 'A live 3D digital twin of a car plant',
   },
   {
     id: 'neon-circuit', kind: 'game', recording: true, footage: 'neon-circuit-real',
     title: 'Neon Circuit racer',
     brief: 'A synthwave 3D racer: three laps against five AI rivals, drifting through banked corners to fill the boost meter.',
-    stages: [[DESIGN], ['Track', 'City', 'Cars', PHYSICS, 'Interface', SOUND], ['Wiring'], ['Build'], [REVIEW]],
+    stages: [[DESIGN, MEDIA], ['Track', 'City', 'Cars', PHYSICS, 'Interface', SOUND], ['Wiring'], ['Build'], [REVIEW]],
     deliverable: 'A three-lap 3D race against five rivals',
   },
   {

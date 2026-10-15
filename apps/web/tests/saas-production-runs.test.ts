@@ -1,32 +1,66 @@
 import { expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { PRODUCTION_RUN_SUMMARY, formatDuration, type ProductionRunRecord } from '../src/saas/productionRuns';
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { PRODUCTION_RUN_SUMMARY, formatDuration, loadProductionMedia, type ProductionMediaFile, type ProductionRunRecord } from '../src/saas/productionRuns';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { isCompleteHtmlDocument } from '../src/canvas/htmlDeliverable';
 
-const RECORDS = Object.values(import.meta.glob<ProductionRunRecord>(['../src/saas/production-runs/*.ts', '!../src/saas/production-runs/*.media.ts'], { eager: true, import: 'default' }));
+const RECORDS = Object.values(import.meta.glob<ProductionRunRecord>('../src/saas/production-runs/*.ts', { eager: true, import: 'default' }));
 const byCase = new Map(RECORDS.map(record => [record.caseId, record]));
-const MEDIA = import.meta.glob<Readonly<Record<string, string>>>('../src/saas/production-runs/*.media.ts', { eager: true, import: 'default' });
+const MEDIA = import.meta.glob<Readonly<Record<string, ProductionMediaFile>>>('../src/saas/production-runs/*.media.json', { eager: true, import: 'default' });
+const WEB = path.resolve(__dirname, '..');
 
-it('inlines exactly the generated files a media case’s page names, and records its media nodes beside the agents', () => {
+it('publishes exactly the generated files a media case’s page names as static files, and records its media nodes beside the agents', () => {
   for (const record of RECORDS) {
     const workflow = PRODUCTION_WORKFLOWS[record.caseId];
-    const files = MEDIA[`../src/saas/production-runs/${record.caseId}.media.ts`];
+    const files = MEDIA[`../src/saas/production-runs/${record.caseId}.media.json`];
     if (!workflow?.media?.length) { expect(record.media, record.caseId).toBeUndefined(); expect(files, record.caseId).toBeUndefined(); continue; }
-    expect(record.media?.map(item => [item.id, item.title]), record.caseId).toEqual(workflow.media.map(item => [item.id, item.title]));
+    expect(record.media?.map(item => [item.id, item.title, item.kind]), record.caseId).toEqual(workflow.media.map(item => [item.id, item.title, item.kind]));
     const page = record.nodes.find(node => node.id === record.artifactNodeId)?.output ?? '';
-    const named = record.media!.flatMap(item => item.files).filter(path => page.includes(path));
-    expect(Object.keys(files ?? {}).sort(), record.caseId).toEqual(named.sort());
-    for (const [path, url] of Object.entries(files ?? {})) {
-      const kind = record.media!.find(item => item.files.includes(path))!.kind;
-      expect(url.startsWith(kind === 'video' ? 'data:video/mp4;base64,' : 'data:image/jpeg;base64,'), path).toBe(true);
+    // What the page names, and a 3D model's preview picture, which the dialog shows beside the agents.
+    const published = record.media!.flatMap(item => item.files.filter(file => page.includes(file) || (item.kind === 'model3d' && /\.(?:png|jpe?g|webp)$/i.test(file))));
+    expect(Object.keys(files ?? {}).sort(), record.caseId).toEqual(published.sort());
+    const folder = path.join(WEB, 'showcase', 'media', record.caseId);
+    for (const [reference, file] of Object.entries(files ?? {})) {
+      const kind = record.media!.find(item => item.files.includes(reference))!.kind;
+      const type = kind === 'video' ? 'video/mp4' : /\.glb$/i.test(reference) ? 'model/gltf-binary' : kind === 'model3d' ? 'image/webp' : 'image/jpeg';
+      expect(file.type, reference).toBe(type);
+      // Served beside the case footage, named by its content.
+      expect(file.src, reference).toBe(`/showcase/media/${record.caseId}/${file.sha256.slice(0, 16)}.${{ 'video/mp4': 'mp4', 'model/gltf-binary': 'glb', 'image/webp': 'webp', 'image/jpeg': 'jpg' }[type]}`);
+      const bytes = readFileSync(path.join(WEB, ...file.src.split('/').filter(Boolean)));
+      expect(bytes.length, reference).toBe(file.bytes);
+      expect(createHash('sha256').update(bytes).digest('hex'), reference).toBe(file.sha256);
     }
+    // Nothing else is in the case's folder.
+    expect(readdirSync(folder).sort(), record.caseId).toEqual(Object.values(files ?? {}).map(file => path.basename(file.src)).sort());
     // The agents are the record's nodes; a media node is never one of them.
     expect(record.nodes.map(node => node.id).sort(), record.caseId).toEqual(workflow.nodes.map(node => node.id).sort());
   }
+  // No folder is left for a case without media.
+  for (const name of readdirSync(path.join(WEB, 'showcase', 'media'))) expect(MEDIA[`../src/saas/production-runs/${name}.media.json`], name).toBeDefined();
+});
+
+it('loads a media case’s files as data: URLs from the site, and leaves out one it cannot fetch or that is not the size published', async () => {
+  const record = RECORDS.find(value => value.media?.length)!;
+  const manifest = MEDIA[`../src/saas/production-runs/${record.caseId}.media.json`];
+  const [first, ...rest] = Object.entries(manifest);
+  const seen: string[] = [];
+  const fetchFile = (async (input: RequestInfo | URL) => {
+    const src = String(input);
+    seen.push(src);
+    if (src === first[1].src) return new Response('missing', { status: 404 });
+    const bytes = readFileSync(path.join(WEB, ...src.split('/').filter(Boolean)));
+    return new Response(src === rest[0]?.[1].src ? bytes.subarray(1) : bytes, { status: 200 });
+  }) as typeof fetch;
+  const files = await loadProductionMedia(record.caseId, fetchFile);
+  expect(seen.sort()).toEqual(Object.values(manifest).map(file => file.src).sort());
+  expect(Object.keys(files).sort()).toEqual(rest.slice(1).map(([reference]) => reference).sort());
+  for (const [reference, url] of Object.entries(files)) expect(url.startsWith(`data:${manifest[reference].type};base64,`), reference).toBe(true);
+  expect(await loadProductionMedia('no-such-case', fetchFile)).toEqual({});
 });
 
 it('publishes a record for real cases only, and summarises each one exactly', () => {

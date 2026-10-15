@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import ProductionShowcase from '../src/saas/ProductionShowcase';
 import { ProductionCases } from '../src/saas/ProductionCases';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
@@ -7,8 +9,17 @@ import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { showcasePage } from '../src/saas/examples/showcaseDocument';
 
-beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
-afterEach(() => cleanup());
+// The site serves a media case's files beside its footage (showcase/media/); the dialog fetches them when it opens.
+const WEB = path.resolve(__dirname, '..');
+beforeEach(() => {
+  localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh');
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (!url.startsWith('/showcase/')) return new Response('not found', { status: 404 });
+    return new Response(readFileSync(path.join(WEB, ...url.split('/').filter(Boolean))), { status: 200 });
+  });
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('puts each named file in place, after ./ or / too, and leaves a page without files as it is', () => {
   const page = '<img src="n1/image-1.jpg"><img src="./n1/image-1.jpg"><script>clip.src = "/n2/video-1.mp4";</script><p>n3/model-1.glb</p>';
@@ -57,3 +68,23 @@ it('counts a media case’s agents without its media slot, which still shows as 
     render(<SaaSPreferencesProvider><ProductionCases /></SaaSPreferencesProvider>);
   }
 });
+
+
+// The rebuilt 3D cases (R1b, 2026-10-15): their 3D model node's GLB is published as a static file and handed to the page in
+// place of the path its code loads, and the brand fonts their interfaces name come with the page.
+it.each([['neon-circuit', 'Orbitron'], ['car-plant', 'Space Grotesk']] as const)('runs %s on the 3D model its canvas made, in its brand fonts', async (id, font) => {
+  const item = PRODUCTION_CASES.find(value => value.id === id)!, media = PRODUCTION_WORKFLOWS[id].media!;
+  expect(media.map(value => value.kind)).toEqual(['model3d']);
+  render(<SaaSPreferencesProvider><ProductionShowcase item={item} /></SaaSPreferencesProvider>);
+  const frame = await screen.findByTitle(`${item.title}: the result an AwwO run delivered`, undefined, { timeout: 20000 });
+  const source = frame.getAttribute('srcdoc')!;
+  expect(source).toContain('data:model/gltf-binary;base64,');
+  expect(source).not.toMatch(new RegExp(`\\b${media[0].id}/model-\\d+\\.glb`));
+  expect(source).toContain(`@font-face{font-family:"${font}";src:url(data:font/woff2;base64,`);
+  expect(source).toContain('"three/addons/loaders/GLTFLoader.js"');
+  // The model node shows in the strip by its preview picture, beside the agents.
+  const strip = screen.getByRole('region', { name: 'What the media nodes generated in this run' });
+  expect(within(strip).getAllByRole('listitem')).toHaveLength(1);
+  expect(within(strip).getByText('Stage 01 · 1 media node, generated in the same run')).toBeVisible();
+  expect(strip.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/webp;base64,/);
+}, 30000);

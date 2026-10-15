@@ -50,11 +50,12 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
         if (field.value === '') expect(upstream).toHaveLength(1);
         else expect(upstream).toHaveLength(0);
       }
-      // A page a media node feeds is told how to show its files, and a 3D model by its preview; any other page uses none.
+      // A node a media node feeds (a page, or a module whose code the page holds) is told how to use its files, and a
+      // 3D model's GLB; any other node uses none.
       const fed = node.contract!.inputs.filter(field => field.id.startsWith('media_'));
       expect(node.persona.includes('media nodes hand you the files')).toBe(fed.length > 0);
       const model = fed.some(field => item.media?.find(spec => `media_${spec.id}` === field.id)?.kind === 'model3d');
-      expect(node.persona.includes('preview-1.*')).toBe(model);
+      expect(node.persona.includes('A 3D model node hands over a GLB model')).toBe(model);
     }
     for (const [index, node] of media(document).entries()) {
       const spec = item.media![index];
@@ -65,7 +66,7 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
       for (const wire of wires) {
         expect(wire).toMatchObject({ fromPort: 'result', toPort: `in:media_${spec.id}`, dataType: spec.kind === 'model3d' ? 'file' : spec.kind });
         const page = agents(document).find(candidate => candidate.id === wire.toNode)!;
-        expect(page.contract!.outputs[0].type).toBe('html');
+        expect(['html', 'markdown']).toContain(page.contract!.outputs[0].type);
         expect(isSoftMediaFeed(node, page, wire)).toBe(true);
       }
       // Its only input is the picture it starts from, when it has one.

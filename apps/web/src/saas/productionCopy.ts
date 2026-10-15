@@ -34,13 +34,16 @@ export function createProductionCopyDocument(workflow: OfficialWorkflow, record:
   const at = Date.parse(`${record.capturedOn}T00:00:00Z`);
   // A media case's image and video nodes follow the agents and generate afresh in the copy; a page they feed names the
   // case run's own files, which the copy does not have, so its delivery is not pinned either: it is made on the first run.
+  // So is a page that names them through a module it pastes (a 3D model's GLB, loaded by its path in the module's code).
   const fed = new Set((workflow.media ?? []).flatMap(item => item.feeds ?? []));
+  const files = (record.media ?? []).flatMap(item => item.files);
   // createOfficialDocument mints one node per workflow node, in the workflow's order, then the media nodes.
   const nodes = document.nodes.map((node, index): CanvasNode => {
     const spec = workflow.nodes[index];
     if (!spec || fed.has(spec.id)) return node;
     const recorded = record.nodes.find(value => value.id === spec.id);
     if (node.kind !== 'session' || recorded?.status !== 'done') return node;
+    if (spec.outputType === 'html' && files.some(file => recorded.output?.includes(file))) return node;
     const text = recorded.output?.trim() ? recordedText(node, recorded.output) : null;
     // The copy dialog counts every delivered node as carried, so a delivery the canvas cannot hold stops the copy.
     if (text === null) throw new Error(`The run record of ${record.caseId} has a delivery of ${recorded.id} its canvas cannot hold.`);

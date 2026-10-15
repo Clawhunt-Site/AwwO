@@ -1,0 +1,26 @@
+{
+ "clip/video-1.mp4": {
+  "src": "/showcase/media/neon-city/c04e9602e3641a7b.mp4",
+  "type": "video/mp4",
+  "bytes": 2080827,
+  "sha256": "c04e9602e3641a7b87abe8335b1925feae979b2a2e9780455a540340d46d7df7"
+ },
+ "dawn/image-1.jpg": {
+  "src": "/showcase/media/neon-city/10b206c33269c484.jpg",
+  "type": "image/jpeg",
+  "bytes": 241239,
+  "sha256": "10b206c33269c484c8ccefb246192f1355e64221d415b81696cdeff4b1b6422f"
+ },
+ "market/image-1.jpg": {
+  "src": "/showcase/media/neon-city/3bb5f7ce2de0c03a.jpg",
+  "type": "image/jpeg",
+  "bytes": 249191,
+  "sha256": "3bb5f7ce2de0c03a6ccf3054738df471e487848af792263a76ecbf6dc7dbf008"
+ },
+ "rooftop/image-1.jpg": {
+  "src": "/showcase/media/neon-city/8182ee44d25fe885.jpg",
+  "type": "image/jpeg",
+  "bytes": 334273,
+  "sha256": "8182ee44d25fe88559c259c19347977fa9f86b559693d3f276eddf8168a39f01"
+ }
+}

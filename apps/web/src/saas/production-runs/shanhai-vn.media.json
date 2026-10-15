@@ -1,0 +1,38 @@
+{
+ "forest/image-1.jpg": {
+  "src": "/showcase/media/shanhai-vn/6bc6dd30f63b7b91.jpg",
+  "type": "image/jpeg",
+  "bytes": 560212,
+  "sha256": "6bc6dd30f63b7b919a1d2086fc9408c1a10f1feb6cbdcdab3e339af9ca7e091d"
+ },
+ "fox/image-1.jpg": {
+  "src": "/showcase/media/shanhai-vn/74b1cbbe360d25e6.jpg",
+  "type": "image/jpeg",
+  "bytes": 473172,
+  "sha256": "74b1cbbe360d25e63a2580751c165b2be417fdc0cd369128dde1f0bd44f3d414"
+ },
+ "hero/image-1.jpg": {
+  "src": "/showcase/media/shanhai-vn/e8644c0c663a055b.jpg",
+  "type": "image/jpeg",
+  "bytes": 529293,
+  "sha256": "e8644c0c663a055bfc45b4f9d1a361ef40e0436a6fe56178055644a9e88dbc96"
+ },
+ "opening/video-1.mp4": {
+  "src": "/showcase/media/shanhai-vn/97b9952e208032b8.mp4",
+  "type": "video/mp4",
+  "bytes": 1562758,
+  "sha256": "97b9952e208032b8a0f2ef1934b8c081ac601f667d7cee9d2c9b1b35d8d68b92"
+ },
+ "temple/image-1.jpg": {
+  "src": "/showcase/media/shanhai-vn/6f636dc44409309d.jpg",
+  "type": "image/jpeg",
+  "bytes": 365036,
+  "sha256": "6f636dc44409309dca7c59169614f85305f357d7dad6ce6b8348317870d011bd"
+ },
+ "town/image-1.jpg": {
+  "src": "/showcase/media/shanhai-vn/9830bc91cefff02a.jpg",
+  "type": "image/jpeg",
+  "bytes": 501929,
+  "sha256": "9830bc91cefff02ad2152a3635450a9343adb5316462cbb2a294708eb0b536ab"
+ }
+}

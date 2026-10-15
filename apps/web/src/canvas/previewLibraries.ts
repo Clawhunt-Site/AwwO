@@ -5,6 +5,7 @@
  * are pinned here and checked by tests/canvas-artifact-preview.test.tsx.
  */
 import { FIGURE_KIT_BYTES, FIGURE_KIT_SHA256, FIGURE_KIT_URL } from './figureKit/figureKit';
+import { previewFontFaces, previewFontNeeds, PREVIEW_FONTS_KEY, type PreviewFont } from './previewFonts';
 import { moduleImportEntries, moduleNeeds, pinnedModuleFile, PREVIEW_IMPORT_MAP_KEY, THREE_MODULES_ID, THREE_MODULES_LABEL, type ModuleNeeds } from './previewModules';
 
 export interface PreviewAddition {
@@ -31,6 +32,8 @@ export interface PreviewLibrary {
   readonly additions?: readonly PreviewAddition[];
   /** ES modules supplied through the page's import map rather than a script tag (previewModules.ts): `urls` is empty. */
   readonly modules?: true;
+  /** Brand fonts supplied as @font-face rules (previewFonts.ts): `urls` is empty. */
+  readonly fonts?: true;
 }
 
 // three.js r139's CapsuleGeometry (src/geometries/CapsuleGeometry.js), which r128 does not have yet. Generated games
@@ -97,6 +100,18 @@ export const THREE_MODULES_LIBRARY: PreviewLibrary = {
   modules: true,
 };
 
+/** The brand fonts (previewFonts.ts): listed with the libraries a page gets, supplied as @font-face rules. */
+export const PREVIEW_FONTS_LIBRARY: PreviewLibrary = {
+  id: 'brand-fonts',
+  label: 'Brand fonts',
+  labelZh: '品牌字体',
+  urls: [],
+  bytes: 0,
+  sha256: '',
+  load: () => Promise.resolve(''),
+  fonts: true,
+};
+
 export interface PreviewScriptNeeds {
   /** Libraries AwwO supplies for this page, in first-use order. */
   readonly libraries: readonly PreviewLibrary[];
@@ -106,15 +121,18 @@ export interface PreviewScriptNeeds {
   readonly blocked: readonly string[];
   /** The ES modules AwwO supplies through the page's import map, when it imports any. */
   readonly modules?: ModuleNeeds;
+  /** The brand fonts AwwO supplies because the page names them, when it names any. */
+  readonly fonts?: readonly PreviewFont[];
 }
 
 export const NO_PREVIEW_SCRIPT_NEEDS: PreviewScriptNeeds = { libraries: [], additions: [], blocked: [] };
 
 /**
- * The external scripts a page asks for, split into the ones AwwO can supply and the ones it cannot. `inlined` are the
- * import specifiers of modules the caller put into the page itself (the live page's canvas JavaScript files).
+ * The external scripts a page asks for, split into the ones AwwO can supply and the ones it cannot, and the brand fonts
+ * it names. `inlined` are the import specifiers of modules the caller put into the page itself (the live page's canvas
+ * JavaScript files); `texts` are the sources of canvas files it put there (scripts and stylesheets), which may name fonts.
  */
-export function previewScriptNeeds(source: string, inlined: readonly string[] = []): PreviewScriptNeeds {
+export function previewScriptNeeds(source: string, inlined: readonly string[] = [], texts: readonly string[] = []): PreviewScriptNeeds {
   const template = document.createElement('template');
   template.innerHTML = source;
   const libraries = new Set<PreviewLibrary>();
@@ -131,9 +149,11 @@ export function previewScriptNeeds(source: string, inlined: readonly string[] = 
   const modules = moduleNeeds(template.content, inlined);
   if (modules?.files.length) libraries.add(THREE_MODULES_LIBRARY);
   for (const host of modules?.blocked ?? []) blocked.add(host);
+  const fonts = previewFontNeeds(source, ...texts);
+  if (fonts.length) libraries.add(PREVIEW_FONTS_LIBRARY);
   if (!libraries.size && !blocked.size) return NO_PREVIEW_SCRIPT_NEEDS;
   const additions = [...libraries].flatMap(library => (library.additions ?? []).filter(addition => addition.used.test(source)));
-  return { libraries: [...libraries], additions, blocked: [...blocked], ...(modules?.files.length ? { modules } : {}) };
+  return { libraries: [...libraries], additions, blocked: [...blocked], ...(modules?.files.length ? { modules } : {}), ...(fonts.length ? { fonts } : {}) };
 }
 
 function scriptOrigin(reference: string): string {
@@ -147,13 +167,16 @@ function scriptOrigin(reference: string): string {
 const loaded = new Map<string, Promise<string>>();
 
 /** The inline code for each supplied library (its pinned copy, then the additions this page uses), keyed by every
- * URL that names it, and, for a page that imports pinned ES modules, their import-map entries as JSON under
- * PREVIEW_IMPORT_MAP_KEY (applyModuleEntries puts them in the page). Rejects when any copy is unusable. */
-export async function loadPreviewLibraries(needs: Pick<PreviewScriptNeeds, 'libraries' | 'additions' | 'modules'>): Promise<ReadonlyMap<string, string>> {
-  const classic = needs.libraries.filter(library => !library.modules);
-  const [entries, modules] = await Promise.all([
+ * URL that names it; for a page that imports pinned ES modules, their import-map entries as JSON under
+ * PREVIEW_IMPORT_MAP_KEY (applyModuleEntries puts them in the page); for a page that names brand fonts, their
+ * @font-face rules under PREVIEW_FONTS_KEY. Rejects when any library or module copy is unusable; a font that cannot be
+ * loaded is left out, so the page still runs, in its fallback font. */
+export async function loadPreviewLibraries(needs: Pick<PreviewScriptNeeds, 'libraries' | 'additions' | 'modules' | 'fonts'>): Promise<ReadonlyMap<string, string>> {
+  const classic = needs.libraries.filter(library => !library.modules && !library.fonts);
+  const [entries, modules, fonts] = await Promise.all([
     Promise.all(classic.map(async library => [library, await loadLibrary(library)] as const)),
     needs.modules?.files.length ? moduleImportEntries(needs.modules) : Promise.resolve(undefined),
+    needs.fonts?.length ? previewFontFaces(needs.fonts).catch(() => undefined) : Promise.resolve(undefined),
   ]);
   const code = new Map<string, string>();
   for (const [library, text] of entries) {
@@ -162,6 +185,7 @@ export async function loadPreviewLibraries(needs: Pick<PreviewScriptNeeds, 'libr
     for (const url of library.urls) code.set(url, inline);
   }
   if (modules !== undefined) code.set(PREVIEW_IMPORT_MAP_KEY, modules);
+  if (fonts) code.set(PREVIEW_FONTS_KEY, fonts);
   return code;
 }
 

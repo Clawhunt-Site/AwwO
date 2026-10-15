@@ -37,9 +37,9 @@ const { PRODUCTION_WORKFLOWS, createOfficialDocument, canonicalCanvasText, parse
 
 const workflow = PRODUCTION_WORKFLOWS[raw.caseId];
 if (!workflow) throw new Error(`Unknown case ${raw.caseId}`);
-// createOfficialDocument mints the agents first, then the case's image and video nodes (officialMedia.ts).
+// createOfficialDocument mints the agents first, then the case's image, video and 3D model nodes (officialMedia.ts).
 const mediaSpecs = workflow.media ?? [];
-if (mediaSpecs.some(spec => spec.kind !== 'image' && spec.kind !== 'video')) throw new Error(`${raw.caseId}: only image and video media nodes are published`);
+if (mediaSpecs.some(spec => !['image', 'video', 'model3d'].includes(spec.kind))) throw new Error(`${raw.caseId}: only image, video and 3D model media nodes are published`);
 const frozen = raw.graph.document.nodes.filter(node => node.kind === 'session');
 if (frozen.length !== workflow.nodes.length + mediaSpecs.length) throw new Error('The frozen canvas does not have the workflow’s nodes');
 // A node's canvas id (minted afresh for every canvas) names a media node's files in the page it feeds, and an agent may
@@ -118,37 +118,99 @@ if (!catalog?.available) console.warn('warning: the raw record’s runtime catal
 const target = path.join(ROOT, 'apps/web/src/saas/production-runs', `${raw.caseId}.ts`);
 writeRecord(target, record);
 writeSummary(path.join(path.dirname(target), 'summary.json'), record, Boolean(artifactOutput) && nodes.find(node => node.id === artifact.id)?.status === 'done');
-if (media.length) writeMedia(path.join(path.dirname(target), `${raw.caseId}.media.ts`));
+if (media.length) writeStaticMedia(path.join(path.dirname(target), `${raw.caseId}.media.json`));
 console.log(`${raw.caseId}: ${record.completed}/${record.total} done, ${record.seconds}s → ${path.relative(ROOT, target)}`);
 
-/** The files the published page names, shrunk (pictures to JPEG at most 1600 px wide, the clip to H.264 at most 960 px
- * wide, without sound) and inlined as data: URLs, keyed by the path the page uses: the homepage has no canvas files. */
-function writeMedia(file) {
+/**
+ * The files the published page names, and a 3D model node's rendered preview picture (the case dialog shows it beside
+ * the agents), published as static files in apps/web/showcase/media/<case>/, each named by the first 16 hex digits of
+ * its sha256 so a cached copy is never a stale one; production-runs/<case>.media.json maps each `<node id>/<file>` path
+ * the page uses to its file. Pictures are re-encoded for the web as JPEG at most 2048 px wide (a preview picture as
+ * WebP at most 512 px, keeping its transparency), clips as H.264 at most 1280 px wide without sound; a 3D model is the
+ * GLB the run made with its geometry and textures byte for byte, its provider's marks taken out (neutralGlb). Only this
+ * run's files stay in the case's folder.
+ */
+function writeStaticMedia(manifestFile) {
   const stored = path.join(path.dirname(path.resolve(rawFile)), `${path.basename(rawFile).replace(/-\d{8}T\d{6}Z\.json$/, '')}-files`);
+  const caseDir = path.join(ROOT, 'apps/web/showcase/media', raw.caseId);
   const scratch = fs.mkdtempSync(path.join(path.dirname(path.resolve(rawFile)), '.media-'));
-  const inlined = {};
+  const manifest = {};
   try {
+    fs.mkdirSync(caseDir, { recursive: true });
     for (const item of media) for (const reference of item.files) {
-      if (!artifactOutput?.includes(reference)) continue;
+      const preview = item.kind === 'model3d' && /\.(?:png|jpe?g|webp)$/i.test(reference);
+      if (!artifactOutput?.includes(reference) && !preview) continue;
       const [specId, name] = [reference.slice(0, reference.indexOf('/')), reference.slice(reference.indexOf('/') + 1)];
       const nodeId = [...MEDIA_IDS].find(([, to]) => to === specId)?.[0];
       const entry = (raw.files || []).find(value => value.nodeId === nodeId && value.name === name);
       if (!entry) throw new Error(`${reference}: the run record has no stored file for it`);
       const source = path.join(stored, entry.file);
-      const video = item.kind === 'video';
-      const out = path.join(scratch, `${Object.keys(inlined).length}.${video ? 'mp4' : 'jpg'}`);
-      const args = video
-        ? ['-y', '-v', 'error', '-i', source, '-an', '-vf', "scale='min(960,iw)':-2", '-c:v', 'libx264', '-preset', 'slow', '-crf', '30', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out]
-        : ['-y', '-v', 'error', '-i', source, '-vf', "scale='min(1600,iw)':-2", '-q:v', '4', out];
-      const done = spawnSync('ffmpeg', args, { encoding: 'utf8' });
-      if (done.status !== 0) throw new Error(`ffmpeg ${reference}: ${done.stderr}`);
-      inlined[reference] = `data:${video ? 'video/mp4' : 'image/jpeg'};base64,${fs.readFileSync(out).toString('base64')}`;
+      let out = source, type = 'model/gltf-binary', extension = 'glb';
+      if (item.kind === 'video') {
+        out = path.join(scratch, `${Object.keys(manifest).length}.mp4`); type = 'video/mp4'; extension = 'mp4';
+        ffmpeg(reference, ['-y', '-v', 'error', '-i', source, '-an', '-vf', "scale='min(1280,iw)':-2", '-c:v', 'libx264', '-preset', 'slow', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out]);
+      } else if (preview) {
+        out = path.join(scratch, `${Object.keys(manifest).length}.webp`); type = 'image/webp'; extension = 'webp';
+        ffmpeg(reference, ['-y', '-v', 'error', '-i', source, '-vf', "scale='min(512,iw)':-2", '-c:v', 'libwebp', '-quality', '82', out]);
+      } else if (!/\.glb$/i.test(name)) {
+        out = path.join(scratch, `${Object.keys(manifest).length}.jpg`); type = 'image/jpeg'; extension = 'jpg';
+        ffmpeg(reference, ['-y', '-v', 'error', '-i', source, '-vf', "scale='min(2048,iw)':-2", '-q:v', '3', out]);
+      }
+      const bytes = extension === 'glb' ? neutralGlb(fs.readFileSync(out), reference) : fs.readFileSync(out);
+      const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+      const fileName = `${sha256.slice(0, 16)}.${extension}`;
+      fs.writeFileSync(path.join(caseDir, fileName), bytes);
+      manifest[reference] = { src: `/showcase/media/${raw.caseId}/${fileName}`, type, bytes: bytes.length, sha256 };
     }
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
-  const missing = media.flatMap(item => item.files).filter(reference => artifactOutput?.includes(reference) && !inlined[reference]);
-  if (missing.length) throw new Error(`not inlined: ${missing.join(', ')}`);
-  fs.writeFileSync(file, `// Generated by scripts/showcase/publish-run.mjs from a recorded run; do not edit by hand.\n/** The files of ${raw.caseId}'s image and video nodes that its page names, by the path the page uses, as small data: URLs. */\nconst media: Readonly<Record<string, string>> = ${JSON.stringify(inlined)};\nexport default media;\n`);
-  console.log(`${raw.caseId}: ${Object.keys(inlined).length} media file(s) inlined, ${Math.round(fs.statSync(file).size / 1024)} KB → ${path.relative(ROOT, file)}`);
+  const missing = media.flatMap(item => item.files).filter(reference => artifactOutput?.includes(reference) && !manifest[reference]);
+  if (missing.length) throw new Error(`not published: ${missing.join(', ')}`);
+  const keep = new Set(Object.values(manifest).map(file => path.basename(file.src)));
+  for (const name of fs.readdirSync(caseDir)) if (!keep.has(name)) fs.rmSync(path.join(caseDir, name));
+  const sorted = Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b)));
+  fs.writeFileSync(manifestFile, `${JSON.stringify(sorted, null, 1)}\n`);
+  // The inlined data: URLs these files replace (published before 2026-10-15).
+  fs.rmSync(path.join(path.dirname(manifestFile), `${raw.caseId}.media.ts`), { force: true });
+  const total = Object.values(manifest).reduce((sum, file) => sum + file.bytes, 0);
+  console.log(`${raw.caseId}: ${Object.keys(manifest).length} media file(s), ${Math.round(total / 1024)} KB → ${path.relative(ROOT, caseDir)}`);
+}
+
+/**
+ * A GLB without its provider's marks: the 3D model nodes' files name the service that made them (asset.generator, and
+ * material, mesh and node names), and a published file is downloadable by anyone. The JSON chunk's generator becomes
+ * AwwO and every named object is renamed by its kind and index (the delivered pages load the model's scene and name no
+ * object in it); the binary chunk, the geometry and the textures, is kept byte for byte. A mark this cannot take out
+ * (in the binary chunk, say a texture's metadata) stops the publish.
+ */
+function neutralGlb(bytes, reference) {
+  // Names of the generation providers behind AwwO's media nodes, which users never see (the site names its models
+  // generically): none may be left in a published file.
+  const marks = /tripo|x-?tasy|runninghub|bytedance|dreamina|jimeng|kuaishou|midjourney|pixverse|shengshu/i;
+  const singular = kind => (kind === 'meshes' ? 'mesh' : kind.replace(/s$/, ''));
+  const word = at => bytes.readUInt32LE(at);
+  if (bytes.toString('latin1', 0, 4) !== 'glTF' || word(4) !== 2 || word(8) !== bytes.length) throw new Error(`${reference}: not a glTF 2.0 binary`);
+  if (bytes.toString('latin1', 16, 20) !== 'JSON') throw new Error(`${reference}: its first chunk is not JSON`);
+  const doc = JSON.parse(bytes.toString('utf8', 20, 20 + word(12)));
+  const rest = bytes.subarray(20 + word(12));
+  if (marks.test(rest.toString('latin1'))) throw new Error(`${reference}: its binary chunk names a provider`);
+  doc.asset = { ...doc.asset, generator: 'AwwO' };
+  for (const [kind, values] of Object.entries(doc)) if (Array.isArray(values)) values.forEach((value, index) => {
+    if (value && typeof value === 'object' && typeof value.name === 'string') value.name = `${singular(kind)}_${index}`;
+  });
+  const text = JSON.stringify(doc);
+  if (marks.test(text)) throw new Error(`${reference}: its JSON chunk still names a provider`);
+  // A chunk is padded to 4 bytes, the JSON one with spaces.
+  const plain = Buffer.from(text, 'utf8');
+  const json = Buffer.concat([plain, Buffer.alloc((4 - (plain.length % 4)) % 4, 0x20)]);
+  const head = Buffer.alloc(20);
+  head.write('glTF', 0, 'latin1'); head.writeUInt32LE(2, 4); head.writeUInt32LE(20 + json.length + rest.length, 8);
+  head.writeUInt32LE(json.length, 12); head.write('JSON', 16, 'latin1');
+  return Buffer.concat([head, json, rest]);
+}
+
+function ffmpeg(reference, args) {
+  const done = spawnSync('ffmpeg', args, { encoding: 'utf8' });
+  if (done.status !== 0) throw new Error(`ffmpeg ${reference}: ${done.stderr}`);
 }

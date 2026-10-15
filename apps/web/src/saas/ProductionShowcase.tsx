@@ -35,7 +35,8 @@ const renderRecordMarkdown = (source: string) => <ReactMarkdown remarkPlugins={[
  * supplies (three.js r128) runs from its pinned copy, exactly as the Results preview runs it; other external scripts stay
  * blocked. A media case's page runs the way the canvas runs a page that shows generated media (studio/liveDocument.ts:
  * every element kept, so its <video> plays; opaque origin, injected policy, links stopped), with the files its run's
- * image and video nodes made as data: URLs in place of the `<node id>/<file>` paths it names (showcaseDocument.ts). */
+ * image, video and 3D model nodes made (published as static files, fetched when the case opens) as data: URLs in place
+ * of the `<node id>/<file>` paths it names (showcaseDocument.ts). */
 function ResultFrame({ html, title, media }: { html: string; title: string; media: Readonly<Record<string, string>> }) {
   const inline = Object.keys(media).length > 0;
   const needs = useMemo(() => { try { return previewScriptNeeds(htmlDocumentSource(html)); } catch { return NO_PREVIEW_SCRIPT_NEEDS; } }, [html]);
@@ -74,15 +75,17 @@ function ResultFrame({ html, title, media }: { html: string; title: string; medi
 
 const NO_MEDIA: Readonly<Record<string, string>> = {};
 
-/** What the canvas's image and video nodes generated in the run, shown small beside the agents (they are not agents). */
+/** What the canvas's image, video and 3D model nodes generated in the run, shown small beside the agents (they are not
+ * agents); a 3D model by its rendered preview picture. */
 function MediaStrip({ record, files, stage }: { record: ProductionRunRecord; files: Readonly<Record<string, string>> | undefined; stage?: string }) {
   if (!record.media?.length) return null;
   const count = record.media.length;
+  const made = `${count} media ${count === 1 ? 'node' : 'nodes'}, generated in the same run`;
   return <section className="production-made-media" aria-label="What the media nodes generated in this run">
-    <span>{stage ? `Stage ${stage} · ${count} media nodes, generated in the same run`
-      : `${count} media nodes, generated in the same run`}</span>
+    <span>{stage ? `Stage ${stage} · ${made}` : made}</span>
     <ul>{record.media.map(item => {
-      const url = files?.[item.files[0] ?? ''];
+      const shown = item.kind === 'model3d' ? item.files.find(file => /\.(?:png|jpe?g|webp)$/i.test(file)) : item.files[0];
+      const url = files?.[shown ?? ''];
       return <li key={item.id}>
         {url ? (item.kind === 'video' ? <video src={url} muted playsInline preload="metadata" aria-hidden="true" /> : <img src={url} alt="" />) : <i aria-hidden="true" />}
         <span>{item.title}</span><StatusChip status={item.status} />

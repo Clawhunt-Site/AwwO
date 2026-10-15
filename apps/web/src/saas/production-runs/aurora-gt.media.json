@@ -1,0 +1,26 @@
+{
+ "blue/image-1.jpg": {
+  "src": "/showcase/media/aurora-gt/86dfbc49aa9d680e.jpg",
+  "type": "image/jpeg",
+  "bytes": 151757,
+  "sha256": "86dfbc49aa9d680eb1b7d1cf6f822869e90dc63eeaf0f0887d7aeaefa85aa498"
+ },
+ "drive/video-1.mp4": {
+  "src": "/showcase/media/aurora-gt/0a86f8317f688642.mp4",
+  "type": "video/mp4",
+  "bytes": 1187984,
+  "sha256": "0a86f8317f688642a5c9312ce7d80af63b4412b2b1b95cb3a76fb7b606e5e5f9"
+ },
+ "red/image-1.jpg": {
+  "src": "/showcase/media/aurora-gt/ef0a6d45cb02a7c1.jpg",
+  "type": "image/jpeg",
+  "bytes": 152316,
+  "sha256": "ef0a6d45cb02a7c168c8c11ecd47288e05ca3acfd4ca03a105e97570456914a6"
+ },
+ "white/image-1.jpg": {
+  "src": "/showcase/media/aurora-gt/deaa0f3ca776b2f1.jpg",
+  "type": "image/jpeg",
+  "bytes": 130292,
+  "sha256": "deaa0f3ca776b2f1726bf0077b4cbe8a5a371c38ff0a4f4bd1a770a5c64d3ec3"
+ }
+}

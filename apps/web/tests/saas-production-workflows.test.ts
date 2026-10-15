@@ -49,7 +49,10 @@ it('is a valid DAG that runs left to right and compiles into its one English can
       // Every handoff goes to a later stage, so stages are the dependency order and there is no cycle.
       expect(column.get(edge.to)!, `${item.id}: ${edge.from}->${edge.to}`).toBeGreaterThan(column.get(edge.from)!);
     }
-    for (const value of media) expect(item.nodes.some(node => value.feeds?.includes(node.id) && node.outputType === 'html'), `${item.id}/${value.id}`).toBe(true);
+    // A media node feeds the page itself or a module the page pastes (a 3D model into the code that loads it).
+    const build = item.nodes.find(node => node.outputType === 'html');
+    for (const value of media) expect(item.nodes.some(node => value.feeds?.includes(node.id)
+      && (node === build || item.edges.some(edge => edge.from === node.id && edge.to === build?.id))), `${item.id}/${value.id}`).toBe(true);
     // A column is a stage: each node past the first stage receives something from the stage right before it.
     for (const node of item.nodes.filter(value => value.column > 0))
       expect([...item.edges, ...feeds].some(edge => edge.to === node.id && column.get(edge.from) === node.column - 1), `${item.id}/${node.id}`).toBe(true);
@@ -153,8 +156,9 @@ it('writes every text in English and claims no real brand, footage or production
 it('keeps every node’s fixed prompt well inside what Claude Opus 5.5 leaves for input', () => {
   for (const item of WORKFLOWS) for (const node of (createOfficialDocument(item).nodes as SessionNode[]).filter(value => value.contract?.inputs.length)) {
     // Persona, brief and output policy are sent twice (system and user); upstream outputs add the rest. The runtime's
-    // system prompt allows 32,768 characters, so the fixed part stays far below it.
+    // system prompt allows 32,768 characters, so the fixed part stays far below it: the largest, the EV plant's page with
+    // the brand-font rule (R1b, 2026-10-15), is about 17,100 bytes and ran on production.
     const fixed = new TextEncoder().encode(node.persona + node.contract!.inputs[0].value).byteLength;
-    expect(fixed, `${item.id}/${node.title}`).toBeLessThan(16000);
+    expect(fixed, `${item.id}/${node.title}`).toBeLessThan(20000);
   }
 });

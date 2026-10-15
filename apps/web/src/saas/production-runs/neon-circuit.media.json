@@ -1,0 +1,14 @@
+{
+ "car/model-1.glb": {
+  "src": "/showcase/media/neon-circuit/8e2ddf424e6e3653.glb",
+  "type": "model/gltf-binary",
+  "bytes": 2489408,
+  "sha256": "8e2ddf424e6e36530355f2280241624ff0dfcfe796159f42d0d854340b685869"
+ },
+ "car/preview-2.png": {
+  "src": "/showcase/media/neon-circuit/d76acac40f13b4b8.webp",
+  "type": "image/webp",
+  "bytes": 13266,
+  "sha256": "d76acac40f13b4b84e7895ef3fc8274b3b1668ea02a58f07927bef5c187f6f59"
+ }
+}

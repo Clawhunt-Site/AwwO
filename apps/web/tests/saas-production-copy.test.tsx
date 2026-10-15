@@ -43,7 +43,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('carries every agent’s recorded delivery into its copy, as the case’s, on the very canvas that ran', () => {
   expect(CASES).toHaveLength(17);
-  expect(RECORDED).toHaveLength(14);
+  expect(RECORDED).toHaveLength(12);
   for (const id of RECORDED) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     // Only results are added: the tasks, contracts and wires are the pinned canvas the case ran on.
@@ -81,19 +81,27 @@ it('shows every agent what it received: each wired input resolves to its upstrea
 
 it('copies a media case on the very canvas that ran: agents with their recordings, media nodes fresh, the page they feed made on the first run', () => {
   const media = CASES.filter(id => WORKFLOWS[id].media?.length);
-  expect(media.sort()).toEqual(['aurora-gt', 'neon-city', 'shanhai-vn']);
+  expect(media.sort()).toEqual(['aurora-gt', 'car-plant', 'neon-circuit', 'neon-city', 'shanhai-vn']);
   for (const id of media) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     expect(canonicalCanvasText(copy)).toBe(canonicalCanvasText(createOfficialDocument(workflow)));
     const fed = new Set(workflow.media!.flatMap(item => item.feeds ?? []));
+    const files = record.media!.flatMap(item => item.files);
     expect(copy.nodes).toHaveLength(workflow.nodes.length + workflow.media!.length);
     copy.nodes.forEach((node, index) => {
       const spec = workflow.nodes[index], session = node as SessionNode;
-      if (!spec || fed.has(spec.id)) { expect(session.lastOutput, `${id}/${session.title}`).toBeUndefined(); return; }
-      const recorded = record.nodes.find(value => value.id === spec.id)!;
+      const recorded = spec && record.nodes.find(value => value.id === spec.id)!;
+      // A 3D model reaches the page through a module the page pastes, so that page names the run's files as well.
+      const names = spec?.outputType === 'html' && files.some(file => recorded!.output?.includes(file));
+      if (!spec || fed.has(spec.id) || names) { expect(session.lastOutput, `${id}/${session.title}`).toBeUndefined(); return; }
       expect(session.lastOutput?.source, `${id}/${spec.id}`).toBe('case');
-      expect(parseContractOutput(session.contract!, session.lastOutput!.text).values.result, `${id}/${spec.id}`).toBe(recorded.output);
+      expect(parseContractOutput(session.contract!, session.lastOutput!.text).values.result, `${id}/${spec.id}`).toBe(recorded!.output);
     });
+  }
+  // The rebuilt 3D cases: the module that loads the model and the page that pastes it are made on the first run.
+  for (const [id, nodes] of [['neon-circuit', ['cars', 'build']], ['car-plant', ['vehicles', 'page']]] as const) {
+    const copy = copyOf(id), workflow = WORKFLOWS[id];
+    for (const target of nodes) expect((copy.nodes[workflow.nodes.findIndex(node => node.id === target)] as SessionNode).lastOutput, `${id}/${target}`).toBeUndefined();
   }
 });
 

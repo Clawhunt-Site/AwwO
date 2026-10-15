@@ -21,11 +21,11 @@ export interface ProductionRunNode {
   readonly tokens?: { readonly input?: number; readonly output?: number };
 }
 
-/** One image or video node of a recorded case run, as the run stored it. */
+/** One image, video or 3D model node of a recorded case run, as the run stored it. */
 export interface ProductionRunMedia {
   readonly id: string;
   readonly title: string;
-  readonly kind: 'image' | 'video';
+  readonly kind: 'image' | 'video' | 'model3d';
   readonly status: ProductionNodeStatus;
   readonly seconds?: number;
   /** The files it generated, by the `<node id>/<file name>` path the canvas handed the page. */
@@ -54,8 +54,9 @@ export interface ProductionRunRecord {
   readonly artifactSHA256?: string;
   readonly nodes: ReadonlyArray<ProductionRunNode>;
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: string }>;
-  /** The canvas's image and video nodes (not agents, so not in `nodes`): what each generated in this run. Their files,
-   * shrunk, are in production-runs/<case>.media.ts, keyed by the `<node id>/<file>` paths the page names. */
+  /** The canvas's image, video and 3D model nodes (not agents, so not in `nodes`): what each generated in this run.
+   * Their files are published as static files (production-runs/<case>.media.json lists them), keyed by the
+   * `<node id>/<file>` paths the page names. */
   readonly media?: ReadonlyArray<ProductionRunMedia>;
   /** What happened in the run, failures included. */
   readonly note: string;
@@ -87,15 +88,56 @@ export interface ProductionRunSummary {
 export const PRODUCTION_RUN_SUMMARY = summary as Readonly<Record<string, ProductionRunSummary>>;
 
 /** Each record loads on its own when its case opens; none is in the homepage bundle. */
-const RECORDS = import.meta.glob<{ default: ProductionRunRecord }>(['./production-runs/*.ts', '!./production-runs/*.media.ts']);
+const RECORDS = import.meta.glob<{ default: ProductionRunRecord }>('./production-runs/*.ts');
 export function loadProductionRun(id: string): Promise<ProductionRunRecord | undefined> {
   const load = RECORDS[`./production-runs/${id}.ts`];
   return load ? load().then(module => module.default) : Promise.resolve(undefined);
 }
 
-/** A media case's generated files as data: URLs, keyed by the paths its page names; loaded with the case, never before. */
-const MEDIA = import.meta.glob<{ default: Readonly<Record<string, string>> }>('./production-runs/*.media.ts');
-export function loadProductionMedia(id: string): Promise<Readonly<Record<string, string>>> {
-  const load = MEDIA[`./production-runs/${id}.media.ts`];
+/** One generated file of a media case, published beside the homepage's case footage (showcase/media/<case>/), named by
+ * its content so a cached copy can never be a stale one. Pictures and clips are re-encoded for the web when published
+ * (scripts/showcase/publish-run.mjs); 3D models are the files the run made. */
+export interface ProductionMediaFile {
+  /** Its URL on this site, e.g. /showcase/media/neon-circuit/1f2e3d4c5b6a7980.glb */
+  readonly src: string;
+  readonly type: string;
+  readonly bytes: number;
+  readonly sha256: string;
+}
+
+/** A media case's files by the `<node id>/<file>` path its page names (production-runs/<case>.media.json). */
+const MEDIA = import.meta.glob<{ default: Readonly<Record<string, ProductionMediaFile>> }>('./production-runs/*.media.json');
+export function loadProductionMediaManifest(id: string): Promise<Readonly<Record<string, ProductionMediaFile>>> {
+  const load = MEDIA[`./production-runs/${id}.media.json`];
   return load ? load().then(module => module.default) : Promise.resolve({});
+}
+
+function asDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('read_failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * A media case's generated files as data: URLs keyed by the paths its page names, fetched from this site when the case
+ * opens, never before: the sandboxed page runs in an opaque origin that reaches no network, so the files go in as
+ * data. A file that cannot be fetched, or is not the size published, is left out, and the page runs without it.
+ */
+export async function loadProductionMedia(id: string, fetchFile: typeof fetch = (input, init) => fetch(input, init)): Promise<Readonly<Record<string, string>>> {
+  const manifest = await loadProductionMediaManifest(id);
+  const entries = await Promise.all(Object.entries(manifest).map(async ([path, file]) => {
+    try {
+      const response = await fetchFile(file.src, { credentials: 'omit' });
+      if (!response.ok) return null;
+      const bytes = await response.arrayBuffer();
+      if (bytes.byteLength !== file.bytes) return null;
+      return [path, await asDataUrl(new Blob([bytes], { type: file.type }))] as const;
+    } catch {
+      return null;
+    }
+  }));
+  return Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== null));
 }

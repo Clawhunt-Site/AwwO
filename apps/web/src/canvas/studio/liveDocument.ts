@@ -15,6 +15,7 @@
 // Relative URLs (an archive's own files, or a canvas file named by the page) are inlined from bytes the studio has,
 // so a multi-file site or a page that uses an image another node generated renders without a server.
 import { htmlDocumentSource, PREVIEW_HOST_SCRIPT } from '../htmlDeliverable';
+import { fontStyleText, PREVIEW_FONT_LOAD_SCRIPT, PREVIEW_FONTS_KEY } from '../previewFontList';
 import { loadPreviewLibraries, previewScriptNeeds } from '../previewLibraries';
 import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from '../previewImportMap';
 import { scriptSpecifiers } from '../previewModules';
@@ -95,8 +96,9 @@ async function inlineCss(css: string, cssPath: string, resolve: AssetResolver, b
   return result;
 }
 
-/** What the live page took from the canvas files into itself: the import specifiers and the sources of its scripts. */
-interface Inlined { readonly specifiers: Set<string>; readonly sources: string[] }
+/** What the live page took from the canvas files into itself: the import specifiers and the sources of its scripts, and
+ * the stylesheets it inlined (which may name brand fonts). */
+interface Inlined { readonly specifiers: Set<string>; readonly sources: string[]; readonly styles: string[] }
 
 async function inlineModule(source: string, modulePath: string, resolve: AssetResolver, budget: { left: number }, depth: number,
   found: Inlined): Promise<string> {
@@ -193,7 +195,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   const path = options.path ?? 'index.html';
   const budget = { left: options.inlineBudget ?? 24 * 1024 * 1024 };
-  const inlined: Inlined = { specifiers: new Set<string>(), sources: [] };
+  const inlined: Inlined = { specifiers: new Set<string>(), sources: [], styles: [] };
   // The preview cannot be sent elsewhere by the page's own metadata.
   parsed.querySelectorAll('meta[http-equiv="refresh" i], base').forEach(element => element.remove());
   if (options.resolve) {
@@ -222,6 +224,8 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
           if (text === null) continue;
           const style = parsed.createElement('style');
           style.textContent = await inlineCss(text, target!, resolve, budget);
+          // A canvas stylesheet may name a brand font AwwO supplies (previewFonts.ts).
+          inlined.styles.push(text);
           element.replaceWith(style);
         } else {
           element.setAttribute(attribute, dataUrl(asset.bytes, mimeOfName(asset.name)));
@@ -242,7 +246,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   // handed to fetch, XMLHttpRequest and media elements by that path (scriptAssets below); read before any library is
   // inlined, so only the page's own scripts are searched.
   const assets = options.resolve ? await scriptAssets(parsed, path, options.resolve, budget, inlined.sources) : {};
-  const needs = previewScriptNeeds(source, [...inlined.specifiers]);
+  const needs = previewScriptNeeds(source, [...inlined.specifiers], [...inlined.sources, ...inlined.styles]);
   const supplied = needs.libraries.length ? await loadPreviewLibraries(needs).catch(() => null) : null;
   if (supplied) {
     for (const script of Array.from(parsed.querySelectorAll('script[src]'))) {
@@ -255,9 +259,13 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   }
   const head = parsed.head;
   const guard = parsed.createElement('script');
+  // Brand fonts AwwO supplies (previewFonts.ts) come first, so the guard can start loading them.
+  const fonts = supplied?.get(PREVIEW_FONTS_KEY);
+  const fontStyle = fonts ? parsed.createElement('style') : null;
+  if (fontStyle) fontStyle.textContent = fontStyleText(fonts!);
   // With the link guard: a page that started in a 0×0 frame is told its real size, and a page that fails says so
   // (htmlDeliverable.ts, pageErrors.ts).
-  guard.textContent = LINK_GUARD + PREVIEW_HOST_SCRIPT + (Object.keys(assets).length ? assetScript(assets) : '');
+  guard.textContent = LINK_GUARD + PREVIEW_HOST_SCRIPT + (fonts ? PREVIEW_FONT_LOAD_SCRIPT : '') + (Object.keys(assets).length ? assetScript(assets) : '');
   const csp = parsed.createElement('meta');
   csp.setAttribute('http-equiv', 'Content-Security-Policy');
   csp.setAttribute('content', LIVE_PAGE_CSP);
@@ -266,7 +274,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   referrer.setAttribute('content', 'no-referrer');
   const charset = parsed.createElement('meta');
   charset.setAttribute('charset', 'utf-8');
-  head.prepend(charset, csp, referrer, guard);
+  head.prepend(charset, csp, referrer, ...(fontStyle ? [fontStyle] : []), guard);
   if (!head.querySelector('meta[name="viewport" i]')) {
     const viewport = parsed.createElement('meta');
     viewport.setAttribute('name', 'viewport');
