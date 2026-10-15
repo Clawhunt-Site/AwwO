@@ -92,6 +92,8 @@ type Config struct {
 	PlannerPerWorkspaceDay, PlannerTotalPerDay, PlannerMaxInputBytes int
 	// Image and video generation through RunningHub (media_config.go); off unless configured.
 	mediaSettings
+	// The web reader and the motion renderer (capability_config.go); off unless configured.
+	capabilitySettings
 	// BillingCheckoutEnabled opens the paid plans' checkout (billing.go). Off, the plans can be read but not
 	// bought; subscriptions already taken still count.
 	BillingCheckoutEnabled bool
@@ -113,6 +115,11 @@ func ConfigFromEnv() (Config, error) {
 		return c, err
 	}
 	if err := c.typeSafeFromEnv(); err != nil {
+		return c, err
+	}
+	// The renderer's settings come first: mediaFromEnv validates the media directory, which a render worker
+	// alone may need (media_config.go).
+	if err := c.capabilityFromEnv(); err != nil {
 		return c, err
 	}
 	if err := c.mediaFromEnv(); err != nil {
@@ -241,6 +248,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := validateMediaConfig(c); err != nil {
+		return err
+	}
+	if err := c.validateCapabilities(); err != nil {
 		return err
 	}
 	if err := c.validateClawHunt(); err != nil {

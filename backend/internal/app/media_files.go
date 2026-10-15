@@ -304,7 +304,7 @@ func (a *App) sweepMediaTenant(ctx context.Context, root, tid string, old func(o
 		return
 	}
 	referenced := map[string]bool{}
-	rows, err := a.db.Query(ctx, "SELECT storage_path FROM artifacts WHERE tenant_id=$1 AND storage_path IS NOT NULL UNION ALL SELECT id FROM runs WHERE tenant_id=$1 AND status IN ('queued','running')", tid)
+	rows, err := a.db.Query(ctx, "SELECT storage_path FROM artifacts WHERE tenant_id=$1 AND storage_path IS NOT NULL UNION ALL SELECT id FROM runs WHERE tenant_id=$1 AND status IN ('queued','running') UNION ALL SELECT id FROM render_jobs WHERE tenant_id=$1 AND status IN ('queued','running')", tid)
 	if err != nil {
 		return
 	}
@@ -319,7 +319,7 @@ func (a *App) sweepMediaTenant(ctx context.Context, root, tid string, old func(o
 		return
 	}
 	for _, run := range runs {
-		// An active run (listed by its bare id) may still be writing into its directory.
+		// An active run or render (listed by its bare id) may still be writing into its directory.
 		if !run.IsDir() || !mediaPathPart.MatchString(run.Name()) || referenced[run.Name()] {
 			continue
 		}
@@ -346,7 +346,8 @@ func (a *App) sweepMediaTenant(ctx context.Context, root, tid string, old func(o
 }
 
 func (a *App) startMediaSweeper(ctx context.Context) {
-	if !a.cfg.mediaConfigured() {
+	// Rendered motion videos live in the same directory (renders.go), so a renderer alone also needs the sweep.
+	if !a.cfg.mediaConfigured() && (a.cfg.RenderURL == "" || a.cfg.MediaDir == "") {
 		return
 	}
 	a.tasks.Add(1)

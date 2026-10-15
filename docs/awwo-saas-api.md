@@ -230,6 +230,36 @@ SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、
 
 Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后已受理整图继续执行；重新打开会恢复输出及成员记录。当前为单 API 实例执行与数据库租约，尚未实现水平多执行器调度。服务重启会将已受理但结果不确定的模型调用标记 interrupted；可继续尚未受理且依赖成功的节点，不自动重放未知调用。
 
+## 技能、记忆、网页读取与视频渲染
+
+以下路径以 `/tenants/{tenantId}` 开头；读取需 reader，写入需 member。四项能力都由服务器裁决：前端只在 `GET /capabilities` 报告开启时提供入口，关闭的能力返回 503，不会被前端放行。
+
+| 方法与后缀 | 请求 / 查询 | 说明 |
+| --- | --- | --- |
+| GET /capabilities | 无 | `{skills,memory,webReader,render}`：各项 enabled、上限，以及 webReader/render 今日已用次数 |
+| GET /skills | 无 | `{items,limits}`：26 个内置技能（`builtin:<name>`）与本工作区技能（`workspace:<id>`）的摘要，不含正文 |
+| GET /skills/{ref} | 无 | 一个技能的全文；已归档或属于其他工作区的技能统一 404 |
+| POST /skills | name, title, description, body, category?, applies? 或 markdown（SKILL.md） | 201；正文 ≤ 12 KiB，名称在工作区内唯一（`skill_name_conflict`），最多 100 个（`skill_limit`）；隐藏字符一律拒绝 |
+| PUT /skills/{id} | version + 要改的字段 | 比较并交换，版本陈旧 409；每个版本都保留在 `tenant_skill_revisions` |
+| DELETE /skills/{id} | 无 | 归档（保留行与历史版本）；仍挂着它的节点在受理时被 `skill_unavailable` 拒绝 |
+| GET /memory | canvasId?, status?（active,proposed 默认；archived；all）, q? | `{items}`：工作区记忆与该画布的记忆，置顶在前 |
+| POST /memory | title, body?, kind?, canvasId?, pinned?, status?（active / proposed）, source? | 201；同一范围内容相同的记忆返回已有记录（200）；每个范围最多 200 条（`memory_limit`） |
+| PATCH /memory/{id} | version + title/body/kind/pinned/status | 比较并交换，版本陈旧 409 |
+| DELETE /memory/{id} | 无 | 204，删除记忆；已受理的运行仍保留快照里冻结的副本 |
+| POST /knowledge/sources/web | url, title?, operationId | 读取一个公开网页并存为原始资料（201；同一正文已有资料时 200）；`web_reader_unavailable` 503、`web_reader_busy` 503（同时读取已满，不计次）、`web_read_quota` 429、`web_read_in_progress` 409（同一 operationId 仍在读取）、`web_<原因>` 见下 |
+| GET /canvases/{id}/renders | nodeId? | `{items}`：最近 30 次渲染 |
+| POST /canvases/{id}/renders | operationId, nodeId, html, width, height, fps, seconds, loop?, gif?, contact? | 202 受理；同一 operationId 只属于一个画布，幂等回放同一渲染；每个工作区同时只能有一个（`render_busy`）、每日次数（`render_quota`）、页面 ≤ 6 MiB（`render_too_large`） |
+| GET /canvases/{id}/renders/{renderId} | 无 | status（queued/running/completed/failed/cancelled）、errorCode、result（mode、frames、distinctFrames、warnings、outputs） |
+| POST /canvases/{id}/renders/{renderId}/cancel | 空对象 | 幂等取消 |
+
+**技能** 写在节点的 `document.nodes[].skills`（最多 4 个引用，合计 ≤ 20 KiB）。受理运行时，服务器把每个技能的全文、版本和内容 hash 冻结进执行快照，放在节点指令之后、带边界说明的系统提示里（正文中的 `</skill` 被转义）；之后修改技能只影响新的运行。没有技能的节点请求逐字节不变。
+
+**记忆** 只由人写入或确认（proposed 需确认才生效），不会静默采集。受理时取置顶记忆和与任务最相关的记忆（最多 12 条、4 KiB）冻结进快照，作为带引号的背景资料放在用户消息里，系统提示说明它不是指令、与任务冲突时以任务为准。没有记忆的工作区请求逐字节不变。
+
+**网页读取** 默认关闭（`AWWO_WEB_READER=on` 开启；`AWWO_WEB_READS_PER_DAY` 默认 30、`AWWO_WEB_READS_SITE_PER_DAY` 默认 2000）。只读 http(s) 标准端口上的公开主机名：连接时逐个检查解析出的地址，拒绝本机、内网、链路本地、保留与 IPv4 映射地址，每次跳转重新校验并重查 robots.txt（RFC 9309，以 `AwwO-Reader` 身份如实标识）；20 秒总时限、5 MiB 上限；人机验证等防护页直接拒绝（`web_blocked_by_site_protection`），不绕过。提取正文（或 RSS/Atom 条目）后，读取记录（请求与最终地址、跳转、时间、状态码、原始字节 hash、robots 结论）写入资料的 provenance。先记录再读取，失败的读取也计入每日次数。
+
+**视频渲染** 需要单独部署 `apps/render-worker`（Playwright + Chromium + ffmpeg，见其 README），并配置 `AWWO_RENDER_URL`、`AWWO_RENDER_TOKEN` 和 `AWWO_MEDIA_DIR`（`AWWO_RENDERS_PER_DAY` 默认 20、`AWWO_RENDERS_SITE_PER_DAY` 默认 300、`AWWO_RENDER_TIMEOUT` 默认 8m）。前端发送成果工作台里构建好的页面文档；页面定义 `window.renderAt(t)` 时逐帧精确（渲染约定），否则在虚拟时钟下运行。渲染器一次只渲染一个：其他工作区的渲染保持 queued 排队，渲染器仍在释放上一个时会重试；渲染器没有接手的渲染（忙、不可用、服务重启、排队时被停止）不计入每日次数。MP4（以及可选的 GIF、帧缩略图）全部校验 hash 与文件类型后，与完成状态在同一事务里存为画布的媒体文件，随画布删除与清理；渲染记录本身是每日次数的账本，画布删除后仍保留，画布在渲染排队或进行中时不能删除。服务重启或关闭时排队或进行中的渲染标记为 `interrupted`，不会重复渲染。
+
 ## 平台管理
 
 | 方法与路径（省略 /api/v1） | 请求 / 查询 | 说明 |

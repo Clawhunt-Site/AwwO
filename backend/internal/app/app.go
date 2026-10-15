@@ -70,6 +70,10 @@ type App struct {
 	jimeng        *jimengClient
 	resumable     map[string]bool
 	mediaReserved int64
+	// renderSlot lets one render at a time go to the render worker, which renders one at a time; the others wait
+	// queued (renders.go). Made on first use.
+	renderSlotOnce sync.Once
+	renderSlot     chan struct{}
 }
 type rateEntry struct {
 	start time.Time
@@ -143,6 +147,12 @@ func (a *App) Start(ctx context.Context) error {
 		}
 	}
 	if _, e = tx.Exec(ctx, "UPDATE run_turns SET status='interrupted',error='API restarted before completion',updated_at=now() WHERE status IN ('queued','running')"); e != nil {
+		return e
+	}
+	if e = interruptRenders(ctx, tx); e != nil {
+		return e
+	}
+	if e = interruptWebReads(ctx, tx); e != nil {
 		return e
 	}
 	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET status='interrupted',usage_status='unknown',usage_source='none',usage_reason='worker_lost',cost_status='unknown',failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=now(),credit_charge="+abandonedCreditCharge+" WHERE status='running'"); e != nil {
@@ -264,6 +274,10 @@ func (a *App) Handler() http.Handler {
 	// asking for one must get a visible 404 rather than the whole catalogue.
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runtime", a.tenant(a.runtime, 1))
 	a.registerKnowledgeRoutes(m)
+	a.registerSkillRoutes(m)
+	a.registerMemoryRoutes(m)
+	a.registerRenderRoutes(m)
+	a.registerCapabilityRoutes(m)
 	a.registerWikiCompilerRoutes(m)
 	a.registerOpenMausRoutes(m)
 	a.registerComputerRoutes(m)

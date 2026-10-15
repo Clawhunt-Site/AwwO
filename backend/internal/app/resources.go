@@ -231,6 +231,10 @@ func (a *App) createCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_task_frame", err.Error())
 		return
 	}
+	if err := validateCanvasSkills(b.Document); err != nil {
+		a.skillFailure(w, err)
+		return
+	}
 	a.mutateObject(w, r, "canvas.created", randomID(), 201, func(tx pgx.Tx, id string) (json.RawMessage, error) {
 		return oneJSON(r.Context(), tx, "INSERT INTO canvases(id,tenant_id,name,document) VALUES($1,$2,$3,$4) RETURNING "+canvasJSON, id, r.PathValue("tenantId"), b.Name, b.Document)
 	})
@@ -250,6 +254,10 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateCanvasTaskFrames(b.Document); err != nil {
 		fail(w, 400, "invalid_task_frame", err.Error())
+		return
+	}
+	if err := validateCanvasSkills(b.Document); err != nil {
+		a.skillFailure(w, err)
 		return
 	}
 	tx, e := a.db.Begin(r.Context())
@@ -277,9 +285,13 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "version_conflict", "Canvas changed; reload before saving")
 		return
 	}
-	b.Document = preserveCanvasTaskFrames(savedDocument, b.Document)
+	b.Document = preserveCanvasSkills(savedDocument, preserveCanvasTaskFrames(savedDocument, b.Document))
 	if err := validateCanvasTaskFrames(b.Document); err != nil {
 		fail(w, 400, "invalid_task_frame", err.Error())
+		return
+	}
+	if err := validateCanvasSkills(b.Document); err != nil {
+		a.skillFailure(w, err)
 		return
 	}
 	v, e := oneJSON(r.Context(), tx, "UPDATE canvases SET name=$3,document=$4,version=version+1,updated_at=now() WHERE tenant_id=$1 AND id=$2 RETURNING "+canvasJSON, tid, id, b.Name, b.Document)
@@ -468,7 +480,9 @@ func (a *App) deleteObject(w http.ResponseWriter, r *http.Request, table, action
 		return
 	}
 	var busy bool
-	sql := "SELECT EXISTS(SELECT 1 FROM node_sessions s JOIN runs r ON r.session_id=s.id WHERE s.tenant_id=$1 AND s.canvas_id=$2 AND r.status IN ('queued','running')) OR EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND status IN ('queued','running'))"
+	// A video render still queued or running belongs to the canvas too (renders.go); its row outlives the canvas as
+	// the daily allowance's ledger, so it must have finished first.
+	sql := "SELECT EXISTS(SELECT 1 FROM node_sessions s JOIN runs r ON r.session_id=s.id WHERE s.tenant_id=$1 AND s.canvas_id=$2 AND r.status IN ('queued','running')) OR EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND status IN ('queued','running')) OR EXISTS(SELECT 1 FROM render_jobs WHERE tenant_id=$1 AND canvas_id=$2 AND status IN ('queued','running'))"
 	if table == "agents" {
 		sql = "SELECT EXISTS(SELECT 1 FROM node_sessions WHERE tenant_id=$1 AND agent_id=$2)"
 	}

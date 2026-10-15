@@ -572,6 +572,16 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_task_frame", e.Error())
 		return
 	}
+	if snapshot.Skills, e = a.freezeNodeSkills(r.Context(), tx, tid, document, nodeID); e != nil {
+		a.skillFailure(w, e)
+		return
+	}
+	if kind == "node" && nodeID != "" {
+		if snapshot.Memory, e = freezeMemoryContext(r.Context(), tx, tid, canvasID, b.Prompt); e != nil {
+			a.dbError(w, e)
+			return
+		}
+	}
 	if kind == "computer" {
 		var owner string
 		if e = tx.QueryRow(r.Context(), "SELECT actor_id FROM computer_sessions WHERE tenant_id=$1 AND session_id=$2", tid, b.SessionID).Scan(&owner); e != nil || owner != currentUser(r).ID {
@@ -635,9 +645,9 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			snapshot.Workspace.Inputs = append(snapshot.Workspace.Inputs, attached.Workspace...)
 		}
 	}
-	framedInstructions := knowledgeSystemPrompt(taskFrameSystemPrompt(instructions, snapshot.TaskFrame), snapshot.Knowledge)
-	framedPrompt := knowledgeUserPrompt(b.Prompt, snapshot.Knowledge)
-	if team == nil && (len(framedPrompt) > 128000 || len(framedPrompt)+len(framedInstructions)+overhead > budget || ((snapshot.TaskFrame != nil || snapshot.Knowledge != nil) && len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
+	framedInstructions := memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory)
+	framedPrompt := evidenceUserPrompt(b.Prompt, snapshot.Knowledge, snapshot.Memory)
+	if team == nil && (len(framedPrompt) > 128000 || len(framedPrompt)+len(framedInstructions)+overhead > budget || ((snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil) && len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		fail(w, 413, "context_limit", "Prompt and instructions exceed the selected runtime context budget")
 		return
 	}
@@ -799,8 +809,8 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
 		return
 	}
-	instructions = knowledgeSystemPrompt(instructions, snapshot.Knowledge)
-	prompt = knowledgeUserPrompt(prompt, snapshot.Knowledge)
+	instructions = memorySystemPrompt(knowledgeSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.Knowledge), snapshot.Memory)
+	prompt = evidenceUserPrompt(prompt, snapshot.Knowledge, snapshot.Memory)
 	if kind == "computer" {
 		a.executeComputer(ctx, tid, id, sid, prompt, instructions, snapshot)
 		return
@@ -810,7 +820,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		return
 	}
 	instructions = taskFrameSystemPrompt(instructions, snapshot.TaskFrame)
-	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil) && (len(prompt)+len(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
+	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil) && (len(prompt)+len(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
 		a.finish(tid, id, "failed", "", "context_limit")
 		return
 	}

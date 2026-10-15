@@ -96,6 +96,10 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_task_frame", err.Error())
 		return
 	}
+	if err := validateCanvasSkills(raw); err != nil {
+		a.skillFailure(w, err)
+		return
+	}
 	var d graphDocument
 	var scope []string
 	seeds := map[string]string{}
@@ -263,6 +267,14 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					fail(w, 400, "invalid_task_frame", e.Error())
 					return
 				}
+				if snap.Skills, e = a.freezeNodeSkills(r.Context(), tx, tid, raw, n.ID); e != nil {
+					a.skillFailure(w, e)
+					return
+				}
+				if snap.Memory, e = freezeMemoryContext(r.Context(), tx, tid, cid, graphMemoryQuery(n)); e != nil {
+					a.dbError(w, e)
+					return
+				}
 				// Freeze a structured contract only when the deployment has switched contracts
 				// on, and only for a plain single-agent node whose own model advertises the
 				// capability. A team turn is excluded because its members deliver into the
@@ -329,7 +341,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				// The response-format envelope occupies context too, so history is trimmed
 				// against the instructions this run will actually send plus that reserve.
 				// Both terms are unchanged when no contract is frozen.
-				history = boundedHistoryWithLimits(history, len(knowledgeSystemPrompt(taskFrameSystemPrompt(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)), snap.TaskFrame), snap.Knowledge))+len(knowledgeUserPrompt("", snap.Knowledge))+outputContractReserve(snap), snap.Budget, snap.Overhead)
+				history = boundedHistoryWithLimits(history, len(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)), snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory))+len(evidenceUserPrompt("", snap.Knowledge, snap.Memory))+outputContractReserve(snap), snap.Budget, snap.Overhead)
 				snap.History = &history
 			}
 		}
@@ -808,8 +820,8 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	}
 	prompt = attachmentUserPrompt(prompt, uploads)
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
-	framedInstructions := knowledgeSystemPrompt(taskFrameSystemPrompt(instructions, snap.TaskFrame), snap.Knowledge)
-	framedPrompt := knowledgeUserPrompt(prompt, snap.Knowledge)
+	framedInstructions := memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory)
+	framedPrompt := evidenceUserPrompt(prompt, snap.Knowledge, snap.Memory)
 	if len(framedPrompt) > 128000 || (snap.Team == nil && (len(framedPrompt)+len(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		return errors.New("context_limit")
 	}

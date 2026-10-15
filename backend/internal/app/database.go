@@ -117,6 +117,18 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 29, "migrations/029_workspace_checkins.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 30, "migrations/030_skills.sql"); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 31, "migrations/031_memory.sql"); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 32, "migrations/032_render_jobs.sql"); e != nil {
+		return e
+	}
+	if e = applyIdentifiedMigration(ctx, tx, 33, "migrations/033_web_reads.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
