@@ -1,0 +1,221 @@
+// The skill library (skills.go): method guidance a node can carry. Built-in skills come with AwwO (some adapted
+// from open-source agent libraries, credited on each); a workspace can write its own or import a SKILL.md file.
+// A node lists the skills it uses in its configuration, and each run freezes their exact text, so editing a skill
+// changes later runs only.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Archive, Check, FileUp, Pencil, Plus, RefreshCw, Search, Sparkles, X } from 'lucide-react';
+import { saasErrorMessage } from './api';
+import { renderInertMarkdown } from './inertMarkdown';
+import { useSaaSPreferences } from './preferences';
+import {
+  archiveSkill, createSkill, forgetSkillCatalog, readSkill, readSkillCatalog, SKILL_CATEGORIES, skillDescription, skillTitle, updateSkill,
+  type Skill, type SkillCatalog, type SkillSummary,
+} from './skillsApi';
+import './canvas-library.css';
+
+type Translate = (zh: string, en: string) => string;
+type Source = 'all' | 'builtin' | 'workspace';
+interface Draft { id?: string; version?: number; name: string; title: string; description: string; category: string; applies: string[]; body: string }
+interface Props { tenantId: string; readOnly?: boolean; onClose: () => void }
+
+const SKILL_TAGS = ['html', 'motion', 'video', 'image', 'research', 'writing', 'code', 'review', 'design', 'data', 'plan'] as const;
+const SKILL_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const SKILL_FILE_BYTES = 64 << 10;
+const emptyDraft = (): Draft => ({ name: '', title: '', description: '', category: 'writing', applies: [], body: '' });
+const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
+const categoryRank = (category: string) => { const rank = (SKILL_CATEGORIES as readonly string[]).indexOf(category); return rank < 0 ? SKILL_CATEGORIES.length : rank; };
+export const skillCategoryName = (category: string, t: Translate) => ({
+  video: t('视频', 'Video'), design: t('设计', 'Design'), research: t('研究', 'Research'), writing: t('写作', 'Writing'),
+  engineering: t('工程', 'Engineering'), business: t('商业', 'Business'), data: t('数据', 'Data'),
+} as Record<string, string>)[category] ?? category;
+
+export function SkillLibrary({ tenantId, readOnly = false, onClose }: Props) {
+  const { t, locale } = useSaaSPreferences();
+  const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
+  const [source, setSource] = useState<Source>('all');
+  const [query, setQuery] = useState('');
+  const [selectedRef, setSelectedRef] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Skill | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [notice, setNotice] = useState('');
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [markdown, setMarkdown] = useState<{ name: string; text: string } | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const value = await readSkillCatalog(tenantId);
+      if (!alive.current) return;
+      setCatalog(value); setError(null);
+      // The first skill the list shows (categories in their fixed order), unless one is already open.
+      const first = [...value.items].sort((a, b) => categoryRank(a.category) - categoryRank(b.category))[0];
+      setSelectedRef(ref => ref && value.items.some(item => item.ref === ref) ? ref : first?.ref ?? null);
+    } catch (cause) { if (alive.current) setError(cause); }
+    finally { if (alive.current) setLoading(false); }
+  }, [tenantId]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!selectedRef) { setSelected(null); return; }
+    const controller = new AbortController();
+    readSkill(tenantId, selectedRef, controller.signal).then(value => setSelected(value), cause => { if (!controller.signal.aborted) setError(cause); });
+    return () => controller.abort();
+  }, [tenantId, selectedRef, catalog]);
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return (catalog?.items ?? []).filter(item => (source === 'all' || item.source === source)
+      && (!needle || [item.name, item.title, item.titleZh ?? '', item.description, item.descriptionZh ?? ''].some(text => text.toLowerCase().includes(needle))));
+  }, [catalog, source, query]);
+  const groups = useMemo(() => {
+    const byCategory = new Map<string, SkillSummary[]>();
+    for (const item of visible) byCategory.set(item.category, [...(byCategory.get(item.category) ?? []), item]);
+    return [...byCategory.entries()].sort(([a], [b]) => categoryRank(a) - categoryRank(b));
+  }, [visible]);
+  const workspaceCount = catalog?.items.filter(item => item.source === 'workspace').length ?? 0;
+  const maxWorkspace = catalog?.limits.maxWorkspaceSkills ?? 100;
+  const maxBody = catalog?.limits.maxSkillBodyBytes ?? 12 << 10;
+
+  const act = async (change: () => Promise<string | void>, done: string) => {
+    if (busy) return;
+    setBusy(true); setError(null); setNotice('');
+    try {
+      const ref = await change();
+      if (!alive.current) return;
+      forgetSkillCatalog(tenantId);
+      setNotice(done);
+      if (ref) setSelectedRef(ref);
+      await load();
+    } catch (cause) { if (alive.current) setError(cause); }
+    finally { if (alive.current) setBusy(false); }
+  };
+  const save = (value: Draft) => void act(async () => {
+    const fields = { title: value.title.trim(), description: value.description.trim(), category: value.category, applies: value.applies, body: value.body };
+    const saved = value.id && value.version
+      ? await updateSkill(tenantId, value.id, { ...fields, version: value.version })
+      : await createSkill(tenantId, { name: value.name.trim(), ...fields });
+    if (alive.current) setDraft(null);
+    return saved.ref;
+  }, value.id ? t('技能已更新：之后的运行使用新版本，已开始的运行不受影响。', 'Skill updated. Later runs use the new version; runs already admitted keep theirs.')
+    : t('技能已保存，可以在节点配置里挂到节点上。', 'Skill saved. Attach it to a node in the node configuration.'));
+  const importFile = async (file?: File) => {
+    if (fileInput.current) fileInput.current.value = '';
+    if (!file) return;
+    if (!/\.(md|markdown)$/i.test(file.name) || file.size > SKILL_FILE_BYTES) {
+      setError(new Error(t('请选择不超过 64 KiB 的 SKILL.md（Markdown）文件。', 'Choose a SKILL.md (Markdown) file of at most 64 KiB.'))); return;
+    }
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+      if (alive.current) { setMarkdown({ name: file.name, text }); setDraft(null); setError(null); setNotice(''); }
+    } catch { if (alive.current) setError(new Error(t('无法读取 UTF-8 文本，请检查文件编码。', 'Could not read UTF-8 text. Check the file encoding.'))); }
+  };
+  const importMarkdown = (value: { name: string; text: string }) => void act(async () => {
+    const saved = await createSkill(tenantId, { markdown: value.text });
+    if (alive.current) setMarkdown(null);
+    return saved.ref;
+  }, t('已导入技能。导入的文件只保留它的说明与正文，不会执行其中的任何内容。', 'Skill imported. Only its description and text are kept; nothing in the file runs.'));
+  const archive = (skill: Skill) => void act(async () => {
+    await archiveSkill(tenantId, skill.id!);
+    if (alive.current) { setArchiving(false); setSelectedRef(null); }
+  }, t('技能已归档。还挂着它的节点在运行前需要先移除它。', 'Skill archived. Nodes that still list it must remove it before they run.'));
+  const edit = (skill: Skill) => {
+    setDraft({ id: skill.id, version: skill.version, name: skill.name, title: skill.title, description: skill.description, category: skill.category, applies: [...skill.applies], body: skill.body });
+    setMarkdown(null); setError(null); setNotice('');
+  };
+  const draftReady = !!draft && SKILL_NAME.test(draft.name.trim()) && draft.name.trim().length <= 64 && draft.title.trim() !== '' && [...draft.title.trim()].length <= 120
+    && draft.description.trim() !== '' && [...draft.description.trim()].length <= 1024 && draft.body.trim() !== '' && bytes(draft.body) <= maxBody;
+
+  return <section className="awwo-library" aria-label={t('技能库', 'Skill library')}>
+    <header className="awwo-library-header">
+      <div className="awwo-library-heading"><span className="awwo-library-mark"><Sparkles size={20} aria-hidden="true" /></span><div>
+        <h2>{t('技能库', 'Skill library')}</h2>
+        <p>{t('技能是写给节点的方法指引。在节点配置里挂上技能后，它的全文会随节点指令一起冻结进每次运行。', 'A skill is method guidance for a node. Attach skills in a node’s configuration, and their full text is frozen into each run with the node’s instructions.')}</p>
+      </div></div>
+      <div className="awwo-library-actions">
+        <button type="button" disabled={loading || busy} onClick={() => void load()} aria-label={t('刷新技能库', 'Refresh skills')}><RefreshCw size={16} aria-hidden="true" /></button>
+        {!readOnly && <>
+          <input ref={fileInput} className="saas-visually-hidden" type="file" accept=".md,.markdown,text/markdown" aria-label={t('选择 SKILL.md 文件', 'Choose a SKILL.md file')} onChange={event => void importFile(event.target.files?.[0])} />
+          <button type="button" disabled={busy || workspaceCount >= maxWorkspace} onClick={() => fileInput.current?.click()}><FileUp size={16} aria-hidden="true" />{t('导入 SKILL.md', 'Import SKILL.md')}</button>
+          <button type="button" className="awwo-library-primary" disabled={busy || workspaceCount >= maxWorkspace} onClick={() => { setDraft(emptyDraft()); setMarkdown(null); setError(null); setNotice(''); }}><Plus size={16} aria-hidden="true" />{t('新建技能', 'New skill')}</button>
+        </>}
+        <button type="button" onClick={onClose} aria-label={t('关闭技能库', 'Close skills')}><X size={19} aria-hidden="true" /></button>
+      </div>
+    </header>
+    {error !== null && <p className="awwo-library-alert" role="alert">{saasErrorMessage(error, locale)}</p>}
+    {notice && <p className="awwo-library-notice" role="status"><Check size={14} aria-hidden="true" />{notice}</p>}
+    <div className="awwo-library-body has-editor">
+      <div className="awwo-library-list-column">
+        <div className="awwo-library-filters">
+          <div className="awwo-library-segments" role="group" aria-label={t('来源', 'Source')}>
+            {([['all', t('全部', 'All')], ['builtin', t('内置', 'Built-in')], ['workspace', t(`本工作区 ${workspaceCount}`, `This workspace ${workspaceCount}`)]] as [Source, string][])
+              .map(([value, name]) => <button key={value} type="button" aria-pressed={source === value} onClick={() => setSource(value)}>{name}</button>)}
+          </div>
+          <label className="awwo-library-search"><Search size={15} aria-hidden="true" /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('搜索技能', 'Search skills')} aria-label={t('搜索技能', 'Search skills')} /></label>
+        </div>
+        {loading && !catalog ? <p className="awwo-library-empty" role="status">{t('正在读取技能库…', 'Loading skills…')}</p>
+          : !visible.length ? <p className="awwo-library-empty">{query || source !== 'all' ? t('没有匹配的技能。', 'No matching skills.') : t('技能库是空的。', 'The skill library is empty.')}</p>
+          : groups.map(([category, items]) => <div key={category} className="awwo-library-group">
+            <h3>{skillCategoryName(category, t)}</h3>
+            <ul className="awwo-library-list is-compact">{items.map(item => <li key={item.ref} className={item.ref === selectedRef && !draft && !markdown ? 'is-active' : undefined}>
+              <button type="button" className="awwo-library-pick" aria-pressed={item.ref === selectedRef} onClick={() => { setSelectedRef(item.ref); setDraft(null); setMarkdown(null); setArchiving(false); }}>
+                <strong>{skillTitle(item, locale)}</strong>
+                <span>{skillDescription(item, locale)}</span>
+                <small>{item.source === 'builtin' ? t('内置', 'Built-in') : t('本工作区', 'This workspace')} · v{item.version} · {item.ref}</small>
+              </button>
+            </li>)}</ul>
+          </div>)}
+      </div>
+      {markdown && !readOnly ? <div className="awwo-library-editor">
+        <h3>{t('导入 SKILL.md', 'Import SKILL.md')}</h3>
+        <p className="awwo-library-help">{t(`将导入「${markdown.name}」。文件需以 --- 包起的说明块开头（name、title、description、category、applies），其余是正文；正文最多 ${(maxBody / 1024).toFixed(0)} KiB。导入只保存文字，不会执行文件里的任何内容。`, `This imports “${markdown.name}”. The file starts with a --- block of name, title, description, category and applies, then the text, which is at most ${(maxBody / 1024).toFixed(0)} KiB. Only the text is saved; nothing in the file runs.`)}</p>
+        <pre className="awwo-library-preview">{markdown.text.slice(0, 4000)}{markdown.text.length > 4000 ? '\n…' : ''}</pre>
+        <div className="awwo-library-editor-actions">
+          <button type="button" onClick={() => setMarkdown(null)}>{t('取消', 'Cancel')}</button>
+          <button type="button" className="awwo-library-primary" disabled={busy} onClick={() => importMarkdown(markdown)}>{busy ? t('导入中…', 'Importing…') : t('导入', 'Import')}</button>
+        </div>
+      </div>
+      : draft && !readOnly ? <form className="awwo-library-editor" onSubmit={event => { event.preventDefault(); if (draftReady) save(draft); }}>
+        <h3>{draft.id ? t('编辑技能', 'Edit skill') : t('新建技能', 'New skill')}</h3>
+        <label>{t('名称（引用标识）', 'Name (its reference)')}<input required value={draft.name} disabled={!!draft.id} maxLength={64} onChange={event => setDraft({ ...draft, name: event.target.value.toLowerCase() })} placeholder="brand-voice" />
+          <small>{t('小写字母、数字和单个连字符，保存后不能更改。', 'Lowercase letters, digits and single hyphens; it cannot change after saving.')}</small></label>
+        <label>{t('标题', 'Title')}<input required value={draft.title} maxLength={120} onChange={event => setDraft({ ...draft, title: event.target.value.replace(/[\r\n\t]+/g, ' ') })} /></label>
+        <label>{t('一句话说明（显示在技能列表里）', 'One-line description (shown in the skill list)')}<input required value={draft.description} maxLength={1024} onChange={event => setDraft({ ...draft, description: event.target.value.replace(/[\r\n]+/g, ' ') })} /></label>
+        <label>{t('类别', 'Category')}<select value={draft.category} onChange={event => setDraft({ ...draft, category: event.target.value })}>
+          {SKILL_CATEGORIES.map(category => <option key={category} value={category}>{skillCategoryName(category, t)}</option>)}</select></label>
+        <fieldset><legend>{t('适用于', 'Applies to')}</legend><div className="awwo-library-tags">{SKILL_TAGS.map(tag => <label key={tag} className="awwo-library-check">
+          <input type="checkbox" checked={draft.applies.includes(tag)} onChange={event => setDraft({ ...draft, applies: event.target.checked ? [...draft.applies, tag] : draft.applies.filter(item => item !== tag) })} />{tag}</label>)}</div></fieldset>
+        <label>{t('正文（Markdown）', 'Text (Markdown)')}<textarea required rows={14} value={draft.body} onChange={event => setDraft({ ...draft, body: event.target.value })}
+          placeholder={t('写清楚这个技能要节点怎么做：步骤、检查清单、要避免的问题。', 'Say how the node should work with this skill: steps, a checklist, what to avoid.')} /></label>
+        <small className={bytes(draft.body) > maxBody ? 'awwo-library-count is-over' : 'awwo-library-count'}>{bytes(draft.body).toLocaleString()} / {maxBody.toLocaleString()} B</small>
+        <div className="awwo-library-editor-actions">
+          <button type="button" onClick={() => setDraft(null)}>{t('取消', 'Cancel')}</button>
+          <button type="submit" className="awwo-library-primary" disabled={busy || !draftReady}>{busy ? t('保存中…', 'Saving…') : t('保存', 'Save')}</button>
+        </div>
+      </form>
+      : selected ? <article className="awwo-library-detail">
+        <div className="awwo-library-item-head">
+          <span className="awwo-library-badge">{skillCategoryName(selected.category, t)}</span>
+          <span className="awwo-library-badge">{selected.source === 'builtin' ? t('内置', 'Built-in') : t('本工作区', 'This workspace')}</span>
+          {selected.applies.map(tag => <span key={tag} className="awwo-library-badge is-tag">{tag}</span>)}
+        </div>
+        <h3>{skillTitle(selected, locale)}</h3>
+        <p className="awwo-library-help">{skillDescription(selected, locale)}</p>
+        <p className="awwo-library-meta"><code>{selected.ref}</code> · v{selected.version} · {selected.bytes.toLocaleString()} B</p>
+        {selected.attribution && <p className="awwo-library-meta">{t('来源：', 'Source: ')}{selected.attribution}</p>}
+        {!readOnly && selected.source === 'workspace' && selected.id && <div className="awwo-library-item-actions">
+          <button type="button" disabled={busy} onClick={() => edit(selected)}><Pencil size={14} aria-hidden="true" />{t('编辑', 'Edit')}</button>
+          {archiving
+            ? <><button type="button" className="is-danger" disabled={busy} onClick={() => archive(selected)}>{t('确认归档', 'Archive now')}</button><button type="button" onClick={() => setArchiving(false)}>{t('取消', 'Cancel')}</button></>
+            : <button type="button" disabled={busy} onClick={() => setArchiving(true)}><Archive size={14} aria-hidden="true" />{t('归档', 'Archive')}</button>}
+        </div>}
+        <div className="awwo-library-markdown">{renderInertMarkdown(selected.body)}</div>
+      </article>
+      : <p className="awwo-library-empty">{t('选择左侧的技能查看全文。', 'Choose a skill to read it in full.')}</p>}
+    </div>
+  </section>;
+}

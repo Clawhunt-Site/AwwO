@@ -28,6 +28,7 @@ import { RuntimePicker, type RuntimeValue } from '../RuntimePicker';
 import { NodeTeamEditor } from './NodeTeamEditor';
 import { PersonaPicker } from './PersonaPicker';
 import { TaskFrameEditor } from './TaskFrameEditor';
+import { NodeSkillsEditor } from './NodeSkillsEditor';
 import { cleanTaskFrame, isTaskFrame, taskFrameError } from './taskFrame';
 import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, followNodeModel, inheritNodeModel, nodeTeamModelOverrides, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
@@ -551,6 +552,9 @@ export function InspectorPanel({
 
             <TaskFrameEditor value={sessionDraft.taskFrame} disabled={busy}
               onChange={taskFrame => editDraft({ ...sessionDraft, taskFrame })} />
+
+            <NodeSkillsEditor value={sessionDraft.skills} disabled={busy}
+              onChange={skills => editDraft({ ...sessionDraft, skills })} />
 
             {!sessionDraft.agentRef && <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
               runtimes={teamRuntimes} runtimeTools={teamTools}

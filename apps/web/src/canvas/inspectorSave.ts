@@ -12,11 +12,14 @@ export function inspectorSavedNode(base: SessionNode, draft: SessionNode, live: 
   const saved: SessionNode = { ...base, title: draft.title, agentKind: draft.agentKind, runtime: draft.runtime,
     model: draft.model, effort: draft.effort, persona: draft.persona, team: draft.team, agentRef: draft.agentRef,
     ...(Object.hasOwn(draft, 'taskFrame') ? { taskFrame: draft.taskFrame } : {}),
+    ...(Object.hasOwn(draft, 'skills') ? { skills: draft.skills } : {}),
     binding: change.config ? null : draft.binding, bindAttempt: change.config ? null : draft.bindAttempt,
     issueId: change.binding || change.config ? null : live.issueId };
   if (draft.mediaParams) saved.mediaParams = draft.mediaParams; else delete saved.mediaParams;
   if (mediaKindOf(draft.agentKind)) {
     delete saved.contract; delete saved.templateId; delete saved.templateVersion; delete saved.team; delete saved.taskFrame;
+    // An empty list clears skills the node had; without the key the server would keep them for an older client.
+    if (live.skills?.length) saved.skills = []; else delete saved.skills;
   }
   return saved;
 }

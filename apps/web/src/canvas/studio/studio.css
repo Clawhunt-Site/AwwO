@@ -200,3 +200,29 @@ span.awwo-studio-disclose { cursor: default; }
   .awwo-studio-tree { position: absolute; inset: 0 auto 0 0; z-index: 4; width: min(320px, 86vw); box-shadow: 12px 0 32px rgb(0 0 0 / 18%); }
   .awwo-studio-status .awwo-studio-status-sandbox { display: none; }
 }
+
+/* ── Render as video (RenderVideoPanel.tsx) ──────────────────────────────────────────────────── */
+.awwo-studio-render { position: absolute; top: 10px; right: 10px; z-index: 6; display: grid; gap: 10px; width: min(380px, calc(100% - 20px)); max-height: calc(100% - 20px);
+  overflow: auto; padding: 12px 14px; border: 1px solid var(--studio-line); border-radius: var(--saas-radius-lg, 14px); background: var(--studio-bg);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 18%);
+  & header { display: flex; align-items: center; gap: 8px; }
+  & header h3 { flex: 1; margin: 0; font: 650 13px/1.3 var(--saas-font, inherit); }
+  & p { margin: 0; }
+  & video { width: 100%; max-height: 260px; border-radius: 8px; background: #000; }
+  & ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+  & a { display: inline-flex; align-items: center; gap: 6px; color: var(--studio-accent); font-size: 12px; }
+}
+.awwo-studio-render-hint, .awwo-studio-render-usage, .awwo-studio-render-note { color: var(--studio-muted); font-size: 12px; }
+.awwo-studio-render-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px;
+  & label { display: grid; gap: 4px; color: var(--studio-muted); font-size: 11px; }
+  & label.is-check { display: flex; align-items: center; gap: 6px; grid-column: span 3; color: var(--studio-text); font-size: 12px; }
+  & select, & input[type='number'] { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--studio-line); border-radius: 8px; background: var(--studio-bg); color: var(--studio-text); font: inherit; }
+}
+.awwo-studio-render-actions { display: flex; justify-content: flex-end; gap: 8px;
+  & .is-primary { border-color: var(--studio-accent); background: var(--studio-accent); color: #fff; }
+}
+.awwo-studio-render-result { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--studio-line); font-size: 12px;
+  & > p { display: flex; align-items: center; gap: 6px; }
+}
+.awwo-studio-render-problem { color: var(--saas-danger, #c14040); font-size: 12px; }
+@media (max-width: 760px) { .awwo-studio-render-form { grid-template-columns: minmax(0, 1fr); & label.is-check { grid-column: auto; } } }

@@ -1,17 +1,17 @@
 import { api as requestApi, SaaSApiError, tenantPath } from './api';
 
 /** Bound each HTTP request, rather than a long-running model compilation callback. */
-async function api<T>(path: string, init: RequestInit): Promise<T> {
+async function api<T>(path: string, init: RequestInit, timeoutMs = 15000): Promise<T> {
   const controller = new AbortController();
   const parent = init.signal;
   let timedOut = false;
   const abort = () => controller.abort();
   if (parent?.aborted) abort();
   else parent?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   try { return await requestApi<T>(path, { ...init, signal: controller.signal }); }
   catch (error) {
-    if (timedOut && !parent?.aborted) throw new SaaSApiError(408, 'knowledge_request_timeout', '知识库请求超过 15 秒，请重新读取确认结果；未自动重复提交。');
+    if (timedOut && !parent?.aborted) throw new SaaSApiError(408, 'knowledge_request_timeout', `知识库请求超过 ${Math.round(timeoutMs / 1000)} 秒，请重新读取确认结果；未自动重复提交。`);
     throw error;
   } finally { clearTimeout(timer); parent?.removeEventListener('abort', abort); }
 }
@@ -95,6 +95,13 @@ export async function readKnowledge(tenantId: string, signal: AbortSignal, query
 }
 export async function createKnowledgeSource(tenantId: string, input: KnowledgeSourceInput, signal: AbortSignal) {
   return checked(await api<unknown>(`${base(tenantId)}/sources`, post(input, signal)), (x): x is KnowledgeDocument => document(x) && x.kind === 'source');
+}
+/** What the server's web reader needs: one public http(s) address and, optionally, a title to save the page under. */
+export interface KnowledgeWebImportInput { url: string; title?: string; operationId: string }
+/** The server reads one public page (robots.txt honoured, private addresses refused, one 20 s deadline) and saves its
+ * readable text as a source with the fetch recorded in its provenance. Allowed longer than other knowledge requests. */
+export async function importKnowledgeFromWeb(tenantId: string, input: KnowledgeWebImportInput, signal: AbortSignal) {
+  return checked(await api<unknown>(`${base(tenantId)}/sources/web`, post(input, signal), 45000), (x): x is KnowledgeDocument => document(x) && x.kind === 'source');
 }
 export async function createKnowledgeProposal(tenantId: string, input: KnowledgeProposalInput, signal: AbortSignal) {
   return checked(await api<unknown>(`${base(tenantId)}/proposals`, post(input, signal)), proposal);

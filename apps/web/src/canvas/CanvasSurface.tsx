@@ -613,7 +613,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const restored = invalidateOutputs(live, { ...target, view: live.view, nodes: target.nodes.map(node => {
       const current = live.nodes.find(n => n.id === node.id);
       if (node.kind !== 'session' || current?.kind !== 'session') return node;
-      return preserveThreadRuntime(node, current);
+      const kept = preserveThreadRuntime(node, current);
+      // A step from before the node had skills names none; say so with an empty list, which the server keeps,
+      // rather than leaving the key out, which it reads as an older client's save and answers with the skills.
+      return !Object.hasOwn(kept, 'skills') && current.skills?.length ? { ...kept, skills: [] } : kept;
     }) });
     docRef.current = restored;
     setDoc(restored);
@@ -2210,7 +2213,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return { ...prev, nodes, edges: reconcileEdges(nodes, prev.edges) };
       }, { label: `config:${next.id}` });
       if (current?.kind === 'session' && next.kind === 'session' && (JSON.stringify(current.team) !== JSON.stringify(next.team)
-        || JSON.stringify(current.taskFrame) !== JSON.stringify(next.taskFrame))) {
+        || JSON.stringify(current.taskFrame) !== JSON.stringify(next.taskFrame) || JSON.stringify(current.skills ?? []) !== JSON.stringify(next.skills ?? []))) {
         const affected = new Set(downstreamClosure([next.id]));
         setAllRuns(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !affected.has(id))));
         setRunSummary(null);

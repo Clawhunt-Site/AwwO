@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AlertTriangle, Archive, Box, ChevronDown, ChevronRight, Code2, Copy, Download, ExternalLink, Eye, File as FileIcon, FileCode2, FileImage,
+  AlertTriangle, Archive, Box, ChevronDown, ChevronRight, Clapperboard, Code2, Copy, Download, ExternalLink, Eye, File as FileIcon, FileCode2, FileImage,
   FileJson, FileText, FileVideo, Folder, FolderDown, Loader2, Maximize2, Minimize2, Monitor, Music, PanelLeft, RotateCw, Search,
   Smartphone, SquareArrowOutUpRight, Table2, Tablet, X, ZoomIn, ZoomOut,
 } from 'lucide-react';
@@ -20,6 +20,7 @@ import { highlight, languageOf, type Token } from './codeHighlight';
 import { DEVICE_WIDTH, LivePage, type LiveDevice } from './LivePage';
 import { standaloneWrapper, type AssetResolver } from './liveDocument';
 import { pickCanvasFile } from './canvasAssets';
+import { RenderVideoPanel, useRenderCapability } from './RenderVideoPanel';
 import { buildArchive, decodeText, entryMediaUrl, fetchEntryBytes, mimeOfName, saveBlob, unzipMembers, type LoadedFile } from './studioData';
 import { formatBytes, isTextKind, kindOfName, kindOfType, studioGroups, type StudioEntry, type StudioGroup, type StudioKind } from './studioModel';
 import './studio.css';
@@ -98,7 +99,14 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const [maximized, setMaximized] = useState(false);
   const [notice, setNotice] = useState<{ text: string; href?: string } | null>(null);
   const [bundling, setBundling] = useState<{ done: number; total: number } | null>(null);
-  const pageDocument = useRef<string | null>(null);
+  // The document the live page built, with the entry it was built for: a page still building, or another one
+  // chosen since, never hands its predecessor's document to Open in a new tab or Render.
+  const pageDocument = useRef<{ entryId: string; html: string } | null>(null);
+  // Counts the builds, so the render panel can look up a page's earlier renders once its document exists.
+  const [pageBuilds, setPageBuilds] = useState(0);
+  // Rendering a page as a video: offered on a cloud canvas whose server has a render worker (RenderVideoPanel.tsx).
+  const renderCapability = useRenderCapability();
+  const [rendering, setRendering] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const controllers = useRef(new Set<AbortController>());
@@ -234,7 +242,6 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
     if (line) setMode('code');
     else setMode(PREVIEWABLE.has(shown(entry, loaded[entry.id]).kind) || !isTextKind(shown(entry, loaded[entry.id]).kind) ? 'preview' : 'code');
     setReloadKey(0);
-    pageDocument.current = null;
     if (window.innerWidth <= 760) setSidebar(false);
   };
 
@@ -263,8 +270,9 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const openInTab = () => {
     if (!selected) return;
     let url: string | null = null;
-    if (selected.kind === 'page' && pageDocument.current) {
-      url = URL.createObjectURL(new Blob([standaloneWrapper(selected.name, pageDocument.current)], { type: 'text/html;charset=utf-8' }));
+    const built = pageDocument.current?.entryId === selected.id ? pageDocument.current.html : null;
+    if (selected.kind === 'page' && built) {
+      url = URL.createObjectURL(new Blob([standaloneWrapper(selected.name, built)], { type: 'text/html;charset=utf-8' }));
     } else {
       const value = loaded[selected.id];
       // SVG can carry script: it is never opened as a document of this site.
@@ -325,6 +333,8 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
         })}
       </div>}
       {selected?.kind === 'page' && !showCode && <button type="button" className="awwo-studio-icon" aria-label={t('studio.reload')} title={t('studio.reload')} onClick={() => setReloadKey(value => value + 1)}><RotateCw size={15} aria-hidden="true" /></button>}
+      {selected?.kind === 'page' && !showCode && renderCapability && <button type="button" className="awwo-studio-icon" aria-label={t('studio.renderVideo')} title={t('studio.renderVideo')}
+        aria-pressed={rendering} onClick={() => setRendering(value => !value)}><Clapperboard size={15} aria-hidden="true" /></button>}
       {selected && (selected.kind === 'page' || selected.kind === 'image' || selected.kind === 'video' || selected.kind === 'pdf') && <button type="button" className="awwo-studio-icon"
         aria-label={t('studio.openInTab')} title={t('studio.openInTab')} onClick={openInTab}><ExternalLink size={15} aria-hidden="true" /></button>}
       {selectedText !== null && <button type="button" className="awwo-studio-icon" aria-label={t('studio.copy')} title={t('studio.copy')} onClick={() => { void copySelected(); }}><Copy size={15} aria-hidden="true" /></button>}
@@ -386,7 +396,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
       line={jump?.entryId === selected.id ? jump.line : undefined} query={lowered} t={t} />;
   else if (selected.kind === 'page') body = selectedText === null ? <Pending loaded={selectedLoaded} t={t} />
     : <LivePage key={selected.id} html={selectedText} title={selected.name} path={selected.source.type === 'member' ? selected.source.path : selected.name}
-      resolve={selectedResolver} device={device} reloadKey={reloadKey} onDocument={document => { pageDocument.current = document; }}
+      resolve={selectedResolver} device={device} reloadKey={reloadKey} onDocument={document => { pageDocument.current = { entryId: selected.id, html: document }; setPageBuilds(count => count + 1); }}
       onLink={href => setNotice({ text: t('studio.linkBlocked'), href })} />;
   else if (selected.kind === 'markdown') body = selectedText === null ? <Pending loaded={selectedLoaded} t={t} />
     : <div className="awwo-studio-doc awwo-markdown-preview"><DeliverableMarkdown>{selectedText}</DeliverableMarkdown></div>;
@@ -431,6 +441,9 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
     <div className="awwo-studio-body">
       {sidebar && tree}
       <main className="awwo-studio-main">{body}</main>
+      {rendering && selected?.kind === 'page' && !showCode && renderCapability && <RenderVideoPanel key={selected.id} nodeId={selected.nodeId} pageName={selected.name}
+        capability={renderCapability} documentOf={() => pageDocument.current?.entryId === selected.id ? pageDocument.current.html : null} documentVersion={pageBuilds}
+        onClose={() => setRendering(false)} />}
     </div>
     {status}
     {notice && <div className="awwo-studio-toast" role="status"><span>{notice.text}</span>

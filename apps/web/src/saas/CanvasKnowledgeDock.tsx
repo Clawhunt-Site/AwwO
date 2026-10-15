@@ -16,13 +16,15 @@ interface Compilation {
 export interface CanvasTaskDraft { id: string; prompt: string }
 // A failure keeps the original error, so API error codes are still translated when it is shown.
 type Message = { text: string } | { error: unknown };
-interface Props { tenantId: string; canvasId: string; readOnly?: boolean; onTaskDraft?: (draft: CanvasTaskDraft) => void }
+// extraTools: more canvas-bar tools (memory, skills) shown after the map, labelled the same way so they give way
+// to icons together with it.
+interface Props { tenantId: string; canvasId: string; readOnly?: boolean; onTaskDraft?: (draft: CanvasTaskDraft) => void; extraTools?: ReactNode }
 const requestSignal = (signal?: AbortSignal | null) => signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
 const boundedApi = <T,>(path: string, init: RequestInit = {}) => api<T>(path, { ...init, signal: requestSignal(init.signal) });
 // Free width the tool labels leave before the run controls, below which they give way to icons.
 const LABEL_ROOM = 24;
 
-function WorkbenchOverlay({ label, onClose, children }: {label:string;onClose:()=>void;children:ReactNode}) {
+export function WorkbenchOverlay({ label, onClose, children }: {label:string;onClose:()=>void;children:ReactNode}) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
@@ -44,7 +46,7 @@ function delay(signal: AbortSignal): Promise<void> {
 export function CanvasKnowledgeDock(props: Props) {
   return <Dock key={`${props.tenantId}/${props.canvasId}`} {...props} />;
 }
-function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft }: Props) {
+function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft, extraTools }: Props) {
   const { t, locale } = useSaaSPreferences();
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [open, setOpen] = useState(false);
@@ -220,6 +222,7 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft }: Props) {
   useLayoutEffect(() => { refit.current(); }, [selected.length]);
   return <div ref={toolsRef} className={compact ? 'awwo-knowledge-tools is-compact' : 'awwo-knowledge-tools'}>
     <button type="button" className="awwo-knowledge-tool" aria-label={mapLabel} title={pending ? `${mapName}${t('：', ': ')}${messageText(pending)}` : mapName} onClick={openMap}><BookOpen size={15} aria-hidden="true" /><span>{mapName}</span>{mark && <i className={`awwo-knowledge-tool-mark is-${mark}`} aria-hidden="true" />}</button>
+    {extraTools}
     {selected.length > 0 && <span className="awwo-knowledge-references" title={references}><span className="awwo-knowledge-references-label">{references}</span><span className="awwo-knowledge-references-count" aria-hidden="true"><BookMarked size={13} aria-hidden="true" />{selected.length}</span>
       {!readOnly && <button type="button" aria-label={t('清除任务知识引用', 'Clear task knowledge references')} onClick={() => { configureCanvasKnowledge([]); setSelected([]); }}><X size={13} aria-hidden="true" /></button>}</span>}
     <span className="saas-visually-hidden" aria-live="polite">{politeText}</span>

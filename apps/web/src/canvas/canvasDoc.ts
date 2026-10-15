@@ -94,6 +94,9 @@ export interface SessionNode extends CanvasNodeBase {
   contract?: NodeContract;
   /** Preserve unknown versions unchanged; editors must validate before interpreting. */
   taskFrame?: unknown;
+  /** Skills attached to this node (builtin:<name> or workspace:<id>); the server freezes their text into each run.
+   *  An explicit empty list clears them, so an older client's save cannot drop them. */
+  skills?: string[];
   /** Image and video nodes only: choices for the model's closed parameters. */
   mediaParams?: MediaParams;
 }
@@ -404,6 +407,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
     // than showing it as an LLM tile they can switch back.
     const agentKind = AGENT_KINDS.includes(r.agentKind as AgentKind) ? (r.agentKind as AgentKind) : 'llm';
     const mediaParams = sanitizeMediaParams(r.mediaParams);
+    const skills = sanitizeSkillRefs(r.skills);
     let binding: AgentBinding | null = null;
     if (r.binding && typeof r.binding === 'object') {
       const b = r.binding as Record<string, unknown>;
@@ -443,11 +447,26 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       lastOutput: sanitizeOutput(r.lastOutput),
       ...(contract ? { contract } : {}),
       ...(Object.hasOwn(r, 'taskFrame') ? { taskFrame: r.taskFrame } : {}),
+      ...(skills ? { skills } : {}),
       ...(mediaParams ? { mediaParams } : {}),
     };
   }
 
   return null;
+}
+
+/** A node skill reference as the server accepts it (skills.go). */
+export const NODE_SKILL_REF = /^(builtin:[a-z0-9]+(-[a-z0-9]+)*|workspace:a[A-Za-z0-9_-]{32})$/;
+export const MAX_NODE_SKILLS = 4;
+
+/** Keeps a well-formed list of distinct references, at most four; an explicit empty list stays (it clears them). */
+function sanitizeSkillRefs(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const refs: string[] = [];
+  for (const value of raw) {
+    if (typeof value === 'string' && NODE_SKILL_REF.test(value) && !refs.includes(value) && refs.length < MAX_NODE_SKILLS) refs.push(value);
+  }
+  return refs;
 }
 
 const MEDIA_PARAM_NAME = /^[A-Za-z][A-Za-z0-9]{0,40}$/;

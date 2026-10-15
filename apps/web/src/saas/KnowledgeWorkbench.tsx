@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { BookOpen, Check, FileText, GitBranch, History, Import, Link2, Plus, RefreshCw, Search, Sparkles, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { BookOpen, Check, FileText, GitBranch, Globe, History, Import, Link2, Plus, RefreshCw, Search, Sparkles, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { SaaSApiError, saasErrorMessage } from './api';
 import { useSaaSPreferences } from './preferences';
 import {
-  acceptKnowledgeProposal, createKnowledgeProposal, createKnowledgeSource, knowledgeCompilePrompt,
+  acceptKnowledgeProposal, createKnowledgeProposal, createKnowledgeSource, importKnowledgeFromWeb, knowledgeCompilePrompt,
   KNOWLEDGE_CONTENT_BYTES, KNOWLEDGE_CONTEXT_ITEMS, readKnowledge, readKnowledgeContext,
   readKnowledgeRevisions, rejectKnowledgeProposal, restoreKnowledgeRevision,
   type KnowledgeContextItem, type KnowledgeDocument, type KnowledgeKind, type KnowledgeLink,
   type KnowledgeLinkDraft, type KnowledgeProposal, type KnowledgeProposalInput, type KnowledgeRelation,
   type KnowledgeRevision, type KnowledgeSnapshot,
 } from './knowledgeApi';
+import { readCapabilities, type WorkspaceCapabilities } from './capabilitiesApi';
 import './knowledge-workbench.css';
 
 export interface KnowledgeArtifactCandidate {
@@ -70,6 +71,9 @@ function KnowledgeWorkbenchView({ tenantId, canvasId, onTaskContext, onCompile, 
   const [sourceTitle, setSourceTitle] = useState('');
   const [sourceContent, setSourceContent] = useState('');
   const [sourceUri, setSourceUri] = useState('');
+  const [webUrl, setWebUrl] = useState('');
+  const [webReader, setWebReader] = useState<WorkspaceCapabilities['webReader'] | null>(null);
+  const [webReads, setWebReads] = useState(0);
   const [draft, setDraft] = useState<ProposalDraft>(emptyDraft);
   const [linkTarget, setLinkTarget] = useState('');
   const [linkRelation, setLinkRelation] = useState<KnowledgeRelation>('links_to');
@@ -132,6 +136,15 @@ function KnowledgeWorkbenchView({ tenantId, canvasId, onTaskContext, onCompile, 
     alive.current = true; void reload();
     return () => { alive.current = false; controllers.current.forEach(item => item.abort()); controllers.current.clear(); };
   }, [reload]);
+  // The web reader is off unless the server enables it; without a positive answer the address field is not offered.
+  // Asked when the import panel opens, not with every read of the library, and again after each read, which the
+  // server counts whether or not it succeeded.
+  useEffect(() => {
+    if (readOnly || panel !== 'source') return;
+    const controller = new AbortController();
+    readCapabilities(tenantId, controller.signal).then(value => setWebReader(value.webReader), () => undefined);
+    return () => controller.abort();
+  }, [tenantId, readOnly, panel, webReads]);
 
   const action = async (fn: (signal: AbortSignal) => Promise<void>, refresh = true) => {
     if (lock.current) return;
@@ -178,6 +191,15 @@ function KnowledgeWorkbenchView({ tenantId, canvasId, onTaskContext, onCompile, 
     if (signal.aborted) return;
     setSelectedId(result.id); setPanel('document'); setSourceTitle(''); setSourceContent(''); setSourceUri('');
     setNotice(t('原始资料已入库，可以据此新建知识提案。', 'Source saved. You can now create a knowledge proposal.'));
+  });
+  const readWeb = () => void action(async signal => {
+    const input = { url: webUrl.trim() };
+    try {
+      const result = await importKnowledgeFromWeb(tenantId, { ...input, operationId: operationId(`web:${JSON.stringify(input)}`) }, signal);
+      if (signal.aborted) return;
+      setSelectedId(result.id); setPanel('document'); setWebUrl('');
+      setNotice(t('网页正文已作为原始资料入库，读取记录（地址、时间、robots.txt）保存在来源信息里。', 'The page text was saved as a source, with the read (address, time, robots.txt) kept in its provenance.'));
+    } finally { if (alive.current) setWebReads(count => count + 1); }
   });
   const saveProposal = () => void action(async signal => {
     const { sourceRevisions, ...proposalDraft } = draft;
@@ -227,6 +249,7 @@ function KnowledgeWorkbenchView({ tenantId, canvasId, onTaskContext, onCompile, 
     setSelectedId(value.id); setNotice(t('已创建恢复版本，完整历史仍然保留。', 'A restored version was created. The full history is retained.'));
   });
   const conflict = error instanceof SaaSApiError && (error.status === 409 || /conflict/.test(error.code));
+  const webReady = !busy && !!webReader && webReader.usedToday < webReader.perDay && /^https?:\/\/\S+$/i.test(webUrl.trim());
 
   return <section className="knowledge-workbench" aria-label={t('知识工作台', 'Knowledge workbench')}>
     <header className="knowledge-header">
@@ -268,6 +291,13 @@ function KnowledgeWorkbenchView({ tenantId, canvasId, onTaskContext, onCompile, 
         {panel === 'source' && <form onSubmit={event => { event.preventDefault(); saveSource(); }}>
           <PanelTitle icon={<Import size={18} />} title={t('导入原始资料', 'Import source')} onClose={() => setPanel('document')} t={t} />
           <p className="knowledge-help">{t('原文保存后保持不变。整理、补充与纠错通过知识页面提案完成。', 'Original sources stay immutable. Synthesis and corrections become page proposals.')}</p>
+          {webReader?.enabled && <div className="knowledge-web-import" role="group" aria-label={t('从网址读取', 'Read from a web address')}>
+            <strong><Globe size={15} aria-hidden="true" />{t('从网址读取', 'Read from a web address')}</strong>
+            <div><input type="text" inputMode="url" autoComplete="url" spellCheck={false} value={webUrl} placeholder="https://" aria-label={t('网页地址', 'Web address')} onChange={event => setWebUrl(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); if (webReady) readWeb(); } }} />
+              <button type="button" disabled={!webReady} onClick={readWeb}>{busy ? t('读取中…', 'Reading…') : t('读取并保存', 'Read and save')}</button></div>
+            <small>{t(`由服务器读取一个公开网页并保存正文：遵守 robots.txt，不访问本机或内网地址。今天已用 ${webReader.usedToday} / ${webReader.perDay} 次。`, `The server reads one public page and saves its text. It honours robots.txt and never reaches local or private addresses. Used today: ${webReader.usedToday} / ${webReader.perDay}.`)}</small>
+          </div>}
           <input ref={fileInput} className="knowledge-sr-only" type="file" accept=".md,.markdown,.txt,text/plain,text/markdown" aria-label={t('选择文本文件', 'Choose text file')} onChange={event => void importFile(event.target.files?.[0])} />
           <button className="knowledge-upload" type="button" onClick={() => fileInput.current?.click()}><Import size={20} />{t('选择 Markdown / 文本文件', 'Choose Markdown / text file')}<small>UTF-8 · ≤ 256 KiB</small></button>
           <label>{t('资料标题', 'Source title')}<input required maxLength={500} value={sourceTitle} onChange={event => setSourceTitle(event.target.value)} /></label>

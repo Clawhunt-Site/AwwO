@@ -1,0 +1,91 @@
+/* The memory and skill-library workbenches, shown in the knowledge map's overlay. */
+.awwo-library {
+  --library-ink: var(--awwo-ink, var(--text, #25323c));
+  --library-muted: var(--awwo-muted, var(--text-muted, #75818c));
+  --library-border: var(--awwo-border, var(--border, #dfe5e8));
+  --library-surface: var(--awwo-surface, var(--panel, #ffffff));
+  --library-bg: var(--awwo-bg, var(--bg, #f5f7f8));
+  --library-accent: var(--awwo-accent, #187b70);
+  display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; color: var(--library-ink);
+  background: var(--library-surface); font-size: 13px; line-height: 1.6;
+}
+.awwo-library * { box-sizing: border-box; }
+.awwo-library button, .awwo-library input, .awwo-library textarea, .awwo-library select { font: inherit; }
+.awwo-library button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 10px;
+  border: 1px solid var(--library-border); border-radius: 8px; background: var(--library-surface); color: inherit; cursor: pointer;
+}
+.awwo-library button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--library-accent) 40%, var(--library-border)); }
+.awwo-library button:disabled { opacity: .5; cursor: not-allowed; }
+.awwo-library :focus-visible { outline: 2px solid var(--library-accent); outline-offset: 2px; }
+.awwo-library .awwo-library-primary { background: var(--library-accent); border-color: var(--library-accent); color: #fff; }
+.awwo-library button.is-danger { border-color: var(--saas-danger, #c14040); color: var(--saas-danger, #c14040); }
+.awwo-library input:not([type=checkbox]):not([type=radio]):not([type=file]), .awwo-library textarea, .awwo-library select {
+  width: 100%; min-width: 0; padding: 7px 10px; border: 1px solid var(--library-border); border-radius: 8px;
+  background: var(--library-surface); color: var(--library-ink);
+}
+.awwo-library textarea { resize: vertical; line-height: 1.6; }
+.awwo-library h2, .awwo-library h3, .awwo-library p { margin: 0; }
+.awwo-library h2 { font-size: 18px; }
+.awwo-library h3 { font-size: 14px; }
+.awwo-library-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--library-border); }
+.awwo-library-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.awwo-library-heading p { max-width: 760px; color: var(--library-muted); font-size: 12px; }
+.awwo-library-mark { display: flex; padding: 9px; border-radius: 12px; background: color-mix(in srgb, var(--library-accent) 12%, transparent); color: var(--library-accent); }
+.awwo-library-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.awwo-library-alert, .awwo-library-notice { display: flex; align-items: center; gap: 6px; padding: 8px 20px; font-size: 12px; overflow-wrap: anywhere; }
+.awwo-library-alert { color: var(--saas-danger, #c14040); }
+.awwo-library-notice { color: var(--library-accent); }
+.awwo-library-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.awwo-library-body.has-editor { grid-template-columns: minmax(300px, 0.9fr) minmax(340px, 1.1fr); }
+.awwo-library-list-column { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 14px 16px; overflow-y: auto; overscroll-behavior: contain; }
+.awwo-library-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.awwo-library-segments { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--library-border); border-radius: 10px; background: var(--library-bg); }
+.awwo-library-segments button { min-height: 28px; padding: 3px 9px; border-color: transparent; background: transparent; font-size: 12px; }
+.awwo-library-segments button[aria-pressed='true'] { background: var(--library-surface); border-color: var(--library-border); color: var(--library-accent); }
+.awwo-library-search { display: flex; flex: 1 1 220px; align-items: center; gap: 6px; min-width: 180px; color: var(--library-muted); }
+.awwo-library-search button { flex-shrink: 0; }
+.awwo-library-empty { padding: 24px 8px; color: var(--library-muted); font-size: 12px; }
+.awwo-library-group h3 { margin: 6px 0; color: var(--library-muted); font-size: 12px; }
+.awwo-library-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.awwo-library-list > li { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--library-border); border-radius: 10px; background: var(--library-surface); }
+.awwo-library-list > li.is-active { border-color: var(--library-accent); }
+.awwo-library-list > li > p { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--library-ink); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.awwo-library-list > li > small { color: var(--library-muted); font-size: 11px; }
+.awwo-library-list.is-compact > li { padding: 0; }
+.awwo-library-pick { display: grid !important; justify-items: start; gap: 2px; width: 100%; padding: 9px 12px !important; border: 0 !important; text-align: left; }
+.awwo-library-pick span { color: var(--library-muted); font-size: 12px; }
+.awwo-library-pick small { color: var(--library-muted); font-size: 10px; overflow-wrap: anywhere; }
+.awwo-library-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.awwo-library-badge { display: inline-flex; align-items: center; gap: 3px; padding: 1px 8px; border-radius: 999px; background: var(--library-bg); color: var(--library-muted); font-size: 11px; }
+.awwo-library-badge.is-proposed { background: color-mix(in srgb, #c08a1e 16%, transparent); color: #8a5d00; }
+.awwo-library-badge.is-pinned, .awwo-library-badge.kind-decision { color: var(--library-accent); }
+.awwo-library-badge.is-tag { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; }
+.awwo-library-item-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.awwo-library-item-actions button { min-height: 28px; padding: 3px 9px; font-size: 12px; }
+.awwo-library-editor, .awwo-library-detail { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 16px 20px; border-left: 1px solid var(--library-border); overflow-y: auto; overscroll-behavior: contain; background: var(--library-bg); }
+.awwo-library-editor > label, .awwo-library-editor fieldset > label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.awwo-library-editor label small, .awwo-library-editor fieldset small { color: var(--library-muted); font-size: 11px; }
+.awwo-library-editor fieldset { display: grid; gap: 6px; margin: 0; padding: 8px 10px; border: 1px solid var(--library-border); border-radius: 8px; }
+.awwo-library-editor legend { padding: 0 4px; font-size: 12px; }
+.awwo-library .awwo-library-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 6px; font-size: 12px; }
+.awwo-library-check input { accent-color: var(--library-accent); }
+.awwo-library-tags { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.awwo-library-count { align-self: flex-end; color: var(--library-muted); font-size: 11px; }
+.awwo-library-count.is-over { color: var(--saas-danger, #c14040); }
+.awwo-library-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.awwo-library-help { color: var(--library-muted); font-size: 12px; }
+.awwo-library-meta { color: var(--library-muted); font-size: 11px; overflow-wrap: anywhere; }
+.awwo-library-meta code { font-size: 11px; }
+.awwo-library-preview { max-height: 340px; margin: 0; padding: 10px; overflow: auto; border: 1px solid var(--library-border); border-radius: 8px; background: var(--library-surface); white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; }
+.awwo-library-markdown { padding: 12px 14px; border: 1px solid var(--library-border); border-radius: 10px; background: var(--library-surface); overflow-wrap: anywhere; }
+.awwo-library-markdown h1, .awwo-library-markdown h2, .awwo-library-markdown h3, .awwo-library-markdown h4 { margin: 12px 0 6px; font-size: 14px; }
+.awwo-library-markdown h1 { font-size: 15px; }
+.awwo-library-markdown p, .awwo-library-markdown ul, .awwo-library-markdown ol { margin: 6px 0; }
+.awwo-library-markdown pre { white-space: pre-wrap; font-size: 11px; }
+@media (max-width: 900px) {
+  .awwo-library-body.has-editor { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  .awwo-library-editor, .awwo-library-detail { border-left: 0; border-top: 1px solid var(--library-border); overflow: visible; }
+  .awwo-library-header { flex-wrap: wrap; }
+  .awwo-library-heading p { display: none; }
+}

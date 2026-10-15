@@ -155,7 +155,9 @@ describe('knowledge workbench', () => {
     await waitFor(() => expect(screen.getByLabelText('资料标题')).toHaveValue('会议记录'));
     expect(screen.getByLabelText('原文内容')).toHaveValue('# 中文资料');
     fireEvent.change(screen.getByLabelText('选择文本文件'), { target: { files: [new File(['binary'], 'image.png')] } });
-    expect(screen.getByRole('alert')).toHaveTextContent('Markdown 或文本文件'); expect(fetcher).toHaveBeenCalledTimes(1);
+    // Opening the import panel also asks whether the server reads web addresses (a GET); nothing else is sent.
+    expect(screen.getByRole('alert')).toHaveTextContent('Markdown 或文本文件');
+    expect(fetcher.mock.calls.filter(([url]) => !String(url).endsWith('/capabilities'))).toHaveLength(1);
   });
 
   it('uses the stored artifact ID and keeps failed imports explicit', async () => {
