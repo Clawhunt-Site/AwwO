@@ -41,6 +41,27 @@ const MEDIA = MEDIA_ROLE;
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
   {
+    id: 'neon-city', kind: 'interactive', recording: true, footage: 'neon-real',
+    title: 'Neon City',
+    brief: 'A cinematic full-screen interactive brand page: a future city whose lights never go out on a rainy night.',
+    stages: [[MEDIA], [FRONT_END], [REVIEW]],
+    deliverable: 'A full-screen interactive brand page',
+  },
+  {
+    id: 'shanhai-vn', kind: 'game', recording: true, footage: 'shanhai-real',
+    title: 'Tales of Mountains and Seas',
+    brief: 'A Chinese-fantasy visual-novel chapter: a young swordsman seeks a cure in Qingqiu and meets a nine-tailed fox girl.',
+    stages: [['Script', MEDIA], [CODE], [REVIEW]],
+    deliverable: 'A playable visual-novel chapter',
+  },
+  {
+    id: 'aurora-gt', kind: 'interactive', recording: true, footage: 'gt-real',
+    title: 'Aurora GT',
+    brief: 'A launch site for an electric supercar: an opening race under the aurora, a three-colour configurator, performance figures and a test-drive booking.',
+    stages: [[MEDIA], [FRONT_END], [REVIEW]],
+    deliverable: 'An electric supercar launch site',
+  },
+  {
     id: 'car-plant', kind: 'twin', recording: true, footage: 'car-plant-real',
     title: 'EV plant digital twin',
     brief: 'Turn a whole EV plant into a live 3D digital twin: 14 stations, buffers, rework and faults, every car changing as it moves down the line.',
@@ -82,27 +103,6 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     stages: [['Architecture'], ['Access', 'Data', 'Copy'],
       [BACKEND], ['Frontend'], [REVIEW]],
     deliverable: 'A working knowledge-base web workspace',
-  },
-  {
-    id: 'neon-city', kind: 'interactive', recording: true, footage: 'neon-real',
-    title: 'Neon City',
-    brief: 'A cinematic full-screen interactive brand page: a future city whose lights never go out on a rainy night.',
-    stages: [[MEDIA], [FRONT_END], [REVIEW]],
-    deliverable: 'A full-screen interactive brand page',
-  },
-  {
-    id: 'shanhai-vn', kind: 'game', recording: true, footage: 'shanhai-real',
-    title: 'Tales of Mountains and Seas',
-    brief: 'A Chinese-fantasy visual-novel chapter: a young swordsman seeks a cure in Qingqiu and meets a nine-tailed fox girl.',
-    stages: [['Script', MEDIA], [CODE], [REVIEW]],
-    deliverable: 'A playable visual-novel chapter',
-  },
-  {
-    id: 'aurora-gt', kind: 'interactive', recording: true, footage: 'gt-real',
-    title: 'Aurora GT',
-    brief: 'A launch site for an electric supercar: an opening race under the aurora, a three-colour configurator, performance figures and a test-drive booking.',
-    stages: [[MEDIA], [FRONT_END], [REVIEW]],
-    deliverable: 'An electric supercar launch site',
   },
   {
     id: 'pixel-platformer', kind: 'game', recording: true, footage: 'pixel-real',
