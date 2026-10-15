@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 	"time"
@@ -482,6 +483,68 @@ func TestSubmitMediaRefusalAfterAResendStillCounts(t *testing.T) {
 	if _, err := submitMedia(context.Background(), again, "/x", map[string]any{}, func() {}); err == nil || err.(*rhError).Refused || again.calls != 2 ||
 		mediaFailureCode(err) != "media_provider_unauthorized" {
 		t.Fatal("a refusal after a resend", err, again.calls)
+	}
+}
+
+// RunningHub refuses a submission with 200 and an error code: only its flat answer that names no task, with an
+// operator-side code, is a refusal that gives the attempt back; an answer with a task, a wrapped one, a refusal of the
+// request itself and any answer to a poll keep the generation counted.
+func TestRunningHubFlatRefusalsAreRefusals(t *testing.T) {
+	// RunningHub's own answer to a bad key, as seen on 2026-10-15, with another code where a case needs one.
+	flat := func(code string) string {
+		return `{"taskId":"","status":"","errorCode":"` + code + `","errorMessage":"x","results":null,"clientId":"c","promptTips":"","failedReason":{},"usage":null}`
+	}
+	answers := map[string]string{
+		"/openapi/v2/balance":     flat("812"),
+		"/openapi/v2/key":         flat("806"),
+		"/openapi/v2/spaced":      " \n" + flat("416") + "\n",
+		"/openapi/v2/prompt":      flat("1007"),
+		"/openapi/v2/busy":        flat("1003"),
+		"/openapi/v2/task":        `{"taskId":"task-9","status":"FAILED","errorCode":"812"}`,
+		"/openapi/v2/wrapped":     `{"code":812,"msg":"x","data":{"taskId":""}}`,
+		"/openapi/v2/results":     `{"taskId":"","status":"","errorCode":"812","results":[{"url":"https://files.runninghub.ai/a.png"}]}`,
+		"/openapi/v2/no-field":    `{"status":"","errorCode":"812"}`,
+		"/openapi/v2/no-status":   `{"taskId":"","errorCode":"812"}`,
+		"/openapi/v2/running":     `{"taskId":"","status":"RUNNING","errorCode":"812","results":null}`,
+		"/openapi/v2/queued":      `{"taskId":"","status":"QUEUED","errorCode":"812"}`,
+		"/openapi/v2/case":        `{"taskId":"","TaskId":"task-9","status":"FAILED","errorCode":"812"}`,
+		"/openapi/v2/repeated":    `{"taskId":"task-9","taskId":"","status":"","errorCode":"812"}`,
+		"/openapi/v2/folded":      "{\"ta\u017fkId\":\"task-9\",\"taskId\":\"\",\"status\":\"\",\"errorCode\":\"812\"}",
+		"/openapi/v2/null-id":     `{"taskId":null,"status":"","errorCode":"812"}`,
+		"/openapi/v2/blank-id":    `{"taskId":" ","status":"","errorCode":"812"}`,
+		"/openapi/v2/number-id":   `{"taskId":0,"status":"","errorCode":"812"}`,
+		"/openapi/v2/trailing":    flat("812") + `{}`,
+		"/openapi/v2/null-code":   `{"taskId":"","status":"","errorCode":null,"code":812}`,
+		"/openapi/v2/data-object": `{"taskId":"","status":"","errorCode":"812","data":{}}`,
+		"/openapi/v2/query":       flat("806"),
+	}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(answers[r.URL.Path]))
+	}))
+	defer api.Close()
+	h := &runningHub{base: api.URL, key: "secret-key-0123456789", api: api.Client(), hosts: []string{".runninghub.ai"}, maxFile: 1 << 20}
+	refused := map[string]bool{"/openapi/v2/balance": true, "/openapi/v2/key": true, "/openapi/v2/spaced": true}
+	for path := range answers {
+		if path == "/openapi/v2/query" {
+			continue
+		}
+		_, err := h.submit(context.Background(), path, map[string]any{"prompt": "p"})
+		e, ok := asRHError(err)
+		if !ok || e.Refused != refused[path] {
+			t.Errorf("%s: %v (refused %v), want refused %v", path, err, ok && e.Refused, refused[path])
+		}
+	}
+	for path, code := range map[string]string{"/openapi/v2/balance": "media_provider_balance", "/openapi/v2/key": "media_provider_unauthorized",
+		"/openapi/v2/prompt": "media_params_invalid", "/openapi/v2/busy": "media_provider_busy"} {
+		if _, err := h.submit(context.Background(), path, map[string]any{"prompt": "p"}); mediaFailureCode(err) != code {
+			t.Errorf("%s: %v, want %s", path, err, code)
+		}
+	}
+	if _, err := h.query(context.Background(), "task-1"); err == nil {
+		t.Fatal("a poll's refusal passed")
+	} else if e, _ := asRHError(err); e == nil || e.Refused {
+		t.Fatal("a poll's answer marked refused", err)
 	}
 }
 

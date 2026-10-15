@@ -242,6 +242,7 @@ func mustMediaCatalog(raw []byte) *mediaCatalog {
 // (tripo.go) to a parsed catalog, refusing to start on one that does not validate or that collides with an existing
 // id, as the embedded catalog itself is refused. Jimeng's come first, then X-tasy's: a new image or video node starts
 // on the first one its workspace is offered (Jimeng's only where the operator granted them, X-tasy's elsewhere).
+// RunningHub's embedded models follow, each renamed to its generic name (runningHubLabels), then the 3D models.
 func withProviderModels(c *mediaCatalog) *mediaCatalog {
 	c.list = nil
 	add := func(m *mediaModel, err error) {
@@ -261,7 +262,17 @@ func withProviderModels(c *mediaCatalog) *mediaCatalog {
 		add(m, validXtasyModel(m))
 	}
 	for i := range c.Models {
-		c.list = append(c.list, &c.Models[i])
+		m := &c.Models[i]
+		// RunningHub's models are shown like everyone else's: a generic name under the generic vendor.
+		label, ok := runningHubLabels[m.ID]
+		if !ok {
+			panic(fmt.Errorf("runninghub model %q has no generic name", m.ID))
+		}
+		m.Name, m.Label, m.Vendor = label[0], label, mediaVendorShown
+		if !validMediaLabel(m) {
+			panic(fmt.Errorf("runninghub model %q has an invalid generic name", m.ID))
+		}
+		c.list = append(c.list, m)
 	}
 	for _, m := range tripoModels() {
 		add(m, validTripoModel(m))

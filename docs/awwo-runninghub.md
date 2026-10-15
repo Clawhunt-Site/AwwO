@@ -1,5 +1,9 @@
 # AwwO 图像与视频节点（RunningHub）
 
+> 2026-10-15：RunningHub 重新启用（业主：「把rh的key再放回去重启」）。2026-10-10 起它曾关闭（图片和视频改走 X-tasy，`media.env` 里去掉了它的 key）。
+> 重新启用后用户只看到通用名（业主 2026-10-11：「模型名也全部改成通用名」），不显示厂商、模型系列或版本号，见下方「用户看到的名字」。
+> X-tasy 的模型仍排在前面，新的图片 / 视频节点默认仍是「图片 · 高清」「视频 · 全能」。
+
 状态：2026-10-03 已在生产启用（`AWWO_MEDIA_UNRESTRICTED_WORKSPACES=true`：没有模型白名单的工作区也能用全部媒体模型）。上线前用真实企业共享 Key 在 runninghub.ai 走通了一次完整生成；2026-10-05 又在生产主机上用生产 Key 为目录里全部 18 个模型各做了一次真实生成，全部成功，结果都来自已放行的存储桶（见文末验收记录）。
 
 画布里的图像节点和视频节点由 RunningHub 的标准模型 API（Standard Model API）执行：节点照常对话、排队、计入并发与取消，但不经过任何模型 worker——API 把提示词和节点参数提交给 RunningHub 一次，记录任务号，轮询到结束，再把结果文件下载到服务器磁盘并记为产物。运行的输出是一条指向这些产物的小记录，画布在对话里直接显示图片或视频。
@@ -21,6 +25,33 @@
 | 视频 | Kling 3.0 Pro、Seedance 2.0、Veo 3.1 Fast、Sora 2、海螺 2.3 Pro、Vidu Q3 Pro、Wan 2.7、Grok Imagine Video、PixVerse V6 |
 
 每个模型的参数取自其 OpenAPI 请求定义（`.local/research` 下的生成脚本，提示词示例和 URL 不复制）。`verified` 字段记录用本部署的密钥真实调用成功的日期：Seedream 5.0 Pro 为 2026-10-03，其余 17 个为 2026-10-05。`GET /api/v1/tenants/{tenantId}/media` 返回已配置状态、本工作区可用的模型（受工作区模型白名单约束）和每日上限，不暴露密钥或接口地址。
+
+## 用户看到的名字（2026-10-15 起）
+
+API 在启动时把下表的名字写进每个模型的 `name`/`label`，厂商一律显示为通用的 `media`（`runningHubLabels`，`runninghub.go`）；缺名字或名字不合规则时进程拒绝启动。名字按模型自己的参数说明用途，不带厂商、系列或数字。
+
+| id | 中文 | English |
+| --- | --- | --- |
+| `rh.seedream-v5-pro` | 图片 · 高清无损 | Image · Lossless HD |
+| `rh.nano-banana-pro` | 图片 · 超清精品 | Image · Ultra HD Premium |
+| `rh.nano-banana-2` | 图片 · 超清快速 | Image · Ultra HD Fast |
+| `rh.gpt-image-2` | 图片 · 精细可调 | Image · Adjustable detail |
+| `rh.qwen-image-3-pro` | 图片 · 中英文字 | Image · Text in pictures |
+| `rh.midjourney-v7` | 图片 · 艺术风格 | Image · Artistic style |
+| `rh.grok-imagine` | 图片 · 宽幅 | Image · Wide format |
+| `rh.wan-2-7-pro` | 图片 · 自定尺寸 | Image · Custom size |
+| `rh.jimeng-4-6` | 图片 · 海报设计 | Image · Poster design |
+| `rh.kling-v3-pro` | 视频 · 动作流畅 | Video · Smooth motion |
+| `rh.seedance-2` | 视频 · 全高清带声 | Video · Full HD with sound |
+| `rh.veo-3-1-fast` | 视频 · 超清带声 | Video · Ultra HD with sound |
+| `rh.sora-2` | 视频 · 写实 | Video · Realistic |
+| `rh.hailuo-2-3-pro` | 视频 · 动感 | Video · Dynamic |
+| `rh.vidu-q3-pro` | 视频 · 动漫风格 | Video · Anime style |
+| `rh.wan-2-7` | 视频 · 全高清标准 | Video · Full HD Standard |
+| `rh.grok-imagine-video` | 视频 · 快速出片 | Video · Quick clip |
+| `rh.pixverse-v6` | 视频 · 灵活时长 | Video · Flexible length |
+
+RunningHub 拒绝提交时回 HTTP 200 和错误码（坏 key `806`、缺参数 `1007`、余额 `812`/`416`）。只有明确不含任务的平铺回答（`taskId` 和 `status` 都是空字符串、带错误码、没有 `data`、没有结果，每个键只出现一次且是 ASCII，任务解析读到的也是没有任务）里的运营方原因（key、余额）才算拒绝、退回免费次数（`rhAnswerNamesNoTask`）；带任务或可能带任务的回答（QUEUED/RUNNING 等状态、重复键或大小写不同的键）、包装过的回答、请求本身的问题和轮询的回答都照常计数。
 
 ## 配置（只在 API 上）
 

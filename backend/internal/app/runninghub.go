@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // RunningHub's Standard Model API is task based: submit a request, receive a task id, query it
@@ -38,6 +39,31 @@ type rhTask struct {
 	Status  string
 	Code    string
 	Results []rhResult
+}
+
+// runningHubLabels are the names users see for RunningHub's models, [Chinese, English]: what each is good for, by its
+// settings in media_models.json (sizes, batches, style controls, sound, length), never its maker, family or version
+// (owner decisions 2026-10-11, 「模型名也全部改成通用名」), and none the other providers' models already use.
+// withProviderModels refuses to start on a RunningHub model without one.
+var runningHubLabels = map[string][2]string{
+	"rh.seedream-v5-pro":    {"图片 · 高清无损", "Image · Lossless HD"},
+	"rh.nano-banana-pro":    {"图片 · 超清精品", "Image · Ultra HD Premium"},
+	"rh.nano-banana-2":      {"图片 · 超清快速", "Image · Ultra HD Fast"},
+	"rh.gpt-image-2":        {"图片 · 精细可调", "Image · Adjustable detail"},
+	"rh.qwen-image-3-pro":   {"图片 · 中英文字", "Image · Text in pictures"},
+	"rh.midjourney-v7":      {"图片 · 艺术风格", "Image · Artistic style"},
+	"rh.grok-imagine":       {"图片 · 宽幅", "Image · Wide format"},
+	"rh.wan-2-7-pro":        {"图片 · 自定尺寸", "Image · Custom size"},
+	"rh.jimeng-4-6":         {"图片 · 海报设计", "Image · Poster design"},
+	"rh.kling-v3-pro":       {"视频 · 动作流畅", "Video · Smooth motion"},
+	"rh.seedance-2":         {"视频 · 全高清带声", "Video · Full HD with sound"},
+	"rh.veo-3-1-fast":       {"视频 · 超清带声", "Video · Ultra HD with sound"},
+	"rh.sora-2":             {"视频 · 写实", "Video · Realistic"},
+	"rh.hailuo-2-3-pro":     {"视频 · 动感", "Video · Dynamic"},
+	"rh.vidu-q3-pro":        {"视频 · 动漫风格", "Video · Anime style"},
+	"rh.wan-2-7":            {"视频 · 全高清标准", "Video · Full HD Standard"},
+	"rh.grok-imagine-video": {"视频 · 快速出片", "Video · Quick clip"},
+	"rh.pixverse-v6":        {"视频 · 灵活时长", "Video · Flexible length"},
 }
 
 // rhError is a provider failure reduced to a closed code; RunningHub's message text is never
@@ -238,7 +264,67 @@ func (h *runningHub) call(ctx context.Context, path string, body map[string]any,
 	case resp.StatusCode != 200:
 		return rhTask{}, &rhError{Code: "media_failed"}
 	}
-	return parseRHTask(data)
+	task, err := parseRHTask(data)
+	// RunningHub answers a refused submission with 200 and an error code. One that names no task (an explicit empty
+	// taskId and status, nothing wrapped, no results), read so by parseRHTask too, created none, so an operator-side
+	// code there is a refusal like a 401's.
+	if err != nil && submission && task.TaskID == "" && task.Status == "" && rhAnswerNamesNoTask(data) {
+		err = refusedAnswer(err)
+	}
+	return task, err
+}
+
+// rhAnswerNamesNoTask reports whether an answer is RunningHub's flat refusal of a submission, as it answered a bad key
+// (806) and a missing prompt (1007) on 2026-10-15: one JSON object whose taskId and status are present and the empty
+// string, with an error code, that wraps no data and carries no results. encoding/json matches keys without regard to
+// case and lets a repeated key win, so an answer with a repeated key, two keys that differ only in case or a key that
+// is not ASCII is not this shape: what parseRHTask read from it could differ from what is read here. Any other shape
+// may hold a task, and keeps the generation counted.
+func rhAnswerNamesNoTask(data []byte) bool {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return false
+	}
+	fields := map[string]string{}
+	for dec.More() {
+		t, err := dec.Token()
+		name, ok := t.(string)
+		if err != nil || !ok {
+			return false
+		}
+		for i := 0; i < len(name); i++ {
+			if name[i] >= utf8.RuneSelf {
+				return false
+			}
+		}
+		name = strings.ToLower(name)
+		var raw json.RawMessage
+		if _, repeated := fields[name]; repeated || dec.Decode(&raw) != nil {
+			return false
+		}
+		fields[name] = string(bytes.TrimSpace(raw))
+	}
+	if t, err := dec.Token(); err != nil || t != json.Delim('}') {
+		return false
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return false
+	}
+	absentOr := func(name string, allowed ...string) bool {
+		raw, present := fields[name]
+		if !present {
+			return true
+		}
+		for _, ok := range allowed {
+			if raw == ok {
+				return true
+			}
+		}
+		return false
+	}
+	code, coded := fields["errorcode"]
+	return fields["taskid"] == `""` && fields["status"] == `""` && coded && code != `""` && code != "null" &&
+		absentOr("data", "null") && absentOr("results", "null", "[]")
 }
 
 // parseRHTask reads a task answer, either bare or wrapped once in {code, msg, data}.

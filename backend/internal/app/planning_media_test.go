@@ -43,9 +43,6 @@ func TestPlansMayDeclareMediaNodes(t *testing.T) {
 func TestMediaModelNamesNeverNameTheirProvider(t *testing.T) {
 	seen := 0
 	for _, m := range builtinMediaCatalog.List() {
-		if m.Provider != mediaProviderXtasy && m.Provider != mediaProviderTripo && m.Provider != mediaProviderJimeng {
-			continue
-		}
 		seen++
 		if m.Vendor != mediaVendorShown || m.Name != m.Label[0] {
 			t.Errorf("%s: vendor %q, name %q, label %q", m.ID, m.Vendor, m.Name, m.Label)
@@ -56,11 +53,15 @@ func TestMediaModelNamesNeverNameTheirProvider(t *testing.T) {
 			}
 		}
 	}
-	if seen != len(jimengModels())+len(xtasyModels())+len(tripoModels()) {
-		t.Fatalf("checked %d models", seen)
+	// Every provider's models, RunningHub's included (runningHubLabels names exactly the embedded ones).
+	if len(runningHubLabels) != len(builtinMediaCatalog.Models) {
+		t.Fatalf("%d RunningHub names for %d models", len(runningHubLabels), len(builtinMediaCatalog.Models))
+	}
+	if want := len(jimengModels()) + len(xtasyModels()) + len(tripoModels()) + len(runningHubLabels); seen != want {
+		t.Fatalf("checked %d models, want %d", seen, want)
 	}
 	names := map[string]string{}
-	for _, m := range append(append(jimengModels(), xtasyModels()...), tripoModels()...) {
+	for _, m := range builtinMediaCatalog.List() {
 		for _, shown := range m.Label {
 			if other, taken := names[shown]; taken {
 				t.Errorf("%s and %s are both shown as %q", other, m.ID, shown)
@@ -96,8 +97,9 @@ func brandedMediaName(name string) string {
 	return ""
 }
 
-// The catalogue a browser reads shows media, not providers: every X-tasy and Tripo model by a generic name in both
-// languages under the one vendor, and no provider named anywhere in the answer but the model ids themselves.
+// The catalogue a browser reads shows media, not providers: every X-tasy, Tripo and RunningHub model by a generic
+// name in both languages under the one vendor, and no provider named anywhere in the answer but the model ids
+// themselves.
 func TestMediaCatalogueShowsMediaNotProviders(t *testing.T) {
 	h, _ := newMediaHarness(t)
 	h.a.cfg.XtasyAPIKey, h.a.cfg.TripoAPIKey = "xtk_test-key-0123456789", "tsk_"+strings.Repeat("k", 32)
@@ -114,7 +116,7 @@ func TestMediaCatalogueShowsMediaNotProviders(t *testing.T) {
 		if _, named := m["provider"]; named {
 			t.Errorf("%s names its provider", id)
 		}
-		if !strings.HasPrefix(id, "xt.") && !strings.HasPrefix(id, "tripo.") {
+		if !strings.HasPrefix(id, "xt.") && !strings.HasPrefix(id, "tripo.") && !strings.HasPrefix(id, "rh.") {
 			continue
 		}
 		listed++
@@ -129,11 +131,14 @@ func TestMediaCatalogueShowsMediaNotProviders(t *testing.T) {
 			}
 		}
 		delete(m, "id")
-		if raw, _ := json.Marshal(m); bytes.Contains(bytes.ToLower(raw), []byte("tripo")) || bytes.Contains(bytes.ToLower(raw), []byte("xtasy")) {
-			t.Errorf("%s names its provider beside its id: %s", id, raw)
+		raw, _ := json.Marshal(m)
+		for _, provider := range []string{"tripo", "xtasy", "runninghub"} {
+			if bytes.Contains(bytes.ToLower(raw), []byte(provider)) {
+				t.Errorf("%s names its provider beside its id: %s", id, raw)
+			}
 		}
 	}
-	if listed != len(xtasyModels())+len(tripoModels()) {
-		t.Fatalf("listed %d of the X-tasy and Tripo models", listed)
+	if listed != len(xtasyModels())+len(tripoModels())+len(runningHubLabels) {
+		t.Fatalf("listed %d of the X-tasy, Tripo and RunningHub models", listed)
 	}
 }
