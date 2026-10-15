@@ -153,7 +153,9 @@ const CAMERA_GLIDE_MS = 260;
 const INSPECTOR_OVERLAY = { inset: 12, width: 360, gap: 16 } as const;
 // The focused delivery overlays the conversation whenever the usable stage cannot fit both
 // panes at a readable scale, including laptops with both rails visible.
-const narrowFocusWidth = (stageWidth: number) => stageWidth > 0 && stageWidth <= 900 ? Math.max(280, stageWidth - FOCUS_FIT_PADDING.x * 2) : undefined;
+/** The narrowest an open node gets in the narrow layout. */
+const NARROW_FOCUS_MIN_WIDTH = 280;
+const narrowFocusWidth = (stageWidth: number) => stageWidth > 0 && stageWidth <= 900 ? Math.max(NARROW_FOCUS_MIN_WIDTH, stageWidth - FOCUS_FIT_PADDING.x * 2) : undefined;
 /** Whether an opened node of this drawn width holds its delivery drawer beside its conversation on this stage: not on a
  *  narrow stage, nor in a frame too narrow for both (deliverablesShown, DRAWER_BESIDE_MIN_WIDTH). */
 const drawerBeside = (narrow: number | undefined, nodeWidth: number) => !narrow && nodeWidth >= DRAWER_BESIDE_MIN_WIDTH;
@@ -164,6 +166,32 @@ const openRoom = (stage: { w: number; h: number }, configuring: boolean) => ({
   w: stage.w - FOCUS_FIT_PADDING.x * 2 - (configuring ? INSPECTOR_OVERLAY.inset + INSPECTOR_OVERLAY.width + INSPECTOR_OVERLAY.gap : 0),
   h: stage.h - FOCUS_FIT_PADDING.top - FOCUS_FIT_PADDING.bottom,
 });
+/** The stage as the fit math measures it; `cover` is the width of its left edge under a sidebar that floats over it. */
+type StageBox = { w: number; h: number; cover?: number };
+/** How much of the stage's left edge the assistant sidebar covers, in pixels: where the workspace lays the sidebar over
+ *  the board (absolutely positioned, from the stage's left edge), its layout width; 0 where it takes its own room, is
+ *  closed, or leaves no room for an open node at a readable scale (as on a phone, where it spans the stage and is closed
+ *  to see the board): the board is then laid out as without it. Measured without the sidebar's own entrance slide
+ *  (`translate`), so a fit taken while it slides in is not short by a few pixels. */
+function sidebarCover(root: HTMLElement, stage: DOMRect): number {
+  const side = root.closest('.awwo-workspace')?.querySelector<HTMLElement>('.awwo-planner-sidebar');
+  if (!side) return 0;
+  const box = side.getBoundingClientRect();
+  if (box.width <= 0 || box.height <= 0) return 0;
+  const slide = Number.parseFloat(getComputedStyle(side).translate || '0') || 0;
+  const left = box.left - slide;
+  const right = left + side.offsetWidth;
+  if (left > stage.left + 1 || right <= stage.left) return 0;
+  const cover = Math.min(stage.width, right - stage.left);
+  const room = stage.width - cover - FOCUS_FIT_PADDING.x * 2;
+  return room < NARROW_FOCUS_MIN_WIDTH * MIN_READABLE_FIT_SCALE ? 0 : Math.round(cover);
+}
+/** Whether Configure, open on this stage, raises the board above the assistant sidebar: the hosted app at 900 px and
+ *  below does (awwo-workspace.css), so while it is open the sidebar covers nothing of the board. */
+const configureRaisesBoard = (root: HTMLElement) => Boolean(root.closest('.saas-canvas-shell'))
+  && typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 900px)').matches);
+/** A view fitted on the stage right of `cover` (computed as if that part were the whole stage), back on the stage. */
+const shiftView = (view: ViewportState, by: number): ViewportState => by ? { ...view, x: view.x + by } : view;
 /** An opened node's frame and the camera the app placed for it, from one measurement of the stage (openPlacement). */
 type OpenFit = { id: string; frame?: { w: number; h: number }; view: ViewportState; narrow?: number; content: OpenContent; resized?: boolean };
 /** Stage changes (window resize, rail toggles) settle for this long before the overview refits. */
@@ -675,7 +703,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const scale = from.scale * (target.scale / from.scale) ** k;
       setView(t >= 1 ? target : { scale, x: fromX + (toX - fromX) * k - anchor.x * scale, y: fromY + (toY - fromY) * k - anchor.y * scale });
       glide.current = t >= 1 ? null : requestAnimationFrame(frame);
-      if (t >= 1) glideTarget.current = null;
+      // Landed: the camera is the target from now on, also for a check that runs before the render showing it (it
+      // would otherwise meet no target and the last passing frame).
+      if (t >= 1) { glideTarget.current = null; viewRef.current = target; }
     };
     glide.current = requestAnimationFrame(frame);
   }, [stopGlide]);
@@ -691,20 +721,28 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const unsavedCamera = useRef<ViewportState | null>(doc.view ? null : view);
   // The operator's camera waiting out the save debounce (see the viewport persistence below).
   const pendingCameraSave = useRef<{ timer: ReturnType<typeof setTimeout>; camera: ViewportState; save: () => void } | null>(null);
-  const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: { w: number; h: number }, automatic = false) => {
-    const next = fitNodeOverview(fitNodes, box, cardFramesRef.current, docRef.current.displays);
+  const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: StageBox, automatic = false) => {
+    // The overview fits the stage right of a sidebar that floats over its left edge.
+    const cover = box.cover ?? 0;
+    const next = shiftView(fitNodeOverview(fitNodes, { w: box.w - cover, h: box.h }, cardFramesRef.current, docRef.current.displays), cover);
     lastAutoView.current = next;
     // The app refits only a camera it may take over (a requested fit, say): the operator's camera still waiting to be
-    // saved is saved now, before the refit replaces it, if it is still the live one (not a frame the camera has left).
+    // saved is saved now, before the refit replaces it.
     const pending = automatic ? pendingCameraSave.current : null;
     if (pending) {
       clearTimeout(pending.timer); pendingCameraSave.current = null;
-      const live = viewRef.current;
-      if (pending.camera.x === live.x && pending.camera.y === live.y && pending.camera.scale === live.scale) pending.save();
+      // The operator's camera now, which is what is saved, kept as the viewport persistence below keeps it: an open
+      // node's return camera; else where a glide lands (the one a closed node returns to), or its last frame before the
+      // render showing it, never a frame on the way that waits to be saved; not the app's own camera.
+      const now = focusedRef.current && focusReturn.current ? focusReturn.current : glideTarget.current ?? viewRef.current;
+      if (!isFittedCamera(now, unsavedCamera.current)) {
+        patchDoc(prev => (prev.view?.x === now.x && prev.view?.y === now.y && prev.view?.scale === now.scale)
+          ? prev : { ...prev, view: now }, { silent: true });
+      }
     }
     unsavedCamera.current = automatic ? next : null;
     moveCamera(next);
-  }, [moveCamera]);
+  }, [moveCamera, patchDoc]);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const sizeRef = useRef(size);
   sizeRef.current = size;
@@ -763,14 +801,20 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // a backgrounded/non-compositing tab. Falling back to a live measurement turns what would be a
   // silent no-op (press ⌘E, nothing happens, no way to tell why) into the action the user asked
   // for. Returns null only when there is genuinely nothing laid out to fit into.
-  const viewportSize = useCallback((): { w: number; h: number } | null => {
-    const r = rootRef.current?.getBoundingClientRect();
-    if (r && r.width > 0) return { w: r.width, h: r.height };
+  // `cover`: how much of the stage's left edge the assistant sidebar covers where it floats over the stage (the hosted
+  // workspace with a model library lays it over the board): fits use the stage right of it. `configuring`: whether
+  // the fit is for the stage with Configure open (by default, whether it is open now); where Configure raises the board
+  // above the sidebar, nothing is covered.
+  const viewportSize = useCallback((configuring = inspectorRef.current !== null): StageBox | null => {
+    const root = rootRef.current;
+    const r = root?.getBoundingClientRect();
+    if (root && r && r.width > 0) return { w: r.width, h: r.height, cover: configuring && configureRaisesBoard(root) ? 0 : sidebarCover(root, r) };
     return sizeRef.current.w > 0 ? sizeRef.current : null;
   }, []);
 
   const fitAll = useCallback(() => {
-    const box = viewportSize();
+    // Configure closes here (the ref still says it is open): the fit is for the board without it.
+    const box = viewportSize(false);
     if (!nodes.length || !box || inspectorCloseLocked.current) return;
     setInspectorId(null);
     setFocusedId(null);
@@ -790,10 +834,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // canvas waits for its first node.
     if (nodes.length === 0) { if (saved) fitted.current = true; return; }
     fitted.current = true;
-    const box = viewportSize() || size;
+    // A node opened before the stage's first size arrived owns the camera: no overview is fitted over it (the
+    // camera it returns to stays the one it opened from).
+    if (focusedRef.current !== null) return;
+    const box: StageBox = viewportSize() || size;
     // A kept saved view already shows the whole graph, so it counts as fitted: a later stage change
-    // may refit it, exactly as it would the overview computed below.
-    if (saved && boundsWithinViewport(boundsOfNodes(presentationNodes(nodes, null)), saved, box)) { lastAutoView.current = viewRef.current; return; }
+    // may refit it, exactly as it would the overview computed below. It shows it only in the part a
+    // sidebar floating over the stage leaves (simple mode opens the assistant with the canvas).
+    const cover = box.cover ?? 0;
+    if (saved && boundsWithinViewport(boundsOfNodes(presentationNodes(nodes, null)), shiftView(saved, -cover), { w: box.w - cover, h: box.h })) {
+      lastAutoView.current = viewRef.current;
+      return;
+    }
     autoFit(nodes, box, true);
   }, [size, nodes, viewportSize, autoFit]);
 
@@ -813,7 +865,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     stageSignature.current = signature;
     if (previous === null || previous === signature) return;
     const timer = setTimeout(() => {
-      if (focusedRef.current !== null || inspectorCloseLocked.current || !isFittedCamera(viewRef.current, lastAutoView.current)) return;
+      // The camera as it will be once a glide in progress lands (closing a node glides back to the overview): a passing
+      // frame is not the operator's camera.
+      if (focusedRef.current !== null || inspectorCloseLocked.current || !isFittedCamera(glideTarget.current ?? viewRef.current, lastAutoView.current)) return;
       const current = docRef.current.nodes;
       const box = viewportSize();
       if (!current.length || !box) return;
@@ -847,19 +901,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   /** Where a node opens on this stage, from the camera `current`: the frame its content can use (openFrameFor) and the
    *  camera that shows it whole, opened where it is — never re-centred. Null when nothing is laid out to fit into.
    *  `content` keeps the room of what the node showed; `preferredScale` is the operator's zoom, kept where readable. */
-  const openPlacement = useCallback((nodeId: string, configuring: boolean, current: ViewportState,
+  const openPlacement = useCallback((nodeId: string, configuring: boolean, currentOnStage: ViewportState,
     options: { content?: OpenContent; preferredScale?: number; frame?: { w: number; h: number } } = {}) => {
-    const box = viewportSize();
+    const stage = viewportSize(configuring);
     const target = docRef.current.nodes.find((n) => n.id === nodeId);
-    if (!box || !target) return null;
+    if (!stage || !target) return null;
     const besidePanel = configuring && (canInitialize || target.kind === 'form');
-    const narrow = narrowFocusWidth(box.w);
-    const frame = options.frame ?? openFrameFor(target, openRoom(box, besidePanel), options.content);
-    const node = presentationNodes(docRef.current.nodes, nodeId, narrow, undefined, frame, Boolean(options.frame)).find((n) => n.id === nodeId)!;
-    // Cap the focus scale so the whole node — delivery drawer included — fits the stage inside
-    // the focus padding.
-    const pad = FOCUS_FIT_PADDING;
-    const availH = Math.max(120, box.h - pad.top - pad.bottom);
     // Opened to be configured (or re-fitted while its inspector is open) where the inspector floats
     // over the stage (cloud canvases, forms), the node keeps clear of it, as far as it can while
     // staying readable: the reserve shrinks before the node would drop below the readable scale.
@@ -867,20 +914,42 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // reserved.
     const spansStage = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 760px)').matches)
       && Boolean(rootRef.current?.closest('.saas-canvas-shell'));
-    const inspectorRoom = INSPECTOR_OVERLAY.inset + Math.min(INSPECTOR_OVERLAY.width, box.w - INSPECTOR_OVERLAY.inset * 2) + INSPECTOR_OVERLAY.gap;
-    const readable = Math.min(MIN_READABLE_FIT_SCALE, availH / Math.max(1, node.h));
-    const right = besidePanel && !spansStage
-      ? Math.max(pad.x, Math.min(inspectorRoom, box.w - pad.x - node.w * readable)) : pad.x;
-    const availW = Math.max(120, box.w - pad.x - right);
-    const maxScale = Math.min(1.25, availW / Math.max(1, node.w), availH / Math.max(1, node.h));
-    // The operator's own zoom when it is readable and the node fits; else a node drawn at its open frame opens at 100 %
-    // (the frame is sized for it; less only where a node resized by hand needs it), and one on a narrow stage as large as
-    // fits. The card's corner stays where it sat on screen, moved only as far as the stage needs.
-    const atFrame = Boolean(frame) && !narrow;
-    const preferred = options.preferredScale ?? current.scale;
-    const scale = preferred >= 1 && preferred <= maxScale ? preferred : atFrame ? Math.min(1, maxScale) : maxScale;
-    const view = openInPlace(current, { minX: node.x, minY: node.y, maxX: node.x + node.w, maxY: node.y + node.h }, box, scale, { ...pad, right });
-    return { frame, view, anchor: { x: node.x, y: node.y }, narrow, content: options.content ?? openContentOf(target) };
+    const reserving = besidePanel && !spansStage;
+    const pad = FOCUS_FIT_PADDING;
+    // Placed in the stage right of `cover`, the width of its left edge under a floating sidebar: everything is measured
+    // there (the camera too: its x is moved by the covered width), and the camera is moved back at the end.
+    const place = (cover: number) => {
+      const box = { w: stage.w - cover, h: stage.h };
+      const current = shiftView(currentOnStage, -cover);
+      // The narrow layout is a narrow stage's (a phone, a tablet), and a wider one's whose part right of the sidebar has
+      // no room for an open frame; there as wide as that part. Beside a sidebar the node otherwise keeps its frame,
+      // sized to that part.
+      const frameless = box.w - pad.x * 2 < FOCUSED_SESSION_MIN_SIZE.w;
+      const narrow = narrowFocusWidth(stage.w) || frameless ? narrowFocusWidth(box.w) : undefined;
+      const frame = options.frame ?? openFrameFor(target, openRoom(box, besidePanel), options.content);
+      const node = presentationNodes(docRef.current.nodes, nodeId, narrow, undefined, frame, Boolean(options.frame)).find((n) => n.id === nodeId)!;
+      // Cap the focus scale so the whole node — delivery drawer included — fits the stage inside the focus padding.
+      const availH = Math.max(120, box.h - pad.top - pad.bottom);
+      const inspectorRoom = INSPECTOR_OVERLAY.inset + Math.min(INSPECTOR_OVERLAY.width, box.w - INSPECTOR_OVERLAY.inset * 2) + INSPECTOR_OVERLAY.gap;
+      const readable = Math.min(MIN_READABLE_FIT_SCALE, availH / Math.max(1, node.h));
+      const right = reserving ? Math.max(pad.x, Math.min(inspectorRoom, box.w - pad.x - node.w * readable)) : pad.x;
+      const availW = Math.max(120, box.w - pad.x - right);
+      const maxScale = Math.min(1.25, availW / Math.max(1, node.w), availH / Math.max(1, node.h));
+      // The operator's own zoom when it is readable and the node fits; else a node drawn at its open frame opens at
+      // 100 % (the frame is sized for it; less only where a node resized by hand needs it), and one on a narrow stage
+      // as large as fits. The card's corner stays where it sat on screen, moved only as far as the stage needs.
+      const atFrame = Boolean(frame) && !narrow;
+      const preferred = options.preferredScale ?? current.scale;
+      const scale = preferred >= 1 && preferred <= maxScale ? preferred : atFrame ? Math.min(1, maxScale) : maxScale;
+      const view = shiftView(openInPlace(current, { minX: node.x, minY: node.y, maxX: node.x + node.w, maxY: node.y + node.h }, box, scale, { ...pad, right }), cover);
+      const placement = { frame, view, anchor: { x: node.x, y: node.y }, narrow, content: options.content ?? openContentOf(target) };
+      return { placement, squeezed: reserving && right < inspectorRoom };
+    };
+    const cover = stage.cover ?? 0;
+    const beside = place(cover);
+    // Configured where the part right of the sidebar leaves no readable room beside the inspector, the node opens as
+    // without the sidebar: clear of the panel in use, which the reserve would otherwise give up.
+    return cover > 0 && beside.squeezed ? place(0).placement : beside.placement;
   }, [viewportSize, canInitialize]);
 
   const focusNode = useCallback(
@@ -941,7 +1010,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       glideTo(placement.view, placement.anchor);
     }, REFIT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [focusedId, size.w, size.h, configuringFocused, focusedContent, bindingLocked, openPlacement, glideTo]);
+  }, [focusedId, size.w, size.h, railsVersion, configuringFocused, focusedContent, bindingLocked, openPlacement, glideTo]);
 
   const arrangeNodes = useCallback(() => {
     if (!canEditStructure(false, [])) return;
@@ -950,7 +1019,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setInspectorId(null);
     setFocusedId(null);
     focusReturn.current = null;
-    const box = viewportSize();
+    const box = viewportSize(false);
     if (box) autoFit(arranged, box);
   }, [canEditStructure, patchDoc, viewportSize, autoFit]);
 
@@ -3445,6 +3514,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const assistantPanel = assistantOpen && (viewerTasks || (!readOnly && (nodes.length > 0 || mentionedTasks.size > 0)))
     ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} onClose={() => closeAssistant()} /> : undefined;
   const panelShown = Boolean(assistantPanel);
+  // Showing or hiding the panel changes the room a fit has where the sidebar floats over the board: the overview and an
+  // open node refit, as when a rail toggles (not on the first render: the opening fit measures it itself).
+  const panelSeen = useRef(panelShown);
+  useEffect(() => {
+    if (panelSeen.current === panelShown) return;
+    panelSeen.current = panelShown;
+    onRailsChange();
+  }, [panelShown, onRailsChange]);
   // Tasks are read while the conversation is on screen: in the side panel, or in the welcome of an empty canvas,
   // which draws it (its tasks and the canvas's earlier ones) once there is one. A viewer's host reads nothing before.
   const tasksShown = panelShown || (!readOnly && !nodes.length && planning.messages.length > 0);
