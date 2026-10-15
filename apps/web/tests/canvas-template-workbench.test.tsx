@@ -26,7 +26,7 @@ it('adds role-specific starters to only the active Session draft, without sendin
   fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
   fireEvent.click(screen.getByRole('button', { name: '新建 Session' }));
   expect(screen.getByTestId('composer-input')).toHaveValue('');
-  fireEvent.click(screen.getByRole('button', { name: '打开 Session 1' }));
+  fireEvent.click(screen.getByRole('button', { name: '打开 对话 1' }));
   expect(screen.getByTestId('composer-input')).toHaveValue(combined);
   expect(onSend).not.toHaveBeenCalled();
 });

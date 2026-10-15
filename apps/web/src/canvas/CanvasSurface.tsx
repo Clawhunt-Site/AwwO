@@ -115,7 +115,8 @@ import { forgetNode, restoreHistory } from './sessionTransport';
 import { projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
 import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserveThreadRuntime, rebindNodeThread, sessionStoreKey,
   updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
-import { arrangeNodePositions, nodeDepths, presentationNodes } from './nodePresentation';
+import { arrangeNodePositions, deliverablesShown, DRAWER_BESIDE_MIN_WIDTH, FOCUSED_SESSION_MIN_SIZE, nodeDepths, openContentOf, openFrameFor, presentationNodes,
+  type OpenContent } from './nodePresentation';
 import { boundsOfBoxes, boundsWithinViewport, fitBounds, fitOverview, focusWorld, MIN_READABLE_FIT_SCALE, openInPlace, visibleBoxIds, type ViewportState } from './viewport';
 import { RAIL_MODEL_KEY, isDesktopStage, readRailCollapsed, useDesktopStage, writeRailCollapsed } from './railState';
 import { paperclipApiBase } from '../paperclipBridge';
@@ -153,6 +154,18 @@ const INSPECTOR_OVERLAY = { inset: 12, width: 360, gap: 16 } as const;
 // The focused delivery overlays the conversation whenever the usable stage cannot fit both
 // panes at a readable scale, including laptops with both rails visible.
 const narrowFocusWidth = (stageWidth: number) => stageWidth > 0 && stageWidth <= 900 ? Math.max(280, stageWidth - FOCUS_FIT_PADDING.x * 2) : undefined;
+/** Whether an opened node of this drawn width holds its delivery drawer beside its conversation on this stage: not on a
+ *  narrow stage, nor in a frame too narrow for both (deliverablesShown, DRAWER_BESIDE_MIN_WIDTH). */
+const drawerBeside = (stageWidth: number, nodeWidth: number) => !narrowFocusWidth(stageWidth) && nodeWidth >= DRAWER_BESIDE_MIN_WIDTH;
+/** The world pixels an opened node may fill at 100 % zoom on a stage of this size: the stage less the focus padding,
+ *  and less the Configure panel's room while it floats beside the node (a stage narrow enough for the panel to span it
+ *  opens nodes in its narrow layout, without a frame). */
+const openRoom = (stage: { w: number; h: number }, configuring: boolean) => ({
+  w: stage.w - FOCUS_FIT_PADDING.x * 2 - (configuring ? INSPECTOR_OVERLAY.inset + INSPECTOR_OVERLAY.width + INSPECTOR_OVERLAY.gap : 0),
+  h: stage.h - FOCUS_FIT_PADDING.top - FOCUS_FIT_PADDING.bottom,
+});
+/** An opened node's frame and the camera the app placed for it, from one measurement of the stage (openPlacement). */
+type OpenFit = { id: string; frame?: { w: number; h: number }; view: ViewportState; narrow?: number; content: OpenContent; resized?: boolean };
 /** Stage changes (window resize, rail toggles) settle for this long before the overview refits. */
 const REFIT_DEBOUNCE_MS = 150;
 /** A camera within this many pixels of the one the app fitted, at the same scale, is still the app's.
@@ -357,6 +370,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [palettePersona, setPalettePersona] = useState<AgentTemplateId | null>(null);
   // Each press of a 「去填写」 step opens that node on its input drawer (SessionTile inputRequest).
   const [inputRequests, setInputRequests] = useState<Record<string, number>>({});
+  // A node's own view hands it to the assistant (SessionTile onAskAssistant): one stable callback for every card, which
+  // calls the latest render's handler, so the memoised cards do not all re-render.
+  const askAboutNodeRef = useRef<(nodeId: string, kind: 'edit' | 'fix') => void>(() => {});
+  const askAboutNode = useCallback((nodeId: string, kind: 'edit' | 'fix') => askAboutNodeRef.current(nodeId, kind), []);
   // The model rail starts collapsed on a desktop stage (the canvas gets the width) and remembers
   // the operator's choice per browser. Below the desktop width the rail is a drawer that always
   // opens on the full shelf, whatever was stored, exactly like the Bot drawer.
@@ -717,7 +734,24 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId, narrowFocusWidth(size.w), cardFrames), [nodes, focusedId, size.w, cardFrames]);
+  const [inspectorId, setInspectorId] = useState<string | null>(null);
+  // Live, for a focus that re-fits a node while it is being configured (focusNode reads it).
+  const inspectorRef = useRef<string | null>(null);
+  inspectorRef.current = inspectorId;
+  // An opened node takes as much of the stage as its content can use (openFrameFor), less the Configure panel's room
+  // while that floats beside it. Its frame and the camera that shows it come from one measurement of the stage
+  // (openPlacement), so the card drawn is the card the camera framed, even before the stage's own measurement arrives;
+  // `view` is that camera, which tells the app's camera from one the operator has taken since.
+  // `narrow` is the narrow layout's width from that same measurement, `content` what the node showed, and `resized` a
+  // frame the reader dragged to another size, which is theirs as a camera they moved is.
+  const [openFit, setOpenFit] = useState<OpenFit | null>(null);
+  const openFitRef = useRef(openFit);
+  openFitRef.current = openFit;
+  const focusedFit = openFit && openFit.id === focusedId ? openFit : null;
+  const focusedOpenFrame = focusedFit?.frame;
+  const focusNarrow = focusedFit ? focusedFit.narrow : narrowFocusWidth(size.w);
+  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame),
+    [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame]);
   const renderNodeById = useMemo(() => new globalThis.Map(renderNodes.map(node => [node.id, node])), [renderNodes]);
   // Focus pushes the pre-focus viewport so a second press returns exactly where you were.
   const focusReturn = useRef<ViewportState | null>(null);
@@ -809,14 +843,52 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     });
   }, []);
 
+  /** Where a node opens on this stage, from the camera `current`: the frame its content can use (openFrameFor) and the
+   *  camera that shows it whole, opened where it is — never re-centred. Null when nothing is laid out to fit into.
+   *  `content` keeps the room of what the node showed; `preferredScale` is the operator's zoom, kept where readable. */
+  const openPlacement = useCallback((nodeId: string, configuring: boolean, current: ViewportState,
+    options: { content?: OpenContent; preferredScale?: number } = {}) => {
+    const box = viewportSize();
+    const target = docRef.current.nodes.find((n) => n.id === nodeId);
+    if (!box || !target) return null;
+    const besidePanel = configuring && (canInitialize || target.kind === 'form');
+    const narrow = narrowFocusWidth(box.w);
+    const frame = openFrameFor(target, openRoom(box, besidePanel), options.content);
+    const node = presentationNodes(docRef.current.nodes, nodeId, narrow, undefined, frame).find((n) => n.id === nodeId)!;
+    // Cap the focus scale so the whole node — delivery drawer included — fits the stage inside
+    // the focus padding.
+    const pad = FOCUS_FIT_PADDING;
+    const availH = Math.max(120, box.h - pad.top - pad.bottom);
+    // Opened to be configured (or re-fitted while its inspector is open) where the inspector floats
+    // over the stage (cloud canvases, forms), the node keeps clear of it, as far as it can while
+    // staying readable: the reserve shrinks before the node would drop below the readable scale.
+    // Where the inspector spans the stage instead (the hosted app at 760 px and below), nothing is
+    // reserved.
+    const spansStage = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 760px)').matches)
+      && Boolean(rootRef.current?.closest('.saas-canvas-shell'));
+    const inspectorRoom = INSPECTOR_OVERLAY.inset + Math.min(INSPECTOR_OVERLAY.width, box.w - INSPECTOR_OVERLAY.inset * 2) + INSPECTOR_OVERLAY.gap;
+    const readable = Math.min(MIN_READABLE_FIT_SCALE, availH / Math.max(1, node.h));
+    const right = besidePanel && !spansStage
+      ? Math.max(pad.x, Math.min(inspectorRoom, box.w - pad.x - node.w * readable)) : pad.x;
+    const availW = Math.max(120, box.w - pad.x - right);
+    const maxScale = Math.min(1.25, availW / Math.max(1, node.w), availH / Math.max(1, node.h));
+    // The operator's own zoom when it is readable and the node fits; else a node drawn at its open frame opens at 100 %
+    // (the frame is sized for it; less only where a node resized by hand needs it), and one on a narrow stage as large as
+    // fits. The card's corner stays where it sat on screen, moved only as far as the stage needs.
+    const atFrame = Boolean(frame) && !narrow;
+    const preferred = options.preferredScale ?? current.scale;
+    const scale = preferred >= 1 && preferred <= maxScale ? preferred : atFrame ? Math.min(1, maxScale) : maxScale;
+    const view = openInPlace(current, { minX: node.x, minY: node.y, maxX: node.x + node.w, maxY: node.y + node.h }, box, scale, { ...pad, right });
+    return { frame, view, anchor: { x: node.x, y: node.y }, narrow, content: options.content ?? openContentOf(target) };
+  }, [viewportSize, canInitialize]);
+
   const focusNode = useCallback(
     (nodeId: string, options: { configure?: boolean } = {}) => {
       if (inspectorCloseLocked.current) return;
       // Opening a node always shows the board.
       changeStageView('canvas');
-      const box = viewportSize();
-      const node = presentationNodes(docRef.current.nodes, nodeId, narrowFocusWidth(box?.w ?? sizeRef.current.w)).find((n) => n.id === nodeId);
-      if (!node) return;
+      if (!docRef.current.nodes.some((n) => n.id === nodeId)) return;
+      const configuring = Boolean(options.configure) || inspectorRef.current === nodeId;
       // The camera as it will be once a glide in progress lands: reopening mid-glide must not take a
       // passing frame for the operator's camera.
       const current = glideTarget.current ?? viewRef.current;
@@ -826,36 +898,43 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (focusedId !== nodeId) setInspectorId(current => current === nodeId ? current : null);
       setFocusedId(nodeId);
       setSelection([nodeId]);
-      if (!box) return;
-      // Cap the focus scale so the whole node — delivery drawer included — fits the stage inside
-      // the focus padding.
-      const pad = FOCUS_FIT_PADDING;
-      const availH = Math.max(120, box.h - pad.top - pad.bottom);
-      // Opened to be configured (or re-fitted while its inspector is open) where the inspector floats
-      // over the stage (cloud canvases, forms), the node keeps clear of it, as far as it can while
-      // staying readable: the reserve shrinks before the node would drop below the readable scale.
-      // Where the inspector spans the stage instead (the hosted app at 760 px and below), nothing is
-      // reserved.
-      const spansStage = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 760px)').matches)
-        && Boolean(rootRef.current?.closest('.saas-canvas-shell'));
-      const inspectorRoom = INSPECTOR_OVERLAY.inset + Math.min(INSPECTOR_OVERLAY.width, box.w - INSPECTOR_OVERLAY.inset * 2) + INSPECTOR_OVERLAY.gap;
-      const readable = Math.min(MIN_READABLE_FIT_SCALE, availH / Math.max(1, node.h));
-      const configuring = options.configure || inspectorRef.current === nodeId;
-      const right = configuring && (canInitialize || node.kind === 'form') && !spansStage
-        ? Math.max(pad.x, Math.min(inspectorRoom, box.w - pad.x - node.w * readable)) : pad.x;
-      const availW = Math.max(120, box.w - pad.x - right);
-      const maxScale = Math.min(1.25, availW / Math.max(1, node.w), availH / Math.max(1, node.h));
-      // Open the node where it is, never re-centred: the operator's own zoom when it is readable and the
-      // node fits, the card's corner kept where it sat on screen, moved only as far as the stage needs.
-      const scale = current.scale >= 1 && current.scale <= maxScale ? current.scale : maxScale;
-      glideTo(openInPlace(current, { minX: node.x, minY: node.y, maxX: node.x + node.w, maxY: node.y + node.h }, box, scale, { ...pad, right }),
-        { x: node.x, y: node.y });
+      const placement = openPlacement(nodeId, configuring, current);
+      setOpenFit(placement ? { id: nodeId, frame: placement.frame, view: placement.view, narrow: placement.narrow, content: placement.content } : null);
+      if (placement) glideTo(placement.view, placement.anchor);
     },
-    [focusedId, viewportSize, glideTo, canInitialize, changeStageView],
+    [focusedId, openPlacement, glideTo, changeStageView],
   );
   // The latest focusNode, for a focus deferred to the next frame (an older one judges a stale render).
   const focusNodeRef = useRef(focusNode);
   focusNodeRef.current = focusNode;
+  // The open node takes its new room when what it opens at changes — the stage changed shape (the assistant panel
+  // opened or closed, the window was resized), Configure opened or closed beside it, its first delivery arrived — once
+  // the change has settled, and only while the camera is still the one the app opened it with: a camera the operator
+  // zoomed or panned since is theirs, and so is a frame they resized; the node keeps its frame under it. A run that
+  // clears its delivery does not take back the delivery's room.
+  const focusedNode = focusedId ? nodes.find(node => node.id === focusedId) : undefined;
+  const focusedContent = focusedNode ? openContentOf(focusedNode) : null;
+  const configuringFocused = Boolean(focusedId && inspectorId === focusedId);
+  useEffect(() => {
+    if (!focusedId) return;
+    const timer = setTimeout(() => {
+      const fit = openFitRef.current;
+      if (focusedRef.current !== focusedId || !fit || fit.id !== focusedId || fit.resized || inspectorCloseLocked.current) return;
+      if (!isFittedCamera(glideTarget.current ?? viewRef.current, fit.view)) return;
+      const node = docRef.current.nodes.find(candidate => candidate.id === focusedId);
+      const content = node && fit.content === 'delivery' && openContentOf(node) === 'chat' ? fit.content : undefined;
+      const placement = openPlacement(focusedId, inspectorRef.current === focusedId, fit.view,
+        { content, preferredScale: focusReturn.current?.scale });
+      if (!placement) return;
+      const sameFrame = placement.frame?.w === fit.frame?.w && placement.frame?.h === fit.frame?.h && placement.narrow === fit.narrow;
+      const sameView = Math.abs(placement.view.x - fit.view.x) < 0.5 && Math.abs(placement.view.y - fit.view.y) < 0.5
+        && Math.abs(placement.view.scale - fit.view.scale) <= 1e-9 * Math.max(1, fit.view.scale);
+      if (sameFrame && sameView) return;
+      setOpenFit({ id: focusedId, frame: placement.frame, view: placement.view, narrow: placement.narrow, content: placement.content });
+      glideTo(placement.view, placement.anchor);
+    }, REFIT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [focusedId, size.w, size.h, configuringFocused, focusedContent, bindingLocked, openPlacement, glideTo]);
 
   const arrangeNodes = useCallback(() => {
     if (!canEditStructure(false, [])) return;
@@ -1831,16 +1910,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }, { silent: true });
   }, [patchDoc, laneList]);
 
+  // The reader's choice is kept against what the node shows now (deliverablesShown), so closing a drawer that opened by
+  // itself is remembered. The drawer takes a share of an opened node's frame, so the node keeps its size and camera;
+  // only a node opened without a frame grows by the drawer and is fitted again.
   const toggleDeliverables = useCallback((nodeId: string, open: boolean) => {
     if (!canEditStructure(false, [])) return;
     const target = docRef.current.nodes.find(node => node.id === nodeId);
-    if (!target || target.kind !== 'session' || Boolean(target.deliverablesOpen) === open || hasStreamingConversation([target])) return;
-    patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => {
-      if (node.id !== nodeId || node.kind !== 'session') return node;
-      const w = Math.max(220, node.w + (open ? 260 : -260));
-      return { ...node, deliverablesOpen: open, w, x: node.x - (w - node.w) / 2 };
-    }) }), { silent: true });
-    requestAnimationFrame(() => focusNodeRef.current(nodeId));
+    const drawn = renderNodesRef.current.find(node => node.id === nodeId);
+    if (!target || target.kind !== 'session' || hasStreamingConversation([target])
+      || deliverablesShown(target, drawerBeside(sizeRef.current.w, drawn?.w ?? target.w)) === open) return;
+    patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === nodeId && node.kind === 'session' ? { ...node, deliverablesOpen: open } : node) }),
+      { silent: true });
+    const fit = openFitRef.current;
+    if (!fit || fit.id !== nodeId || !fit.frame) requestAnimationFrame(() => focusNodeRef.current(nodeId));
   }, [canEditStructure, patchDoc]);
 
   // ---- 预览展示 windows (displayNodes.ts) ---------------------------------------------------------
@@ -1898,22 +1980,25 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const scale = Math.max(0.06, Math.min(current.scale, fits));
     moveCamera(focusWorld({ ...current, scale }, display.x + display.w / 2, display.y + display.h / 2, box));
   }, [viewportSize, moveCamera]);
+  // The board as it is with no node open: a display is placed beside where a card sits, not beside its open frame.
+  const closedNodes = useCallback(() => presentationNodes(docRef.current.nodes, null, undefined, cardFramesRef.current), []);
   /** The view tools' 预览展示: everything the canvas made, live, at the end of the board (the one already there, if any). */
   const showCanvasDisplay = useCallback(() => {
     const existing = docRef.current.displays?.find(item => item.source.type === 'canvas');
     if (existing) { selectDisplay(existing.id); revealDisplay(existing); return; }
-    const added = addDisplay(placeDisplayAfter([...renderNodesRef.current, ...(docRef.current.displays ?? NO_DISPLAYS)]));
+    const added = addDisplay(placeDisplayAfter([...closedNodes(), ...(docRef.current.displays ?? NO_DISPLAYS)]));
     if (added) fitAll();
-  }, [selectDisplay, revealDisplay, addDisplay, fitAll]);
+  }, [selectDisplay, revealDisplay, addDisplay, fitAll, closedNodes]);
   /** A card's 在预览展示中查看: the display already showing that component, or a new one beside it. */
   const showNodeInDisplay = useCallback((nodeId: string) => {
     const existing = docRef.current.displays?.find(item => item.source.type === 'node' && item.source.nodeId === nodeId);
     if (existing) { selectDisplay(existing.id); revealDisplay(existing); return; }
-    const card = renderNodesRef.current.find(node => node.id === nodeId);
+    const board = closedNodes();
+    const card = board.find(node => node.id === nodeId);
     if (!card) return;
-    const added = addDisplay(placeDisplayBeside(card, [...renderNodesRef.current, ...(docRef.current.displays ?? NO_DISPLAYS)]), { type: 'node', nodeId });
+    const added = addDisplay(placeDisplayBeside(card, [...board, ...(docRef.current.displays ?? NO_DISPLAYS)]), { type: 'node', nodeId });
     if (added) revealDisplay(added);
-  }, [selectDisplay, revealDisplay, addDisplay]);
+  }, [selectDisplay, revealDisplay, addDisplay, closedNodes]);
 
   const addNode = useCallback(
     (kind: AddNodeKind, world: { x: number; y: number }) => {
@@ -1988,6 +2073,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const resizeNode = useCallback(
     (nodeId: string, w: number, h: number) => {
       if (!canEditStructure(false, [])) return;
+      // A node drawn at its open frame resizes that frame, like the camera a view choice: saved into the node, a size
+      // fitted to this screen would open it oversized (or below 100 %) on the next one.
+      const fit = openFitRef.current;
+      if (fit && fit.id === nodeId && fit.frame && !fit.narrow && focusedRef.current === nodeId) {
+        setOpenFit({ ...fit, frame: { w: Math.max(FOCUSED_SESSION_MIN_SIZE.w, Math.round(w)), h: Math.max(FOCUSED_SESSION_MIN_SIZE.h, Math.round(h)) }, resized: true });
+        return;
+      }
       patchDoc((prev) => ({ ...prev, nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, w, h } : n)) }), {
         label: `resize:${nodeId}`,
       });
@@ -2112,10 +2204,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   );
 
   // ---- overlays -----------------------------------------------------------------------------
-  const [inspectorId, setInspectorId] = useState<string | null>(null);
-  // Live, for a focus that re-fits a node while it is being configured (focusNode reads it).
-  const inspectorRef = useRef<string | null>(null);
-  inspectorRef.current = inspectorId;
+  // (inspectorId and inspectorRef are declared beside focusedId: an opened node's size depends on them.)
   // A node can leave the document without being closed: undoing its addition, a redo, an edit in
   // another tab. It closes then as deleting it would (back to the operator's camera), and an
   // inspector left on a missing node closes too.
@@ -2637,9 +2726,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, { choices: planModels });
+      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, { choices: planModels }, currentSaaSCanvas() !== null);
       // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own).
-      const applied = jev ? planned : { ...planned, doc: withAssistantModel(planned.doc, planned.addedNodeIds, assistantExecution?.componentModel, paletteRef.current?.models ?? []) };
+      // ...except a node the plan itself put on a model, the workspace default included.
+      const applied = jev ? planned : { ...planned, doc: withAssistantModel(planned.doc,
+        planned.addedNodeIds.filter(id => !planned.modelSetNodeIds.includes(id)), assistantExecution?.componentModel, paletteRef.current?.models ?? []) };
       // Every step skipped (each one said in the adjustments) leaves the canvas as it was: nothing to patch, undo
       // or select, and the reply says so instead of calling it applied.
       const changed = canvasPlanRevision(applied.doc) !== canvasPlanRevision(before);
@@ -2968,6 +3059,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     ? { ...message, content: t('assistant.startUnconfirmedLost') } : message) : planning.messages;
   // What to do next, offered by the assistant unasked: worked out from the canvas and the latest run, and carried out
   // here with the same controls the canvas already has (the run button, a node's settings, the results view).
+  // The assistant can be asked to fix a failure or fill in inputs only while it can plan (and not through Jev, which
+  // adds nodes rather than repairing one).
+  const assistantCanPlan = !planningUnavailableReason && plannerProvider !== 'jev' && plannerStatus?.available !== false;
   const suggested: NextSteps | null = readOnly || initializing || bindingLocked ? null : canvasNextSteps({
     nodes, edges, runs, running, canRun: !runUnavailableReason, resultsAvailable: Boolean(results), upgradeAvailable: Boolean(cloudScope),
     // A refusal's text is the run error's own copy (canvasErrors), in whichever language the run was read in.
@@ -2976,8 +3070,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // Only the hosted workspace puts a node's task requirements into its prompt, which is how a rework carries the
     // review's findings.
     reworkAvailable: Boolean(cloudScope),
-    // The assistant can be asked to fix a failure or fill in inputs only while it can plan.
-    canPlan: !planningUnavailableReason && plannerProvider !== 'jev' && plannerStatus?.available !== false,
+    canPlan: assistantCanPlan,
   });
   // Only the hosted app counts calls, so only it says what a step costs (and that this advice cost none).
   const countsCalls = Boolean(cloudScope);
@@ -2998,6 +3091,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const detail = recoveryDetailMessage(t, runs[ids[0]]?.detail)?.trim();
     return t('assistant.fixRequest', { nodes: failedNodes.map(name => locale === 'zh' ? `「${name}」` : `“${name}”`).join(listSeparator),
       reason: detail || t('assistant.repairNoReason') });
+  };
+  // A node handed to the assistant from its own view: 'edit' starts the request in the composer (the reader says what
+  // to change), 'fix' asks it to make the failed node finish, as the 接下来 card's step does.
+  // A fix the assistant cannot take now (it is busy, or cannot plan) waits in its composer as a draft, never lost.
+  askAboutNodeRef.current = (nodeId: string, kind: 'edit' | 'fix') => {
+    if (readOnlyRef.current) return;
+    if (kind === 'fix' && assistantCanPlan && !planningBusy) { askAssistant(fixRequest([nodeId])); return; }
+    setAssistantOpen(true);
+    const lead = kind === 'fix' ? fixRequest([nodeId]) : t('brief.askAssistantDraft', { node: titleOf(nodeId) });
+    setPlanning(previous => previous.draft.trim() ? previous : { ...previous, draft: lead });
+    requestAnimationFrame(() => {
+      const scope = rootRef.current?.closest('.awwo-workspace') ?? document;
+      const box = scope.querySelector<HTMLTextAreaElement>('.awwo-canvas-assistant--panel textarea')
+        ?? scope.querySelector<HTMLTextAreaElement>('.awwo-canvas-assistant textarea');
+      box?.focus(); box?.setSelectionRange(box.value.length, box.value.length);
+    });
   };
   const fillRequest = (ids: ReadonlyArray<string>) => {
     const rows = fillSteps.filter(step => ids.includes(step.nodeId))
@@ -3165,14 +3274,21 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     else if (suggested?.situation.kind === 'inputs') content = localAnswer();
     else {
       const rest = kind === 'rest' ? suggested?.steps.find(step => step.kind === 'run-rest') : undefined;
+      const failed = kind === 'rest' ? suggested?.steps.find(step => step.kind === 'rerun-failed') : undefined;
       const all = suggested?.steps.find(step => step.kind === 'run-all');
       if (rest?.kind === 'run-rest') {
         scope = downstreamClosure(rest.nodeIds);
         content = t('assistant.runStartingRest', { count: rest.nodeIds.length });
-      } else content = t('assistant.runStarting');
-      const calls = rest?.kind === 'run-rest' ? rest.calls : all?.kind === 'run-all' ? all.calls : undefined;
+      } else if (failed?.kind === 'rerun-failed') {
+        // What is left after a failure is the failed nodes and what they feed.
+        scope = downstreamClosure(failed.nodeIds);
+        content = t('assistant.runStartingFailed', { count: failed.nodeIds.length });
+      } else if (kind === 'rest') content = t('assistant.runNothingLeft');
+      else content = t('assistant.runStarting');
+      const calls = rest?.kind === 'run-rest' ? rest.calls : kind === 'all' && all?.kind === 'run-all' ? all.calls : undefined;
       if (countsCalls && calls) content += t('assistant.runCalls', { calls });
-      start = true;
+      // 「继续运行」 with every node done runs nothing: running it all again is 「重新运行」.
+      start = kind === 'all' || scope !== undefined;
     }
     const id = `turn-${Date.now()}-${++planningSequence.current}`;
     setPlanningError('');
@@ -3569,6 +3685,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onDelete={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : tileDelete}
             modelChoices={tileModelChoices(node)}
             inputRequest={inputRequests[node.id]}
+            onAskAssistant={readOnly ? undefined : askAboutNode}
+            deliveryBeside={focusedId === node.id ? drawerBeside(size.w, renderNodeById.get(node.id)?.w ?? node.w) : true}
             onChangeModel={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : changeNodeModel}
             onResizeCard={resizeCard}
             onToggleCardPreview={toggleCardPreview}

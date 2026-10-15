@@ -38,11 +38,11 @@ it('starts with the model rail collapsed on a desktop stage and remembers expans
   const view = render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
   const shelf = () => screen.getByRole('complementary', { name: '执行与编排模型' });
   expect(shelf()).toHaveClass('is-collapsed');
-  expect(screen.queryByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '添加 Qwen fixture' })).toBeNull();
   expect(screen.queryByRole('combobox', { name: '编排模型' })).toBeNull();
   expandModels();
   expect(shelf()).not.toHaveClass('is-collapsed');
-  expect(await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
+  expect(await screen.findByRole('button', { name: '添加 Qwen fixture' })).toBeVisible();
   expect(localStorage.getItem(RAIL_MODEL_KEY)).toBe('0');
   view.unmount();
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
@@ -55,14 +55,14 @@ it('starts with the model rail collapsed on a desktop stage and remembers expans
 it('shows configured models first and keeps model search visible in the expanded rail', async () => {
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
   expandModels();
-  expect(await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
+  expect(await screen.findByRole('button', { name: '添加 Qwen fixture' })).toBeVisible();
   expect(screen.queryByText('Codex / OpenAI')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '查看全部 15 个品牌' }));
   expect(screen.getByText('Codex / OpenAI')).toBeVisible();
   const search = screen.getByRole('searchbox', { name: '查找模型' });
   expect(search).toBeVisible();
   fireEvent.change(search, { target: { value: 'qwen' } });
-  expect(screen.getByRole('button', { name: '添加 Qwen fixture · Pi' })).toBeVisible();
+  expect(screen.getByRole('button', { name: '添加 Qwen fixture' })).toBeVisible();
   expect(screen.queryByText('Codex / OpenAI')).toBeNull();
 });
 
@@ -72,7 +72,7 @@ it('adds a selected persona on a real catalog model with generic inputs, and und
   fireEvent.click(screen.getByText('人设预设'));
   fireEvent.click(screen.getByRole('radio', { name: '前端开发' }));
   expandModels();
-  fireEvent.click(await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' }));
+  fireEvent.click(await screen.findByRole('button', { name: '添加 Qwen fixture' }));
   await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
   const node = loadDocumentWithStatus().doc.nodes[0];
   expect(node).toMatchObject({ runtime: 'pi', model: 'qwen-fixture', effort: '', templateId: 'general', binding: null });
@@ -91,7 +91,7 @@ it('drops only same-workspace model identities and uses viewport coordinates', a
   });
   const { container } = render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} />);
   expandModels();
-  await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' });
+  await screen.findByRole('button', { name: '添加 Qwen fixture' });
   const stage = container.querySelector('.awwo-stage-canvas')!;
   const root = container.querySelector('.canvas-root')!;
   vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ left: 60, top: 120, width: 900, height: 600, x: 60, y: 120, right: 960, bottom: 720, toJSON() {} });
@@ -169,7 +169,7 @@ it('keeps a dragged model visible after undoing a plan back to the welcome scree
   ] });
   const { container } = render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} planRequest={planRequest} />);
   expandModels();
-  await screen.findByRole('button', { name: '添加 Qwen fixture · Pi' });
+  await screen.findByRole('button', { name: '添加 Qwen fixture' });
   fireEvent.change(screen.getByRole('textbox', { name: '画布需求' }), { target: { value: 'Fixture request' } });
   fireEvent.click(screen.getByRole('button', { name: '生成画布', exact: true }));
   await screen.findByRole('button', { name: '撤销本次更改', exact: true });

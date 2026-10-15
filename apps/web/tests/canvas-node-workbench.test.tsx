@@ -34,8 +34,8 @@ it('creates and switches real local Sessions while retaining each unsent draft',
   fireEvent.click(screen.getByRole('button', { name: '新建 Session' }));
   expect(screen.getByTestId('composer-input')).toHaveValue('');
   fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '第二段草稿' } });
-  fireEvent.click(screen.getByRole('button', { name: '打开 Session 1' }));
+  fireEvent.click(screen.getByRole('button', { name: '打开 对话 1' }));
   expect(screen.getByTestId('composer-input')).toHaveValue('第一段草稿');
-  fireEvent.click(screen.getByRole('button', { name: '打开 Session 2' }));
+  fireEvent.click(screen.getByRole('button', { name: '打开 对话 2' }));
   expect(screen.getByTestId('composer-input')).toHaveValue('第二段草稿');
 });

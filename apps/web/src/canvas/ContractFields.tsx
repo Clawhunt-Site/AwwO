@@ -27,6 +27,8 @@ export interface ContractFieldsProps {
   valuesFirst?: boolean;
   /** With valuesFirst: open with the field structure editable (rename, retype, add, remove). */
   initialEditingSchema?: boolean;
+  /** With valuesFirst: offer to edit the field structure at all. The simple view only fills the values in. */
+  structureEditable?: boolean;
   label: string;
 }
 
@@ -106,10 +108,10 @@ function FileFieldValue({ field, name, readOnly, onChange, placeholder, describe
   </div>;
 }
 
-export function ContractFields({ fields, resolvedFields, sources, recorded, onChange, readOnly = false, valuesFirst = false, initialEditingSchema = false, label }: ContractFieldsProps) {
+export function ContractFields({ fields, resolvedFields, sources, recorded, onChange, readOnly = false, valuesFirst = false, initialEditingSchema = false, structureEditable = true, label }: ContractFieldsProps) {
   const { locale, t } = useCanvasI18n();
   const instanceId = useId();
-  const [editingSchema, setEditingSchema] = useState(initialEditingSchema && !readOnly);
+  const [editingSchema, setEditingSchema] = useState(initialEditingSchema && !readOnly && structureEditable);
   const showSchema = !valuesFirst || editingSchema;
   const nextField = useRef(0);
   const errors = validateContractFields(resolvedFields ?? fields);
@@ -123,7 +125,7 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, onCh
     onChange([...fields, { id, label: t('contract.defaultField', { count: fields.length + 1 }), type: 'text', required: false, value: '' }]);
   };
   return <section className="awwo-contract-fields" aria-label={t('contract.fields', { label })}>
-    {valuesFirst && !readOnly && <button type="button" className="awwo-field-structure-toggle" aria-expanded={editingSchema} onClick={() => setEditingSchema(value => !value)}>{locale === 'zh' ? (editingSchema ? '完成结构编辑' : '编辑字段结构') : (editingSchema ? 'Done editing fields' : 'Edit field structure')}</button>}
+    {valuesFirst && !readOnly && structureEditable && <button type="button" className="awwo-field-structure-toggle" aria-expanded={editingSchema} onClick={() => setEditingSchema(value => !value)}>{locale === 'zh' ? (editingSchema ? '完成结构编辑' : '编辑字段结构') : (editingSchema ? 'Done editing fields' : 'Edit field structure')}</button>}
     {fields.length === 0 ? <div className="awwo-contract-empty">{t('contract.empty', { label })}</div> : null}
     {fields.map((field, index) => {
       const name = field.label || t('contract.defaultField', { count: index + 1 });

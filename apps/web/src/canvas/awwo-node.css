@@ -58,6 +58,8 @@
 .canvas-root .awwo-node .canvas-composer-blocked { color: var(--awwo-muted); font-size: 11px; line-height: 1.45; }
 .canvas-root .awwo-node .canvas-composer-row { position: relative; align-items: stretch; gap: 8px; }
 .canvas-root .awwo-node .canvas-composer-input { min-height: 56px; max-height: 120px; width: 100%; padding: 8px 12px; font-size: 13px; line-height: 1.55; color: var(--awwo-ink); background: var(--awwo-soft); border: 1px solid var(--awwo-line); border-radius: 10px; resize: vertical; }
+/* An image, video or 3D node's prompt is its whole task: the box shows it whole, up to a good part of the opened node. */
+.canvas-root .awwo-node[data-content='media'] .canvas-composer-input { field-sizing: content; min-height: 96px; max-height: min(42vh, 380px); }
 .canvas-root .awwo-node .canvas-composer-send { display: flex; align-items: center; justify-content: center; gap: 4px; align-self: flex-end; min-height: 36px; padding: 8px; font-size: 12px; background: var(--awwo-teal); color: white; border: 0; border-radius: 8px; }
 .canvas-root .awwo-node .canvas-composer-send svg { flex-shrink: 0; }
 .canvas-root .awwo-node .canvas-tile-actions { margin: 0; padding: 8px 16px; gap: 8px; min-height: 45px; flex-shrink: 0; border-top: 1px solid var(--awwo-line); background: var(--awwo-card); }
@@ -104,6 +106,8 @@
 .canvas-root .awwo-markdown-toolbar button:hover { background: var(--awwo-tint); color: var(--awwo-teal); }
 .canvas-root .awwo-markdown-toolbar .awwo-markdown-preview-toggle { margin-left: auto; color: var(--awwo-teal); }
 .canvas-root .awwo-markdown .awwo-field-value { border: 0; border-radius: 0; background: var(--awwo-card); min-height: 96px; }
+/* A written input or output shows whole, not cut mid-line at four rows, up to a good part of the node (then it scrolls). */
+.canvas-root .awwo-markdown .awwo-field-value { field-sizing: content; max-height: min(48vh, 420px); }
 .canvas-root .awwo-markdown-preview { padding: 8px 12px; min-height: 96px; color: var(--awwo-ink); overflow-wrap: anywhere; font-size: 13px; }
 .canvas-root .awwo-markdown-preview > :first-child { margin-top: 0; }
 .canvas-root .awwo-markdown-preview > :last-child { margin-bottom: 0; }
@@ -169,7 +173,9 @@
 .canvas-root .awwo-node .canvas-composer-send span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .canvas-root .awwo-node .canvas-composer-blocked, .canvas-root .awwo-node .canvas-composer-notice, .canvas-root .awwo-node .canvas-composer-disclaimer { font-size: 10px; line-height: 1.4; }
 /* Width mirrors DELIVERY_DRAWER_WIDTH in nodePresentation.ts. */
-.canvas-root .awwo-node-delivery-drawer { width: 320px; flex: 0 0 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--awwo-line); background: var(--awwo-card); }
+/* An opened node gives its delivery the share of its width the delivery needs (SessionTile --awwo-drawer-width: a
+   page most of it, a document half), never less than the drawer's own 320 px. */
+.canvas-root .awwo-node-delivery-drawer { width: var(--awwo-drawer-width, 320px); flex: 0 0 var(--awwo-drawer-width, 320px); min-width: min(320px, 100%); max-width: 72%; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--awwo-line); background: var(--awwo-card); }
 .canvas-root .awwo-node-delivery-drawer > header { min-height: 37px; padding: 5px 10px; border-bottom: 1px solid var(--awwo-line); display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
 .canvas-root .awwo-node-delivery-drawer > header > span { display: flex; align-items: center; gap: 6px; }
 :is(.canvas-root, .awwo-results) .awwo-deliverables { padding: 12px; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; font-size: 12px; }
@@ -206,11 +212,16 @@
 :is(.canvas-root, .awwo-results) .awwo-deliverable-body h1, :is(.canvas-root, .awwo-results) .awwo-deliverable-body h2 { font-size: 15px; margin: 0 0 10px; }
 :is(.canvas-root, .awwo-results) .awwo-deliverable-body img { max-width: 100%; }
 :is(.canvas-root, .awwo-results) .awwo-deliverable-body pre { white-space: pre-wrap; font-size: 11px; }
+/* A delivery that is code (codeLike.ts) reads as code: monospace, every line kept, long lines wrapped at the width. */
+:is(.canvas-root, .awwo-results) .awwo-deliverable-code { margin: 0; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; font: 12px/1.6 var(--awwo-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+:is(.canvas-root, .awwo-results) .awwo-deliverable-code code { font: inherit; background: none; padding: 0; }
 :is(.canvas-root, .awwo-results) .awwo-deliverables-editor summary { cursor: pointer; color: var(--awwo-muted); font-size: 11px; padding: 8px 0; }
 :is(.canvas-root, .awwo-results) .awwo-deliverables-editor .awwo-contract-field { padding: 8px; }
 :is(.canvas-root, .awwo-results) .awwo-deliverables .awwo-field-header { flex-wrap: wrap; }
 :is(.canvas-root, .awwo-results) .awwo-deliverables .awwo-field-name { flex-basis: 100%; }
 .canvas-root .awwo-input-drawer { flex: 0 1 auto; max-height: 52%; padding: 10px 12px; border-block: 1px solid var(--awwo-line); background: var(--awwo-soft); }
+/* Opened inputs keep room to read in a short node (a laptop stage beside the assistant), never only their header. */
+.canvas-root .awwo-node.canvas-tile--focus .awwo-input-drawer { min-height: min(160px, 35%); }
 /* A copied case node (productionCopy.ts) with nothing said or run yet opens on what it was asked and
    received: the inputs fill the column, and the empty conversation's hint waits until they close. */
 .canvas-root .awwo-node-workbench.is-case-intro .awwo-input-drawer { flex: 1 1 auto; max-height: none; }
@@ -234,7 +245,7 @@
 .canvas-root .awwo-rework-note-body .awwo-deliverable-body h3 { margin: 8px 0 4px; font-size: 12px; }
 .canvas-root .awwo-rework-note-foot { margin: 8px 0 0; color: var(--awwo-muted); font-size: 10.5px; line-height: 1.45; }
 @media (prefers-reduced-motion: reduce) { .canvas-root .awwo-rework-note-chevron { transition: none; } }
-.canvas-root .awwo-node-delivery-drawer:has(.canvas-inspector) { position: absolute; inset: 0 0 0 auto; width: min(340px, 100%); z-index: 9; box-shadow: -4px 0 16px #0001; }
+.canvas-root .awwo-node-delivery-drawer:has(.canvas-inspector) { position: absolute; inset: 0 0 0 auto; width: min(340px, 100%); max-width: none; z-index: 9; box-shadow: -4px 0 16px #0001; }
 .canvas-root .awwo-node .canvas-inspector { border: 0; background: var(--awwo-card); color: var(--awwo-ink); }
 .canvas-root .awwo-node .canvas-inspector-input,
 .canvas-root .awwo-node .canvas-inspector-persona { background: var(--awwo-soft); color: var(--awwo-ink); border-color: var(--awwo-line); }
@@ -284,13 +295,13 @@
 .canvas-root .awwo-node-empty .awwo-media-wiring p { margin: 0; }
 .canvas-root .awwo-node-empty .awwo-media-wiring-title { color: var(--awwo-ink); font-weight: 600; }
 
-.canvas-root[data-narrow-focus='true'] .awwo-node.canvas-tile--focus .awwo-node-delivery-drawer { position: absolute; inset: 0; z-index: 8; width: 100%; border-left: 0; }
+.canvas-root[data-narrow-focus='true'] .awwo-node.canvas-tile--focus .awwo-node-delivery-drawer { position: absolute; inset: 0; z-index: 8; width: 100%; max-width: none; border-left: 0; }
 
 /* Read-only and running nodes can open a delivery locally without resizing the saved
  * document. Fit the drawer to the actual workstation, even on a wide desktop. */
 .canvas-root .awwo-node-workbench { container: awwo-workbench / inline-size; }
 @container awwo-workbench (max-width: 739px) {
-  .canvas-root .awwo-node-delivery-drawer { position: absolute; inset: 0; z-index: 8; width: 100%; border-left: 0; }
+  .canvas-root .awwo-node-delivery-drawer { position: absolute; inset: 0; z-index: 8; width: 100%; max-width: none; border-left: 0; }
 }
 .canvas-root .awwo-chat-heading { flex-wrap: wrap; }
 .canvas-root .awwo-chat-heading > button { flex-shrink: 0; white-space: nowrap; }

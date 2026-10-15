@@ -67,8 +67,11 @@ describe('progressive node disclosure', () => {
     expect(outputPort).toHaveStyle({ left: '260px', top: '64px' });
 
     fireEvent.click(screen.getByRole('button', { name: '打开 甲', exact: true }));
-    expect(screen.getByTestId('canvas-wire-a-b')).toHaveAttribute('d', edgeBezierPath({ x: 800, y: 310 }, { x: 950, y: 144 }));
-    expect(outputPort).toHaveStyle({ left: '700px', top: '230px' });
+    // Opened, the node takes the room its conversation can use on the 1280 × 720 stage (1100 × the stage's height less
+    // the focus padding), larger than its saved 700 × 460; the wire leaves from that border.
+    expect(screen.getByTestId('canvas-tile-a')).toHaveStyle({ width: '1100px', height: '614px' });
+    expect(screen.getByTestId('canvas-wire-a-b')).toHaveAttribute('d', edgeBezierPath({ x: 1200, y: 387 }, { x: 950, y: 144 }));
+    expect(outputPort).toHaveStyle({ left: '1100px', top: '307px' });
     fireEvent.click(screen.getByRole('button', { name: '收起节点', exact: true }));
     expect(screen.getByTestId('canvas-wire-a-b')).toHaveAttribute('d', compactPath);
     expect(loadDocumentWithStatus().doc.nodes.map(node => ({ w: node.w, h: node.h }))).toEqual([{ w: 700, h: 460 }, { w: 700, h: 460 }]);

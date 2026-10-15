@@ -134,7 +134,7 @@ describe('durable manual draft acceptance', () => {
     const accept = deferOwnership();
     fireEvent.click(screen.getByTestId('composer-send'));
     fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表', exact: true }));
-    fireEvent.click(screen.getByRole('button', { name: '打开 Session 2', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '打开 对话 2', exact: true }));
     accept();
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('画布已在其他标签页更新'));
     expect(activeNodeThread(savedNode())).toMatchObject({ id: siblingThreadId, draft: '另一个 Session 的未发送任务' });

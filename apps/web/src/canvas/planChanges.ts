@@ -20,8 +20,11 @@ function names(locale: UiLocale, t: CanvasTranslate, nodes: ReadonlyArray<Canvas
   return nodes.length > MAX_NAMES ? t('planning.changeMoreNames', { names: shown, count: nodes.length - MAX_NAMES }) : shown;
 }
 
+/** A node without task requirements has none of either: a plan that only sets its acceptance criteria has not changed
+ *  its constraints. A frame of a version this app cannot read compares as it is stored. */
 function frameOf(node: SessionNode): { constraints: string; acceptance: string } {
-  if (!isTaskFrame(node.taskFrame)) return { constraints: JSON.stringify(node.taskFrame ?? null), acceptance: '' };
+  if (node.taskFrame === undefined || node.taskFrame === null) return { constraints: '[]', acceptance: '[]' };
+  if (!isTaskFrame(node.taskFrame)) return { constraints: JSON.stringify(node.taskFrame), acceptance: '' };
   return { constraints: JSON.stringify(node.taskFrame.constraints), acceptance: JSON.stringify(node.taskFrame.acceptanceCriteria) };
 }
 

@@ -41,7 +41,9 @@ describe('a message that only asks to run the canvas', () => {
     expect(runRequestKind(text)).toBe(kind);
   });
 
-  it.each(['运行后告诉我效果', '把前端改成 React 再运行', '为什么运行失败', '运行一个新的节点', 'run a new research step', 'how do I run it', '', '运行'.repeat(20)])(
+  it.each(['运行后告诉我效果', '把前端改成 React 再运行', '为什么运行失败', '运行一个新的节点', 'run a new research step', 'how do I run it', '', '运行'.repeat(20),
+    // A number names a node or a step, never the whole canvas (Codex review).
+    'run 2', 'run #2', 'Run step 3!', 'rerun 2', '运行2', '运行 #2'])(
     'leaves “%s” to the assistant', text => {
       expect(runRequestKind(text)).toBeNull();
     });
@@ -90,6 +92,17 @@ describe('what a plan changed, said under its reply', () => {
     // A runtime the canvas moved a node to is not a change the reader made or needs to read about.
     expect(describePlanChanges(doc(a), doc({ ...a, runtime: 'openai-agents' }), 'en', (key, values) => canvasText('en', key, values), name)).toEqual([]);
   });
+
+  it('says only the checks a plan set on a node that had no task requirements (seen in a real plan, 2026-10-15)', () => {
+    const plain = agent('关卡', { taskFrame: undefined });
+    const checked = { ...plain, taskFrame: { version: 1 as const, source: 'manual' as const, constraints: [], acceptanceCriteria: ['正好 3 封信'] } };
+    expect(describePlanChanges(doc(plain), doc(checked), 'zh', t, name)).toEqual([zh('planning.changeAcceptance', { names: '「关卡」' })]);
+    const ruled = { ...plain, taskFrame: { version: 1 as const, source: 'manual' as const, constraints: ['不联网'], acceptanceCriteria: [] } };
+    expect(describePlanChanges(doc(plain), doc(ruled), 'zh', t, name)).toEqual([zh('planning.changeConstraints', { names: '「关卡」' })]);
+    // An emptied frame is no change from none.
+    const emptied = { ...plain, taskFrame: { version: 1 as const, source: 'manual' as const, constraints: [], acceptanceCriteria: [] } };
+    expect(describePlanChanges(doc(plain), doc(emptied), 'zh', t, name)).toEqual([]);
+  });
 });
 
 // On the canvas: 「运行」 runs it without asking the planner, and the 接下来 card's assistant steps send the assistant a
@@ -133,6 +146,45 @@ describe('the assistant on the canvas', () => {
     fireEvent.change(box, { target: { value: '把前端改成 React 再运行' } });
     fireEvent.click(sidebar().getByRole('button', { name: '修改画布' }));
     await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+  });
+
+  it('runs nothing when told to go on and every node already has its result (Codex review)', async () => {
+    const node = { ...createAgentTemplate('general', { x: 80, y: 60 }), id: 'node-a', title: '已有节点',
+      lastOutput: { text: '{"result":"## 完成"}', source: 'run' as const, at: 1 } } as SessionNode;
+    const contract = node.contract!;
+    saveDocument({ ...emptyDocument(), nodes: [{ ...node, contract: { ...contract, inputs: contract.inputs.map(field => field.id === 'brief' ? { ...field, value: '一个页面' } : field) } }],
+      view: { x: 0, y: 0, scale: 1 } });
+    const planRequest = vi.fn(async () => ({ version: 1 as const, summary: '改好了', operations: [] }));
+    render(<CanvasSurface planRequest={planRequest} />);
+    fireEvent.click(toggle());
+    const box = sidebar().getByRole('textbox', { name: '画布需求' });
+    fireEvent.change(box, { target: { value: '继续运行' } });
+    fireEvent.click(sidebar().getByRole('button', { name: '修改画布' }));
+    const log = within(sidebar().getByRole('log', { name: '画布对话' }));
+    await waitFor(() => expect(log.getByText(zh('assistant.runNothingLeft'))).toBeVisible());
+    expect(log.queryByText(zh('assistant.runStarting'))).toBeNull();
+    expect(planRequest).not.toHaveBeenCalled();
+    // No run started: nothing was posted anywhere, and the run controls offer a run.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')).toEqual([]);
+    expect(screen.queryByRole('button', { name: /停止/ })).toBeNull();
+  });
+
+  it('takes a change to an opened node from its task card into the assistant\'s composer, without sending it', async () => {
+    seed('为二年级学生设计游戏化学习知识库');
+    const planRequest = vi.fn(async () => ({ version: 1 as const, summary: '改好了', operations: [] }));
+    render(<CanvasSurface planRequest={planRequest} />);
+    fireEvent.click(screen.getByRole('button', { name: '打开 已有节点', exact: true }));
+    const card = within(await screen.findByRole('region', { name: zh('brief.label', { node: '已有节点' }) }));
+    fireEvent.click(card.getByRole('button', { name: zh('brief.askAssistant') }));
+    const box = sidebar().getByRole('textbox', { name: '画布需求' });
+    expect(box).toHaveValue(zh('brief.askAssistantDraft', { node: '已有节点' }));
+    await waitFor(() => expect(box).toHaveFocus());
+    expect(planRequest).not.toHaveBeenCalled();
+    // A draft the reader already started is theirs: asking about the node again leaves it.
+    fireEvent.change(box, { target: { value: '把关卡改成三段' } });
+    fireEvent.click(card.getByRole('button', { name: zh('brief.askAssistant') }));
+    expect(box).toHaveValue('把关卡改成三段');
   });
 
   it('asks the planner to fill in what a run still needs, in a message the reader sees', async () => {

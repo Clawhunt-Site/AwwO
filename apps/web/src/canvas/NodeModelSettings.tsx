@@ -27,16 +27,21 @@ export interface NodeModelSettingsProps {
   error?: string;
   onRetry?: () => void;
   disabled?: boolean;
+  /** A team keeps the runtime it is set up on until its model changes: its effort levels are offered only while that
+   *  runtime is the one AwwO runs the model on, since another runtime's levels may not exist on its own. */
+  keepRuntime?: boolean;
   onChange: (next: NodeModelValue) => void;
 }
 
-export function NodeModelSettings({ node, groups, loading = false, error = '', onRetry, disabled = false, onChange }: NodeModelSettingsProps) {
+export function NodeModelSettings({ node, groups, loading = false, error = '', onRetry, disabled = false, keepRuntime = false, onChange }: NodeModelSettingsProps) {
   const { t } = useCanvasI18n();
   const modelId = useId();
   const effortId = useId();
   const entries = groups.flatMap(group => group.models);
   const selected: ModelPaletteSelection | undefined = node.model ? entries.find(entry => entry.model === node.model) : undefined;
-  const efforts = selected?.efforts ?? [];
+  // The levels shown are the automatic runtime's (nodeRuntime.ts), so choosing one also moves a node set up on another
+  // runtime there: a level that runtime has, kept on the old runtime, would be refused when the node is set up.
+  const efforts = selected && (!keepRuntime || selected.runtime === node.runtime) ? selected.efforts ?? [] : [];
   const pick = (model: string) => {
     if (!model) { onChange({ runtime: '', model: '', effort: '' }); return; }
     const entry = entries.find(item => item.model === model && item.available);
@@ -62,7 +67,7 @@ export function NodeModelSettings({ node, groups, loading = false, error = '', o
     {efforts.length ? <>
       <label className="canvas-inspector-label" htmlFor={effortId}>{t('inspector.effort')}</label>
       <select id={effortId} className="canvas-inspector-input" aria-label={t('inspector.effort')} value={efforts.includes(node.effort) ? node.effort : ''}
-        disabled={disabled} onChange={event => onChange({ runtime: node.runtime, model: node.model, effort: event.target.value })}>
+        disabled={disabled} onChange={event => onChange({ runtime: keepRuntime ? node.runtime : selected?.runtime ?? node.runtime, model: node.model, effort: event.target.value })}>
         <option value="">{selected?.defaultEffort ? t('inspector.effortDefaultIs', { level: effortLabel(t, selected.defaultEffort) }) : t('inspector.effortDefault')}</option>
         {efforts.map(level => <option key={level} value={level}>{effortLabel(t, level)}</option>)}
       </select>

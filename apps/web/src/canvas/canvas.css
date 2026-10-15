@@ -1098,6 +1098,8 @@
   transition: border-color 0.14s var(--ease);
 }
 .canvas-inspector-persona { resize: vertical; min-height: 92px; font-size: var(--fs-body); line-height: 1.55; }
+/* A persona or task requirement shows whole as written, up to half the panel's height (then it scrolls). */
+.canvas-inspector-persona { field-sizing: content; max-height: min(52vh, 520px); }
 .canvas-inspector-input:focus,
 .canvas-inspector-persona:focus { border-color: var(--strong); }
 .canvas-inspector-seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }

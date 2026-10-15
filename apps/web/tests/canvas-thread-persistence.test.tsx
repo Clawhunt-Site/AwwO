@@ -88,18 +88,19 @@ it('retargets the open inspector to the selected Session before saving configura
   expect(getNodeThreads(saved)).toHaveLength(2);
 });
 
-it('persists delivery expansion as one idempotent view change without moving siblings or adding undo steps', () => {
+it('persists delivery expansion as one idempotent view change without moving or resizing the node or adding undo steps', () => {
+  // The drawer takes a share of an opened node's width (2026-10-15): it no longer widens or moves the saved node.
   const first = prepare();
   render(<CanvasSurface />);
   fireEvent.click(screen.getByText('Open delivery drawer'));
   fireEvent.click(screen.getByText('Open delivery drawer'));
   let saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
-  expect(saved).toMatchObject({ deliverablesOpen: true, w: first.w + 260, x: first.x - 130 });
+  expect(saved).toMatchObject({ deliverablesOpen: true, w: first.w, x: first.x });
   expect(screen.getByRole('button', { name: '撤销', exact: true })).toBeDisabled();
   cleanup(); render(<CanvasSurface />);
   fireEvent.click(screen.getByText('Open delivery drawer'));
   saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
-  expect(saved.w).toBe(first.w + 260);
+  expect(saved).toMatchObject({ deliverablesOpen: true, w: first.w, x: first.x });
   fireEvent.click(screen.getByText('Close delivery drawer'));
   saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
   expect(saved).toMatchObject({ deliverablesOpen: false, w: first.w, x: first.x });

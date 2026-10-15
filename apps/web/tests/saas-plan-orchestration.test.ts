@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createFormNode, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { applyCanvasPlan, CANVAS_PLAN_PROTOCOL, parseCanvasPlan, sharedRequirements, type CanvasPlanModels } from '../src/canvas/canvasPlan';
+import { applyCanvasPlan, CANVAS_PLAN_PROTOCOL, hostedPagePersona, parseCanvasPlan, sharedRequirements, type CanvasPlanModels } from '../src/canvas/canvasPlan';
 import { buildPlanningContext } from '../src/canvas/canvasPlanning';
+import { withAssistantModel } from '../src/canvas/assistantModel';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
 // What developer mode used to be opened for in the case tutorials (owner request 2026-10-15): every node's task
@@ -139,6 +140,28 @@ describe('models a plan sets', () => {
       { type: 'set_model', nodeId: 'page', model: 'Qwen 3.8' },
     ), 'en', REQUEST, undefined, models);
     expect(applied.doc.nodes[0]).toMatchObject({ runtime: 'pi', model: 'qwen3.8-27b-p6' });
+    expect(applied.modelSetNodeIds).toEqual(applied.addedNodeIds);
+  });
+
+  it('keeps a new node the plan put on the workspace default there, though the assistant runs another model (Codex review)', () => {
+    const applied = applyCanvasPlan(emptyDocument(), plan(
+      { type: 'add_node', ref: 'page', templateId: 'frontend' },
+      { type: 'add_node', ref: 'copy', templateId: 'materials' },
+      { type: 'set_model', nodeId: 'page', model: 'default' },
+    ), 'en', REQUEST, undefined, models);
+    const [page, copy] = applied.addedNodeIds;
+    expect(applied.modelSetNodeIds).toEqual([page]);
+    // As the hosted canvas applies it (CanvasSurface): the assistant's model goes only to the nodes the plan left unset.
+    const assistant = { runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5' };
+    const choices = models.choices.map(choice => ({ runtime: choice.runtime, model: choice.model, available: choice.available }));
+    const doc = withAssistantModel(applied.doc, applied.addedNodeIds.filter(id => !applied.modelSetNodeIds.includes(id)), assistant, choices);
+    expect(session(doc, page)).toMatchObject({ runtime: '', model: '' });
+    expect(session(doc, copy)).toMatchObject({ runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5' });
+  });
+
+  it('counts a model name in characters, as the plan gate does', () => {
+    expect(plan({ type: 'set_model', nodeId: 'n', model: `m${'🙂'.repeat(199)}` }).operations[0]).toMatchObject({ type: 'set_model' });
+    expect(() => plan({ type: 'set_model', nodeId: 'n', model: `m${'🙂'.repeat(200)}` })).toThrow('最多 200 字符');
   });
 });
 
@@ -181,5 +204,50 @@ describe('what the planner is shown', () => {
     expect(context).not.toContain('"model":');
     expect(context).toContain('set_task: {type:"set_task"');
     expect(CANVAS_PLAN_PROTOCOL).toContain('set_model: {type:"set_model"');
+  });
+});
+
+// Every case tutorial turned the page's node into one html output by hand; a 27B planner given the rule in words still
+// left the frontend template's three markdown/file outputs (local planner check, 2026-10-15). On a hosted canvas the
+// frontend node is the page itself, as the planner is shown it and as a plan makes it.
+describe('a page on a hosted canvas', () => {
+  const page = plan(
+    { type: 'add_node', ref: 'game', templateId: 'frontend', title: 'Snake' },
+    { type: 'add_node', ref: 'check', templateId: 'review', title: 'Play test' },
+    { type: 'connect', fromNode: 'game', fromField: 'page', toNode: 'check', toField: 'delivery' },
+  );
+
+  it('makes a plan’s frontend node deliver one html page, with a brief for a page, wired on by that page', () => {
+    const applied = applyCanvasPlan(doc(), page, 'en', REQUEST, undefined, undefined, true);
+    const game = applied.doc.nodes.find(node => node.id === applied.addedNodeIds[0]) as SessionNode;
+    expect(game.contract!.outputs.map(field => [field.id, field.type, field.required])).toEqual([['page', 'html', true]]);
+    expect(game.persona).toBe(hostedPagePersona('en'));
+    expect(game.persona).toContain('one complete HTML file');
+    expect(game.contract!.inputs.map(field => field.id)).toEqual(['api', 'screens', 'design', 'assets']);
+    expect(applied.doc.edges).toEqual([expect.objectContaining({ fromNode: game.id, fromPort: 'out:page', toNode: applied.addedNodeIds[1] })]);
+    expect(applied.adjustments).toEqual([]);
+    // A persona the plan writes is the node's brief.
+    const briefed = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'game', templateId: 'frontend', persona: 'A snake game.' }), 'zh', REQUEST, undefined, undefined, true);
+    expect((briefed.doc.nodes[0] as SessionNode).persona).toBe('A snake game.');
+    expect((briefed.doc.nodes[0] as SessionNode).contract!.outputs.map(field => field.label)).toEqual(['网页']);
+  });
+
+  it('keeps the frontend template elsewhere: off a hosted canvas, and on a frontend node already on the canvas', () => {
+    const local = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'game', templateId: 'frontend' }), 'en', REQUEST);
+    expect((local.doc.nodes[0] as SessionNode).contract!.outputs.map(field => field.id)).toEqual(['delivery', 'preview', 'checks']);
+    const existing = { ...createAgentTemplate('frontend', { x: 0, y: 0 }, 'en'), id: 'old' } as SessionNode;
+    const renamed = applyCanvasPlan(doc(existing), plan({ type: 'update_node', nodeId: 'old', title: 'Shop' }), 'en', REQUEST, undefined, undefined, true);
+    expect(session(renamed.doc, 'old').contract!.outputs.map(field => field.id)).toEqual(['delivery', 'preview', 'checks']);
+  });
+
+  it('shows the hosted planner a frontend node as that page, and a local planner the template', () => {
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    const hosted = buildPlanningContext(doc(), [], 'en');
+    expect(hosted).toContain('"id":"frontend","title":"Frontend development","responsibility":"Delivers one page that works when opened');
+    expect(hosted).toContain('"outputs":[{"id":"page","label":"Page","type":"html","required":true}]');
+    clearSaaSCanvas();
+    const local = buildPlanningContext(doc(), [], 'en');
+    expect(local).not.toContain('"id":"page","label":"Page"');
+    expect(local).toContain('{"id":"delivery"');
   });
 });

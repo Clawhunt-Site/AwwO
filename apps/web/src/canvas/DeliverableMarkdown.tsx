@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useCanvasI18n } from './i18n';
+import { looksLikeCode } from './codeLike';
 
 /** A display/copy reference only; recognizing a path never reads or opens a file. */
 export function localFilePath(value: string, plainFile = false): string | null {
@@ -61,7 +62,9 @@ const deliveryMarkdownComponents: Components = {
 };
 
 /** Delivered Markdown, inert: images become their alt text, links open apart, local paths are copy-only
- * and a relative link stays text. Upstream deliveries shown as a node's inputs render the same way. */
+ * and a relative link stays text. Upstream deliveries shown as a node's inputs render the same way. A delivery that
+ * is code (codeLike.ts) reads as code, every character and line kept. */
 export function DeliverableMarkdown({ children }: { children: string }) {
+  if (looksLikeCode(children)) return <pre className="awwo-deliverable-code"><code>{children}</code></pre>;
   return <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={deliveryUrlTransform} components={deliveryMarkdownComponents}>{children}</ReactMarkdown>;
 }

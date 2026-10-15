@@ -4,8 +4,8 @@ import { gatewayApiBase } from '../chatAutomations';
 import { getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import { figureRole } from './figureKit/figureKit';
 import type { CanvasDocument } from './canvasDoc';
-import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, DEFAULT_MODEL_REFERENCE, MEDIA_PLAN_TEMPLATE_IDS, PLAN_TEMPLATE_IDS, canvasPlanRevision,
-  parseCanvasPlan, sharedRequirements, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType } from './canvasPlan';
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, DEFAULT_MODEL_REFERENCE, HOSTED_PAGE_TEMPLATE_ID, MEDIA_PLAN_TEMPLATE_IDS, PLAN_TEMPLATE_IDS,
+  canvasPlanRevision, hostedPageOutputs, parseCanvasPlan, sharedRequirements, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType } from './canvasPlan';
 import { isTaskFrame } from './taskFrame';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
@@ -218,9 +218,12 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
     execution: doc.execution ? { mode: doc.execution.mode, maxRounds: doc.execution.maxRounds,
       reviewerNodeId: doc.execution.reviewerNodeId, verdictFieldId: doc.execution.verdictFieldId } : { mode: 'workflow' },
   };
-  const templates = [...getAgentTemplates(locale).map(item => ({ id: item.id, title: item.title, responsibility: item.subtitle,
+  // A hosted canvas's frontend node is the page itself, as a plan then makes it (hostedPageOutputs).
+  const page = (id: string) => saas && id === HOSTED_PAGE_TEMPLATE_ID;
+  const templates = [...getAgentTemplates(locale).map(item => ({ id: item.id, title: item.title,
+    responsibility: page(item.id) ? canvasText(locale, 'planning.pageResponsibility') : item.subtitle,
     inputs: item.inputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
-    outputs: item.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
+    outputs: (page(item.id) ? hostedPageOutputs(locale) : item.outputs).map(({ id, label, type, required }) => ({ id, label, type, required })),
   })), ...offeredMedia.map(kind => ({ id: kind,
     title: canvasText(locale, kind === 'video' ? 'node.addVideo' : kind === 'model3d' ? 'node.addModel3d' : 'node.addImage'),
     responsibility: canvasText(locale, 'planning.mediaResponsibility', { kind: canvasText(locale, kind === 'video' ? 'media.kindVideo' : kind === 'model3d' ? 'media.kindModel3d' : 'media.kindImage') }),

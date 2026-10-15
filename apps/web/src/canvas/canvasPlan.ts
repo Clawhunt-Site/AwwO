@@ -23,6 +23,24 @@ const isMediaTemplate = (value: unknown): value is MediaKind => MEDIA_PLAN_TEMPL
 const AGENT_PLAN_TEMPLATE_IDS = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure'] as const satisfies ReadonlyArray<AgentTemplateId>;
 export const PLAN_TEMPLATE_IDS: ReadonlySet<string> = new Set<string>([...AGENT_PLAN_TEMPLATE_IDS, ...MEDIA_PLAN_TEMPLATE_IDS]);
 
+/** On a hosted canvas a frontend node the assistant adds is the page itself: its one model call delivers one complete
+ *  HTML page (a site, a game or a tool) that opens and runs in 成果, where the template's delivery notes, preview link
+ *  and checks would describe files and servers that call cannot make. The planner is shown it this way
+ *  (buildPlanningContext) and a plan's frontend node is made this way (applyCanvasPlan), so the two agree on its one
+ *  output, which every case tutorial used to set by hand in developer mode (owner request 2026-10-15). */
+export const HOSTED_PAGE_TEMPLATE_ID = 'frontend' satisfies AgentTemplateId;
+export function hostedPageOutputs(locale: UiLocale): ContractField[] {
+  return [{ id: 'page', label: locale === 'en' ? 'Page' : '网页', type: 'html', required: true, value: '',
+    help: locale === 'en' ? 'One complete HTML page that works as soon as it is opened.' : '一页完整的 HTML，打开就能使用。' }];
+}
+/** Its brief when the plan writes none: the frontend template's own speaks of code locations, preview links and test
+ *  records, which a page delivered in one call does not have. */
+export function hostedPagePersona(locale: UiLocale): string {
+  return locale === 'en'
+    ? 'Delivers one page that works as soon as it is opened in a browser: a website, game or tool as one complete HTML file, its CSS and JavaScript inside it. Uses what the nodes wired into it deliver and pastes their code unchanged. Writes no notes, code locations or preview links, and relies on no server, account or tool to install.'
+    : '负责交付一页打开就能用的网页、游戏或小工具：一个完整的 HTML 文件，CSS 与 JavaScript 写在页面里，在浏览器里直接打开就能使用。使用上游节点交来的内容，代码原样粘贴、不改写。不写说明文字、代码位置或预览链接，不依赖服务器、账号或需要安装的工具。';
+}
+
 export type CanvasPlanFieldChanges = Partial<Pick<ContractField, 'label' | 'type' | 'required' | 'help' | 'placeholder'>>;
 export type CanvasPlanOperation =
   | { type: 'add_node'; ref: string; templateId: PlanTemplateId; title?: string; persona?: string; inputValues?: Record<string, string>; acceptanceCriteria?: string[] }
@@ -58,7 +76,9 @@ export const CANVAS_PLAN_NODE_OPERATION_TYPES: ReadonlySet<string> = new Set(['a
 export interface CanvasPlan { version: 1; summary: string; operations: CanvasPlanOperation[] }
 /** `adjustments` says, in the request's language, what was applied differently from how the plan wrote it
  *  (a connection given its own input, a link a field change broke) or left out (a connection that would loop). */
-export interface AppliedCanvasPlan { doc: CanvasDocument; addedNodeIds: string[]; summary: string; adjustments: string[] }
+/** `modelSetNodeIds`: the nodes a set_model step put on a model, the workspace default included, which a host's own
+ *  model for new nodes must leave as the plan set them. */
+export interface AppliedCanvasPlan { doc: CanvasDocument; addedNodeIds: string[]; summary: string; adjustments: string[]; modelSetNodeIds: string[] }
 /** What a host tells a plan about the media nodes it can run: the model a new node of each kind starts on (a kind
  *  missing here cannot be added), and the longest prompt a model takes. */
 export interface CanvasPlanMedia { models: Partial<Record<MediaKind, string>>; promptMax: (model: string) => number | undefined }
@@ -229,7 +249,9 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
       }
       case 'set_model': {
         keys(op, ['type', 'nodeId', 'model', 'effort'], location);
-        const model = text(op.model, `${location}.model`, LIMITS.title, false);
+        // Counted in characters, as the plan gate counts it (planning.go), so a name both accept is the same name.
+        if (typeof op.model !== 'string' || Array.from(op.model).length > LIMITS.title || !op.model.trim()) fail(`${location}.model必须是非空字符串，最多 ${LIMITS.title} 字符。`);
+        const model = op.model;
         if (Object.hasOwn(op, 'effort') && (typeof op.effort !== 'string' || (op.effort !== '' && !EFFORT_LEVEL.test(op.effort)))) fail(`${location}.effort不是有效的思考强度档位。`);
         return { type: 'set_model', nodeId: nodeId(), model: model.trim(), ...(typeof op.effort === 'string' && op.effort ? { effort: op.effort } : {}) };
       }
@@ -522,9 +544,10 @@ const REQUIREMENT_REF = /^@R\d+$/;
 export const DEFAULT_MODEL_REFERENCE = 'default';
 
 /** Validate against a private clone, then return one complete document. No partial writes: an operation that
- *  cannot apply as written is either repaired or left out, and each such case is listed in `adjustments`. */
+ *  cannot apply as written is either repaired or left out, and each such case is listed in `adjustments`. On a
+ *  `hosted` canvas a frontend node the plan adds delivers one html page (hostedPageOutputs). */
 export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = '', media?: CanvasPlanMedia,
-  models?: CanvasPlanModels): AppliedCanvasPlan {
+  models?: CanvasPlanModels, hosted = false): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
   const adjustments: string[] = [];
   const adjust: Adjust = (zh, en) => { if (adjustments.length < LIMITS.operations) adjustments.push(locale === 'en' ? en : zh); };
@@ -550,6 +573,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   // New-node refs left out (a media kind this workspace cannot generate); each was said once, so steps naming one skip.
   const skipped = new Set<string>();
   const addedNodeIds: string[] = [];
+  const modelSetNodeIds = new Set<string>();
   const find = (reference: string): CanvasNode | undefined => draft.nodes.find(item => item.id === (refs.get(reference) ?? reference));
   const resolve = (reference: string): CanvasNode => {
     const node = find(reference);
@@ -580,6 +604,10 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           break;
         }
         const node = createAgentTemplate(op.templateId, { x: 0, y: 0 }, locale);
+        if (hosted && op.templateId === HOSTED_PAGE_TEMPLATE_ID && node.contract) {
+          node.contract = { ...node.contract, outputs: hostedPageOutputs(locale) };
+          node.persona = hostedPagePersona(locale);
+        }
         // Carry the human's exact request separately from the model-authored persona.
         // Every new downstream reviewer receives it even if an upstream draft drifts.
         if (constraints.length || op.acceptanceCriteria?.length) {
@@ -654,7 +682,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           break;
         }
         const wanted = op.model.trim();
-        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = ''; node.model = ''; node.effort = ''; break; }
+        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = ''; node.model = ''; node.effort = ''; modelSetNodeIds.add(node.id); break; }
         const choices = models?.choices ?? [];
         const folded = wanted.toLowerCase();
         const id = choices.find(choice => choice.model === wanted)?.model
@@ -668,6 +696,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (op.effort && !effort) adjust(`「${title}」改用了「${entry.name || entry.model}」，它没有「${op.effort}」这档思考强度，使用模型默认`,
           `“${title}” now uses “${entry.name || entry.model}”, which has no “${op.effort}” reasoning effort; it uses the model’s default`);
         node.runtime = entry.runtime; node.model = entry.model; node.effort = effort;
+        modelSetNodeIds.add(node.id);
         break;
       }
       case 'set_input': if (!skipped.has(op.nodeId)) setInput(resolve(op.nodeId), op.fieldId, op.value, adjust, media); break;
@@ -784,7 +813,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   const positions = new Map(arranged.map(node => [node.id, { x: node.x + right - 80, y: node.y }]));
   draft.nodes = draft.nodes.map(node => positions.has(node.id) ? { ...node, ...positions.get(node.id)! } : node);
   draft.updatedAt = Date.now();
-  return { doc: invalidateOutputs(base, draft), addedNodeIds: survivors.map(node => node.id), summary: plan.summary, adjustments };
+  return { doc: invalidateOutputs(base, draft), addedNodeIds: survivors.map(node => node.id), summary: plan.summary, adjustments,
+    modelSetNodeIds: draft.nodes.filter(node => modelSetNodeIds.has(node.id)).map(node => node.id) };
 }
 
 function canonical(value: unknown): string {

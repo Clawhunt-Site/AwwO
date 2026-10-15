@@ -15,7 +15,8 @@ export function TaskFrameEditor({ value, disabled, onChange }: { value: unknown;
   };
   return <section className="canvas-task-frame" aria-label={text('任务要求', 'Task requirements')}>
     <h3>{text('任务要求', 'Task requirements')}</h3>
-    <p className="canvas-inspector-hint">{text('由你填写，运行时随任务传递。验收标准仍需人工核对。', 'Your requirements accompany the task. Acceptance criteria still need human review.')}</p>
+    <p className="canvas-inspector-hint">{text('约束是这个节点必须遵守的要求，验收标准是它的交付要满足、可以逐条核对的条件；两者都随任务发给模型，画布助手也能修改。验收标准仍需人工核对。',
+      'Constraints are what this node must keep to; acceptance criteria are checks its delivery must pass, one by one. Both go to the model with the task, and the canvas assistant can change them. Acceptance criteria still need human review.')}</p>
     {error && <p className="canvas-task-frame-error" role="alert">{messages[error]}</p>}
     {error !== 'unsupported' && (['constraints', 'acceptanceCriteria'] as const).map(field => {
       const label = field === 'constraints' ? text('约束', 'Constraint') : text('验收标准', 'Acceptance criterion');

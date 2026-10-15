@@ -1,0 +1,31 @@
+/* An opened node's task card and failure note (NodeBrief.tsx), at the top of its conversation column. */
+/* Both give way before the message box (flex-shrink 0) in a short node: they scroll within what is left. */
+.canvas-root .awwo-node-brief { flex: 0 1 auto; min-height: 44px; overflow: auto; overscroll-behavior: contain; display: grid; gap: 6px; margin: 10px 12px 0; padding: 10px 12px; border: 1px solid var(--awwo-line); border-radius: 10px; background: var(--awwo-soft); color: var(--awwo-ink); font-size: 12.5px; line-height: 1.55; }
+.canvas-root .awwo-node-brief > header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.canvas-root .awwo-node-brief > header strong { font-size: 12.5px; }
+.canvas-root .awwo-node-brief-model { color: var(--awwo-muted); font-size: 11.5px; }
+.canvas-root .awwo-node-brief > header button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 9px; border: 1px solid var(--awwo-line); border-radius: 999px; background: var(--awwo-card, #fff); color: var(--awwo-ink); font: inherit; font-size: 11.5px; cursor: pointer; }
+.canvas-root .awwo-node-brief > header .awwo-node-brief-ask { margin-left: auto; }
+.canvas-root .awwo-node-brief > header button:hover { border-color: var(--awwo-teal, #286454); }
+.canvas-root .awwo-node-brief > header button:focus-visible { outline: 2px solid var(--awwo-teal, #286454); outline-offset: 1px; }
+.canvas-root .awwo-node-brief-task { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.canvas-root .awwo-node-brief.is-open { max-height: 46%; overflow: auto; overscroll-behavior: contain; }
+/* Beside the inputs (NodeBrief compact): one line of the task, the checks counted, so the inputs keep the column. */
+.canvas-root .awwo-node-brief.is-compact { gap: 4px; padding-block: 8px; min-height: 64px; }
+.canvas-root .awwo-node-brief.is-compact .awwo-node-brief-task { -webkit-line-clamp: 1; }
+.canvas-root .awwo-node-brief-counts { margin: 0; color: var(--awwo-muted); font-size: 11.5px; }
+.canvas-root .awwo-node-brief.is-open .awwo-node-brief-task { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.canvas-root .awwo-node-brief-body { display: grid; gap: 6px; min-height: 0; }
+.canvas-root .awwo-node-brief-list > span { color: var(--awwo-muted); font-size: 11.5px; font-weight: 600; }
+.canvas-root .awwo-node-brief-list ul { margin: 2px 0 0; padding-left: 18px; }
+.canvas-root .awwo-node-brief-list li { overflow-wrap: anywhere; white-space: pre-wrap; }
+.canvas-root .awwo-node-brief:not(.is-open) .awwo-node-brief-list:not(.is-constraints) li:nth-child(n + 3) { display: none; }
+.canvas-root .awwo-node-failure { flex: 0 1 auto; min-height: 44px; max-height: 34%; overflow: auto; overscroll-behavior: contain; display: grid; gap: 8px; margin: 10px 12px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, #c2410c 45%, var(--awwo-line)); border-radius: 10px; background: color-mix(in srgb, #c2410c 7%, var(--awwo-card, #fff)); color: var(--awwo-ink); font-size: 12.5px; line-height: 1.5; }
+.canvas-root .awwo-node-failure p { display: flex; align-items: flex-start; gap: 8px; margin: 0; overflow-wrap: anywhere; }
+.canvas-root .awwo-node-failure p svg { flex: none; margin-top: 3px; color: #c2410c; }
+.canvas-root .awwo-node-failure p strong { margin-right: 6px; }
+.canvas-root .awwo-node-failure-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.canvas-root .awwo-node-failure-actions button { min-height: 28px; padding: 3px 12px; border: 1px solid var(--awwo-line); border-radius: 999px; background: var(--awwo-card, #fff); color: var(--awwo-ink); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.canvas-root .awwo-node-failure-actions button.is-primary { border-color: transparent; background: var(--awwo-ink, #232c29); color: var(--awwo-card, #fff); }
+.canvas-root .awwo-node-failure-actions button:focus-visible { outline: 2px solid var(--awwo-teal, #286454); outline-offset: 1px; }
+:root[data-theme='dark'] .canvas-root .awwo-node-failure p svg { color: #f0a072; }

@@ -346,7 +346,8 @@ it('publishes a complete structured follow-up and restores its readable report a
   vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:revised-report'; });
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-  fireEvent.click(screen.getByRole('button', { name: 'Expand deliverables' }));
+  // A node that has delivered opens with its delivery beside the conversation.
+  expect(screen.queryByRole('button', { name: 'Expand deliverables' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Download .md' }));
   expect(blobs).toHaveLength(1);
   const downloaded = await new Promise<string>((resolve, reject) => {

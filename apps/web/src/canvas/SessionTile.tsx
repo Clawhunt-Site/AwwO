@@ -29,14 +29,14 @@
 //  - An unbound tile's composer is disabled with the reason stated, never a live-looking box.
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
 import { displayText } from './displayCopy';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
-import { unlistedModelLabel } from './modelNames';
+import { nodeModelName, unlistedModelLabel } from './modelNames';
 import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
@@ -52,6 +52,7 @@ import { ContractFields } from './ContractFields';
 import { emptyContract, type ContractField } from './nodeContracts';
 import { NodeDeliverables } from './NodeDeliverables';
 import { ReworkFindingsNote } from './ReworkFindingsNote';
+import { NodeBrief, NodeFailure } from './NodeBrief';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { AgentGlyph, AgentTemplateDetails } from './AgentTemplateDetails';
 import { activeNodeThread, getNodeThreads, createNodeThread, selectNodeThread, updateNodeDraft, sessionStoreKey } from './nodeThreads';
@@ -65,12 +66,22 @@ import { showsPreview } from './cardFrames';
 import type { StudioEntry } from './studio/studioModel';
 import { canvasText, useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { recoveryDetailMessage } from './surfaceMessages';
+import { deliverablesShown, openContentOf, type OpenContent } from './nodePresentation';
 import { nodeTeamModeLabel } from './NodeTeamEditor';
 import type { UiLocale } from '../locale';
 
 /** Smallest a tile may be dragged to. Below this the head itself stops being readable. */
 /** Below this much travel a press is a click, not a drag (in SCREEN px, before scale). */
 const DRAG_THRESHOLD_PX = 3;
+
+/** A conversation's title in the reader's words: the server names the ones it makes "Session 2", "Session 3" … */
+function threadTitle(title: string | undefined, t: CanvasTranslate): string {
+  const numbered = /^Session (\d+)$/.exec(title?.trim() ?? '');
+  return numbered ? t('tile.threadNumber', { count: Number(numbered[1]) }) : title?.trim() || t('tile.threadNumber', { count: 1 });
+}
+
+/** The share of an opened node's width its delivery drawer takes, by what the node mostly shows (openContentOf). */
+const DRAWER_WIDTH: Record<OpenContent, string> = { page: '62%', media: '48%', delivery: '52%', chat: '38%' };
 
 /** What an image, video or 3D node that has not generated yet asks for (its empty state's title). */
 const MEDIA_EMPTY_TITLE: Record<MediaKind, CanvasTextKey> = {
@@ -337,6 +348,11 @@ export interface SessionTileProps {
   onStopNode?: (nodeId: string) => void;
   /** Bumped to open this node's input drawer (the assistant's 「去填写」 step), in either mode. */
   inputRequest?: number;
+  /** Hand this node to the canvas assistant: 'edit' starts a request to change it, 'fix' asks it to make a failed node
+   *  finish. The simple view's way to change a node, without its settings. */
+  onAskAssistant?: (nodeId: string, kind: 'edit' | 'fix') => void;
+  /** Whether the opened node's delivery drawer sits beside its conversation (it opens by itself only then). */
+  deliveryBeside?: boolean;
 }
 
 /**
@@ -386,6 +402,8 @@ export const SessionTile = memo(function SessionTile({
   canvasEntries,
   onStopNode,
   inputRequest = 0,
+  onAskAssistant,
+  deliveryBeside = true,
 }: SessionTileProps) {
   const { locale, t } = useCanvasI18n();
   const simple = useSimpleCanvas();
@@ -417,12 +435,14 @@ export const SessionTile = memo(function SessionTile({
   // Each press of the template guide's 编辑 opens the editor, also after the reader collapsed it.
   const [deliverablesEditorRequest, setDeliverablesEditorRequest] = useState(0);
   const template = node.kind === 'session' ? getAgentTemplateForNode(node, locale) : undefined;
-  const [deliverablesOpen, setDeliverablesOpen] = useState(node.kind === 'session' && Boolean(node.deliverablesOpen));
+  // A node that has delivered opens with its delivery beside the conversation unless the reader closed it there
+  // (deliverablesShown).
+  const drawerShown = deliverablesShown(node, deliveryBeside);
+  const [deliverablesOpen, setDeliverablesOpen] = useState(drawerShown);
   useEffect(() => {
-    const open = node.kind === 'session' && Boolean(node.deliverablesOpen);
-    setDeliverablesOpen(open);
-    if (!open) setDeliverablesEditorOpen(false);
-  }, [node.kind, node.kind === 'session' && node.deliverablesOpen]);
+    setDeliverablesOpen(drawerShown);
+    if (!drawerShown) setDeliverablesEditorOpen(false);
+  }, [drawerShown]);
   // The Session list starts collapsed so an opened node leads with its conversation; the chat
   // heading keeps the expand control and the list keeps its collapse control.
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -702,6 +722,10 @@ export const SessionTile = memo(function SessionTile({
   const outputAge = output ? relativeAge(output.at, Date.now(), locale) : '';
 
   const runDetail = run ? recoveryDetailMessage(t, run.detail) : undefined;
+  // The model the node runs, as its picker names it (the task card says it); none when it runs the workspace default.
+  const modelLabel = sessionNode?.model
+    ? modelChoices?.find(choice => choice.key === currentChoiceKey(sessionNode, modelChoices))?.label || nodeModelName(sessionNode, {}, locale)
+    : undefined;
   const badge = run ? runBadgeText(run, locale, t) : '';
   const showBody = lod !== 'glance';
   const tail = TAIL_LINES[lod];
@@ -773,7 +797,10 @@ export const SessionTile = memo(function SessionTile({
       className={`canvas-tile awwo-node canvas-tile--${kindClass} canvas-tile--${lod}${
         selected ? ' canvas-tile--selected' : ''
       } is-${dot}${settledMark ? ` is-just-${settledMark}` : ''}${compact ? ' is-compact' : ''}${previewing ? ' has-preview' : ''}`}
-      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
+      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h,
+        // An opened node gives its delivery the share of its width that delivery needs (a page most of it).
+        ...(expanded ? { '--awwo-drawer-width': DRAWER_WIDTH[openContentOf(node)] } as CSSProperties : {}) }}
+      data-content={expanded ? openContentOf(node) : undefined}
       data-testid={`canvas-tile-${nodeId}`}
       data-lod={lod}
       data-zoom={zoomedOut ? 'far' : undefined}
@@ -891,23 +918,29 @@ export const SessionTile = memo(function SessionTile({
                 <div className="awwo-session-heading"><span>{t('tile.sessions')}</span><button type="button" aria-label={t('tile.collapseSessions')} title={t('tile.collapseList')} onClick={() => setSessionsOpen(false)}><PanelLeftClose size={14} /></button></div>
                 <button className="awwo-session-new" type="button" aria-label={t('tile.newSession')} disabled={readOnly} onClick={() => changeThread()}><Plus size={14} />{t('tile.new')}</button>
                 <div className="awwo-session-list">{getNodeThreads(node).map(thread => <button key={thread.id} type="button" className={thread.id === currentThread?.id ? 'is-active' : ''}
-                  aria-label={t('tile.openSession', { title: thread.title })} aria-current={thread.id === currentThread?.id ? 'page' : undefined}
-                  disabled={busy || (!viewOnly && !onUpdateNode)} onClick={() => changeThread(thread.id)} title={thread.preview || thread.title}>
-                  <MessageSquare size={13} /><span>{thread.title}</span>
+                  aria-label={t('tile.openSession', { title: threadTitle(thread.title, t) })} aria-current={thread.id === currentThread?.id ? 'page' : undefined}
+                  disabled={busy || (!viewOnly && !onUpdateNode)} onClick={() => changeThread(thread.id)} title={thread.preview || threadTitle(thread.title, t)}>
+                  <MessageSquare size={13} /><span>{threadTitle(thread.title, t)}</span>
                 </button>)}</div>
                 <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} />{t('tile.input')}</button>
               </nav> : null}
               <div className="awwo-node-chat">
                 {expanded ? <div className="awwo-chat-heading">
                   {!sessionsOpen && !simple ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
-                  <span>{currentThread?.title || 'Session 1'}</span>
+                  <span>{threadTitle(currentThread?.title, t)}</span>
                   {freeConversation && onRunNode ? <button type="button" className="awwo-chat-task-action" disabled={viewOnly || busy || interactionLocked} onClick={() => onRunNode(nodeId)}><Play size={13} />{t('conversation.executeTask')}</button> : null}
                   {template && !simple ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
-                  {!sessionsOpen && !simple ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} /></button> : null}
+                  {/* What the node receives: always in developer mode, where its fields are added, and in the simple view once it has inputs to fill. */}
+                  {!sessionsOpen && (!simple || (node.kind === 'session' && (node.contract?.inputs.length ?? 0) > 0)) ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} />{simple ? <span>{t('tile.input')}</span> : null}</button> : null}
                 </div> : null}
+                {expanded && sessionNode && run?.state === 'failed' ? <NodeFailure detail={runDetail ?? ''}
+                  onRerun={onRunNode && !viewOnly && !busy && (sessionNode.binding || initializeOnSend) ? () => onRunNode(nodeId) : undefined}
+                  onAskAssistant={onAskAssistant && !viewOnly ? () => onAskAssistant(nodeId, 'fix') : undefined} /> : null}
+                {expanded && sessionNode && !mediaNode && !(templateOpen && template) ? <NodeBrief key={nodeId} node={sessionNode} template={template}
+                  modelLabel={modelLabel} compact={inputOpen} onAskAssistant={onAskAssistant && !viewOnly ? () => onAskAssistant(nodeId, 'edit') : undefined} /> : null}
                 {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
                   <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={closeInput}><X size={14} /></button></header>
-                  <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
+                  <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} structureEditable={!simple} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className="awwo-node-panel awwo-node-panel--conversation">
                   {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} /> : null}

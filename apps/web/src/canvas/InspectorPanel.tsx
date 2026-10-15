@@ -476,13 +476,13 @@ export function InspectorPanel({
 
             {mediaDraft ? <MediaNodeSettings node={sessionDraft} state={media} disabled={busy} onChange={editDraft} onRetry={onRetryMedia} /> : <>
 
-            {!(modelGroups && onInitialize) || sessionDraft.agentRef ? <div className="canvas-inspector-label">{t(modelGroups && onInitialize ? 'inspector.model' : 'inspector.runtime')}</div> : null}
+            {!(modelGroups) || sessionDraft.agentRef ? <div className="canvas-inspector-label">{t(modelGroups ? 'inspector.model' : 'inspector.runtime')}</div> : null}
             {sessionDraft.agentRef ? <dl className="canvas-inspector-hint">
-              {modelGroups && onInitialize ? null : <><dt>Runtime</dt><dd><output aria-label="Runtime">{nodeTeamRuntimeLabel(sessionDraft.runtime || 'pi')}</output></dd></>}
+              {modelGroups ? null : <><dt>Runtime</dt><dd><output aria-label="Runtime">{nodeTeamRuntimeLabel(sessionDraft.runtime || 'pi')}</output></dd></>}
               <dt>{locale === 'en' ? 'Model' : '模型'}</dt><dd><output aria-label={locale === 'en' ? 'Model' : '模型'}>{sessionDraft.model || (locale === 'en' ? 'Resolved by the server' : '由服务端解析')}</output></dd>
               <dt>{locale === 'en' ? 'Reasoning effort' : '推理强度'}</dt><dd><output aria-label={locale === 'en' ? 'Reasoning effort' : '推理强度'}>{sessionDraft.effort || (locale === 'en' ? 'Not set' : '未设置')}</output></dd>
-            </dl> : modelGroups && onInitialize ? <div className="canvas-inspector-runtime">
-                <NodeModelSettings node={sessionDraft} groups={modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels}
+            </dl> : modelGroups ? <div className="canvas-inspector-runtime">
+                <NodeModelSettings node={sessionDraft} groups={modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team)}
                   disabled={busy}
                   onChange={next => editDraft({ ...sessionDraft, ...next,
                     ...(sessionDraft.team && next.model !== sessionDraft.model ? { team: followNodeModel(sessionDraft.team, sessionDraft, { runtime: next.runtime }) } : {}) })} />
@@ -536,11 +536,13 @@ export function InspectorPanel({
             <label className="canvas-inspector-label" htmlFor="cv-cfg-persona">
               {t('inspector.persona')}
             </label>
+            <div className="canvas-inspector-hint" id="cv-cfg-persona-hint">{t('inspector.personaHint')}</div>
             <textarea
               id="cv-cfg-persona"
               className="canvas-inspector-persona"
               aria-label={t('inspector.persona')}
-              rows={5}
+              aria-describedby="cv-cfg-persona-hint"
+              rows={10}
               placeholder={t(onInitialize ? 'inspector.initializePersonaPlaceholder' : 'inspector.personaPlaceholder')}
               value={sessionDraft.persona}
               disabled={busy || Boolean(sessionDraft.agentRef)}

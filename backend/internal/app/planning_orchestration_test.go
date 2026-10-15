@@ -24,6 +24,8 @@ func planWith(t *testing.T, operations ...map[string]any) string {
 
 func TestPlanGateAdmitsTaskRequirementsAndModels(t *testing.T) {
 	long := strings.Repeat("界", taskFrameMaxEntryRunes)
+	half := strings.Repeat("b", taskFrameMaxEntryRunes)
+	overTotal := []any{half, half, half, half, half, half, "c"} // 12,001 runes in all
 	for name, op := range map[string]map[string]any{
 		"acceptance only":      {"type": "set_task", "nodeId": "n", "acceptanceCriteria": []any{"The page opens", "Every button works"}},
 		"constraints only":     {"type": "set_task", "nodeId": "n", "constraints": []any{"@R1", "Write only the layout data"}},
@@ -33,6 +35,9 @@ func TestPlanGateAdmitsTaskRequirementsAndModels(t *testing.T) {
 		"model with effort":    {"type": "set_model", "nodeId": "n", "model": "Claude Opus 5.5", "effort": "high"},
 		"model, empty effort":  {"type": "set_model", "nodeId": "n", "model": "default", "effort": ""},
 		"new node with checks": {"type": "add_node", "ref": "page", "templateId": "frontend", "acceptanceCriteria": []any{"One complete HTML document"}},
+		// Over the task frame's 12,000 in all: the canvas leaves the step out with a note, the rest of the plan applies.
+		"over the total":        {"type": "set_task", "nodeId": "n", "constraints": overTotal},
+		"over the total in two": {"type": "set_task", "nodeId": "n", "constraints": overTotal[:3], "acceptanceCriteria": overTotal[3:]},
 	} {
 		if !validatePlan(planWith(t, op)) {
 			t.Errorf("%s: refused %v", name, op)
@@ -46,8 +51,6 @@ func TestPlanGateRefusesMalformedTaskRequirementsAndModels(t *testing.T) {
 		many[i] = "check"
 	}
 	tooLong := strings.Repeat("a", taskFrameMaxEntryRunes+1)
-	half := strings.Repeat("b", taskFrameMaxEntryRunes)
-	overTotal := []any{half, half, half, half, half, half, "c"} // 12,001 runes in all
 	for name, op := range map[string]map[string]any{
 		"no list":                   {"type": "set_task", "nodeId": "n"},
 		"not a list":                {"type": "set_task", "nodeId": "n", "constraints": "one"},
@@ -55,8 +58,6 @@ func TestPlanGateRefusesMalformedTaskRequirementsAndModels(t *testing.T) {
 		"null entry":                {"type": "set_task", "nodeId": "n", "acceptanceCriteria": []any{nil}},
 		"too many":                  {"type": "set_task", "nodeId": "n", "acceptanceCriteria": many},
 		"entry too long":            {"type": "set_task", "nodeId": "n", "constraints": []any{tooLong}},
-		"over the total":            {"type": "set_task", "nodeId": "n", "constraints": overTotal},
-		"over the total in two":     {"type": "set_task", "nodeId": "n", "constraints": overTotal[:3], "acceptanceCriteria": overTotal[3:]},
 		"unknown key":               {"type": "set_task", "nodeId": "n", "constraints": []any{}, "runtime": "pi"},
 		"bad node":                  {"type": "set_task", "nodeId": "has space", "constraints": []any{}},
 		"no model":                  {"type": "set_model", "nodeId": "n"},
@@ -105,5 +106,20 @@ func TestPlanProgressOperationsMatchTheCanvas(t *testing.T) {
 		if !strings.Contains(plannerInstructions, name) {
 			t.Errorf("the planner is not told it may propose %s", name)
 		}
+	}
+}
+
+// A hosted canvas's frontend node is the page itself (hostedPageOutputs in canvasPlan.ts, shown to the planner in its
+// component templates); the planner is told to deliver a page that way rather than to rebuild a template's outputs.
+func TestPlannerDeliversAPageWithOneFrontendNode(t *testing.T) {
+	source, e := os.ReadFile(filepath.Join("..", "..", "..", "apps", "web", "src", "canvas", "canvasPlan.ts"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !strings.Contains(string(source), "HOSTED_PAGE_TEMPLATE_ID = 'frontend'") || !strings.Contains(string(source), "id: 'page'") {
+		t.Fatal("canvasPlan.ts no longer makes a hosted frontend node one html page")
+	}
+	if !strings.Contains(plannerInstructions, "one frontend node") || !strings.Contains(plannerInstructions, "add no fields to it") {
+		t.Fatal("the planner is not told to deliver a page with one frontend node")
 	}
 }

@@ -282,7 +282,8 @@ export function runRequestKind(text: string): 'all' | 'rest' | null {
   const raw = text.trim().toLowerCase();
   if (!raw || [...raw].length > 30) return null;
   if (/[a-z]/.test(raw) && !/[一-鿿]/.test(raw)) {
-    const words = raw.replace(/[’'`]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+    // Digits stay: 「run 2」 or 「run #2」 names a node or a step, not the whole canvas.
+    const words = raw.replace(/[’'`]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
       .replace(/^(please|ok|okay|so|then|now|lets|let s|just|can you|could you)\s+/, '').replace(/\s+(now|please|for me|then)$/, '');
     return EN_RUN_ALL.has(words) ? 'all' : EN_RUN_REST.has(words) ? 'rest' : null;
   }
