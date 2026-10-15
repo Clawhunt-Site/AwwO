@@ -769,6 +769,44 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect([parseFloat(tile.style.width), parseFloat(tile.style.height)]).toEqual([w0 - 100, h0 - 50]);
   });
 
+  it('shrinks a node saved larger than its frame when it is resized by hand, and keeps that size when opened again in place', async () => {
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(seed({ w: 1400, h: 900 })));
+    const { tile } = await openOn({ w: 1600, h: 1000 });
+    expect([parseFloat(tile.style.width), parseFloat(tile.style.height)]).toEqual([1400, 900]);
+    const handle = screen.getByTestId('canvas-tile-resize-s1');
+    fireEvent.pointerDown(handle, { button: 0, clientX: 800, clientY: 800 });
+    fireEvent.pointerMove(window, { clientX: 500, clientY: 500 });
+    fireEvent.pointerUp(window, { clientX: 500, clientY: 500 });
+    // A 300 px drag at the open node's zoom, below the 1400 × 900 it is saved at.
+    const scale = transformOf(document.querySelector('.canvas-world') as HTMLElement)[2];
+    const resized = [parseFloat(tile.style.width), parseFloat(tile.style.height)];
+    expect(resized[0]).toBeCloseTo(1400 - 300 / scale, 0);
+    expect(resized[1]).toBeCloseTo(900 - 300 / scale, 0);
+    expect([saved().w, saved().h]).toEqual([1400, 900]);
+    // Configure places the open node again: the size the reader chose stays.
+    fireEvent.click(within(tile).getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(within(tile).getByRole('button', { name: '配置', exact: true }));
+    await glideDone();
+    const again = screen.getByTestId('canvas-tile-s1');
+    expect([parseFloat(again.style.width), parseFloat(again.style.height)]).toEqual(resized);
+  });
+
+  it('places a display shown from a card beside the open node clear of that node’s frame', async () => {
+    const doc = delivered();
+    const beside = { ...createSessionNode('llm', { x: 600, y: 800 }), id: 's2', title: '旁边的节点', lastOutput: { text: '## 草图', source: 'run' as const, at: 1 } };
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...doc, nodes: [...doc.nodes, beside] }));
+    const { tile } = await openOn({ w: 1600, h: 1000 });
+    const frame = { x: 900, y: 700, w: parseFloat(tile.style.width), h: parseFloat(tile.style.height) };
+    // The card's own spot, right of it at x = 932, lies under the open node.
+    const card = within(screen.getByTestId('canvas-tile-s2'));
+    fireEvent.click(card.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(card.getByRole('button', { name: '在预览展示中查看' }));
+    await waitFor(() => expect((JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).displays?.length).toBe(1));
+    const display = (JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).displays![0];
+    const overlaps = display.x < frame.x + frame.w && display.x + display.w > frame.x && display.y < frame.y + frame.h && display.y + display.h > frame.y;
+    expect(overlaps).toBe(false);
+  });
+
   it('keeps the room of a delivery a run clears while the node is open', async () => {
     canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(delivered()));
     const { tile } = await openOn({ w: 1800, h: 1000 });

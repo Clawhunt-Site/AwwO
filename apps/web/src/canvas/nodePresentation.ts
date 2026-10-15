@@ -56,10 +56,11 @@ export function openFrameFor(node: CanvasNode | undefined, available: { w: numbe
  * remain untouched, so closing a conversation does not resize or discard the user's work.
  * Use these same nodes for cards, port anchors, wires, minimap, selection and viewport fitting.
  * `cardFrames` are the sizes people enlarged cards to (cardFrames.ts), a view preference too.
- * `openFrame` is the size the focused node opens at (openFrameFor); a node resized larger by hand keeps its size.
+ * `openFrame` is the size the focused node opens at (openFrameFor); a node saved larger keeps its size, unless the
+ * frame is `exact` (the reader resized the open node by hand, to any size).
  */
 export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: string | null, narrowFocusWidth?: number,
-  cardFrames?: Readonly<Record<string, { w: number; h: number }>>, openFrame?: { w: number; h: number }): CanvasNode[] {
+  cardFrames?: Readonly<Record<string, { w: number; h: number }>>, openFrame?: { w: number; h: number }, exact = false): CanvasNode[] {
   return nodes.map(node => {
     if (node.kind !== 'session') return node;
     const card = cardFrames?.[node.id];
@@ -68,9 +69,11 @@ export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: s
       ? narrowFocusWidth
         ? Math.min(Math.max(280, narrowFocusWidth), Math.max(node.w, FOCUSED_SESSION_MIN_SIZE.w))
         // Opened at its frame, the drawer takes a share of that width; without one it widens the node by its own width.
+        : opened && exact ? opened.w
         : Math.max(node.w, opened ? opened.w : FOCUSED_SESSION_MIN_SIZE.w + (deliverablesShown(node) ? DELIVERY_DRAWER_WIDTH : 0))
       : card?.w ?? COMPACT_SESSION_SIZE.w;
-    const h = node.id === focusedId ? Math.max(node.h, opened ? opened.h : 0, FOCUSED_SESSION_MIN_SIZE.h) : card?.h ?? COMPACT_SESSION_SIZE.h;
+    const h = node.id !== focusedId ? card?.h ?? COMPACT_SESSION_SIZE.h
+      : opened && exact ? opened.h : Math.max(node.h, opened ? opened.h : 0, FOCUSED_SESSION_MIN_SIZE.h);
     return node.w === w && node.h === h ? node : { ...node, w, h };
   });
 }

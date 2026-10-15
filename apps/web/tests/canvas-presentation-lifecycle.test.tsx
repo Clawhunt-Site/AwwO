@@ -112,8 +112,10 @@ describe('conversation presentation lifecycle', () => {
     await waitFor(() => expect(loadRunJournal()).toBeNull());
     const agentTurn = getSnapshot(ID).turns.find(turn => turn.role === 'agent')!;
     expect(agentTurn.presentation).toEqual({ outputState: 'final', outputContract: presentation(node).outputContract });
-    expect(screen.getByRole('heading', { name: '会员详情', exact: true })).toBeInTheDocument();
-    expect(screen.getByText('抽屉已完成').tagName).toBe('STRONG');
+    // The reply reads in the conversation (the delivery drawer, open once the node has delivered, shows it as well).
+    const reply = within(container.querySelector('.canvas-transcript') as HTMLElement);
+    expect(reply.getByRole('heading', { name: '会员详情', exact: true })).toBeInTheDocument();
+    expect(reply.getByText('抽屉已完成').tagName).toBe('STRONG');
 
     const saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
     transport.setComments(nativeComments(expected, String(post.body.operationId)));

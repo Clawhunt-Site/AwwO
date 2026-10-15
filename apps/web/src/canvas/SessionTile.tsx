@@ -29,14 +29,14 @@
 //  - An unbound tile's composer is disabled with the reason stated, never a live-looking box.
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
 import { displayText } from './displayCopy';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
-import { nodeModelName, unlistedModelLabel } from './modelNames';
+import { nodeModelName, unlistedModelLabel, type ModelNameSources } from './modelNames';
 import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
@@ -353,6 +353,8 @@ export interface SessionTileProps {
   onAskAssistant?: (nodeId: string, kind: 'edit' | 'fix') => void;
   /** Whether the opened node's delivery drawer sits beside its conversation (it opens by itself only then). */
   deliveryBeside?: boolean;
+  /** What the canvas names models by, for a node whose model its choices do not list (a read-only canvas). */
+  modelNames?: ModelNameSources;
 }
 
 /**
@@ -404,6 +406,7 @@ export const SessionTile = memo(function SessionTile({
   inputRequest = 0,
   onAskAssistant,
   deliveryBeside = true,
+  modelNames,
 }: SessionTileProps) {
   const { locale, t } = useCanvasI18n();
   const simple = useSimpleCanvas();
@@ -439,7 +442,8 @@ export const SessionTile = memo(function SessionTile({
   // (deliverablesShown).
   const drawerShown = deliverablesShown(node, deliveryBeside);
   const [deliverablesOpen, setDeliverablesOpen] = useState(drawerShown);
-  useEffect(() => {
+  // Before paint: a drawer that should not show on this stage must not flash open for a frame.
+  useLayoutEffect(() => {
     setDeliverablesOpen(drawerShown);
     if (!drawerShown) setDeliverablesEditorOpen(false);
   }, [drawerShown]);
@@ -724,7 +728,7 @@ export const SessionTile = memo(function SessionTile({
   const runDetail = run ? recoveryDetailMessage(t, run.detail) : undefined;
   // The model the node runs, as its picker names it (the task card says it); none when it runs the workspace default.
   const modelLabel = sessionNode?.model
-    ? modelChoices?.find(choice => choice.key === currentChoiceKey(sessionNode, modelChoices))?.label || nodeModelName(sessionNode, {}, locale)
+    ? modelChoices?.find(choice => choice.key === currentChoiceKey(sessionNode, modelChoices))?.label || nodeModelName(sessionNode, modelNames ?? {}, locale)
     : undefined;
   const badge = run ? runBadgeText(run, locale, t) : '';
   const showBody = lod !== 'glance';

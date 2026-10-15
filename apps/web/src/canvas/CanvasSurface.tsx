@@ -156,7 +156,7 @@ const INSPECTOR_OVERLAY = { inset: 12, width: 360, gap: 16 } as const;
 const narrowFocusWidth = (stageWidth: number) => stageWidth > 0 && stageWidth <= 900 ? Math.max(280, stageWidth - FOCUS_FIT_PADDING.x * 2) : undefined;
 /** Whether an opened node of this drawn width holds its delivery drawer beside its conversation on this stage: not on a
  *  narrow stage, nor in a frame too narrow for both (deliverablesShown, DRAWER_BESIDE_MIN_WIDTH). */
-const drawerBeside = (stageWidth: number, nodeWidth: number) => !narrowFocusWidth(stageWidth) && nodeWidth >= DRAWER_BESIDE_MIN_WIDTH;
+const drawerBeside = (narrow: number | undefined, nodeWidth: number) => !narrow && nodeWidth >= DRAWER_BESIDE_MIN_WIDTH;
 /** The world pixels an opened node may fill at 100 % zoom on a stage of this size: the stage less the focus padding,
  *  and less the Configure panel's room while it floats beside the node (a stage narrow enough for the panel to span it
  *  opens nodes in its narrow layout, without a frame). */
@@ -750,8 +750,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const focusedFit = openFit && openFit.id === focusedId ? openFit : null;
   const focusedOpenFrame = focusedFit?.frame;
   const focusNarrow = focusedFit ? focusedFit.narrow : narrowFocusWidth(size.w);
-  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame),
-    [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame]);
+  const focusExact = Boolean(focusedFit?.resized);
+  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact),
+    [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact]);
   const renderNodeById = useMemo(() => new globalThis.Map(renderNodes.map(node => [node.id, node])), [renderNodes]);
   // Focus pushes the pre-focus viewport so a second press returns exactly where you were.
   const focusReturn = useRef<ViewportState | null>(null);
@@ -847,14 +848,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
    *  camera that shows it whole, opened where it is — never re-centred. Null when nothing is laid out to fit into.
    *  `content` keeps the room of what the node showed; `preferredScale` is the operator's zoom, kept where readable. */
   const openPlacement = useCallback((nodeId: string, configuring: boolean, current: ViewportState,
-    options: { content?: OpenContent; preferredScale?: number } = {}) => {
+    options: { content?: OpenContent; preferredScale?: number; frame?: { w: number; h: number } } = {}) => {
     const box = viewportSize();
     const target = docRef.current.nodes.find((n) => n.id === nodeId);
     if (!box || !target) return null;
     const besidePanel = configuring && (canInitialize || target.kind === 'form');
     const narrow = narrowFocusWidth(box.w);
-    const frame = openFrameFor(target, openRoom(box, besidePanel), options.content);
-    const node = presentationNodes(docRef.current.nodes, nodeId, narrow, undefined, frame).find((n) => n.id === nodeId)!;
+    const frame = options.frame ?? openFrameFor(target, openRoom(box, besidePanel), options.content);
+    const node = presentationNodes(docRef.current.nodes, nodeId, narrow, undefined, frame, Boolean(options.frame)).find((n) => n.id === nodeId)!;
     // Cap the focus scale so the whole node — delivery drawer included — fits the stage inside
     // the focus padding.
     const pad = FOCUS_FIT_PADDING;
@@ -898,8 +899,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (focusedId !== nodeId) setInspectorId(current => current === nodeId ? current : null);
       setFocusedId(nodeId);
       setSelection([nodeId]);
-      const placement = openPlacement(nodeId, configuring, current);
-      setOpenFit(placement ? { id: nodeId, frame: placement.frame, view: placement.view, narrow: placement.narrow, content: placement.content } : null);
+      // Placing the node already open again (Configure, 查看交付物, a 接下来 step) keeps its delivery's room and a frame
+      // the reader resized by hand.
+      const kept = openFitRef.current?.id === nodeId && focusedRef.current === nodeId ? openFitRef.current : null;
+      const target = docRef.current.nodes.find(n => n.id === nodeId);
+      const content = kept && target && kept.content === 'delivery' && openContentOf(target) === 'chat' ? kept.content : undefined;
+      const placement = openPlacement(nodeId, configuring, current, { content, ...(kept?.resized ? { frame: kept.frame } : {}) });
+      setOpenFit(placement ? { id: nodeId, frame: placement.frame, view: placement.view, narrow: placement.narrow, content: placement.content,
+        ...(kept?.resized ? { resized: true } : {}) } : null);
       if (placement) glideTo(placement.view, placement.anchor);
     },
     [focusedId, openPlacement, glideTo, changeStageView],
@@ -1917,8 +1924,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (!canEditStructure(false, [])) return;
     const target = docRef.current.nodes.find(node => node.id === nodeId);
     const drawn = renderNodesRef.current.find(node => node.id === nodeId);
+    const placed = openFitRef.current?.id === nodeId ? openFitRef.current : null;
+    const narrow = placed ? placed.narrow : narrowFocusWidth(sizeRef.current.w);
     if (!target || target.kind !== 'session' || hasStreamingConversation([target])
-      || deliverablesShown(target, drawerBeside(sizeRef.current.w, drawn?.w ?? target.w)) === open) return;
+      || deliverablesShown(target, drawerBeside(narrow, drawn?.w ?? target.w)) === open) return;
     patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === nodeId && node.kind === 'session' ? { ...node, deliverablesOpen: open } : node) }),
       { silent: true });
     const fit = openFitRef.current;
@@ -1982,13 +1991,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [viewportSize, moveCamera]);
   // The board as it is with no node open: a display is placed beside where a card sits, not beside its open frame.
   const closedNodes = useCallback(() => presentationNodes(docRef.current.nodes, null, undefined, cardFramesRef.current), []);
+  // ...and clear of the node open now, whose frame covers the board around its card.
+  const openNodeFrame = useCallback(() => renderNodesRef.current.filter(node => node.id === focusedRef.current), []);
   /** The view tools' 预览展示: everything the canvas made, live, at the end of the board (the one already there, if any). */
   const showCanvasDisplay = useCallback(() => {
     const existing = docRef.current.displays?.find(item => item.source.type === 'canvas');
     if (existing) { selectDisplay(existing.id); revealDisplay(existing); return; }
-    const added = addDisplay(placeDisplayAfter([...closedNodes(), ...(docRef.current.displays ?? NO_DISPLAYS)]));
+    const added = addDisplay(placeDisplayAfter([...closedNodes(), ...openNodeFrame(), ...(docRef.current.displays ?? NO_DISPLAYS)]));
     if (added) fitAll();
-  }, [selectDisplay, revealDisplay, addDisplay, fitAll, closedNodes]);
+  }, [selectDisplay, revealDisplay, addDisplay, fitAll, closedNodes, openNodeFrame]);
   /** A card's 在预览展示中查看: the display already showing that component, or a new one beside it. */
   const showNodeInDisplay = useCallback((nodeId: string) => {
     const existing = docRef.current.displays?.find(item => item.source.type === 'node' && item.source.nodeId === nodeId);
@@ -1996,9 +2007,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const board = closedNodes();
     const card = board.find(node => node.id === nodeId);
     if (!card) return;
-    const added = addDisplay(placeDisplayBeside(card, [...board, ...(docRef.current.displays ?? NO_DISPLAYS)]), { type: 'node', nodeId });
+    const added = addDisplay(placeDisplayBeside(card, [...board, ...openNodeFrame(), ...(docRef.current.displays ?? NO_DISPLAYS)]), { type: 'node', nodeId });
     if (added) revealDisplay(added);
-  }, [selectDisplay, revealDisplay, addDisplay, closedNodes]);
+  }, [selectDisplay, revealDisplay, addDisplay, closedNodes, openNodeFrame]);
 
   const addNode = useCallback(
     (kind: AddNodeKind, world: { x: number; y: number }) => {
@@ -3097,10 +3108,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // A fix the assistant cannot take now (it is busy, or cannot plan) waits in its composer as a draft, never lost.
   askAboutNodeRef.current = (nodeId: string, kind: 'edit' | 'fix') => {
     if (readOnlyRef.current) return;
-    if (kind === 'fix' && assistantCanPlan && !planningBusy) { askAssistant(fixRequest([nodeId])); return; }
+    if (kind === 'fix' && assistantCanPlan && !planningBusy && planBlocker() === null) { askAssistant(fixRequest([nodeId])); return; }
     setAssistantOpen(true);
     const lead = kind === 'fix' ? fixRequest([nodeId]) : t('brief.askAssistantDraft', { node: titleOf(nodeId) });
-    setPlanning(previous => previous.draft.trim() ? previous : { ...previous, draft: lead });
+    // A draft the reader started is theirs: a change request leaves it, a fix request goes after it.
+    setPlanning(previous => !previous.draft.trim() ? { ...previous, draft: lead }
+      : kind === 'fix' && !previous.draft.includes(lead) ? { ...previous, draft: `${previous.draft.trimEnd()}\n${lead}` } : previous);
     requestAnimationFrame(() => {
       const scope = rootRef.current?.closest('.awwo-workspace') ?? document;
       const box = scope.querySelector<HTMLTextAreaElement>('.awwo-canvas-assistant--panel textarea')
@@ -3597,7 +3610,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         timelineUnavailableReason={focusedId ? t('run.timelineWhileOpen') : undefined}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
     {/* Under the 成果 view the board is out of reach (the shortcuts pause too) but stays as it was. */}
-    <div className="canvas-root" inert={showingResults || undefined} data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={narrowFocusWidth(size.w) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef} {...nodeViewRoot}>
+    <div className="canvas-root" inert={showingResults || undefined} data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={(focusedId ? focusNarrow : narrowFocusWidth(size.w)) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef} {...nodeViewRoot}>
       <CanvasViewport
         view={view}
         onViewChange={moveCamera}
@@ -3686,7 +3699,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             modelChoices={tileModelChoices(node)}
             inputRequest={inputRequests[node.id]}
             onAskAssistant={readOnly ? undefined : askAboutNode}
-            deliveryBeside={focusedId === node.id ? drawerBeside(size.w, renderNodeById.get(node.id)?.w ?? node.w) : true}
+            deliveryBeside={focusedId === node.id ? drawerBeside(focusNarrow, renderNodeById.get(node.id)?.w ?? node.w) : !narrowFocusWidth(size.w)}
+            modelNames={modelNames}
             onChangeModel={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : changeNodeModel}
             onResizeCard={resizeCard}
             onToggleCardPreview={toggleCardPreview}

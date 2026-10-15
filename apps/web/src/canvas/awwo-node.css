@@ -42,6 +42,8 @@
 .canvas-root .awwo-node-tabs button[aria-selected="true"] { color: var(--awwo-teal); border-bottom-color: var(--awwo-teal); font-weight: 600; }
 .canvas-root .awwo-node-panel { min-height: 0; flex: 1; overflow: auto; padding: 12px 16px; overscroll-behavior: contain; }
 .canvas-root .awwo-node-panel--conversation { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+/* An opened node's conversation keeps room for its message box: the task card, a failure note and the inputs give way first. */
+.canvas-root .awwo-node.canvas-tile--focus .awwo-node-panel--conversation { min-height: min(160px, 45%); }
 .canvas-root .awwo-node-empty { flex: 1; min-height: 56px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 16px; color: var(--awwo-muted); font-size: 13px; }
 .canvas-root .awwo-node-empty > svg { color: var(--awwo-teal); margin-bottom: 4px; flex-shrink: 0; }
 .canvas-root .awwo-node-empty strong { color: var(--awwo-ink); font-size: 14px; font-weight: 600; }

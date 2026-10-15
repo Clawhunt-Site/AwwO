@@ -28,6 +28,13 @@ describe('a delivery that is code reads as code', () => {
     ['a stylesheet', 'body { margin: 0; color: #222; }\n.stage { display: grid; place-items: center; }'],
     ['a stylesheet of words', '.hero-title {\n  font-family: Inter, system-ui, sans-serif;\n  letter-spacing: 0.02em;\n  text-transform: uppercase;\n  color: midnightblue;\n}'],
     ['Python', 'def plant_layout(rows):\n    return [row.split(",") for row in rows]\n'],
+    // Seen by the second review round: a module that opens with a comment and uses a template literal, and a tile map
+    // whose water rows look like a fence.
+    ['a module after its header comment', '// Level 1 sequencer\nlet bpm = 120;\nexport function start(el) {\n  el.textContent = `${bpm} bpm`;\n  return setInterval(() => tick(el), 60000 / bpm);\n}'],
+    ['a tile map with tilde rows', 'export const LEVEL_1 = `\n~~~~~~~~~~~~~~~~\n~~~~......~~~~~~\n################\n`;'],
+    ['an interface', 'interface Level {\n  tiles: string[];\n  checkpoints: Array<{ x: number; y: number }>;\n}'],
+    ['copy written as a constant under a comment', "// Copy for the title screen\nexport const TITLE = 'Fox Courier: deliver three letters across the rooftops before the lanterns go out at dusk';"],
+    ['a call with a template literal', 'setup({\n  title: `Fox ${level}`,\n  lives: 3,\n});\nstart();'],
   ])('%s', (_name, text) => {
     expect(looksLikeCode(text)).toBe(true);
     const { container } = render(<DeliverableMarkdown>{text}</DeliverableMarkdown>);
@@ -157,6 +164,12 @@ describe('an opened node says what it was asked', () => {
     // Nothing clipped and nothing more to show: no control.
     render(<SessionTile node={agent({ persona: '设计三段关卡。' })} scale={1} focused />);
     expect(within(screen.getByRole('region', { name: '「关卡设计」的任务' })).queryByRole('button', { name: '展开' })).toBeNull();
+  });
+
+  it('names a model its choices do not list by the canvas catalogue, as on a read-only canvas', () => {
+    const models = [{ key: 'opus', label: 'Claude Opus 5.5', providerGroup: 'anthropic' as const, runtime: 'openai-agents' as const, model: 'bedrock.claude-opus-5-5', available: true }];
+    render(<SessionTile node={brief} scale={1} focused readOnly modelNames={{ models }} />);
+    expect(within(screen.getByRole('region', { name: '「关卡设计」的任务' })).getByText('使用 Claude Opus 5.5')).toBeVisible();
   });
 
   it('says the workspace default model, offers no assistant on a view-only node, and shows nothing for a node with no task', () => {
