@@ -220,6 +220,71 @@ func TestXtasyErrorCodesAreClosed(t *testing.T) {
 	}
 }
 
+// The HTTP transport never sends a submission again by itself: when a reused connection drops after the request was
+// read (a task may exist), the send fails to submitMedia, which resends and counts it, instead of the transport
+// resending it inside one call, where a refusal of the resend would look like a refusal of the first send. A
+// reference upload, which no allowance counts, is still resent by the transport.
+func TestXtasySubmitIsNeverResentByTheTransport(t *testing.T) {
+	var mu sync.Mutex
+	posts := map[string]int{}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/openapi/v1/files/file_1":
+			writeJSON(w, 200, map[string]any{"file_id": "file_1", "status": "ready"})
+			return
+		case r.Method == http.MethodGet:
+			writeJSON(w, 200, map[string]any{"task_id": "mt_0", "status": "running"})
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		mu.Lock()
+		posts[r.URL.Path]++
+		first := posts[r.URL.Path] == 1
+		mu.Unlock()
+		switch {
+		case first:
+			// The first send is read and its answer lost: the connection closes without one.
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+		case r.URL.Path == "/openapi/v1/files":
+			writeJSON(w, 200, map[string]any{"file_id": "file_1", "status": "processing"})
+		default:
+			writeJSON(w, 401, map[string]any{"error": map[string]any{"code": "UNAUTHORIZED"}})
+		}
+	}))
+	defer api.Close()
+	c := testConfig()
+	c.XtasyAPIKey, c.XtasyBaseURL, c.MediaMaxFileBytes = "xtk_test-key-0123456789", api.URL, 1<<20
+	x := newXtasy(c)
+	// A finished request leaves its connection idle, so the submission goes out on a reused one.
+	if _, err := x.query(context.Background(), "mt_0"); err != nil {
+		t.Fatal("query", err)
+	}
+	m, _ := builtinMediaCatalog.model("xt.seedream-5-pro")
+	params, _ := m.resolveMediaParams(nil)
+	_, err := x.submit(context.Background(), m.Endpoint, xtasyRequest(m, "a lake", params, "run1", nil))
+	e, ok := asRHError(err)
+	mu.Lock()
+	sent := posts[m.Endpoint]
+	mu.Unlock()
+	if sent != 1 || !ok || e.Refused || !e.Transient || e.RetryAfter <= 0 {
+		t.Fatal("a lost answer comes back to be resent by submitMedia", sent, err)
+	}
+	// The upload goes out on a reused connection too, after the query below leaves one idle.
+	if _, err := x.query(context.Background(), "mt_0"); err != nil {
+		t.Fatal("query", err)
+	}
+	id, err := x.uploadReference(context.Background(), testReference(testPNG, "image/png"), testPNG, "run1")
+	mu.Lock()
+	uploads := posts["/openapi/v1/files"]
+	mu.Unlock()
+	if err != nil || id != "file_1" || uploads != 2 {
+		t.Fatal("an upload whose answer was lost is resent by the transport", id, err, uploads)
+	}
+}
+
 func TestXtasyClientSubmitsQueriesAndDownloads(t *testing.T) {
 	var mu sync.Mutex
 	var seen []*http.Request

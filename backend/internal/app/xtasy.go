@@ -417,6 +417,13 @@ func (x *xtasyClient) request(ctx context.Context, method, path string, body []b
 	if err != nil {
 		return nil, 0, 0, &rhError{Code: "media_request_invalid"}
 	}
+	// net/http sends a request that carries an Idempotency-Key and can rewind its body again by itself when a reused
+	// connection drops before the answer. Every resend of a generation must be submitMedia's own, which counts it (a
+	// refusal that answers a resend keeps the generation counted), so a submission gives the transport no way to
+	// rewind its body. A reference upload, which no allowance counts, keeps the transport's resend.
+	if path == xtasyEndpoints[mediaKindImage] || path == xtasyEndpoints[mediaKindVideo] {
+		req.GetBody = nil
+	}
 	req.Header.Set("Authorization", "Bearer "+x.key)
 	req.Header.Set("Accept", "application/json")
 	// X-tasy's edge refuses some library user agents (Cloudflare 1010), so the client names itself.

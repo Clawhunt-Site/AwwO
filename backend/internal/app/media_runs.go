@@ -641,13 +641,19 @@ func (a *App) mediaStopped(ctx context.Context, id string, recorded bool) bool {
 // few workspaces generate at once): that is waited out as the provider asked, with the run shown as queued
 // (waiting is called once), until the task is accepted, refused otherwise, or the run is cancelled or past its
 // deadline. Each send has its own timeout and is never abandoned midway, like the single send it replaces.
+// A refusal gives the generation's attempt back (rhError.Refused) only when it answered the first send: X-tasy also
+// sends again after an answer that never arrived (its Idempotency-Key returns the task the first send made), so after
+// any resend an earlier send may have created, and billed, the task.
 func submitMedia(ctx context.Context, hub mediaProvider, endpoint string, body map[string]any, waiting func()) (rhTask, error) {
 	notified := false
-	for {
+	for sends := 1; ; sends++ {
 		submitCtx, cancelSubmit := context.WithTimeout(context.WithoutCancel(ctx), rhSubmitTimeout)
 		task, err := hub.submit(submitCtx, endpoint, body)
 		cancelSubmit()
 		e, ok := asRHError(err)
+		if ok && sends > 1 {
+			e.Refused = false
+		}
 		if !ok || e.RetryAfter <= 0 {
 			return task, err
 		}

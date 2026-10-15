@@ -468,6 +468,23 @@ func TestRefusedAnswerMarksOnlyDefiniteRefusals(t *testing.T) {
 	}
 }
 
+// A refusal of a resend gives nothing back: an earlier send whose answer never arrived may have made the task.
+func TestSubmitMediaRefusalAfterAResendStillCounts(t *testing.T) {
+	refused := func() error { return refusedAnswer(&rhError{Code: "media_provider_unauthorized"}) }
+	lost := func() error {
+		return xtasyResendable(&rhError{Code: "media_provider_unavailable", Transient: true}, time.Millisecond)
+	}
+	first := &fakeMediaProvider{answers: []error{refused()}}
+	if _, err := submitMedia(context.Background(), first, "/x", map[string]any{}, func() {}); err == nil || !err.(*rhError).Refused || first.calls != 1 {
+		t.Fatal("a refusal of the first send", err, first.calls)
+	}
+	again := &fakeMediaProvider{answers: []error{lost(), refused()}}
+	if _, err := submitMedia(context.Background(), again, "/x", map[string]any{}, func() {}); err == nil || err.(*rhError).Refused || again.calls != 2 ||
+		mediaFailureCode(err) != "media_provider_unauthorized" {
+		t.Fatal("a refusal after a resend", err, again.calls)
+	}
+}
+
 // A run cancelled before its generation was marked sent is not sent at all; one marked sent counts.
 func TestPostgresMarkMediaSubmittedHonoursACancel(t *testing.T) {
 	h, _ := newMediaHarness(t)
