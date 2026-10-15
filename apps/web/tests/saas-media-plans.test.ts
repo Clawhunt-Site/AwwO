@@ -173,20 +173,33 @@ describe('canvas runs and media nodes', () => {
 describe('retired media models and provider names', () => {
   const model = (id: string, name: string, vendor: string, kind: 'image' | 'video') => ({ id, name, vendor, kind, prompt: { minLength: 1, maxLength: 32000 }, params: [] });
   const catalogue = parseMediaCatalogue({ configured: true, available: true, limits: { runsPerDay: 30, timeoutSeconds: 1200 }, models: [
-    model('xt.seedream-5-pro', 'Seedream 5.0 Pro', 'bytedance', 'image'), model('xt.gpt-image-2', 'GPT Image 2', 'openai', 'image'),
-    model('xt.xtasy-v3', 'Video V3', 'xtasy', 'video'),
+    model('xt.seedream-5-pro', 'Seedream 5.0 Pro', 'bytedance', 'image'), model('xt.gpt-image-2-5', 'GPT Image 2.5', 'openai', 'image'),
+    model('xt.omni-video', 'Omni video', 'xtasy', 'video'), model('xt.omni-video-2-5', 'Omni video 2.5', 'xtasy', 'video'),
   ] });
 
   it('moves a node off a retired model to the same family, else to the first model of its kind', () => {
-    expect(replacementMediaModel(catalogue, 'image', 'rh.gpt-image-2')).toBe('xt.gpt-image-2');
+    expect(replacementMediaModel(catalogue, 'image', 'rh.gpt-image-2')).toBe('xt.gpt-image-2-5');
     expect(replacementMediaModel(catalogue, 'image', 'rh.midjourney-v7')).toBe('xt.seedream-5-pro');
-    expect(replacementMediaModel(catalogue, 'video', 'rh.kling-v3-pro')).toBe('xt.xtasy-v3');
-    expect(replacementMediaModel(catalogue, 'image', 'xt.gpt-image-2')).toBeNull();
+    expect(replacementMediaModel(catalogue, 'video', 'rh.kling-v3-pro')).toBe('xt.omni-video');
+    // The two X-tasy models gone from its list on 2026-10-15 move to their nearest offered model.
+    expect(replacementMediaModel(catalogue, 'video', 'xt.xtasy-v3')).toBe('xt.omni-video');
+    expect(replacementMediaModel(catalogue, 'image', 'xt.gpt-image-2')).toBe('xt.gpt-image-2-5');
+    // An offered model and any other model that is not retired stay.
+    expect(replacementMediaModel(catalogue, 'video', 'xt.omni-video-2-5')).toBeNull();
+    expect(replacementMediaModel(catalogue, 'image', 'xt.unknown')).toBeNull();
     expect(replacementMediaModel(catalogue, 'model3d', 'rh.anything')).toBeNull();
     expect(replacementMediaModel(undefined, 'image', 'rh.gpt-image-2')).toBeNull();
     // A deployment that still runs the retired generator offers its models: they stay.
-    const offered = parseMediaCatalogue({ configured: true, available: true, models: [model('rh.gpt-image-2', 'GPT Image 2', 'openai', 'image')] });
+    const offered = parseMediaCatalogue({ configured: true, available: true, models: [model('rh.gpt-image-2', 'GPT Image 2', 'openai', 'image'), model('xt.xtasy-v3', 'Video V3', 'xtasy', 'video')] });
     expect(replacementMediaModel(offered, 'image', 'rh.gpt-image-2')).toBeNull();
+    expect(replacementMediaModel(offered, 'video', 'xt.xtasy-v3')).toBeNull();
+  });
+
+  it('moves a video node off Video · Standard, its settings back to the new model defaults', () => {
+    const clip = { ...createSessionNode('video', { x: 0, y: 0 }), model: 'xt.xtasy-v3', mediaParams: { duration: 5, thinking: false } } as unknown as SessionNode;
+    const moved = replaceRetiredMediaModels({ ...emptyDocument(), nodes: [clip] }, catalogue)!;
+    expect(moved.nodes[0]).toMatchObject({ model: 'xt.omni-video' });
+    expect((moved.nodes[0] as SessionNode).mediaParams).toBeUndefined();
   });
 
   it('keeps the rest of the node, its results included, with settings back to the new model defaults', () => {

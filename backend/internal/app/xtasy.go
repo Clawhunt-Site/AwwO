@@ -38,7 +38,7 @@ const (
 // parameter names. A catalog parameter without an entry here is refused at startup, so none is ever dropped.
 var xtasyWireParams = map[string]string{
 	"aspectRatio": "aspect_ratio", "imageNum": "count", "resolution": "resolution", "negativePrompt": "negative_prompt",
-	"duration": "duration", "generateAudio": "generate_audio", "thinking": "enable_thinking",
+	"duration": "duration", "generateAudio": "generate_audio",
 }
 
 var (
@@ -55,9 +55,8 @@ var (
 // the video.
 var xtasyFixed = map[string]map[string]any{
 	"xt.seedream-5-pro": {"mode": "txt2img"}, "xt.gemini-3-1-flash-image": {"mode": "txt2img"},
-	"xt.gpt-image-2-5": {"mode": "txt2img"}, "xt.gpt-image-2": {"mode": "txt2img"},
-	"xt.xtasy-3": {"mode": "txt2img"}, "xt.xtasy-3-pro": {"mode": "txt2img"}, "xt.omni-image-5-pro": {"mode": "txt2img"},
-	"xt.xtasy-v3":       {"mode": "multimodal"},
+	"xt.gpt-image-2-5": {"mode": "txt2img"},
+	"xt.xtasy-3":       {"mode": "txt2img"}, "xt.xtasy-3-pro": {"mode": "txt2img"}, "xt.omni-image-5-pro": {"mode": "txt2img"},
 	"xt.omni-video":     {"mode": "multimodal", "watermark": false, "return_last_frame": false},
 	"xt.omni-video-2-5": {"mode": "text2video", "watermark": false, "return_last_frame": false, "output_format": "mp4"},
 }
@@ -68,11 +67,11 @@ var xtasyFixed = map[string]map[string]any{
 // 2026-10-12: 视频节点也加参考图, 视频也支持按多张图做主体参考) start from one picture as their first frame (mode
 // interpolation, {"role":"first_frame"}), and with two or more take them all as subject references (mode multimodal,
 // each {"role":"reference_image"}), as GET /openapi/v1/models lists those roles and modes for every one of them (read
-// 2026-10-12 12:01Z): at most 10 reference images for the standard model, 9 for the omni one and 30 for 2.5, here
-// capped at the 10 files a message carries. The 2.5 model also allows only an adaptive ratio with a frame and takes
+// 2026-10-12 12:01Z): at most 9 reference images for the omni model and 30 for 2.5, here capped at the 10 files a
+// message carries. The 2.5 model also allows only an adaptive ratio with a frame and takes
 // omni_reference_task_type with references. Every other model stays text-only until it is verified the same way.
 var xtasyReferenceModels = map[string]int{"xt.xtasy-3": 1, "xt.xtasy-3-pro": 1, "xt.seedream-5-pro": 1,
-	"xt.xtasy-v3": 10, "xt.omni-video": 9, "xt.omni-video-2-5": 10}
+	"xt.omni-video": 9, "xt.omni-video-2-5": 10}
 
 // maxXtasyVideoReferences bounds a video model's reference count: the files one message carries.
 const maxXtasyVideoReferences = 10
@@ -97,7 +96,6 @@ func xtasyModels() []*mediaModel {
 	}
 	audio := mediaParam{Name: "generateAudio", Type: "boolean", Default: true, Label: [2]string{"生成音频", "Generate audio"}}
 	negative := mediaParam{Name: "negativePrompt", Type: "text", MaxLength: 2000, Label: [2]string{"反向提示词", "Negative prompt"}}
-	thinking := mediaParam{Name: "thinking", Type: "boolean", Default: false, Label: [2]string{"深度思考", "Thinking"}}
 	ratios := []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
 	videoRatios := []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"}
 	prompt := mediaPrompt{MinLength: 1, MaxLength: 32000}
@@ -117,21 +115,17 @@ func xtasyModels() []*mediaModel {
 			resolution("1K", "512px", "1K", "2K", "4K")),
 		model("xt.gpt-image-2-5", [2]string{"图片 · 超清多张 Pro", "Image · Ultra HD batch Pro"}, mediaKindImage, "model_6fe4cc38-b598-5a88-ad7e-b4cefa0a9e51",
 			ratio("auto", "auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"), images(4), resolution("1K", "1K", "2K", "4K")),
-		model("xt.gpt-image-2", [2]string{"图片 · 超清多张", "Image · Ultra HD batch"}, mediaKindImage, "model_f56b6e0e-b445-5113-ad06-000604f1c548",
-			ratio("1:1", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"), images(4),
-			resolution("1024x1024", "1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "3840x2160", "2160x3840")),
 		model("xt.xtasy-3", [2]string{"图片 · 标准多张", "Image · Standard batch"}, mediaKindImage, "model_0641b8b9-f39e-5bd5-bccb-104b84988282",
 			ratio("1:1", ratios...), images(6), resolution("1K", "1K", "2K"), negative),
 		model("xt.xtasy-3-pro", [2]string{"图片 · 标准多张 Pro", "Image · Standard batch Pro"}, mediaKindImage, "model_52c32c2d-aecc-564d-84d6-c5549ff349c9",
 			ratio("1:1", ratios...), images(6), resolution("1K", "1K", "2K"), negative),
 		model("xt.omni-image-5-pro", [2]string{"图片 · 全能", "Image · All-round"}, mediaKindImage, "model_5cb47bcb-5ce8-57d2-804c-8f382dedc9fe",
 			ratio("1:1", ratios...), resolution("2K", "2K", "1K")),
-		model("xt.xtasy-v3", [2]string{"视频 · 标准", "Video · Standard"}, mediaKindVideo, "model_5426a2da-911e-5226-a770-477a3d08a6c0",
-			ratio("16:9", videoRatios...), duration(2, 30), resolution("720p", "480p", "720p", "1080p"), audio, thinking),
-		model("xt.omni-video-2-5", [2]string{"视频 · 全能 Pro", "Video · All-round Pro"}, mediaKindVideo, "model_c69e040f-0150-5092-a9bc-2a4c03aaaf49",
-			ratio("16:9", videoRatios...), duration(4, 30), resolution("720p", "480p", "720p"), audio),
+		// A new video node starts on the first video model (withProviderModels): All-round, the cheaper of the two.
 		model("xt.omni-video", [2]string{"视频 · 全能", "Video · All-round"}, mediaKindVideo, "model_c0b9927f-48b0-539e-8f79-087e226e4e81",
 			ratio("16:9", videoRatios...), duration(4, 15), resolution("720p", "480p", "720p"), audio),
+		model("xt.omni-video-2-5", [2]string{"视频 · 全能 Pro", "Video · All-round Pro"}, mediaKindVideo, "model_c69e040f-0150-5092-a9bc-2a4c03aaaf49",
+			ratio("16:9", videoRatios...), duration(4, 30), resolution("720p", "480p", "720p"), audio),
 	}
 }
 

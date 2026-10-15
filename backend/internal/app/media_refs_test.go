@@ -21,7 +21,7 @@ func testReference(data []byte, contentType string) mediaReference {
 
 func TestMediaReferenceCatalog(t *testing.T) {
 	want := map[string]int{"xt.xtasy-3": 1, "xt.xtasy-3-pro": 1, "xt.seedream-5-pro": 1, "tripo.v3-1": 1, "tripo.p1": 1,
-		"jm.image-cinema": 1, "jm.image-express": 1, "xt.xtasy-v3": 10, "xt.omni-video": 9, "xt.omni-video-2-5": 10}
+		"jm.image-cinema": 1, "jm.image-express": 1, "xt.omni-video": 9, "xt.omni-video-2-5": 10}
 	for _, m := range builtinMediaCatalog.List() {
 		if m.References != want[m.ID] {
 			t.Errorf("%s takes %d references, want %d", m.ID, m.References, want[m.ID])
@@ -63,7 +63,7 @@ func TestMediaReferenceRequests(t *testing.T) {
 	if plain := xtasyRequest(image, "a cat", params, "run1", nil); plain["parameters"].(map[string]any)["mode"] != "txt2img" || len(plain["references"].([]any)) != 0 {
 		t.Fatal("without a reference the model generates from words", plain)
 	}
-	words, _ := builtinMediaCatalog.model("xt.gpt-image-2")
+	words, _ := builtinMediaCatalog.model("xt.gpt-image-2-5")
 	wordParams, _ := words.resolveMediaParams(nil)
 	if b := xtasyRequest(words, "a cat", wordParams, "run1", []string{"file_1"}); b["parameters"].(map[string]any)["mode"] != "txt2img" || len(b["references"].([]any)) != 0 {
 		t.Fatal("a model that takes no reference never sends one", b)
@@ -204,7 +204,7 @@ func TestMediaReferenceVideoFrames(t *testing.T) {
 		}
 		return out
 	}
-	for _, id := range []string{"xt.xtasy-v3", "xt.omni-video", "xt.omni-video-2-5"} {
+	for _, id := range []string{"xt.omni-video", "xt.omni-video-2-5"} {
 		m, ok := builtinMediaCatalog.model(id)
 		if !ok {
 			t.Fatal(id, "missing")

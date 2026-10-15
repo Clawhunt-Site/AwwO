@@ -28,8 +28,26 @@ func TestXtasyModelsAreInTheCatalogAndClosed(t *testing.T) {
 		}
 		kinds[m.Kind]++
 	}
-	if kinds[mediaKindImage] != 7 || kinds[mediaKindVideo] != 3 {
-		t.Fatal("seven image and three video models", kinds)
+	if kinds[mediaKindImage] != 6 || kinds[mediaKindVideo] != 2 {
+		t.Fatal("six image and two video models", kinds)
+	}
+	// The two models X-tasy's list for the operator's key no longer has (2026-10-15) are gone, and a new video node
+	// starts on All-round, the first video model.
+	for _, gone := range []string{"xt.xtasy-v3", "xt.gpt-image-2"} {
+		if _, ok := builtinMediaCatalog.model(gone); ok {
+			t.Fatal("a retired X-tasy model is still offered", gone)
+		}
+		if _, priced := mediaBaseCredits[gone]; priced {
+			t.Fatal("a retired X-tasy model is still priced", gone)
+		}
+	}
+	for _, m := range builtinMediaCatalog.List() {
+		if m.Kind == mediaKindVideo && m.Provider == mediaProviderXtasy {
+			if m.ID != "xt.omni-video" {
+				t.Fatal("the first X-tasy video model", m.ID)
+			}
+			break
+		}
 	}
 	unmapped := xtasyModels()[0]
 	unmapped.Params = append(unmapped.Params, mediaParam{Name: "seed", Type: "integer", Min: new(float64), Max: new(float64), Label: [2]string{"a", "b"}})
@@ -49,7 +67,7 @@ func TestXtasyModelsAreInTheCatalogAndClosed(t *testing.T) {
 }
 
 func TestXtasyRequestUsesWireNamesFixedValuesAndTheRun(t *testing.T) {
-	video, _ := builtinMediaCatalog.model("xt.xtasy-v3")
+	video, _ := builtinMediaCatalog.model("xt.omni-video")
 	params, err := video.resolveMediaParams(json.RawMessage(`{"duration":8,"generateAudio":false}`))
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +76,7 @@ func TestXtasyRequestUsesWireNamesFixedValuesAndTheRun(t *testing.T) {
 	if body["model_id"] != video.Version || body["prompt"] != "a lake" || body[xtasyIdempotencyField] != "awwo-run-run1" || len(body["references"].([]any)) != 0 {
 		t.Fatal("body", body)
 	}
-	want := map[string]any{"mode": "multimodal", "aspect_ratio": "16:9", "duration": int64(8), "resolution": "720p", "generate_audio": false, "enable_thinking": false}
+	want := map[string]any{"mode": "multimodal", "aspect_ratio": "16:9", "duration": int64(8), "resolution": "720p", "generate_audio": false, "watermark": false, "return_last_frame": false}
 	got := body["parameters"].(map[string]any)
 	if len(got) != len(want) {
 		t.Fatal("parameters", got)
@@ -87,9 +105,9 @@ func TestXtasyRequestUsesWireNamesFixedValuesAndTheRun(t *testing.T) {
 	if p, _ := image.resolveMediaParams(json.RawMessage(`{"imageNum":3,"negativePrompt":"blur"}`)); mediaCreditsFor(image.ID, image.Kind, p) != 90 {
 		t.Fatal("three images cost three times one", mediaCreditsFor(image.ID, image.Kind, p))
 	}
-	// The default video, five seconds at 720p, is the measured price; 1080p and longer clips cost more.
-	video5, _ := builtinMediaCatalog.model("xt.xtasy-v3")
-	for raw, want := range map[string]int{`{}`: 200, `{"duration":10}`: 400, `{"resolution":"1080p"}`: 300, `{"duration":2}`: 200} {
+	// The default video, five seconds at 720p, is the measured price; longer clips cost more, shorter ones no less.
+	video5, _ := builtinMediaCatalog.model("xt.omni-video")
+	for raw, want := range map[string]int{`{}`: 280, `{"duration":10}`: 560, `{"duration":15}`: 840, `{"duration":4}`: 280} {
 		p, _ := video5.resolveMediaParams(json.RawMessage(raw))
 		if got := mediaCreditsFor(video5.ID, video5.Kind, p); got != want {
 			t.Fatal("video price", raw, got, want)
@@ -317,7 +335,7 @@ func TestXtasyConfigAndExposure(t *testing.T) {
 	if err := validateMediaConfig(valid); err != nil {
 		t.Fatal("X-tasy alone is a valid media setup", err)
 	}
-	if !valid.xtasyConfigured() || valid.runningHubConfigured() || !valid.mediaProviderConfigured(mediaProviderXtasy) || !isMediaModelID("xt.xtasy-v3") {
+	if !valid.xtasyConfigured() || valid.runningHubConfigured() || !valid.mediaProviderConfigured(mediaProviderXtasy) || !isMediaModelID("xt.omni-video") {
 		t.Fatal("provider predicates")
 	}
 	for name, mutate := range map[string]func(*Config){

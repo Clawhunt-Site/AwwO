@@ -188,22 +188,26 @@ export function mediaModelLabel(model: MediaModel, locale: UiLocale): string {
   return model.label[locale === 'zh' ? 0 : 1];
 }
 
-// Models of a generator this deployment no longer runs (ids `rh.*`), with the model of the same family a workspace is
-// now offered. Any other retired model of a kind moves to that kind's first offered model.
+// Retired models with the model of the same family a workspace is now offered: every model of a generator this
+// deployment no longer runs (ids `rh.*`), and the two X-tasy models its list for the operator's key no longer had on
+// 2026-10-15 (Video · Standard and Image · Ultra HD batch). Any other retired model of a kind moves to that kind's
+// first offered model.
 const RETIRED_MEDIA_MODELS: Readonly<Record<string, string>> = {
   'rh.seedream-v5-pro': 'xt.seedream-5-pro',
   'rh.nano-banana-2': 'xt.gemini-3-1-flash-image',
   'rh.nano-banana-pro': 'xt.gemini-3-1-flash-image',
-  'rh.gpt-image-2': 'xt.gpt-image-2',
+  'rh.gpt-image-2': 'xt.gpt-image-2-5',
+  'xt.xtasy-v3': 'xt.omni-video',
+  'xt.gpt-image-2': 'xt.gpt-image-2-5',
 };
 
 /**
- * The model a media node set to a retired generator's model moves to: the same family when this workspace is offered
- * it, else the first offered model of the node's kind. Null while the node's model is still offered (a deployment
- * that runs that generator keeps it), for any model that is not a retired one, or when nothing of the kind is offered.
+ * The model a media node set to a retired model moves to: the same family when this workspace is offered it, else the
+ * first offered model of the node's kind. Null while the node's model is still offered (a deployment that runs that
+ * generator keeps it), for any model that is not a retired one, or when nothing of the kind is offered.
  */
 export function replacementMediaModel(catalogue: MediaCatalogue | null | undefined, kind: MediaKind, model: string): string | null {
-  if (!model.startsWith('rh.')) return null;
+  if (!model.startsWith('rh.') && !Object.hasOwn(RETIRED_MEDIA_MODELS, model)) return null;
   const offered = mediaModelsOf(catalogue, kind);
   if (!offered.length || offered.some(item => item.id === model)) return null;
   const preferred = RETIRED_MEDIA_MODELS[model];
