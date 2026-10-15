@@ -298,11 +298,13 @@ const RHYTHM: OfficialWorkflow = {
 // the stored files as `<node id>/<file name>` paths; the case dialog shows the published page with those files inlined.
 const MEDIA_RULES = '\nMedia: the pictures and the clip the canvas’s media nodes generated are listed in the inputs by their relative paths, `<node id>/<file name>`; they are this canvas’s own files, not external images or video. Use those paths exactly as given, and only in <img src>, <video src> or <source src>, a video’s poster or a CSS url() — AwwO’s preview replaces them with the real files; never build or rewrite them in JavaScript strings (they would not be replaced), and when script needs a picture, read it from the <img> element that shows it. Every video is muted autoplay loop playsinline and fills its frame with object-fit: cover. Never invent a file name the inputs do not list; where a file was not generated, a gradient with particles stands in for it and the page still works. The look is a film poster or a leading brand’s site: the media themselves fill the screen, under refined typography, gradient masks, glow, particles and transitions; the content moves in full-screen acts and starts animating as soon as the page opens. This page needs no 3D.';
 const mediaBuild = (task: string) => build(task + MEDIA_RULES);
-const CLIP: OfficialMediaNode['params'] = { aspectRatio: '16:9', duration: 5, resolution: '720p', generateAudio: false, thinking: false };
+// A clip starts on Video · All-round, X-tasy's default video model since its list for the operator's key dropped Video ·
+// Standard on 2026-10-15; these are All-round's own settings (a case's recorded run keeps the model it ran on).
+const CLIP: OfficialMediaNode['params'] = { aspectRatio: '16:9', duration: 5, resolution: '720p', generateAudio: false };
 const WIDE: OfficialMediaNode['params'] = { aspectRatio: '16:9', resolution: '2K' };
 const PORTRAIT: OfficialMediaNode['params'] = { aspectRatio: '3:4', resolution: '2K' };
 const media = (id: string, kind: 'image' | 'video', title: string, row: number, prompt: string, params = kind === 'video' ? CLIP : WIDE): OfficialMediaNode =>
-  ({ id, kind, title, prompt, model: kind === 'video' ? 'xt.xtasy-v3' : 'xt.seedream-5-pro', params, column: 0, row, feeds: ['page'] });
+  ({ id, kind, title, prompt, model: kind === 'video' ? 'xt.omni-video' : 'xt.seedream-5-pro', params, column: 0, row, feeds: ['page'] });
 const NEON_LOOK = 'cyberpunk film look, magenta-violet and cyan neon interwoven, mirror reflections on wet streets after rain, volumetric light and thin mist, shallow depth of field, film grain, cinematic grade, ultra detailed, no text or watermark';
 const neonShot = (shot: string) => `${shot}, ${NEON_LOOK}`;
 

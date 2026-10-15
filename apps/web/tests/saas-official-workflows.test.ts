@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { canConnect, isSoftMediaFeed, reconcileEdges } from '../src/canvas/ports';
-import { mediaKindOf } from '../src/canvas/mediaCatalog';
+import { mediaKindOf, parseMediaCatalogue, replacementMediaModel } from '../src/canvas/mediaCatalog';
 import { findCycle, preflightGraph, preflightGraphIssue, runGraph } from '../src/canvas/runGraph';
 import { normalizeContract } from '../src/canvas/nodeContracts';
 import { createOfficialDocument, type OfficialWorkflow } from '../src/saas/examples/officialWorkflows';
@@ -77,6 +77,15 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
       expect(node.persona).toBe('');
       expect(node.mediaParams).toEqual(spec.params);
       expect(node.threads?.map(thread => thread.draft)).toEqual([spec.prompt]);
+    }
+    // A copy starts on models the service still offers: none on a retired one (which a canvas moves off when it opens,
+    // dropping the case's settings), and a clip on Video · All-round with only the settings All-round takes
+    // (backend xtasy.go: aspect ratio, duration, resolution, audio).
+    const offered = parseMediaCatalogue({ configured: true, available: true, models: (['image', 'video', 'model3d'] as const).map(kind =>
+      ({ id: `xt.other-${kind}`, name: kind, vendor: 'xtasy', kind, prompt: { minLength: 1, maxLength: 32000 }, params: [] })) });
+    for (const spec of item.media ?? []) {
+      expect(replacementMediaModel(offered, spec.kind, spec.model), spec.id).toBeNull();
+      if (spec.model === 'xt.omni-video') expect(Object.keys(spec.params ?? {}).filter(name => !['aspectRatio', 'duration', 'resolution', 'generateAudio'].includes(name)), spec.id).toEqual([]);
     }
     expect(agents(document).some(node => node.contract!.outputs.some(field => field.type === 'html' && field.required))).toBe(true);
     expect(preflightGraphIssue(document.nodes, document.edges)?.code).toBe('unbound_nodes');
