@@ -292,3 +292,11 @@ it('stops the copy when a delivered node has no recording its canvas can hold, r
   const cut = { ...record, nodes: record.nodes.map(node => node.id === build.id ? { ...node, output: node.output!.slice(0, 2000) } : node) };
   expect(() => createProductionCopyDocument(workflow, cut, null)).toThrow(new RegExp(`${build.id} its canvas cannot hold`));
 });
+
+
+it('tells a media case’s copier which deliveries its first run makes again', async () => {
+  server();
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+  const setup = await openCopy('Neon Circuit racer');
+  expect(within(setup).getByText(/^Keep all 10 nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on 2026-10-15 \(10\/10 nodes, marked “case recording”\); the media nodes, and the steps that use the files they made, make theirs again on the first run\. Optionally choose one execution model for every new node\.$/)).toBeVisible();
+});

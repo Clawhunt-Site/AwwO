@@ -88,3 +88,26 @@ it.each([['neon-circuit', 'Orbitron'], ['car-plant', 'Space Grotesk']] as const)
   expect(within(strip).getByText('Stage 01 · 1 media node, generated in the same run')).toBeVisible();
   expect(strip.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/webp;base64,/);
 }, 30000);
+
+
+// A media case's page is never shown without the files it uses: a file that cannot be loaded shows a notice and a way to
+// try again instead of a page with broken pictures.
+it('shows no page while a media case’s file cannot be loaded, and runs it once a retry brings every file', async () => {
+  const item = PRODUCTION_CASES.find(value => value.id === 'aurora-gt')!;
+  const files = new Map(Object.entries(await import('../src/saas/production-runs/aurora-gt.media.json').then(module => module.default as Record<string, { src: string }>)));
+  const broken = files.get('red/image-1.jpg')!.src;
+  let fail = true;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === broken && fail) return new Response('missing', { status: 404 });
+    return new Response(readFileSync(path.join(WEB, ...url.split('/').filter(Boolean))), { status: 200 });
+  });
+  render(<SaaSPreferencesProvider><ProductionShowcase item={item} /></SaaSPreferencesProvider>);
+  const notice = await screen.findByRole('alert', undefined, { timeout: 20000 });
+  expect(notice).toHaveTextContent('could not be loaded, so it is not shown without them');
+  expect(screen.queryByTitle(`${item.title}: the result an AwwO run delivered`)).toBeNull();
+  fail = false;
+  fireEvent.click(within(notice).getByRole('button', { name: 'Try again' }));
+  const frame = await screen.findByTitle(`${item.title}: the result an AwwO run delivered`, undefined, { timeout: 20000 });
+  expect(frame.getAttribute('srcdoc')).not.toMatch(/\bred\/image-1\.jpg/);
+}, 30000);

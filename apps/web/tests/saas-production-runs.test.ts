@@ -44,23 +44,32 @@ it('publishes exactly the generated files a media case’s page names as static 
   for (const name of readdirSync(path.join(WEB, 'showcase', 'media'))) expect(MEDIA[`../src/saas/production-runs/${name}.media.json`], name).toBeDefined();
 });
 
-it('loads a media case’s files as data: URLs from the site, and leaves out one it cannot fetch or that is not the size published', async () => {
+it('loads a media case’s files as data: URLs from the site, all or none: a file it cannot fetch, a short one or a stalled one fails the load', async () => {
   const record = RECORDS.find(value => value.media?.length)!;
   const manifest = MEDIA[`../src/saas/production-runs/${record.caseId}.media.json`];
-  const [first, ...rest] = Object.entries(manifest);
-  const seen: string[] = [];
-  const fetchFile = (async (input: RequestInfo | URL) => {
-    const src = String(input);
-    seen.push(src);
-    if (src === first[1].src) return new Response('missing', { status: 404 });
-    const bytes = readFileSync(path.join(WEB, ...src.split('/').filter(Boolean)));
-    return new Response(src === rest[0]?.[1].src ? bytes.subarray(1) : bytes, { status: 200 });
-  }) as typeof fetch;
-  const files = await loadProductionMedia(record.caseId, fetchFile);
-  expect(seen.sort()).toEqual(Object.values(manifest).map(file => file.src).sort());
-  expect(Object.keys(files).sort()).toEqual(rest.slice(1).map(([reference]) => reference).sort());
+  const [first, second] = Object.entries(manifest);
+  const serve = (broken?: { src: string; as: 'missing' | 'short' | 'stalled' }) => {
+    const seen: string[] = [];
+    const fetchFile = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const src = String(input);
+      seen.push(src);
+      expect(init?.credentials).toBe('omit');
+      if (src === broken?.src && broken.as === 'missing') return new Response('missing', { status: 404 });
+      if (src === broken?.src && broken.as === 'stalled') return new Promise<Response>(() => {});
+      const bytes = readFileSync(path.join(WEB, ...src.split('/').filter(Boolean)));
+      return new Response(src === broken?.src ? bytes.subarray(1) : bytes, { status: 200 });
+    }) as typeof fetch;
+    return { seen, fetchFile };
+  };
+  const whole = serve();
+  const files = await loadProductionMedia(record.caseId, whole.fetchFile);
+  expect(whole.seen.sort()).toEqual(Object.values(manifest).map(file => file.src).sort());
+  expect(Object.keys(files).sort()).toEqual(Object.keys(manifest).sort());
   for (const [reference, url] of Object.entries(files)) expect(url.startsWith(`data:${manifest[reference].type};base64,`), reference).toBe(true);
-  expect(await loadProductionMedia('no-such-case', fetchFile)).toEqual({});
+  await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'missing' }).fetchFile)).rejects.toThrow('production_media_unavailable');
+  await expect(loadProductionMedia(record.caseId, serve({ src: second[1].src, as: 'short' }).fetchFile)).rejects.toThrow('production_media_unavailable');
+  await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'stalled' }).fetchFile, 50)).rejects.toThrow('production_media_unavailable');
+  expect(await loadProductionMedia('no-such-case', whole.fetchFile)).toEqual({});
 });
 
 it('publishes a record for real cases only, and summarises each one exactly', () => {

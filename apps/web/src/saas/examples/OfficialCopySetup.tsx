@@ -107,7 +107,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
     <form onSubmit={event => { event.preventDefault(); void confirm(); }}>
       <header><span>PRODUCTION CASE</span><h2 id={`${id}-title`}>Copy example to my canvases</h2><p>{item.title}</p></header>
       <p id={`${id}-description`}>{recording
-        ? `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”). Optionally choose one execution model for every new node.`
+        ? `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”)${item.media?.length ? '; the media nodes, and the steps that use the files they made, make theirs again on the first run' : ''}. Optionally choose one execution model for every new node.`
         : `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements. Optionally choose one execution model for every new node.`}</p>
       <label className="official-copy-model" htmlFor={`${id}-model`}>Execution model
         <select id={`${id}-model`} autoFocus value={selection} disabled={locked} onChange={event => { setSelection(event.target.value); setSubmitError(null); }}>

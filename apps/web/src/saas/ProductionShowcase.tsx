@@ -115,16 +115,20 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
     loadProductionRun(item.id).then(value => { if (live) setRecord(value ?? null); }, () => { if (live) setRecord(null); });
     return () => { live = false; };
   }, [item.id]);
-  // A media case's files load with it (one lazy chunk); undefined until they are here, {} when there are none.
-  const [media, setMedia] = useState<{ id: string; files: Readonly<Record<string, string>> } | undefined>(undefined);
+  // A media case's files load with it; undefined until they are here, {} when there are none. A load that failed (a file
+  // missing, short or too slow) shows no page at all, with a way to try again: never a page without the files it uses.
+  const [media, setMedia] = useState<{ id: string; files?: Readonly<Record<string, string>> } | undefined>(undefined);
+  const [mediaAttempt, setMediaAttempt] = useState(0);
   const hasMedia = Boolean(record?.media?.length);
   useEffect(() => {
     if (!hasMedia) return;
     let live = true;
-    loadProductionMedia(item.id).then(files => { if (live) setMedia({ id: item.id, files }); }, () => { if (live) setMedia({ id: item.id, files: {} }); });
+    loadProductionMedia(item.id).then(files => { if (live) setMedia({ id: item.id, files }); }, () => { if (live) setMedia({ id: item.id }); });
     return () => { live = false; };
-  }, [item.id, hasMedia]);
+  }, [item.id, hasMedia, mediaAttempt]);
   const files = hasMedia ? (media?.id === item.id ? media.files : undefined) : NO_MEDIA;
+  const mediaFailed = hasMedia && media?.id === item.id && !media.files;
+  const retryMedia = () => { setMedia(undefined); setMediaAttempt(value => value + 1); };
   const reuse = onReuse && workflow && <button type="button" className="production-made-reuse" onClick={() => onReuse(workflow)}><Copy size={14} aria-hidden="true" />Copy this canvas</button>;
   if (!record) return <section className="production-made" lang="en" aria-labelledby={`${id}-title`}>
     <header className="production-made-heading"><div><span className="production-eyebrow"><span />HOW IT WAS MADE</span>
@@ -176,9 +180,11 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
       </div>
       <div className="production-made-result">
         <header><span>{artifact ? 'The delivered result · runs in a sandbox' : 'Delivery'}</span>
-          {artifact && <div><button type="button" onClick={() => setRevision(value => value + 1)} aria-label="Reload the result" title="Reload the result"><RotateCcw size={14} aria-hidden="true" /></button>
+          {artifact && <div><button type="button" onClick={() => { setRevision(value => value + 1); if (mediaFailed) retryMedia(); }} aria-label="Reload the result" title="Reload the result"><RotateCcw size={14} aria-hidden="true" /></button>
             <button type="button" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}Focus the result</button></div>}</header>
         {artifact?.output ? (files ? <Fragment key={revision}><ResultFrame html={artifact.output} media={files} title={`${item.title}: the result an AwwO run delivered`} /></Fragment>
+          : mediaFailed ? <p className="production-made-empty" role="alert">The pictures, clips or models this page uses could not be loaded, so it is not shown without them.
+            <button type="button" onClick={retryMedia}>Try again</button></p>
           : <p className="production-made-empty" role="status">Loading the result…</p>)
           : <p className="production-made-empty">This run did not deliver the result; the failed and blocked nodes are on the left.</p>}
         {artifact && <p className="production-made-hint">Click the page, then use the keyboard. The result is model-generated and runs as delivered, without manual edits.</p>}

@@ -166,6 +166,15 @@ function scriptOrigin(reference: string): string {
 
 const loaded = new Map<string, Promise<string>>();
 
+// Fonts are a finish, not a requirement: a font chunk still loading after this long is left out and the page runs in its
+// fallback font.
+const FONT_DEADLINE_MS = 20_000;
+function withinDeadline<T>(promise: Promise<T | undefined>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([promise, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), ms); })])
+    .finally(() => clearTimeout(timer));
+}
+
 /** The inline code for each supplied library (its pinned copy, then the additions this page uses), keyed by every
  * URL that names it; for a page that imports pinned ES modules, their import-map entries as JSON under
  * PREVIEW_IMPORT_MAP_KEY (applyModuleEntries puts them in the page); for a page that names brand fonts, their
@@ -176,7 +185,7 @@ export async function loadPreviewLibraries(needs: Pick<PreviewScriptNeeds, 'libr
   const [entries, modules, fonts] = await Promise.all([
     Promise.all(classic.map(async library => [library, await loadLibrary(library)] as const)),
     needs.modules?.files.length ? moduleImportEntries(needs.modules) : Promise.resolve(undefined),
-    needs.fonts?.length ? previewFontFaces(needs.fonts).catch(() => undefined) : Promise.resolve(undefined),
+    needs.fonts?.length ? withinDeadline(previewFontFaces(needs.fonts).catch(() => undefined), FONT_DEADLINE_MS) : Promise.resolve(undefined),
   ]);
   const code = new Map<string, string>();
   for (const [library, text] of entries) {

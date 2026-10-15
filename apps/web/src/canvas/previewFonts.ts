@@ -10,16 +10,23 @@ export { fontStyleText, PREVIEW_FONT_LOAD_SCRIPT, PREVIEW_FONT_RULE, PREVIEW_FON
 
 // A family counts where a font is named: right after a quote, a comma or a colon (a CSS declaration or custom property,
 // a style attribute or object, an SVG attribute) or after a size (a CSS or canvas font shorthand: '700 28px Orbitron',
-// '14px/1.4 Inter'), and right before a quote (escaped or not), a comma, a semicolon, a brace, a bracket, !important or a
-// line's end. Prose that only contains the word ("an outfit", "Interstate") names no font.
-const BEFORE = String.raw`(?:['"\x60,:]|(?:px|pt|em|rem|%|vw|vh|vmin|vmax|ch)(?:\s*\/\s*[\d.]+[a-z%]*)?\s)\s*`;
+// '14px/1.4 Inter', '2rem/var(--leading) Orbitron', 'clamp(2rem,5vw,4rem) Orbitron'), and right before a quote (escaped
+// or not), a comma, a semicolon, a brace, a bracket, !important or a line's end. A quote may be written as an HTML
+// entity, as in a style attribute (font-family:&quot;Space Grotesk&quot;). Prose that only contains the word ("an
+// outfit", "Interstate") names no font.
+const CALL = String.raw`(?:var|calc|clamp|min|max)\((?:[^()]|\([^()]*\))*\)`;
+const SIZE = String.raw`(?:px|pt|em|rem|%|vw|vh|vmin|vmax|ch|${CALL})`;
+const LINE_HEIGHT = String.raw`(?:\s*\/\s*(?:[\d.]+[a-z%]*|${CALL}|normal))?`;
+const BEFORE = String.raw`(?:['"\x60,:]|${SIZE}${LINE_HEIGHT}\s)\s*`;
 const AFTER = String.raw`(?=\s*(?:['"\x60,;})\]!\\]|$))`;
 const PATTERNS = new Map(PREVIEW_FONTS.map(font => [font,
   new RegExp(BEFORE + font.family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, String.raw`\s+`) + AFTER, 'im')]));
+const decodeQuotes = (text: string) => text.replace(/&(?:quot|#0*34|#x0*22);/gi, '"').replace(/&(?:apos|#0*39|#x0*27);/gi, "'");
 
 /** The supplied families the given page texts name (its document, and any canvas files inlined into it), in list order. */
 export function previewFontNeeds(...texts: readonly string[]): PreviewFont[] {
-  return PREVIEW_FONTS.filter(font => texts.some(text => PATTERNS.get(font)!.test(text)));
+  const decoded = texts.map(decodeQuotes);
+  return PREVIEW_FONTS.filter(font => decoded.some(text => PATTERNS.get(font)!.test(text)));
 }
 
 // Each face's file, as a data: URL in its own chunk, fetched only when a page uses that family.

@@ -124,20 +124,32 @@ function asDataUrl(blob: Blob): Promise<string> {
 /**
  * A media case's generated files as data: URLs keyed by the paths its page names, fetched from this site when the case
  * opens, never before: the sandboxed page runs in an opaque origin that reaches no network, so the files go in as
- * data. A file that cannot be fetched, or is not the size published, is left out, and the page runs without it.
+ * data. All or nothing: a file that cannot be fetched, is not the size published, or is not here within the deadline
+ * rejects the whole load (production_media_unavailable), so a case's page is never shown without the files it uses;
+ * its dialog offers to try again.
  */
-export async function loadProductionMedia(id: string, fetchFile: typeof fetch = (input, init) => fetch(input, init)): Promise<Readonly<Record<string, string>>> {
+export async function loadProductionMedia(id: string, fetchFile: typeof fetch = (input, init) => fetch(input, init),
+  deadlineMs = 120_000): Promise<Readonly<Record<string, string>>> {
   const manifest = await loadProductionMediaManifest(id);
-  const entries = await Promise.all(Object.entries(manifest).map(async ([path, file]) => {
-    try {
-      const response = await fetchFile(file.src, { credentials: 'omit' });
-      if (!response.ok) return null;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(new Error('production_media_unavailable')); }, deadlineMs);
+  });
+  try {
+    const entries = await Promise.race([Promise.all(Object.entries(manifest).map(async ([path, file]) => {
+      const response = await fetchFile(file.src, { credentials: 'omit', signal: controller.signal });
+      if (!response.ok) throw new Error('production_media_unavailable');
       const bytes = await response.arrayBuffer();
-      if (bytes.byteLength !== file.bytes) return null;
+      if (bytes.byteLength !== file.bytes) throw new Error('production_media_unavailable');
       return [path, await asDataUrl(new Blob([bytes], { type: file.type }))] as const;
-    } catch {
-      return null;
-    }
-  }));
-  return Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== null));
+    })), deadline]);
+    return Object.fromEntries(entries);
+  } catch {
+    // One file failed: the others stop downloading too.
+    controller.abort();
+    throw new Error('production_media_unavailable');
+  } finally {
+    clearTimeout(timer);
+  }
 }

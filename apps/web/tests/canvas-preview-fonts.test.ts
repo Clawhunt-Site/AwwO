@@ -42,6 +42,10 @@ describe('brand fonts AwwO supplies to running pages', () => {
     expect(names(['label.style.fontFamily = \'exo 2\';'])).toEqual(['Exo 2']);
     expect(names(['<text font-family="Cinzel" x="0">KEEP</text>'])).toEqual(['Cinzel']);
     expect(names(['h2{font-family:inter;}', 'p{font-family:"Playfair Display" !important}'])).toEqual(['Inter', 'Playfair Display']);
+    // A style attribute writes its quotes as entities; a shorthand may size by a variable or a CSS function.
+    expect(names(['<h1 style="font-family:&quot;Space Grotesk&quot;,sans-serif">Hello</h1>'])).toEqual(['Space Grotesk']);
+    expect(names([':root{--leading:1.2}h1{font:700 2rem/var(--leading) Orbitron,sans-serif}'])).toEqual(['Orbitron']);
+    expect(names(['h1{font:800 clamp(2rem, calc(1rem + 4vw), 5rem)/1 Unbounded;}', 'p{font:var(--size) Manrope}'])).toEqual(['Manrope', 'Unbounded']);
   });
 
   it('does not take prose, other families or longer names for a supplied font', () => {
