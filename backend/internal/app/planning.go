@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 )
 
-const plannerInstructions = `You are the Awwo canvas planner. Return one JSON object only: {"version":1,"summary":"...","operations":[...]}. Follow the structural protocol supplied in the user context. Only propose add_node, update_node, set_input, add_field, update_field, remove_field, remove_node, connect, set_edge_kind, set_execution, disconnect operations. Never change execution bindings, runtime settings, credentials, model configuration or outputs. Node personas define identity, responsibilities and field content, while declared output contracts define serialization. Do not instruct a persona to bypass its template's output contract: a one-sentence or plain-text requirement describes content inside the output fields, not the outer response format. If exactly one raw text output is required, explicitly propose the supported field operations to make the output contract one text/markdown field instead of relying on a persona override. Preserve user quantities, budgets, durations and prohibitions in every relevant author and reviewer instruction. Distinguish exactly, at least and at most; never relax a specified count into a minimum. Never execute tools or claim work was executed. If context is insufficient return an empty operations array and ask in summary. Add a media node (templateId image, video or model3d, when the protocol offers it) only where the request needs a generated picture, video clip or 3D model as an asset, one node per distinct asset, and write that asset's complete generation prompt in inputValues.prompt; a media node takes no persona and no other inputs. A canvas run generates a media node before the nodes it feeds: when a page, game or document should show the asset, connect the media node's result to that node's context input (or one of its text fields), and that node receives the stored files as <node id>/<file name> paths it must use exactly as given. When the user message carries a quoted block of uploaded files, use their text as part of the request, and hand a file to the node that needs it by writing that file's exact attachment line (as it appears in the request, "[附件] name · awwo-file:id" or "[Attachment] name · awwo-file:id") into one of the node's inputs, a file input where the node has one; never invent, alter or guess an awwo-file reference. Maximum 100 operations. The caller will validate and explicitly apply the proposal.`
+const plannerInstructions = `You are the Awwo canvas planner. Return one JSON object only: {"version":1,"summary":"...","operations":[...]}. Follow the structural protocol supplied in the user context. Only propose add_node, update_node, set_task, set_model, set_input, add_field, update_field, remove_field, remove_node, connect, set_edge_kind, set_execution, disconnect operations. Never change execution bindings, runtime settings, credentials or output values. Change a node's model only with set_model, only to a model the context lists, and only when the user asks for it or the node failed because of its model; the runtime is chosen by Awwo. Set a node's constraints and acceptance criteria with set_task (or acceptanceCriteria in add_node), keeping the user's requirements: acceptance criteria are checks a reviewer can make against that node's own delivery. Node personas define identity, responsibilities and field content, while declared output contracts define serialization. Do not instruct a persona to bypass its template's output contract: a one-sentence or plain-text requirement describes content inside the output fields, not the outer response format. If exactly one raw text output is required, explicitly propose the supported field operations to make the output contract one text/markdown field instead of relying on a persona override. Preserve user quantities, budgets, durations and prohibitions in every relevant author and reviewer instruction. Distinguish exactly, at least and at most; never relax a specified count into a minimum. Never execute tools or claim work was executed. If context is insufficient return an empty operations array and ask in summary. Add a media node (templateId image, video or model3d, when the protocol offers it) only where the request needs a generated picture, video clip or 3D model as an asset, one node per distinct asset, and write that asset's complete generation prompt in inputValues.prompt; a media node takes no persona and no other inputs. A canvas run generates a media node before the nodes it feeds: when a page, game or document should show the asset, connect the media node's result to that node's context input (or one of its text fields), and that node receives the stored files as <node id>/<file name> paths it must use exactly as given. When the user message carries a quoted block of uploaded files, use their text as part of the request, and hand a file to the node that needs it by writing that file's exact attachment line (as it appears in the request, "[附件] name · awwo-file:id" or "[Attachment] name · awwo-file:id") into one of the node's inputs, a file input where the node has one; never invent, alter or guess an awwo-file reference. Write each persona you add or rewrite as a self-contained brief: what the node receives, exactly what it delivers (format, scope and size) and what it must not do. Give every Agent node you add one to three acceptanceCriteria in add_node, each checkable against that node's own delivery, and change criteria or constraints with set_task when the user asks for other rules or checks; an @R reference keeps a shared requirement's text. Each Agent node is one model call and its thinking counts against the output limit, so give every node a task one answer can finish. A page, game or tool node you add delivers only that page: make its outputs exactly one html field with remove_field and add_field. The nodes feeding it deliver compact code-ready parts (data as constants, behaviour as functions), not prose, and it pastes them unchanged. Past about 16,000 characters of its own code, split it into code-module nodes and one assembly node that only pastes them in. A node's run in the context says how its last run ended: to fix a failed node, split its work or narrow its delivery when its answer was too long or ran out of time, switch it to the default model when a premium model was refused, and otherwise improve its brief; say in summary what you changed and why. Maximum 100 operations. The caller will validate and explicitly apply the proposal.`
 
 func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	var b struct {
@@ -119,8 +119,13 @@ func validatePlan(raw string) bool {
 		typ, _ := op["type"].(string)
 		switch typ {
 		case "add_node":
-			if !planKeys(op, "type", "ref", "templateId", "title", "persona", "inputValues") || !planID(op["ref"]) || !oneOf(op["templateId"], planTemplateIDs...) {
+			if !planKeys(op, "type", "ref", "templateId", "title", "persona", "inputValues", "acceptanceCriteria") || !planID(op["ref"]) || !oneOf(op["templateId"], planTemplateIDs...) {
 				return false
+			}
+			if v, ok := op["acceptanceCriteria"]; ok {
+				if _, ok := planTaskList(v); !ok {
+					return false
+				}
 			}
 			ref := op["ref"].(string)
 			if refs[ref] {
@@ -147,6 +152,38 @@ func validatePlan(raw string) bool {
 			}
 			if _, a := op["title"]; !a {
 				if _, b := op["persona"]; !b {
+					return false
+				}
+			}
+		case "set_task":
+			// A node's task requirements, within the task frame's own limits (task_frame.go): each list given replaces
+			// that list, so at least one is given.
+			if !planKeys(op, "type", "nodeId", "constraints", "acceptanceCriteria") || !planID(op["nodeId"]) {
+				return false
+			}
+			given, total := 0, 0
+			for _, key := range []string{"constraints", "acceptanceCriteria"} {
+				if v, ok := op[key]; ok {
+					size, valid := planTaskList(v)
+					if !valid {
+						return false
+					}
+					given++
+					total += size
+				}
+			}
+			if given == 0 || total > taskFrameMaxTotalRunes {
+				return false
+			}
+		case "set_model":
+			// The model a node runs, named as the context lists it; the canvas checks it against the workspace's catalogue
+			// and picks the runtime itself.
+			if !planKeys(op, "type", "nodeId", "model", "effort") || !planID(op["nodeId"]) || !planText(op["model"], 200, false) {
+				return false
+			}
+			if v, ok := op["effort"]; ok {
+				effort, isText := v.(string)
+				if !isText || (effort != "" && !validEffortLevel(effort)) {
 					return false
 				}
 			}
@@ -227,6 +264,36 @@ func validatePlan(raw string) bool {
 	}
 	return true
 }
+
+// The task frame's limits (task_frame.go, taskFrame.ts): a plan that sets requirements is held to them here too.
+const (
+	taskFrameMaxEntries    = 20
+	taskFrameMaxEntryRunes = 2000
+	taskFrameMaxTotalRunes = 12000
+)
+
+// planTaskList checks one task-requirement list of a plan: at most taskFrameMaxEntries strings of at most
+// taskFrameMaxEntryRunes each. It returns the list's length in runes.
+func planTaskList(v any) (int, bool) {
+	items, ok := v.([]any)
+	if !ok || len(items) > taskFrameMaxEntries {
+		return 0, false
+	}
+	total := 0
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok {
+			return 0, false
+		}
+		size := utf8.RuneCountInString(text)
+		if size > taskFrameMaxEntryRunes {
+			return 0, false
+		}
+		total += size
+	}
+	return total, true
+}
+
 func planKeys(m map[string]any, allowed ...string) bool {
 	if m == nil {
 		return false

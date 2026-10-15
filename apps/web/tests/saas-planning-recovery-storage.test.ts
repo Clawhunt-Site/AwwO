@@ -26,7 +26,10 @@ describe('bounded compressed planner recovery journal', () => {
   // (11,674 bytes). Re-set to 6,150 on 2026-10-11 when the figure template (原理图解) joined the planner's template
   // catalog: that added about 230 characters to this empty-canvas journal (zh 5,685 -> 5,917, en 5,809 -> 6,021), and
   // the English journal had only 28 characters left under the observed line. A larger catalog still has to fit here.
-  const AVAILABLE_CHARS = 6150;
+  // Re-set to 6,400 on 2026-10-15 when set_task (a node's constraints and acceptance criteria, set by the assistant)
+  // joined the protocol: the journal grew to zh 6,181 and en 6,317 characters. The guidance that came with it is in the
+  // server's planner instructions (planning.go), which this journal does not carry.
+  const AVAILABLE_CHARS = 6400;
   it.each(['zh', 'en'] as const)('fits the complete real %s protocol/template catalog in a nearly full browser storage budget', async locale => {
     configureSaaSCanvas({ tenant: { ...scope.tenant, name: 'Fixture', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 }, canvasId: scope.canvasId });
     const doc = emptyDocument();

@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 describe('the assistant’s next steps on the canvas', () => {
-  it('marks the closed toggle for a node a run would refuse, and opens that node’s settings in one click', async () => {
+  it('marks the closed toggle for a node a run would refuse, and opens that node on its inputs in one click', async () => {
     seed('');
     render(<CanvasSurface />);
     expect(toggle()).toHaveClass('has-hint');
@@ -42,7 +42,10 @@ describe('the assistant’s next steps on the canvas', () => {
     expect(next.getByText('填好后就能运行整张画布。')).toBeVisible();
     expect(next.queryByText('本地检查，不用次数')).toBeNull();
     fireEvent.click(row.getByRole('button', { name: '去补全「已有节点」' }));
-    await waitFor(() => expect(screen.getByRole('dialog', { name: /已有节点/ })).toBeVisible());
+    // The value is filled in where it lives: the node opens on its input drawer (its settings have no input fields).
+    const drawer = await screen.findByRole('region', { name: '输入表单' });
+    expect(drawer.closest('[data-node-id]')).toHaveAttribute('data-lod', 'focus');
+    expect(screen.queryByRole('dialog', { name: /已有节点/ })).toBeNull();
   });
 
   it('offers to run a ready canvas that never ran, without marking the toggle', () => {

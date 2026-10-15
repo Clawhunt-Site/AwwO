@@ -22,6 +22,8 @@ export interface ModelPaletteSelection {
   execution?: 'workspace' | 'workspace-unavailable' | 'text';
   /** The reasoning-effort levels this runtime's entry for the model advertises, in the catalogue's order; absent: none. */
   efforts?: string[];
+  /** The workspace's free allowance does not include the model: a run on it waits for a paid plan (SaaSRuntimeModel). */
+  requiresUpgrade?: boolean;
   /** The level the model uses when none is chosen, when it advertises one. Shown, never written into a node. */
   defaultEffort?: string;
 }
@@ -108,7 +110,7 @@ export function groupModels(status: SaaSRuntimeStatus | null, locale: UiLocale =
         displayName: clean(model.name) || clean(model.label) || model.id,
         providerGroup: group, runtime: runtime.id, model: model.id, available,
         execution: runtime.workspace ? (runtime.workspace.available ? 'workspace' : 'workspace-unavailable') : 'text',
-        ...effortsOf(model),
+        ...effortsOf(model), ...(model.requiresUpgrade === true ? { requiresUpgrade: true } : {}),
         ...(available ? {} : { reason: runtime.workspace?.available === false
           ? text(locale, '项目执行环境尚未就绪。', 'The project execution environment is not ready.')
           : runtime.reason || text(locale, '此模型的执行服务尚未就绪。', 'This model’s runtime is not ready.') }) });

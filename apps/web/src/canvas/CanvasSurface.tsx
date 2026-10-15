@@ -33,7 +33,7 @@ import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePoint
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
-import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, type NextStep, type NextSteps } from './nextSteps';
+import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, runRequestKind, type NextStep, type NextSteps } from './nextSteps';
 import { reviewVerdict, reworkRequirements } from './reviewVerdict';
 import { runErrorText } from '../saas/canvasErrors';
 import { fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
@@ -46,8 +46,9 @@ import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { automaticGroups, paletteEfforts, readModelPalette, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
-import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, type CanvasPlanMedia } from './canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, type CanvasPlanMedia, type CanvasPlanModelChoice } from './canvasPlan';
 import { withAssistantModel } from './assistantModel';
+import { describePlanChanges } from './planChanges';
 import { automaticEntries, withAutomaticRuntimes } from './nodeRuntime';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
   readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
@@ -354,6 +355,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [paletteError, setPaletteError] = useState('');
   const [paletteRefresh, setPaletteRefresh] = useState(0);
   const [palettePersona, setPalettePersona] = useState<AgentTemplateId | null>(null);
+  // Each press of a 「去填写」 step opens that node on its input drawer (SessionTile inputRequest).
+  const [inputRequests, setInputRequests] = useState<Record<string, number>>({});
   // The model rail starts collapsed on a desktop stage (the canvas gets the width) and remembers
   // the operator's choice per browser. Below the desktop width the rail is a drawer that always
   // opens on the full shelf, whatever was stored, exactly like the Bot drawer.
@@ -2581,6 +2584,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   // `request` plans a prompt handed over (a carried-over request, a routed message) rather than the box's draft;
   // the box is emptied only where it holds that prompt.
+  // The chat models a plan may put a node on: this canvas's palette, each entry with its name and effort levels.
+  const planningModelChoices = (): Array<CanvasPlanModelChoice & { requiresUpgrade?: boolean }> => {
+    const live = paletteRef.current; const here = currentSaaSCanvas();
+    if (!live || !here || live.tenantId !== here.tenant.id || live.canvasId !== here.canvasId) return [];
+    return live.models.map(entry => ({ runtime: entry.runtime, model: entry.model, available: entry.available, name: entry.displayName || entry.label,
+      ...(entry.efforts ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { requiresUpgrade: true } : {}) }));
+  };
   const sendPlanningMessage = async (request?: string, resume = false) => {
     // Keep the draft untouched and refuse before allocating a request or calling either planner.
     const blocked = planBlocker(resume);
@@ -2608,10 +2618,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
         setPlanningProgress(progress);
       };
+      // The planner sees the models a node can run (each once, where AwwO runs it) and how each node's last run ended,
+      // so it can change a node's model and act on a failure the reader asks it to fix.
+      const planModels = planningModelChoices();
+      const planRuns = Object.fromEntries(Object.entries(runs).map(([id, run]) => [id,
+        { state: run.state, ...(run.detail ? { detail: recoveryDetailMessage(t, run.detail) || run.detail } : {}) }]));
       const jev = !resume && plannerProvider === 'jev'
         ? await requestJevPlan(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress) : null;
       const plan = jev?.plan ?? await planRequest(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress,
-        { ...(resume ? { recoveryOperationId: planningRecovery!.operationId } : {}), mediaKinds });
+        { ...(resume ? { recoveryOperationId: planningRecovery!.operationId } : {}), mediaKinds,
+          models: automaticEntries(planModels).filter(entry => entry.available).map(entry => ({ id: entry.model, name: entry.name || entry.model,
+            ...(entry.efforts?.length ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { paid: true } : {}) })),
+          runs: planRuns });
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (canvasPlanRevision(docRef.current) !== revision || laneGuard.current.active() || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale', route);
@@ -2619,7 +2637,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia);
+      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, { choices: planModels });
       // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own).
       const applied = jev ? planned : { ...planned, doc: withAssistantModel(planned.doc, planned.addedNodeIds, assistantExecution?.componentModel, paletteRef.current?.models ?? []) };
       // Every step skipped (each one said in the adjustments) leaves the canvas as it was: nothing to patch, undo
@@ -2642,8 +2660,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const shownAdjustments = applied.adjustments.slice(0, 6);
       // Media nodes a plan added: said once, so the user knows a canvas run generates them and Send makes one alone.
       const addedMedia = changed ? applied.doc.nodes.filter(node => applied.addedNodeIds.includes(node.id) && node.kind === 'session' && mediaKindOf(node.agentKind)).length : 0;
+      // What the canvas now holds, node by node, under the model's own summary of what it meant to do.
+      const modelName = (id: string) => planModels.find(entry => entry.model === id)?.name || id;
+      const changes = changed ? describePlanChanges(before, applied.doc, locale, t, modelName) : [];
       const lead = [...(!changed && plan.operations.length ? [applied.summary, t('planning.nothingApplied')] : [applied.summary]),
-        ...(addedMedia ? [t('planning.mediaAdded', { count: addedMedia })] : [])];
+        ...(addedMedia ? [t('planning.mediaAdded', { count: addedMedia })] : []),
+        ...(changes.length ? [t('planning.changesHeader'), ...changes.map(line => `· ${line}`)] : [])];
       const reply = applied.adjustments.length ? [...lead, ...(changed ? [t('planning.adjusted', { count: applied.adjustments.length })] : []),
         ...shownAdjustments.map(item => `· ${item}`),
         ...(applied.adjustments.length > shownAdjustments.length ? [t('planning.adjustedMore', { count: applied.adjustments.length - shownAdjustments.length })] : [])].join('\n')
@@ -2871,7 +2893,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // A question about what the canvas still needs is answered here, from the canvas, before it could cost a call; so
     // is a message about the last run's failure, which only the canvas can see.
     if (!readOnlyRef.current && !pendingRef.current && !planningRequest.current
-      && (answerLocally(planning.draft.trim()) || repairLocally(planning.draft.trim()))) return;
+      && (answerLocally(planning.draft.trim()) || repairLocally(planning.draft.trim()) || runLocally(planning.draft.trim()))) return;
     if (!unifiedHost || !routeAssistant) { void sendPlanningMessage(); return; }
     if (readOnlyRef.current || pendingRef.current || planningRequest.current) return;
     const prompt = planning.draft.trim();
@@ -2954,6 +2976,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // Only the hosted workspace puts a node's task requirements into its prompt, which is how a rework carries the
     // review's findings.
     reworkAvailable: Boolean(cloudScope),
+    // The assistant can be asked to fix a failure or fill in inputs only while it can plan.
+    canPlan: !planningUnavailableReason && plannerProvider !== 'jev' && plannerStatus?.available !== false,
   });
   // Only the hosted app counts calls, so only it says what a step costs (and that this advice cost none).
   const countsCalls = Boolean(cloudScope);
@@ -2961,6 +2985,25 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const listSeparator = locale === 'zh' ? '、' : ', ';
   const titleOf = (id: string) => nodes.find(node => node.id === id)?.title ?? '';
   const configureNode = (id: string) => { if (!inspectorCloseLocked.current) { focusNode(id, { configure: true }); setInspectorId(id); } };
+  // Opens a node on its input drawer, in either mode: where a run's missing inputs are filled in.
+  const openNodeInputs = (id: string) => {
+    if (inspectorCloseLocked.current) return;
+    setInputRequests(previous => ({ ...previous, [id]: (previous[id] ?? 0) + 1 }));
+    focusNode(id);
+  };
+  // A step the assistant takes from the conversation, said as the reader's own message so the turn reads as asked.
+  const askAssistant = (prompt: string) => { setAssistantOpen(true); void sendPlanningMessage(prompt); };
+  const fixRequest = (ids: ReadonlyArray<string>) => {
+    const failedNodes = ids.map(titleOf).filter(Boolean);
+    const detail = recoveryDetailMessage(t, runs[ids[0]]?.detail)?.trim();
+    return t('assistant.fixRequest', { nodes: failedNodes.map(name => locale === 'zh' ? `「${name}」` : `“${name}”`).join(listSeparator),
+      reason: detail || t('assistant.repairNoReason') });
+  };
+  const fillRequest = (ids: ReadonlyArray<string>) => {
+    const rows = fillSteps.filter(step => ids.includes(step.nodeId))
+      .map(step => t('assistant.fillRequestRow', { node: titleOf(step.nodeId), fields: step.fields.join(listSeparator) }));
+    return t('assistant.fillRequest', { rows: rows.join(locale === 'zh' ? '；' : '; ') });
+  };
   // A review that found the delivery wanting is acted on in one click: its findings become one of the reviewed Agent's
   // task requirements (shown, and editable, in that node's settings), then the Agent and everything it feeds run
   // again, the review included. A later rework from the same review replaces that requirement instead of adding one.
@@ -2988,8 +3031,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       case 'switch-model': return { id: `switch-${step.nodeId}`, primary, label: t('assistant.nextSwitchModel'), onSelect: () => configureNode(step.nodeId) };
       case 'open-failed': return { id: `open-${step.nodeId}`, primary, label: t('assistant.nextOpenFailed'), onSelect: () => focusNode(step.nodeId) };
       case 'rerun-failed': return { id: 'rerun-failed', primary, label: t('assistant.nextRerunFailed'), onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
+      // The inputs are filled in where they are: the node opens on its input drawer (Configure has no input fields).
       case 'fill-inputs': return { id: `fill-${step.nodeId}`, primary, label: t('assistant.nextFillShort'), ariaLabel: t('assistant.nextFill', { node: titleOf(step.nodeId) }),
-        onSelect: () => configureNode(step.nodeId) };
+        onSelect: () => openNodeInputs(step.nodeId) };
+      case 'assistant-fix': return { id: 'assistant-fix', primary, label: t('assistant.nextAssistantFix'), onSelect: () => askAssistant(fixRequest(step.nodeIds)) };
+      case 'assistant-fill': return { id: 'assistant-fill', primary, label: t('assistant.nextAssistantFill'), onSelect: () => askAssistant(fillRequest(step.nodeIds)) };
       case 'run-all': return { id: 'run-all', primary, label: withCalls(t('assistant.nextRunAll'), step.calls), onSelect: () => void startRun() };
       // One node, alone: an out-of-scope upstream would contribute what it produced earlier, and a first node has none.
       case 'try-first': return { id: `try-${step.nodeId}`, primary, label: withCalls(t('assistant.nextTryFirst', { node: titleOf(step.nodeId) }), step.calls),
@@ -3023,8 +3069,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const fillSteps = suggested?.steps.flatMap(step => step.kind === 'fill-inputs' ? [step] : []) ?? [];
   const assistantNextSteps: AssistantNextSteps | undefined = suggested ? {
     lead: nextLead(suggested.situation, suggested.steps.some(step => step.kind === 'try-first')),
-    // What a run still needs is a checklist with a step per node; every other situation is a few buttons.
-    actions: suggested.situation.kind === 'inputs' ? [] : suggested.steps.map((step, index) => nextAction(step, index === 0)),
+    // What a run still needs is a checklist with a step per node (and the assistant to fill it all in); every other
+    // situation is a few buttons.
+    actions: suggested.situation.kind === 'inputs' ? suggested.steps.filter(step => step.kind !== 'fill-inputs').map(step => nextAction(step, false))
+      : suggested.steps.map((step, index) => nextAction(step, index === 0)),
     ...(fillSteps.length ? {
       items: fillSteps.map((step, index) => ({ id: step.nodeId, title: t('assistant.nextItemNode', { node: titleOf(step.nodeId) }),
         detail: step.fields.join(listSeparator), action: nextAction(step, index === 0) })),
@@ -3101,6 +3149,37 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       { id: `${id}-user`, role: 'user' as const, content: prompt }, { id: `${id}-assistant`, role: 'assistant' as const, content }].slice(-60) }));
     setAssistantOpen(true);
     if (scope) void startRun(scope);
+    countPress('assistant.local_answer');
+    return true;
+  };
+  // 「运行」「跑一下」「run it」 (owner request 2026-10-15): the canvas runs itself, as its run button would; the planner
+  // cannot run anything. What a run would refuse (inputs nobody filled in) is said instead, with the checklist under it.
+  const runLocally = (prompt: string): boolean => {
+    const kind = runRequestKind(prompt);
+    if (!kind || !nodes.some(node => node.kind === 'session' && !mediaKindOf(node.agentKind))) return false;
+    let content: string;
+    let scope: string[] | undefined;
+    let start = false;
+    if (running) content = t('assistant.runBusy');
+    else if (runUnavailableReason) content = t('assistant.runUnavailable', { reason: runUnavailableReason });
+    else if (suggested?.situation.kind === 'inputs') content = localAnswer();
+    else {
+      const rest = kind === 'rest' ? suggested?.steps.find(step => step.kind === 'run-rest') : undefined;
+      const all = suggested?.steps.find(step => step.kind === 'run-all');
+      if (rest?.kind === 'run-rest') {
+        scope = downstreamClosure(rest.nodeIds);
+        content = t('assistant.runStartingRest', { count: rest.nodeIds.length });
+      } else content = t('assistant.runStarting');
+      const calls = rest?.kind === 'run-rest' ? rest.calls : all?.kind === 'run-all' ? all.calls : undefined;
+      if (countsCalls && calls) content += t('assistant.runCalls', { calls });
+      start = true;
+    }
+    const id = `turn-${Date.now()}-${++planningSequence.current}`;
+    setPlanningError('');
+    setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
+      { id: `${id}-user`, role: 'user' as const, content: prompt }, { id: `${id}-assistant`, role: 'assistant' as const, content }].slice(-60) }));
+    setAssistantOpen(true);
+    if (start) void startRun(scope);
     countPress('assistant.local_answer');
     return true;
   };
@@ -3489,6 +3568,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onRunNode={readOnly || busyNow.has(node.id) || exclusiveNow || initializing || runUnavailableReason ? undefined : rerunNode}
             onDelete={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : tileDelete}
             modelChoices={tileModelChoices(node)}
+            inputRequest={inputRequests[node.id]}
             onChangeModel={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : changeNodeModel}
             onResizeCard={resizeCard}
             onToggleCardPreview={toggleCardPreview}

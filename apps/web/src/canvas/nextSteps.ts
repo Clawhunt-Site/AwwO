@@ -21,6 +21,11 @@ export type NextStep =
    * (the review included) again. */
   | { kind: 'rework'; nodeId: string; reviewerId: string; calls: number }
   | { kind: 'open-review'; nodeId: string }
+  /** Ask the canvas assistant to change the canvas so the failed nodes can finish (split a node, narrow its delivery,
+   *  another model): a plan, which costs the planner's call, not a run. */
+  | { kind: 'assistant-fix'; nodeIds: string[] }
+  /** Ask the canvas assistant to fill in the inputs a run still needs, from the request and the canvas. */
+  | { kind: 'assistant-fill'; nodeIds: string[] }
   | { kind: 'results' };
 
 /** Why those steps, in one line the host words. */
@@ -58,6 +63,8 @@ export interface NextStepsInput {
   /** The host can carry a review's findings into the reviewed Agent's next run (a hosted workspace's task
    * requirements reach its prompt; a local canvas's do not). */
   reworkAvailable?: boolean;
+  /** The canvas assistant can plan now, so it can be asked to fix a failure or fill in inputs. */
+  canPlan?: boolean;
 }
 
 const MAX_STEPS = 3;
@@ -103,7 +110,7 @@ function downstreamOf(roots: ReadonlyArray<SessionNode>, agents: ReadonlyArray<S
  * then everything a run would refuse for want of an input, then what has not run yet, then the results. Nothing is
  * offered while a run is going, or when no step could act. */
 export function nextSteps(input: NextStepsInput): NextSteps | null {
-  const { nodes, edges, runs, running, canRun, resultsAvailable, upgradeAvailable, isPremiumRefusal, isQuotaRefusal, reworkAvailable } = input;
+  const { nodes, edges, runs, running, canRun, resultsAvailable, upgradeAvailable, isPremiumRefusal, isQuotaRefusal, reworkAvailable, canPlan } = input;
   if (running) return null;
   const agents = agentNodes(nodes);
   if (!agents.length) return null;
@@ -124,7 +131,10 @@ export function nextSteps(input: NextStepsInput): NextSteps | null {
       return offer({ kind: 'premium', nodeTitle: first.title },
         [...(upgradeAvailable ? [{ kind: 'upgrade' as const }] : []), { kind: 'switch-model', nodeId: first.id }, ...rerun]);
     }
-    return offer({ kind: 'failed', nodeTitle: first.title, count: failed.length }, [{ kind: 'open-failed', nodeId: first.id }, ...rerun]);
+    // A failure the same settings would meet again (an answer too long, a call out of time) is the assistant's to fix
+    // by changing the canvas; it is offered after running again, which a passing fault needs.
+    const fix: NextStep[] = canPlan ? [{ kind: 'assistant-fix', nodeIds: failed.map(node => node.id) }] : [];
+    return offer({ kind: 'failed', nodeTitle: first.title, count: failed.length }, [{ kind: 'open-failed', nodeId: first.id }, ...rerun, ...fix]);
   }
 
   const wired = reconcileEdges(nodes, edges.filter(edge => edge.kind !== 'feedback'));
@@ -142,9 +152,11 @@ export function nextSteps(input: NextStepsInput): NextSteps | null {
 
   const missing = missingInputs(agents, wired);
   if (missing.length) {
-    // Every node a run would refuse is listed at once, so nothing has to be found one failed run at a time.
+    // Every node a run would refuse is listed at once, so nothing has to be found one failed run at a time; the
+    // assistant can fill them all in, after them.
     return offer({ kind: 'inputs', nodes: missing.length, fields: missing.reduce((sum, item) => sum + item.fields.length, 0), calls: callsOf(agents) },
-      missing.map(({ node, fields }) => ({ kind: 'fill-inputs' as const, nodeId: node.id, fields })), missing.length);
+      [...missing.map(({ node, fields }) => ({ kind: 'fill-inputs' as const, nodeId: node.id, fields })),
+        ...(canPlan ? [{ kind: 'assistant-fill' as const, nodeIds: missing.map(({ node }) => node.id) }] : [])], missing.length + (canPlan ? 1 : 0));
   }
 
   const pending = agents.filter(node => !delivered(node));
@@ -249,4 +261,32 @@ export function failureRequestKind(text: string): 'fix' | 'why' | null {
   if (!ZH_FAILURE.test(s) || ZH_NOT_FAILED.test(s) || ZH_CHANGE.test(s)) return null;
   if ([...s].length > 12 && !ZH_REFERENCE.test(s)) return null;
   return ZH_WHY.test(s) ? 'why' : 'fix';
+}
+
+// 「运行」「开始运行」「跑一下」「run it」: a message that only asks to run the canvas is carried out here, as the run button
+// would, rather than sent to the planner, which cannot run anything (owner request 2026-10-15: a reader who only talks to
+// the assistant runs the canvas from it too). The whole message must be the request once politeness and the canvas's
+// name are gone, so 「运行后告诉我效果」 or 「把前端改成 React 再运行」 still go to the assistant.
+const ZH_RUN_FILLER = /^(请|请你|帮我|麻烦|麻烦你|那就|那|好的|好|就|现在|直接|可以|我要|我想)+/;
+const ZH_RUN_TAIL = /(吧|吗|呗|啊|呀|一下|一下吧|看看|一遍|起来)+$/;
+const ZH_RUN_ALL = new Set(['运行', '开始运行', '运行画布', '运行整张画布', '运行整个画布', '运行全部', '全部运行', '运行所有节点', '运行全部节点',
+  '跑', '跑画布', '开跑', '开始跑', '执行', '开始执行', '执行画布', '启动', '开始', '试运行', '重新运行', '再运行', '重跑', '再跑']);
+const ZH_RUN_REST = new Set(['运行剩下的', '运行剩下的节点', '运行剩余的', '运行剩余节点', '继续运行', '接着运行', '接着跑', '继续跑', '跑剩下的']);
+const EN_RUN_ALL = new Set(['run', 'run it', 'run this', 'run the canvas', 'run the whole canvas', 'run everything', 'run all', 'run all nodes',
+  'run the workflow', 'run the team', 'start', 'start it', 'start the run', 'go', 'execute', 'execute it', 'run it again', 'run again', 'rerun', 're run']);
+const EN_RUN_REST = new Set(['run the rest', 'run the remaining nodes', 'run the remaining ones', 'continue', 'continue the run', 'keep going', 'resume']);
+
+/** 'all' for a message that only asks to run the whole canvas, 'rest' for one that asks to run what has not run yet,
+ *  null for anything else. */
+export function runRequestKind(text: string): 'all' | 'rest' | null {
+  const raw = text.trim().toLowerCase();
+  if (!raw || [...raw].length > 30) return null;
+  if (/[a-z]/.test(raw) && !/[一-鿿]/.test(raw)) {
+    const words = raw.replace(/[’'`]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+      .replace(/^(please|ok|okay|so|then|now|lets|let s|just|can you|could you)\s+/, '').replace(/\s+(now|please|for me|then)$/, '');
+    return EN_RUN_ALL.has(words) ? 'all' : EN_RUN_REST.has(words) ? 'rest' : null;
+  }
+  let s = raw.replace(/[\s\p{P}\p{S}]/gu, '');
+  for (let previous = ''; previous !== s;) { previous = s; s = s.replace(ZH_RUN_FILLER, '').replace(ZH_RUN_TAIL, ''); }
+  return ZH_RUN_ALL.has(s) ? 'all' : ZH_RUN_REST.has(s) ? 'rest' : null;
 }

@@ -110,8 +110,10 @@ describe('the canvas assistant’s one conversation', () => {
     await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2));
     expect(planRequest.mock.calls[0][0]).toBe('加一个审核节点');
     expect(host.start).not.toHaveBeenCalled();
-    await waitFor(() => expect(panel().getByText('已添加一个节点。')).toBeVisible());
-    const reply = panel().getByText('已添加一个节点。').closest('li')!;
+    // The model's summary leads the reply; under it, what the canvas now holds.
+    await waitFor(() => expect(panel().getByText(/^已添加一个节点。/)).toBeVisible());
+    const reply = panel().getByText(/^已添加一个节点。/).closest('li')!;
+    expect(reply).toHaveTextContent(/画布上的改动：\s*· 新增 1 个节点：「新节点」/);
     expect(reply).toHaveTextContent('调整画布');
     expect(reply).toHaveTextContent('已更新画布');
     expect(loadPlanningConversation().messages.every(message => message.route === 'plan')).toBe(true);

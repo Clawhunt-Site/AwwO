@@ -335,6 +335,8 @@ export interface SessionTileProps {
   canvasEntries?: ReadonlyArray<StudioEntry>;
   /** Stop this node's own run (its lane), leaving every other running node alone. */
   onStopNode?: (nodeId: string) => void;
+  /** Bumped to open this node's input drawer (the assistant's 「去填写」 step), in either mode. */
+  inputRequest?: number;
 }
 
 /**
@@ -383,6 +385,7 @@ export const SessionTile = memo(function SessionTile({
   onShowInDisplay,
   canvasEntries,
   onStopNode,
+  inputRequest = 0,
 }: SessionTileProps) {
   const { locale, t } = useCanvasI18n();
   const simple = useSimpleCanvas();
@@ -402,6 +405,11 @@ export const SessionTile = memo(function SessionTile({
   // A copied case node not yet set up has said and run nothing: open, it leads with what it was asked and received.
   const [inputOpen, setInputOpen] = useState(node.kind === 'session' && node.lastOutput?.source === 'case' && !node.binding);
   const [templateOpen, setTemplateOpen] = useState(false);
+  // Asked to show the inputs (a run still needs some filled in): the drawer opens on their values.
+  useEffect(() => {
+    if (!inputRequest) return;
+    setTemplateOpen(false); setInputSchemaOpen(false); setInputOpen(true);
+  }, [inputRequest]);
   // Opened from the template guide's 编辑: the input drawer starts on its field structure, the deliverables drawer on
   // its form editor. Each resets when its drawer closes, so opening it the ordinary way shows values as before.
   const [inputSchemaOpen, setInputSchemaOpen] = useState(false);

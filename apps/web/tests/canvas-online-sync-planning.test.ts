@@ -16,7 +16,9 @@ afterEach(() => { clearSaaSCanvas(); vi.resetAllMocks(); });
 
 describe('planner host capability boundary after online integration', () => {
   it('advertises the native Review/HTML protocol and only Go-supported SaaS operations', () => {
-    expect(buildPlanningContext(emptyDocument(), [])).toContain(CANVAS_PLAN_PROTOCOL);
+    // The whole native protocol, but set_model, which only a host that offers its models can take.
+    expect(buildPlanningContext(emptyDocument(), [])).toContain(CANVAS_PLAN_PROTOCOL.split('\n').filter(line => !line.startsWith('set_model')).join('\n'));
+    expect(buildPlanningContext(emptyDocument(), [], 'zh', [], { models: [{ id: 'm', name: 'M' }] })).toContain(CANVAS_PLAN_PROTOCOL);
     activate();
     const context = buildPlanningContext(emptyDocument(), [], 'en');
     const protocol = context.split('\n\n')[0];

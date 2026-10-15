@@ -9,8 +9,9 @@ import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { canConnect, canFeed, edgeId, isMediaSessionNode, portsFor, reconcileEdges, type PortSpec } from './ports';
 import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
-import { TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH } from './taskFrame';
+import { cleanTaskFrame, isTaskFrame, taskFrameError, TASK_FRAME_MAX_ENTRIES, TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH, type TaskFrame } from './taskFrame';
 import { figurePersona } from './figureKit/figureKit';
+import { automaticEntry } from './nodeRuntime';
 
 /** The media kinds a plan may add as nodes (templateId image, video or model3d): generators that make one asset from a
  *  prompt instead of running an Agent. A host offers the planner only the kinds its workspace can generate. */
@@ -24,8 +25,13 @@ export const PLAN_TEMPLATE_IDS: ReadonlySet<string> = new Set<string>([...AGENT_
 
 export type CanvasPlanFieldChanges = Partial<Pick<ContractField, 'label' | 'type' | 'required' | 'help' | 'placeholder'>>;
 export type CanvasPlanOperation =
-  | { type: 'add_node'; ref: string; templateId: PlanTemplateId; title?: string; persona?: string; inputValues?: Record<string, string> }
+  | { type: 'add_node'; ref: string; templateId: PlanTemplateId; title?: string; persona?: string; inputValues?: Record<string, string>; acceptanceCriteria?: string[] }
   | { type: 'update_node'; nodeId: string; title?: string; persona?: string }
+  /** A node's task requirements: each list given replaces that list (constraints it must follow, criteria its delivery
+   *  is checked against); a list left out stays as it is. */
+  | { type: 'set_task'; nodeId: string; constraints?: string[]; acceptanceCriteria?: string[] }
+  /** A node's model (one the host offered the planner), and its reasoning effort; the runtime is AwwO's (nodeRuntime.ts). */
+  | { type: 'set_model'; nodeId: string; model: string; effort?: string }
   | { type: 'set_input'; nodeId: string; fieldId: string; value: string }
   | { type: 'add_field'; nodeId: string; side: 'input' | 'output'; field: ContractField }
   | { type: 'update_field'; nodeId: string; side: 'input' | 'output'; fieldId: string; changes: CanvasPlanFieldChanges }
@@ -38,7 +44,7 @@ export type CanvasPlanOperation =
   | { type: 'disconnect'; edgeId: string };
 
 export type CanvasPlanOperationType = CanvasPlanOperation['type'];
-const OPERATION_TYPES = ['add_node', 'update_node', 'set_input', 'add_field', 'update_field', 'remove_field', 'remove_node',
+const OPERATION_TYPES = ['add_node', 'update_node', 'set_task', 'set_model', 'set_input', 'add_field', 'update_field', 'remove_field', 'remove_node',
   'connect', 'set_edge_kind', 'set_execution', 'disconnect'] as const satisfies ReadonlyArray<CanvasPlanOperationType>;
 // An operation type added to CanvasPlanOperation but not listed above fails to compile here.
 const everyOperationListed: [Exclude<CanvasPlanOperationType, typeof OPERATION_TYPES[number]>] extends [never] ? true : never = true;
@@ -46,7 +52,7 @@ void everyOperationListed;
 /** Every operation type a plan may contain: the closed set planning progress may name. */
 export const CANVAS_PLAN_OPERATION_TYPES: ReadonlySet<string> = new Set(OPERATION_TYPES);
 /** The operation types that concern one node, beside which progress may name that node's template. */
-export const CANVAS_PLAN_NODE_OPERATION_TYPES: ReadonlySet<string> = new Set(['add_node', 'update_node', 'set_input', 'add_field',
+export const CANVAS_PLAN_NODE_OPERATION_TYPES: ReadonlySet<string> = new Set(['add_node', 'update_node', 'set_task', 'set_model', 'set_input', 'add_field',
   'update_field', 'remove_field', 'remove_node'] satisfies CanvasPlanOperationType[]);
 
 export interface CanvasPlan { version: 1; summary: string; operations: CanvasPlanOperation[] }
@@ -56,12 +62,18 @@ export interface AppliedCanvasPlan { doc: CanvasDocument; addedNodeIds: string[]
 /** What a host tells a plan about the media nodes it can run: the model a new node of each kind starts on (a kind
  *  missing here cannot be added), and the longest prompt a model takes. */
 export interface CanvasPlanMedia { models: Partial<Record<MediaKind, string>>; promptMax: (model: string) => number | undefined }
+/** What a host tells a plan about the chat models its nodes can run (the palette): a set_model names one of these, by id
+ *  or by its name, and may pick one of the levels its entry advertises. Without it a plan cannot change a model. */
+export interface CanvasPlanModelChoice { runtime: string; model: string; available: boolean; name?: string; efforts?: ReadonlyArray<string> }
+export interface CanvasPlanModels { choices: ReadonlyArray<CanvasPlanModelChoice> }
 
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
 允许的 operations（未知键会被拒绝）：
-add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure",title?:string,persona?:string,inputValues?:{[已有输入字段ID]:string}}
+add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure",title?:string,persona?:string,inputValues?:{[已有输入字段ID]:string},acceptanceCriteria?:string[]}
 update_node: {type:"update_node",nodeId:string,title?:string,persona?:string}
+set_task: {type:"set_task",nodeId:string,constraints?:string[],acceptanceCriteria?:string[]}
+set_model: {type:"set_model",nodeId:string,model:string,effort?:string}
 set_input: {type:"set_input",nodeId:string,fieldId:string,value:string}
 add_field: {type:"add_field",nodeId:string,side:"input"|"output",field:{id:string,label:string,type:"text"|"markdown"|"html"|"number"|"boolean"|"file",required:boolean,value:"",help?:string,placeholder?:string}}
 update_field: {type:"update_field",nodeId:string,side:"input"|"output",fieldId:string,changes:{label?:string,type?:上述字段类型,required?:boolean,help?:string,placeholder?:string}}
@@ -74,6 +86,8 @@ disconnect: {type:"disconnect",edgeId:string}
 nodeId/fromNode/toNode/reviewerNodeId 必须为当前画布中提供的真实节点ID，或前面 add_node 的唯一 ref；不允许前向引用。ref 不得与既有ID重名。
 connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源。kind默认data，本轮data连线不得成环。feedback将上一轮反馈传回上游，可构成跨轮闭环；workflow模式保留但不执行feedback。
 互审Graph使用set_execution mode:review，maxRounds/reviewerNodeId/verdictFieldId必填；最终评审节点必须已存在且verdictFieldId指向其boolean输出，true通过、false继续。先创建节点和判定字段，再设置互审。工作流模式禁止携带互审额外字段。反馈环路和Agent绑定在用户启动时校验，此协议仅编辑结构，不启动运行。
+set_task 改任务要求：constraints=约束，acceptanceCriteria=可逐条核对交付的验收标准；给出的列表整体替换；每列表≤20条、每条≤2000字、合计≤12000字；新节点约束默认为原始请求，@R1 等即 requirements 原文。
+set_model 是唯一能改模型的操作，只能改用 models 中的模型：model 写 id（"default"=工作区默认），effort 只能是该模型列出的档位；执行引擎由应用选择。
 新增节点完整使用对应角色模板。字段值都是字符串；布尔值用"true"/"false"，数字用数字字符串，file为引用字符串。add_field.value必须为空；输入内容通过set_input填写。严禁生成或填写任何输出值。
 改变已连接字段类型或删除字段前须先disconnect。remove_node 明确删除该节点及其关联连线。
 只能修改白名单：禁止binding/runtime/model/effort/threads/issueId/preview/lastOutput/templateId等执行状态修改；禁止命令执行、创建真实Agent、发消息、运行节点、文件写入、部署、付款等副作用。布局由应用安排新增节点，不能提交x/y/w/h。
@@ -132,6 +146,20 @@ function edgeKind(value: unknown, location: string): 'data' | 'feedback' {
 function optionalText(raw: Record<string, unknown>, key: string, max: number, location: string, empty = true): Record<string, string> {
   return Object.hasOwn(raw, key) ? { [key]: text(raw[key], `${location}.${key}`, max, empty) } : {};
 }
+/** A task-requirement list: strings within the task frame's limits (taskFrame.ts, task_frame.go). Blank entries are
+ *  kept here and dropped when the frame is cleaned; the frame's total is checked once both lists are known. */
+function textList(value: unknown, location: string): string[] {
+  if (!Array.isArray(value) || value.length > TASK_FRAME_MAX_ENTRIES) fail(`${location}必须是数组，最多 ${TASK_FRAME_MAX_ENTRIES} 项。`);
+  return value.map((item, index) => {
+    if (typeof item !== 'string' || Array.from(item).length > TASK_FRAME_MAX_ENTRY_LENGTH) fail(`${location}第 ${index + 1} 项必须是字符串，最多 ${TASK_FRAME_MAX_ENTRY_LENGTH} 字符。`);
+    return item;
+  });
+}
+function optionalList(raw: Record<string, unknown>, key: 'constraints' | 'acceptanceCriteria', location: string): Partial<Record<typeof key, string[]>> {
+  return Object.hasOwn(raw, key) ? { [key]: textList(raw[key], `${location}.${key}`) } : {};
+}
+const EFFORT_LEVEL = /^[a-z][a-z0-9_-]{0,31}$/;
+
 function fieldChanges(value: unknown, location: string): CanvasPlanFieldChanges {
   const raw = object(value, location);
   keys(raw, ['label', 'type', 'required', 'help', 'placeholder'], location);
@@ -177,7 +205,7 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
     const fieldId = () => id(op.fieldId, `${location}.fieldId`);
     switch (op.type) {
       case 'add_node': {
-        keys(op, ['type', 'ref', 'templateId', 'title', 'persona', 'inputValues'], location);
+        keys(op, ['type', 'ref', 'templateId', 'title', 'persona', 'inputValues', 'acceptanceCriteria'], location);
         const ref = id(op.ref, `${location}.ref`);
         if (refs.has(ref)) fail(`重复的新增节点引用「${ref}」。`);
         refs.add(ref);
@@ -191,8 +219,19 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
         }
         return { type: 'add_node', ref, templateId: op.templateId as PlanTemplateId,
           ...optionalText(op, 'title', LIMITS.title, location, false), ...optionalText(op, 'persona', LIMITS.persona, location),
-          ...(inputValues ? { inputValues } : {}),
+          ...(inputValues ? { inputValues } : {}), ...optionalList(op, 'acceptanceCriteria', location),
         };
+      }
+      case 'set_task': {
+        keys(op, ['type', 'nodeId', 'constraints', 'acceptanceCriteria'], location);
+        if (!Object.hasOwn(op, 'constraints') && !Object.hasOwn(op, 'acceptanceCriteria')) fail(`${location}没有要修改的任务要求。`);
+        return { type: 'set_task', nodeId: nodeId(), ...optionalList(op, 'constraints', location), ...optionalList(op, 'acceptanceCriteria', location) };
+      }
+      case 'set_model': {
+        keys(op, ['type', 'nodeId', 'model', 'effort'], location);
+        const model = text(op.model, `${location}.model`, LIMITS.title, false);
+        if (Object.hasOwn(op, 'effort') && (typeof op.effort !== 'string' || (op.effort !== '' && !EFFORT_LEVEL.test(op.effort)))) fail(`${location}.effort不是有效的思考强度档位。`);
+        return { type: 'set_model', nodeId: nodeId(), model: model.trim(), ...(typeof op.effort === 'string' && op.effort ? { effort: op.effort } : {}) };
       }
       case 'update_node':
         keys(op, ['type', 'nodeId', 'title', 'persona'], location);
@@ -460,9 +499,32 @@ function disconnectBroken(draft: CanvasDocument, nodeId: string, adjust: Adjust)
   });
 }
 
+/** The constraint texts several Agent nodes share (typically a request copied to every node a plan added), named @R1,
+ *  @R2 … in the order they first appear. The planner reads each shared text once (canvasPlanning.ts) and writes its
+ *  name to keep it; the same table, built from the same document, expands the names when the plan is applied. */
+export function sharedRequirements(doc: CanvasDocument): Map<string, string> {
+  const counts = new Map<string, number>();
+  const order: string[] = [];
+  for (const node of doc.nodes) {
+    if (node.kind !== 'session' || !isTaskFrame(node.taskFrame)) continue;
+    for (const item of new Set(node.taskFrame.constraints)) {
+      if (!item.trim()) continue;
+      if (!counts.has(item)) order.push(item);
+      counts.set(item, (counts.get(item) ?? 0) + 1);
+    }
+  }
+  const table = new Map<string, string>();
+  for (const item of order) if ((counts.get(item) ?? 0) > 1) table.set(`@R${table.size + 1}`, item);
+  return table;
+}
+const REQUIREMENT_REF = /^@R\d+$/;
+/** The model a set_model may name for the workspace's default: the node then runs the server's default model. */
+export const DEFAULT_MODEL_REFERENCE = 'default';
+
 /** Validate against a private clone, then return one complete document. No partial writes: an operation that
  *  cannot apply as written is either repaired or left out, and each such case is listed in `adjustments`. */
-export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = '', media?: CanvasPlanMedia): AppliedCanvasPlan {
+export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = '', media?: CanvasPlanMedia,
+  models?: CanvasPlanModels): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
   const adjustments: string[] = [];
   const adjust: Adjust = (zh, en) => { if (adjustments.length < LIMITS.operations) adjustments.push(locale === 'en' ? en : zh); };
@@ -475,6 +537,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
     }
   }
   const draft = structuredClone(doc);
+  // The shared requirement names the planner saw, from the document it was shown.
+  const requirements = sharedRequirements(doc);
   // A wire whose field was deleted or retyped by hand is not drawn, so it cannot be disconnected; it is dropped
   // here as the board drops it, instead of failing every later plan.
   const base = { ...doc, edges: reconcileEdges(doc.nodes, doc.edges) };
@@ -518,7 +582,16 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         const node = createAgentTemplate(op.templateId, { x: 0, y: 0 }, locale);
         // Carry the human's exact request separately from the model-authored persona.
         // Every new downstream reviewer receives it even if an upstream draft drifts.
-        if (constraints.length) node.taskFrame = { version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [] };
+        if (constraints.length || op.acceptanceCriteria?.length) {
+          const frame = cleanTaskFrame({ version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [...(op.acceptanceCriteria ?? [])] });
+          // The request is always kept whole; acceptance criteria that would push the frame past its limits are left out.
+          if (taskFrameError(frame)) {
+            const name = op.title ?? node.title;
+            adjust(`「${name}」的验收标准太长，没有写入（任务要求合计最多 ${TASK_FRAME_MAX_TOTAL_LENGTH} 字）`,
+              `The acceptance criteria of “${name}” were too long and were left out (task requirements allow ${TASK_FRAME_MAX_TOTAL_LENGTH} characters in all)`);
+            if (constraints.length) node.taskFrame = { version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [] };
+          } else node.taskFrame = frame;
+        }
         if (op.title !== undefined) node.title = op.title;
         // A figure node's page is built with AwwO's figure kit: a planned persona replaces its role, never the guide.
         if (op.persona !== undefined) node.persona = op.templateId === 'figure' ? figurePersona(op.persona) : op.persona;
@@ -534,6 +607,67 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (op.persona !== undefined && node.kind === 'session' && !mediaKindOf(node.agentKind)) {
           node.persona = node.templateId === 'figure' ? figurePersona(op.persona) : op.persona;
         }
+        break;
+      }
+      case 'set_task': {
+        if (skipped.has(op.nodeId)) break;
+        const node = resolve(op.nodeId);
+        if (node.kind !== 'session' || mediaKindOf(node.agentKind)) {
+          adjust(`没有改动「${titleOf(node)}」的任务要求：只有 Agent 节点有任务要求`, `Left “${titleOf(node)}” as it was: only an Agent node has task requirements`);
+          break;
+        }
+        if (node.taskFrame !== undefined && !isTaskFrame(node.taskFrame)) {
+          adjust(`没有改动「${titleOf(node)}」的任务要求：它们的版本不能在这里修改`, `Left the task requirements of “${titleOf(node)}” as they were: their version cannot be edited here`);
+          break;
+        }
+        const current: TaskFrame = isTaskFrame(node.taskFrame) ? node.taskFrame : { version: 1, source: 'manual', constraints: [], acceptanceCriteria: [] };
+        // A shared requirement's name stands for its text; a name the canvas does not have is left out.
+        const expand = (items: string[]) => items.flatMap(item => {
+          const named = requirements.get(item.trim());
+          if (named !== undefined) return [named];
+          if (REQUIREMENT_REF.test(item.trim())) {
+            adjust(`跳过了「${titleOf(node)}」的约束「${item.trim()}」：画布上没有这条原始需求`, `Skipped the constraint “${item.trim()}” on “${titleOf(node)}”: the canvas has no such requirement`);
+            return [];
+          }
+          return [item];
+        });
+        const next = cleanTaskFrame({ ...current, ...(op.constraints ? { constraints: expand(op.constraints) } : {}),
+          ...(op.acceptanceCriteria ? { acceptanceCriteria: [...op.acceptanceCriteria] } : {}) });
+        if (taskFrameError(next)) {
+          adjust(`没有改动「${titleOf(node)}」的任务要求：超过了长度限制（每个列表最多 ${TASK_FRAME_MAX_ENTRIES} 条，合计最多 ${TASK_FRAME_MAX_TOTAL_LENGTH} 字）`,
+            `Left the task requirements of “${titleOf(node)}” as they were: they exceed the limits (${TASK_FRAME_MAX_ENTRIES} entries per list, ${TASK_FRAME_MAX_TOTAL_LENGTH} characters in all)`);
+          break;
+        }
+        node.taskFrame = next;
+        break;
+      }
+      case 'set_model': {
+        if (skipped.has(op.nodeId)) break;
+        const node = resolve(op.nodeId);
+        const title = titleOf(node);
+        if (node.kind !== 'session' || mediaKindOf(node.agentKind)) {
+          adjust(`没有改动「${title}」的模型：图片、视频和 3D 节点由媒体模型生成，表单没有模型`, `Left the model of “${title}” as it was: image, video and 3D nodes use media models, and a form has none`);
+          break;
+        }
+        if (node.team || node.agentRef) {
+          adjust(`没有改动「${title}」的模型：它是团队或工作区 Agent，按自己的设置运行`, `Left the model of “${title}” as it was: a team or a workspace Agent runs as it is set up`);
+          break;
+        }
+        const wanted = op.model.trim();
+        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = ''; node.model = ''; node.effort = ''; break; }
+        const choices = models?.choices ?? [];
+        const folded = wanted.toLowerCase();
+        const id = choices.find(choice => choice.model === wanted)?.model
+          ?? choices.find(choice => choice.model.toLowerCase() === folded || (choice.name ?? '').trim().toLowerCase() === folded)?.model;
+        const entry = id ? automaticEntry(id, choices) : undefined;
+        if (!entry) {
+          adjust(`没有把「${title}」改用「${wanted}」：此工作区现在没有可用的这个模型`, `Did not switch “${title}” to “${wanted}”: this workspace has no such model ready`);
+          break;
+        }
+        const effort = op.effort && entry.efforts?.includes(op.effort) ? op.effort : '';
+        if (op.effort && !effort) adjust(`「${title}」改用了「${entry.name || entry.model}」，它没有「${op.effort}」这档思考强度，使用模型默认`,
+          `“${title}” now uses “${entry.name || entry.model}”, which has no “${op.effort}” reasoning effort; it uses the model’s default`);
+        node.runtime = entry.runtime; node.model = entry.model; node.effort = effort;
         break;
       }
       case 'set_input': if (!skipped.has(op.nodeId)) setInput(resolve(op.nodeId), op.fieldId, op.value, adjust, media); break;

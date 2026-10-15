@@ -132,6 +132,8 @@ func TestPlanGateOperationsMatchTheCanvas(t *testing.T) {
 	samples := map[string]string{
 		"add_node":      `{"type":"add_node","ref":"a","templateId":"general"}`,
 		"update_node":   `{"type":"update_node","nodeId":"n","title":"T"}`,
+		"set_task":      `{"type":"set_task","nodeId":"n","acceptanceCriteria":["Opens in one file"]}`,
+		"set_model":     `{"type":"set_model","nodeId":"n","model":"bedrock.claude-opus-5-5","effort":"high"}`,
 		"set_input":     `{"type":"set_input","nodeId":"n","fieldId":"f","value":"v"}`,
 		"add_field":     `{"type":"add_field","nodeId":"n","side":"input","field":{"id":"f","label":"F","type":"text","required":false,"value":""}}`,
 		"update_field":  `{"type":"update_field","nodeId":"n","side":"input","fieldId":"f","changes":{"label":"F"}}`,

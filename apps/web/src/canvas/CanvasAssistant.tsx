@@ -155,6 +155,8 @@ function writingHeadline(t: CanvasTranslate, progress: PlanProgress, template: s
     case 'add_node': return progress.nodes > 0 ? node() : t('assistant.statusWriting');
     case 'set_input': return about('assistant.statusFillingInputs', 'assistant.statusFillingInputsAs');
     case 'update_node': return about('assistant.statusUpdatingNode', 'assistant.statusUpdatingNodeAs');
+    case 'set_task': return about('assistant.statusSettingTask', 'assistant.statusSettingTaskAs');
+    case 'set_model': return about('assistant.statusSettingModel', 'assistant.statusSettingModelAs');
     case 'add_field': case 'update_field': case 'remove_field': return about('assistant.statusEditingFields', 'assistant.statusEditingFieldsAs');
     case 'remove_node': return about('assistant.statusRemovingNode', 'assistant.statusRemovingNodeAs');
     case 'connect': return t('assistant.statusConnecting');

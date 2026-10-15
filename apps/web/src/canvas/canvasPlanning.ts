@@ -4,8 +4,9 @@ import { gatewayApiBase } from '../chatAutomations';
 import { getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import { figureRole } from './figureKit/figureKit';
 import type { CanvasDocument } from './canvasDoc';
-import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, MEDIA_PLAN_TEMPLATE_IDS, PLAN_TEMPLATE_IDS, canvasPlanRevision,
-  parseCanvasPlan, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType } from './canvasPlan';
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, DEFAULT_MODEL_REFERENCE, MEDIA_PLAN_TEMPLATE_IDS, PLAN_TEMPLATE_IDS, canvasPlanRevision,
+  parseCanvasPlan, sharedRequirements, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType } from './canvasPlan';
+import { isTaskFrame } from './taskFrame';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
 import type { UiLocale } from '../locale';
@@ -104,14 +105,38 @@ export function saveLastPlanDuration(seconds: number): void {
 
 
 /** Keep the shared structural protocol, with only the Go host's supported operations/types, and the media nodes the
- *  workspace can generate (a hosted workspace only). */
-function planningProtocol(saas: boolean, mediaKinds: ReadonlyArray<MediaKind> = []): string {
-  if (!saas) return CANVAS_PLAN_PROTOCOL;
-  return withMediaNodes(CANVAS_PLAN_PROTOCOL.split('\n').filter(line =>
+ *  workspace can generate (a hosted workspace only). A host that offers the planner no models leaves set_model out. */
+function planningProtocol(saas: boolean, mediaKinds: ReadonlyArray<MediaKind> = [], models = false): string {
+  const protocol = models ? CANVAS_PLAN_PROTOCOL : CANVAS_PLAN_PROTOCOL.split('\n').filter(line => !line.startsWith('set_model')).join('\n');
+  if (!saas) return protocol;
+  return withMediaNodes(protocol.split('\n').filter(line =>
     !/^(set_edge_kind:|set_execution:|互审Graph使用)/.test(line),
   ).map(line => line.startsWith('connect 使用')
     ? 'connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源，全图不得成环。'
     : line.replace(',kind?:"data"|"feedback"', '').replace('/reviewerNodeId', '')).join('\n'), mediaKinds);
+}
+
+/** A chat model a node can run, as the planner is told (the host's palette, each model once): its id for set_model,
+ *  its name, the effort levels it offers, and whether a free workspace needs a paid plan for it. */
+export interface PlanModel { id: string; name: string; efforts?: ReadonlyArray<string>; paid?: boolean }
+/** How a node's last run ended, as the planner is told: its state and, for a failure or a block, the reason shown. */
+export interface PlanRunState { state: string; detail?: string }
+/** What a host can add to the planner's view: the models nodes can run, and each node's last run. */
+export interface PlanningExtras { models?: ReadonlyArray<PlanModel>; runs?: Readonly<Record<string, PlanRunState | undefined>> }
+
+/** What the planner is told about a node's brief, its requirements and how its last run went: the things a person used
+ *  to set by hand in developer mode, which the assistant now sets itself (owner request 2026-10-15). A hosted
+ *  workspace's planner has this, and how its nodes are sized for one call, in its server instructions
+ *  (plannerInstructions, planning.go), which reach it without growing this context or its recovery journal. */
+function orchestrationGuidance(locale: UiLocale, models: boolean): string {
+  return locale === 'en'
+    ? 'Write each persona you add or rewrite as a self-contained brief: what the node receives, exactly what it delivers (format, scope, size) and what it must not do. '
+      + 'Give every Agent node you add 1–3 acceptanceCriteria in add_node, checkable against its own delivery; change criteria or constraints with set_task when the user asks for other rules or checks. '
+      + (models ? 'Use set_model only when the user asks for another model or a node failed because of its model. ' : '')
+      + 'A node’s run is how its last run ended. To fix a failed node: an answer too long or out of time → split the work or narrow the delivery; a refused premium model → the default model; otherwise improve the brief. Say in summary what you changed.'
+    : 'persona写成完整任务说明：收到什么、交付什么（格式、范围、篇幅）、不做什么。新增Agent节点在add_node写1到3条可对照其交付核对的acceptanceCriteria；改规则或检查用set_task。'
+      + (models ? '仅在用户要求或节点因模型失败时用set_model。' : '')
+      + 'run是上次运行结果；修复失败：太长或超时就拆分工作或缩小交付，高级模型被拒就换默认模型，否则改进说明。summary说明改动。';
 }
 
 /** The plan a SaaS workspace can apply. `kind: "data"` on a connect is the default kind, which models add although
@@ -153,25 +178,40 @@ export function savePlanningConversation(value: PlanningConversation): void {
 }
 
 /** Supply the current structure, never execution credentials, transcripts or generated artifacts. `mediaKinds` are the
- *  media nodes this workspace can generate; only those are offered to the planner. */
-export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMessage[], locale: UiLocale = 'zh', mediaKinds: ReadonlyArray<MediaKind> = []): string {
+ *  media nodes this workspace can generate; only those are offered to the planner. `extras` add the models nodes can run
+ *  (set_model is offered only with them) and how each node's last run ended. */
+export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMessage[], locale: UiLocale = 'zh', mediaKinds: ReadonlyArray<MediaKind> = [],
+  extras: PlanningExtras = {}): string {
   const saas = currentSaaSCanvas() !== null;
   const offeredMedia = saas ? MEDIA_PLAN_TEMPLATE_IDS.filter(kind => mediaKinds.includes(kind)) : [];
+  const models = extras.models?.length ? extras.models : undefined;
+  // A request copied to several nodes is shown once and named; the plan keeps it by that name (sharedRequirements).
+  const requirements = sharedRequirements(doc);
+  const refOf = new Map([...requirements].map(([ref, text]) => [text, ref]));
   const graph = {
+    ...(requirements.size ? { requirements: Object.fromEntries(requirements) } : {}),
     nodes: doc.nodes.map(node => {
       if (node.kind === 'form') return { id: node.id, kind: node.kind, title: node.title, fields: node.fields };
       // A media node is described by what it makes and the prompt it will make it from, never by its model.
       const media = mediaKindOf(node.agentKind);
-      if (media) return { id: node.id, templateId: media, title: node.title, prompt: activeNodeThread(node).draft };
+      if (media) return { id: node.id, templateId: media, title: node.title, prompt: activeNodeThread(node).draft, ...runView(extras.runs?.[node.id]) };
       const template = getAgentTemplateForNode(node, locale);
       // A figure node's persona carries the kit guide after its role; the planner only reads (and writes) the role.
       const roleOf = (persona: string | undefined) => (template?.id === 'figure' && persona !== undefined ? figureRole(persona) : persona);
       const persona = roleOf(node.persona);
+      const frame = isTaskFrame(node.taskFrame) ? node.taskFrame : undefined;
       return { id: node.id, templateId: template?.id, title: node.title,
         // Templates already declare responsibilities below. Preserve only user-authored differences.
         ...(persona !== roleOf(template?.persona) ? { persona } : {}),
+        ...(frame?.constraints.length ? { constraints: frame.constraints.map(item => refOf.get(item) ?? item) } : {}),
+        ...(frame?.acceptanceCriteria.length ? { acceptanceCriteria: frame.acceptanceCriteria } : {}),
+        // The planner sees a node's model only where it can change one; an unset node runs the workspace default.
+        ...(models ? { model: node.model || DEFAULT_MODEL_REFERENCE } : {}),
+        ...(node.team ? { team: true } : {}),
         inputs: node.contract?.inputs.map(({ id, label, type, required, value }) => ({ id, label, type, required, value })),
         outputs: node.contract?.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
+        ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}),
+        ...runView(extras.runs?.[node.id]),
       };
     }),
     edges: doc.edges.map(({ id, fromNode, fromPort, toNode, toPort, kind }) => ({ id, fromNode, fromPort, toNode, toPort, kind: kind ?? 'data' })),
@@ -209,13 +249,23 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
   const mediaGuidance = !offeredMedia.length ? '' : locale === 'en'
     ? ' When the request needs pictures, video or 3D models as assets, add one matching media node per asset with its prompt written, rather than having a text Agent describe the asset or claim a file.'
     : '需要图片、视频或3D模型素材时，为每个素材添加一个对应的媒体节点并写好提示词，不要让文字Agent用描述代替生成或声称已有文件。';
+  const modelHeading = locale === 'en' ? 'Models a node can run (for set_model; "default" is the workspace default)' : '节点可用的模型（供 set_model 使用；"default" 为工作区默认模型）';
   return [
-    planningProtocol(saas, offeredMedia),
-    guidance[0], guidance[1] + mediaGuidance, ...guidance.slice(2, 4),
+    planningProtocol(saas, offeredMedia, Boolean(models)),
+    guidance[0], guidance[1] + mediaGuidance, ...(saas ? [] : [orchestrationGuidance(locale, Boolean(models))]), ...guidance.slice(2, 4),
     `${guidance[4]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(templates)}`,
+    ...(models ? [`${modelHeading}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(models.map(({ id, name, efforts, paid }) => ({ id, name,
+      ...(efforts?.length ? { efforts } : {}), ...(paid ? { paid: true } : {}) })))}`] : []),
     `${guidance[5]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(graph)}`,
     `${guidance[6]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(messages.slice(-10).map(({ role, content, status }) => ({ role, content, status })))}`,
   ].join('\n\n');
+}
+
+/** A node's last run as the planner reads it: the state, and the reason a failure or a block showed, kept short. */
+function runView(run: PlanRunState | undefined): { run?: PlanRunState } {
+  if (!run?.state) return {};
+  const detail = run.detail?.trim();
+  return { run: { state: run.state, ...(detail && (run.state === 'failed' || run.state === 'blocked') ? { detail: Array.from(detail).slice(0, 300).join('') } : {}) } };
 }
 
 /** A planner failure that kept the server's code, so the caller can tell a malformed plan — worth
@@ -265,7 +315,7 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
   const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan`, {
     method: 'POST', credentials: 'include', signal,
     headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' },
-    body: JSON.stringify({ prompt, context: buildPlanningContext(doc, messages, locale, options?.mediaKinds), ...(saas ? { revision: canvasPlanRevision(doc),
+    body: JSON.stringify({ prompt, context: buildPlanningContext(doc, messages, locale, options?.mediaKinds, { models: options?.models, runs: options?.runs }), ...(saas ? { revision: canvasPlanRevision(doc),
       ...(options?.recoveryOperationId !== undefined ? { recoveryOperationId: options.recoveryOperationId } : {}) } : {}) }),
   });
   // A progress stream carries its own terminal frames, so its transport status is already 200.
@@ -315,7 +365,7 @@ export async function cancelCanvasPlanRecovery(operationId: string, signal?: Abo
 }
 
 /** `mediaKinds`: the media nodes the workspace can generate, which the planner may then add. */
-export type PlanRequestOptions = { recoveryOperationId?: string; mediaKinds?: ReadonlyArray<MediaKind> };
+export type PlanRequestOptions = { recoveryOperationId?: string; mediaKinds?: ReadonlyArray<MediaKind> } & PlanningExtras;
 export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
   locale: UiLocale = 'zh', onProgress?: PlanProgressReporter, options?: PlanRequestOptions): Promise<CanvasPlan> {
   const scope = currentSaaSCanvas();
