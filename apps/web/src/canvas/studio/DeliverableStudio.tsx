@@ -19,6 +19,7 @@ import { PdfPreview } from '../PdfPreview';
 import { highlight, languageOf, type Token } from './codeHighlight';
 import { DEVICE_WIDTH, LivePage, type LiveDevice } from './LivePage';
 import { standaloneWrapper, type AssetResolver } from './liveDocument';
+import { pickCanvasFile } from './canvasAssets';
 import { buildArchive, decodeText, entryMediaUrl, fetchEntryBytes, mimeOfName, saveBlob, unzipMembers, type LoadedFile } from './studioData';
 import { formatBytes, isTextKind, kindOfName, kindOfType, studioGroups, type StudioEntry, type StudioGroup, type StudioKind } from './studioModel';
 import './studio.css';
@@ -65,8 +66,6 @@ function shown(entry: StudioEntry, loaded?: Loaded): StudioEntry {
   const kind = kindOfName(name) !== 'file' ? kindOfName(name) : kindOfType(loaded.file.contentType) ?? (loaded.text !== null ? 'text' : 'file');
   return { ...entry, name, kind, size: loaded.file.bytes.length };
 }
-
-const basename = (path: string) => path.split('/').pop()!.toLowerCase();
 
 export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntryId, title, variant = 'dialog', onClose, onOpenNode, assetEntries, focusNodeId }: DeliverableStudioProps) {
   const { t, locale } = useCanvasI18n();
@@ -179,10 +178,10 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
         ?? siblings.find(item => item.source.type === 'member' && item.source.path.toLowerCase() === path.toLowerCase());
       return match && match.source.type === 'member' ? { bytes: match.source.bytes, name: match.name } : null;
     }
-    const wanted = basename(path);
     const pool = assetEntries ? [...flat, ...assetEntries.filter(item => !flat.some(own => own.id === item.id))] : flat;
-    const candidate = pool.find(item => item !== entry && item.source.type !== 'inline' && item.source.type !== 'missing'
-      && (basename(shown(item, loadedRef.current[item.id]).name) === wanted || basename(item.label) === wanted));
+    // Every image node calls its first picture image-1.jpg: a page names which by the node folder, `<node id>/image-1.jpg`
+    // (pickCanvasFile). Matching the name alone gave every chapter of a page the first node's picture.
+    const candidate = pickCanvasFile(pool, path, entry.id, item => shown(item, loadedRef.current[item.id]).name);
     if (!candidate) return null;
     const file = await load(candidate);
     return file ? { bytes: file.bytes, name: file.name || candidate.name } : null;

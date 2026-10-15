@@ -25,4 +25,20 @@ describe('canvas files a delivered page names', () => {
   it('never answers a page with itself', () => {
     expect(pickCanvasFile(entries, 'hero/image-1.png', entries[0].id)?.nodeId).toBe('banner');
   });
+
+  // The Results studio (DeliverableStudio) names a stored file by the name it learns on reading it. A page made from
+  // three image nodes names `<node id>/image-1.jpg` for each of its chapters; it must get each node's own picture.
+  it('gives each chapter of a page its own node picture when names come from nameOf', () => {
+    const stored = (nodeId: string): StudioEntry => ({
+      id: `${nodeId}:file`, nodeId, nodeTitle: nodeId, folder: [], name: 'file', label: 'Picture', kind: 'file', state: 'done',
+      source: { type: 'stored', reference: `ref-${nodeId}` },
+    } as StudioEntry);
+    const chapters = [stored('cv-rooftop'), stored('cv-market'), stored('cv-dawn')];
+    const realName = () => 'image-1.jpg';
+    expect(pickCanvasFile(chapters, 'cv-market/image-1.jpg', undefined, realName)?.nodeId).toBe('cv-market');
+    expect(pickCanvasFile(chapters, 'cv-dawn/image-1.jpg', undefined, realName)?.nodeId).toBe('cv-dawn');
+    expect(pickCanvasFile(chapters, 'cv-rooftop/image-1.jpg', undefined, realName)?.nodeId).toBe('cv-rooftop');
+    expect(pickCanvasFile(chapters, 'image-1.jpg', undefined, realName)?.nodeId).toBe('cv-rooftop');
+    expect(pickCanvasFile(chapters, 'cv-market/image-1.jpg')).toBeUndefined();
+  });
 });

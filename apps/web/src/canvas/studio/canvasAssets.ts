@@ -44,13 +44,15 @@ const basename = (path: string) => path.split('/').pop()!.toLowerCase();
 
 /** The canvas file a page's relative URL names: by file name, and among several of that name the one whose node id
  * is the URL's folder (`<node id>/image-1.png`, as a canvas run tells downstream nodes), since every image node calls
- * its first picture image-1.png. */
-export function pickCanvasFile(entries: ReadonlyArray<StudioEntry>, path: string, self?: string): StudioEntry | undefined {
+ * its first picture image-1.png. `nameOf` is the name a file goes by: the Results studio knows a stored file's real
+ * name once it has read it. */
+export function pickCanvasFile(entries: ReadonlyArray<StudioEntry>, path: string, self?: string,
+  nameOf: (entry: StudioEntry) => string = entry => entry.name): StudioEntry | undefined {
   const parts = path.split(/[?#]/)[0].split('/').filter(part => part && part !== '.');
   const wanted = (parts.pop() ?? '').toLowerCase();
   const folder = parts.pop();
   const candidates = entries.filter(entry => entry.id !== self && entry.source.type !== 'inline' && entry.source.type !== 'missing'
-    && (basename(entry.name) === wanted || basename(entry.label) === wanted));
+    && (basename(nameOf(entry)) === wanted || basename(entry.label) === wanted));
   return (folder && candidates.find(entry => entry.nodeId === folder)) || candidates[0];
 }
 
