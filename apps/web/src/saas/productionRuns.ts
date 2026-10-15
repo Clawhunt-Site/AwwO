@@ -126,24 +126,24 @@ function asDataUrl(blob: Blob): Promise<string> {
  * opens, never before: the sandboxed page runs in an opaque origin that reaches no network, so the files go in as
  * data. All or nothing: a file that cannot be fetched, is not the size published, or is not here within the deadline
  * rejects the whole load (production_media_unavailable), so a case's page is never shown without the files it uses;
- * its dialog offers to try again.
+ * its dialog offers to try again. The deadline also covers the manifest's own chunk, so a stalled chunk ends in that
+ * offer too rather than in a dialog that never stops loading.
  */
 export async function loadProductionMedia(id: string, fetchFile: typeof fetch = (input, init) => fetch(input, init),
-  deadlineMs = 120_000): Promise<Readonly<Record<string, string>>> {
-  const manifest = await loadProductionMediaManifest(id);
+  deadlineMs = 120_000, loadManifest: typeof loadProductionMediaManifest = loadProductionMediaManifest): Promise<Readonly<Record<string, string>>> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => { controller.abort(); reject(new Error('production_media_unavailable')); }, deadlineMs);
   });
   try {
-    const entries = await Promise.race([Promise.all(Object.entries(manifest).map(async ([path, file]) => {
+    const entries = await Promise.race([loadManifest(id).then(manifest => Promise.all(Object.entries(manifest).map(async ([path, file]) => {
       const response = await fetchFile(file.src, { credentials: 'omit', signal: controller.signal });
       if (!response.ok) throw new Error('production_media_unavailable');
       const bytes = await response.arrayBuffer();
       if (bytes.byteLength !== file.bytes) throw new Error('production_media_unavailable');
       return [path, await asDataUrl(new Blob([bytes], { type: file.type }))] as const;
-    })), deadline]);
+    }))), deadline]);
     return Object.fromEntries(entries);
   } catch {
     // One file failed: the others stop downloading too.

@@ -69,6 +69,10 @@ it('loads a media case’s files as data: URLs from the site, all or none: a fil
   await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'missing' }).fetchFile)).rejects.toThrow('production_media_unavailable');
   await expect(loadProductionMedia(record.caseId, serve({ src: second[1].src, as: 'short' }).fetchFile)).rejects.toThrow('production_media_unavailable');
   await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'stalled' }).fetchFile, 50)).rejects.toThrow('production_media_unavailable');
+  // A manifest chunk that never arrives ends at the same deadline, and nothing is fetched for it.
+  const idle = serve();
+  await expect(loadProductionMedia(record.caseId, idle.fetchFile, 50, () => new Promise(() => {}))).rejects.toThrow('production_media_unavailable');
+  expect(idle.seen).toEqual([]);
   expect(await loadProductionMedia('no-such-case', whole.fetchFile)).toEqual({});
 });
 
