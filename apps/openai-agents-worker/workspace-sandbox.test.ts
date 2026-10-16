@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { link, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { createWorkspaceSandbox, validateWorkspacePath, workspaceDockerArgs, WORKSPACE_FILE_HELPER } from './workspace-sandbox.ts';
 import type { WorkspaceDockerRunner } from './workspace-sandbox.ts';
 import { EGRESS_FORWARDER, egressToken, loadWorkspaceEgress, parseWorkspaceTools, sandboxAbilities } from './workspace-sandbox.ts';
@@ -304,4 +305,86 @@ test('Docker smoke: execute, repair, publish, snapshot/restore, isolation and ti
       assert.match(stopped.stderr, /stopped this command after 1 s/);
       assert.equal((await restored.read('site/index.html')).content, '<h1>Real artifact</h1>');
     } finally { await restored.close(); }
+  });
+
+const TOOL_FIXTURES = fileURLToPath(new URL('../../deploy/saas/workspace/fixtures/', import.meta.url));
+
+async function fixtureInputs(prefix = ''): Promise<{ path: string; content: string; encoding: 'base64' }[]> {
+  const inputs: { path: string; content: string; encoding: 'base64' }[] = [];
+  for (const entry of await readdir(join(TOOL_FIXTURES, prefix), { withFileTypes: true })) {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) inputs.push(...await fixtureInputs(path));
+    else inputs.push({ path, content: (await readFile(join(TOOL_FIXTURES, path))).toString('base64'), encoding: 'base64' });
+  }
+  return inputs;
+}
+
+test('Docker smoke: rea and awwo-check-page work offline within the production command limit',
+  { skip: !process.env.AWWO_TEST_WORKSPACE_IMAGE || !process.env.AWWO_TEST_DOCKER_EXECUTABLE, timeout: 600_000 }, async t => {
+    // 30 s is the command limit both workers use in production; an overrun would remove the container.
+    const realConfig = { dockerExecutable: process.env.AWWO_TEST_DOCKER_EXECUTABLE!, image: process.env.AWWO_TEST_WORKSPACE_IMAGE!, dockerContext: process.env.AWWO_TEST_DOCKER_CONTEXT, commandTimeoutMs: 30_000 };
+    const sandbox = await createWorkspaceSandbox(realConfig, { workspaceId: 'local-tools-smoke', runId: 'one', inputs: await fixtureInputs() });
+    const json = async (path: string) => JSON.parse((await sandbox.read(path)).content);
+    try {
+      const version = await sandbox.exec('rea --version');
+      assert.equal(version.exitCode, 0, version.stderr);
+      assert.match(version.stdout, /6\.5\.0/);
+      const analysis = await sandbox.exec('rea analyze-javascript-application /inputs/rea-app --json > rea-report.json');
+      assert.equal(analysis.exitCode, 0, analysis.stderr);
+      const evidence = (await json('rea-report.json')).normalized_result;
+      assert.equal(evidence.statistics.parsed_javascript_files, 3);
+      const imports = evidence.graph.edges.filter((edge: any) => edge.relation === 'imports')
+        .map((edge: any) => `${edge.properties.specifier} -> ${edge.properties.resolved_path ?? edge.properties.resolution_status}`);
+      for (const expected of ['./lib/format -> lib/format.js', './lib/store -> lib/store.js', 'node:fs -> external']) assert.ok(imports.includes(expected), expected);
+
+      const pages: Record<string, { exitCode: number; check: (report: any) => void }> = {
+        pass: { exitCode: 0, check: report => {
+          assert.deepEqual([report.selfTest.passed, report.selfTest.failed, report.selfTest.plantedTotal, report.selfTest.plantedRejected], [4, 0, 2, 2]);
+          assert.equal(report.blank, false); assert.equal(report.errorCount, 0);
+        } },
+        'failing-test': { exitCode: 1, check: report => {
+          assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [3, 1]);
+          assert.ok(report.selfTest.items.tests.some((item: any) => item.name === '1900 is not a leap year' && item.ok === false));
+        } },
+        'planted-escape': { exitCode: 1, check: report => {
+          assert.deepEqual([report.selfTest.failed, report.selfTest.plantedTotal, report.selfTest.plantedRejected], [0, 2, 1]);
+        } },
+        malformed: { exitCode: 1, check: report => assert.match(report.selfTest.malformed, /tests\[0\]/) },
+        throws: { exitCode: 1, check: report => {
+          assert.equal(report.errors[0].kind, 'uncaught'); assert.equal(report.errors[0].phase, 'load');
+          assert.match(report.errors[0].message, /TypeError: Cannot read properties of undefined \(reading 'list'\)/);
+        } },
+        rejection: { exitCode: 1, check: report => {
+          assert.ok(report.errors.some((error: any) => error.kind === 'unhandledrejection' && error.message.includes('fixture: the save slot is missing')));
+        } },
+        blank: { exitCode: 1, check: report => {
+          assert.equal(report.blank, true); assert.equal(report.errorCount, 0); assert.equal(report.selfTest.present, false);
+        } },
+        network: { exitCode: 0, check: report => {
+          const blocked = report.blockedRequests.map((request: any) => new URL(request.url).hostname);
+          for (const host of ['fonts.googleapis.com', 'cdn.jsdelivr.net', 'api.example.com', 'live.example.com']) assert.ok(blocked.includes(host), host);
+          assert.equal(report.selfTest.passed, 3);
+        } },
+        webgl: { exitCode: 0, check: report => assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [2, 0]) },
+      };
+      for (const [page, expected] of Object.entries(pages)) {
+        const run = await sandbox.exec(`awwo-check-page /inputs/check-page/${page}.html --out checks/${page}`);
+        assert.equal(run.exitCode, expected.exitCode, `${page}: ${run.stdout}${run.stderr}`);
+        const report = await json(`checks/${page}/report.json`);
+        assert.equal(report.exitCode, expected.exitCode);
+        expected.check(report);
+        t.diagnostic(`${page}: exit ${run.exitCode}, ${report.timings.totalMs} ms (launch ${report.timings.launchMs} ms), Chromium ${report.chromium.version}`);
+      }
+      const hang = await sandbox.exec('awwo-check-page /inputs/check-page/hang.html --out checks/hang --timeout-ms 1000');
+      assert.equal(hang.exitCode, 1, hang.stdout);
+      assert.equal((await json('checks/hang/report.json')).selfTest.timedOut, true);
+      assert.equal((await sandbox.exec('awwo-check-page /inputs/check-page/missing.html')).exitCode, 2);
+      // The check cannot write its report into the read-only inputs, so it could not run.
+      assert.equal((await sandbox.exec('awwo-check-page /inputs/check-page/pass.html --out /inputs/out')).exitCode, 3);
+      const usage = await sandbox.exec('cat /sys/fs/cgroup/pids.peak /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes; ls -A /tmp');
+      t.diagnostic(`peak tasks and memory bytes (cgroup v2; v1 has the memory peak only), then /tmp leftovers: ${usage.stdout.trim().replace(/\n/g, ' ')}`);
+      // Chromium's profile and caches stay out of the workspace, so the snapshot is still a plain source archive.
+      assert.deepEqual((await sandbox.list('')).map(entry => entry.path).sort(), ['checks', 'inputs', 'rea-report.json']);
+      await sandbox.archive();
+    } finally { await sandbox.close(); }
   });
