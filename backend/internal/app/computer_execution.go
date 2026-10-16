@@ -464,7 +464,13 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 	// Sent only when the message named files, so a task without any is the request it always was; after the fit above,
 	// which bounds the start's text (the files ride beside it, within the broker's larger LIMITS.request).
 	if len(snap.Computer.Inputs) > 0 {
-		payload["inputs"] = snap.Computer.Inputs
+		// Encoded once: a task waiting for a worker slot sends the same request again every few seconds.
+		encoded, err := json.Marshal(snap.Computer.Inputs)
+		if err != nil {
+			a.finish(tid, rid, "failed", "", "computer_input_invalid")
+			return
+		}
+		payload["inputs"] = json.RawMessage(encoded)
 	}
 	response, started := a.startComputerTask(ctx, tid, rid, payload)
 	if !started {

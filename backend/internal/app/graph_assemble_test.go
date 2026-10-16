@@ -182,7 +182,7 @@ func TestPostgresGraphAssembleNodeRunsWithoutModel(t *testing.T) {
 	})
 	defer pi.Close()
 	h := newHarness(t, pi.URL)
-	c, tid, _ := h.register(t, "assemble@example.test")
+	c, tid, uid := h.register(t, "assemble@example.test")
 	prefix := "/tenants/" + tid
 	agent := h.request(t, c, "POST", prefix+"/agents", map[string]any{"name": "Builder", "adapterType": "pi", "model": "test-model", "instructions": "Build."}, 201)["id"].(string)
 	binding := map[string]string{"companyId": tid, "agentId": agent}
@@ -237,5 +237,33 @@ func TestPostgresGraphAssembleNodeRunsWithoutModel(t *testing.T) {
 	var invocations int
 	if err := h.db.QueryRow(ctx, "SELECT count(*) FROM runs WHERE tenant_id=$1", tid).Scan(&invocations); err != nil || invocations != 3 {
 		t.Fatalf("runs %d %v", invocations, err)
+	}
+	// A node with a file input wired from the page's file output (a sandbox node's /inputs) receives the stored
+	// page byte for byte, with its provenance.
+	var pageNode graphNode
+	pageRaw, _ := json.Marshal(page)
+	if err := json.Unmarshal(pageRaw, &pageNode); err != nil {
+		t.Fatal(err)
+	}
+	consumer := graphNode{ID: "test", Kind: "session", Contract: &graphContract{Version: 1, Inputs: []graphField{{ID: "page", Type: "file", Required: true}}}}
+	wired, _ := json.Marshal(graphDocument{Nodes: []graphNode{pageNode, consumer}, Edges: []graphEdge{{ID: "page-file", FromNode: "page", FromPort: "out:file", ToNode: "test", ToPort: "in:page", DataType: "file"}}})
+	fid := randomID()
+	if _, err := h.db.Exec(ctx, `INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status) VALUES($1,$2,$3,$4,$1,'test',0,$5,'[]','completed')`, fid, tid, cid, uid, wired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(ctx, `INSERT INTO graph_run_nodes(tenant_id,graph_id,node_id,ordinal,state,output) VALUES($1,$2,'page',0,'done',$3)`, tid, fid, recorded); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	files, err := materializeWorkspaceInputs(ctx, tx, tid, fid, "test")
+	if err != nil || len(files) != 1 || files[0].SourceNodeID != "page" || files[0].FieldID != "file" || !strings.HasSuffix(files[0].Name, "-game.html") {
+		t.Fatalf("workspace inputs %+v %v", files, err)
+	}
+	if data, err := workspaceFileBytes(files[0]); err != nil || string(data) != want {
+		t.Fatalf("the sandbox would get %q %v", data, err)
 	}
 }

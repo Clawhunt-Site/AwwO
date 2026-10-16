@@ -20,6 +20,8 @@ export interface WorkspaceConfig {
   tools: ReadonlySet<WorkspaceTool>;
   /** The web through the egress proxy; absent = no network. */
   egress?: WorkspaceEgress;
+  /** One command's limit (AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS): 30 s, or 120 s with the web. */
+  commandTimeoutMs: number;
 }
 /** What the task process tells its agent about the workspace. */
 export interface WorkspaceAbilities { tools: WorkspaceTool[]; web: boolean }
@@ -45,7 +47,10 @@ export function loadWorkspaceConfig(env: Record<string, string | undefined>): Wo
     || !/^\d+$/.test(rawCalls) || Number(rawCalls) < 2 || Number(rawCalls) > WORKSPACE_MAX_MODEL_CALLS) throw new Error('Invalid workspace execution configuration');
   const tools = parseWorkspaceTools(env.AWWO_OPENAI_AGENTS_WORKSPACE_TOOLS, 'AWWO_OPENAI_AGENTS_WORKSPACE_TOOLS');
   const egress = loadWorkspaceEgress(env);
-  return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls), tools, ...(egress ? { egress } : {}) });
+  const rawTimeout = env.AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS;
+  const commandTimeoutMs = rawTimeout ? Number(rawTimeout) : egress ? 120_000 : 30_000;
+  if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 1000 || commandTimeoutMs > 120_000) throw new Error('AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS must be 1000-120000');
+  return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls), tools, commandTimeoutMs, ...(egress ? { egress } : {}) });
 }
 function validFile(value: unknown): value is WorkspaceFile {
   if (!object(value) || typeof value.name !== 'string' || !value.name || value.name.length > 200

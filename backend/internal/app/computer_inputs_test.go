@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,7 +24,7 @@ func TestPostgresComputerTaskCarriesTheFilesItsMessageNames(t *testing.T) {
 		Inputs []json.RawMessage `json:"inputs"`
 		Raw    map[string]json.RawMessage
 	}
-	started := make(chan sent, 2)
+	started := make(chan sent, 3)
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			writeJSON(w, 200, map[string]any{"service": "awwo-openmaus-worker", "ready": true, "capabilities": map[string]bool{"workspace": true, "approvals": true}})
@@ -51,8 +53,12 @@ func TestPostgresComputerTaskCarriesTheFilesItsMessageNames(t *testing.T) {
 	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
 	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
 	h.a.cfg.MediaDir = t.TempDir()
-	h.a.cfg.UploadMaxBytes, h.a.cfg.UploadsPerDay, h.a.cfg.UploadWorkspaceBytes, h.a.cfg.MediaMinFreeBytes = 64<<10, 5, 1<<20, 0
+	h.a.cfg.UploadMaxBytes, h.a.cfg.UploadsPerDay, h.a.cfg.UploadWorkspaceBytes, h.a.cfg.MediaMinFreeBytes = 64<<10, 20, 1<<20, 0
 	owner, tid, _ := h.register(t, "computer-inputs@example.test")
+	// The fake worker holds every task open, so the three tasks run side by side.
+	if _, err := h.db.Exec(context.Background(), "UPDATE tenants SET max_concurrent_runs=5 WHERE id=$1", tid); err != nil {
+		t.Fatal(err)
+	}
 	canvas, _, _ := h.fixture(t, owner, tid)
 	app := []byte("import { start } from './engine.js';\nstart();\n")
 	upload := h.upload(t, owner, tid, canvas, "app.js", app, 201)
@@ -86,5 +92,16 @@ func TestPostgresComputerTaskCarriesTheFilesItsMessageNames(t *testing.T) {
 	h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]string{"operationId": "computer-without-files", "prompt": "Prepare a report", "runtime": "pi", "model": "test-model"}, 202)
 	if plain := await(); plain.Raw["inputs"] != nil {
 		t.Fatalf("a task naming no file was sent inputs: %s", plain.Raw["inputs"])
+	}
+	// A message may name up to ten files; the workspace takes the first eight (the rest stay quoted text), and the
+	// task still runs.
+	references := []string{}
+	for i := 0; i < 9; i++ {
+		file := h.upload(t, owner, tid, canvas, fmt.Sprintf("part-%d.js", i), []byte(fmt.Sprintf("export const part = %d;\n", i)), 201)
+		references = append(references, file["reference"].(string))
+	}
+	h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]string{"operationId": "computer-with-nine-files", "prompt": "Read these: " + strings.Join(references, " "), "runtime": "pi", "model": "test-model"}, 202)
+	if many := await(); len(many.Inputs) != 8 {
+		t.Fatalf("nine named files gave the workspace %d", len(many.Inputs))
 	}
 }

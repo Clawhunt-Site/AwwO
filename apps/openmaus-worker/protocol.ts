@@ -2,7 +2,7 @@ import { timingSafeEqual, createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 // A request may carry up to 8 MiB of input files, base64 in JSON (about 11 MiB), besides its text.
-export const LIMITS = { request: 12 * 1024 * 1024, response: 4 * 1024 * 1024, artifact: 2 * 1024 * 1024, artifacts: 8 * 1024 * 1024, inputs: 8, inputBytes: 8 * 1024 * 1024, event: 3 * 1024 * 1024, events: 16 * 1024 * 1024 } as const;
+export const LIMITS = { request: 12 * 1024 * 1024, toolArguments: 512 * 1024, response: 4 * 1024 * 1024, artifact: 2 * 1024 * 1024, artifacts: 8 * 1024 * 1024, inputs: 8, inputBytes: 8 * 1024 * 1024, event: 3 * 1024 * 1024, events: 16 * 1024 * 1024 } as const;
 /** A file the task's message named, read-only in the workspace's /inputs (the API's computerPlan.Inputs). */
 export type RunInput = { name: string; content: string; encoding: 'base64'; sha256: string };
 export type RunRequest = { runId: string; tenantId: string; sessionId: string; prompt: string; instructions: string; modelProxyURL: string; modelProxyToken: string; timeoutMs: number; maxModelCalls: number; inputs: RunInput[] };

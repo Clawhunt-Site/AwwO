@@ -137,7 +137,7 @@ export class ManagedRun {
       stage = 'send';
       await this.api(`/api/bots/${this.botId}/messages/guarded`, { threadId: this.threadId, sendId, text: this.request.prompt, expectedActiveLeafId: created.bot.activeLeafId ?? null, expectedApprovalMode: 'ask' });
       stage = 'poll';
-      const seen = new Map<string, string>(), secrets = [this.coreToken, owner, transport.token, this.request.modelProxyToken, home];
+      const seen = new Map<string, string>(), secrets = [this.coreToken, owner, transport.token, this.request.modelProxyToken, home, ...(sandbox?.secrets ?? [])];
       while (true) {
         signal.throwIfAborted(); if (exited) throw new WorkerError('CORE_EXITED');
         const snapshot = await this.api(`/api/bots/${this.botId}/requests/${sendId}?threadId=${encodeURIComponent(this.threadId)}`);

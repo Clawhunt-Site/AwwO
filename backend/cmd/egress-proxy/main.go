@@ -2,9 +2,9 @@
 // network interface but loopback; the workers mount this proxy's socket directory into it read-only, and a forwarder
 // inside the container joins 127.0.0.1:3128 to the socket. The proxy itself runs where it has a route out.
 //
-//	AWWO_EGRESS_SECRET   (required, >= 32 bytes) shared with the workers, which derive each run's proxy password
-//	AWWO_EGRESS_SOCKET   path of the unix socket to serve on (its directory is what the workers mount), or
-//	AWWO_EGRESS_LISTEN   a TCP address instead (default :3128 when no socket is given)
+//	AWWO_EGRESS_SECRET   (required, 32-512 printable bytes) shared with the workers, which derive each run's password
+//	AWWO_EGRESS_SOCKET   path of the unix socket to serve, named egress.sock (its directory is what the workers mount),
+//	AWWO_EGRESS_LISTEN   or a TCP address instead (default 127.0.0.1:3128 when no socket is given)
 //	AWWO_EGRESS_DENY     comma-separated addresses or prefixes refused besides every non-public one (the host's own)
 //	AWWO_EGRESS_RUN_MB   megabytes a run may move in and out (default 512)
 package main
@@ -17,51 +17,69 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"awwo/backend/internal/egress"
 )
 
 func main() {
-	secret := os.Getenv("AWWO_EGRESS_SECRET")
-	if len(secret) < 32 {
-		log.Fatal("AWWO_EGRESS_SECRET must hold at least 32 bytes")
-	}
-	deny, err := egress.ParseDeny(os.Getenv("AWWO_EGRESS_DENY"))
-	if err != nil {
-		log.Fatal("AWWO_EGRESS_DENY: ", err)
-	}
-	limits := egress.DefaultLimits
-	if raw := os.Getenv("AWWO_EGRESS_RUN_MB"); raw != "" {
-		mb, err := strconv.Atoi(raw)
-		if err != nil || mb < 1 || mb > 8192 {
-			log.Fatal("AWWO_EGRESS_RUN_MB must be 1-8192")
-		}
-		limits.RunBytes = int64(mb) << 20
-	}
-	listener, where, err := listen(os.Getenv("AWWO_EGRESS_SOCKET"), os.Getenv("AWWO_EGRESS_LISTEN"))
+	proxy, listener, where, err := setup(os.Getenv)
 	if err != nil {
 		log.Fatal(err)
 	}
+	var mu sync.Mutex
 	encoder := json.NewEncoder(os.Stdout)
-	proxy := &egress.Proxy{Secret: []byte(secret), Limits: limits, Deny: deny, Log: func(event map[string]any) {
+	proxy.Log = func(event map[string]any) {
 		event["at"] = time.Now().UTC().Format(time.RFC3339)
+		mu.Lock()
+		defer mu.Unlock()
 		_ = encoder.Encode(event)
-	}}
-	server := &http.Server{Handler: proxy, ReadHeaderTimeout: 15 * time.Second, MaxHeaderBytes: 64 << 10}
+	}
+	server := &http.Server{Handler: proxy, ReadHeaderTimeout: 15 * time.Second, IdleTimeout: proxy.Limits.IdleTimeout, MaxHeaderBytes: 64 << 10}
 	log.Printf("egress proxy serving on %s", where)
 	log.Fatal(server.Serve(listener))
+}
+
+// setup reads the settings and opens the listener.
+func setup(env func(string) string) (*egress.Proxy, net.Listener, string, error) {
+	secret := env("AWWO_EGRESS_SECRET")
+	if !egress.ValidSecret(secret) {
+		return nil, nil, "", errors.New("AWWO_EGRESS_SECRET must be 32-512 printable characters, the same value the workers have")
+	}
+	deny, err := egress.ParseDeny(env("AWWO_EGRESS_DENY"))
+	if err != nil {
+		return nil, nil, "", errors.New("AWWO_EGRESS_DENY: " + err.Error())
+	}
+	limits := egress.DefaultLimits
+	if raw := env("AWWO_EGRESS_RUN_MB"); raw != "" {
+		mb, err := strconv.Atoi(raw)
+		if err != nil || mb < 1 || mb > 8192 {
+			return nil, nil, "", errors.New("AWWO_EGRESS_RUN_MB must be 1-8192")
+		}
+		limits.RunBytes = int64(mb) << 20
+	}
+	listener, where, err := listen(env("AWWO_EGRESS_SOCKET"), env("AWWO_EGRESS_LISTEN"))
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return &egress.Proxy{Secret: []byte(secret), Limits: limits, Deny: deny}, listener, where, nil
 }
 
 // listen serves on the socket when one is named (replacing a stale socket, never another kind of file), else on TCP.
 func listen(socket, address string) (net.Listener, string, error) {
 	if socket == "" {
 		if address == "" {
-			address = ":3128"
+			address = "127.0.0.1:3128"
 		}
 		listener, err := net.Listen("tcp", address)
 		return listener, address, err
+	}
+	// The forwarder in every workspace connects to <mounted directory>/egress.sock.
+	if filepath.Base(socket) != "egress.sock" || !filepath.IsAbs(socket) {
+		return nil, "", errors.New("AWWO_EGRESS_SOCKET must be an absolute path ending in /egress.sock")
 	}
 	if info, err := os.Lstat(socket); err == nil {
 		if info.Mode().Type() != fs.ModeSocket {

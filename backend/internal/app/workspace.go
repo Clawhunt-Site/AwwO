@@ -26,6 +26,17 @@ import (
 const workspaceSnapshotField = "__workspace_snapshot"
 const maxWorkspaceFileBytes = 2 << 20
 const maxWorkspaceInputBytes = 8 << 20
+
+// maxWorkspaceInputFiles is how many files a workspace's /inputs takes (the workers refuse more:
+// apps/openmaus-worker/protocol.ts LIMITS.inputs, apps/openai-agents-worker/workspace-protocol.ts).
+const maxWorkspaceInputFiles = 8
+
+// withWorkspaceFiles adds files to a workspace's inputs up to maxWorkspaceInputFiles; a message's further attachments
+// still reach the model as quoted text, only not as files.
+func withWorkspaceFiles(inputs, more []workspaceFile) []workspaceFile {
+	return append(inputs, more[:max(0, min(len(more), maxWorkspaceInputFiles-len(inputs)))]...)
+}
+
 const maxWorkspaceWireBytes = 16 << 20
 const defaultWorkspaceModelCalls = 32
 const maxWorkspaceModelCalls = 64
@@ -634,7 +645,7 @@ func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instr
 		}
 		total += len(data)
 	}
-	if len(inputs) > 8 || total > maxWorkspaceInputBytes {
+	if len(inputs) > maxWorkspaceInputFiles || total > maxWorkspaceInputBytes {
 		failRun("workspace_input_limit")
 		return
 	}

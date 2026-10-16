@@ -648,10 +648,10 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		freezeVisionImages(&snapshot, attached)
 		b.Prompt = attachmentUserPrompt(b.Prompt, attached)
 		if snapshot.Workspace != nil {
-			snapshot.Workspace.Inputs = append(snapshot.Workspace.Inputs, attached.Workspace...)
+			snapshot.Workspace.Inputs = withWorkspaceFiles(snapshot.Workspace.Inputs, attached.Workspace)
 		}
 		if snapshot.Computer != nil {
-			snapshot.Computer.Inputs = append(snapshot.Computer.Inputs, attached.Workspace...)
+			snapshot.Computer.Inputs = withWorkspaceFiles(snapshot.Computer.Inputs, attached.Workspace)
 		}
 	}
 	framedInstructions := memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory)

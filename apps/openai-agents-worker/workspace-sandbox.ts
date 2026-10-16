@@ -54,6 +54,8 @@ export interface WorkspaceSandbox {
   publish(path: string): Promise<WorkspaceRead>;
   archive(): Promise<WorkspaceFile>;
   close(): Promise<void>;
+  /** Values commands can read (the run's proxy password) that a worker never shows in what it relays. */
+  readonly secrets?: readonly string[];
 }
 
 const MiB = 1024 * 1024;
@@ -66,13 +68,21 @@ const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest(
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const EGRESS_MOUNT = '/run/awwo-egress';
 
-/** A run's proxy password, as backend/internal/egress derives it. */
-export function egressToken(secret: string, runId: string): string {
-  return createHmac('sha256', secret).update('awwo-egress-v1\0' + runId).digest('hex').slice(0, 40);
+/** How long a proxy password lives: accepted in the period it was made and the next (backend/internal/egress). */
+export const EGRESS_TOKEN_PERIOD_SECONDS = 12 * 60 * 60;
+
+/** A run's proxy password at a time, as backend/internal/egress derives it. */
+export function egressToken(secret: string, runId: string, at: Date = new Date()): string {
+  const period = Math.floor(at.getTime() / 1000 / EGRESS_TOKEN_PERIOD_SECONDS);
+  return createHmac('sha256', secret).update(`awwo-egress-v2\0${runId}\0${period}`).digest('hex').slice(0, 40);
 }
 
-// The directory goes into a --mount value, where a comma would start another option.
-const validEgress = (egress: WorkspaceEgress) => /^\/[A-Za-z0-9._/-]{1,255}$/.test(egress.socketDir) && !egress.socketDir.split('/').includes('..')
+// The directory goes into a --mount value, where a comma would start another option, and every socket in it becomes
+// reachable from the workspace, so it must be a directory of its own, never a shared system one.
+const SHARED_DIRECTORIES = new Set(['/run', '/var/run', '/tmp', '/var/tmp', '/var/lib', '/var/lib/docker', '/dev', '/proc', '/sys', '/etc', '/home', '/root', '/srv', '/opt', '/usr', '/var']);
+const validEgress = (egress: WorkspaceEgress) => /^\/[A-Za-z0-9._/-]{1,255}$/.test(egress.socketDir)
+  && egress.socketDir.split('/').slice(1).every(part => part !== '' && part !== '.' && part !== '..')
+  && !SHARED_DIRECTORIES.has(egress.socketDir) && !egress.socketDir.startsWith('/run/user/')
   && typeof egress.secret === 'string' && egress.secret.length >= 32 && egress.secret.length <= 512 && !/[\x00-\x1f\x7f]/.test(egress.secret);
 
 /** AWWO_WORKSPACE_EGRESS_DIR and AWWO_WORKSPACE_EGRESS_SECRET, both or neither; both workers read the same pair. */
@@ -80,7 +90,7 @@ export function loadWorkspaceEgress(env: Record<string, string | undefined>): Wo
   const socketDir = env.AWWO_WORKSPACE_EGRESS_DIR || '', secret = env.AWWO_WORKSPACE_EGRESS_SECRET || '';
   if (!socketDir && !secret) return undefined;
   const egress = { socketDir, secret };
-  if (!validEgress(egress)) throw new Error('AWWO_WORKSPACE_EGRESS_DIR (an absolute path of letters, digits and ._-/) and AWWO_WORKSPACE_EGRESS_SECRET (32+ characters) must be set together');
+  if (!validEgress(egress)) throw new Error('AWWO_WORKSPACE_EGRESS_DIR (the egress proxy\'s own directory: an absolute path of letters, digits and ._-/) and AWWO_WORKSPACE_EGRESS_SECRET (32-512 printable characters) must be set together');
   return Object.freeze(egress);
 }
 
@@ -363,9 +373,13 @@ selector = selectors.DefaultSelector()
 selector.register(process.stdout, selectors.EVENT_READ, 'stdout')
 selector.register(process.stderr, selectors.EVENT_READ, 'stderr')
 deadline = time.monotonic() + payload['timeoutMs'] / 1000
+# A command that runs out of time is stopped and reported (exit 124, as timeout(1) does); the workspace and its files stay.
+timed_out = False
 try:
     while selector.get_map():
-        if time.monotonic() >= deadline: raise TimeoutError('Workspace command timed out')
+        if time.monotonic() >= deadline:
+            timed_out = True
+            break
         for key, event in selector.select(0.1):
             data = os.read(key.fileobj.fileno(), 8192)
             if not data:
@@ -374,7 +388,12 @@ try:
             remaining = limit - sum(len(value) for value in chunks.values())
             if len(data) > remaining: truncated = True
             chunks[key.data].extend(data[:max(0, remaining)])
-    exit_code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
+    if not timed_out:
+        try: exit_code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired: timed_out = True
+    if timed_out:
+        exit_code = 124
+        chunks['stderr'].extend(('\n[AwwO stopped this command after %d s. The workspace and its files are kept; split the work into shorter commands.]\n' % round(payload['timeoutMs'] / 1000)).encode())
 finally:
     try: os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError: pass
@@ -389,24 +408,25 @@ print(json.dumps({'exitCode': exit_code, 'stdout': bytes(chunks['stdout']).decod
 `;
 
 // PID 1 of a workspace with the web: 127.0.0.1:3128 joined to the egress proxy's socket, one connection per client.
+// A side that finishes sending is half-closed and the other goes on, as the proxy does; an error ends both.
 export const EGRESS_FORWARDER = String.raw`
 import asyncio, signal
 signal.signal(signal.SIGCHLD, signal.SIG_IGN)
-async def pipe(reader, writer, other):
-    try:
-        while True:
-            data = await reader.read(65536)
-            if not data: break
-            writer.write(data)
-            await writer.drain()
-    except Exception: pass
-    finally:
-        writer.close(); other.close()
+async def pipe(reader, writer):
+    while True:
+        data = await reader.read(65536)
+        if not data: break
+        writer.write(data)
+        await writer.drain()
+    if writer.can_write_eof(): writer.write_eof()
 async def serve(reader, writer):
     try: upstream_reader, upstream_writer = await asyncio.open_unix_connection('${EGRESS_MOUNT}/egress.sock')
     except OSError:
         writer.close(); return
-    await asyncio.gather(pipe(reader, upstream_writer, writer), pipe(upstream_reader, writer, upstream_writer))
+    try: await asyncio.gather(pipe(reader, upstream_writer), pipe(upstream_reader, writer))
+    except Exception: pass
+    finally:
+        writer.close(); upstream_writer.close()
 async def main():
     server = await asyncio.start_server(serve, '127.0.0.1', 3128)
     async with server: await asyncio.sleep(86400)
@@ -421,7 +441,8 @@ export function workspaceDockerArgs(name: string, image: string, egress?: { sock
     '--network=none', '--read-only', '--user=1000:1000', '--cap-drop=ALL', '--security-opt=no-new-privileges',
     '--memory=1g', '--memory-swap=1g', '--cpus=1', '--pids-limit=128', '--ulimit=nofile=1024:1024',
     '--tmpfs', '/workspace:rw,nosuid,nodev,size=134217728,nr_inodes=8192,uid=1000,gid=1000,mode=0700',
-    '--tmpfs', '/inputs:rw,nosuid,nodev,noexec,size=8388608,nr_inodes=2048,uid=0,gid=0,mode=0755',
+    // 8 MiB of inputs plus a page for each file's last partial one: tmpfs counts whole 4 KiB pages.
+    '--tmpfs', '/inputs:rw,nosuid,nodev,noexec,size=9437184,nr_inodes=2048,uid=0,gid=0,mode=0755',
     '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=33554432,nr_inodes=2048,uid=1000,gid=1000,mode=0700',
     ...web,
     '--workdir=/workspace', '--env', 'HOME=/workspace', '--env', 'PYTHONDONTWRITEBYTECODE=1',
@@ -439,13 +460,15 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
   for (const value of [options.workspaceId, options.runId]) if (typeof value !== 'string' || !value || value.length > 256) throw new Error('Invalid workspace identity');
   const fileLimit = boundedInteger(config.maxFileBytes, FILE_LIMIT, FILE_LIMIT);
   const archiveLimit = boundedInteger(config.maxArchiveBytes, ARCHIVE_LIMIT, ARCHIVE_LIMIT);
-  const timeoutMs = boundedInteger(config.commandTimeoutMs, 30_000, 120_000);
+  // With the web, installs and clones need more than a quick command's 30 s.
+  const timeoutMs = boundedInteger(config.commandTimeoutMs, config.egress ? 120_000 : 30_000, 120_000);
   if (signal?.aborted) throw new Error('Workspace operation cancelled');
   const identity = sha256(Buffer.from(options.workspaceId + '\0' + options.runId));
   const name = `awwo-ws-${identity.slice(0,24)}-${randomBytes(6).toString('hex')}`;
   // Every sandbox of one run shares that run's traffic allowance at the proxy.
-  const egress = config.egress && { socketDir: config.egress.socketDir,
-    proxyURL: `http://ws-${identity.slice(0, 32)}:${egressToken(config.egress.secret, `ws-${identity.slice(0, 32)}`)}@127.0.0.1:3128` };
+  const egressRun = `ws-${identity.slice(0, 32)}`;
+  const egressPassword = config.egress ? egressToken(config.egress.secret, egressRun) : '';
+  const egress = config.egress && { socketDir: config.egress.socketDir, proxyURL: `http://${egressRun}:${egressPassword}@127.0.0.1:3128` };
   const inputs: { path: string; content: string }[] = [];
   const seen = new Set<string>();
   let inputBytes = 0;
@@ -553,5 +576,6 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
     publish: path => serialized(async () => verified(await invoke('publish', { path: validateWorkspacePath(path) }), path, fileLimit)),
     archive: () => serialized(async () => verified(await invoke('archive'), 'workspace.zip', archiveLimit, true) as WorkspaceFile),
     close,
+    secrets: egressPassword ? [egressPassword] : [],
   };
 }

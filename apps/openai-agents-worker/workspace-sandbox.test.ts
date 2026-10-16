@@ -24,8 +24,10 @@ test('container arguments enforce isolation without host mounts, inherited crede
 });
 
 test('the web is a read-only proxy socket and a run password, never a network interface', async () => {
-  // The same value backend/internal/egress derives (egress_test.go).
-  assert.equal(egressToken('k'.repeat(32), 'run-a'), '1f365883b108aae59ff783c5a2a257416f01a467');
+  // The same value backend/internal/egress derives (egress_test.go), and a new password each 12-hour period.
+  const at = new Date(1_800_000_000_000);
+  assert.equal(egressToken('k'.repeat(32), 'run-a', at), '8b412f26fe7dc28c6e9e94439690dcf5db39e168');
+  assert.notEqual(egressToken('k'.repeat(32), 'run-a', new Date(at.getTime() + 12 * 3600_000)), egressToken('k'.repeat(32), 'run-a', at));
   const egress = { socketDir: '/var/lib/awwo/egress', secret: 's'.repeat(32) };
   const calls: string[][] = [];
   const runner: WorkspaceDockerRunner = async args => { calls.push(args); return response('ok'); };
@@ -45,7 +47,9 @@ test('the web is a read-only proxy socket and a run password, never a network in
   // Without egress nothing of it is there.
   const plain = workspaceDockerArgs('awwo-ws-test', config.image);
   assert.ok(!plain.some(value => /PROXY|egress/i.test(value)));
-  for (const bad of [{ socketDir: 'relative', secret: egress.secret }, { socketDir: '/a,readonly=false', secret: egress.secret }, { socketDir: '/a/../b', secret: egress.secret }, { ...egress, secret: 'short' }]) {
+  for (const bad of [{ socketDir: 'relative', secret: egress.secret }, { socketDir: '/a,readonly=false', secret: egress.secret }, { socketDir: '/a/../b', secret: egress.secret },
+    { socketDir: '/run', secret: egress.secret }, { socketDir: '/var/run', secret: egress.secret }, { socketDir: '/./srv', secret: egress.secret }, { socketDir: '//srv', secret: egress.secret },
+    { socketDir: '/run/user/1000/x', secret: egress.secret }, { socketDir: '/', secret: egress.secret }, { ...egress, secret: 'short' }, { ...egress, secret: 's'.repeat(40) + String.fromCharCode(10) }]) {
     await assert.rejects(createWorkspaceSandbox({ ...config, egress: bad }, { workspaceId: 'a', runId: 'b' }, undefined, runner), /egress/);
   }
 });
@@ -294,7 +298,10 @@ test('Docker smoke: execute, repair, publish, snapshot/restore, isolation and ti
     const restored = await createWorkspaceSandbox(realConfig, { workspaceId: 'local-security-smoke', runId: 'two', snapshot: archive });
     try {
       assert.equal((await restored.read('site/index.html')).content, '<h1>Real artifact</h1>');
-      await assert.rejects(restored.exec('sleep 30', { timeoutMs: 100 }), /timed out|failed/);
-      await assert.rejects(restored.read('site/index.html'), /closed/);
+      // A command that runs out of time is stopped and reported; the workspace and its files stay.
+      const stopped = await restored.exec('sleep 30', { timeoutMs: 1000 });
+      assert.equal(stopped.exitCode, 124);
+      assert.match(stopped.stderr, /stopped this command after 1 s/);
+      assert.equal((await restored.read('site/index.html')).content, '<h1>Real artifact</h1>');
     } finally { await restored.close(); }
   });

@@ -17,7 +17,7 @@ export async function startShim() {
         request = JSON.parse(line);
         if (!record(request) || request.jsonrpc !== '2.0') return;
         if (request.id === undefined) return;
-        const response = await fetch(target, { method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: line, signal: AbortSignal.timeout(120_000) });
+        const response = await fetch(target, { method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: line, signal: AbortSignal.timeout(150_000) }); // a command may run 120 s
         if (!response.ok) throw new Error('Workspace transport failed');
         const result = await responseJSON(response);
         process.stdout.write(JSON.stringify(result) + '\n');

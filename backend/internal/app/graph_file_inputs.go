@@ -90,7 +90,7 @@ func readGraphInputFiles(ctx context.Context, tx graphInputReader, tid, gid, nid
 			continue
 		}
 		seen[identity] = true
-		if len(inputs) >= 8 {
+		if len(inputs) >= maxWorkspaceInputFiles {
 			return nil, errors.New("workspace_input_limit")
 		}
 		var name, hash string

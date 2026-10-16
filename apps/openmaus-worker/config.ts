@@ -19,11 +19,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const dockerExecutable = env.AWWO_OPENMAUS_DOCKER || env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER || '/usr/bin/docker';
   if (![corePath, dataRoot, dockerExecutable].every(isAbsolute)) throw new Error('Runtime and Docker paths must be absolute');
   const proxyOrigins = new Set((env.AWWO_OPENMAUS_MODEL_PROXY_ORIGINS || '').split(',').filter(Boolean).map(value => new URL(value.trim()).origin));
-  // A code-structure report or a page check can take longer than a quick command; the sandbox caps any one at 120 s.
-  const commandTimeoutMs = Number(env.AWWO_OPENMAUS_COMMAND_TIMEOUT_MS || 30_000);
-  if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 1000 || commandTimeoutMs > 120_000) throw new Error('AWWO_OPENMAUS_COMMAND_TIMEOUT_MS must be 1000–120000');
   const tools = parseWorkspaceTools(env.AWWO_OPENMAUS_WORKSPACE_TOOLS, 'AWWO_OPENMAUS_WORKSPACE_TOOLS');
   const egress = loadWorkspaceEgress(env);
+  // A code-structure report, a page check or an install takes longer than a quick command; the sandbox caps any one
+  // at 120 s, the default once the web is on.
+  const commandTimeoutMs = Number(env.AWWO_OPENMAUS_COMMAND_TIMEOUT_MS || (egress ? 120_000 : 30_000));
+  if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 1000 || commandTimeoutMs > 120_000) throw new Error('AWWO_OPENMAUS_COMMAND_TIMEOUT_MS must be 1000–120000');
   return { token, host: env.AWWO_OPENMAUS_HOST || '127.0.0.1', port, maxConcurrent, corePath, dataRoot, proxyOrigins, tools,
     sandbox: { dockerExecutable, image: env.AWWO_OPENMAUS_WORKSPACE_IMAGE || env.AWWO_OPENAI_AGENTS_WORKSPACE_IMAGE || 'awwo-workspace:20261001', dockerContext: env.AWWO_OPENMAUS_DOCKER_CONTEXT || env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT, commandTimeoutMs, ...(egress ? { egress } : {}) } };
 }

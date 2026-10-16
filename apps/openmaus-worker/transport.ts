@@ -87,7 +87,7 @@ export async function createTransport(request: RunRequest, sandbox: WorkspaceSan
           if (choice.message.tool_calls.length > 32) throw new WorkerError('TOOL_BUDGET_EXCEEDED');
           for (const call of choice.message.tool_calls) {
             if (!record(call) || !record(call.function) || typeof call.function.name !== 'string') continue;
-            let args: unknown; try { args = JSON.parse(textField(call.function.arguments, LIMITS.request, true)); } catch { continue; }
+            let args: unknown; try { args = JSON.parse(textField(call.function.arguments, LIMITS.toolArguments, true)); } catch { continue; }
             if (record(args)) calls.push({ tool: call.function.name, arguments: args });
           }
         }

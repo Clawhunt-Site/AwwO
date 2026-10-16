@@ -773,7 +773,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		return e
 	}
 	if uploads != nil && snap.Workspace != nil {
-		snap.Workspace.Inputs = append(snap.Workspace.Inputs, uploads.Workspace...)
+		snap.Workspace.Inputs = withWorkspaceFiles(snap.Workspace.Inputs, uploads.Workspace)
 	}
 	if turn != nil {
 		if snap.Team != nil {
