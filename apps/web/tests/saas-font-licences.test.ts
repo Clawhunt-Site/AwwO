@@ -3,11 +3,11 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { brotliDecompressSync } from 'node:zlib';
 import { build } from 'vite';
 import { describe, expect, it } from 'vitest';
 import { familyFonts, folderFiles, fontFolder, fontsInModules, inlinedFontLicences, licenceAssets, licenceBanner, unlicensedFonts } from '../scripts/font-licences.mjs';
 import { PREVIEW_FONTS } from '../src/canvas/previewFontList';
+import { glyphCount } from './woff2-font';
 
 const WEB = path.resolve(__dirname, '..');
 const FONTS = path.join(WEB, 'src', 'saas', 'design', 'fonts');
@@ -37,9 +37,11 @@ const PREVIEW = path.join(WEB, 'src', 'canvas', 'fonts');
 const slug = (family: string) => family.toLowerCase().replace(/ /g, '-');
 // Each face's license file, as vite.saas.config.mjs gives the plugin: its family's.
 const PREVIEW_PAIRS = new Map(PREVIEW_FONTS.flatMap(font => font.faces.map(face => [face.file, `${slug(font.family)}.LICENSE.txt`] as const)));
-// Each preview font family's license in src/canvas/fonts/: the LICENSE of its Fontsource 5.3.0 package, unchanged
-// (@fontsource-variable/<family>, or @fontsource/<family> for Bebas Neue, Instrument Serif, Press Start 2P and
-// Rajdhani), as the fonts are (tests/canvas-preview-fonts.test.ts pins those).
+// Each preview font family's license in src/canvas/fonts/, unchanged, from where its fonts come from
+// (tests/canvas-preview-fonts.test.ts pins those): the LICENSE of its Fontsource 5.3.0 package
+// (@fontsource-variable/<family>, or @fontsource/<family> for Bebas Neue, Instrument Serif and Rajdhani), and for the
+// three families that reserve their names, which ship their full fonts, the OFL.txt beside them in google/fonts at
+// bf7c667a (ofl/orbitron, ofl/playfairdisplay, ofl/pressstart2p).
 const PREVIEW_LICENCES: Record<string, { bytes: number; sha256: string }> = {
   'bebas-neue.LICENSE.txt': { bytes: 4391, sha256: '66c436339f7490c1a99e4f6a7b8aef5c176676edfd071a31638e7d54c1b0aeda' },
   'cinzel.LICENSE.txt': { bytes: 4382, sha256: 'f5a242cf68ad6ebd0603b3359a74c593ca080318a681035be5296ba2c6b04ae6' },
@@ -49,12 +51,12 @@ const PREVIEW_LICENCES: Record<string, { bytes: number; sha256: string }> = {
   'jetbrains-mono.LICENSE.txt': { bytes: 4524, sha256: '403581b69dac5cff4079205e01c6b467e56af449ecbd7247693ddb1baafa005b' },
   'manrope.LICENSE.txt': { bytes: 4383, sha256: 'd826ab6583b12c26807d8716a545bdbbb672df04f48608a364ba9efdbe501c30' },
   'montserrat.LICENSE.txt': { bytes: 4509, sha256: 'f429f739351287574c0c3175a9222bb3e49c7cad3f568a04f2c08d74c107724e' },
-  'orbitron.LICENSE.txt': { bytes: 4388, sha256: '075b0137b7a19be521031442001478342ebafc1923f01092b8dc51afc4341041' },
+  'orbitron.LICENSE.txt': { bytes: 4426, sha256: 'ab609b0e110d622435ff337cdf233288556e011bbf9bd0550be98846c0630819' },
   'outfit.LICENSE.txt': { bytes: 4387, sha256: '0e5fcef5d93bfcae273c11c00f0bb453d3b5491860e1ac8b658767b7577c938f' },
   'oxanium.LICENSE.txt': { bytes: 4383, sha256: '062fa183baec494d989d5d848f78a5466a537033c40f1b7651c19ca5d140ab7c' },
   'pixelify-sans.LICENSE.txt': { bytes: 4393, sha256: '8ed5cd9e189e30dfdb0df2d5c2771556b50e9d502d899221328c3245caf8423c' },
-  'playfair-display.LICENSE.txt': { bytes: 4630, sha256: 'c052aafd2a71e90bcee6e69f475029d430a10d548c08ffcae350171f0e9668b1' },
-  'press-start-2p.LICENSE.txt': { bytes: 4412, sha256: '98e451fe911e5ee4a1a45359535dc30ea7df28b8d9a9cd1f741778efab1387ee' },
+  'playfair-display.LICENSE.txt': { bytes: 4449, sha256: '566be814f8e96e93dfa16101331557eb6b5467e9e03f627c0910fe93ca12300e' },
+  'press-start-2p.LICENSE.txt': { bytes: 4413, sha256: '705960c3281a5765ecc0b59bd4ed7ca59eed165748076bc2fc3e8fdbfeb944b0' },
   'rajdhani.LICENSE.txt': { bytes: 4727, sha256: '078e327eb00525214cdce9780cfdf156141f137f1a095bec9798f470703d7d2d' },
   'space-grotesk.LICENSE.txt': { bytes: 4401, sha256: '18a4de52385f6b988782639d5d0cc1326e5a8c2de9a7f01d7b20d9aedcc60943' },
   'unbounded.LICENSE.txt': { bytes: 4390, sha256: '48a780bc857729859e54d1e691b05792894a26634edc1c4b5dbeabffe6941758' },
@@ -78,37 +80,6 @@ const hostedBuild = () => (hosted ??= (async () => {
   }));
 })());
 
-/** The glyph count of a WOFF2 font, from its maxp table: tables follow one another, unpadded, in one Brotli stream. */
-function woff2GlyphCount(file: Buffer): number {
-  let offset = 48;
-  const base128 = (): number => {
-    let value = 0;
-    for (let i = 0; i < 5; i += 1) {
-      const byte = file[offset++]!;
-      value = value * 128 + (byte & 0x7f);
-      if (byte < 0x80) return value;
-    }
-    throw new Error('UIntBase128 longer than 5 bytes');
-  };
-  const tables: { known: number; stored: number }[] = [];
-  for (let i = 0; i < file.readUInt16BE(12); i += 1) {
-    const flags = file[offset++]!, known = flags & 0x3f, version = flags >> 6;
-    if (known === 0x3f) offset += 4;
-    const length = base128();
-    // glyf (10) and loca (11) are transformed at version 0, every other table at any other version.
-    const transformed = known === 10 || known === 11 ? version === 0 : version !== 0;
-    tables.push({ known, stored: transformed ? base128() : length });
-  }
-  const data = brotliDecompressSync(file.subarray(offset, offset + file.readUInt32BE(20)));
-  let start = 0;
-  for (const table of tables) {
-    // maxp is table 4 of WOFF2's known tags; its numGlyphs is at offset 4.
-    if (table.known === 4) return data.readUInt16BE(start + 4);
-    start += table.stored;
-  }
-  throw new Error('no maxp table');
-}
-
 describe("the hosted app's own fonts", () => {
   it("are GitHub's own build, its whole font in WOFF2, with the license their stylesheet names", () => {
     // Hidden files (a Finder .DS_Store) are no part of the folder; the plugin ignores them too.
@@ -122,7 +93,7 @@ describe("the hosted app's own fonts", () => {
       expect(bytes.subarray(0, 4).toString('latin1'), name).toBe('wOF2');
       expect(bytes.readUInt32BE(4), name).toBe(0x00010000);
       expect([bytes.readUInt32BE(32), bytes.readUInt32BE(44)], name).toEqual([0, 0]);
-      expect(woff2GlyphCount(bytes), name).toBe(GLYPHS);
+      expect(glyphCount(bytes), name).toBe(GLYPHS);
     }
     const licence = readFileSync(path.join(FONTS, LICENCE), 'utf8');
     expect(licence.startsWith('Copyright 2022 The Mona Sans Project Authors (https://github.com/github/mona-sans), with Reserved Font Name "Mona"')).toBe(true);
@@ -174,7 +145,7 @@ describe("the hosted app's own fonts", () => {
 });
 
 describe('the fonts AwwO supplies to running previews', () => {
-  it("each come with their family's license, as fontsource ships it", () => {
+  it("each come with their family's license, as their source ships it", () => {
     const files = folderFiles(PREVIEW);
     for (const [name, pin] of Object.entries(PREVIEW_LICENCES)) {
       const bytes = files.get(name)!;
@@ -187,10 +158,11 @@ describe('the fonts AwwO supplies to running previews', () => {
     const faces = PREVIEW_FONTS.flatMap(font => font.faces.map(face => `${face.file} ${slug(font.family)}.LICENSE.txt`)).sort();
     expect(fonts.map(font => `${font.name} ${font.licence.name}`)).toEqual(faces);
     expect([...files.keys()].sort()).toEqual([...fonts.map(font => font.name), ...Object.keys(PREVIEW_LICENCES)].sort());
-    // The Reserved Font Names the licenses declare with their copyright lines. Orbitron's font files declare
-    // "Orbitron" in their own copyright notice, as Google Fonts' license of it does; its fontsource license leaves it out.
+    // The Reserved Font Names the licenses declare with their copyright lines: those of the three families that ship
+    // their full fonts (Orbitron's fontsource license left its name out; Google Fonts' license of it, as its font
+    // files' own copyright notice, declares it).
     const reserved = Object.keys(PREVIEW_LICENCES).filter(name => files.get(name)!.toString('utf8').split('\n')[0].includes('Reserved Font Name'));
-    expect(reserved).toEqual(['playfair-display.LICENSE.txt', 'press-start-2p.LICENSE.txt']);
+    expect(reserved).toEqual(['orbitron.LICENSE.txt', 'playfair-display.LICENSE.txt', 'press-start-2p.LICENSE.txt']);
   });
 
   it('ship each with its license at the top of the script chunk that holds it, in the hosted build', async () => {
@@ -204,7 +176,8 @@ describe('the fonts AwwO supplies to running previews', () => {
       // data: URL previewFonts.ts reads, in a chunk that another chunk loads.
       const name = `${slug(font.family)}.LICENSE.txt`, licence = readFileSync(path.join(PREVIEW, name), 'utf8');
       const code = holders[0].code ?? '';
-      expect(code.startsWith(`/*! License of ${face.file} (${name}):\n${licence}*/\n`), face.file).toBe(true);
+      // (Press Start 2P's license, as Google Fonts ships it, has no line break at its end: the comment adds one.)
+      expect(code.startsWith(`/*! License of ${face.file} (${name}):\n${licence}${licence.endsWith('\n') ? '' : '\n'}*/\n`), face.file).toBe(true);
       expect(code, face.file).toContain(`data:font/woff2;base64,${base64}`);
       expect(chunks.some(chunk => chunk.code?.includes(path.posix.basename(holders[0].fileName))), face.file).toBe(true);
       licensed.add(holders[0]);

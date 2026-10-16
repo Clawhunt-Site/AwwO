@@ -1,8 +1,11 @@
 /**
- * The brand fonts AwwO supplies to a running preview of a delivered page (previewFonts.ts loads them): the Latin subsets
- * of OFL-1.1 families from the Fontsource 5.3.0 packages, vendored byte for byte in fonts/ with each family's license
- * beside its files (THIRD_PARTY_NOTICES.md lists them). Plain data with no loader, so the case canvases (officialWorkflows.ts) and the publish script can
- * name the families without bundling the files. tests/canvas-preview-fonts.test.ts pins every file's size and sha256.
+ * The brand fonts AwwO supplies to a running preview of a delivered page (previewFonts.ts loads them): OFL-1.1 families
+ * vendored in fonts/, each family's license beside its files (THIRD_PARTY_NOTICES.md lists them). Most are the Latin
+ * subsets of the Fontsource 5.3.0 packages, byte for byte. Orbitron, Playfair Display and Press Start 2P reserve their
+ * names, which no subset may keep, so those three are the full fonts as Google Fonts publishes them, converted to WOFF2
+ * with nothing else changed, beside Google Fonts' license of each. Plain data with no loader, so the case canvases
+ * (officialWorkflows.ts) and the publish script can name the families without bundling the files.
+ * tests/canvas-preview-fonts.test.ts pins every file's size and sha256.
  */
 export interface PreviewFontFace {
   /** File name in fonts/. */
@@ -41,7 +44,7 @@ export const PREVIEW_FONTS: readonly PreviewFont[] = [
   { family: 'Unbounded', use: 'display', faces: [
     face('unbounded-latin-wght-normal.woff2', '200 900', 50904, '22f9b928aa3928a896340422b54d690fbb5875c30eae4c106f029c61f2289fd6')] },
   { family: 'Orbitron', use: 'display', faces: [
-    face('orbitron-latin-wght-normal.woff2', '400 900', 11800, 'c25a9f9da5d9f3db1bf2a01474722dc9b377675b7bbab6d0dfda6902794fd1ed')] },
+    face('orbitron-wght-normal.woff2', '400 900', 16028, '206601dd7476a038ad4038f8c45f07c59bf2189b8733e328b79697a09e846bc0')] },
   { family: 'Exo 2', use: 'display', faces: [
     face('exo-2-latin-wght-normal.woff2', '100 900', 40896, '4a259dde317e08aa5d37e6eb684e222ae833516b2a0fccba36ee5e36224f16be'),
     face('exo-2-latin-wght-italic.woff2', '100 900', 43048, '26a4dc84a13ae17366fcd188e354530db070234c038370df9ee47f1b0d611a7a', 'italic')] },
@@ -55,8 +58,8 @@ export const PREVIEW_FONTS: readonly PreviewFont[] = [
   { family: 'Bebas Neue', use: 'display', faces: [
     face('bebas-neue-latin-400-normal.woff2', '400', 13768, 'a7c90c89240c134f7fdd33d40c000ec90b79d675ea53e8cc5a6d423c073de412')] },
   { family: 'Playfair Display', use: 'serif', faces: [
-    face('playfair-display-latin-wght-normal.woff2', '400 900', 38404, 'e0c764a8e9e1cce92163c55bac4b2ad6cd4cf8c696ce2289ab5c41565e65b7e2'),
-    face('playfair-display-latin-wght-italic.woff2', '400 900', 38804, '54af24bd0f911f0fd7399d5445ea2023ff501d6a69f2d728f1213072f977ab14', 'italic')] },
+    face('playfair-display-wght-normal.woff2', '400 900', 106440, '4297e9ec39f1b8157623d048fb99eab03c90e482669599e8fc662ee178994c49'),
+    face('playfair-display-wght-italic.woff2', '400 900', 103728, '07dd1cb3a11ed07a7d706e25b64b1a1a46c0ab1bbd53f7e4b5dff9052fc6dd26', 'italic')] },
   { family: 'Instrument Serif', use: 'serif', faces: [
     face('instrument-serif-latin-400-normal.woff2', '400', 21032, '5eb09b5ac0e28b67c2f041c8ba6d244604ca0c0980d65912ab2d47fed84ddc31'),
     face('instrument-serif-latin-400-italic.woff2', '400', 22128, '5a51946dfffa82972bc98745359c46761515641fda557c25116459a9f83da4a7', 'italic')] },
@@ -66,7 +69,7 @@ export const PREVIEW_FONTS: readonly PreviewFont[] = [
     face('jetbrains-mono-latin-wght-normal.woff2', '100 800', 40404, '18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e'),
     face('jetbrains-mono-latin-wght-italic.woff2', '100 800', 42964, 'a8afa085e9ca5e53434e2ee918ba6b65c7dd4dda56509976b36591478c99d62e', 'italic')] },
   { family: 'Press Start 2P', use: 'pixel', faces: [
-    face('press-start-2p-latin-400-normal.woff2', '400', 12512, 'afec86997fdaf54af1f59358fa2c1e2a0f1d04146edad18e5cd141d0384a7548')] },
+    face('press-start-2p-400-normal.woff2', '400', 29920, 'ec0a835d8047efb59e51434c40cce52997d5dd235a0968f611b286c5f6fce743')] },
   { family: 'Pixelify Sans', use: 'pixel', faces: [
     face('pixelify-sans-latin-wght-normal.woff2', '400 700', 12016, '4a5633a0c9c1b73abd133a56d3716c2d8df2ed03cb987346f72194aeb224f382')] },
 ];

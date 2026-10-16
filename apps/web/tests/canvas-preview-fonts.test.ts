@@ -7,10 +7,19 @@ import { PREVIEW_FONT_RULE, PREVIEW_FONTS, PREVIEW_FONTS_KEY } from '../src/canv
 import { previewFontFaces, previewFontNeeds, previewFontSource } from '../src/canvas/previewFonts';
 import { loadPreviewLibraries, previewScriptNeeds, PREVIEW_FONTS_LIBRARY } from '../src/canvas/previewLibraries';
 import { buildLiveDocument } from '../src/canvas/studio/liveDocument';
+import { copyrightNotice, glyphCount, reservedNames } from './woff2-font';
 
 const FONT_DIR = path.resolve(__dirname, '../src/canvas/fonts');
 const slug = (family: string) => family.toLowerCase().replace(/ /g, '-');
 const names = (texts: string[]) => previewFontNeeds(...texts).map(font => font.family);
+// The whole fonts of the families that reserve their names, by glyph count: those of google/fonts at bf7c667a, which
+// these files are converted from (a subset of one has fewer glyphs).
+const WHOLE_FONT_GLYPHS: Record<string, number> = {
+  'orbitron-wght-normal.woff2': 269,
+  'playfair-display-wght-italic.woff2': 1101,
+  'playfair-display-wght-normal.woff2': 1103,
+  'press-start-2p-400-normal.woff2': 658,
+};
 
 describe('brand fonts AwwO supplies to running pages', () => {
   it('pins every vendored face to its file, and nothing else is in the folder', () => {
@@ -22,7 +31,7 @@ describe('brand fonts AwwO supplies to running pages', () => {
       expect(createHash('sha256').update(bytes).digest('hex'), face.file).toBe(face.sha256);
       // A woff2 file starts with its signature.
       expect(bytes.subarray(0, 4).toString('latin1'), face.file).toBe('wOF2');
-      expect(face.file.startsWith(`${slug(font.family)}-latin-`), face.file).toBe(true);
+      expect(face.file.startsWith(`${slug(font.family)}-`), face.file).toBe(true);
     }
   });
 
@@ -31,6 +40,39 @@ describe('brand fonts AwwO supplies to running pages', () => {
       const license = readFileSync(path.join(FONT_DIR, `${slug(font.family)}.LICENSE.txt`), 'utf8');
       expect(license, font.family).toMatch(/SIL OPEN FONT LICENSE/i);
     }
+  });
+
+  it('ships the full font of a family that reserves its name, which no subset may keep', () => {
+    const reservingFaces: string[] = [];
+    for (const font of PREVIEW_FONTS) {
+      const license = readFileSync(path.join(FONT_DIR, `${slug(font.family)}.LICENSE.txt`), 'utf8');
+      const header = license.slice(0, license.indexOf('This Font Software is licensed'));
+      for (const face of font.faces) {
+        const bytes = readFileSync(path.join(FONT_DIR, face.file)), notice = copyrightNotice(bytes);
+        expect(notice, face.file).toMatch(/^Copyright /);
+        // The license beside it reserves every name the font's own notice does.
+        expect(reservedNames(header), face.file).toEqual(expect.arrayContaining(reservedNames(notice)));
+        // A subset is a Modified Version, which may not use a Reserved Font Name (OFL-FAQ 2.6): such a family ships
+        // its whole font, converted to WOFF2 with nothing else changed (OFL-FAQ 2.2.1), with all of its glyphs.
+        if (!reservedNames(notice).length && !reservedNames(header).length) continue;
+        reservingFaces.push(face.file);
+        expect(face.file, face.file).not.toMatch(/-latin-/);
+        expect(glyphCount(bytes), face.file).toBe(WHOLE_FONT_GLYPHS[face.file]);
+      }
+    }
+    expect(reservingFaces.sort()).toEqual(Object.keys(WHOLE_FONT_GLYPHS).sort());
+    const reserving = PREVIEW_FONTS.filter(font => font.faces.some(face => reservedNames(copyrightNotice(readFileSync(path.join(FONT_DIR, face.file)))).length));
+    expect(reserving.map(font => font.family)).toEqual(['Orbitron', 'Playfair Display', 'Press Start 2P']);
+  });
+
+  it('reads the names a copyright notice reserves, however it quotes them', () => {
+    expect(reservedNames('Copyright 2018 The Orbitron Project Authors, with Reserved Font Name: "Orbitron".')).toEqual(['Orbitron']);
+    expect(reservedNames('Copyright 2017 X, with Reserved Font Name "Playfair Display". B.ttf: Copyright 2017 X, with Reserved Font Name "Playfair Display".'))
+      .toEqual(['Playfair Display', 'Playfair Display']);
+    expect(reservedNames("Copyright 2010 Adobe, with Reserved Font Name 'Source'.")).toEqual(['Source']);
+    expect(reservedNames('Copyright 2022 GitHub, with Reserved Font Name “Mona Sans”')).toEqual(['Mona Sans']);
+    expect(reservedNames('Copyright 2014 A, with Reserved Font Name Lato.')).toEqual(['Lato']);
+    expect(reservedNames('Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)')).toEqual([]);
   });
 
   it('finds a family where a page names a font, in CSS, styles, canvas strings and SVG', () => {
