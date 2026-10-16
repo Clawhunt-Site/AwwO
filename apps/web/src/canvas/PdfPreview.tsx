@@ -5,7 +5,6 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import pdfLicenseUrl from 'pdfjs-dist/LICENSE?url';
 import cmapLicenseUrl from 'pdfjs-dist/cmaps/LICENSE?url';
 import foxitLicenseUrl from 'pdfjs-dist/standard_fonts/LICENSE_FOXIT?url';
-import liberationLicenseUrl from 'pdfjs-dist/standard_fonts/LICENSE_LIBERATION?url';
 import { PREVIEW_LIMITS, type PreviewFile } from './previewData';
 
 export function PdfPreview({ file }: { file: PreviewFile }) {
@@ -74,6 +73,6 @@ export function PdfPreview({ file }: { file: PreviewFile }) {
       <label>缩放 <select aria-label="PDF 缩放" value={zoom} onChange={event => setZoom(Number(event.target.value))}><option value={0.75}>75%</option><option value={1}>100%</option><option value={1.5}>150%</option></select></label>
     </div>
     {error ? <p role="alert" className="awwo-artifact-status">{error}</p> : <div className="awwo-pdf-page"><canvas ref={canvas} aria-label={`${file.name} 第 ${page} 页`} role="img" />{busy && <p role="status">正在渲染 PDF…</p>}</div>}
-    <p className="awwo-artifact-note awwo-pdf-licenses">PDF.js · <a href={pdfLicenseUrl} target="_blank" rel="noreferrer">许可</a> / <a href={cmapLicenseUrl} target="_blank" rel="noreferrer">Adobe CMap</a> / <a href={foxitLicenseUrl} target="_blank" rel="noreferrer">Foxit</a> / <a href={liberationLicenseUrl} target="_blank" rel="noreferrer">Liberation</a></p>
+    <p className="awwo-artifact-note awwo-pdf-licenses">PDF.js · <a href={pdfLicenseUrl} target="_blank" rel="noreferrer">许可</a> / <a href={cmapLicenseUrl} target="_blank" rel="noreferrer">Adobe CMap</a> / <a href={foxitLicenseUrl} target="_blank" rel="noreferrer">Foxit</a></p>
   </div>;
 }

@@ -2,7 +2,10 @@
 // The manifest is fixed at build time. PDF-supplied resource names cannot become
 // arbitrary paths, and Chinese/CJK PDFs can use the bundled Adobe character maps.
 const cmaps = import.meta.glob<string>('../../node_modules/pdfjs-dist/cmaps/*.bcmap', { query: '?url', import: 'default', eager: true });
-const fonts = import.meta.glob<string>(['../../node_modules/pdfjs-dist/standard_fonts/*.pfb', '../../node_modules/pdfjs-dist/standard_fonts/*.ttf'], { query: '?url', import: 'default', eager: true });
+// PdfPreview turns on useSystemFonts, so pdf.js asks for the data of Symbol and ZapfDingbats only and takes the other
+// twelve standard fonts from the system (tests/canvas-artifact-viewers.test.tsx checks that pdf.js still does). Its
+// other font files, the Liberation Sans fonts (GPL-2.0 with a font exception) among them, would ship unused.
+const fonts = import.meta.glob<string>(['../../node_modules/pdfjs-dist/standard_fonts/FoxitSymbol.pfb', '../../node_modules/pdfjs-dist/standard_fonts/FoxitDingbats.pfb'], { query: '?url', import: 'default', eager: true });
 const names = (files: Record<string, string>) => new Map(Object.entries(files).map(([path, url]) => [path.split('/').at(-1)!, url]));
 const resources = { cMapUrl: names(cmaps), standardFontDataUrl: names(fonts) };
 
