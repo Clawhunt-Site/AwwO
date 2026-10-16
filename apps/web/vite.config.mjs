@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { assetFileNames } from './scripts/asset-names.mjs';
 import { familyLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
 import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
 
@@ -304,6 +305,9 @@ export default defineConfig({
   build: {
     rolldownOptions: {
       output: {
+        // A license or notice file without an extension (the PDF preview links three) gets a .txt name, as in the hosted
+        // build (scripts/asset-names.mjs).
+        assetFileNames,
         codeSplitting: {
           groups: vendorChunkGroups,
         },

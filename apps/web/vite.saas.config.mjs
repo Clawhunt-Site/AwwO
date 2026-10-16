@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { copyFileSync, cpSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { assetFileNames } from './scripts/asset-names.mjs';
 import { familyLicences, fontLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
 import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
 
@@ -45,5 +46,5 @@ export default defineConfig({
   define: { 'import.meta.env.VITE_AWWO_SAAS': JSON.stringify('1') },
   server: { host: process.env.VITE_AWWO_WEB_HOST || '127.0.0.1', port: Number(process.env.VITE_AWWO_WEB_PORT || 5189), strictPort: true,
     proxy: { '/api/v1': { target: process.env.AWWO_API_TARGET || 'http://127.0.0.1:8087' } } },
-  build: { outDir: 'dist-saas', rollupOptions: { input: fileURLToPath(new URL('./saas.html', import.meta.url)) } },
+  build: { outDir: 'dist-saas', rollupOptions: { input: fileURLToPath(new URL('./saas.html', import.meta.url)), output: { assetFileNames } } },
 });

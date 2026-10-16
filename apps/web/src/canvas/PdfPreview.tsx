@@ -2,9 +2,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import pdfLicenseUrl from 'pdfjs-dist/LICENSE?url';
-import cmapLicenseUrl from 'pdfjs-dist/cmaps/LICENSE?url';
-import foxitLicenseUrl from 'pdfjs-dist/standard_fonts/LICENSE_FOXIT?url';
+// Files of their own even when small, so each link opens the text (an inlined one would be a data: URL).
+import pdfLicenseUrl from 'pdfjs-dist/LICENSE?url&no-inline';
+import cmapLicenseUrl from 'pdfjs-dist/cmaps/LICENSE?url&no-inline';
+import foxitLicenseUrl from 'pdfjs-dist/standard_fonts/LICENSE_FOXIT?url&no-inline';
 import { PREVIEW_LIMITS, type PreviewFile } from './previewData';
 
 export function PdfPreview({ file }: { file: PreviewFile }) {
