@@ -1,6 +1,7 @@
 import type { AgentTemplateId } from '../../canvas/agentTemplates';
 import { createAssembleNode, createSessionNode, emptyDocument, type AssembleNode, type CanvasDocument, type SessionNode } from '../../canvas/canvasDoc';
 import type { ContractField } from '../../canvas/nodeContracts';
+import { SANDBOX_RUNTIME } from '../../canvas/nodeRuntime';
 import { updateNodeDraft } from '../../canvas/nodeThreads';
 import { edgeId } from '../../canvas/ports';
 import { PREVIEW_FONT_RULE } from '../../canvas/previewFontList';
@@ -22,7 +23,19 @@ export interface OfficialWorkflowNode {
   /** An assemble node instead of an agent (assembleNode.ts): no model; each `{{in:from_<upstream id>}}` slot of the
    *  template takes that upstream's delivery byte for byte. `task` then says what it puts together; `file` also
    *  delivers the page as a file (`fileName`, default index.html) for a sandbox node downstream. */
-  readonly assemble?: { readonly template: string; readonly file?: true; readonly fileName?: string };
+  readonly assemble?: { readonly template: string; readonly file?: true; readonly fileName?: string; readonly fileOnly?: true };
+  /** The agent runs in the sandbox computer (the `sandbox` runtime): its inputs as files, real commands and tests. */
+  readonly sandbox?: true;
+  /** A second, Markdown output (`report`) beside its result, for what downstream reads instead of a large result. */
+  readonly report?: string;
+}
+/** A wire of a case canvas: from the source's result, or from its `file` output (a file input on the target) or its
+ *  `report` output. */
+export interface OfficialWorkflowEdge {
+  readonly from: string;
+  readonly to: string;
+  readonly label: string;
+  readonly port?: 'file' | 'report';
 }
 /** The canvas behind a homepage production case (productionWorkflows.ts), which createOfficialDocument
  * compiles into the canvas a member copies. */
@@ -39,7 +52,7 @@ export interface OfficialWorkflow {
   readonly fonts?: true;
   readonly brief: string;
   readonly nodes: ReadonlyArray<OfficialWorkflowNode>;
-  readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: string }>;
+  readonly edges: ReadonlyArray<OfficialWorkflowEdge>;
   /** Image, video and 3D nodes that generate the case's media in the same canvas run (officialMedia.ts). */
   readonly media?: ReadonlyArray<OfficialMediaNode>;
 }
@@ -75,10 +88,9 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
     const inputs: ContractField[] = [{
       id: 'brief', label: 'Task and boundaries', type: 'markdown', required: true,
       value: `${item.brief}\n\n${spec.task}`,
-    }, ...incoming.map((edge): ContractField => ({
-      id: `from_${edge.from}`, label: edge.label, type: 'markdown', required: true, value: '',
-      help: 'Supplied by the actual upstream output.',
-    })), ...pictures.map((picture): ContractField => ({
+    }, ...incoming.map((edge): ContractField => edge.port === 'file'
+      ? { id: `from_${edge.from}`, label: edge.label, type: 'file', required: true, value: '', help: 'Supplied by the actual upstream file.' }
+      : { id: `from_${edge.from}`, label: edge.label, type: 'markdown', required: true, value: '', help: 'Supplied by the actual upstream output.' }), ...pictures.map((picture): ContractField => ({
       id: `media_${picture.id}`, label: `${picture.title} (generated files)`,
       type: 'markdown', required: true, value: '',
       help: 'Supplied by the canvas’s media node once it generates: the files’ relative paths, or a note that none was made.',
@@ -91,12 +103,12 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
     const models = pictures.some(picture => picture.kind === 'model3d');
     const shows = pictures.length
       ? modern ? `${MEDIA_PAGE_R186}${models ? MEDIA_MODEL_PAGE_R186 : ''}` : `${MEDIA_PAGE}${models ? MEDIA_MODEL_PAGE : ''}` : '';
-    return { ...base, title: spec.title, w: 560, h: 420,
+    return { ...base, title: spec.title, w: 560, h: 420, ...(spec.sandbox ? { runtime: SANDBOX_RUNTIME } : {}),
       // These nodes have purpose-built contracts; assigning a built-in templateId would display
       // that template's unrelated guide instead of the official case's task and acceptance.
       persona: `${spec.task}\n\nAcceptance:\n${spec.acceptance.map(check => `- ${check}`).join('\n')}\n\n${EVIDENCE}${html}${shows}`,
       contract: { version: 1, inputs, outputs: [{ id: 'result', label: spec.output, type: outputType, required: true, value: '',
-        help: spec.acceptance.join('\n') }] },
+        help: spec.acceptance.join('\n') }, ...(spec.report ? [{ id: 'report', label: spec.report, type: 'markdown' as const, required: true, value: '' }] : [])] },
     };
   });
   const byId = new Map(item.nodes.map((spec, index) => [spec.id, nodes[index]]));
@@ -104,10 +116,10 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
     const source = byId.get(link.from);
     const target = byId.get(link.to);
     if (!source || !target) throw new Error(`Invalid official workflow edge: ${link.from} -> ${link.to}`);
-    const from = { nodeId: source.id, portId: 'out:result' };
+    const from = { nodeId: source.id, portId: `out:${link.port ?? 'result'}` };
     const to = { nodeId: target.id, portId: `in:from_${link.from}` };
     return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId,
-      toNode: to.nodeId, toPort: to.portId, dataType: 'text' as const };
+      toNode: to.nodeId, toPort: to.portId, dataType: link.port === 'file' ? 'file' as const : 'text' as const };
   });
   // Each media node's result into the pages that show it: a soft wire (ports.ts isSoftMediaFeed), which a picture that
   // was not made never holds back. The wire keeps its source's type.
@@ -140,8 +152,10 @@ function officialAssembleNode(item: OfficialWorkflow, spec: OfficialWorkflowNode
   }));
   return { ...base, title: spec.title, w: 560, h: 420, template: assemble.template,
     contract: { version: 1, inputs, outputs: [
-      { id: 'result', label: spec.output, type: spec.outputType ?? 'html', required: true, value: '', help: spec.acceptance.join('\n') },
-      ...(assemble.file ? [{ id: 'file', label: `${spec.output} (file)`, type: 'file' as const, required: true, value: '' }] : []),
+      ...(assemble.fileOnly ? [] : [{ id: 'result', label: spec.output, type: spec.outputType ?? 'html', required: true, value: '', help: spec.acceptance.join('\n') }]),
+      // A file-only page goes to a sandbox node that tests it and delivers the result itself.
+      ...(assemble.file || assemble.fileOnly ? [{ id: 'file', label: assemble.fileOnly ? spec.output : `${spec.output} (file)`, type: 'file' as const, required: true, value: '',
+        ...(assemble.fileOnly ? { help: spec.acceptance.join('\n') } : {}) }] : []),
     ] },
     ...(assemble.fileName ? { fileName: assemble.fileName } : {}),
   };

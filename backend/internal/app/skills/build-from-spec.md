@@ -39,4 +39,4 @@ The spec defines a small kernel every module registers with. Use its names; if t
 
 ## Output
 
-Only the code, as one fenced block when the task asks for code, followed by at most three lines: the names defined, the commands registered, and the tests and plants registered.
+Only the code, as one fenced block, with nothing before or after it: an assemble step pastes your answer into the page byte for byte, and any sentence outside the block would break the program. Report what you defined and registered through the program itself (its registries and tests), not in prose.
