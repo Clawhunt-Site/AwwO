@@ -3,8 +3,9 @@
 // composer's toolbar, as chat apps keep them out of the way of the box (owner request 2026-10-12: 这里都放到用户须知里面).
 //
 // The list opens above the button in a layer of its own (a portal on the page), so a card or a scrolled panel never
-// clips it, and closes on a click elsewhere, on Escape (the focus goes back to the button), or when anything scrolls
-// or the window is resized, since it is placed where the button was.
+// clips it, and closes on a click elsewhere, on Escape (the focus goes back to the button), when anything scrolls
+// or the window is resized, since it is placed where the button was, or when the button is no longer laid out (the
+// assistant's panel it is in steps aside for an open node).
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Info } from 'lucide-react';
@@ -39,7 +40,11 @@ export function ComposerNotes({ notes, className }: ComposerNotesProps) {
     document.addEventListener('keydown', key);
     window.addEventListener('resize', close);
     window.addEventListener('scroll', close, true);
+    const gone = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => { if (button.current && !button.current.getClientRects().length) close(); }) : null;
+    if (button.current) gone?.observe(button.current);
     return () => {
+      gone?.disconnect();
       document.removeEventListener('pointerdown', away, true);
       document.removeEventListener('keydown', key);
       window.removeEventListener('resize', close);

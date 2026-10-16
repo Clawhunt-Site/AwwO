@@ -32,6 +32,24 @@ it('keeps the standing notice against personal or sensitive information in 用�
   fireEvent.pointerDown(document.body);
   expect(screen.queryByRole('region', { name: /用户须知|Good to know/ })).toBeNull();
 });
+it('closes 用户须知 when its button is no longer laid out (the assistant’s panel stepping aside for an open node)', () => {
+  // The list lives in a layer of its own on the page, so it outlived a panel hidden under it (found in review).
+  const observed: Array<() => void> = [];
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observed.push(callback); } observe() {} unobserve() {} disconnect() {} });
+  try {
+    render(<TileComposer streaming={false} onSend={vi.fn()} />);
+    const button = screen.getByRole('button', { name: /用户须知|Good to know/ });
+    fireEvent.click(button);
+    const laidOut = vi.spyOn(button, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+    act(() => observed.forEach(callback => callback()));
+    expect(screen.getByRole('region', { name: /用户须知|Good to know/ })).toBeTruthy();
+    laidOut.mockReturnValue([] as unknown as DOMRectList);
+    act(() => observed.forEach(callback => callback()));
+    expect(screen.queryByRole('region', { name: /用户须知|Good to know/ })).toBeNull();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 it('leaves the notice out of a composer that is blocked, as for a view-only reader', () => {
   render(<TileComposer blocked streaming={false} onSend={vi.fn()} />);
   expect(screen.queryByText(/Don’t enter personal or sensitive data|请勿输入身份证号/)).toBeNull();

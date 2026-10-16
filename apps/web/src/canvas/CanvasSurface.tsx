@@ -168,23 +168,30 @@ const openRoom = (stage: { w: number; h: number }, configuring: boolean) => ({
 });
 /** The stage as the fit math measures it; `cover` is the width of its left edge under a sidebar that floats over it. */
 type StageBox = { w: number; h: number; cover?: number };
-/** How much of the stage's left edge the assistant sidebar covers, in pixels: where the workspace lays the sidebar over
- *  the board (absolutely positioned, from the stage's left edge), its layout width; 0 where it takes its own room, is
- *  closed, or leaves no room for an open node at a readable scale (as on a phone, where it spans the stage and is closed
- *  to see the board): the board is then laid out as without it. Measured without the sidebar's own entrance slide
- *  (`translate`), so a fit taken while it slides in is not short by a few pixels. */
-function sidebarCover(root: HTMLElement, stage: DOMRect): number {
+/** The assistant sidebar where the workspace lays it over the board (absolutely positioned, from the stage's left
+ *  edge): how much of the stage's left edge it covers (its layout width), and whether it leaves no room for an open
+ *  node at a readable scale (`cramped`: a narrow window, or a phone, where it spans the stage). Null where it takes its
+ *  own room beside the stage or is closed. Measured without the sidebar's own entrance slide (`translate`), so a fit
+ *  taken while it slides in is not short by a few pixels. */
+function floatingSidebar(root: HTMLElement, stage: DOMRect): { cover: number; cramped: boolean } | null {
   const side = root.closest('.awwo-workspace')?.querySelector<HTMLElement>('.awwo-planner-sidebar');
-  if (!side) return 0;
+  if (!side) return null;
   const box = side.getBoundingClientRect();
-  if (box.width <= 0 || box.height <= 0) return 0;
+  if (box.width <= 0 || box.height <= 0) return null;
   const slide = Number.parseFloat(getComputedStyle(side).translate || '0') || 0;
   const left = box.left - slide;
   const right = left + side.offsetWidth;
-  if (left > stage.left + 1 || right <= stage.left) return 0;
+  if (left > stage.left + 1 || right <= stage.left) return null;
   const cover = Math.min(stage.width, right - stage.left);
   const room = stage.width - cover - FOCUS_FIT_PADDING.x * 2;
-  return room < NARROW_FOCUS_MIN_WIDTH * MIN_READABLE_FIT_SCALE ? 0 : Math.round(cover);
+  return { cover: Math.round(cover), cramped: room < NARROW_FOCUS_MIN_WIDTH * MIN_READABLE_FIT_SCALE };
+}
+/** How much of the stage's left edge the assistant sidebar covers, in pixels (floatingSidebar); 0 where it takes its
+ *  own room, is closed, or leaves no readable room: the board is then laid out as without it (an open node there has
+ *  the assistant step aside, focusNode). */
+function sidebarCover(root: HTMLElement, stage: DOMRect): number {
+  const side = floatingSidebar(root, stage);
+  return side && !side.cramped ? side.cover : 0;
 }
 /** Whether Configure, open on this stage, raises the board above the assistant sidebar: the hosted app at 900 px and
  *  below does (awwo-workspace.css), so while it is open the sidebar covers nothing of the board. */
@@ -955,12 +962,24 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return cover > 0 && beside.squeezed ? place(0).placement : beside.placement;
   }, [viewportSize, canInitialize]);
 
+  // Steps the assistant's panel aside for the node being opened (set once the panel's state exists below), and whether it
+  // has stepped aside for the node open now.
+  const stowAssistantRef = useRef<(nodeId: string) => void>(() => {});
+  const assistantStowedRef = useRef(false);
   const focusNode = useCallback(
     (nodeId: string, options: { configure?: boolean } = {}) => {
       if (inspectorCloseLocked.current) return;
       // Opening a node always shows the board.
       changeStageView('canvas');
       if (!docRef.current.nodes.some((n) => n.id === nodeId)) return;
+      // Where the floating assistant leaves the board no readable room (a narrow window, or a phone where it spans the
+      // stage), the node opens as without it, so under it: the assistant steps aside while the node is open (also for
+      // the next node opened from it), back once it closes; 画布助手 brings it back over the node.
+      const root = rootRef.current;
+      const stageBox = root?.getBoundingClientRect();
+      if (assistantStowedRef.current || (root && stageBox && stageBox.width > 0 && floatingSidebar(root, stageBox)?.cramped)) {
+        stowAssistantRef.current(nodeId);
+      }
       const configuring = Boolean(options.configure) || inspectorRef.current === nodeId;
       // The camera as it will be once a glide in progress lands: reopening mid-glide must not take a
       // passing frame for the operator's camera.
@@ -2614,7 +2633,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setAssistantOpen(true);
   }, [taskDraft, readOnly, assistantPending]);
   // Simple mode is chat-first: on a desktop stage the assistant's conversation is open beside the canvas from the start.
-  const [assistantOpen, setAssistantOpen] = useState(() => simple && !readOnly && isDesktopStage());
+  const [assistantOpen, setAssistantOpenState] = useState(() => simple && !readOnly && isDesktopStage());
+  // The open node the assistant has stepped aside for (focusNode): kept mounted, not drawn, while that node is open.
+  const [stowedFor, setStowedFor] = useState<string | null>(null);
+  // Opening or closing the assistant (画布助手, or a request that brings it up) ends its stepping aside.
+  const setAssistantOpen = useCallback((open: boolean) => { setStowedFor(null); setAssistantOpenState(open); }, []);
+  useEffect(() => { if (stowedFor !== null && stowedFor !== focusedId) setStowedFor(null); }, [stowedFor, focusedId]);
   const [planningBusy, setPlanningBusy] = useState(false);
   // The assistant's canvas changes on the operator's model are outside today's calls up to a daily number (the server's
   // route usage says how many are left); read again whenever a plan settles, so the composer's note stays true.
@@ -3516,9 +3540,28 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   const assistantPanel = assistantOpen && (viewerTasks || (!readOnly && (nodes.length > 0 || mentionedTasks.size > 0)))
     ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} onClose={() => closeAssistant()} /> : undefined;
-  const panelShown = Boolean(assistantPanel);
+  // Stepped aside for the open node (focusNode): mounted, not drawn. Focus inside it goes to the toggle.
+  const assistantStowed = Boolean(assistantPanel) && stowedFor !== null && stowedFor === focusedId;
+  assistantStowedRef.current = assistantStowed;
+  stowAssistantRef.current = (nodeId: string) => {
+    if (!assistantPanel) return;
+    setStowedFor(nodeId);
+    refocus('.awwo-assistant-toggle');
+  };
+  const panelShown = Boolean(assistantPanel) && !assistantStowed;
   // Showing or hiding the panel changes the room a fit has where the sidebar floats over the board: the overview and an
   // open node refit, as when a rail toggles (not on the first render: the opening fit measures it itself).
+  // The stage shrinking under an open node until the floating assistant leaves it no readable room steps the assistant
+  // aside, as opening the node there does; bringing it back over the node is the reader's (no size changes then).
+  const stageSeen = useRef(size);
+  useEffect(() => {
+    const before = stageSeen.current;
+    stageSeen.current = size;
+    if (!focusedId || !panelShown || before.w === 0 || (before.w === size.w && before.h === size.h)) return;
+    const root = rootRef.current;
+    const stage = root?.getBoundingClientRect();
+    if (root && stage && stage.width > 0 && floatingSidebar(root, stage)?.cramped) stowAssistantRef.current(focusedId);
+  }, [size, focusedId, panelShown]);
   const panelSeen = useRef(panelShown);
   useEffect(() => {
     if (panelSeen.current === panelShown) return;
@@ -3656,12 +3699,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }}
       onFocusNode={focusNode} onAddAgent={addAgent} loadWorkspaceAgents={loadWorkspaceAgents} agentLibraryRequest={agentLibraryRequest} onAddWorkspaceAgent={addWorkspaceAgent} onAddMarketAgent={loadWorkspaceAgents ? addMarketAgent : undefined} onCreateTemplate={createTemplate}
       onSearch={() => { changeStageView('canvas'); setBarMode('search'); }}
-      assistant={assistantPanel}
+      assistant={assistantPanel} assistantStowed={assistantStowed}
       // One composer at a time: on an empty canvas whose conversation is in the side panel, the welcome steps aside.
       welcome={readOnly || assistantPanel ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} unified={unified} />}
       // The toggle reports the panel as it is drawn; tasks need no canvas, so it is offered on an empty one with them.
       assistantOpen={panelShown} assistantAvailable={viewerTasks || mentionedTasks.size > 0} assistantHint={assistantHint}
-      onToggleAssistant={readOnly && !assistantExecution ? undefined : () => { if (assistantPanel) closeAssistant(); else setAssistantOpen(true); }}
+      onToggleAssistant={readOnly && !assistantExecution ? undefined : () => { if (panelShown) closeAssistant(); else setAssistantOpen(true); }}
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
       headerTitle={headerTitle} headerActions={headerActions} canvasTools={canvasTools}

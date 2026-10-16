@@ -589,11 +589,12 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
       if (this.classList.contains('canvas-viewport') && layout.viewportLate) return box(0, 0, 0);
       if (this.classList.contains('canvas-root') || this.classList.contains('canvas-viewport')) return box(layout.stageLeft, layout.w, layout.h);
-      if (this.classList.contains('awwo-planner-sidebar')) return box(layout.sidebarLeft, layout.sidebar, layout.h);
+      // A sidebar stepped aside (hidden, display: none) lays out nothing, as in a browser.
+      if (this.classList.contains('awwo-planner-sidebar')) return (this as HTMLElement).hidden ? box(0, 0, 0) : box(layout.sidebarLeft, layout.sidebar, layout.h);
       return real.call(this);
     });
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('awwo-planner-sidebar') ? layout.sidebar : 0;
+      return this.classList.contains('awwo-planner-sidebar') && !this.hidden ? layout.sidebar : 0;
     });
   });
   const addSidebar = () => {
@@ -912,6 +913,106 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     const after = measure();
     expect(after.left).toBeCloseTo(opened.left, 3);
     expect(after.right).toBeLessThanOrEqual(1232 - 28 + 1e-6);
+  });
+
+  it('steps the assistant aside when the stage shrinks under an open node until it leaves no readable room', async () => {
+    // Opened beside the sidebar on a wide stage, the node kept the whole stage under the sidebar once the window
+    // narrowed (found in review). Bringing the assistant back over it then is the reader's choice, kept.
+    const deliveries: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+    const side = () => document.querySelector<HTMLElement>('.awwo-planner-sidebar');
+    const shown = () => Boolean(side() && !side()!.hidden);
+    render(<CanvasSurface />);
+    act(() => { deliveries.forEach(deliver => deliver()); });
+    fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    await waitFor(() => expect(shown()).toBe(true));
+    await settle();
+    await openNode();
+    expect(shown()).toBe(true);
+    layout = { ...layout, w: 600, sidebar: 340 };
+    act(() => { deliveries.forEach(deliver => deliver()); });
+    await waitFor(() => expect(shown(), 'narrowed').toBe(false));
+    await settle();
+    await glideDone();
+    const opened = measure();
+    expect(opened.left).toBeGreaterThanOrEqual(0);
+    expect(opened.right).toBeLessThanOrEqual(600);
+    fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    await waitFor(() => expect(shown()).toBe(true));
+    await settle();
+    expect(shown(), 'the reader brought it back').toBe(true);
+  });
+
+  it('steps the assistant aside for a node opened on a stage it leaves no readable room on, back once the node closes', async () => {
+    // Beside a 340 px sidebar a 600 px stage leaves 204 px, and a phone's sidebar spans the stage: the node opens as
+    // without the sidebar, under it (pre-existing, 2026-10-16). The assistant steps aside while the node is open, kept
+    // mounted (a reply being written, a file uploading: unmounting it dropped an upload, found in review), and comes
+    // back when the node closes; 画布助手 brings it back over the node. Where the part right of the sidebar has readable
+    // room, the assistant stays beside the node.
+    const toggle = () => fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    const side = () => document.querySelector<HTMLElement>('.awwo-planner-sidebar');
+    const shown = () => Boolean(side() && !side()!.hidden);
+    for (const [w, sidebar, stows] of [[600, 340, true], [600, 600, true], [1400, 400, false]] as const) {
+      const where = `${w}/${sidebar}`;
+      layout = { ...layout, w, h: 900, sidebar };
+      canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 60, y: 150 }), view: { x: 0, y: 0, scale: 1 } }));
+      const view = render(<CanvasSurface />);
+      toggle();
+      await waitFor(() => expect(shown()).toBe(true));
+      await settle();
+      const composer = within(side()!).getByRole('textbox');
+      const opened = await openNode();
+      expect(shown(), where).toBe(!stows);
+      expect(within(side()!).getByRole('textbox', { hidden: true }), `${where}: still mounted`).toBe(composer);
+      if (stows) {
+        expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveAttribute('aria-expanded', 'false');
+        // Laid out as without the sidebar, on the whole stage and readable (at least 100 %).
+        expect(transformOf(document.querySelector('.canvas-world') as HTMLElement)[2], where).toBeGreaterThanOrEqual(1 - 1e-3);
+        expect(opened.left, where).toBeGreaterThanOrEqual(0);
+        expect(opened.right, where).toBeLessThanOrEqual(w);
+        // Back over the open node by its toggle.
+        toggle();
+        await waitFor(() => expect(shown(), where).toBe(true));
+        expect(screen.getByTestId('canvas-tile-s1').dataset.lod, where).toBe('focus');
+        toggle();
+        await waitFor(() => expect(side(), where).toBeNull());
+        // Opened with the node open and stepped aside again, it comes back by itself once the node closes.
+        fireEvent.keyDown(window, { key: 'Escape' });
+        await glideDone();
+        toggle();
+        await waitFor(() => expect(shown(), where).toBe(true));
+        await openNode();
+        expect(shown(), where).toBe(false);
+        fireEvent.keyDown(window, { key: 'Escape' });
+        await waitFor(() => expect(shown(), `${where}: back after closing`).toBe(true));
+        await glideDone();
+      }
+      view.unmount();
+    }
+    // It stays aside for the next node opened while it is (the sidebar measures nothing then), and a wider stage later
+    // opens that node beside it again.
+    layout = { ...layout, w: 600, h: 900, sidebar: 340 };
+    const doc = seed({ x: 60, y: 150 });
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...doc, view: { x: 0, y: 0, scale: 1 },
+      nodes: [...doc.nodes, { ...createSessionNode('llm', { x: 60, y: 420 }), id: 's2', title: 'LLM 会话二' }] }));
+    render(<CanvasSurface />);
+    toggle();
+    await waitFor(() => expect(shown()).toBe(true));
+    await settle();
+    await openNode();
+    expect(shown()).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话二', exact: true }));
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s2').dataset.lod).toBe('focus'));
+    await glideDone();
+    expect(shown(), 'the next node').toBe(false);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(shown()).toBe(true));
+    await glideDone();
+    layout = { ...layout, w: 1400 };
+    fireEvent.click(screen.getByRole('button', { name: '打开 LLM 会话二', exact: true }));
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s2').dataset.lod).toBe('focus'));
+    await glideDone();
+    expect(shown(), 'a wider stage').toBe(true);
   });
 
   it('opens a delivered node’s drawer by itself only where the stylesheet lays it beside the conversation', async () => {

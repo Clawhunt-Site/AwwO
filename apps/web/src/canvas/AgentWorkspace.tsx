@@ -51,6 +51,9 @@ export interface AgentWorkspaceProps {
   onModelDrop?: DragEventHandler<HTMLDivElement>;
   welcome?: ReactNode;
   assistantOpen?: boolean;
+  /** The assistant's panel stays mounted (a reply being written, a file uploading) but is not drawn: it steps aside for
+   *  an open node on a stage it leaves no readable room on. */
+  assistantStowed?: boolean;
   /** Offer the assistant toggle even on an empty canvas (a viewer's task history needs no steps). */
   assistantAvailable?: boolean;
   /** The assistant has a next step about a problem (a failure, missing input): a dot on its closed toggle. */
@@ -69,7 +72,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ simple = false, workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, canvasTools, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, assistantAvailable = false, assistantHint = false, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, view = 'canvas', onViewChange, results, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ simple = false, workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, canvasTools, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, assistantStowed = false, assistantAvailable = false, assistantHint = false, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, view = 'canvas', onViewChange, results, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -292,7 +295,7 @@ export function AgentWorkspace({ simple = false, workspaceName, workspaceCaption
           onClick={() => { if (view !== item) onViewChange(item); }}>{t(item === 'canvas' ? 'results.viewCanvas' : 'results.viewResults')}</button>)}
       </div> : null}{onToggleAssistant && (nodes.length > 0 || assistantOpen || assistantAvailable) ? <button className={`awwo-assistant-toggle${assistantHint && !assistantOpen ? ' has-hint' : ''}`} type="button" aria-label={t('workspace.assistant')} title={assistantHint && !assistantOpen ? t('workspace.assistantHint') : undefined} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span>{assistantHint && !assistantOpen ? <i className="awwo-assistant-toggle-dot" aria-hidden="true" /> : null}</button> : null}{canvasTools}{!headerTitle && <div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div>}<div className="awwo-run-slot">{toolbar}</div></div>
       <section className="awwo-stage" aria-label={t('workspace.stage')}>
-        {assistant ? <aside className="awwo-planner-sidebar" aria-label={t('workspace.assistant')}>{assistant}</aside> : null}
+        {assistant ? <aside className="awwo-planner-sidebar" aria-label={t('workspace.assistant')} hidden={assistantStowed} style={assistantStowed ? { display: 'none' } : undefined}>{assistant}</aside> : null}
         <div data-onboarding="canvas-stage" className="awwo-stage-canvas" onDragOver={onModelDragOver} onDrop={onModelDrop}>{children}
         {view === 'results' && results}
         {!nodes.length && <div className={`awwo-empty${welcome ? ' has-assistant' : ''}`}>
