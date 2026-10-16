@@ -312,9 +312,10 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       {unified?.earlier}
       {shown.length || pending ? <ol>
         {shown.map(message => <li className={`awwo-assistant-message awwo-assistant-message--${message.role}${message.taskId ? ' awwo-execution-card' : ''}`} key={message.id}>
-          {/* How the server handled the request: said on each reply, never asked of the user beforehand. */}
+          {/* How the server handled the request: said on each reply, never asked of the user beforehand. A plan reply
+              that changed nothing (an answer, a question back, every step skipped) says the canvas is as it was. */}
           {unified && message.role === 'assistant' && message.route ? <span className={`awwo-assistant-route is-${message.route}`}>
-            {t(message.route === 'plan' ? 'assistant.routePlan' : 'assistant.routeExecute')}</span> : null}
+            {t(message.route === 'execute' ? 'assistant.routeExecute' : message.status ? 'assistant.routePlan' : 'assistant.routeReply')}</span> : null}
           {message.taskId && unified ? unified.renderTask(message.taskId)
             : message.role === 'user' ? <MessageWithAttachments text={message.content} />
             : <p role={message.status === 'error' ? 'alert' : undefined}>{message.content}</p>}

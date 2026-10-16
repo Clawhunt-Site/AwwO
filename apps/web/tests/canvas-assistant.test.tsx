@@ -359,6 +359,19 @@ describe('one conversation where the host also does tasks', () => {
     expect(screen.getByText('加一个审核节点').closest('li')).not.toHaveTextContent('调整画布');
   });
 
+  // A customer's report (2026-10-16): a plan reply that only answered, with the canvas still empty, was labelled 调整画布.
+  it('says a plan reply that left the canvas as it was is a reply, and keeps 调整画布 for one that changed or tried to', () => {
+    render(<Harness mode="panel" unified={unified()} messages={[
+      { id: 'u1', role: 'user', content: '做一个游戏', route: 'plan' },
+      { id: 'a1', role: 'assistant', content: '想做什么类型的游戏？', route: 'plan' },
+      { id: 'u2', role: 'user', content: '加一个审核节点', route: 'plan' },
+      { id: 'a2', role: 'assistant', content: '已加入审核节点', status: 'applied', route: 'plan' },
+      { id: 'a3', role: 'assistant', content: '画布已有新改动', status: 'stale', route: 'plan' },
+    ]} />);
+    const routes = [...document.querySelectorAll('.awwo-assistant-message--assistant .awwo-assistant-route')].map(chip => chip.textContent);
+    expect(routes).toEqual(['回复 · 画布没有改动', '调整画布', '调整画布']);
+  });
+
   it('shows a message being routed as pending, says so, and lets that be stopped', () => {
     const cancel = vi.fn();
     render(<Harness mode="panel" draft="" onCancel={cancel} unified={unified({ pending: { id: 'p', prompt: '做一个落地页', phase: 'routing' } })} />);
