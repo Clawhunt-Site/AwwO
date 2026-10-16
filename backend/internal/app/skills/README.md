@@ -31,8 +31,10 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
 
 ## Writing rules
 
-- The node's model has no tools: no shell, browser, file system or network. Never tell it to fetch, install or run
-  anything, and never let it claim a render, test or visual check happened.
+- Most nodes' models have no tools: no shell, browser, file system or network. Never tell them to fetch, install or
+  run anything, and never let them claim a render, test or visual check happened. A skill written for the sandbox
+  computer or 直接执行, where the agent does run commands, says so and says what to do without a sandbox
+  (rea-app-reading, self-test-oracle).
 - Media models are shown to users by generic names only, so skills never name vendors or model brands.
 - Concrete numbers beat adjectives. Give the method as steps or tables and end with a short checklist.
 - Write in our own words. Sources that are "ideas only" (no licence, or a licence that forbids reuse) are never
