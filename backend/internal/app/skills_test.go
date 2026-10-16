@@ -38,6 +38,29 @@ func TestBuiltinSkillsAreValid(t *testing.T) {
 	}
 }
 
+// A vertical reel's node attaches all four video skills; together they must fit one node's skill budget.
+func TestBuiltinSkillsVideoSetFitsOneNode(t *testing.T) {
+	skills, err := builtinSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := map[string]int{}
+	for _, s := range skills {
+		size[s.Name] = s.Bytes
+	}
+	total := 0
+	for _, name := range []string{"code-motion", "promo-film", "code-video-brief", "vertical-reel"} {
+		n, ok := size[name]
+		if !ok {
+			t.Fatalf("video skill %s missing", name)
+		}
+		total += n
+	}
+	if total > maxNodeSkillBytes {
+		t.Fatalf("the four video skills add %d bytes; one node takes at most %d", total, maxNodeSkillBytes)
+	}
+}
+
 func TestSkillMarkdownParsingAndValidation(t *testing.T) {
 	meta, body, err := parseSkillMarkdown("\ufeff---\r\nname: demo-skill\r\ndescription: When to use it\r\nlicense: MIT\r\n---\r\n# Body\r\ntext\r\n", false)
 	if err != nil || meta["name"] != "demo-skill" || meta["license"] != "" || body != "# Body\ntext\n" {

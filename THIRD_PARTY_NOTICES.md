@@ -51,6 +51,13 @@ license) informed `neon-pixel-scene`; the Motion Lab article by @flxrnc on X gav
 and its names `window.renderAt` and `window.__ready`, which `apps/render-worker` implements and `code-motion`
 describes. Those skills are written in AwwO's own words.
 
+Read on 2026-10-16, ideas only as well: awesome-opus5-5-videos (yihui-dev/awesome-opus5-5-videos, commit
+92aee2f586ac0715cb3cbcb6384834f98a33383d, MIT, Copyright (c) 2026 yihui-dev), a collection of 703 prompts people
+gave Claude Opus 5.5 to make videos as code. Each prompt is its creator's own post, which the collection's license
+may not cover, so no prompt text is used: the patterns they share (the order of a brief, hooks, two sizes of
+on-screen text, vertical safe areas, banned effects, stills to check) informed `code-video-brief` and
+`vertical-reel`, written in AwwO's own words and checked for shared five-word runs against the whole collection.
+
 ## AwwO SaaS runtime dependencies
 
 The independent `apps/pi-worker` service uses `@earendil-works/pi-coding-agent`
