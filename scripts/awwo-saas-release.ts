@@ -14,7 +14,10 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // THIRD_PARTY_NOTICES.md, AwwO's LICENSE, every license and notice file the notices name, and the licenses of the Go
 // code compiled into the API. This archive (under licenses/) and the API image (deploy/saas/api.Dockerfile) carry
 // them at these repository paths, also those of parts neither contains, so that every reference in the notices resolves.
-export const noticePaths = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt', 'apps/web/src/saas/skillLicences.txt',
+// The preview fonts' licenses are one for each family: apps/web/src/canvas/fonts/<family>.LICENSE.txt.
+const previewFontLicences = ['bebas-neue', 'cinzel', 'exo-2', 'instrument-serif', 'inter', 'jetbrains-mono', 'manrope', 'montserrat', 'orbitron', 'outfit',
+  'oxanium', 'pixelify-sans', 'playfair-display', 'press-start-2p', 'rajdhani', 'space-grotesk', 'unbounded'].map(family => `apps/web/src/canvas/fonts/${family}.LICENSE.txt`);
+export const noticePaths = ['LICENSE', 'THIRD_PARTY_NOTICES.md', ...previewFontLicences, 'apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt', 'apps/web/src/saas/skillLicences.txt',
   'examples/knowledge-workbench/data/unicode/LICENSE.txt', 'examples/knowledge-workbench/data/unicode/17.0.0/LICENSE.txt', 'server/LICENSE',
   'server/packages/adapters/hermes/LICENSE', 'third_party/adapted',
   'third_party/anatomy/LICENSE', 'third_party/clawwork/LICENSE', 'third_party/clawwork/NOTICE', goLicences, 'third_party/open-design/LICENSE',

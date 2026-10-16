@@ -488,6 +488,16 @@ test('THIRD_PARTY_NOTICES.md names no license or notice file the artifacts leave
   const { required } = requiredNotices(markdown, files);
   for (const path of ['LICENSE', 'apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt', 'apps/web/src/saas/skillLicences.txt', 'server/packages/adapters/hermes/LICENSE',
     'third_party/adapted/aihot/NOTICE', 'third_party/clawwork/NOTICE', 'third_party/osiris/LICENSE']) assert.ok(required.includes(path), path);
+  // Each preview font's license: its family's, <family>.LICENSE.txt beside it, here the longest family whose name, then
+  // "-", starts the font's (the build pairs them by apps/web/src/canvas/previewFontList.ts); and every license file there.
+  const previewFolder = /^apps\/web\/src\/canvas\/fonts\/[^/]+$/, previewFonts = files.filter(file => previewFolder.test(file) && file.endsWith('.woff2'));
+  const previewLicences = files.filter(file => previewFolder.test(file) && file.endsWith('.LICENSE.txt'));
+  assert.ok(previewFonts.length >= 26);
+  for (const font of previewFonts) {
+    const licence = previewLicences.filter(path => posix.basename(font).startsWith(`${posix.basename(path, '.LICENSE.txt')}-`)).sort((a, b) => b.length - a.length)[0];
+    assert.ok(licence !== undefined && required.includes(licence), `${font}: no license the notices name`);
+  }
+  for (const path of previewLicences) assert.ok(required.includes(path), path);
   for (const path of noticePaths) assert.ok(files.includes(path) || files.some(file => file.startsWith(`${path}/`)), `${path} is not in the repository`);
 });
 

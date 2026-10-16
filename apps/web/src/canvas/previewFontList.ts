@@ -1,7 +1,7 @@
 /**
  * The brand fonts AwwO supplies to a running preview of a delivered page (previewFonts.ts loads them): the Latin subsets
  * of OFL-1.1 families from the Fontsource 5.3.0 packages, vendored byte for byte in fonts/ with each family's license
- * beside its files. Plain data with no loader, so the case canvases (officialWorkflows.ts) and the publish script can
+ * beside its files (THIRD_PARTY_NOTICES.md lists them). Plain data with no loader, so the case canvases (officialWorkflows.ts) and the publish script can
  * name the families without bundling the files. tests/canvas-preview-fonts.test.ts pins every file's size and sha256.
  */
 export interface PreviewFontFace {

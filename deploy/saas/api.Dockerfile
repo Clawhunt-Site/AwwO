@@ -3,6 +3,7 @@
 # compares with these lines and the .dockerignore. The image keeps them in /usr/share/doc/awwo-api/.
 FROM scratch AS notices
 COPY LICENSE THIRD_PARTY_NOTICES.md /
+COPY apps/web/src/canvas/fonts/bebas-neue.LICENSE.txt apps/web/src/canvas/fonts/cinzel.LICENSE.txt apps/web/src/canvas/fonts/exo-2.LICENSE.txt apps/web/src/canvas/fonts/instrument-serif.LICENSE.txt apps/web/src/canvas/fonts/inter.LICENSE.txt apps/web/src/canvas/fonts/jetbrains-mono.LICENSE.txt apps/web/src/canvas/fonts/manrope.LICENSE.txt apps/web/src/canvas/fonts/montserrat.LICENSE.txt apps/web/src/canvas/fonts/orbitron.LICENSE.txt apps/web/src/canvas/fonts/outfit.LICENSE.txt apps/web/src/canvas/fonts/oxanium.LICENSE.txt apps/web/src/canvas/fonts/pixelify-sans.LICENSE.txt apps/web/src/canvas/fonts/playfair-display.LICENSE.txt apps/web/src/canvas/fonts/press-start-2p.LICENSE.txt apps/web/src/canvas/fonts/rajdhani.LICENSE.txt apps/web/src/canvas/fonts/space-grotesk.LICENSE.txt apps/web/src/canvas/fonts/unbounded.LICENSE.txt /apps/web/src/canvas/fonts/
 COPY apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt /apps/web/src/saas/design/fonts/
 COPY apps/web/src/saas/skillLicences.txt /apps/web/src/saas/
 COPY examples/knowledge-workbench/data/unicode/LICENSE.txt /examples/knowledge-workbench/data/unicode/
