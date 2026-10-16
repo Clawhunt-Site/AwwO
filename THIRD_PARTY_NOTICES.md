@@ -93,6 +93,47 @@ of `golang.org/x/net`, pinned to `v0.57.0` in `backend/go.mod` and
 `backend/go.sum` (BSD-3-Clause, Copyright 2009 The Go Authors). It is compiled
 into the API binary; preserve its LICENSE file when distributing the source.
 
+Those three are among the modules the API binary links, which
+`third_party/go-modules/README.md` lists with their licenses (Apache-2.0,
+BSD-3-Clause and MIT, some with NOTICE or PATENTS files) beside the Go standard
+library and runtime it is built with (BSD-3-Clause, with Go's patent grant).
+`scripts/awwo-go-licences.ts` copies their license, notice and patent files into
+`third_party/go-modules/` unchanged from the Go module cache, after checking
+each module against its hash in `backend/go.sum`: from each module's root and
+from every directory between it and a package the binary links or a file such a
+package embeds, which also brings the BSD-3-Clause license of the gddo code
+inside `github.com/prometheus/client_golang` and the MIT license of the code
+`go.yaml.in/yaml/v2` ported from libyaml. A README there that grants a license,
+or names one that no license file above it grants, is copied as well: the README
+of Go's `crypto/internal/fips140/nistec/fiat` holds fiat-crypto's BSD-1-Clause,
+and those of `github.com/beorn7/perks` and `github.com/munnerz/goautoneg` repeat
+their licenses. A compiled or embedded file whose own text grants a license, for
+code its module took from elsewhere, or names one that the license files of its
+directory and those above it do not grant (in that variant: a BSD 4-Clause
+license is not BSD-3-Clause), gives the comment or literal that holds it, with
+the copyright notice above it, or the whole file if there is none, unchanged, as
+`<file>.notice`: Lucent Technologies and Vita Nuova's MIT notice in Go's
+`runtime/memmove_amd64.s`, the Sun Microsystems (FreeBSD msun) and Stephen L.
+Moshier (Cephes) notices in Go's `math`, fiat-crypto's BSD-1-Clause in Go's
+`crypto/internal/fips140`, the public-domain dedications of SLEEF and the
+Rijndael reference code, the Protocol Buffers BSD-3-Clause in protobuf's
+well-known types and the MIT notice of the beorn7/floats code in client_golang.
+Finding those is heuristic: it knows grant wording, SPDX headers, the copyleft
+and other licenses that need a person, and the usual ways of naming a license,
+and it misses a file that took code from elsewhere under its module's own
+license, or that names another license in words it does not know. Every file the
+script copies is pinned by its SHA-256 to what the person who read it recorded
+in the script, which is where the License column of
+`third_party/go-modules/README.md` comes from, so a new or changed text stops
+the script until someone has read it; so are the files a person left out, which
+that README lists with why: Go's own README, whose Creative Commons license is
+the Gopher image's, and the BoringSSL license, for an object the binary never
+links without cgo. `npm run check:go-licences` fails when that directory differs
+from what the script would write. The release builds with the Go toolchain that
+`third_party/go-modules/modules.txt` names, as the API image does, and both fail
+when the binary they built was made for another target or by another toolchain,
+or links other modules than it lists.
+
 The independent `apps/render-worker` service uses `playwright-core` `1.64.1`,
 pinned in its manifest and lockfile (Apache-2.0, Copyright (c) Microsoft
 Corporation; its NOTICE says it contains code derived from Puppeteer, also
@@ -127,6 +168,20 @@ exception) and `procps` (GPL-2+ and LGPL-2+). Preserve the Debian packages'
 copyright files under `/usr/share/doc` and the npm packages' LICENSE, NOTICE
 and ThirdPartyNotices.txt files when distributing the image. These tools run inside the sandbox only and do not
 change AwwO's own license.
+
+## What the API image and the release archive carry
+
+Both artifacts carry AwwO's `LICENSE`, this file, every license and notice file
+named here and `third_party/go-modules/`, at their paths in this repository: the
+API image (`deploy/saas/api.Dockerfile`) under `/usr/share/doc/awwo-api/`, and
+the native release archive (`scripts/awwo-saas-release.ts`) under `licenses/`,
+with AwwO's license at its root as well; the archive's worker directories keep
+the license files of their installed packages. Some of those files belong to
+components that neither contains: they are there so that every reference in this
+file resolves. The release refuses to build while this file names a license or
+notice file that the list it copies from, `noticePaths` in
+`scripts/awwo-saas-release.ts`, leaves out, and the release test checks that the
+image copies exactly that list.
 
 ## Existing fusion boundary
 

@@ -52,6 +52,7 @@ AWWO_OPENMAUS_REAL_TEST=1 \
 | `apps/computer-model.ts`、`apps/user-models.ts` | 两个模型 worker 的相对导入必需；保持 `apps/` 层级 |
 | `apps/openmaus-worker/` | TS 源码、package.json、构建后的 `.runtime/core/dist-server/` 及 manifest |
 | 许可文件 | OpenMaus LICENSE、NOTICE、third_party 保留在核心构建产物中 |
+| `licenses/` | `THIRD_PARTY_NOTICES.md`、AwwO `LICENSE`、它点名的全部许可与 NOTICE 文件，以及 API 链接的 Go 标准库与各模块的许可（`third_party/go-modules/`），都按仓库路径存放；API 镜像在 `/usr/share/doc/awwo-api/` 带同一套文件 |
 | workspace 镜像 | 在执行服务实际使用的 daemon 预先加载，记录不可变 digest/image ID |
 
 现有 API 的正确原生构建方式：

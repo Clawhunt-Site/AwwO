@@ -4,5 +4,5 @@
     "strict": true, "noEmit": true, "allowImportingTsExtensions": true,
     "typeRoots": ["../apps/openmaus-worker/node_modules/@types"], "types": ["node"], "skipLibCheck": true
   },
-  "include": ["awwo-saas-release.ts", "awwo-saas-release.test.ts", "awwo-openmaus-image-smoke.ts"]
+  "include": ["awwo-saas-release.ts", "awwo-saas-release.test.ts", "awwo-go-licences.ts", "awwo-openmaus-image-smoke.ts"]
 }

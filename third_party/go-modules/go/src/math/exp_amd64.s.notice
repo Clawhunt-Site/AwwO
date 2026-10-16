@@ -1,0 +1,12 @@
+// The method is based on a paper by Naoki Shibata: "Efficient evaluation
+// methods of elementary functions suitable for SIMD computation", Proc.
+// of International Supercomputing Conference 2010 (ISC'10), pp. 25 -- 32
+// (May 2010). The paper is available at
+// https://link.springer.com/article/10.1007/s00450-010-0108-2
+//
+// The original code and the constants below are from the author's
+// implementation available at http://freshmeat.net/projects/sleef.
+// The README file says, "The software is in public domain.
+// You can use the software without any obligation."
+//
+// This code is a simplified version of the original.

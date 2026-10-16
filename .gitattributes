@@ -20,3 +20,5 @@
 # Frozen verification records contain byte hashes. Preserve their original bytes.
 docs/superpowers/evidence/** -text
 examples/knowledge-workbench/docs/contracts/** -text
+# Go module license files, compared byte for byte with the module cache (scripts/awwo-go-licences.ts --check).
+third_party/go-modules/** -text
