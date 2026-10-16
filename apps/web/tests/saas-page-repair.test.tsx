@@ -80,7 +80,9 @@ describe('the page error reporter', () => {
       const note = document.createElement('div'); note.className = 'anatomy-error'; document.body.appendChild(note);
       const again = document.createElement('div'); again.className = 'anatomy-error'; document.body.appendChild(again);`);
     const logged = page(`console.error(new Error('a library logged this and carried on'));`);
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // The report takes a turn of each page's event loop (its mutation observer, then postMessage); wait for it, not a fixed
+    // 50 ms, which a busy machine overruns. By then the other page has had the same turns to post anything.
+    await waitFor(() => expect(kit.posted).toHaveLength(1));
     expect(kit.posted).toEqual([{ type: PAGE_ERROR_MESSAGE, message: "ReferenceError: Cannot access 'crank' before initialization", line: 0, column: 0,
       stack: expect.stringContaining('ReferenceError') }]);
     expect(logged.posted).toEqual([]);
