@@ -74,10 +74,17 @@ it('gives every builder the same fixed kernel contract and module rules, within 
     expect(new Set(builders.map(node => node.column)).size, item.id).toBe(1);
     const contract = (task: string) => task.slice(task.indexOf('kernel contract (fixed'), task.indexOf('Rules for every module'));
     expect(contract(builders[0].task).length, item.id).toBeGreaterThan(3000);
+    const document = createOfficialDocument(item);
     for (const node of builders) {
       expect(contract(node.task), node.id).toBe(contract(builders[0].task));
-      expect(node.task, node.id).toContain('Output only the code as one fenced block, with nothing before or after it');
+      // Each builder writes, checks and publishes its module in its own sandbox computer: no single model call has
+      // to hold a whole module (Opus 5.5's cap per call is shared with its hidden thinking).
+      expect(node.sandbox, node.id).toBe(true);
+      expect(node.task, node.id).toContain(`node --check ${node.id}.js`);
+      expect(node.task, node.id).toContain(`publish ${node.id}.js into your result output`);
       expect(node.task, node.id).toContain('U.tests.plant');
+      const tile = document.nodes.find((value): value is SessionNode => value.kind === 'session' && value.title === node.title);
+      expect(tile?.runtime, node.id).toBe(SANDBOX_RUNTIME);
     }
     for (const node of item.nodes) expect(node.task.length, `${item.id}/${node.id}`).toBeLessThan(20000);
   }
