@@ -114,18 +114,18 @@ Apache-2.0) with the dependency tree pinned in
 installed without running its install script, so without its native binding.
 The other packages declare MIT (136), ISC (14), Apache-2.0 (11), BSD-3-Clause
 (7), BlueOak-1.0.0 (5), BSD-2-Clause (1), a combination of these (`rc`,
-`sha.js`), MIT and Zlib (`pako`) or MIT or WTFPL (`expand-template`); their
-license files ship in the image under
-`/opt/awwo/tools/node_modules`. The image also installs Debian bookworm's
+`sha.js`), MIT and Zlib (`pako`) or MIT or WTFPL (`expand-template`); each
+package's license file ships in the image with the package, under
+`/opt/awwo/tools`. The image also installs Debian bookworm's
 `chromium-headless-shell` and `chromium-common` (each build takes
 bookworm-security's current version, `155.0.8059.39-1~deb12u1` on 2026-10-16;
 Chromium is BSD-3-Clause, Copyright The Chromium Authors, and bundles
 third-party components under their own licenses, all listed in
 `/usr/share/doc/chromium-common/copyright`), `fonts-dejavu-core` (Bitstream
 Vera license), `fonts-wqy-microhei` (Apache-2.0 or GPL-3+ with the font
-exception) and `procps` (GPL-2+ and LGPL-2+). Preserve `/usr/share/doc/*/copyright`
-and the npm packages' LICENSE, NOTICE and ThirdPartyNotices.txt files when
-distributing the image. These tools run inside the sandbox only and do not
+exception) and `procps` (GPL-2+ and LGPL-2+). Preserve the Debian packages'
+copyright files under `/usr/share/doc` and the npm packages' LICENSE, NOTICE
+and ThirdPartyNotices.txt files when distributing the image. These tools run inside the sandbox only and do not
 change AwwO's own license.
 
 ## Existing fusion boundary
