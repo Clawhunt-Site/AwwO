@@ -914,6 +914,23 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     expect(after.right).toBeLessThanOrEqual(1232 - 28 + 1e-6);
   });
 
+  it('opens a delivered node’s drawer by itself only where the stylesheet lays it beside the conversation', async () => {
+    // A 750 px frame is under the 770 px a drawer needs beside the conversation (740 px of workbench inside the tile's
+    // 30 px of padding and border): by itself it opened there over the conversation (found 2026-10-16). 794 px holds it.
+    for (const [w, sidebar, frame, open] of [[1193, 387, 750, false], [1250, 400, 794, true]] as const) {
+      layout = { ...layout, w, h: 900, sidebar };
+      canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({
+        ...seed({ x: 60, y: 150, lastOutput: { text: '## 关卡规格\n- 三段', source: 'run', at: 1 } }), view: { x: 0, y: 0, scale: 1 },
+      }));
+      const view = render(<CanvasSurface />);
+      addSidebar();
+      const opened = await openNode();
+      expect(opened.width, `stage ${w}`).toBeCloseTo(frame, 3);
+      expect(Boolean(screen.queryByRole('region', { name: '交付物' })), `stage ${w}`).toBe(open);
+      view.unmount();
+    }
+  });
+
   it('keeps the frame layout beside a sidebar that leaves less than a narrow stage (production: 1232 px, 398 px)', async () => {
     // 834 px are left right of the sidebar, less than the 900 px below which a stage opens nodes in its narrow layout
     // (a 520 × 380 card zoomed in, its delivery over the conversation). The stage is not narrow: the node keeps its

@@ -27,9 +27,11 @@ export function deliverablesShown(node: CanvasNode, beside = true): boolean {
   if (node.kind !== 'session') return false;
   return node.deliverablesOpen ?? (beside && Boolean(node.lastOutput && !node.lastOutput.partial) && !mediaKindOf(node.agentKind));
 }
-/** The narrowest an opened node holds its delivery drawer beside its conversation (the container query in
- *  awwo-node.css lays the drawer over the conversation below it). */
-export const DRAWER_BESIDE_MIN_WIDTH = 740;
+/** The narrowest an opened node (its frame, the tile's outer width) holds its delivery drawer beside its conversation.
+ *  The container query in awwo-node.css lays the drawer over the conversation while the workbench is under 740 px, and
+ *  the workbench is the tile less its padding (14 px a side) and border (1 px a side, canvas.css): a frame of 740-769 px
+ *  opened its drawer by itself over the conversation. */
+export const DRAWER_BESIDE_MIN_WIDTH = 740 + 2 * (14 + 1);
 
 /** The widest an opened node of each kind grows: a page wants the room of a browser window, a conversation the width
  *  of a readable column beside its drawer. */
