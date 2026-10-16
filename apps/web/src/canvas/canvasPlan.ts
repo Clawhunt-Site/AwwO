@@ -90,7 +90,8 @@ export interface CanvasPlanModels { choices: ReadonlyArray<CanvasPlanModelChoice
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
 允许的 operations（未知键会被拒绝）：
-add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure",title?:string,persona?:string,inputValues?:{[已有输入字段ID]:string},acceptanceCriteria?:string[]}
+add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure",title?:string,acceptanceCriteria:string[],persona?:string,inputValues?:{[已有输入字段ID]:string}}
+新增 Agent 节点的 add_node 必须写 acceptanceCriteria：1 到 3 条，每条是能对照这个节点自己的交付逐条核对的检查。
 update_node: {type:"update_node",nodeId:string,title?:string,persona?:string}
 set_task: {type:"set_task",nodeId:string,constraints?:string[],acceptanceCriteria?:string[]}
 set_model: {type:"set_model",nodeId:string,model:string,effort?:string}
@@ -127,7 +128,7 @@ export function withMediaNodes(protocol: string, kinds: ReadonlyArray<MediaKind>
   if (!offered.length) return protocol;
   const names = offered.map(kind => `${kind}=${MEDIA_KIND_WORDS[kind]}`).join('、');
   const line = `媒体节点（templateId 为 ${names}）：只在需求明确需要生成这类素材时添加，每个素材一个节点；在 inputValues.prompt 写这个素材完整、具体的生成提示词`
-    + '（主体、风格、构图或镜头、材质与配色；3D 模型只写单个物体或角色，不超过 1000 字），不写 persona 和其他输入。'
+    + '（主体、风格、构图或镜头、材质与配色；3D 模型只写单个物体或角色，不超过 1000 字），不写 persona、acceptanceCriteria 和其他输入。'
     + '媒体节点的输出端口 ID 为 result（图片、视频为对应类型，3D 模型为 file），图片节点和 3D 模型节点另有 reference 输入，可接上游图片节点的 result 作为参考图（按图改图、按图生成 3D 模型；先出角色或产品图、再做 3D 时就这样连），视频节点没有 reference 输入；连线只能接到类型相同的输入。'
     + '画布运行会按连线顺序生成媒体节点：提示词是节点自己的提示词，后面接上连到它 context 输入的上游文字；每次生成计入当天的生成次数。已有媒体节点的提示词用 set_input 的 fieldId:"prompt" 修改。';
   return protocol.split('\n').flatMap(text => text.startsWith('add_node:')

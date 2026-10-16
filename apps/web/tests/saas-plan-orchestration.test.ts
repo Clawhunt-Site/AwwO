@@ -47,6 +47,22 @@ describe('the protocol for task requirements and models', () => {
     expect(() => plan(operation)).toThrow(message);
   });
 
+  it('asks for every new Agent node’s acceptance criteria in add_node’s own shape, still taking a plan without them', () => {
+    // Production 2026-10-15 (qwen3.8-27b-p6): a plan added 「贪吃蛇游戏」 with none, though the instructions asked for one to
+    // three in words: the shape the planner copies listed them last and optional. A plan that leaves them out applies as
+    // before (the request stays its constraints).
+    expect(CANVAS_PLAN_PROTOCOL).toContain('title?:string,acceptanceCriteria:string[],persona?:string,inputValues?:');
+    expect(CANVAS_PLAN_PROTOCOL).not.toContain('inputValues?:{[已有输入字段ID]:string},acceptanceCriteria?:string[]}');
+    expect(CANVAS_PLAN_PROTOCOL).toContain('新增 Agent 节点的 add_node 必须写 acceptanceCriteria：1 到 3 条');
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    const hosted = buildPlanningContext(doc(), [], 'zh', ['image']);
+    expect(hosted).toContain('不写 persona、acceptanceCriteria 和其他输入');
+    // The rule sits after the add_node line and the media line that follows it.
+    expect(hosted.indexOf('必须写 acceptanceCriteria')).toBeGreaterThan(hosted.indexOf('媒体节点（templateId'));
+    const bare = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'a', templateId: 'general', title: 'Writer' }), 'en', REQUEST);
+    expect(session(bare.doc, bare.addedNodeIds[0]).taskFrame).toEqual(frame([REQUEST]));
+  });
+
   it('still forbids runtime, model and effort outside set_model', () => {
     for (const key of ['runtime', 'model', 'effort']) expect(() => plan({ type: 'update_node', nodeId: 'n', title: 'T', [key]: 'x' })).toThrow(`不允许字段「${key}」`);
   });
