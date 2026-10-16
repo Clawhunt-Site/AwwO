@@ -486,7 +486,8 @@ test('THIRD_PARTY_NOTICES.md names no license or notice file the artifacts leave
   const files = trackedFiles(), markdown = readFileSync(join(repository, 'THIRD_PARTY_NOTICES.md'), 'utf8');
   assert.deepEqual(uncoveredNotices(markdown, files), []);
   const { required } = requiredNotices(markdown, files);
-  for (const path of ['LICENSE', 'apps/web/src/saas/skillLicences.txt', 'server/packages/adapters/hermes/LICENSE', 'third_party/adapted/aihot/NOTICE', 'third_party/clawwork/NOTICE', 'third_party/osiris/LICENSE']) assert.ok(required.includes(path), path);
+  for (const path of ['LICENSE', 'apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt', 'apps/web/src/saas/skillLicences.txt', 'server/packages/adapters/hermes/LICENSE',
+    'third_party/adapted/aihot/NOTICE', 'third_party/clawwork/NOTICE', 'third_party/osiris/LICENSE']) assert.ok(required.includes(path), path);
   for (const path of noticePaths) assert.ok(files.includes(path) || files.some(file => file.startsWith(`${path}/`)), `${path} is not in the repository`);
 });
 

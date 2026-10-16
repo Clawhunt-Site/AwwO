@@ -16,7 +16,8 @@
  * Loaded after ios-theme.css with the same selectors, so these definitions are the ones that apply. */
 
 /* Mona Sans, as on the main site: Latin only (CJK keeps the platform's UI face), self-hosted with the
-   app, so nothing is fetched from a third party. SIL Open Font License, see fonts/LICENSE-mona-sans.txt. */
+   app, so nothing is fetched from a third party. SIL Open Font License, see fonts/LICENSE-mona-sans.txt,
+   which the build writes beside the font files it emits (scripts/font-licences.mjs). */
 @font-face {
   font-family: 'Mona Sans';
   src: url('./fonts/mona-sans-latin-standard-normal.woff2') format('woff2-variations');

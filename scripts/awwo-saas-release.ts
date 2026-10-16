@@ -14,8 +14,9 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // THIRD_PARTY_NOTICES.md, AwwO's LICENSE, every license and notice file the notices name, and the licenses of the Go
 // code compiled into the API. This archive (under licenses/) and the API image (deploy/saas/api.Dockerfile) carry
 // them at these repository paths, also those of parts neither contains, so that every reference in the notices resolves.
-export const noticePaths = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'apps/web/src/saas/skillLicences.txt', 'examples/knowledge-workbench/data/unicode/LICENSE.txt',
-  'examples/knowledge-workbench/data/unicode/17.0.0/LICENSE.txt', 'server/LICENSE', 'server/packages/adapters/hermes/LICENSE', 'third_party/adapted',
+export const noticePaths = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt', 'apps/web/src/saas/skillLicences.txt',
+  'examples/knowledge-workbench/data/unicode/LICENSE.txt', 'examples/knowledge-workbench/data/unicode/17.0.0/LICENSE.txt', 'server/LICENSE',
+  'server/packages/adapters/hermes/LICENSE', 'third_party/adapted',
   'third_party/anatomy/LICENSE', 'third_party/clawwork/LICENSE', 'third_party/clawwork/NOTICE', goLicences, 'third_party/open-design/LICENSE',
   'third_party/openpencil/LICENSE', 'third_party/openpencil/packages/agent-native/LICENSE', 'third_party/osiris/LICENSE', 'third_party/wshobson-agents/LICENSE'];
 const sourcePaths = ['backend', 'apps/web', 'apps/pi-worker', 'apps/openai-agents-worker', 'apps/openmaus-worker', 'apps/user-models.ts', 'apps/computer-model.ts', 'apps/bedrock-bridge.ts', 'apps/bedrock-catalog.ts', 'apps/bedrock-models.json', 'third_party/openmaus-core', 'deploy/saas/workspace', ...noticePaths];

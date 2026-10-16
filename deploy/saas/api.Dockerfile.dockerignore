@@ -11,6 +11,7 @@ backend/**/build
 # The notice files api.Dockerfile copies (noticePaths in scripts/awwo-saas-release.ts).
 !LICENSE
 !THIRD_PARTY_NOTICES.md
+!apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt
 !apps/web/src/saas/skillLicences.txt
 !examples/knowledge-workbench/data/unicode/LICENSE.txt
 !examples/knowledge-workbench/data/unicode/17.0.0/LICENSE.txt

@@ -3,6 +3,7 @@
 # compares with these lines and the .dockerignore. The image keeps them in /usr/share/doc/awwo-api/.
 FROM scratch AS notices
 COPY LICENSE THIRD_PARTY_NOTICES.md /
+COPY apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt /apps/web/src/saas/design/fonts/
 COPY apps/web/src/saas/skillLicences.txt /apps/web/src/saas/
 COPY examples/knowledge-workbench/data/unicode/LICENSE.txt /examples/knowledge-workbench/data/unicode/
 COPY examples/knowledge-workbench/data/unicode/17.0.0/LICENSE.txt /examples/knowledge-workbench/data/unicode/17.0.0/
