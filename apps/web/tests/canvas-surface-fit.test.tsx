@@ -789,6 +789,48 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     expect(tools().style.marginLeft, 'Configure closed').toBe('340px');
   });
 
+  it('hands the stylesheets the part of the stage a floating sidebar covers, where it leaves a readable part', async () => {
+    // The run notes in the stage's top-left corner, the selection bar at its top centre and the 成果 view are laid out
+    // right of --awwo-stage-cover (canvas-stage-cover.test.ts reads those rules): they sat under the sidebar (found
+    // 2026-10-16). None where the sidebar takes its own room beside the stage, leaves it less than 200 px (here below
+    // the 266 px an open node needs: a note still reads there, found in review), or is closed.
+    const cover = () => document.querySelector<HTMLElement>('.awwo-stage-canvas')!.style.getPropertyValue('--awwo-stage-cover');
+    const toggle = () => fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    const cases = [[stage.w, 0, `${SIDEBAR}px`], [SIDEBAR + 200, 0, `${SIDEBAR}px`], [SIDEBAR + 199, 0, ''], [stage.w, SIDEBAR, '']] as const;
+    for (const [w, stageLeft, want] of cases) {
+      layout = { ...layout, w, stageLeft };
+      const view = render(<CanvasSurface />);
+      expect(cover(), 'the assistant closed').toBe('');
+      toggle();
+      await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).not.toBeNull());
+      await settle();
+      expect(cover(), `a ${SIDEBAR} px sidebar on a ${w} px stage from ${stageLeft} px`).toBe(want);
+      toggle();
+      await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).toBeNull());
+      await settle();
+      expect(cover(), 'closed again').toBe('');
+      view.unmount();
+    }
+  });
+
+  it('measures the cover again when the stage changes size under an open sidebar', async () => {
+    // A window resized with the assistant open: the stage narrows past the 200 px left beside the sidebar, and back.
+    const deliveries: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+    const cover = () => document.querySelector<HTMLElement>('.awwo-stage-canvas')!.style.getPropertyValue('--awwo-stage-cover');
+    render(<CanvasSurface />);
+    fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).not.toBeNull());
+    await settle();
+    expect(cover(), 'a 1400 px stage').toBe(`${SIDEBAR}px`);
+    for (const [w, want] of [[SIDEBAR + 199, ''], [stage.w, `${SIDEBAR}px`]] as const) {
+      layout.w = w;
+      act(() => { deliveries.forEach(deliver => deliver()); });
+      await settle();
+      expect(cover(), `resized to ${w} px`).toBe(want);
+    }
+  });
+
   it('moves an open node clear of the sidebar when the assistant opens, and gives it the stage back when it closes', async () => {
     render(<CanvasSurface />);
     const alone = await openNode();

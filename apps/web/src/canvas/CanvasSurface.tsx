@@ -195,6 +195,9 @@ function sidebarCover(root: HTMLElement, stage: DOMRect): number {
   const side = floatingSidebar(root, stage);
   return side && !side.cramped ? side.cover : 0;
 }
+/** The least of the stage a floating sidebar leaves for the stage's notes, its selection bar and the 成果 view to move
+ *  into (about a 150 px note between the note's own margins); with less, they stay where they are, under it. */
+const STAGE_OVERLAY_MIN_ROOM = 200;
 /** Whether Configure, open on this stage, raises the board above the assistant sidebar: the hosted app at 900 px and
  *  below does (awwo-workspace.css), so while it is open the sidebar covers nothing of the board. */
 const configureRaisesBoard = (root: HTMLElement) => Boolean(root.closest('.saas-canvas-shell'))
@@ -3637,6 +3640,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, []);
   const selectionShown = selection.length > 0;
   useLayoutEffect(measureViewTools, [measureViewTools, size.w, size.h, railsVersion, panelShown, simple, viewToolsShown, inspectorId, minimapShown, selectionShown]);
+  // How much of the stage's left edge a sidebar floating over it covers (floatingSidebar), where it leaves the stage
+  // STAGE_OVERLAY_MIN_ROOM or more: 0 where it takes its own room, is closed or stepped aside, or (nearly) spans the stage.
+  // The workspace hands it to the stylesheets as --awwo-stage-cover, and the run notes in the stage's top-left corner,
+  // the selection bar at its top centre and the 成果 view lay themselves out right of it: they sat under it (found
+  // 2026-10-16). A note reads in less room than an open node, so the part left may be narrower than the board's own fit
+  // needs (sidebarCover); there, an open node has the assistant step aside instead. Where Configure lifts the board over
+  // the sidebar (hosted, 900 px and below), the board's own notes and bar stay put (awwo-workspace.css).
+  const [stageCover, setStageCover] = useState(0);
+  const measureStageCover = useCallback(() => {
+    const root = rootRef.current;
+    const stage = root?.getBoundingClientRect();
+    const side = root && stage && stage.width > 0 ? floatingSidebar(root, stage) : null;
+    const cover = side && stage && stage.width - side.cover >= STAGE_OVERLAY_MIN_ROOM ? side.cover : 0;
+    setStageCover(previous => previous === cover ? previous : cover);
+  }, []);
+  useLayoutEffect(measureStageCover, [measureStageCover, size.w, size.h, railsVersion, panelShown, simple]);
   // Tasks are read while the conversation is on screen: in the side panel, or in the welcome of an empty canvas,
   // which draws it (its tasks and the canvas's earlier ones) once there is one. A viewer's host reads nothing before.
   const tasksShown = panelShown || (!readOnly && !nodes.length && planning.messages.length > 0);
@@ -3770,7 +3789,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }}
       onFocusNode={focusNode} onAddAgent={addAgent} loadWorkspaceAgents={loadWorkspaceAgents} agentLibraryRequest={agentLibraryRequest} onAddWorkspaceAgent={addWorkspaceAgent} onAddMarketAgent={loadWorkspaceAgents ? addMarketAgent : undefined} onCreateTemplate={createTemplate}
       onSearch={() => { changeStageView('canvas'); setBarMode('search'); }}
-      assistant={assistantPanel} assistantStowed={assistantStowed}
+      assistant={assistantPanel} assistantStowed={assistantStowed} stageCover={stageCover}
       // One composer at a time: on an empty canvas whose conversation is in the side panel, the welcome steps aside.
       welcome={readOnly || assistantPanel ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} unified={unified} />}
       // The toggle reports the panel as it is drawn; tasks need no canvas, so it is offered on an empty one with them.

@@ -8,7 +8,10 @@
   --awwo-card: var(--saas-card); --awwo-ink: var(--saas-text); --awwo-muted: var(--saas-muted); --awwo-line: var(--saas-border);
   --awwo-soft: var(--saas-input); --awwo-teal: var(--saas-accent); --awwo-tint: var(--saas-soft); --awwo-error: var(--saas-danger);
   position: absolute; inset: 0; z-index: 60; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin;
-  padding: 22px 24px 32px; background: var(--saas-canvas); color: var(--saas-text); font-family: var(--saas-font);
+  /* Its content starts right of an assistant panel floating over the stage (--awwo-stage-cover, AgentWorkspace), here
+     and in the two paddings below; its own background stays under the panel, which fades in over it, and its container
+     queries read the content's width. */
+  padding: 22px 24px 32px calc(24px + var(--awwo-stage-cover, 0px)); background: var(--saas-canvas); color: var(--saas-text); font-family: var(--saas-font);
   -webkit-font-smoothing: antialiased;
   /* The view's own width decides its layout: with the assistant panel and the Bots list open, a wide window
      leaves it a fraction of the screen, and a window-width breakpoint kept two columns that no longer fit. */
@@ -26,7 +29,7 @@
 .awwo-results-main { display: grid; gap: 16px; min-width: 0; }
 .awwo-results-aside { position: sticky; top: 0; display: grid; gap: 14px; min-width: 0; }
 /* The results studio fills the view: the file tree and viewer take the height, the steps keep their column. */
-.awwo-results.is-studio { display: flex; flex-direction: column; gap: 10px; overflow: hidden; padding: 14px 16px 16px; }
+.awwo-results.is-studio { display: flex; flex-direction: column; gap: 10px; overflow: hidden; padding: 14px 16px 16px calc(16px + var(--awwo-stage-cover, 0px)); }
 .awwo-results-layout.is-studio { flex: 1 1 auto; min-height: 0; width: 100%; max-width: none; align-items: stretch; grid-template-columns: minmax(0, 1fr) minmax(240px, 280px); }
 .awwo-results-main.is-studio { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .awwo-results-main.is-studio > .awwo-studio { flex: 1 1 auto; min-height: 0; }
@@ -217,7 +220,7 @@
 :is(.awwo-main):has(.awwo-stage-canvas > .awwo-results) .awwo-run-slot .canvas-run-note:not(.canvas-run-note--err) { display: none; }
 :is(.awwo-main):has(.awwo-stage-canvas > .awwo-results) .awwo-run-slot .canvas-run-note--err { top: auto; bottom: 24px; }
 @media (max-width: 760px) {
-  .awwo-results { padding: 14px 12px 24px; }
+  .awwo-results { padding: 14px 12px 24px calc(12px + var(--awwo-stage-cover, 0px)); }
   .awwo-results-empty { min-height: 0; padding: 28px 22px; }
 }
 @media (prefers-reduced-motion: reduce) {
