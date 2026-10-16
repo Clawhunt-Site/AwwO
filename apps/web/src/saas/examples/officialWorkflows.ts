@@ -1,12 +1,15 @@
 import type { AgentTemplateId } from '../../canvas/agentTemplates';
 import { createAssembleNode, createSessionNode, emptyDocument, type AssembleNode, type CanvasDocument, type SessionNode } from '../../canvas/canvasDoc';
 import type { ContractField } from '../../canvas/nodeContracts';
-import { SANDBOX_RUNTIME } from '../../canvas/nodeRuntime';
 import { updateNodeDraft } from '../../canvas/nodeThreads';
 import { edgeId } from '../../canvas/ports';
 import { PREVIEW_FONT_RULE } from '../../canvas/previewFontList';
 import { THREE_MODULES_IMPORT_MAP } from '../../canvas/previewImportMap';
 import type { OfficialMediaNode } from './officialMedia';
+
+/** nodeRuntime.ts SANDBOX_RUNTIME, written out: that module loads the media catalog, which plain bundles of the case
+ * canvases (the case runner's job generator) cannot load. */
+const SANDBOX_RUNTIME = 'sandbox';
 
 /** Every production case is English, in both interface languages (owner 2026-10-14): its canvas, tasks and
  * deliveries are written and run in English, so a copy is the same canvas whatever the reader's language. */
