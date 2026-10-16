@@ -3573,8 +3573,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     refocus('.awwo-assistant-toggle');
   };
   const panelShown = Boolean(assistantPanel) && !assistantStowed;
-  // Showing or hiding the panel changes the room a fit has where the sidebar floats over the board: the overview and an
-  // open node refit, as when a rail toggles (not on the first render: the opening fit measures it itself).
   // The stage shrinking under an open node until the floating assistant leaves it no readable room steps the assistant
   // aside, as opening the node there does; bringing it back over the node is the reader's (no size changes then).
   const stageSeen = useRef(size);
@@ -3586,12 +3584,53 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const stage = root?.getBoundingClientRect();
     if (root && stage && stage.width > 0 && floatingSidebar(root, stage)?.cramped) stowAssistantRef.current(focusedId);
   }, [size, focusedId, panelShown]);
+  // Showing or hiding the panel changes the room a fit has where the sidebar floats over the board: the overview and an
+  // open node refit, as when a rail toggles (not on the first render: the opening fit measures it itself).
   const panelSeen = useRef(panelShown);
   useEffect(() => {
     if (panelSeen.current === panelShown) return;
     panelSeen.current = panelShown;
     onRailsChange();
   }, [panelShown, onRailsChange]);
+  // The view tools (zoom, fit) sit in the stage's bottom-left corner, which a sidebar floating over the stage covers (the
+  // hosted workspace at 1280 px and below, any at 900 px and below): with the assistant open they could not be reached
+  // (found 2026-10-16). They move right of the sidebar as far as it covers, while they fit on the stage with their own
+  // margin on both sides; where they would then reach the minimap (drawn in their row: not while an open node hides
+  // it), they step up over it. Configure lifting the board over the sidebar (hosted, 900 px and below) leaves nothing
+  // covered. Measured again when a selection adds or takes away 运行所选及下游, the one button that changes their width
+  // once they are drawn.
+  const viewToolsRef = useRef<HTMLDivElement>(null);
+  const viewToolsShift = useRef({ x: 0, y: 0 });
+  const [viewToolsCover, setViewToolsCover] = useState({ x: 0, y: 0 });
+  const viewToolsShown = nodes.length > 0 || history.undo > 0 || history.redo > 0;
+  // Mounted as the minimap's own condition below says; an open node hides it (visibility, canvas.css).
+  const minimapShown = minimapOpen && !simple && nodes.length > 0 && !focusedId;
+  const measureViewTools = useCallback(() => {
+    const root = rootRef.current;
+    const tools = viewToolsRef.current;
+    const stage = root?.getBoundingClientRect();
+    const raised = Boolean(root && inspectorRef.current !== null && configureRaisesBoard(root));
+    const side = root && tools && stage && stage.width > 0 && !raised ? floatingSidebar(root, stage) : null;
+    const shift = { x: 0, y: 0 };
+    // Their own left margin (the stylesheet's, without the shift set here).
+    const margin = tools ? tools.offsetLeft - viewToolsShift.current.x : 0;
+    if (root && tools && stage && side && side.cover + 2 * margin + tools.offsetWidth <= stage.width) {
+      shift.x = side.cover;
+      // Where they sit unraised, and where they reach once moved.
+      const row = tools.getBoundingClientRect();
+      const bottom = row.bottom + viewToolsShift.current.y;
+      const right = stage.left + side.cover + margin + tools.offsetWidth;
+      const minimap = root.closest('.awwo-workspace')?.querySelector<HTMLElement>('.canvas-minimap');
+      const map = minimap && getComputedStyle(minimap).visibility !== 'hidden' ? minimap.getBoundingClientRect() : null;
+      if (map && map.width > 0 && map.top < bottom && map.bottom > bottom - row.height && right + margin > map.left) {
+        shift.y = Math.round(bottom - map.top + margin);
+      }
+    }
+    viewToolsShift.current = shift;
+    setViewToolsCover(previous => previous.x === shift.x && previous.y === shift.y ? previous : shift);
+  }, []);
+  const selectionShown = selection.length > 0;
+  useLayoutEffect(measureViewTools, [measureViewTools, size.w, size.h, railsVersion, panelShown, simple, viewToolsShown, inspectorId, minimapShown, selectionShown]);
   // Tasks are read while the conversation is on screen: in the side panel, or in the welcome of an empty canvas,
   // which draws it (its tasks and the canvas's earlier ones) once there is one. A viewer's host reads nothing before.
   const tasksShown = panelShown || (!readOnly && !nodes.length && planning.messages.length > 0);
@@ -3872,7 +3911,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       {/* Same guard as the minimap: the view tools never paint over the opaque welcome overlay of a
           fresh canvas. An empty canvas that still has something to undo or redo keeps them, or a
           deleted last node or an undone plan could only come back through a keyboard shortcut. */}
-      {(nodes.length > 0 || history.undo > 0 || history.redo > 0) && <div className={`awwo-view-tools${simple ? ' is-simple' : ''}`} role="toolbar" aria-label={viewText.toolbar}>
+      {viewToolsShown && <div ref={viewToolsRef} className={`awwo-view-tools${simple ? ' is-simple' : ''}`} role="toolbar" aria-label={viewText.toolbar}
+        style={viewToolsCover.x ? { marginLeft: viewToolsCover.x, ...(viewToolsCover.y ? { marginBottom: viewToolsCover.y } : {}) } : undefined}>
         {!simple && <><button type="button" aria-label={locale === 'zh' ? '框选组件' : 'Select components'} title={locale === 'zh' ? '框选组件（也可按住 Shift 拖动）' : 'Select components (or Shift + drag)'} aria-pressed={selectionTool}
           onClick={() => setSelectionTool(value => !value)}><MousePointer2 size={16} /></button>
         <span className="awwo-tool-separator" /></>}

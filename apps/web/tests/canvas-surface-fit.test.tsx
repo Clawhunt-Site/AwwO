@@ -20,6 +20,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument } from '../src/canvas/canvasDoc';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
+import { PLANNING_STORAGE_KEY } from '../src/canvas/canvasPlanning';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { RAIL_BOT_KEY, RAIL_MODEL_KEY } from '../src/canvas/railState';
@@ -579,11 +580,12 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
   const stage = { w: 1400, h: 1000 };
   const SIDEBAR = 400;
   // What the stage and the sidebar measure in the current case (the cases below the first three set their own).
-  // `viewportLate`: the viewport measures nothing until a ResizeObserver delivery (its first size comes late).
-  let layout = { ...stage, sidebar: SIDEBAR, stageLeft: 0, sidebarLeft: 0, viewportLate: false };
+  // `viewportLate`: the viewport measures nothing until a ResizeObserver delivery (its first size comes late). `tools`:
+  // the view tools' width (their row is the stage's bottom 16-56 px; the minimap's 200 x 130 box sits at its bottom right).
+  let layout = { ...stage, sidebar: SIDEBAR, stageLeft: 0, sidebarLeft: 0, viewportLate: false, tools: 200 };
   const box = (left: number, w: number, h: number) => ({ x: left, y: 0, top: 0, left, right: left + w, bottom: h, width: w, height: h, toJSON: () => ({}) } as DOMRect);
   beforeEach(() => {
-    layout = { ...stage, sidebar: SIDEBAR, stageLeft: 0, sidebarLeft: 0, viewportLate: false };
+    layout = { ...stage, sidebar: SIDEBAR, stageLeft: 0, sidebarLeft: 0, viewportLate: false, tools: 200 };
     canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 60, y: 150 }), view: { x: 0, y: 0, scale: 1 } }));
     const real = Element.prototype.getBoundingClientRect;
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
@@ -591,10 +593,21 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
       if (this.classList.contains('canvas-root') || this.classList.contains('canvas-viewport')) return box(layout.stageLeft, layout.w, layout.h);
       // A sidebar stepped aside (hidden, display: none) lays out nothing, as in a browser.
       if (this.classList.contains('awwo-planner-sidebar')) return (this as HTMLElement).hidden ? box(0, 0, 0) : box(layout.sidebarLeft, layout.sidebar, layout.h);
+      // The view tools' row: the stage's bottom 16-56 px, raised by the margin-bottom the app may set.
+      if (this.classList.contains('awwo-view-tools')) {
+        const up = Number.parseFloat((this as HTMLElement).style.marginBottom) || 0;
+        return { ...box(layout.stageLeft + 16, layout.tools, layout.h - 16 - up), top: layout.h - 56 - up, y: layout.h - 56 - up, height: 40 };
+      }
+      if (this.classList.contains('canvas-minimap')) return { ...box(layout.stageLeft + layout.w - 220, 200, layout.h - 20), top: layout.h - 150, y: layout.h - 150, height: 130 };
       return real.call(this);
     });
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('awwo-view-tools')) return layout.tools;
       return this.classList.contains('awwo-planner-sidebar') && !this.hidden ? layout.sidebar : 0;
+    });
+    // The view tools' 16 px margin, plus the margin the app sets to move them, as a browser lays them out.
+    vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('awwo-view-tools') ? 16 + (Number.parseFloat(this.style.marginLeft) || 0) : 0;
     });
   });
   const addSidebar = () => {
@@ -667,6 +680,113 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     const opened = await openNode();
     expect(opened.left).toBeGreaterThanOrEqual(SIDEBAR + 28 - 1e-6);
     expect(opened.width).toBeLessThanOrEqual(stage.w - SIDEBAR - 56);
+  });
+
+  it('moves the view tools right of a sidebar floating over the stage, where they fit beside it', async () => {
+    // The zoom and fit buttons sit in the stage's bottom-left corner, under the sidebar while the assistant was open
+    // (found 2026-10-16 at 1244 px): they move right of it as far as it covers, while they fit there.
+    const tools = () => document.querySelector<HTMLElement>('.awwo-view-tools')!;
+    const toggle = () => fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    for (const [sidebar, shift] of [[SIDEBAR, `${SIDEBAR}px`], [stage.w - 100, '']] as const) {
+      layout = { ...layout, sidebar };
+      const view = render(<CanvasSurface />);
+      expect(tools().style.marginLeft).toBe('');
+      toggle();
+      await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).not.toBeNull());
+      await settle();
+      expect(tools().style.marginLeft, `a ${sidebar} px sidebar`).toBe(shift);
+      toggle();
+      await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).toBeNull());
+      await settle();
+      expect(tools().style.marginLeft).toBe('');
+      view.unmount();
+    }
+    // Beside the stage (a wide screen), the sidebar covers nothing.
+    layout = { ...layout, sidebar: SIDEBAR, stageLeft: SIDEBAR };
+    const wide = render(<CanvasSurface />);
+    toggle();
+    await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).not.toBeNull());
+    await settle();
+    expect(tools().style.marginLeft).toBe('');
+    wide.unmount();
+    // Reaching the minimap in their row they step up over it (in review: at 880 px it covered undo and redo; in a
+    // browser the developer row did not fit beside it and stayed covered), and they are measured again when a
+    // selection adds 运行所选及下游 (here as if it made the row 440 px wide).
+    layout = { ...layout, w: 800, stageLeft: 0 };
+    render(<CanvasSurface />);
+    toggle();
+    await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).not.toBeNull());
+    await settle();
+    expect(screen.getByTestId('canvas-minimap')).toBeTruthy();
+    expect([tools().style.marginLeft, tools().style.marginBottom], 'reaching the minimap: 416 + 200 + 16 > 580').toEqual([`${SIDEBAR}px`, '150px']);
+    fireEvent.click(screen.getByRole('button', { name: '显示小地图' }));
+    await waitFor(() => expect(screen.queryByTestId('canvas-minimap')).toBeNull());
+    expect([tools().style.marginLeft, tools().style.marginBottom], 'without it').toEqual([`${SIDEBAR}px`, '']);
+    layout.tools = 440;
+    fireEvent.pointerDown(screen.getByTestId('canvas-tile-s1'), { button: 0, clientX: 0, clientY: 0 });
+    await waitFor(() => expect(within(tools()).getByRole('button', { name: '运行所选及下游' })).toBeTruthy());
+    expect([tools().style.marginLeft, tools().style.marginBottom], 'grown past the stage').toEqual(['', '']);
+  });
+
+  it('steps the view tools over the minimap only while it is drawn', async () => {
+    // An open node hides the minimap (visibility: hidden, canvas.css, modelled here), and deleting the last node
+    // unmounts it while undo keeps the tools: neither counts then, and undo bringing it back is measured again (found
+    // in review). Moved 400 px right the tools reach the minimap's 580 px, so they step up over it. An earlier
+    // assistant task keeps the assistant's panel open with no node left.
+    canvasStorage().setItem(PLANNING_STORAGE_KEY, JSON.stringify({ draft: '', messages: [{ id: 'm1', role: 'user', content: '做个页面', taskId: 'task-1' }] }));
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element, pseudo?: string | null) => {
+      const style = real(element, pseudo);
+      if (!element.classList?.contains('canvas-minimap') || !element.closest('.canvas-root[data-node-open]')) return style;
+      return new Proxy(style, { get: (target, key) => {
+        if (key === 'visibility') return 'hidden';
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      } });
+    });
+    layout = { ...layout, w: 800 };
+    render(<CanvasSurface />);
+    const tools = () => document.querySelector<HTMLElement>('.awwo-view-tools')!;
+    fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).not.toBeNull());
+    await settle();
+    const placed = () => [tools().style.marginLeft, tools().style.marginBottom];
+    expect(placed(), 'over the minimap').toEqual([`${SIDEBAR}px`, '150px']);
+    await openNode();
+    expect(document.querySelector('.canvas-root')).toHaveAttribute('data-node-open');
+    expect(placed(), 'the minimap hidden under an open node').toEqual([`${SIDEBAR}px`, '']);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).not.toBe('focus'));
+    await glideDone();
+    expect(placed(), 'the node closed').toEqual([`${SIDEBAR}px`, '150px']);
+    const tile = within(screen.getByTestId('canvas-tile-s1'));
+    fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(tile.getByRole('button', { name: '删除', exact: true }));
+    await waitFor(() => expect(screen.queryByTestId('canvas-tile-s1')).toBeNull());
+    expect(screen.queryByTestId('canvas-minimap')).toBeNull();
+    expect(placed(), 'the last node deleted').toEqual([`${SIDEBAR}px`, '']);
+    fireEvent.click(within(tools()).getByRole('button', { name: '撤销' }));
+    await waitFor(() => expect(screen.getByTestId('canvas-minimap')).toBeTruthy());
+    expect(placed(), 'undone').toEqual([`${SIDEBAR}px`, '150px']);
+  });
+
+  it('keeps the view tools in their corner while Configure lifts the board over the sidebar', async () => {
+    // At 900 px and below Configure raises the board above the sidebar, which then covers nothing; moved right, the
+    // tools sat under the inspector (found in review).
+    const deliveries: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+    await renderHosted(880, 340, true);
+    // The sidebar comes after the first measurement: a stage resize measures the tools again.
+    layout.w = 878;
+    act(() => { deliveries.forEach(deliver => deliver()); });
+    await settle();
+    const tools = () => document.querySelector<HTMLElement>('.awwo-view-tools')!;
+    expect(tools().style.marginLeft).toBe('340px');
+    await configure();
+    expect(tools().style.marginLeft, 'with Configure open').toBe('');
+    fireEvent.click(screen.getByRole('button', { name: '关闭配置' }));
+    await waitFor(() => expect(document.querySelector('.canvas-root > .canvas-inspector')).toBeNull());
+    expect(tools().style.marginLeft, 'Configure closed').toBe('340px');
   });
 
   it('moves an open node clear of the sidebar when the assistant opens, and gives it the stage back when it closes', async () => {
