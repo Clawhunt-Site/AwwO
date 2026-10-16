@@ -245,7 +245,9 @@ export function loadConfig(env = process.env) {
     port: integer(env.AWWO_OPENAI_AGENTS_PORT, 8098, 0, 65535, 'AWWO_OPENAI_AGENTS_PORT'),
     token, provider, model, apiKey, baseURL, protocol, environment,
     enabledTools: Object.freeze([...enabledTools]),
-    timeoutMs: integer(env.AWWO_OPENAI_AGENTS_TIMEOUT_MS, 120_000, 100, 600_000, 'AWWO_OPENAI_AGENTS_TIMEOUT_MS'),
+    // Up to the API's own 30-minute run limit: a sandbox worker's workspace run writes, checks and fixes a module over
+    // dozens of model calls, which 10 minutes cut short (2026-10-16).
+    timeoutMs: integer(env.AWWO_OPENAI_AGENTS_TIMEOUT_MS, 120_000, 100, 1_800_000, 'AWWO_OPENAI_AGENTS_TIMEOUT_MS'),
     cancelGraceMs: integer(env.AWWO_OPENAI_AGENTS_CANCEL_GRACE_MS, 2_000, 50, 10_000, 'AWWO_OPENAI_AGENTS_CANCEL_GRACE_MS'),
     maxConcurrency: integer(env.AWWO_OPENAI_AGENTS_MAX_CONCURRENCY, 4, 1, 32, 'AWWO_OPENAI_AGENTS_MAX_CONCURRENCY'),
     maxOutputBytes: integer(env.AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES, 1_048_576, 1024, 8_388_608, 'AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES'),

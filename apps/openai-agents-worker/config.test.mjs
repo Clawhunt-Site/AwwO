@@ -90,6 +90,12 @@ test('configuration is explicit, immutable and unconfigured by default', () => {
   assert.throws(() => configuration({ APP_ENV: 'test' }), /APP_ENV/);
 });
 
+test('a run may last up to the API\'s 30-minute run limit when the worker is given one', () => {
+  assert.equal(configuration({ AWWO_OPENAI_AGENTS_TIMEOUT_MS: '1500000' }).timeoutMs, 1_500_000);
+  assert.equal(configuration({ AWWO_OPENAI_AGENTS_TIMEOUT_MS: '1800000' }).timeoutMs, 1_800_000);
+  assert.throws(() => configuration({ AWWO_OPENAI_AGENTS_TIMEOUT_MS: '1800001' }), /AWWO_OPENAI_AGENTS_TIMEOUT_MS/);
+});
+
 test('provider URL credentials, queries, malformed syntax and insecure deployment URLs fail closed', () => {
   for (const url of ['http://a:b@example.invalid/v1','https://example.invalid?key=private','https://example.invalid#private','file:///etc/passwd','https:\\example.invalid','https://example.invalid/a b']) assert.equal(configuration({ AWWO_OPENAI_AGENTS_BASE_URL: url }).ready, false);
   assert.equal(configuration({ APP_ENV: 'production', AWWO_OPENAI_AGENTS_BASE_URL: 'http://example.invalid/v1' }).ready, false);
