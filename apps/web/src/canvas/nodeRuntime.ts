@@ -11,6 +11,9 @@ import { mediaKindOf } from './mediaCatalog';
 
 /** The runtimes a node may run on, most preferred first. A runtime missing here comes after them. */
 export const AUTOMATIC_RUNTIME_ORDER: ReadonlyArray<string> = ['openai-agents', 'pi'];
+/** The sandbox computer is a node's own choice (its settings' switch), never one AwwO makes for it: a sandbox node runs
+ *  many model calls and real commands, so the automatic choice neither moves a node there nor away from it. */
+export const SANDBOX_RUNTIME = 'sandbox';
 
 /** One model a runtime offers this workspace (a palette entry). */
 export interface RuntimeEntry { runtime: string; model: string; available: boolean }
@@ -25,7 +28,7 @@ function rank(runtime: string): number {
 export function automaticEntry<T extends RuntimeEntry>(model: string, entries: ReadonlyArray<T>): T | undefined {
   let best: T | undefined;
   for (const entry of entries) {
-    if (!model || entry.model !== model || !entry.available || !entry.runtime) continue;
+    if (!model || entry.model !== model || !entry.available || !entry.runtime || entry.runtime === SANDBOX_RUNTIME) continue;
     if (!best || rank(entry.runtime) < rank(best.runtime)) best = entry;
   }
   return best;
@@ -37,6 +40,7 @@ export function automaticEntries<T extends RuntimeEntry>(entries: ReadonlyArray<
   const at = new Map<string, number>();
   const result: T[] = [];
   for (const entry of entries) {
+    if (entry.runtime === SANDBOX_RUNTIME) continue;
     const index = at.get(entry.model);
     if (index === undefined) { at.set(entry.model, result.length); result.push(entry); continue; }
     const current = result[index];
@@ -50,7 +54,7 @@ export function automaticEntries<T extends RuntimeEntry>(entries: ReadonlyArray<
  *  own setup made for it (node_setup.go), so it does not count: setting the node up again on another runtime is what a
  *  model change does too. */
 export function choosesRuntime(node: CanvasNode): node is SessionNode {
-  return node.kind === 'session' && !mediaKindOf(node.agentKind) && !node.team && !node.agentRef;
+  return node.kind === 'session' && !mediaKindOf(node.agentKind) && !node.team && !node.agentRef && node.runtime !== SANDBOX_RUNTIME;
 }
 
 /** The reasoning-effort levels a runtime's entry for a model advertises (empty: none). */

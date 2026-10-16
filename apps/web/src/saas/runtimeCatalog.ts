@@ -16,8 +16,12 @@ export type SaaSRuntimeModel = {
 export function withPlanTag(label: string, model: { requiresUpgrade?: boolean }): string {
   return model.requiresUpgrade === true ? `${label} · Pro` : label;
 }
+/** The runtimes a node can be set up on: a team's runtimes, and the sandbox computer (a node that works in its own
+ *  isolated computer, with files, a shell and tests; never a team). */
+export type NodeRuntime = NodeTeamRuntime | 'sandbox';
+export const NODE_RUNTIMES: readonly NodeRuntime[] = [...NODE_TEAM_RUNTIMES, 'sandbox'];
 export type SaaSRuntimeDefinition = {
-  id: NodeTeamRuntime; name: string; available: boolean; configured: boolean;
+  id: NodeRuntime; name: string; available: boolean; configured: boolean;
   /** True when at least one model of this runtime advertises effort levels. Per-model levels still rule. */
   supportsEffortSelection: boolean; tools: NodeTeamTool[]; reason?: string;
   /** Present only when both the server and isolated worker advertise project execution. */
@@ -40,7 +44,7 @@ export type SaaSRuntimeStatus = {
 };
 
 /** Keep catalogs scoped to their advertised runtime. Missing runtime belongs only to legacy Pi. */
-export function runtimeModels(status: SaaSRuntimeStatus, runtime: NodeTeamRuntime): SaaSRuntimeModel[] {
+export function runtimeModels(status: SaaSRuntimeStatus, runtime: NodeRuntime): SaaSRuntimeModel[] {
   if (!Array.isArray(status.models)) throw new Error('Invalid runtime model catalog.');
   return status.models.filter(model => model && typeof model.id === 'string' && model.id.trim()
     && (model.runtime === runtime || (runtime === 'pi' && model.runtime === undefined)));
@@ -51,11 +55,11 @@ export function runtimeDefinitions(status: SaaSRuntimeStatus): SaaSRuntimeDefini
     configured: status.configured === true, supportsEffortSelection: false, tools: [], reason: status.reason }];
   if (!Array.isArray(status.runtimes)) throw new Error('Invalid runtime inventory.');
   const seen = new Set<string>();
-  return status.runtimes.filter(runtime => NODE_TEAM_RUNTIMES.includes(runtime?.id)).map(runtime => {
+  return status.runtimes.filter(runtime => NODE_RUNTIMES.includes(runtime?.id)).map(runtime => {
     if (seen.has(runtime.id) || !Array.isArray(runtime.tools)) throw new Error('Invalid runtime inventory.');
     seen.add(runtime.id);
     const workspace = runtime.workspace;
-    const workspaceValid = runtime.id === 'openai-agents'
+    const workspaceValid = (runtime.id === 'openai-agents' || runtime.id === 'sandbox')
       && workspace?.version === 1 && typeof workspace.available === 'boolean' && Number.isInteger(workspace.maxModelCalls)
       && workspace.maxModelCalls >= 2 && workspace.maxModelCalls <= 64;
     return { id: runtime.id, name: runtime.name || nodeTeamRuntimeLabel(runtime.id),

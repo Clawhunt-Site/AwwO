@@ -35,6 +35,7 @@ import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
 import { NodeModelSettings } from './NodeModelSettings';
+import { SANDBOX_RUNTIME } from './nodeRuntime';
 import { AssembleSettings } from './AssembleSettings';
 import type { ModelPaletteGroup } from './modelPalette';
 import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
@@ -71,6 +72,9 @@ export interface InspectorPanelProps {
   /** A hosted workspace's chat models, each once on the runtime AwwO runs it on (automaticGroups): the node's model is
    *  picked from these and its runtime is never shown (nodeRuntime.ts). Absent → the runtime picker of a local host. */
   modelGroups?: ReadonlyArray<ModelPaletteGroup>;
+  /** The models a node can run in its own sandbox computer (sandboxGroups); with any of them ready, the node's settings
+   *  offer the sandbox switch. */
+  sandboxGroups?: ReadonlyArray<ModelPaletteGroup>;
   modelsLoading?: boolean;
   modelsError?: string;
   onRetryModels?: () => void;
@@ -173,6 +177,7 @@ export function InspectorPanel({
   media,
   onRetryMedia,
   modelGroups,
+  sandboxGroups,
   modelsLoading = false,
   modelsError = '',
   onRetryModels,
@@ -254,6 +259,9 @@ export function InspectorPanel({
     bindingRef.current = false;
   }, [node.id]);
   const sessionDraft = draft.kind === 'session' ? draft : null;
+  const sandboxEntries = (sandboxGroups ?? []).flatMap(group => group.models);
+  const sandboxReady = sandboxEntries.some(entry => entry.available);
+  const sandboxNode = sessionDraft?.runtime === SANDBOX_RUNTIME;
   const formDraft = draft.kind === 'form' ? draft : null;
   const assembleDraft = draft.kind === 'assemble' ? draft : null;
   const mediaCatalogue = mediaCatalogueOf(media);
@@ -485,7 +493,12 @@ export function InspectorPanel({
               <dt>{locale === 'en' ? 'Model' : '模型'}</dt><dd><output aria-label={locale === 'en' ? 'Model' : '模型'}>{sessionDraft.model || (locale === 'en' ? 'Resolved by the server' : '由服务端解析')}</output></dd>
               <dt>{locale === 'en' ? 'Reasoning effort' : '推理强度'}</dt><dd><output aria-label={locale === 'en' ? 'Reasoning effort' : '推理强度'}>{sessionDraft.effort || (locale === 'en' ? 'Not set' : '未设置')}</output></dd>
             </dl> : modelGroups ? <div className="canvas-inspector-runtime">
-                <NodeModelSettings node={sessionDraft} groups={modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team)}
+                {sandboxReady || sandboxNode ? <label className="awwo-sandbox-switch">
+                  <input type="checkbox" checked={sandboxNode} disabled={busy || Boolean(sessionDraft.team) || (!sandboxNode && !sandboxReady)}
+                    onChange={event => editDraft(withSandbox(sessionDraft, event.target.checked, sandboxEntries))} />
+                  <span><strong>{t('inspector.sandbox')}</strong><small>{t(sessionDraft.team ? 'inspector.sandboxTeam' : 'inspector.sandboxHint')}</small></span>
+                </label> : null}
+                <NodeModelSettings node={sessionDraft} groups={sandboxNode && sandboxGroups ? sandboxGroups : modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team) || sandboxNode}
                   disabled={busy}
                   onChange={next => editDraft({ ...sessionDraft, ...next,
                     ...(sessionDraft.team && next.model !== sessionDraft.model ? { team: followNodeModel(sessionDraft.team, sessionDraft, { runtime: next.runtime }) } : {}) })} />
@@ -686,6 +699,15 @@ export function InspectorPanel({
       </footer>
     </aside>
   );
+}
+
+/** The node moved into its own sandbox computer, keeping its model where the sandbox offers it (else the sandbox's first
+ *  ready model), or back out to the runtime AwwO chooses. A reasoning level is not carried across. */
+export function withSandbox(node: SessionNode, on: boolean, entries: ReadonlyArray<{ runtime: string; model: string; available: boolean }>): SessionNode {
+  if (!on) return node.runtime === SANDBOX_RUNTIME ? { ...node, runtime: '', effort: '' } : node;
+  const ready = entries.filter(entry => entry.runtime === SANDBOX_RUNTIME && entry.available);
+  const model = ready.some(entry => entry.model === node.model) ? node.model : ready[0]?.model ?? node.model;
+  return { ...node, runtime: SANDBOX_RUNTIME, model, effort: '' };
 }
 
 function patchField(node: FormNode, fieldId: string, patch: Partial<FormField>): FormNode {

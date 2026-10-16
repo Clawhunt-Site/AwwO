@@ -1149,6 +1149,10 @@ const EN = {
   'assemble.alsoFile': 'Also deliver it as a file, for a sandbox node downstream',
   'assemble.fileName': 'File name',
   'assemble.issues': 'Fix before running: {issues}',
+  'inspector.sandbox': 'Run in a sandbox computer',
+  'inspector.sandboxHint': 'The node gets its own isolated computer: it reads its inputs as files, writes code, runs commands and tests (Node.js, Python, a headless Chromium, the REA code reader) and delivers real files. It makes several model calls and takes longer than a single answer.',
+  'inspector.sandboxTeam': 'A team runs on its members’ own runtimes; a sandbox node is a single agent.',
+  'tile.sandbox': 'Sandbox',
 } as const;
 
 export type CanvasTextKey = keyof typeof EN;
@@ -1850,6 +1854,10 @@ const ZH: Record<CanvasTextKey, string> = {
   'assemble.alsoFile': '同时作为文件交付，供下游的沙箱节点使用',
   'assemble.fileName': '文件名',
   'assemble.issues': '运行前需要修改：{issues}',
+  'inspector.sandbox': '在沙箱电脑里执行',
+  'inspector.sandboxHint': '这个节点获得自己的隔离电脑：把输入当作文件读取，写代码、运行命令和测试（Node.js、Python、无头 Chromium、REA 代码分析），然后交付真实的文件。它会多次调用模型，比一次性回答慢。',
+  'inspector.sandboxTeam': '团队由成员各自的运行时执行；沙箱节点只运行一个 Agent。',
+  'tile.sandbox': '沙箱',
 };
 
 const CATALOG: Record<UiLocale, Record<CanvasTextKey, string>> = { en: EN, zh: ZH };

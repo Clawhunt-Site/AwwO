@@ -13,15 +13,30 @@ import (
 )
 
 const (
-	runtimePI             = "pi"
-	runtimeOpenAIAgents   = "openai-agents"
+	runtimePI           = "pi"
+	runtimeOpenAIAgents = "openai-agents"
+	// runtimeSandbox is a node that works in its own sandbox computer: an OpenAI Agents worker in project-execution
+	// mode (AWWO_SANDBOX_AGENTS_URL), with files, a shell and its tests, chosen node by node. Plain openai-agents nodes
+	// keep running as single calls on their own worker.
+	runtimeSandbox        = "sandbox"
 	maxRuntimeModels      = 256
 	maxRuntimeHealthBytes = 512 * 1024
 )
 
 type runtimeCatalog map[string]piHealth
 
-func validRuntime(runtime string) bool { return runtime == runtimePI || runtime == runtimeOpenAIAgents }
+func validRuntime(runtime string) bool {
+	return runtime == runtimePI || runtime == runtimeOpenAIAgents || runtime == runtimeSandbox
+}
+
+// workerRuntime is the runtime the worker itself serves, as the run request names it: a sandbox run goes to an
+// OpenAI Agents worker, which knows itself as openai-agents.
+func workerRuntime(runtime string) string {
+	if runtime == runtimeSandbox {
+		return runtimeOpenAIAgents
+	}
+	return defaultRuntime(runtime)
+}
 func defaultRuntime(runtime string) string {
 	if runtime == "" {
 		return runtimeOpenAIAgents
@@ -45,7 +60,7 @@ func memberRuntime(t *nodeTeam, m teamMember) string {
 	return t.Runtime
 }
 func runtimeTools(runtime string) []string {
-	if runtime == runtimeOpenAIAgents {
+	if runtime == runtimeOpenAIAgents || runtime == runtimeSandbox {
 		return []string{"calculator", "current_time"}
 	}
 	return []string{}
@@ -104,6 +119,8 @@ func (a *App) runtimeEndpoint(runtime string) (string, string, error) {
 		endpoint, token = a.cfg.PIURL, a.cfg.PIToken
 	case runtimeOpenAIAgents:
 		endpoint, token = a.cfg.OpenAIAgentsURL, a.cfg.OpenAIAgentsToken
+	case runtimeSandbox:
+		endpoint, token = a.cfg.SandboxAgentsURL, a.cfg.SandboxAgentsToken
 	default:
 		return "", "", errors.New("Unsupported runtime")
 	}
@@ -115,6 +132,10 @@ func (a *App) runtimeEndpoint(runtime string) (string, string, error) {
 
 func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error) {
 	var h piHealth
+	if a.cfg.UserCredentials && runtime == runtimeSandbox {
+		// A sandbox runs on the operator's platform models; personal connections are not wired to it.
+		return h, errors.New("The sandbox computer is not available with personal model connections")
+	}
 	if a.cfg.UserCredentials {
 		if err := a.requirePersonalConnection(ctx, runtime); err != nil {
 			return h, err
@@ -175,6 +196,10 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	if !validWorkspaceCapability(runtime, h.Workspace) {
 		h.Workspace = nil
 	}
+	if runtime == runtimeSandbox && h.Workspace == nil {
+		// A sandbox node is nothing but its sandbox: a worker that cannot open one does not serve it.
+		return piHealth{}, errors.New("The sandbox computer is not available")
+	}
 	if a.cfg.LLMGateOnly {
 		var policy struct {
 			LLMGateOnly       bool            `json:"llmgateOnly"`
@@ -202,6 +227,10 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		if m.Runtime == "" && runtime == runtimePI {
 			m.Runtime = runtimePI
 		}
+		// The sandbox's worker is an OpenAI Agents worker and lists its models as that runtime's.
+		if runtime == runtimeSandbox && m.Runtime == runtimeOpenAIAgents {
+			m.Runtime = runtimeSandbox
+		}
 		if m.Runtime != runtime || m.ID == "" || len(m.ID) > 200 || len(m.Provider) > 200 || seen[m.ID] || !validEffortCatalog(m) {
 			return piHealth{}, errors.New("Runtime model catalog is invalid")
 		}
@@ -213,7 +242,10 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		if m.structuredOutputMalformed {
 			cleared = append(cleared, clearing{m.ID, "malformed"})
 		}
-		if runtime != runtimeOpenAIAgents && m.StructuredOutput {
+		if runtime == runtimeSandbox {
+			// A sandbox delivers through its published files and final JSON, never a provider schema.
+			m.StructuredOutput = false
+		} else if runtime != runtimeOpenAIAgents && m.StructuredOutput {
 			m.StructuredOutput = false
 			cleared = append(cleared, clearing{m.ID, "wrong_runtime"})
 		}
@@ -338,7 +370,13 @@ func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement,
 		}
 	}
 	snapshot := executionSnapshot{Runtime: runtime, Instructions: instructions, Model: model, Effort: effort, Budget: budget, Overhead: overhead, Team: resolved, Health: h, RuntimeHealth: used}
-	if resolved == nil && a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(runtime, h.Workspace) {
+	if runtime == runtimeSandbox && resolved != nil {
+		return executionSnapshot{}, invalidSetup("A sandbox node runs one agent, not a team")
+	}
+	// With a sandbox worker configured, only sandbox nodes get a sandbox; without one, an openai-agents worker that
+	// advertises project execution runs every node that way, as before.
+	if resolved == nil && a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(runtime, h.Workspace) &&
+		(runtime == runtimeSandbox || a.cfg.SandboxAgentsURL == "") {
 		snapshot.Workspace = &workspacePlan{Version: 1, MaxModelCalls: h.Workspace.MaxModelCalls, OutputFields: []outputContractField{}}
 	}
 	return snapshot, nil

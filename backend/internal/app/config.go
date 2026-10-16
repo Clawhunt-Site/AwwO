@@ -51,12 +51,14 @@ type Config struct {
 	UsageRetentionDays                                                                    int
 	Env, DatabaseURL, ListenAddr, PublicOrigin, PIURL, PIToken, AdminEmail, AdminPassword string
 	OpenAIAgentsURL, OpenAIAgentsToken                                                    string
-	SessionTTL, RunTimeout                                                                time.Duration
-	PIAdmissionWait                                                                       time.Duration
-	MaxBodyBytes                                                                          int64
-	RunArchiveMaxBytes                                                                    int64
-	AuthRequestsPerMinute                                                                 int
-	TrustedProxyCIDRs                                                                     []netip.Prefix
+	// The sandbox computer runtime (runtimeSandbox): an OpenAI Agents worker in project-execution mode.
+	SandboxAgentsURL, SandboxAgentsToken string
+	SessionTTL, RunTimeout               time.Duration
+	PIAdmissionWait                      time.Duration
+	MaxBodyBytes                         int64
+	RunArchiveMaxBytes                   int64
+	AuthRequestsPerMinute                int
+	TrustedProxyCIDRs                    []netip.Prefix
 	// StructuredContracts is the deployment switch for freezing structured delivery
 	// contracts into new graph snapshots. A worker capability alone freezes nothing.
 	// Turning it off stops new freezes without touching any workspace entitlement, so
@@ -173,6 +175,7 @@ func ConfigFromEnv() (Config, error) {
 	c.SMTPFrom = os.Getenv("AWWO_SMTP_FROM")
 	c.PIAdmissionWait = 5 * time.Second
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = os.Getenv("AWWO_OPENAI_AGENTS_URL"), os.Getenv("AWWO_OPENAI_AGENTS_TOKEN")
+	c.SandboxAgentsURL, c.SandboxAgentsToken = os.Getenv("AWWO_SANDBOX_AGENTS_URL"), os.Getenv("AWWO_SANDBOX_AGENTS_TOKEN")
 	for key, dst := range map[string]*time.Duration{"AWWO_SESSION_TTL": &c.SessionTTL, "AWWO_RUN_TIMEOUT": &c.RunTimeout, "AWWO_PI_SESSION_WAIT": &c.PIAdmissionWait} {
 		if s := os.Getenv(key); s != "" {
 			v, e := time.ParseDuration(s)
@@ -322,6 +325,22 @@ func (c Config) Validate() error {
 		}
 		if len(c.OpenAIAgentsToken) < 32 || strings.ContainsAny(c.OpenAIAgentsToken, "\r\n") {
 			return errors.New("AWWO_OPENAI_AGENTS_TOKEN must be at least 32 characters")
+		}
+	}
+	if (c.SandboxAgentsURL == "") != (c.SandboxAgentsToken == "") {
+		return errors.New("AWWO_SANDBOX_AGENTS_URL and AWWO_SANDBOX_AGENTS_TOKEN must be configured together")
+	}
+	if c.SandboxAgentsURL != "" {
+		u, e := url.Parse(c.SandboxAgentsURL)
+		if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return errors.New("invalid AWWO_SANDBOX_AGENTS_URL")
+		}
+		if len(c.SandboxAgentsToken) < 32 || strings.ContainsAny(c.SandboxAgentsToken, "\r\n") {
+			return errors.New("AWWO_SANDBOX_AGENTS_TOKEN must be at least 32 characters")
+		}
+		// The sandbox's model calls are admitted one by one through the workspace callback.
+		if c.WorkspaceCallbackURL == "" {
+			return errors.New("AWWO_SANDBOX_AGENTS_URL requires AWWO_WORKSPACE_CALLBACK_URL")
 		}
 	}
 	if strings.Contains(c.PublicOrigin, "example.com") && c.Env != "development" {

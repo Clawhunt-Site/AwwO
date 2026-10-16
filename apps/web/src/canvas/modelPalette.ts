@@ -2,7 +2,7 @@ import type { UiLocale } from '../locale';
 import { api, tenantPath } from '../saas/api';
 import { currentSaaSCanvas } from '../saas/canvasBridge';
 import { modelEffortCapability, runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeModel, type SaaSRuntimeStatus } from '../saas/runtimeCatalog';
-import type { NodeTeamRuntime } from './nodeTeam';
+import type { NodeRuntime } from '../saas/runtimeCatalog';
 import { automaticEntries, type EffortLevels } from './nodeRuntime';
 
 export type ModelProviderGroup = 'codex' | 'claude' | 'grok' | 'gemini' | 'deepseek' | 'qwen' | 'kimi' | 'glm'
@@ -13,7 +13,7 @@ export interface ModelPaletteSelection {
   /** Published model name without connection metadata; never used as a runtime selector. */
   displayName?: string;
   providerGroup: ModelProviderGroup;
-  runtime: NodeTeamRuntime;
+  runtime: NodeRuntime;
   model: string;
   available: boolean;
   effort?: string;
@@ -134,6 +134,15 @@ function effortsOf(model: SaaSRuntimeModel): Pick<ModelPaletteSelection, 'effort
  *  runtime itself. Groups keep their order and their availability. */
 export function automaticGroups(groups: ReadonlyArray<ModelPaletteGroup>): ModelPaletteGroup[] {
   return groups.map(group => ({ ...group, models: automaticEntries(group.models) }));
+}
+
+/** The models a node can run in its own sandbox computer (the 'sandbox' runtime), each once; none where the deployment
+ *  has no sandbox. Groups keep their order. */
+export function sandboxGroups(groups: ReadonlyArray<ModelPaletteGroup>): ModelPaletteGroup[] {
+  return groups.map(group => {
+    const models = group.models.filter(model => model.runtime === 'sandbox');
+    return { ...group, models, available: models.some(model => model.available) };
+  });
 }
 
 /** The effort levels each runtime's entry for a model advertises, read from a palette's entries. */

@@ -43,7 +43,7 @@ import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHos
   type RouteAssistant } from './assistantRouting';
 import { CanvasResults } from './CanvasResults';
 import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
-import { automaticGroups, paletteEfforts, readModelPalette, type ModelPaletteSelection } from './modelPalette';
+import { automaticGroups, paletteEfforts, readModelPalette, sandboxGroups, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
 import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, type CanvasPlanMedia, type CanvasPlanModelChoice } from './canvasPlan';
@@ -3678,6 +3678,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   // The model rail lists each model once, on the runtime AwwO runs it on (nodeRuntime.ts).
   const shelfGroups = useMemo(() => automaticGroups(palette?.groups ?? []), [palette?.groups]);
+  // The models a node can run in its own sandbox computer; a node gets there only through its settings' switch.
+  const sandboxShelf = useMemo(() => sandboxGroups(palette?.groups ?? []), [palette?.groups]);
   const modelShelf = canInitialize && !readOnly && !simple ? <ModelPersonaShelf modelsOnly
     configureModelsHref={personalCredentialsRequired ? accountURL('engines') : undefined}
     operatorManaged={!personalCredentialsRequired} groups={shelfGroups}
@@ -3741,7 +3743,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
       readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || busyNow.has(node.id) || exclusiveNow} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       media={canInitialize ? mediaState : undefined} onRetryMedia={() => setMediaRefresh(value => value + 1)}
-      modelGroups={canInitialize ? shelfGroups : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
+      modelGroups={canInitialize ? shelfGroups : undefined} sandboxGroups={canInitialize ? sandboxShelf : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
       onRetryModels={() => setPaletteRefresh(value => value + 1)}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
       onCreateCompany={!readOnly && onCreateCompany ? () => {

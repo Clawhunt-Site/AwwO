@@ -234,11 +234,16 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 		h   piHealth
 		err error
 	}
+	ids := []string{runtimePI, runtimeOpenAIAgents}
+	// The sandbox computer is listed only where a deployment configured one; elsewhere the catalogue is unchanged.
+	if a.cfg.SandboxAgentsURL != "" {
+		ids = append(ids, runtimeSandbox)
+	}
 	results := make(chan struct {
 		runtime string
 		discovery
-	}, 2)
-	for _, id := range []string{runtimePI, runtimeOpenAIAgents} {
+	}, len(ids))
+	for _, id := range ids {
 		go func(id string) {
 			h, err := a.probeRuntime(r.Context(), id)
 			results <- struct {
@@ -248,28 +253,28 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 		}(id)
 	}
 	found := map[string]discovery{}
-	for range 2 {
+	for range ids {
 		result := <-results
 		found[result.runtime] = result.discovery
 	}
 	models, runtimes := []map[string]any{}, []map[string]any{}
 	available, configured := false, false
-	for _, id := range []string{runtimePI, runtimeOpenAIAgents} {
+	for _, id := range ids {
 		result := found[id]
 		h := entitlement.apply(result.h)
 		_, _, configError := a.runtimeEndpoint(id)
 		// Effort selection is a per-model fact taken from the worker catalog, so
 		// the same runtime can advertise it for one profile and refuse it for another.
 		// The picker treats the levels as a closed enum ("select"), never free text.
-		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": result.err == nil && h.supportsEffortSelection(), "effortInputMode": "select", "tools": enabledRuntimeTools(h, id)}
-		if id == runtimeOpenAIAgents && a.cfg.WorkspaceCallbackURL != "" {
+		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents", runtimeSandbox: "Sandbox computer"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": result.err == nil && h.supportsEffortSelection(), "effortInputMode": "select", "tools": enabledRuntimeTools(h, id)}
+		if (id == runtimeOpenAIAgents && a.cfg.SandboxAgentsURL == "" || id == runtimeSandbox) && a.cfg.WorkspaceCallbackURL != "" {
 			descriptor["workspace"] = &workspaceCapability{Version: 1, Available: false, MaxModelCalls: defaultWorkspaceModelCalls}
 		}
 		if result.err != nil {
 			descriptor["reason"] = result.err.Error()
 		} else {
 			descriptor["defaultModel"] = h.defaultModel()
-			if a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(id, h.Workspace) {
+			if a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(id, h.Workspace) && (id == runtimeSandbox || a.cfg.SandboxAgentsURL == "") {
 				descriptor["workspace"] = h.Workspace
 			}
 			seen := map[string]bool{}
@@ -869,7 +874,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	} else {
 		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions)+outputContractReserve(snapshot), budget, overhead)
 	}
-	request := map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": defaultRuntime(snapshot.Runtime)}
+	request := map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": workerRuntime(snapshot.Runtime)}
 	if snapshot.Effort != "" {
 		request["effort"] = snapshot.Effort
 	}

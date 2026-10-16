@@ -289,6 +289,10 @@ func (a *App) creditRates(runtime, model string) (in, out int64, ok bool) {
 	if a.pricing == nil {
 		return 0, 0, false
 	}
+	if runtime == runtimeSandbox {
+		// A sandbox run's calls are its OpenAI Agents worker's, priced as that runtime's.
+		runtime = runtimeOpenAIAgents
+	}
 	price, found := a.pricing.Models[runtime+":"+model]
 	if !found || price.Rates.Input == nil || price.Rates.Output == nil {
 		return 0, 0, false

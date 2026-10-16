@@ -1,0 +1,179 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+)
+
+// The sandbox computer is an OpenAI Agents worker in project-execution mode, chosen node by node: its models become the
+// sandbox runtime's, a worker that cannot open a sandbox does not serve it, and the run request still names the
+// worker's own runtime.
+func TestSandboxRuntimeIsServedOnlyByAWorkspaceWorker(t *testing.T) {
+	withWorkspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { workspaceHealthWithLimit(w, 8) }))
+	defer withWorkspace.Close()
+	textOnly := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "fixture", "models": []map[string]any{{"id": "test-model", "runtime": runtimeOpenAIAgents, "maxContextTextBytes": 262144}}})
+	}))
+	defer textOnly.Close()
+	cfg := testConfig()
+	cfg.OpenAIAgentsURL, cfg.OpenAIAgentsToken = withWorkspace.URL, strings.Repeat("o", 32)
+	cfg.SandboxAgentsURL, cfg.SandboxAgentsToken = withWorkspace.URL, strings.Repeat("s", 32)
+	cfg.WorkspaceCallbackURL = "http://127.0.0.1:8087/api/internal/workspace-calls"
+	a := New(nil, cfg)
+	h, err := a.probeRuntime(context.Background(), runtimeSandbox)
+	if err != nil || len(h.Models) != 1 || h.Models[0].Runtime != runtimeSandbox || h.Workspace == nil {
+		t.Fatalf("sandbox catalogue %+v %v", h, err)
+	}
+	entitlement, _ := newModelEntitlement(false, nil)
+	sandbox, err := a.runtimeSnapshot(context.Background(), entitlement, runtimeCatalog{}, runtimeSandbox, "test-model", "", "Build.", nil)
+	if err != nil || sandbox.Workspace == nil || a.requireWorkspaceSnapshot(sandbox) != nil {
+		t.Fatalf("sandbox node got no sandbox: %+v %v", sandbox.Workspace, err)
+	}
+	// With a sandbox worker configured, a plain openai-agents node stays a single call even on a worker that could open
+	// a sandbox, and is never refused for lacking one.
+	plain, err := a.runtimeSnapshot(context.Background(), entitlement, runtimeCatalog{}, runtimeOpenAIAgents, "test-model", "", "Answer.", nil)
+	if err != nil || plain.Workspace != nil || a.requireWorkspaceSnapshot(plain) != nil {
+		t.Fatalf("plain node was moved into a sandbox: %+v %v", plain.Workspace, err)
+	}
+	if workerRuntime(runtimeSandbox) != runtimeOpenAIAgents || workerRuntime("") != runtimeOpenAIAgents || workerRuntime(runtimePI) != runtimePI {
+		t.Fatal("worker runtime mapping")
+	}
+	if !validRuntime(runtimeSandbox) || validRuntime("sandbox ") {
+		t.Fatal("sandbox runtime id")
+	}
+	a.cfg.SandboxAgentsURL = textOnly.URL
+	if _, err = a.probeRuntime(context.Background(), runtimeSandbox); err == nil {
+		t.Fatal("a worker without a sandbox served the sandbox runtime")
+	}
+	a.cfg.SandboxAgentsURL = ""
+	if _, _, err = a.runtimeEndpoint(runtimeSandbox); err == nil {
+		t.Fatal("an unconfigured sandbox had an endpoint")
+	}
+	// Without a sandbox worker, project execution keeps its old meaning: the openai-agents worker runs every node so.
+	legacy, err := a.runtimeSnapshot(context.Background(), entitlement, runtimeCatalog{}, runtimeOpenAIAgents, "test-model", "", "Answer.", nil)
+	if err != nil || legacy.Workspace == nil {
+		t.Fatalf("legacy project execution changed: %+v %v", legacy.Workspace, err)
+	}
+}
+
+func TestSandboxRuntimeConfiguration(t *testing.T) {
+	base := func() Config {
+		c := testConfig()
+		c.Env = "development"
+		return c
+	}
+	cases := map[string]func(*Config){
+		"url without token": func(c *Config) { c.SandboxAgentsURL = "http://127.0.0.1:8098" },
+		"token without url": func(c *Config) { c.SandboxAgentsToken = strings.Repeat("s", 32) },
+		"short token":       func(c *Config) { c.SandboxAgentsURL, c.SandboxAgentsToken = "http://127.0.0.1:8098", "short" },
+		"no callback": func(c *Config) {
+			c.SandboxAgentsURL, c.SandboxAgentsToken = "http://127.0.0.1:8098", strings.Repeat("s", 32)
+		},
+		"credentials in the url": func(c *Config) {
+			c.SandboxAgentsURL, c.SandboxAgentsToken, c.WorkspaceCallbackURL = "http://u@127.0.0.1:8098", strings.Repeat("s", 32), "http://127.0.0.1:8087/api/internal/workspace-calls"
+		},
+	}
+	for name, edit := range cases {
+		c := base()
+		edit(&c)
+		if c.Validate() == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	c := base()
+	c.SandboxAgentsURL, c.SandboxAgentsToken, c.WorkspaceCallbackURL = "http://127.0.0.1:8098", strings.Repeat("s", 32), "http://127.0.0.1:8087/api/internal/workspace-calls"
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A sandbox node's run goes to the sandbox worker in project-execution mode, naming the worker's own runtime, while a
+// plain openai-agents node on the same API still goes to its own worker as one call.
+func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) {
+	snapshot := workspaceFixtureSnapshot(t)
+	var sandboxRuns, plainRuns atomic.Int32
+	sandboxWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			workspaceHealthWithLimit(w, 4)
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(202)
+			return
+		}
+		var request struct {
+			Runtime   string           `json:"runtime"`
+			Workspace workspaceRequest `json:"workspace"`
+		}
+		if e := json.NewDecoder(r.Body).Decode(&request); e != nil || request.Runtime != runtimeOpenAIAgents || request.Workspace.MaxModelCalls != 4 {
+			t.Errorf("sandbox worker request runtime %q budget %d %v", request.Runtime, request.Workspace.MaxModelCalls, e)
+			w.WriteHeader(400)
+			return
+		}
+		sandboxRuns.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		callbackRequest(t, request.Workspace, map[string]any{"operation": "admit", "index": 1}, 200)
+		callbackRequest(t, request.Workspace, map[string]any{"operation": "settle", "index": 1, "status": "completed", "observability": json.RawMessage(observationFixture(3, 4))}, 200)
+		fmt.Fprint(w, "data: {\"type\":\"workspace_activity\",\"step\":1,\"tool\":\"workspace_exec\"}\n\n")
+		raw, _ := json.Marshal(map[string]any{"type": "completed", "text": "Tests pass.", "workspaceSnapshot": snapshot})
+		fmt.Fprintf(w, "data: %s\n\n", raw)
+	}))
+	defer sandboxWorker.Close()
+	plainWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "fixture", "models": []map[string]any{{"id": "test-model", "runtime": runtimeOpenAIAgents, "maxContextTextBytes": 262144, "messageOverheadBytes": 32}}})
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(202)
+			return
+		}
+		var request map[string]json.RawMessage
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		if _, has := request["workspace"]; has {
+			t.Error("a plain node was sent a workspace")
+		}
+		plainRuns.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		completePi(w, "One answer.")
+	}))
+	defer plainWorker.Close()
+	h := newHarness(t, plainWorker.URL)
+	h.a.cfg.OpenAIAgentsURL, h.a.cfg.OpenAIAgentsToken = plainWorker.URL, strings.Repeat("o", 32)
+	h.a.cfg.SandboxAgentsURL, h.a.cfg.SandboxAgentsToken = sandboxWorker.URL, strings.Repeat("s", 32)
+	h.a.cfg.WorkspaceCallbackURL = h.server.URL + "/api/internal/workspace-calls"
+	c, tid, _ := h.register(t, "sandbox-runtime@example.test")
+	ctx := context.Background()
+	runOn := func(runtime, operation string) map[string]any {
+		cid, aid, sid := h.fixture(t, c, tid)
+		if _, e := h.db.Exec(ctx, `UPDATE canvases SET document=jsonb_set(document,'{nodes,0,runtime}',to_jsonb($2::text)) WHERE id=$1`, cid, runtime); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := h.db.Exec(ctx, "UPDATE agents SET runtime=$2 WHERE id=$1", aid, runtime); e != nil {
+			t.Fatal(e)
+		}
+		run := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]any{"sessionId": sid, "prompt": "go", "operationId": operation}, 202)
+		return h.awaitRun(t, c, tid, run["id"].(string), "completed")
+	}
+	sandbox := runOn(runtimeSandbox, "sandbox-operation")
+	if sandbox["executionKind"] != "workspace" || sandboxRuns.Load() != 1 || plainRuns.Load() != 0 {
+		t.Fatalf("sandbox run: kind %v, sandbox %d, plain %d", sandbox["executionKind"], sandboxRuns.Load(), plainRuns.Load())
+	}
+	plain := runOn(runtimeOpenAIAgents, "plain-operation")
+	if plain["executionKind"] != "text" || sandboxRuns.Load() != 1 || plainRuns.Load() != 1 {
+		t.Fatalf("plain run: kind %v, sandbox %d, plain %d", plain["executionKind"], sandboxRuns.Load(), plainRuns.Load())
+	}
+	var priced int
+	if e := h.db.QueryRow(ctx, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1 AND status='completed'", tid).Scan(&priced); e != nil || priced != 2 {
+		t.Fatalf("model calls accounted %d %v", priced, e)
+	}
+}

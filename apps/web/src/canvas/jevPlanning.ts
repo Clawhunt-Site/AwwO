@@ -9,7 +9,8 @@ import { applyCanvasPlan, canvasPlanRevision, parseCanvasPlan, type AppliedCanva
 import type { PlanningMessage, PlanProgressReporter } from './canvasPlanning';
 import { deliveryProfiles, type DeliveryProfile } from './deliveryProfiles';
 
-export interface JevModelAssignment { ref: string; runtime: 'pi' | 'openai-agents'; model: string }
+/** Jev may give a building role the sandbox computer (it prefers project execution for building and testing). */
+export interface JevModelAssignment { ref: string; runtime: 'pi' | 'openai-agents' | 'sandbox'; model: string }
 export interface JevPlanResult {
   plan: CanvasPlan;
   modelAssignments: JevModelAssignment[];

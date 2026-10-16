@@ -26,6 +26,7 @@ const (
 )
 
 var assembleSlot = regexp.MustCompile(`\{\{in:([A-Za-z0-9_-]{1,64})\}\}`)
+
 // HTML tag names are case-insensitive in ASCII only, so the patterns spell their cases out: (?i) would also fold
 // letters such as ſ (long s), which no browser reads as an s.
 var assembleScriptClose = regexp.MustCompile(`</([sS][cC][rR][iI][pP][tT])`)
