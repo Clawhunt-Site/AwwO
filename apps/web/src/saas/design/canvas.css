@@ -335,7 +335,7 @@ html:root .saas-canvas-shell {
     &.is-blocked { border-color: color-mix(in srgb, var(--saas-warning-dot) 65%, var(--saas-border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--saas-warning-dot) 16%, transparent), var(--awwo-node-shadow); }
     /* The agent working now breathes in the live colour. */
     &.is-running { border-color: color-mix(in srgb, var(--saas-signal) 75%, var(--saas-border)); box-shadow: 0 0 0 3px var(--saas-signal-soft), var(--awwo-node-shadow); animation: awwo-signal-breathe 2.2s var(--saas-ease-in-out) infinite; }
-    /* Your own choice outranks run state; the dot and chip still carry it. */
+    /* Your own choice outranks run state; the dot and chip still carry it (a closed card that runs: its dot and glyph). */
     &.canvas-tile--selected, &.canvas-tile--focus { border-color: var(--saas-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--saas-accent) 20%, transparent), var(--awwo-node-shadow); animation: none; }
   }
   .canvas-root .awwo-node .canvas-tile-head { gap: 8px; }
@@ -366,7 +366,14 @@ html:root .saas-canvas-shell {
   /* Zoomed out (SessionTile sets data-zoom="far"), a state chip is unreadable and only truncates the title.
      The run states the card's own dot, ring and border show (running, done, failed, blocked) hide their chip
      visually, kept for assistive technology; the others (queued, reused, cancelled, a draft, a connection
-     still to confirm) have no other mark, so their chip stays, as a small coloured pill. */
+     still to confirm) have no other mark, so their chip stays, as a small coloured pill.
+     Up close the running chip steps aside too: the card breathes in the live colour, its glyph and dot take it,
+     and a node running on its own shows its stop button, beside which 「运行中」 pushed the title onto a second
+     line and clipped itself to 「运行…」 (2026-10-16). So does the queued chip beside the stop button, which
+     already says the node is in a run while it waits a moment for its turn. A chip with a note on the run
+     (data-detail: why a run that lost its stream still shows as running, in its title) stays in view. */
+  .canvas-root .awwo-node.is-compact .canvas-tile-badge.canvas-tile-badge--running:not([data-detail]),
+  .canvas-root .awwo-node.is-compact .canvas-tile-head:has(.awwo-card-stop) .canvas-tile-badge.canvas-tile-badge--waiting:not([data-detail]),
   .canvas-root .awwo-node.is-compact[data-zoom='far'] .canvas-tile-badge:is(.canvas-tile-badge--running, .canvas-tile-badge--done, .canvas-tile-badge--failed, .canvas-tile-badge--blocked) {
     position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -122,6 +124,33 @@ describe('AwwO conversational cards', () => {
     // An open card draws its own level of detail and is never marked.
     rerender(<SessionTile node={node()} scale={0.3} focused={false} run={blocked} />);
     expect(tile()).not.toHaveAttribute('data-zoom');
+  });
+
+  it('lets a closed card that runs keep its title on one line, its chip still read by assistive technology', () => {
+    // jsdom has no layout. In a real browser (2026-10-16) 「运行中」 beside the stop button pushed a five-character title
+    // onto a second line and clipped itself to 「运行…」; the rule that steps the chip aside visually is checked.
+    const css = readFileSync(resolve(process.cwd(), 'src/saas/design/canvas.css'), 'utf8');
+    const hidden = /([^{}]+)\{\s*position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset\(50%\);/.exec(css)?.[1] ?? '';
+    const selectors = hidden.replace(/\/\*[\s\S]*?\*\//g, '').split(',').map(selector => selector.trim());
+    expect(selectors).toContain('.canvas-root .awwo-node.is-compact .canvas-tile-badge.canvas-tile-badge--running:not([data-detail])');
+    expect(selectors).toContain('.canvas-root .awwo-node.is-compact .canvas-tile-head:has(.awwo-card-stop) .canvas-tile-badge.canvas-tile-badge--waiting:not([data-detail])');
+    const bound = node({ binding: { companyId: 'c', agentId: 'a', agentName: '前端' } });
+    for (const [state, label] of [['running', '运行中'], ['waiting', '排队']] as const) {
+      cleanup();
+      render(<SessionTile node={bound} compact scale={1} focused={false} run={{ state }} onStopNode={vi.fn()} />);
+      const head = screen.getByTestId('canvas-tile-frontend').querySelector('.canvas-tile-head')!;
+      expect(within(head as HTMLElement).getByRole('button', { name: '停下这个组件' })).toHaveClass('awwo-card-stop');
+      const chip = screen.getByTestId('canvas-tile-run-frontend');
+      expect(chip).toHaveClass(`canvas-tile-badge--${state}`);
+      expect(chip).toHaveTextContent(label);
+      expect(chip).not.toHaveAttribute('data-detail');
+    }
+    // A run that lost its stream before it ended still shows as running; its chip keeps the reason in view, as its title.
+    cleanup();
+    render(<SessionTile node={bound} compact scale={1} focused={false} run={{ state: 'running', unconfirmed: true, detail: 'recovery_settlement_unconfirmed' }} onStopNode={vi.fn()} />);
+    const noted = screen.getByTestId('canvas-tile-run-frontend');
+    expect(noted).toHaveAttribute('data-detail', 'true');
+    expect(noted.getAttribute('title')).not.toBe(noted.textContent);
   });
 
   it('localizes a persisted recovery code in the run badge and title', () => {

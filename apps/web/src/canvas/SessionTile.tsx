@@ -841,6 +841,8 @@ export const SessionTile = memo(function SessionTile({
           <span
             className={`canvas-tile-badge canvas-tile-badge--${run!.state}`}
             data-testid={`canvas-tile-run-${nodeId}`}
+            // A note on the run (why a run that lost its stream still shows as running) keeps the chip in view, its title.
+            data-detail={runDetail ? 'true' : undefined}
             title={runDetail || badge}
           >
             {badge}
