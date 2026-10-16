@@ -47,7 +47,8 @@ func TestEarlierTaskEndingsArePlain(t *testing.T) {
 		{"completed", "", "completed"}, {"cancelled", "", "stopped by the user"}, {"interrupted", "", "service restarted"},
 		{"failed", "computer_busy", "never started"}, {"failed", "quota_exceeded", "calls for the day ran out"},
 		{"failed", "premium_quota_exceeded", "outside the user's allowance"}, {"failed", "", "failed"},
-		{"failed", "something_new", "failed (something_new)"},
+		{"failed", "something_new", "failed (something_new)"}, {"failed", "computer_task_timeout", "ran out of its time"},
+		{"failed", "computer_call_budget", "used all of its model calls"}, {"failed", "computer_tool_budget", "more tool calls at once"},
 	} {
 		if got := earlierTaskEnding(c.status, c.code); !strings.Contains(got, c.want) {
 			t.Fatalf("%s/%s: %q lacks %q", c.status, c.code, got, c.want)

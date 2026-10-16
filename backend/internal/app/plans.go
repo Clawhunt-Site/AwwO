@@ -171,7 +171,7 @@ func accountPlanUsage(ctx context.Context, q querier, userID, plannerModel strin
 	var u planUsage
 	err := q.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM model_invocations WHERE billed_user_id=$1 AND status='running'),
-		(SELECT count(*) FROM model_invocations mi WHERE mi.billed_user_id=$1 AND mi.credit_reserve IS NULL AND mi.created_at>=`+todayUTC+` AND `+countsTowardsDaily("$2")+`),
+		(SELECT `+dailyCalls("$2", "true")+` FROM model_invocations mi WHERE mi.billed_user_id=$1 AND mi.credit_reserve IS NULL AND mi.created_at>=`+todayUTC+`),
 		(SELECT count(*) FROM media_generations g WHERE g.billed_user_id=$1 AND g.created_at>=`+todayUTC+` AND `+generationCounts+`)`, userID, plannerModel).Scan(&u.Running, &u.FreeToday, &u.MediaToday)
 	return u, err
 }

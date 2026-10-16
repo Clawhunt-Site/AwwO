@@ -261,15 +261,15 @@ func invocationFailure(status, code string) string {
 		return "cancelled"
 	}
 	switch code {
-	case "run_timeout", "team_timeout":
+	case "run_timeout", "team_timeout", "computer_model_cut":
 		return "timeout"
-	case "runtime_failed", "model_refused", "provider_auth_failed", "provider_rate_limited", "provider_unavailable":
+	case "runtime_failed", "model_refused", "provider_auth_failed", "provider_rate_limited", "provider_unavailable", "computer_model_provider":
 		return "provider"
-	case "invalid_runtime_event", "inconsistent_runtime_output", "output_limit", "invalid_canvas_plan", "reasoning_only_output":
+	case "invalid_runtime_event", "inconsistent_runtime_output", "output_limit", "invalid_canvas_plan", "reasoning_only_output", "computer_model_answer", "computer_model_protocol":
 		return "protocol"
 	case "runtime_session_busy", "runtime_rejected":
 		return "capacity"
-	case "runtime_unavailable", "runtime_stream_ended":
+	case "runtime_unavailable", "runtime_stream_ended", "computer_model_transport":
 		return "transport"
 	case "database_unavailable", "event_persistence_failed", "turn_persistence_failed", "accounting_commit_failed":
 		return "persistence"

@@ -58,6 +58,51 @@ func computerWorkerCode(code string) string {
 	return code
 }
 
+// computerStopped ends a task whose context ended: the user's stop (cancelled), or the API shutting down under it
+// (interrupted, as Start finds a task a crash left, which gives its calls back: direct_task_refund.go).
+func (a *App) computerStopped(tid, rid string) {
+	a.mu.Lock()
+	closing := a.closed
+	a.mu.Unlock()
+	if closing {
+		a.finish(tid, rid, "interrupted", "", "API restarted before completion")
+		return
+	}
+	a.finish(tid, rid, "cancelled", "", "")
+}
+
+// computerFailureCode is a failed task's error for the broker's own code: a task that ran into its own limits says
+// which, so it reads plainly and is never taken for a platform failure (direct_task_refund.go); any other failure is
+// computer_execution_failed.
+func computerFailureCode(worker string) string {
+	switch worker {
+	case "TIMEOUT":
+		return "computer_task_timeout"
+	case "MODEL_BUDGET_EXCEEDED":
+		return "computer_call_budget"
+	case "TOOL_BUDGET_EXCEEDED":
+		return "computer_tool_budget"
+	}
+	return "computer_execution_failed"
+}
+
+// computerArtifactName is a delivered file's name as stored: a name past cleanName's 200 bytes (a Chinese title of 67
+// characters is) keeps its extension and as much of the rest as fits, instead of failing the whole task.
+func computerArtifactName(name string) string {
+	if len(name) <= 200 {
+		return name
+	}
+	ext := path.Ext(name)
+	if len(ext) > 32 {
+		ext = ""
+	}
+	stem, cut := strings.TrimSuffix(name, ext), 200-len(ext)
+	for cut > 0 && !utf8.RuneStart(stem[cut]) {
+		cut--
+	}
+	return stem[:cut] + ext
+}
+
 // computerRefusal is the worker's error code for a task it would not start.
 func computerRefusal(response *http.Response) string {
 	stop := time.AfterFunc(computerRefusalWait, func() { response.Body.Close() })
@@ -360,7 +405,7 @@ func (a *App) createComputerRun(w http.ResponseWriter, r *http.Request) {
 	a.createRun(w, next)
 }
 func (a *App) listComputerRuns(w http.ResponseWriter, r *http.Request) {
-	items, more, e := knowledgeRows(r.Context(), a.db, 1<<20, 40, `SELECT jsonb_build_object('id',r.id,'status',r.status,'prompt',r.prompt,'createdAt',r.created_at,'updatedAt',r.updated_at) FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND s.canvas_id=$2 AND s.kind='computer' ORDER BY r.created_at DESC,r.id LIMIT 41`, r.PathValue("tenantId"), r.PathValue("id"))
+	items, more, e := knowledgeRows(r.Context(), a.db, 1<<20, 40, `SELECT jsonb_build_object('id',r.id,'status',r.status,'error',r.error,'prompt',r.prompt,'createdAt',r.created_at,'updatedAt',r.updated_at) FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND s.canvas_id=$2 AND s.kind='computer' ORDER BY r.created_at DESC,r.id LIMIT 41`, r.PathValue("tenantId"), r.PathValue("id"))
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -373,7 +418,7 @@ const computerArtifactJSON = `jsonb_build_object('id',id,'name',name,'size',size
 
 func (a *App) getComputerRun(w http.ResponseWriter, r *http.Request) {
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
-	value, e := oneJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',r.id,'status',r.status,'prompt',r.prompt,'output',r.output,'error',r.error,'createdAt',r.created_at,'updatedAt',r.updated_at,'canRespond',r.actor_id=$3 AND r.status='running' AND m.role IN ('owner','admin','member'),'canCancel',r.actor_id=$3 AND r.status IN ('queued','running') AND m.role IN ('owner','admin','member')) FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id JOIN memberships m ON m.tenant_id=r.tenant_id AND m.user_id=$3 WHERE r.tenant_id=$1 AND r.id=$2 AND s.kind='computer'`, tid, id, currentUser(r).ID)
+	value, e := oneJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',r.id,'status',r.status,'prompt',r.prompt,'output',r.output,'error',r.error,'createdAt',r.created_at,'updatedAt',r.updated_at,'canRespond',r.actor_id=$3 AND r.status='running' AND m.role IN ('owner','admin','member'),'canCancel',r.actor_id=$3 AND r.status IN ('queued','running') AND m.role IN ('owner','admin','member'),'calls',(SELECT count(*) FROM model_invocations c WHERE c.tenant_id=r.tenant_id AND c.run_id=r.id AND NOT (c.status<>'running' AND c.cost_status='not_incurred')),'refundedCalls',CASE WHEN `+refundedRun+` THEN (SELECT count(*) FROM model_invocations c WHERE c.tenant_id=r.tenant_id AND c.run_id=r.id AND c.credit_reserve IS NULL AND NOT (c.status<>'running' AND c.cost_status='not_incurred')) ELSE 0 END) FROM runs r JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id JOIN memberships m ON m.tenant_id=r.tenant_id AND m.user_id=$3 WHERE r.tenant_id=$1 AND r.id=$2 AND s.kind='computer'`, tid, id, currentUser(r).ID)
 	if e != nil {
 		a.replyOne(w, nil, e, 200)
 		return
@@ -495,7 +540,11 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			return
 		}
 		if !a.computerRunActive(ctx, tid, rid) {
-			a.finish(tid, rid, "failed", "", "execution_revoked")
+			if ctx.Err() != nil {
+				a.computerStopped(tid, rid)
+			} else {
+				a.finish(tid, rid, "failed", "", "execution_revoked")
+			}
 			return
 		}
 		var ev struct {
@@ -567,6 +616,7 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			}
 		case "computer_artifact":
 			files++
+			ev.Name = computerArtifactName(ev.Name)
 			data, err := base64.StdEncoding.Strict().DecodeString(ev.Content)
 			fileBytes += len(data)
 			if ev.Path == "" {
@@ -624,7 +674,7 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			return
 		case "failed":
 			a.log.Warn("managed execution task failed", "run", rid, "code", computerWorkerCode(ev.Code))
-			code := "computer_execution_failed"
+			code := computerFailureCode(computerWorkerCode(ev.Code))
 			lease.mu.Lock()
 			if lease.refusal != "" {
 				code = lease.refusal
@@ -633,7 +683,17 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			a.finish(tid, rid, "failed", "", code)
 			return
 		case "cancelled":
-			a.finish(tid, rid, "cancelled", "", "")
+			// The user's stop cancels the task's context before the broker hears of it (cancelRun, then the deferred
+			// DELETE): a task the broker reports cancelled while its context is live was stopped by the broker itself,
+			// shutting down or restarting, the platform's doing (code review 2026-10-16).
+			switch refusal := lease.refused(); {
+			case ctx.Err() != nil:
+				a.computerStopped(tid, rid)
+			case refusal != "":
+				a.finish(tid, rid, "failed", "", refusal)
+			default:
+				a.finish(tid, rid, "interrupted", "", "execution service restarted before completion")
+			}
 			return
 		default:
 			e = errors.New("invalid_computer_event")
@@ -643,11 +703,32 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			return
 		}
 	}
-	if ctx.Err() != nil {
-		a.finish(tid, rid, "cancelled", "", "")
-	} else {
+	switch refusal := lease.refused(); {
+	case ctx.Err() != nil:
+		a.computerStopped(tid, rid)
+	case refusal != "":
+		// One of its calls was refused by an allowance or a plan: that is how it ended, whatever the stream did.
+		a.finish(tid, rid, "failed", "", refusal)
+	case total >= computerBrokerEventsNear:
+		// The broker cuts a task's stream without a last event once its events pass 16 MiB (LIMITS.events in
+		// apps/openmaus-worker/protocol.ts): the task's own output, not the platform failing (security review 2026-10-16).
+		a.finish(tid, rid, "failed", "", "computer_output_limit")
+	default:
 		a.finish(tid, rid, "failed", "", "computer_stream_ended")
 	}
+}
+
+// computerBrokerEventsNear is how much of a task's events, read here, makes a stream that ended without a last event
+// the broker's own output limit rather than it failing: the broker stops before an event that would pass 16 MiB of event
+// lines, one event may be up to 3 MiB, and what it still held for this side when it cut, up to 3 MiB more, is lost
+// (LIMITS.events and LIMITS.event), so a cut can come after 10 MiB read here (security review 2026-10-16).
+var computerBrokerEventsNear = 9 << 20 // a variable for the tests only
+
+// refused is the allowance or plan refusal one of the task's calls met, if any.
+func (l *computerLease) refused() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.refusal
 }
 func (a *App) respondComputer(w http.ResponseWriter, r *http.Request) {
 	var b struct {

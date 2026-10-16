@@ -145,6 +145,11 @@ func (a *App) Start(ctx context.Context) error {
 		if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", p.t, p.id, `{"type":"interrupted"}`); e != nil {
 			return e
 		}
+		// A direct task the restart cut gives its calls back to the daily total (direct_task_refund.go).
+		if _, e = tx.Exec(ctx, `INSERT INTO refunded_runs(tenant_id,run_id,reason) SELECT r.tenant_id,r.id,'interrupted' FROM runs r
+			JOIN node_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id WHERE r.tenant_id=$1 AND r.id=$2 AND s.kind='computer' ON CONFLICT DO NOTHING`, p.t, p.id); e != nil {
+			return e
+		}
 	}
 	if _, e = tx.Exec(ctx, "UPDATE run_turns SET status='interrupted',error='API restarted before completion',updated_at=now() WHERE status IN ('queued','running')"); e != nil {
 		return e

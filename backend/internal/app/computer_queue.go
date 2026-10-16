@@ -100,7 +100,7 @@ func (a *App) startComputerTask(ctx context.Context, tid, rid string, payload ma
 		response, e := a.computerRequest(ctx, "POST", "/internal/runs", payload)
 		if e != nil {
 			if ctx.Err() != nil {
-				a.finish(tid, rid, "cancelled", "", "")
+				a.computerStopped(tid, rid)
 			} else {
 				a.finish(tid, rid, "failed", "", "computer_unavailable")
 			}
@@ -124,12 +124,16 @@ func (a *App) startComputerTask(ctx context.Context, tid, rid string, payload ma
 			if time.Since(queuedAt) < limit {
 				select {
 				case <-ctx.Done():
-					a.finish(tid, rid, "cancelled", "", "")
+					a.computerStopped(tid, rid)
 					return nil, false
 				case <-time.After(computerQueuePoll):
 				}
 				if !a.computerRunActive(ctx, tid, rid) {
-					a.finish(tid, rid, "failed", "", "execution_revoked")
+					if ctx.Err() != nil {
+						a.computerStopped(tid, rid)
+					} else {
+						a.finish(tid, rid, "failed", "", "execution_revoked")
+					}
 					return nil, false
 				}
 				continue

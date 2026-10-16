@@ -43,7 +43,7 @@ func (a *App) routeUsageWithStored(ctx context.Context, tid, uid string) (routeA
 	var interested bool
 	var status string
 	if e := a.db.QueryRow(ctx, `SELECT t.status,t.max_runs_per_day,t.route_limits,
-		(SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=t.id AND mi.created_at>=`+todayUTC+` AND `+countsTowardsDaily("$3")+`),
+		(SELECT `+dailyCalls("$3", "true")+` FROM model_invocations mi WHERE mi.tenant_id=t.id AND mi.created_at>=`+todayUTC+`),
 		(SELECT count(*) FROM media_generations g WHERE g.tenant_id=t.id AND g.created_at>=`+todayUTC+` AND `+generationCounts+`),
 		(SELECT count(*) FROM media_generations g WHERE g.tenant_id=t.id AND g.billed_user_id IS NULL AND g.created_at>=`+todayUTC+` AND `+generationCounts+`),
 		EXISTS(SELECT 1 FROM upgrade_interests WHERE tenant_id=t.id AND user_id=$2)

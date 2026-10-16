@@ -447,7 +447,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if e = tx.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$1 AND mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+countsTowardsDaily("$2")+")+(SELECT count(*) FROM media_generations g WHERE g.tenant_id=$1 AND g.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+generationCounts+")", tid, a.cfg.PlannerModel).Scan(&today); e != nil {
+	if e = tx.QueryRow(r.Context(), "SELECT (SELECT "+dailyCalls("$2", "true")+" FROM model_invocations mi WHERE mi.tenant_id=$1 AND mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')+(SELECT count(*) FROM media_generations g WHERE g.tenant_id=$1 AND g.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND "+generationCounts+")", tid, a.cfg.PlannerModel).Scan(&today); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -1305,6 +1305,20 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 		runRuntime = snapshotRuntime(snap)
 		if snap.Team != nil && runKind != "graph" {
 			runKind = "team"
+		}
+	}
+	// A direct task the platform failed or interrupted gives its calls back (direct_task_refund.go): noted in the
+	// transaction that moves it there, so a stop that wins the race leaves no refund behind.
+	if runKind == "computer" && (status == "interrupted" || (status == "failed" && computerRefundable(code))) {
+		reason := "failed"
+		switch {
+		case status == "interrupted":
+			reason = "interrupted"
+		case code == "computer_stream_ended":
+			reason = "dropped" // the execution service dropped the task: its own evidence (refundEvidence)
+		}
+		if _, e = tx.Exec(ctx, "INSERT INTO refunded_runs(tenant_id,run_id,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", tid, id, reason); e != nil {
+			return e
 		}
 	}
 	event := map[string]string{"type": status}

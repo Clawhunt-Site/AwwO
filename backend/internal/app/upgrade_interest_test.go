@@ -68,10 +68,10 @@ func TestPostgresRouteUsageAndUpgradeInterest(t *testing.T) {
 	if u = usage(ca, ta); u["interested"] != true {
 		t.Fatal("interest not reflected in the meter", u)
 	}
-	// The meter counts as admission does: a call that cost nothing gives its route allowance back but
-	// still spent the daily total.
+	// The meter counts as admission does: a call that never reached a model gives back its route allowance and, since
+	// 2026-10-16 (owner), its place in the daily total.
 	exec("UPDATE model_invocations SET status='failed',cost_status='not_incurred' WHERE tenant_id=$1 AND model_id LIKE 'bedrock.%'", ta)
-	if u = usage(ca, ta); !reflect.DeepEqual(u["routes"].(map[string]any)["bedrock"], allowance(1, 0)) || !reflect.DeepEqual(u["daily"], allowance(30, 4)) {
+	if u = usage(ca, ta); !reflect.DeepEqual(u["routes"].(map[string]any)["bedrock"], allowance(1, 0)) || !reflect.DeepEqual(u["daily"], allowance(30, 3)) {
 		t.Fatal("not_incurred call", u)
 	}
 	// A second press within ten minutes is the same request, but it adds what has run out since.
@@ -84,7 +84,7 @@ func TestPostgresRouteUsageAndUpgradeInterest(t *testing.T) {
 	}
 	// A later occasion counts; a spent daily total is recorded, a route closed with 0 never is.
 	exec("UPDATE upgrade_interests SET last_at=last_at-interval '11 minutes' WHERE tenant_id=$1", ta)
-	exec(`UPDATE tenants SET max_runs_per_day=6,route_limits='{"gate":3,"bedrock":1,"media":0}'::jsonb WHERE id=$1`, ta)
+	exec(`UPDATE tenants SET max_runs_per_day=5,route_limits='{"gate":3,"bedrock":1,"media":0}'::jsonb WHERE id=$1`, ta)
 	if v := interest(ca, map[string]any{}, 200); v["clicks"] != 2.0 {
 		t.Fatal("a later occasion not counted", v)
 	}
@@ -130,7 +130,7 @@ func TestPostgresRouteUsageAndUpgradeInterest(t *testing.T) {
 	}
 	// A generation its provider accepted counts in the media route and the daily total, even on a closed route.
 	exec("INSERT INTO media_generations(run_id,tenant_id,model,provider_accepted) VALUES($1,$2,'rh.seedream-v5-pro',true)", randomID(), ta)
-	if u = usage(ca, ta); !reflect.DeepEqual(u["routes"].(map[string]any)["media"], allowance(0, 1)) || !reflect.DeepEqual(u["daily"], allowance(6, 7)) {
+	if u = usage(ca, ta); !reflect.DeepEqual(u["routes"].(map[string]any)["media"], allowance(0, 1)) || !reflect.DeepEqual(u["daily"], allowance(5, 6)) {
 		t.Fatal("generation in the meter", u)
 	}
 	// A suspended workspace still shows its meter but takes no interest.

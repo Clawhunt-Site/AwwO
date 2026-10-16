@@ -385,7 +385,7 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 func (a *App) admitFreeInvocation(ctx context.Context, tx pgx.Tx, tid, model string, concurrent, daily int, routes []byte, operatorPaid bool) (bool, error) {
 	var active, today int
 	// Image and video generations spend the same daily run quota.
-	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE mi.status='running'),count(*) FILTER(WHERE mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND `+countsTowardsDaily("$2")+`)
+	if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE mi.status='running'),`+dailyCalls("$2", "mi.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'")+`
 		+(SELECT count(*) FROM media_generations g WHERE g.tenant_id=$1 AND g.created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND `+generationCounts+`) FROM model_invocations mi WHERE mi.tenant_id=$1`, tid, a.cfg.PlannerModel).Scan(&active, &today); e != nil {
 		return false, e
 	}

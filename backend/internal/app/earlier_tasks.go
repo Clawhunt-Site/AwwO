@@ -134,6 +134,12 @@ func earlierTaskEnding(status, code string) string {
 		return "never started or stopped: the chosen model was outside the user's allowance"
 	case "computer_output_limit":
 		return "failed: its output went over the size limit"
+	case "computer_task_timeout":
+		return "stopped: it ran out of its time before it finished"
+	case "computer_call_budget":
+		return "stopped: it used all of its model calls before it finished"
+	case "computer_tool_budget":
+		return "stopped: a model answer asked for more tool calls at once than allowed"
 	case "":
 		return "failed"
 	}

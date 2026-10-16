@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -302,6 +303,44 @@ func jsonStringForms(s string) [][]byte {
 	return forms
 }
 
+// computerModelFailure is the ledger's code for a model call the worker answered with an error (apps/computer-model.ts):
+// cut off (499, the worker's own time limit); the provider or the call's machinery failing (computerProviderFault); the
+// model's own answer not holding (reason answer, or stream: a Bedrock answer the model's output broke, such as too many
+// tool calls at once or a malformed tool call); or not known (computer_model_failed: a request the provider refused
+// before any work, and any non-Bedrock provider error, which the worker does not tell apart yet). Only the first two are
+// the platform's faults (invocationFailure, direct_task_refund.go; security review 2026-10-16).
+func computerModelFailure(status int, body []byte) string {
+	var reply struct {
+		Error struct {
+			Code   string `json:"code"`
+			Reason string `json:"reason"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &reply)
+	switch {
+	case status == 499 || reply.Error.Code == "CANCELLED":
+		return "computer_model_cut"
+	case reply.Error.Code == "PROVIDER_ERROR" && (reply.Error.Reason == "answer" || reply.Error.Reason == "stream"):
+		return "computer_model_answer"
+	case reply.Error.Code == "PROVIDER_ERROR" && computerProviderFault(reply.Error.Reason):
+		return "computer_model_provider"
+	}
+	return "computer_model_failed"
+}
+
+// computerProviderFault says whether a Bedrock call's failure label (apps/pi-worker/bedrock-call.mjs, runner.mjs) is the
+// platform's side: the provider throttling, failing or refusing our access (bedrock:<status>:<type> with 401, 403, 404,
+// 408, 424, 429 or 5xx), or the call's machinery (bridge-error:…, credentials, child…). A request the provider refused
+// as invalid (400 and other 4xx) is not.
+func computerProviderFault(reason string) bool {
+	if rest, ok := strings.CutPrefix(reason, "bedrock:"); ok {
+		code, _, _ := strings.Cut(rest, ":")
+		n, err := strconv.Atoi(code)
+		return err == nil && (n >= 500 || n == 401 || n == 403 || n == 404 || n == 408 || n == 424 || n == 429)
+	}
+	return reason == "credentials" || strings.HasPrefix(reason, "bridge-error:") || strings.HasPrefix(reason, "child")
+}
+
 // computerWorkerBodyLimit is what the worker reads of one call's body (MAX_BYTES in apps/computer-model.ts).
 const computerWorkerBodyLimit = 512 << 10
 
@@ -455,19 +494,35 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		if dialFailed(e) {
 			facts.Admission = "rejected_before_start"
 		}
+		code = "computer_model_transport"
+		if ctx.Err() != nil {
+			// Cut by its own limit (computerModelCallTimeout), by its caller giving up on it (the task's own idle limit,
+			// a stop) or by its task ending: not the platform failing, as a task's own time limit is not (security
+			// review 2026-10-16). A worker that cannot be reached or drops the connection is.
+			code = "computer_model_cut"
+		}
 		fail(w, 502, "computer_model_transport", "Model response is unavailable; the call will not be retried")
 		return
 	}
 	defer response.Body.Close()
 	switch response.StatusCode {
-	case 400, 401, 413, 422, 429, 503:
-		// The worker or the provider refused the call before any model work.
+	case 400, 401, 409, 413, 415, 422, 429, 503:
+		// The worker or the provider refused the call before any model work (409: the worker already holds a call of
+		// this run or session): it never reached a model, so it never counts (owner 2026-10-16).
 		facts.Admission = "rejected_before_start"
 	}
 	data, e := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
 	facts.Ended = time.Now()
 	facts.OutputBytes = int64(len(data))
 	if e != nil || len(data) > 2<<20 || response.StatusCode != 200 {
+		switch {
+		case e != nil && ctx.Err() != nil:
+			code = "computer_model_cut"
+		case e != nil:
+			code = "computer_model_transport" // the worker's answer broke off
+		default:
+			code = computerModelFailure(response.StatusCode, data)
+		}
 		fail(w, 502, "computer_model_failed", "The selected model could not complete this call")
 		return
 	}
@@ -476,6 +531,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		Observability json.RawMessage `json:"observability"`
 	}
 	if json.Unmarshal(data, &result) != nil || !json.Valid(result.Completion) {
+		code = "computer_model_protocol"
 		fail(w, 502, "computer_model_protocol", "Model response was invalid")
 		return
 	}
@@ -492,6 +548,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		Usage json.RawMessage `json:"usage"`
 	}
 	if json.Unmarshal(result.Completion, &answer) != nil || len(answer.Choices) < 1 || len(answer.Choices) > 4 {
+		code = "computer_model_protocol"
 		fail(w, 502, "computer_model_protocol", "Model response was invalid")
 		return
 	}

@@ -86,11 +86,13 @@ func (c Config) validatePlannerSettings() error {
 const operatorPaidRun = `EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=mi.tenant_id AND r.id=mi.run_id AND r.execution_snapshot @> '{"operatorPaid":true}'::jsonb)`
 
 // countsTowardsDaily matches a ledger row (alias mi) that spends a daily allowance: every call except the operator's
-// planner-model calls, which only the planner ceilings below count. p is the query parameter holding the planner
-// model; with none configured it is the empty string and every row matches. A fallback plan on the default model is an ordinary
-// call and counts.
+// planner-model calls, which only the planner ceilings below count, and a call that settled without reaching a model
+// (cost_status not_incurred; a running one always counts, so concurrent admissions cannot pass the limit together).
+// The daily totals count with dailyCalls, which also gives back the calls of direct tasks the platform failed
+// (direct_task_refund.go). p is the query parameter holding the planner model; with none configured it is the empty
+// string and the first exception matches no row. A fallback plan on the default model is an ordinary call and counts.
 func countsTowardsDaily(p string) string {
-	return `NOT (mi.model_id=` + p + ` AND ` + operatorPaidRun + `)`
+	return `NOT (mi.model_id=` + p + ` AND ` + operatorPaidRun + `) AND NOT (mi.status<>'running' AND mi.cost_status='not_incurred')`
 }
 
 // plannerAllowanceToday is the workspace's operator-paid planner calls today against its ceiling, for the usage meter;
