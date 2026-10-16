@@ -56,10 +56,10 @@ it('assembles the page from every builder with no model, and hands it to the san
     expect(built.text.startsWith('<!DOCTYPE html>') && built.text.trimEnd().endsWith('</html>')).toBe(true);
     for (const id of inputs) expect(built.text).toContain(`console.log("${id}<\\/script>");`);
     expect(built.text).not.toContain('```');
-    const test = document.nodes.find((node): node is SessionNode => node.kind === 'session' && node.runtime === SANDBOX_RUNTIME);
-    expect(test, item.id).toBeDefined();
-    const wire = document.edges.find(edge => edge.fromNode === page.id && edge.toNode === test!.id);
+    const wire = document.edges.find(edge => edge.fromNode === page.id);
     expect(wire && [wire.fromPort, wire.dataType]).toEqual(['out:file', 'file']);
+    const test = document.nodes.find((node): node is SessionNode => node.kind === 'session' && node.id === wire!.toNode);
+    expect(test?.runtime, item.id).toBe(SANDBOX_RUNTIME);
     expect(test!.contract?.outputs.map(field => [field.id, field.type])).toEqual([['result', 'html'], ['report', 'markdown']]);
     // The review reads the test report, never the whole page.
     const review = document.nodes.find(node => node.kind === 'session' && node.title === 'Review')!;
@@ -69,9 +69,11 @@ it('assembles the page from every builder with no model, and hands it to the san
 
 it('gives every builder the same fixed kernel contract and module rules, within the node prompt budget', () => {
   for (const item of FLAGSHIPS) {
-    const builders = item.nodes.filter(node => node.column === 1);
+    const builders = item.nodes.filter(node => node.task.includes('Rules for every module'));
     expect(builders.length, item.id).toBeGreaterThanOrEqual(6);
-    const contract = (task: string) => task.slice(task.indexOf('Umber kernel contract'), task.indexOf('Rules for every module'));
+    expect(new Set(builders.map(node => node.column)).size, item.id).toBe(1);
+    const contract = (task: string) => task.slice(task.indexOf('kernel contract (fixed'), task.indexOf('Rules for every module'));
+    expect(contract(builders[0].task).length, item.id).toBeGreaterThan(3000);
     for (const node of builders) {
       expect(contract(node.task), node.id).toBe(contract(builders[0].task));
       expect(node.task, node.id).toContain('Output only the code as one fenced block, with nothing before or after it');
