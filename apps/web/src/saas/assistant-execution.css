@@ -106,6 +106,8 @@ html:root .saas-canvas-shell .awwo-canvas-assistant {
   .awwo-execution-premium { display: grid; gap: 6px; }
   .awwo-execution-premium .saas-plan-upsell { margin: 0; }
   .awwo-execution-switch { justify-self: start; padding: 5px 11px; border: 1px solid var(--saas-hairline); border-radius: 999px; background: transparent; color: var(--saas-text); font-size: var(--saas-text-xs); cursor: pointer; &:hover:not(:disabled) { border-color: var(--saas-primary); } }
+  /* A failed task sent again, as a new task in the conversation. */
+  .awwo-execution-retry { display: inline-flex; align-items: center; gap: 6px; justify-self: start; padding: 5px 12px; border: 1px solid var(--saas-primary); border-radius: 999px; background: transparent; color: var(--saas-text); font-size: var(--saas-text-xs); cursor: pointer; &:hover:not(:disabled) { background: color-mix(in srgb, var(--saas-primary) 12%, transparent); } &:disabled { opacity: .6; cursor: default; } }
   .awwo-execution-notice { margin: 0 0 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
 
   /* A permission or a question: answered only by your choice. */

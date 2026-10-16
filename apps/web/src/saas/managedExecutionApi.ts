@@ -3,7 +3,8 @@ import { API_BASE, api, SaaSApiError, tenantPath } from './api';
 /** requiresUpgrade: this workspace's free allowance does not include the model (a premium route closed to it). */
 export interface ExecutionModel { id: string; label: string; runtime: string; efforts?: string[]; route?: string; requiresUpgrade?: boolean }
 export interface ExecutionRuntime { ready: boolean; reason?: string; capabilities: { workspace: boolean; approvals: boolean }; models: ExecutionModel[] }
-export interface ExecutionRunSummary { id: string; status: string; prompt: string; createdAt: string; updatedAt: string }
+/** error: how a task that ended without its result ended (the run's error code; empty otherwise). */
+export interface ExecutionRunSummary { id: string; status: string; prompt: string; createdAt: string; updatedAt: string; error?: string }
 export interface ExecutionRuns { items: ExecutionRunSummary[]; truncated?: boolean }
 export interface ExecutionMessage { id: string; role: string; text: string; createdAt: string; truncated?: boolean }
 export interface ExecutionApproval {
@@ -16,6 +17,9 @@ export interface ExecutionRun extends ExecutionRunSummary {
   messages: ExecutionMessage[]; approvals: ExecutionApproval[]; artifacts: ExecutionArtifact[];
   /** In line for a free execution slot: every workspace is running a task and this one starts when one frees up. */
   waitingForSlot?: boolean;
+  /** The model calls the task spent (or is spending), and those given back to today's total because the platform
+   *  failed it (direct_task_refund.go on the server). */
+  calls?: number; refundedCalls?: number;
 }
 export interface ExecutionInput { operationId: string; prompt: string; runtime: string; model: string; effort?: string; knowledgeRevisionIds?: string[] }
 export interface ExecutionResponseInput { requestId: string; behavior: 'allow' | 'deny'; message?: string; operationId: string }

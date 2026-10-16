@@ -374,6 +374,9 @@ export interface CanvasResultsOptions {
   studio?: boolean;
 }
 
+// A message that only asks to go on with the turn before it (the router is told of such words too: assistant_route.go).
+const FOLLOW_UP = /^(继续|重试|再试一次|再来一次|接着做|继续执行|continue|retry|try again|go on)[\s。.!！]*$/i;
+
 export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
@@ -3143,7 +3146,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     let route: AssistantRoute = routes.includes('plan') ? 'plan' : routes[0];
     if (routes.length > 1) {
       const controller = new AbortController();
-      const request = assistantRouteRequest(prompt, routes, docRef.current, planning.messages);
+      const request = assistantRouteRequest(prompt, routes, docRef.current, planning.messages, taskId => executionRef.current?.outcome?.(taskId));
       setPending({ id, prompt, phase: 'routing' }, controller);
       try { route = await routeAssistant(request, controller.signal); }
       catch { /* The router did not answer: the message is handled the default way rather than lost. */ }
@@ -3153,6 +3156,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
     if (route === 'execute') await startAssistantTask(prompt, id);
     else planRouted(prompt, id);
+  };
+  // A task's card sends a follow-up (the request again) straight to a new task, as its own turn.
+  const sendTaskFollowUp = (text: string) => {
+    if (readOnlyRef.current || pendingRef.current || planningRequest.current || !text.trim()) return;
+    void startAssistantTask(text.trim(), `turn-${Date.now()}-${++planningSequence.current}`);
   };
   /** Stops a message being routed; the box still holds it. False when none is. */
   const cancelRouting = () => {
@@ -3522,6 +3530,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       } else setPlanningError(failureText(error));
     } finally { if (pendingId() === id) setPending(null); }
   };
+  // A bare follow-up (继续, 重试…) hands the canvas the request it followed: planned alone, the word says nothing.
+  const handOverRequest = (messages: PlanningMessage[], index: number) => {
+    for (let i = index; i >= 0; i--) {
+      if (messages[i].role === 'user' && !FOLLOW_UP.test(messages[i].content.trim())) return messages[i].content;
+    }
+    return messages[index].content;
+  };
   const switchToCanvas = async (prompt: string, taskId?: string) => {
     const blocked = planBlocker();
     if (blocked !== null) { setPlanningError(blocked || t('assistant.canvasBusy')); return; }
@@ -3542,7 +3557,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   const switchLastRequest = (to: AssistantRoute) => {
     if (!lastRequest || !lastReply || pendingRef.current || planningRequest.current) return;
-    if (to === 'plan') { void switchToCanvas(lastRequest.content, lastReply.taskId); return; }
+    if (to === 'plan') { void switchToCanvas(handOverRequest(planning.messages, lastRequestIndex), lastReply.taskId); return; }
     const planOnCanvas = lastReply.status === 'applied' && !undoneHere(lastReply);
     if (planOnCanvas && !canUndoPlan) return;
     // A node that began talking since this render would keep the plan from being undone once the task exists.
@@ -3562,7 +3577,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const routeNotice = unifiedHost && planningUnavailableReason && unifiedHost.ready ? t('assistant.executeOnly') : undefined;
   const unified: UnifiedAssistant | undefined = assistantExecution ? {
     ...(assistantPending ? { pending: assistantPending } : {}),
-    renderTask: assistantExecution.renderTask,
+    renderTask: taskId => assistantExecution.renderTask(taskId, readOnly ? undefined : { send: sendTaskFollowUp }),
     earlier: assistantExecution.renderEarlier(mentionedTasks, readOnly),
     notices: assistantExecution.renderNotices(planAvailable),
     settings: assistantExecution.settings,

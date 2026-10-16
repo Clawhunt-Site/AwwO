@@ -6,7 +6,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, RefreshCw, Sparkles, Square, X } from 'lucide-react';
 import { StoredArtifactPreview } from '../canvas/ArtifactPreview';
-import type { AssistantExecutionHost } from '../canvas/assistantRouting';
+import type { AssistantExecutionHost, AssistantTaskActions } from '../canvas/assistantRouting';
 import { ARTIFACT_REF_PREFIX } from './canvasBridge';
 import { renderInertMarkdown } from './inertMarkdown';
 import { saasErrorMessage } from './api';
@@ -47,7 +47,10 @@ function taskErrorText(t: T, locale: UiLocale, code: string): string {
     computer_busy: ['执行环境一直都在忙，排队 10 分钟仍没有空位，任务没有开始。请稍后再试。', 'Every workspace stayed busy for 10 minutes, so the task did not start. Try again later.'],
     computer_unavailable: ['工作区执行服务暂时不可用，请稍后再试。', 'Workspace execution is temporarily unavailable. Try again later.'],
     computer_rejected: ['执行服务没有接受这个任务，请稍后再试。', 'The execution service did not accept this task. Try again later.'],
-    computer_execution_failed: ['任务执行失败，没有完成。', 'The task failed before it finished.'],
+    computer_execution_failed: ['任务在执行途中失败了（执行服务或一次模型调用出了错），没有做完。', 'The task failed part-way (the execution service or a model call failed) and did not finish.'],
+    computer_task_timeout: ['任务超过了时间上限，没有做完。可以重试，或把它拆成几步分别发。', 'The task ran out of time before it finished. Try again, or send it in smaller steps.'],
+    computer_call_budget: ['任务用完了一个任务可用的模型调用，没有做完。可以重试，或把它拆成几步分别发。', 'The task used every model call one task may make before it finished. Try again, or send it in smaller steps.'],
+    computer_tool_budget: ['模型一次要用的工具太多，任务停下了。可以重试。', 'A model answer asked for too many tools at once, so the task stopped. Try again.'],
     computer_stream_ended: ['与执行服务的连接中断，任务没有完成。', 'The connection to the execution service ended before the task finished.'],
     computer_model_failed: ['模型调用失败，任务没有完成。', 'A model call failed, so the task did not finish.'],
     computer_admission_denied: ['模型额度或权限不足，任务停在了这里。', 'The model allowance or permission ran out, so the task stopped here.'],
@@ -57,6 +60,36 @@ function taskErrorText(t: T, locale: UiLocale, code: string): string {
   const text = known[code];
   // The run errors every run shares (the paid plan's and the daily allowances') read as they do on a node.
   return text ? t(text[0], text[1]) : runErrorText(code, locale) ?? t(`任务没有完成（${code}）。`, `The task did not finish (${code}).`);
+}
+
+/** The task as last read: the open one in full, any other as listed. */
+const readTask = (execution: ManagedExecution, taskId: string) =>
+  execution.run?.id === taskId ? execution.run : execution.history.items.find(item => item.id === taskId);
+
+/** Whether the task is being read now: the open one, while its reading goes on. Any other task's status, or a paused
+ * one's, may be old (code review 2026-10-16: the open task is read about six minutes, a task runs up to fifteen). */
+const beingRead = (execution: ManagedExecution, taskId: string) =>
+  execution.selectedId === taskId && execution.run?.id === taskId && !execution.pollingPaused;
+
+/** Endings worth sending the same request again for: the platform's failures and the task's own limits, which a second
+ * try may stay within. Not an allowance, a plan or a refusal: they would be refused again (security review 2026-10-16). */
+const RETRYABLE: ReadonlySet<string> = new Set(['computer_execution_failed', 'computer_stream_ended', 'computer_unavailable', 'computer_busy',
+  'computer_rejected', 'computer_model_failed', 'computer_task_timeout', 'computer_call_budget', 'computer_tool_budget']);
+
+/** How a task ended, in a few plain English words for the router: a follow-up such as 「继续」 after one that stopped
+ * part-way goes on with it. */
+function taskOutcome(execution: ManagedExecution, taskId: string): string | undefined {
+  const task = readTask(execution, taskId);
+  if (!task) return undefined;
+  if (!executionTerminal(task.status)) return beingRead(execution, taskId) ? 'still running' : undefined;
+  if (task.status === 'completed') return 'completed';
+  if (task.status === 'cancelled') return 'stopped by the user';
+  if (task.status === 'interrupted') return 'interrupted by a service restart before it finished';
+  const code = task.error ?? '';
+  return ({ computer_execution_failed: 'failed part-way: the execution service or a model call failed',
+    computer_stream_ended: 'failed part-way: the execution service stopped answering',
+    computer_task_timeout: 'stopped part-way: it ran out of time', computer_call_budget: 'stopped part-way: it used all its model calls',
+  } as Record<string, string>)[code] ?? (code ? `failed (${code})` : 'failed');
 }
 
 /** What the canvas assistant needs from the hosted app's managed execution. */
@@ -69,7 +102,8 @@ export function executionHost(execution: ManagedExecution): AssistantExecutionHo
     start: execution.start,
     stop: execution.stopTask,
     finished: execution.finished,
-    renderTask: taskId => <ExecutionTaskCard execution={execution} taskId={taskId} />,
+    renderTask: (taskId, actions) => <ExecutionTaskCard execution={execution} taskId={taskId} actions={actions} />,
+    outcome: taskId => taskOutcome(execution, taskId),
     renderEarlier: (mentioned, open) => <ExecutionEarlier execution={execution} mentioned={mentioned} open={open} />,
     renderNotices: planAvailable => <ExecutionNotices execution={execution} planAvailable={planAvailable} />,
     settings: <ExecutionSettings execution={execution} />,
@@ -81,7 +115,7 @@ export function executionHost(execution: ManagedExecution): AssistantExecutionHo
 }
 
 /** One task's card: the open task in full, any other as a line that opens it. */
-function ExecutionTaskCard({ execution, taskId }: { execution: ManagedExecution; taskId: string }) {
+function ExecutionTaskCard({ execution, taskId, actions }: { execution: ManagedExecution; taskId: string; actions?: AssistantTaskActions }) {
   const { t } = useSaaSPreferences();
   const card = useRef<HTMLDivElement>(null);
   const open = taskId === execution.selectedId;
@@ -95,7 +129,7 @@ function ExecutionTaskCard({ execution, taskId }: { execution: ManagedExecution;
   }, [open]);
   const task = execution.history.items.find(item => item.id === taskId);
   return <div ref={card} className="awwo-execution-task" data-task={taskId}>
-    {open ? <TaskDetail execution={execution} />
+    {open ? <TaskDetail execution={execution} actions={actions} />
       : task ? <TaskSummary execution={execution} task={task} />
         : execution.loading || !execution.activated ? <p className="awwo-execution-loading" role="status"><Loader2 size={14} aria-hidden="true" />{t('正在读取任务…', 'Reading the task…')}</p>
           : <p className="awwo-execution-note">{t('这个任务不在最近的记录里。', 'This task is not among the recent ones.')}</p>}
@@ -163,7 +197,7 @@ function PremiumTaskActions({ execution, code }: { execution: ManagedExecution; 
   </div>;
 }
 
-function TaskDetail({ execution }: { execution: ManagedExecution }) {
+function TaskDetail({ execution, actions }: { execution: ManagedExecution; actions?: AssistantTaskActions }) {
   const { t, locale } = useSaaSPreferences();
   const run = execution.run;
   // A request waiting for you is brought into view inside the conversation.
@@ -187,8 +221,15 @@ function TaskDetail({ execution }: { execution: ManagedExecution }) {
     {execution.pollingPaused && <p className="awwo-execution-warning" role="status">{t('自动读取已暂停，任务可能仍在运行。', 'Automatic reading is paused; the task may still be running.')}
       <button type="button" onClick={execution.refreshDetail}>{t('继续读取', 'Keep reading')}</button></p>}
     {run.truncated && <p className="awwo-execution-note">{t('记录超过显示上限，部分过程未展示。', 'The record exceeds the display limit; part of the process is not shown.')}</p>}
-    {run.error && <p className="awwo-execution-error" role="alert">{taskErrorText(t, locale, run.error)}</p>}
-    {run.error && planUpsellCode([run.error]) ? <PremiumTaskActions execution={execution} code={run.error} /> : null}
+    {run.error && <p className="awwo-execution-error" role="alert">{run.status === 'interrupted'
+      ? t('服务重启，任务被中断了，没有做完。', 'The service restarted and interrupted the task before it finished.') : taskErrorText(t, locale, run.error)}</p>}
+    {(run.refundedCalls ?? 0) > 0 && <p className="awwo-execution-note">{t('这是平台的原因：这次用掉的次数退还到当天的总次数；每天最多退还 32 次，超出的照常计算。',
+      'This was the platform’s fault: the calls it used go back to that day’s total; at most 32 a day go back, the rest count as usual.')}</p>}
+    {run.error && planUpsellCode([run.error]) ? <PremiumTaskActions execution={execution} code={run.error} />
+      : terminal && run.id === execution.selectedId && (run.status === 'interrupted' || (run.status === 'failed' && RETRYABLE.has(run.error)))
+        && actions?.send && !execution.readOnly && run.prompt.trim()
+        ? <button type="button" className="awwo-execution-retry" disabled={execution.busy || !!execution.pendingSubmission} onClick={() => actions.send!(run.prompt)}>
+          <RefreshCw size={14} aria-hidden="true" />{t('重试这个任务', 'Try this task again')}</button> : null}
     {pending.map(approval => <RequestCard key={approval.id} execution={execution} run={run} approval={approval} />)}
     {run.output && <section className="awwo-execution-result" aria-label={t('任务结果', 'Task result')}>
       <div className="awwo-execution-markdown">{renderInertMarkdown(run.output)}</div>
@@ -222,6 +263,7 @@ function RunStatus({ execution, run }: { execution: ManagedExecution; run: Execu
   const facts = [terminal ? t(`用时 ${elapsed(run.createdAt, new Date(run.updatedAt).getTime())}`, `Took ${elapsed(run.createdAt, new Date(run.updatedAt).getTime())}`)
     : t(`已运行 ${elapsed(run.createdAt, now)}`, `Running for ${elapsed(run.createdAt, now)}`)];
   if (run.messages.length) facts.push(t(`${run.messages.length} 条进展`, `${run.messages.length} updates`));
+  if (terminal && run.calls !== undefined) facts.push(t(`用了 ${run.calls} 次`, `${run.calls} ${run.calls === 1 ? 'call' : 'calls'}`));
   if (run.artifacts.length) facts.push(t(`${run.artifacts.length} 个文件`, `${run.artifacts.length} files`));
   const headline = terminal ? statusLabel(t, run.status) : waiting ? t('等你回应后继续', 'Waiting for your response')
     : run.waitingForSlot ? t('执行环境都在忙，已排队，空出来就开始', 'Every workspace is busy; queued, starting as soon as one frees up')
