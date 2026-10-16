@@ -103,6 +103,33 @@ func TestCanvasBriefingStaysBounded(t *testing.T) {
 	}
 }
 
+// The managed-execution worker refuses a prompt holding a NUL, which fails the whole task: a stored text file with a
+// control byte is named, never inlined (Codex 2026-10-16).
+func TestCanvasBriefingInlinesOnlyCleanText(t *testing.T) {
+	facts := reportedCanvasFacts()
+	at := facts.Files[0].At
+	facts.Files = append([]briefingFile{
+		{NodeID: "front", FieldID: "data", Name: "data.json", Size: 3, At: at, Content: []byte("{\x00}")},
+		{NodeID: "front", FieldID: "log", Name: "log.txt", Size: 4, At: at, Content: []byte("a\x1bb\n")},
+	}, facts.Files...)
+	text := renderCanvasBriefing(facts, true)
+	if strings.ContainsAny(text, "\x00\x1b") || strings.Count(text, "=== file ") != 1 || !strings.Contains(text, "=== file 3D游戏前端实现/index.html (") ||
+		!strings.Contains(text, "Other delivered files are not shown here") {
+		t.Fatalf("only clean text files may be inlined:\n%q", text)
+	}
+	for _, f := range []briefingFile{{Name: "a.md", Content: []byte("x\ty\r\n")}, {Name: "a.md", Content: []byte{}}} {
+		if !inlineableText(f) {
+			t.Fatalf("%q is clean text", f.Content)
+		}
+	}
+	for _, f := range []briefingFile{{Name: "a.md"}, {Name: "a.md", Content: []byte("a\x00")}, {Name: "a.md", Content: []byte("a\x7f")},
+		{Name: "a.md", Content: []byte{0xc3}}, {Name: "a.bin", Content: []byte("text")}} {
+		if inlineableText(f) {
+			t.Fatalf("%s %q must not be inlined", f.Name, f.Content)
+		}
+	}
+}
+
 func TestDirectTaskTranscriptKeepsTheUsersWords(t *testing.T) {
 	prompt := "画布的最后一个节点运行失败了"
 	if got := withoutCanvasBriefing(prompt + renderCanvasBriefing(reportedCanvasFacts(), true)); got != prompt {

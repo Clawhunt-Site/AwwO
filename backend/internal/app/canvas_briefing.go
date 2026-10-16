@@ -37,6 +37,20 @@ var briefingWantsFiles = regexp.MustCompile(`(?i)(文件|目录|文件夹|输出
 var briefingTextFile = map[string]bool{".html": true, ".htm": true, ".css": true, ".js": true, ".mjs": true, ".ts": true, ".tsx": true, ".jsx": true,
 	".json": true, ".md": true, ".markdown": true, ".txt": true, ".csv": true, ".py": true, ".svg": true, ".xml": true, ".yaml": true, ".yml": true, ".sql": true}
 
+// inlineableText is a stored file whose content may travel inside a direct task's prompt: valid UTF-8 of a text type
+// with no control byte other than tab and line breaks (the worker refuses a prompt with a NUL, failing the task).
+func inlineableText(f briefingFile) bool {
+	if f.Content == nil || !utf8.Valid(f.Content) || !briefingTextFile[strings.ToLower(path.Ext(f.Name))] {
+		return false
+	}
+	for _, c := range f.Content {
+		if c < 0x20 && c != '\t' && c != '\n' && c != '\r' || c == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 type briefingNode struct {
 	ID         string `json:"id"`
 	Kind       string `json:"kind"`
@@ -224,7 +238,7 @@ func renderCanvasBriefing(f canvasBriefingFacts, withFiles bool) string {
 		budget := briefingInlineBytes
 		shown := 0
 		for _, file := range f.Files {
-			if file.Content == nil || !briefingTextFile[strings.ToLower(path.Ext(file.Name))] || !utf8.Valid(file.Content) || len(file.Content) > budget {
+			if !inlineableText(file) || len(file.Content) > budget {
 				continue
 			}
 			if shown == 0 {
