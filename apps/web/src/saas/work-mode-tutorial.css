@@ -51,6 +51,12 @@
 .wmt-flow > span:not(:last-child)::after { content: '→'; position: absolute; right: -12px; top: 50%; transform: translateY(-50%); color: var(--saas-muted, #66766b); }
 .wmt-flow b { font-size: 14px; }
 .wmt-flow small { color: var(--saas-muted, #66766b); font-size: 11.5px; }
+.wmt-ways { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: center; gap: 12px; }
+.wmt-ways > span { display: grid; gap: 8px; padding: 22px 14px; border: 1px solid var(--wmt-line); border-radius: 14px; background: var(--saas-card, #fff); text-align: center;
+  animation: wmt-rise .5s ease both; animation-delay: calc(var(--wmt-index) * 380ms); }
+.wmt-ways b { font-size: 14px; }
+.wmt-ways small { color: var(--saas-muted, #66766b); font-size: 11.5px; line-height: 1.5; }
+.wmt-ways > .wmt-caption { grid-column: 1 / -1; text-align: center; }
 .wmt-prompt { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0; padding: 12px 14px; border: 1px solid var(--wmt-line); border-radius: 12px; background: var(--saas-card, #fff); }
 .wmt-prompt > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; animation: wmt-type 1.1s steps(28, end) both; }
 .wmt-prompt > b { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 5px 10px; border-radius: 8px; background: var(--saas-accent, #31563d); color: var(--saas-accent-text, #fff); font-size: 11.5px; }

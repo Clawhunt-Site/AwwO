@@ -11,7 +11,7 @@ const base: WorkModeTutorialProps = { open: true, locale: 'zh', onClose: () => {
 const next = () => screen.getByRole('button', { name: /^(下一步|Next|开始使用 AwwO|Start using AwwO)$/ });
 const dwell = () => act(() => { vi.advanceTimersByTime(STEP_DWELL_MS + 10); });
 /** Walk to the last step, waiting out each step as a person would. */
-function walk(steps = 6) { for (let i = 0; i < steps; i++) { dwell(); fireEvent.click(next()); } }
+function walk(steps = 7) { for (let i = 0; i < steps; i++) { dwell(); fireEvent.click(next()); } }
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -21,16 +21,31 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it('explains the work mode in seven steps on a native modal, starting with the heading in focus', () => {
+it('explains the work mode in eight steps on a native modal, starting with the heading in focus', () => {
   render(<WorkModeTutorial {...base} />);
   expect(showModal).toHaveBeenCalledTimes(1);
   const dialog = screen.getByRole('dialog', { name: 'AwwO 怎么工作' });
   expect(dialog).toHaveAttribute('open');
   expect(screen.getByRole('heading', { level: 2, name: 'AwwO 怎么工作' })).toHaveFocus();
-  expect(screen.getByText('第 1 / 7 步')).toBeVisible();
-  const titles = ['一句需求，先铺成一张画布', '节点：一位 Agent，一项任务', '连线：上游的真实产出就是下游的输入', '阶段：能同时做的，就一起做', '运行：按阶段推进，状态一目了然', '验收与交付，然后轮到你'];
+  expect(screen.getByText('第 1 / 8 步')).toBeVisible();
+  const titles = ['一句需求，先铺成一张画布', '节点：一位 Agent，一项任务', '连线：上游的真实产出就是下游的输入', '阶段：能同时做的，就一起做', '运行：按阶段推进，状态一目了然', '画布助手：调整画布，或直接执行', '验收与交付，然后轮到你'];
   for (const title of titles) { dwell(); fireEvent.click(next()); expect(screen.getByRole('heading', { level: 2, name: title })).toHaveFocus(); }
-  expect(screen.getByText('第 7 / 7 步')).toBeVisible();
+  expect(screen.getByText('第 8 / 8 步')).toBeVisible();
+});
+
+// A customer's report (2026-10-16): which way the assistant took was unclear, and so was what one 次 counts.
+it('explains the assistant’s two ways and what one call is, before the last step', () => {
+  render(<WorkModeTutorial {...base} />);
+  walk(6);
+  expect(screen.getByRole('heading', { level: 2, name: '画布助手：调整画布，或直接执行' })).toHaveFocus();
+  expect(screen.getByText(/「直接执行」是由一位 Agent 在独立的工作区里直接做完，画布不变/)).toBeVisible();
+  expect(screen.getByText(/模型回答一次算 1 次，一个任务往往要回答好几次。$/)).toBeVisible();
+  expect(screen.getByText('1 次 = 模型回答一次（或生成一张图片 / 一段视频）')).toBeInTheDocument();
+  cleanup();
+  render(<WorkModeTutorial {...base} locale="en" />);
+  walk(6);
+  expect(screen.getByRole('heading', { level: 2, name: 'The canvas assistant: on the canvas, or done directly' })).toHaveFocus();
+  expect(screen.getByText(/each model answer is 1 call, and a task usually takes several\.$/)).toBeVisible();
 });
 
 it('shows its example from the real pixel-platformer canvas, in the interface language', () => {
@@ -55,15 +70,15 @@ it('unlocks each step only after its scene has played, and never locks a step ag
   const onClose = vi.fn();
   render(<WorkModeTutorial {...base} onClose={onClose} />);
   fireEvent.click(next());
-  expect(screen.getByText('第 1 / 7 步')).toBeVisible();
+  expect(screen.getByText('第 1 / 8 步')).toBeVisible();
   expect(next()).toHaveAttribute('aria-disabled', 'true');
   dwell();
   expect(next()).not.toHaveAttribute('aria-disabled');
   fireEvent.click(next());
-  expect(screen.getByText('第 2 / 7 步')).toBeVisible();
+  expect(screen.getByText('第 2 / 8 步')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '上一步' }));
   fireEvent.click(next());                     // the first step stays unlocked
-  expect(screen.getByText('第 2 / 7 步')).toBeVisible();
+  expect(screen.getByText('第 2 / 8 步')).toBeVisible();
   expect(onClose).not.toHaveBeenCalled();
 });
 
@@ -77,7 +92,7 @@ it('cannot be closed or skipped when it is mandatory, by button or by Escape', (
   const cancel = new Event('cancel', { cancelable: true }); dialog.dispatchEvent(cancel);
   expect(cancel.defaultPrevented).toBe(true);
   expect(onClose).not.toHaveBeenCalled();
-  expect(screen.getByText(/看完全部 7 步就能开始使用/)).toBeVisible();
+  expect(screen.getByText(/看完全部 8 步就能开始使用/)).toBeVisible();
   // A browser that closes it anyway (a repeated-Escape close watcher) has it shown again.
   dialog.removeAttribute('open'); fireEvent(dialog, new Event('close'));
   expect(showModal).toHaveBeenCalledTimes(2);
@@ -128,7 +143,7 @@ it('starts every step at its top, however far the last one was scrolled', () => 
   top = 240; dwell();
   expect(top).toBe(240);                       // unlocking the step leaves the reader where they are
   fireEvent.click(next());
-  expect(screen.getByText('第 2 / 7 步')).toBeVisible();
+  expect(screen.getByText('第 2 / 8 步')).toBeVisible();
   expect(top).toBe(0);
   top = 180; fireEvent.click(screen.getByRole('button', { name: '上一步' }));
   expect(top).toBe(0);

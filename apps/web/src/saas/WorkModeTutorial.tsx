@@ -35,6 +35,9 @@ const STEPS: ReadonlyArray<{ key: string; title: Copy; body: Copy; readOnlyBody?
     'Nodes that do not depend on each other share a stage and can run in parallel, like art, levels and sound, which never wait for each other; how many start at once depends on the workspace’s concurrency limit. Once all three have delivered, the code node puts their work together.'] },
   { key: 'run', title: ['运行：按阶段推进，状态一目了然', 'Run: stage by stage, every state in view'], body: ['点「运行图」后，任务在服务器上按阶段推进，关掉页面也会继续。每个节点显示进行中、完成、失败或被阻断：一个节点失败，依赖它的下游会停下；改好以后可以只重跑这一段，没受影响的结果会被沿用。',
     'Choose “Run graph” and the work advances stage by stage on the server, even if you close the page. Every node shows running, done, failed or blocked: when a node fails, everything downstream of it stops; once fixed, you can rerun just that part and keep the results it did not touch.'] },
+  // A customer's report (2026-10-16): which way the assistant took was unclear, and so was what one 次 counts.
+  { key: 'ways', title: ['画布助手：调整画布，或直接执行', 'The canvas assistant: on the canvas, or done directly'], body: ['在画布里和助手说话，它会用两种方式之一处理：「调整画布」是搭出或修改画布上的 Agent，再由你运行；「直接执行」是由一位 Agent 在独立的工作区里直接做完，画布不变，进展和结果都在对话里。每条回复都标着用了哪种，也可以换一种。用量按次计：模型回答一次算 1 次，一个任务往往要回答好几次。',
+    'Talk to the assistant in a canvas and it handles each message one of two ways: “On the canvas” sets up or changes the agents on the canvas for you to run; “Done directly” has one agent finish the job in a separate workspace, leaving the canvas as it is, with progress and results in the conversation. Every reply says which, and you can switch. Usage counts calls: each model answer is 1 call, and a task usually takes several.'] },
   { key: 'deliver', title: ['验收与交付，然后轮到你', 'Review, delivery — then it is your turn'], body: ['最后由验收 Agent 对照标准逐项检查，把确认通过的、发现的缺陷和没法验证的分开写清楚。成品在节点的交付区预览和下载。现在去写你的第一个需求，或者打开一个制作案例，看它是怎么一步步做出来的。',
     'Finally a review agent checks the work against the criteria, keeping what passed, the defects it found and what it could not verify apart. Results preview and download in each node’s deliverables. Now write your first brief, or open a production case to see how it was made, step by step.'],
     readOnlyBody: ['最后由验收 Agent 对照标准逐项检查，把确认通过的、发现的缺陷和没法验证的分开写清楚。成品在节点的交付区预览和下载。现在打开一张团队画布看看，或者打开一个制作案例，看它是怎么一步步做出来的。',
@@ -96,6 +99,12 @@ function Scene({ step, locale, record }: { step: string; locale: UiLocale; recor
     </div>;
     case 'stages': return <div className="wmt-scene wmt-stages"><MiniCanvas locale={locale} highlight={1} labels={durations} />
       <p className="wmt-caption">{zh ? '第 2 阶段：美术、关卡、音效互不依赖，可以并行' : 'Stage 2: art, levels and sound depend on nothing but design, so they can run in parallel'}</p></div>;
+    case 'ways': return <div className="wmt-scene wmt-ways">
+      {[[zh ? '调整画布' : 'On the canvas', zh ? '搭出或修改画布上的 Agent，由你运行' : 'agents set up on the canvas, for you to run'],
+        [zh ? '直接执行' : 'Done directly', zh ? '一位 Agent 在独立的工作区里做完，画布不变' : 'one agent does it in its own workspace; the canvas stays']]
+        .map(([title, detail], index) => <span key={title} style={{ '--wmt-index': index } as CSSProperties}><b>{title}</b><small>{detail}</small></span>)}
+      <p className="wmt-caption">{zh ? '1 次 = 模型回答一次（或生成一张图片 / 一段视频）' : '1 call = one model answer (or one image / video generation)'}</p>
+    </div>;
     case 'run': return <div className="wmt-scene wmt-run">
       <p className="wmt-run-bar"><span><Play size={11} aria-hidden="true" />{zh ? '运行图' : 'Run graph'}</span><i>{zh ? '运行中 · 4/6' : 'Running · 4/6'}</i></p>
       <MiniCanvas locale={locale} states={{ design: 'done', art: 'done', levels: 'done', sound: 'done', build: 'running', review: 'waiting' }} />
@@ -171,7 +180,7 @@ export default function WorkModeTutorial({ open, mandatory = false, locale, read
         <div className="wmt-copy">
           <h2 ref={heading} id={`${id}-title`} tabIndex={-1}>{text(step.title, locale)}</h2>
           <p id={`${id}-body`}>{text(readOnly && step.readOnlyBody ? step.readOnlyBody : step.body, locale)}</p>
-          {mandatory && index === 0 && <p className="wmt-note">{zh ? '这是新账号的入门讲解，看完全部 7 步就能开始使用；之后可从「更多选项 → AwwO 工作模式」随时重看。' : 'This is the introduction for new accounts: go through all 7 steps to start. You can replay it any time from More options → How AwwO works.'}</p>}
+          {mandatory && index === 0 && <p className="wmt-note">{zh ? `这是新账号的入门讲解，看完全部 ${STEPS.length} 步就能开始使用；之后可从「更多选项 → AwwO 工作模式」随时重看。` : `This is the introduction for new accounts: go through all ${STEPS.length} steps to start. You can replay it any time from More options → How AwwO works.`}</p>}
         </div>
       </div>
       <footer className="wmt-footer">
