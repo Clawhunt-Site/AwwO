@@ -1,8 +1,11 @@
 import { timingSafeEqual, createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-export const LIMITS = { request: 512 * 1024, response: 4 * 1024 * 1024, artifact: 2 * 1024 * 1024, artifacts: 8 * 1024 * 1024, event: 3 * 1024 * 1024, events: 16 * 1024 * 1024 } as const;
-export type RunRequest = { runId: string; tenantId: string; sessionId: string; prompt: string; instructions: string; modelProxyURL: string; modelProxyToken: string; timeoutMs: number; maxModelCalls: number };
+// A request may carry up to 8 MiB of input files, base64 in JSON (about 11 MiB), besides its text.
+export const LIMITS = { request: 12 * 1024 * 1024, response: 4 * 1024 * 1024, artifact: 2 * 1024 * 1024, artifacts: 8 * 1024 * 1024, inputs: 8, inputBytes: 8 * 1024 * 1024, event: 3 * 1024 * 1024, events: 16 * 1024 * 1024 } as const;
+/** A file the task's message named, read-only in the workspace's /inputs (the API's computerPlan.Inputs). */
+export type RunInput = { name: string; content: string; encoding: 'base64'; sha256: string };
+export type RunRequest = { runId: string; tenantId: string; sessionId: string; prompt: string; instructions: string; modelProxyURL: string; modelProxyToken: string; timeoutMs: number; maxModelCalls: number; inputs: RunInput[] };
 export type ApprovalAnswer = { requestId: string; behavior: 'allow' | 'deny'; message?: string };
 export type WorkerEvent = { type: string; [key: string]: unknown };
 export const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -25,7 +28,25 @@ export function parseRun(value: unknown, proxyOrigins: Set<string>): RunRequest 
   if (/\r|\n/.test(modelProxyToken) || modelProxyToken.length < 16) throw new WorkerError('INVALID_MODEL_PROXY');
   const timeoutMs = value.timeoutMs ?? 300_000, maxModelCalls = value.maxModelCalls ?? 16;
   if (!Number.isSafeInteger(timeoutMs) || Number(timeoutMs) < 1000 || Number(timeoutMs) > 900_000 || !Number.isSafeInteger(maxModelCalls) || Number(maxModelCalls) < 1 || Number(maxModelCalls) > 32) throw new WorkerError('INVALID_BUDGET');
-  return { runId, tenantId, sessionId, prompt, instructions, modelProxyURL, modelProxyToken, timeoutMs: Number(timeoutMs), maxModelCalls: Number(maxModelCalls) };
+  return { runId, tenantId, sessionId, prompt, instructions, modelProxyURL, modelProxyToken, timeoutMs: Number(timeoutMs), maxModelCalls: Number(maxModelCalls), inputs: parseInputs(value.inputs) };
+}
+/** Input files are checked here as well as in the sandbox: names that stay names, real base64, matching digests, and
+ *  the totals the API froze them within. */
+export function parseInputs(value: unknown): RunInput[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > LIMITS.inputs) throw new WorkerError('INVALID_INPUTS');
+  const names = new Set<string>(); let total = 0;
+  return value.map((item): RunInput => {
+    if (!record(item) || item.encoding !== 'base64') throw new WorkerError('INVALID_INPUTS');
+    const name = textField(item.name, 200), content = textField(item.content, Math.ceil(LIMITS.artifact / 3) * 4 + 4), sha256 = textField(item.sha256, 64);
+    if (/[\\/\x00-\x1f\x7f]/.test(name) || name === '.' || name === '..' || names.has(name) || !/^[0-9a-f]{64}$/.test(sha256)) throw new WorkerError('INVALID_INPUTS');
+    const bytes = Buffer.from(content, 'base64');
+    if (bytes.toString('base64') !== content || bytes.length > LIMITS.artifact || hash(bytes) !== sha256) throw new WorkerError('INVALID_INPUTS');
+    total += bytes.length;
+    if (total > LIMITS.inputBytes) throw new WorkerError('INVALID_INPUTS');
+    names.add(name);
+    return { name, content, encoding: 'base64', sha256 };
+  });
 }
 export function parseAnswer(value: unknown): ApprovalAnswer {
   if (!record(value) || !['allow', 'deny'].includes(String(value.behavior))) throw new WorkerError('INVALID_ANSWER');

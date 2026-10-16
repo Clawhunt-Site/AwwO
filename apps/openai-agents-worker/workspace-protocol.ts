@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
+import { loadWorkspaceEgress, parseWorkspaceTools, type WorkspaceEgress, type WorkspaceTool } from './workspace-sandbox.ts';
 
 export const WORKSPACE_BODY_BYTES = 16 * 1024 * 1024;
 export const WORKSPACE_FILE_BYTES = 2 * 1024 * 1024;
@@ -15,7 +16,14 @@ export interface WorkspaceRequest {
 }
 export interface WorkspaceConfig {
   dockerExecutable: string; image: string; callbackURL: string; maxModelCalls: number;
+  /** Image programs the agent is told about (AWWO_OPENAI_AGENTS_WORKSPACE_TOOLS). */
+  tools: ReadonlySet<WorkspaceTool>;
+  /** The web through the egress proxy; absent = no network. */
+  egress?: WorkspaceEgress;
 }
+/** What the task process tells its agent about the workspace. */
+export interface WorkspaceAbilities { tools: WorkspaceTool[]; web: boolean }
+export const workspaceAbilities = (config: Partial<WorkspaceConfig>): WorkspaceAbilities => ({ tools: [...(config.tools ?? [])], web: !!config.egress });
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const FIELD_TYPES = new Set(['text', 'markdown', 'html', 'file', 'number', 'boolean']);
 const RESERVED = new Set(['__proto__', 'constructor', 'prototype', '__workspace_snapshot']);
@@ -35,7 +43,9 @@ export function loadWorkspaceConfig(env: Record<string, string | undefined>): Wo
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:/@-]{0,255}$/.test(image) || !isAbsolute(dockerExecutable)
     || /[\u0000-\u001f]/.test(dockerExecutable) || !validCallbackURL(callbackURL)
     || !/^\d+$/.test(rawCalls) || Number(rawCalls) < 2 || Number(rawCalls) > WORKSPACE_MAX_MODEL_CALLS) throw new Error('Invalid workspace execution configuration');
-  return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls) });
+  const tools = parseWorkspaceTools(env.AWWO_OPENAI_AGENTS_WORKSPACE_TOOLS, 'AWWO_OPENAI_AGENTS_WORKSPACE_TOOLS');
+  const egress = loadWorkspaceEgress(env);
+  return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls), tools, ...(egress ? { egress } : {}) });
 }
 function validFile(value: unknown): value is WorkspaceFile {
   if (!object(value) || typeof value.name !== 'string' || !value.name || value.name.length > 200

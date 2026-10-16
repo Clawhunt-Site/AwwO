@@ -22,6 +22,9 @@ const computerInstructions = "Complete the user's authorized task using the priv
 type computerPlan struct {
 	Version       int `json:"version"`
 	MaxModelCalls int `json:"maxModelCalls"`
+	// The files the task's message names, frozen at admission: the agent reads them in its workspace's /inputs (the
+	// same limits as project execution: 8 files, 2 MiB each, 8 MiB in all).
+	Inputs []workspaceFile `json:"inputs,omitempty"`
 }
 
 // The managed execution worker accepts one task's run time only within these bounds
@@ -458,6 +461,11 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			response.Body.Close()
 		}
 	}()
+	// Sent only when the message named files, so a task without any is the request it always was; after the fit above,
+	// which bounds the start's text (the files ride beside it, within the broker's larger LIMITS.request).
+	if len(snap.Computer.Inputs) > 0 {
+		payload["inputs"] = snap.Computer.Inputs
+	}
 	response, started := a.startComputerTask(ctx, tid, rid, payload)
 	if !started {
 		return

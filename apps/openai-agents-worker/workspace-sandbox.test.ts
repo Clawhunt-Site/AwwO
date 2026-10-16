@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createWorkspaceSandbox, validateWorkspacePath, workspaceDockerArgs, WORKSPACE_FILE_HELPER } from './workspace-sandbox.ts';
 import type { WorkspaceDockerRunner } from './workspace-sandbox.ts';
+import { EGRESS_FORWARDER, egressToken, loadWorkspaceEgress, parseWorkspaceTools, sandboxAbilities } from './workspace-sandbox.ts';
 
 const config = { dockerExecutable: '/usr/bin/docker', image: 'awwo-workspace@sha256:' + 'a'.repeat(64) };
 const digest = (content: Uint8Array) => createHash('sha256').update(content).digest('hex');
@@ -20,6 +21,46 @@ test('container arguments enforce isolation without host mounts, inherited crede
   assert.ok(args.includes('--entrypoint=python3'));
   assert.ok(!args.some(value => value.includes('docker.sock') || value === '--privileged' || value === '--mount' || value === '--volume'));
   assert.ok(!args.join(' ').includes(process.env.OPENAI_API_KEY ?? 'fixture-provider-secret'));
+});
+
+test('the web is a read-only proxy socket and a run password, never a network interface', async () => {
+  // The same value backend/internal/egress derives (egress_test.go).
+  assert.equal(egressToken('k'.repeat(32), 'run-a'), '1f365883b108aae59ff783c5a2a257416f01a467');
+  const egress = { socketDir: '/var/lib/awwo/egress', secret: 's'.repeat(32) };
+  const calls: string[][] = [];
+  const runner: WorkspaceDockerRunner = async args => { calls.push(args); return response('ok'); };
+  const sandbox = await createWorkspaceSandbox({ ...config, egress }, { workspaceId: 'tenant/session/node', runId: 'run1' }, undefined, runner);
+  await sandbox.close();
+  const args = calls[0];
+  assert.ok(args.includes('--network=none') && !args.some(value => value.startsWith('--network=') && value !== '--network=none'));
+  assert.equal(args[args.indexOf('--mount') + 1], 'type=bind,source=/var/lib/awwo/egress,target=/run/awwo-egress,readonly');
+  assert.equal(args.filter(value => value === '--mount').length, 1);
+  const proxy = new URL(args.find(value => value.startsWith('HTTPS_PROXY='))!.slice('HTTPS_PROXY='.length));
+  const run = 'ws-' + digest(Buffer.from('tenant/session/node\0run1')).slice(0, 32);
+  assert.deepEqual([proxy.protocol, proxy.hostname, proxy.port, proxy.username, proxy.password], ['http:', '127.0.0.1', '3128', run, egressToken(egress.secret, run)]);
+  for (const key of ['HTTP_PROXY', 'http_proxy', 'https_proxy']) assert.ok(args.includes(`${key}=${proxy.href.replace(/\/$/, '')}`), key);
+  assert.ok(args.includes('NO_PROXY=localhost,127.0.0.1,::1'));
+  assert.equal(args.at(-1), EGRESS_FORWARDER);
+  assert.ok(!args.join(' ').includes(egress.secret));
+  // Without egress nothing of it is there.
+  const plain = workspaceDockerArgs('awwo-ws-test', config.image);
+  assert.ok(!plain.some(value => /PROXY|egress/i.test(value)));
+  for (const bad of [{ socketDir: 'relative', secret: egress.secret }, { socketDir: '/a,readonly=false', secret: egress.secret }, { socketDir: '/a/../b', secret: egress.secret }, { ...egress, secret: 'short' }]) {
+    await assert.rejects(createWorkspaceSandbox({ ...config, egress: bad }, { workspaceId: 'a', runId: 'b' }, undefined, runner), /egress/);
+  }
+});
+
+test('egress and tools configuration is both-or-neither and names only known programs', () => {
+  assert.equal(loadWorkspaceEgress({}), undefined);
+  assert.deepEqual(loadWorkspaceEgress({ AWWO_WORKSPACE_EGRESS_DIR: '/srv/egress', AWWO_WORKSPACE_EGRESS_SECRET: 'x'.repeat(40) }), { socketDir: '/srv/egress', secret: 'x'.repeat(40) });
+  for (const env of [{ AWWO_WORKSPACE_EGRESS_DIR: '/srv/egress' }, { AWWO_WORKSPACE_EGRESS_SECRET: 'x'.repeat(40) }, { AWWO_WORKSPACE_EGRESS_DIR: '/srv/egress dir', AWWO_WORKSPACE_EGRESS_SECRET: 'x'.repeat(40) }])
+    assert.throws(() => loadWorkspaceEgress(env), /AWWO_WORKSPACE_EGRESS/);
+  assert.deepEqual([...parseWorkspaceTools(' rea , check-page ', 'X')], ['rea', 'check-page']);
+  assert.deepEqual([...parseWorkspaceTools(undefined, 'X')], []);
+  assert.throws(() => parseWorkspaceTools('rea,curl', 'AWWO_X'), /AWWO_X entry: curl/);
+  const offline = sandboxAbilities(new Set(), false).join(' '), online = sandboxAbilities(new Set(['rea', 'check-page']), true).join(' ');
+  assert.ok(offline.includes('no network') && !offline.includes('rea ') && !offline.includes('awwo-check-page'));
+  assert.ok(online.includes('HTTPS_PROXY') && !online.includes('no network') && online.includes('rea analyze-javascript-application') && online.includes('window.awwoSelfTest'));
 });
 
 test('model paths are constrained before invoking the trusted helper', () => {

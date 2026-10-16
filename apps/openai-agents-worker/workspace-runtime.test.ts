@@ -107,6 +107,9 @@ test('SDK workspace loop edits, tests and publishes with one admission and recei
     } });
   assert.equal(calls.length, 5);
   assert.ok(calls.every(call => call.store === false));
+  // A worker that names no tools and no web tells its agent exactly that.
+  const system = String((calls[0].messages as { role: string; content: unknown }[]).find(item => item.role === 'system')?.content);
+  assert.ok(system.includes('There is no network') && !system.includes('HTTPS_PROXY') && !system.includes('awwo-check-page'));
   // History and task reach the provider as plain text (LLM Gate's Responses endpoint ignores an input_text part list).
   assert.deepEqual((calls[0].messages as { role: string; content: unknown }[]).filter(item => item.role === 'user').map(item => item.content), ['Earlier request', 'Build and test a page']);
   assert.deepEqual(ledger.map(item => [item.operation, item.index]), Array.from({ length: 5 }, (_, i) => [['admit', i + 1], ['settle', i + 1]]).flat());

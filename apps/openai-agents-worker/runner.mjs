@@ -1,4 +1,4 @@
-import { authorizeWorkspace, WORKSPACE_BODY_BYTES } from './workspace-protocol.ts';
+import { authorizeWorkspace, workspaceAbilities, WORKSPACE_BODY_BYTES } from './workspace-protocol.ts';
 import { createWorkspaceSandbox } from './workspace-sandbox.ts';
 import { dispatchWorkspaceTool, validWorkspaceCall } from './workspace-rpc.ts';
 import { parentObservability } from './usage.mjs';
@@ -188,6 +188,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
     type: 'run',
     acceptedAtNs,
     request,
+    ...(request.workspace ? { workspaceAbilities: workspaceAbilities(config.workspace) } : {}),
     modelConfig: {
       provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL,
       // A Bedrock key travels only inside its auth record, never as an OpenAI SDK key.

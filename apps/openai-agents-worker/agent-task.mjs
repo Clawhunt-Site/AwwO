@@ -34,7 +34,7 @@ process.on('message', async message => {
     if (controller.signal.aborted) return await terminal({ type: 'cancelled' });
     if (message.request.workspace) {
       const broker = childWorkspaceBroker(controller.signal);
-      try { await executeWorkspaceAgent({ request: message.request, modelConfig, signal: controller.signal, emit, broker: broker.call, modelFetch }); }
+      try { await executeWorkspaceAgent({ request: message.request, modelConfig, signal: controller.signal, emit, broker: broker.call, modelFetch, abilities: message.workspaceAbilities }); }
       finally { broker.close(); }
     } else await executeAgent({ request: message.request, modelConfig, signal: controller.signal, emit, observer });
   } catch (error) {

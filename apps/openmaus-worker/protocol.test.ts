@@ -1,14 +1,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boundedText, parseRun, parseAnswer, readBytes, safeEqual, WorkerError } from './protocol.ts';
-import { coreEnvironment } from './runtime.ts';
+import { boundedText, hash, parseRun, parseAnswer, readBytes, safeEqual, WorkerError } from './protocol.ts';
+import { coreEnvironment, workspaceSoul } from './runtime.ts';
 import { TOOLS } from './transport.ts';
 
 const request = { runId: 'opaque/中文', tenantId: 'tenant', sessionId: 'session', prompt: 'write a file', instructions: '', modelProxyURL: 'http://127.0.0.1:9000/v1', modelProxyToken: 'task-token-123456789', timeoutMs: 1000, maxModelCalls: 2 };
 test('run scopes are opaque; callback URL and budgets are validated', () => {
-  assert.deepEqual(parseRun(request, new Set()), request);
+  assert.deepEqual(parseRun(request, new Set()), { ...request, inputs: [] });
   for (const patch of [{ timeoutMs: 900001 }, { maxModelCalls: 0 }, { modelProxyURL: 'file:///etc/passwd' }, { modelProxyURL: 'http://evil.invalid/v1' }, { modelProxyURL: 'http://127.0.0.1/a?secret=x' }, { modelProxyToken: 'a\r\nb'.repeat(20) }, { prompt: 'a\0b' }, { tenantId: 'x\n' }]) assert.throws(() => parseRun({ ...request, ...patch }, new Set()), WorkerError);
   assert.equal(parseRun({ ...request, modelProxyURL: 'https://gateway.internal/v1' }, new Set(['https://gateway.internal'])).modelProxyURL, 'https://gateway.internal/v1');
+});
+test('input files are names with real base64 and matching digests, within the totals', () => {
+  const file = (name: string, text: string) => { const content = Buffer.from(text).toString('base64'); return { name, content, encoding: 'base64', sha256: hash(Buffer.from(text)) }; };
+  const parsed = parseRun({ ...request, inputs: [file('app.zip', 'PK'), file('notes.md', '# hi')] }, new Set());
+  assert.deepEqual(parsed.inputs.map(input => input.name), ['app.zip', 'notes.md']);
+  const good = file('a.txt', 'abc');
+  for (const inputs of [[{ ...good, name: '../a' }], [{ ...good, name: 'a/b' }], [{ ...good, sha256: 'f'.repeat(64) }], [{ ...good, content: 'not base64!' }],
+    [{ ...good, encoding: 'utf8' }], [good, good], Array.from({ length: 9 }, (_, i) => file(`f${i}`, 'x')), 'a.txt'])
+    assert.throws(() => parseRun({ ...request, inputs }, new Set()), WorkerError);
+  const big = 'x'.repeat(2 * 1024 * 1024);
+  assert.throws(() => parseRun({ ...request, inputs: [file('big', big + 'x')] }, new Set()), WorkerError);
+  assert.throws(() => parseRun({ ...request, inputs: [file('a', big), file('b', big), file('c', big), file('d', big), file('e', 'x')] }, new Set()), WorkerError);
+});
+test('the agent is told about its files, the tools its image has and the web, and nothing else', () => {
+  const inputs = [{ name: 'app.zip', content: '', encoding: 'base64' as const, sha256: '' }];
+  const plain = workspaceSoul({ tools: new Set(), sandbox: {} }, { inputs: [] });
+  assert.ok(plain.includes('no network') && !plain.includes('/inputs') && !plain.includes('rea ') && !plain.includes('awwo-check-page') && !plain.includes('PROXY'));
+  const full = workspaceSoul({ tools: new Set(['rea', 'check-page']), sandbox: { egress: { socketDir: '/srv/egress', secret: 'x'.repeat(32) } } }, { inputs });
+  assert.ok(full.includes('/inputs: app.zip') && full.includes('rea analyze-javascript-application') && full.includes('awwo-check-page'));
+  assert.ok(full.includes('HTTPS_PROXY') && !full.includes('no network') && !full.includes('x'.repeat(32)));
 });
 test('answers and payload bounds reject malformed input', async () => {
   assert.deepEqual(parseAnswer({ requestId: 'r', behavior: 'deny' }), { requestId: 'r', behavior: 'deny' });

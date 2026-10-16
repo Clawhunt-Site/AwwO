@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createWorkspaceSandbox, type WorkspaceSandbox } from '../openai-agents-worker/workspace-sandbox.ts';
+import { createWorkspaceSandbox, sandboxAbilities, type WorkspaceSandbox } from '../openai-agents-worker/workspace-sandbox.ts';
 import { type WorkerConfig, WORKER_DIR, coreInstalled } from './config.ts';
 import { closeServer, createTransport, listenLocal } from './transport.ts';
 import { WorkerError, boundedText, hash, record, responseJSON, safeMessage, type ApprovalAnswer, type RunRequest, type WorkerEvent } from './protocol.ts';
@@ -15,6 +15,16 @@ import { diagnostic, safeFailureDetails, type RuntimeStage } from './diagnostics
 // model wrote a long file stopped part-way (2026-10-16, CORE_EXECUTION_FAILED at stage poll). 10 minutes matches the API
 // proxy's computerModelCallTimeout and the workers' own per-call limit.
 export const CORE_MODEL_IDLE_TIMEOUT_MS = '600000';
+/** What the agent is told about its workspace: the files it was given, the tools its image has and whether it reaches
+ *  the web, as the deployment configured them (config.ts); without any, what it was always told. */
+export function workspaceSoul(config: Pick<WorkerConfig, 'tools'> & { sandbox: Pick<WorkerConfig['sandbox'], 'egress'> }, request: Pick<RunRequest, 'inputs'>): string {
+  const parts = ['\nUse only AwwO workspace tools. Files and commands exist inside an isolated Docker workspace.'];
+  if (request.inputs.length) parts.push(`The files the user attached are read-only in /inputs: ${request.inputs.map(input => input.name).join(', ')}.`);
+  parts.push(...sandboxAbilities(config.tools, !!config.sandbox.egress));
+  parts.push('No desktop, live browser, host shell, peers, skills or external integrations are available. Publish files you actually created; never claim unrun tests passed.');
+  return parts.join(' ');
+}
+
 export function coreEnvironment(home: string, port: string, webhookPort: string): NodeJS.ProcessEnv {
   return { PATH: dirname(process.execPath) + ':/usr/bin:/bin', HOME: home, TMPDIR: join(home, 'tmp'),
     OMB_DATA_DIR: home, OMB_PORT: port, OMB_WEBHOOK_PORT: webhookPort, OMB_LOOPBACK_TRUST: 'service', OMB_CLI_OWNER_STDIN: '1',
@@ -84,7 +94,8 @@ export class ManagedRun {
       await mkdir(this.config.dataRoot, { recursive: true, mode: 0o700 });
       home = await mkdtemp(join(this.config.dataRoot, 'run-'));
       await mkdir(join(home, 'tmp'), { mode: 0o700 });
-      sandbox = await createWorkspaceSandbox(this.config.sandbox, { workspaceId: hash(this.request.tenantId + '\0' + this.request.sessionId), runId: this.request.runId }, signal);
+      sandbox = await createWorkspaceSandbox(this.config.sandbox, { workspaceId: hash(this.request.tenantId + '\0' + this.request.sessionId), runId: this.request.runId,
+        inputs: this.request.inputs.map(input => ({ name: input.name, content: input.content, encoding: input.encoding, sha256: input.sha256 })) }, signal);
       transport = await createTransport(this.request, sandbox, signal, this.emit);
       stage = 'core_health';
       const owner = randomBytes(32).toString('base64url');
@@ -118,7 +129,7 @@ export class ManagedRun {
       if (!record(paired) || typeof paired.token !== 'string') throw new WorkerError('CORE_PAIRING_FAILED');
       this.coreToken = paired.token;
       stage = 'create_bot';
-      const created = await this.api('/api/bots', { name: 'AwwO workspace', soul: this.request.instructions + '\nUse only AwwO workspace tools. Files and commands exist inside an isolated Docker workspace. No desktop, browser, host shell, peers, skills or external integrations are available. Publish files you actually created; never claim unrun tests passed.',
+      const created = await this.api('/api/bots', { name: 'AwwO workspace', soul: this.request.instructions + workspaceSoul(this.config, this.request),
         modelSelection: { instanceId: 'awwo', model: 'awwo-model' }, requireAvailableModel: true, computer: 'off', browser: false, composio: false, peers: [], mcpServers: ['awwo_workspace'], approvalMode: 'ask', chiefOfStaff: false });
       if (!record(created) || !record(created.bot) || typeof created.bot.id !== 'string' || typeof created.bot.threadId !== 'string') throw new WorkerError('CORE_BOT_FAILED');
       this.botId = created.bot.id; this.threadId = created.bot.threadId;
