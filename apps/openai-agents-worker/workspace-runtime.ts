@@ -62,8 +62,10 @@ export function compileWorkspaceDelivery(source: string, fields: OutputField[], 
   catch {
     const unbound = fields.filter(field => !published.has(field.id));
     // Real files and published HTML are already bound by trusted receipts. A
-    // single remaining handoff field can receive a natural-language final reply.
+    // single remaining handoff field can receive a natural-language final reply,
+    // and once every field is bound the reply carries nothing the delivery needs.
     if (unbound.length === 1 && ['text', 'markdown', 'html'].includes(unbound[0].type)) values = { [unbound[0].id]: source };
+    else if (!unbound.length && source.trim()) values = {};
     else throw new RuntimeError('OUTPUT_CONTRACT_INVALID');
   }
   if (!record(values)) throw new RuntimeError('OUTPUT_CONTRACT_INVALID');

@@ -75,6 +75,18 @@ test('natural final prose fills only the single remaining narrative field alongs
   assert.throws(() => compileWorkspaceDelivery('Unbound fields cannot be guessed.', fields, new Map()));
 });
 
+test('a prose final reply completes a delivery whose every field is already published', () => {
+  // The 2026-10-16 flagship builders published their modules and then said so in prose instead of the JSON object.
+  const fields: OutputField[] = [{ id: 'result', type: 'markdown', required: true }, { id: 'bundle', type: 'file', required: true }];
+  const published = new Map([['result', file('core.js', '(() => { window.U = {}; })();')], ['bundle', file('main.ts', 'console.log(1)')]]);
+  const result = JSON.parse(compileWorkspaceDelivery('Published core.js after node --check passed.', fields, published));
+  assert.equal(result.result, published.get('result')?.content);
+  assert.equal(Buffer.from(result.bundle.content, 'base64').toString(), published.get('bundle')?.content);
+  // An empty reply still delivers nothing, and an unbound file is never guessed from prose.
+  assert.throws(() => compileWorkspaceDelivery('  ', fields, published));
+  assert.throws(() => compileWorkspaceDelivery('Published core.js.', fields, new Map([['result', file('core.js', 'x')]])));
+});
+
 test('one invalid final is repaired with the same history and separately admitted model call', async t => {
   const state = await fixture(t, [invalid, { text: '{"count":7}' }], countFields);
   await state.run(); assertPaidCalls(state, 2);
