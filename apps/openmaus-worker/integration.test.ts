@@ -40,7 +40,7 @@ test('real pinned core + real Docker: approval, exec, verified artifact, questio
     json(res, 200, { id: 'fixture', object: 'chat.completion', model: 'awwo-model', choices: [{ index: 0, finish_reason: tool ? 'tool_calls' : 'stop', message: tool ? { role: 'assistant', content: null, tool_calls: [{ id: `call_${modelCalls}`, type: 'function', function: tool }] } : { role: 'assistant', content: 'Created index.html. The Docker test passed.' } }], usage: { prompt_tokens: 12, completion_tokens: 8 } });
   });
   const modelURL = await listenLocal(model), dir = await mkdtemp(join(tmpdir(), 'awwo-openmaus-integration-'));
-  const config = loadConfig({ ...process.env, AWWO_OPENMAUS_TOKEN: workerToken, AWWO_OPENMAUS_DATA_DIR: dir, AWWO_OPENMAUS_DOCKER: process.env.AWWO_TEST_DOCKER_EXECUTABLE || '/usr/local/bin/docker', AWWO_OPENMAUS_WORKSPACE_IMAGE: process.env.AWWO_TEST_WORKSPACE_IMAGE || 'awwo-workspace:20261001', AWWO_OPENMAUS_DOCKER_CONTEXT: process.env.AWWO_TEST_DOCKER_CONTEXT || 'desktop-linux' });
+  const config = loadConfig({ ...process.env, AWWO_OPENMAUS_TOKEN: workerToken, AWWO_OPENMAUS_DATA_DIR: dir, AWWO_OPENMAUS_DOCKER: process.env.AWWO_TEST_DOCKER_EXECUTABLE || '/usr/local/bin/docker', AWWO_OPENMAUS_WORKSPACE_IMAGE: process.env.AWWO_TEST_WORKSPACE_IMAGE || 'awwo-workspace:20261016', AWWO_OPENMAUS_DOCKER_CONTEXT: process.env.AWWO_TEST_DOCKER_CONTEXT || 'desktop-linux' });
   const worker = createWorkerServer(config), url = await listenLocal(worker.server), headers = { authorization: `Bearer ${workerToken}`, 'content-type': 'application/json' }, runId = randomUUID();
   try {
     let health: { ready: boolean } = { ready: false };
@@ -86,7 +86,7 @@ for (const mode of ['deny', 'cancel', 'disconnect', 'budget'] as const) {
       json(res, 200, { choices: [{ finish_reason: done ? 'stop' : 'tool_calls', message: done ? { role: 'assistant', content: 'The requested write was denied.' } : { role: 'assistant', content: null, tool_calls: [{ id: `call_${calls}`, type: 'function', function: { name: 'awwo_workspace_write', arguments: JSON.stringify({ path: 'pending.txt', content: 'must wait for approval' }) } }] } }] });
     });
     const modelURL = await listenLocal(model), dir = await mkdtemp(join(tmpdir(), 'awwo-openmaus-negative-'));
-    const config = loadConfig({ ...process.env, AWWO_OPENMAUS_TOKEN: workerToken, AWWO_OPENMAUS_DATA_DIR: dir, AWWO_OPENMAUS_DOCKER: process.env.AWWO_TEST_DOCKER_EXECUTABLE || '/usr/local/bin/docker', AWWO_OPENMAUS_WORKSPACE_IMAGE: process.env.AWWO_TEST_WORKSPACE_IMAGE || 'awwo-workspace:20261001', AWWO_OPENMAUS_DOCKER_CONTEXT: process.env.AWWO_TEST_DOCKER_CONTEXT || 'desktop-linux' });
+    const config = loadConfig({ ...process.env, AWWO_OPENMAUS_TOKEN: workerToken, AWWO_OPENMAUS_DATA_DIR: dir, AWWO_OPENMAUS_DOCKER: process.env.AWWO_TEST_DOCKER_EXECUTABLE || '/usr/local/bin/docker', AWWO_OPENMAUS_WORKSPACE_IMAGE: process.env.AWWO_TEST_WORKSPACE_IMAGE || 'awwo-workspace:20261016', AWWO_OPENMAUS_DOCKER_CONTEXT: process.env.AWWO_TEST_DOCKER_CONTEXT || 'desktop-linux' });
     const worker = createWorkerServer(config), url = await listenLocal(worker.server), runId = randomUUID();
     const headers = { authorization: `Bearer ${workerToken}`, 'content-type': 'application/json' }, abort = new AbortController();
     try {

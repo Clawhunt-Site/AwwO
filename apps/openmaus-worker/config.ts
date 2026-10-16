@@ -26,7 +26,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const commandTimeoutMs = Number(env.AWWO_OPENMAUS_COMMAND_TIMEOUT_MS || (egress ? 120_000 : 30_000));
   if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 1000 || commandTimeoutMs > 120_000) throw new Error('AWWO_OPENMAUS_COMMAND_TIMEOUT_MS must be 1000–120000');
   return { token, host: env.AWWO_OPENMAUS_HOST || '127.0.0.1', port, maxConcurrent, corePath, dataRoot, proxyOrigins, tools,
-    sandbox: { dockerExecutable, image: env.AWWO_OPENMAUS_WORKSPACE_IMAGE || env.AWWO_OPENAI_AGENTS_WORKSPACE_IMAGE || 'awwo-workspace:20261001', dockerContext: env.AWWO_OPENMAUS_DOCKER_CONTEXT || env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT, commandTimeoutMs, ...(egress ? { egress } : {}) } };
+    sandbox: { dockerExecutable, image: env.AWWO_OPENMAUS_WORKSPACE_IMAGE || env.AWWO_OPENAI_AGENTS_WORKSPACE_IMAGE || 'awwo-workspace:20261016', dockerContext: env.AWWO_OPENMAUS_DOCKER_CONTEXT || env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT, commandTimeoutMs, ...(egress ? { egress } : {}) } };
 }
 export function coreInstalled(config: WorkerConfig): boolean {
   try { const build = JSON.parse(readFileSync(join(dirname(config.corePath), 'awwo-build.json'), 'utf8')); return build.upstreamRevision === UPSTREAM_REVISION && build.patchVersion === PATCH_VERSION && readFileSync(config.corePath).length > 1000; } catch { return false; }

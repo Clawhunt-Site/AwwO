@@ -152,7 +152,7 @@ services:
       AWWO_OPENMAUS_PORT: 8099
       AWWO_OPENMAUS_TOKEN: ${AWWO_OPENMAUS_TOKEN:?Set a dedicated managed execution internal token}
       AWWO_OPENMAUS_MODEL_PROXY_ORIGINS: http://api:8087
-      AWWO_OPENMAUS_WORKSPACE_IMAGE: ${AWWO_OPENMAUS_WORKSPACE_IMAGE:-awwo-workspace:20261001}
+      AWWO_OPENMAUS_WORKSPACE_IMAGE: ${AWWO_OPENMAUS_WORKSPACE_IMAGE:-awwo-workspace:20261016}
       AWWO_OPENMAUS_MAX_CONCURRENT: ${AWWO_OPENMAUS_MAX_CONCURRENT:-2}
     # Only the trusted broker can reach Docker. The model sees a fixed, approved
     # workspace MCP; the per-run containers receive no socket, host mounts or keys.

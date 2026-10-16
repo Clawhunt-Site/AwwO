@@ -13,7 +13,7 @@ try {
   await run('go', ['build', '-o', '../.local/awwo-saas/bin/awwo-api', './cmd/api'], { cwd: `${root}/backend` });
   await run('npm', ['run', 'build:saas', '--prefix', 'apps/web']);
   try {
-    await run('docker', ['build', '-t', 'awwo-workspace:20261001', 'deploy/saas/workspace']);
+    await run('docker', ['build', '-t', 'awwo-workspace:20261016', 'deploy/saas/workspace']);
   } catch {
     console.warn('The execution workspace image is not ready. Start Docker and rerun npm run setup:saas; other AwwO features remain available.');
   }

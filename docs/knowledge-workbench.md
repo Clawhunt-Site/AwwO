@@ -105,7 +105,7 @@ PDF.js 使用随构建分发的 worker、CMap 与标准字体资源，逐页渲�
 
 ### 部署人员：服务与 Docker 准备
 
-这些是 AwwO 部署要求，不是产品用户的第二套配置。`npm run setup:saas` 安装并构建固定提交的开源核心，并尝试构建 `awwo-workspace:20261001`；`npm run dev:saas` 启动托管 worker，生成本地内部令牌，并连接现有 API 模型代理。Docker 或镜像缺失时，其他 AwwO 页面仍可运行，但「直接执行」会显示服务未就绪，不会报告可执行。
+这些是 AwwO 部署要求，不是产品用户的第二套配置。`npm run setup:saas` 安装并构建固定提交的开源核心，并尝试构建 `awwo-workspace:20261016`；`npm run dev:saas` 启动托管 worker，生成本地内部令牌，并连接现有 API 模型代理。Docker 或镜像缺失时，其他 AwwO 页面仍可运行，但「直接执行」会显示服务未就绪，不会报告可执行。
 
 容器部署使用 `deploy/saas/openmaus.Dockerfile` 和 `deploy/saas/compose.yml`。部署人员需要预先构建 workspace 镜像、给受信任 worker 配置 Docker socket 及其组权限，设置专用 `AWWO_OPENMAUS_TOKEN`，并确保 API 与 worker 的内部地址互通。不要把 worker 端口公开给浏览器或公网，也不要把 Docker socket 挂入任务容器。
 
