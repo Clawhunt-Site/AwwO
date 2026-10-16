@@ -5,7 +5,7 @@ import { saasErrorMessage } from './api';
 import { formatCredits, planName } from './billing';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
-import { canCheckIn, checkIn, fetchRouteUsage, meterState, recordUpgradeInterest, routeOrder, routeUsedUp, type CheckinBonus, type CheckinState, type PromoView, type RouteName, type RouteUsage } from './routeUsage';
+import { ROUTE_USAGE_CHANGED, canCheckIn, checkIn, fetchRouteUsage, meterState, recordUpgradeInterest, routeOrder, routeUsedUp, type CheckinBonus, type CheckinState, type PromoView, type RouteName, type RouteUsage } from './routeUsage';
 import './route-usage.css';
 
 const REFRESH_MS = 120_000;
@@ -38,7 +38,10 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
     };
     reload.current();
     timer = window.setInterval(() => { if (document.visibilityState !== 'hidden') reload.current(); }, REFRESH_MS);
-    return () => { controller.abort(); window.clearInterval(timer); };
+    // A task or a run that spent calls has ended: the numbers are read again now.
+    const changed = () => reload.current();
+    window.addEventListener(ROUTE_USAGE_CHANGED, changed);
+    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener(ROUTE_USAGE_CHANGED, changed); };
   }, [tenantId]);
   if (!usage) return null;
   if (usage.plan) return <PaidMeter usage={usage} plan={usage.plan} open={open} setOpen={setOpen} reload={reload.current} />;
@@ -84,6 +87,7 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
     <Popover containKeyboard open={open} anchorRef={anchor} ariaLabel={t('今日免费额度', 'Today’s free allowance')} className="saas-route-usage" onClose={() => setOpen(false)}>
       <h2>{t('今日免费额度', 'Today’s free allowance')}</h2>
       <p>{t('每天 UTC 0 点重置。默认模型不单独限次，只占总次数。', 'Resets at 00:00 UTC. The default model has no limit of its own and only uses the daily total.')}</p>
+      <CallsNote />
       {usage.promo && <PromoNote promo={usage.promo} />}
       {checkin && <CheckinRow checkin={checkin} busy={checking} announced={checkedNow} onCheckIn={check} />}
       {Boolean(checkError) && <p role="alert" className="saas-error">{saasErrorMessage(checkError, locale)}</p>}
@@ -106,6 +110,18 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
       <button type="button" className="saas-route-usage-ask" disabled={busy} onClick={ask}>{busy ? t('正在记录…', 'Recording…') : interested ? t('我还需要更多次数', 'I still need more calls') : t('想要更多次数', 'I want more calls')}</button>
       {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
     </Popover>
+  </>;
+}
+
+/** What one 次 is (a customer's question, 2026-10-16): one answer from a model or one generation, several in a task;
+ * and what a direct task the platform failed gives back (direct_task_refund.go). */
+function CallsNote() {
+  const { t } = useSaaSPreferences();
+  return <>
+    <p className="saas-route-usage-calls">{t('1 次 = 模型回答一次（或生成一张图片 / 一段视频）。一个任务里模型常要回答好几次，比如先读文件、再写代码、再检查，所以一条消息可能用掉不止 1 次。',
+      '1 call = one answer from a model (or one image / video generation). A task often needs several answers, for example to read files, write code and check it, so one message can use more than 1 call.')}</p>
+    <p className="saas-route-usage-calls">{t('直接执行的任务如果因为平台原因失败（比如执行服务出错或重启），用掉的次数退还到当天的总次数，每天最多退还 32 次；下面单独限次的几行不退。',
+      'A direct task that fails because of the platform (for example the execution service failed or restarted) gives its calls back to that day’s total, up to 32 a day; the rows below with limits of their own keep counting them.')}</p>
   </>;
 }
 

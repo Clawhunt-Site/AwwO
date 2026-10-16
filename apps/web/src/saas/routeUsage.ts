@@ -31,6 +31,13 @@ export type RouteUsage = { limited: boolean; daily: RouteAllowance; routes?: Par
 
 export const routeOrder: RouteName[] = ['gate', 'bedrock', 'media'];
 
+/** Said on the page when something that spends calls has ended (a direct task, a canvas run, a plan): the header
+ * meter reads today's numbers again instead of waiting for its next refresh. */
+export const ROUTE_USAGE_CHANGED = 'awwo:route-usage-changed';
+export function announceRouteUsageChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(ROUTE_USAGE_CHANGED));
+}
+
 export function fetchRouteUsage(tenantId: string, signal?: AbortSignal) {
   return api<RouteUsage>(`/tenants/${encodeURIComponent(tenantId)}/route-usage`, { signal });
 }

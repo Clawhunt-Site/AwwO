@@ -9,6 +9,7 @@ import { TaskStartUnconfirmed } from '../canvas/assistantRouting';
 import { SaaSApiError, saasErrorMessage } from './api';
 import { canvasKnowledgeRevisionIds, subscribeCanvasKnowledge } from './canvasBridge';
 import { createKnowledgeSource } from './knowledgeApi';
+import { announceRouteUsageChanged } from './routeUsage';
 import { useSaaSPreferences } from './preferences';
 import { cancelExecutionRun, createExecutionRun, executionArtifactURL, executionTerminal, readExecutionRun, readExecutionRuns, readExecutionRuntime,
   respondToExecutionRun, type ExecutionApproval, type ExecutionArtifact, type ExecutionInput, type ExecutionModel,
@@ -251,6 +252,8 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   // The tasks this page knows its submissions made (its own sends, or announced by another page): a send of one that
   // ends unconfirmed is that task, never a submission to wait on again.
   const startedTasks = useRef(new Map<string, string>());
+  // The tasks seen ending on this page: each tells the header meter once that its calls may have changed.
+  const endedTasks = useRef(new Set<string>());
   // The submission a shown error is about (a reconcile's that ended unconfirmed): it is cleared once that submission
   // settles, here or in another page; any other error stays until the user moves on.
   const errorAbout = useRef<string | null>(null);
@@ -397,6 +400,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
           if (executionTerminal(value.status)) {
             // A notice that waited on this task's next state (a response or a stop being checked) is answered now.
             if (awaitingOutcome.current) { awaitingOutcome.current = false; setNotice(''); setNoticeWarning(false); }
+            if (!endedTasks.current.has(value.id)) { endedTasks.current.add(value.id); announceRouteUsageChanged(); }
             return;
           }
           await pause(controller.signal);

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { RouteUsageMeter } from '../src/saas/RouteUsageMeter';
 import { AdminPanel } from '../src/saas/AdminPanel';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import { announceRouteUsageChanged } from '../src/saas/routeUsage';
 
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const usage = (routes: Record<string, { limit: number; used: number }>, daily = { limit: 30, used: 12 }, interested = false) => ({ limited: true, interested, daily, routes });
@@ -48,6 +49,31 @@ it('shows the assistant’s free canvas changes as their own row, outside the da
   fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 26 次' }));
   expect(row('助手改画布（免费，不占总次数）')).toHaveTextContent('7 / 20');
   expect(row('总次数')).toHaveTextContent('4 / 30');
+});
+
+// A customer's question (2026-10-16): what one 次 is, and what a task the platform failed gives back.
+it('says what one call is and what a failed direct task gives back', async () => {
+  showing(usage({ gate: { limit: 3, used: 1 } }));
+  meter();
+  fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 18 次' }));
+  expect(screen.getByText(/^1 次 = 模型回答一次/)).toBeVisible();
+  expect(screen.getByText(/用掉的次数退还到当天的总次数，每天最多退还 32 次；下面单独限次的几行不退。$/)).toBeVisible();
+});
+
+it('reads the numbers again as soon as a task says it ended', async () => {
+  const fetch = vi.fn(async () => response(usage({ gate: { limit: 3, used: 1 } })));
+  vi.stubGlobal('fetch', fetch);
+  meter();
+  await screen.findByRole('button', { name: '今日额度 · 剩 18 次' });
+  fetch.mockImplementation(async () => response(usage({ gate: { limit: 3, used: 1 } }, { limit: 30, used: 19 })));
+  React.act(() => { announceRouteUsageChanged(); });
+  expect(await screen.findByRole('button', { name: '今日额度 · 剩 11 次' })).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  // Once unmounted, the meter no longer listens.
+  cleanup();
+  announceRouteUsageChanged();
+  await settle();
+  expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 it('counts down the daily total while every route still has room', async () => {

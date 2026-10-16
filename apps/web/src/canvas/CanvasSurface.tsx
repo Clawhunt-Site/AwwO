@@ -36,7 +36,7 @@ import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from 
 import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, runRequestKind, type NextStep, type NextSteps } from './nextSteps';
 import { reviewVerdict, reworkRequirements } from './reviewVerdict';
 import { runErrorText } from '../saas/canvasErrors';
-import { fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
+import { announceRouteUsageChanged, fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
 import { recordCanvasEvent, type CanvasUiEvent } from '../saas/uiEvents';
 import { assistantCostNote } from './assistantCost';
 import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHost, type AssistantPending, type AssistantRoute,
@@ -2685,6 +2685,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       .catch(() => { /* The note then keeps its general wording. */ });
     return () => controller.abort();
   }, [cloudTenantId, planningBusy]);
+  // A canvas run or a plan that may have spent calls has ended: the header meter reads today's numbers again.
+  const spending = running || planningBusy;
+  const wasSpending = useRef(false);
+  useEffect(() => {
+    if (wasSpending.current && !spending) announceRouteUsageChanged();
+    wasSpending.current = spending;
+  }, [spending]);
   const [planningError, setPlanningError] = useState('');
   const [planningRecovery, setPlanningRecovery] = useState<Awaited<ReturnType<typeof readCanvasPlanRecovery>> | null>(null);
   const [recoveryLoaded, setRecoveryLoaded] = useState(!canInitialize);
