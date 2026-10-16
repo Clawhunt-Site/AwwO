@@ -108,8 +108,9 @@ type computerLease struct {
 	blocks []string
 }
 
-// What the broker reads of a task's start, and of its prompt (LIMITS.request and parseRun in
-// apps/openmaus-worker/protocol.ts).
+// How much of a task's start is its text (the prompt with its reference blocks), and how long its prompt may be
+// (parseRun in apps/openmaus-worker/protocol.ts). The files a task's message names are added after the fit, beside the
+// text: the broker reads up to 12 MiB (LIMITS.request), room for 8 MiB of files in base64 and this text.
 const (
 	computerTaskBodyLimit   = 512 << 10
 	computerTaskPromptLimit = 256 << 10
