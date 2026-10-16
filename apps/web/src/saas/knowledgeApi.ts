@@ -126,16 +126,26 @@ export async function readKnowledgeRevisions(tenantId: string, documentId: strin
 export async function restoreKnowledgeRevision(tenantId: string, documentId: string, revisionId: string, expectedVersion: number, operationId: string, signal: AbortSignal) {
   return checked(await api<unknown>(`${base(tenantId)}/documents/${encoded(documentId)}/restore`, post({ revisionId, expectedVersion, operationId }, signal)), (x): x is KnowledgeDocument => document(x) && x.id === documentId && x.version === expectedVersion + 1);
 }
-export async function readKnowledgeContext(tenantId: string, ids: string[], signal: AbortSignal): Promise<KnowledgeContext> {
-  const result = await api<unknown>(`${base(tenantId)}/context?ids=${encoded(ids.join(','))}`, { signal });
-  const value = checked(result, (x): x is KnowledgeContext => object(x) && string(x.text) && x.truncated === false
+function knowledgeContext(x: unknown): x is KnowledgeContext {
+  return object(x) && string(x.text) && x.truncated === false
     && Array.isArray(x.items) && x.items.every(v => object(v) && nonempty(v.documentId) && nonempty(v.revisionId)
       && string(v.title) && kinds.includes(String(v.kind)) && nonempty(v.contentHash) && string(v.content)
-      && string(v.sourceUri) && object(v.provenance)));
+      && string(v.sourceUri) && object(v.provenance));
+}
+const contextMismatch = () => new SaaSApiError(502, 'invalid_knowledge_context', '上下文与选中的资料不一致，请重新读取。');
+export async function readKnowledgeContext(tenantId: string, ids: string[], signal: AbortSignal): Promise<KnowledgeContext> {
+  const value = checked(await api<unknown>(`${base(tenantId)}/context?ids=${encoded(ids.join(','))}`, { signal }), knowledgeContext);
   if (new Set(value.items.map(item => item.documentId)).size !== ids.length || value.items.length !== ids.length
     || value.items.some(item => !ids.includes(item.documentId))) {
-    throw new SaaSApiError(502, 'invalid_knowledge_context', '上下文与选中的资料不一致，请重新读取。');
+    throw contextMismatch();
   }
+  return value;
+}
+/** The context these exact revisions would give a task, checked by the server as a plan or a run checks it (at most
+ *  eight, each present and intact, 64 KiB in all): how a reference is tried before the canvas cites it. */
+export async function readKnowledgeRevisionContext(tenantId: string, revisionIds: string[], signal: AbortSignal): Promise<KnowledgeContext> {
+  const value = checked(await api<unknown>(`${base(tenantId)}/context?revisionIds=${encoded(revisionIds.join(','))}`, { signal }), knowledgeContext);
+  if (value.items.length !== revisionIds.length || value.items.some((item, index) => item.revisionId !== revisionIds[index])) throw contextMismatch();
   return value;
 }
 

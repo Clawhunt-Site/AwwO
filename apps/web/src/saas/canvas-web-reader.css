@@ -1,0 +1,22 @@
+/* 从网址读取 in simple mode (CanvasWebReader): its canvas-bar button and references chip reuse the knowledge map's
+   look (canvas-knowledge-dock.css); its dialog is a small saas-native-dialog over the canvas. */
+.awwo-web-reader{width:min(540px,calc(100% - 32px));max-width:none;padding:0}
+.awwo-web-reader>.saas-card{display:flex;flex-direction:column;gap:12px;margin:0;border:0;box-shadow:none}
+.awwo-web-reader header{display:flex;align-items:center;gap:8px;color:var(--awwo-accent)}
+.awwo-web-reader h2{flex:1;margin:0;font-size:17px;color:var(--saas-text)}
+.awwo-web-reader .awwo-web-reader-close{display:grid;place-items:center;width:32px;min-height:32px;height:32px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--awwo-muted)}
+.awwo-web-reader .awwo-web-reader-close:not(:disabled):hover{background:var(--saas-hairline)}
+.awwo-web-reader-help,.awwo-web-reader-note{margin:0;font-size:12px;line-height:1.55;color:var(--awwo-muted)}
+.awwo-web-reader-field{display:flex;gap:8px}
+.awwo-web-reader-field input{flex:1;min-width:0}
+.awwo-web-reader-field button{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.awwo-web-reader-result{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid var(--awwo-border);border-radius:12px;background:var(--saas-soft)}
+.awwo-web-reader-saved{margin:0;font-size:12px;color:var(--saas-success,#2f7d4f)}
+.awwo-web-reader-result h3{margin:0;font-size:15px;overflow-wrap:anywhere}
+.awwo-web-reader-source{margin:0;font-size:12px;color:var(--awwo-muted)}
+.awwo-web-reader-excerpt{margin:0;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.awwo-web-reader-result footer{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+.awwo-web-reader-spin{animation:awwo-web-reader-spin 1s linear infinite}
+@keyframes awwo-web-reader-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.awwo-web-reader-spin{animation:none}}
+@media(max-width:560px){.awwo-web-reader-field{flex-direction:column}}

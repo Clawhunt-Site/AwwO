@@ -5,6 +5,7 @@ import { configureCanvasKnowledge } from './canvasBridge';
 import { KnowledgeWorkbench, type KnowledgeArtifactCandidate } from './KnowledgeWorkbench';
 import { createKnowledgeProposal, type KnowledgeContextItem } from './knowledgeApi';
 import { useSaaSPreferences } from './preferences';
+import { useCanvasKnowledgeCount } from './useCanvasKnowledgeCount';
 import './canvas-knowledge-dock.css';
 
 interface Artifact { id: string; name: string; runId: string; nodeId: string }
@@ -50,7 +51,8 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft, extraTools }:
   const { t, locale } = useSaaSPreferences();
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<KnowledgeContextItem[]>([]);
+  // What the canvas's next tasks cite, as the bridge holds it: references set from simple mode show here too.
+  const cited = useCanvasKnowledgeCount();
   // A failed read concerns only the open map. `message` is the latest compilation outcome: shown at
   // the top of the open map and, while the map is closed, marked on its button until it is opened.
   const [readError, setReadError] = useState<unknown>(null);
@@ -165,7 +167,7 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft, extraTools }:
     : mark === 'new' ? t('知识地图（有新的整理结果）', 'Knowledge map (new compilation result)') : mapName;
   const politeText = message && !('error' in message) ? messageText(message) : '';
   const assertiveText = message && 'error' in message ? messageText(message) : '';
-  const references = t(`已引用 ${selected.length} 份知识`, `${selected.length} references selected`);
+  const references = t(`已引用 ${cited} 份知识`, `${cited} references selected`);
 
   // The canvas bar also holds the assistant toggle and the run controls, and it is narrow in a small
   // window or with both side panels open. The labels give way to icons (same names and tooltips)
@@ -219,12 +221,12 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft, extraTools }:
   }, []);
   // The references chip is the dock's own content: re-check before the browser paints it, so a chip that
   // only fits beside icons never shows for a frame with labels and a wrapped bar.
-  useLayoutEffect(() => { refit.current(); }, [selected.length]);
+  useLayoutEffect(() => { refit.current(); }, [cited]);
   return <div ref={toolsRef} className={compact ? 'awwo-knowledge-tools is-compact' : 'awwo-knowledge-tools'}>
     <button type="button" className="awwo-knowledge-tool" aria-label={mapLabel} title={pending ? `${mapName}${t('：', ': ')}${messageText(pending)}` : mapName} onClick={openMap}><BookOpen size={15} aria-hidden="true" /><span>{mapName}</span>{mark && <i className={`awwo-knowledge-tool-mark is-${mark}`} aria-hidden="true" />}</button>
     {extraTools}
-    {selected.length > 0 && <span className="awwo-knowledge-references" title={references}><span className="awwo-knowledge-references-label">{references}</span><span className="awwo-knowledge-references-count" aria-hidden="true"><BookMarked size={13} aria-hidden="true" />{selected.length}</span>
-      {!readOnly && <button type="button" aria-label={t('清除任务知识引用', 'Clear task knowledge references')} onClick={() => { configureCanvasKnowledge([]); setSelected([]); }}><X size={13} aria-hidden="true" /></button>}</span>}
+    {cited > 0 && <span className="awwo-knowledge-references" title={references}><span className="awwo-knowledge-references-label">{references}</span><span className="awwo-knowledge-references-count" aria-hidden="true"><BookMarked size={13} aria-hidden="true" />{cited}</span>
+      {!readOnly && <button type="button" aria-label={t('清除任务知识引用', 'Clear task knowledge references')} onClick={() => configureCanvasKnowledge([])}><X size={13} aria-hidden="true" /></button>}</span>}
     <span className="saas-visually-hidden" aria-live="polite">{politeText}</span>
     <span className="saas-visually-hidden" aria-live="assertive">{assertiveText}</span>
     {open && <WorkbenchOverlay label={t('知识地图工作台', 'Knowledge workbench')} onClose={closeMap}>
@@ -241,7 +243,7 @@ function Dock({ tenantId, canvasId, readOnly = false, onTaskDraft, extraTools }:
       <KnowledgeWorkbench key={workbenchVersion} tenantId={tenantId} canvasId={canvasId} readOnly={readOnly} artifacts={candidates} onClose={closeMap} onCompile={readOnly ? undefined : compile}
         onTaskContext={(_context, refs) => {
           if (readOnly) return;
-          configureCanvasKnowledge(refs.map(item => item.revisionId)); setSelected(refs);
+          configureCanvasKnowledge(refs.map(item => item.revisionId));
           onTaskDraft?.({ id: crypto.randomUUID(), prompt: t('请结合已选知识完成任务：', 'Use the selected knowledge to complete this task:') });
           closeMap();
         }} />
