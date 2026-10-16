@@ -366,6 +366,13 @@ test('Docker smoke: rea and awwo-check-page work offline within the production c
           assert.equal(report.selfTest.passed, 3);
         } },
         webgl: { exitCode: 0, check: report => assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [2, 0]) },
+        // Served from the page's directory over the check's private origin: modules, fetch and a worker all load.
+        modules: { exitCode: 0, check: report => assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [4, 0]) },
+        cancelled: { exitCode: 1, check: report => {
+          assert.equal(report.errorCount, 2);
+          for (const message of ['the inventory failed to load', 'the save slot is missing']) assert.ok(report.errors.some((error: any) => error.message.includes(message) && error.message.includes('(cancelled by the page)')), message);
+        } },
+        noise: { exitCode: 0, check: report => { assert.ok(report.screenshotScale < 1); assert.equal(report.blank, false); } },
       };
       for (const [page, expected] of Object.entries(pages)) {
         const run = await sandbox.exec(`awwo-check-page /inputs/check-page/${page}.html --out checks/${page}`);
@@ -375,10 +382,21 @@ test('Docker smoke: rea and awwo-check-page work offline within the production c
         expected.check(report);
         t.diagnostic(`${page}: exit ${run.exitCode}, ${report.timings.totalMs} ms (launch ${report.timings.launchMs} ms), Chromium ${report.chromium.version}`);
       }
+      // A screenshot over 400,000 bytes is kept smaller, so the workspace snapshot keeps room.
+      assert.ok((await sandbox.read('checks/noise/screenshot.png')).byteLength <= 400_000);
       const hang = await sandbox.exec('awwo-check-page /inputs/check-page/hang.html --out checks/hang --timeout-ms 1000');
       assert.equal(hang.exitCode, 1, hang.stdout);
       assert.equal((await json('checks/hang/report.json')).selfTest.timedOut, true);
-      assert.equal((await sandbox.exec('awwo-check-page /inputs/check-page/missing.html')).exitCode, 2);
+      // A self-test timeout beyond the budget is cut to what the budget leaves; the check still ends in time.
+      const budget = await sandbox.exec('awwo-check-page /inputs/check-page/hang.html --out checks/budget --timeout-ms 60000 --budget-ms 12000');
+      assert.equal(budget.exitCode, 1, budget.stdout);
+      const budgetReport = await json('checks/budget/report.json');
+      assert.match(budgetReport.selfTest.error, /what --budget-ms had left/);
+      assert.ok(budgetReport.timings.totalMs < 13_000, String(budgetReport.timings.totalMs));
+      assert.equal((await sandbox.exec('awwo-check-page /inputs/check-page/pass.html --wait-ms 20000')).exitCode, 2);
+      assert.equal((await sandbox.exec('awwo-check-page /inputs/check-page/missing.html --out checks/pass')).exitCode, 2);
+      // The missing page's run removed the earlier report rather than leaving a stale pass behind.
+      await assert.rejects(sandbox.read('checks/pass/report.json'));
       // The check cannot write its report into the read-only inputs, so it could not run.
       assert.equal((await sandbox.exec('awwo-check-page /inputs/check-page/pass.html --out /inputs/out')).exitCode, 3);
       const usage = await sandbox.exec('cat /sys/fs/cgroup/pids.peak /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes; ls -A /tmp');

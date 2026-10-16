@@ -117,8 +117,9 @@ The other packages declare MIT (136), ISC (14), Apache-2.0 (11), BSD-3-Clause
 `sha.js`), MIT and Zlib (`pako`) or MIT or WTFPL (`expand-template`); their
 license files ship in the image under
 `/opt/awwo/tools/node_modules`. The image also installs Debian bookworm's
-`chromium-headless-shell` and `chromium-common` `155.0.8059.39-1~deb12u1`
-(Chromium is BSD-3-Clause, Copyright The Chromium Authors, and bundles
+`chromium-headless-shell` and `chromium-common` (each build takes
+bookworm-security's current version, `155.0.8059.39-1~deb12u1` on 2026-10-16;
+Chromium is BSD-3-Clause, Copyright The Chromium Authors, and bundles
 third-party components under their own licenses, all listed in
 `/usr/share/doc/chromium-common/copyright`), `fonts-dejavu-core` (Bitstream
 Vera license), `fonts-wqy-microhei` (Apache-2.0 or GPL-3+ with the font

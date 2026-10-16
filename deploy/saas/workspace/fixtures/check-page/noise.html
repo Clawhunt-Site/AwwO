@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a screenshot too large to keep at full size</title>
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="static" width="1280" height="800"></canvas>
+<script>
+// Random noise does not compress, so its full-size PNG is several MB; the check keeps a smaller copy instead.
+const canvas = document.getElementById('static'), graphics = canvas.getContext('2d');
+const pixels = graphics.createImageData(canvas.width, canvas.height);
+for (let index = 0; index < pixels.data.length; index += 4) {
+  pixels.data[index] = Math.random() * 256; pixels.data[index + 1] = Math.random() * 256; pixels.data[index + 2] = Math.random() * 256; pixels.data[index + 3] = 255;
+}
+graphics.putImageData(pixels, 0, 0);
+</script>
+</body>
+</html>

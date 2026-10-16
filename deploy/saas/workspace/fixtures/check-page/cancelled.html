@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: errors the page cancels</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #fbf3f3; color: #3b1f1f; }</style>
+</head>
+<body>
+<h1>Inventory</h1>
+<p id="notice">Something went wrong, but this page hides it.</p>
+<script>
+// A common pattern: show a friendly message and cancel the error, which hides it from the browser's own reporting.
+window.onerror = () => true;
+window.addEventListener('unhandledrejection', event => event.preventDefault());
+setTimeout(() => { throw new Error('fixture: the inventory failed to load'); }, 50);
+Promise.reject(new Error('fixture: the save slot is missing'));
+</script>
+</body>
+</html>

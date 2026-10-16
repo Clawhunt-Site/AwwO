@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: modules, fetch and a worker from the page's directory</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #eef6f2; color: #18332a; }</style>
+</head>
+<body>
+<h1>Level loader</h1>
+<p id="status">Loading…</p>
+<script type="module">
+// None of this works over file://: module imports, fetch and workers of sibling files need a real origin.
+import { totalStars } from './lib/levels.mjs';
+const levels = await (await fetch('./data/levels.json')).json();
+const worker = new Worker('./lib/double-worker.js');
+const doubled = await new Promise(resolve => { worker.onmessage = event => resolve(event.data); worker.postMessage(totalStars(levels)); });
+document.getElementById('status').textContent = `${levels.length} levels, ${totalStars(levels)} stars (doubled by the worker: ${doubled})`;
+window.awwoSelfTest = async () => ({ tests: [
+  { name: 'a sibling ES module is imported', ok: typeof totalStars === 'function' },
+  { name: 'a sibling JSON file is fetched', ok: levels.length === 3, detail: `${levels.length} levels` },
+  { name: 'a worker script from the page directory runs', ok: doubled === 2 * totalStars(levels), detail: String(doubled) },
+  { name: 'the page is a secure context', ok: window.isSecureContext && typeof crypto.randomUUID === 'function' },
+] });
+</script>
+</body>
+</html>
