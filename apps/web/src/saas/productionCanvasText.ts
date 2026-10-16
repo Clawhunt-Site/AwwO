@@ -1,4 +1,4 @@
-type CanvasNode = { readonly id?: unknown; readonly kind?: unknown; readonly title?: unknown; readonly persona?: unknown; readonly contract?: unknown };
+type CanvasNode = { readonly id?: unknown; readonly kind?: unknown; readonly title?: unknown; readonly persona?: unknown; readonly contract?: unknown; readonly template?: unknown; readonly fileName?: unknown };
 type CanvasEdge = { readonly fromNode?: unknown; readonly fromPort?: unknown; readonly toNode?: unknown; readonly toPort?: unknown; readonly dataType?: unknown };
 
 /** The canvas a case run ran, as one canonical string: every node's kind, title, persona and output
@@ -12,7 +12,10 @@ export function canonicalCanvasText(document: { readonly nodes: ReadonlyArray<Ca
     if (value !== null && typeof value === 'object') for (const [key, item] of Object.entries(value)) walk(item, `${path}.${key}`);
     else if (value !== undefined) pairs.push([path, value]);
   };
-  document.nodes.forEach((node, index) => walk({ kind: node.kind, title: node.title, persona: node.persona, contract: node.contract }, String(index)));
+  // An assemble node's template and file name are what it runs; absent on every other node, they leave the text of
+  // canvases published before them as it was.
+  document.nodes.forEach((node, index) => walk({ kind: node.kind, title: node.title, persona: node.persona, contract: node.contract,
+    template: node.template, fileName: node.fileName }, String(index)));
   const position = new Map(document.nodes.map((node, index) => [node.id, index]));
   const wires = (document.edges ?? []).map(edge => JSON.stringify([position.get(edge.fromNode) ?? null, edge.fromPort ?? null, position.get(edge.toNode) ?? null, edge.toPort ?? null, edge.dataType ?? null])).sort();
   const byPath = ([a]: [string, unknown], [b]: [string, unknown]) => (a < b ? -1 : a > b ? 1 : 0);

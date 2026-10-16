@@ -124,7 +124,7 @@ export function studioGroups(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Part
   const groups: StudioGroup[] = [];
   for (const step of result.stages.flat()) {
     if (onlyNodeId && step.node.id !== onlyNodeId) continue;
-    if (step.input || !step.output || step.node.kind !== 'session') continue;
+    if (step.input || !step.output || step.node.kind === 'form') continue;
     const entries = nodeEntries(step.node, step.state, step.review);
     if (!entries.length) continue;
     groups.push({ nodeId: step.node.id, title: step.node.title.trim() || step.node.id, state: step.state,
@@ -136,7 +136,8 @@ export function studioGroups(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Part
 
 /** One node's deliverables (its published output), primary first. */
 export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState, review = false): StudioEntry[] {
-  if (node.kind !== 'session' || !node.lastOutput?.text.trim()) return [];
+  // An assemble node's page and file are deliverables like an agent's.
+  if (node.kind === 'form' || !node.lastOutput?.text.trim()) return [];
   const nodeTitle = node.title.trim() || node.id;
   const contract = node.contract || emptyContract();
   const base = { nodeId: node.id, nodeTitle, folder: [] as string[], state, ...(review ? { review: true } : {}) };
@@ -150,7 +151,7 @@ export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState
     used.add(candidate.toLowerCase());
     return candidate;
   };
-  if (!contract.outputs.length && mediaKindOf(node.agentKind)) {
+  if (!contract.outputs.length && node.kind === 'session' && mediaKindOf(node.agentKind)) {
     const media = parseMediaOutput(text);
     for (const item of media?.items ?? []) {
       const extension = EXTENSION_OF_TYPE[item.contentType] ?? '';

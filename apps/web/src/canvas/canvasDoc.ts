@@ -172,7 +172,22 @@ export interface FormNode extends CanvasNodeBase {
   lastOutput?: NodeOutput | null;
 }
 
-export type CanvasNode = SessionNode | FormNode;
+/**
+ * A node that makes its deliverable from its inputs without a model (assembleNode.ts): each {{in:<input id>}} slot of
+ * its template takes that input's exact text. An agent team builds a program as modules and this puts them into one
+ * page, byte for byte, instead of a model call re-typing all of them.
+ */
+export interface AssembleNode extends CanvasNodeBase {
+  kind: 'assemble';
+  template: string;
+  /** The inputs its slots read and what it delivers: one text result (text, Markdown or HTML), one file, or both. */
+  contract: NodeContract;
+  /** The delivered file's name, when the contract has a file output; absent means index.html. */
+  fileName?: string;
+  lastOutput?: NodeOutput | null;
+}
+
+export type CanvasNode = SessionNode | FormNode | AssembleNode;
 
 export interface CanvasEdge {
   id: string;
@@ -230,6 +245,7 @@ export const AGENT_KIND_META: Record<AgentKind, { label: string; glyph: string }
 /** Default tile sizes. Sessions are taller because they render a live transcript. */
 export const SESSION_NODE_SIZE = { w: 340, h: 260 } as const;
 export const FORM_NODE_SIZE = { w: 300, h: 200 } as const;
+export const ASSEMBLE_NODE_SIZE = { w: 320, h: 220 } as const;
 
 const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video', 'model3d'];
 const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure'];
@@ -278,6 +294,26 @@ export function createFormNode(pos: { x: number; y: number }): FormNode {
       { id: 'f1', label: '目标', value: '' },
       { id: 'f2', label: '约束', value: '' },
     ],
+  };
+}
+
+/** A page assembled from one code module; more inputs and slots are added in its settings. */
+export function createAssembleNode(pos: { x: number; y: number }, locale: 'zh' | 'en' = 'zh'): AssembleNode {
+  const zh = locale === 'zh';
+  return {
+    id: mintId(),
+    kind: 'assemble',
+    x: pos.x,
+    y: pos.y,
+    w: ASSEMBLE_NODE_SIZE.w,
+    h: ASSEMBLE_NODE_SIZE.h,
+    title: zh ? '装配页面' : 'Assemble page',
+    template: `<!DOCTYPE html>\n<html lang="${zh ? 'zh-CN' : 'en'}">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>${zh ? '装配的页面' : 'Assembled page'}</title>\n</head>\n<body>\n<script>\n{{in:module}}\n</script>\n</body>\n</html>\n`,
+    contract: {
+      version: 1,
+      inputs: [{ id: 'module', label: zh ? '代码模块' : 'Code module', type: 'text', required: true, value: '' }],
+      outputs: [{ id: 'result', label: zh ? '页面' : 'Page', type: 'html', required: true, value: '' }],
+    },
   };
 }
 
@@ -382,6 +418,25 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       h: num(r.h, FORM_NODE_SIZE.h),
       title: str(r.title, '需求表单'),
       fields,
+      lastOutput: sanitizeOutput(r.lastOutput),
+    };
+  }
+
+  if (r.kind === 'assemble') {
+    // Its contract is what its slots and ports are; an unreadable one cannot become some other shape.
+    const contract = normalizeContract(r.contract);
+    if (!contract) return null;
+    return {
+      id,
+      kind: 'assemble',
+      x: num(r.x),
+      y: num(r.y),
+      w: num(r.w, ASSEMBLE_NODE_SIZE.w),
+      h: num(r.h, ASSEMBLE_NODE_SIZE.h),
+      title: str(r.title, '装配页面'),
+      template: str(r.template),
+      contract,
+      ...(typeof r.fileName === 'string' && r.fileName.trim() ? { fileName: r.fileName } : {}),
       lastOutput: sanitizeOutput(r.lastOutput),
     };
   }

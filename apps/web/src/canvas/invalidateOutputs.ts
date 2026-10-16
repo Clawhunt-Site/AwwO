@@ -12,6 +12,10 @@ function executionKey(node: CanvasNode): string {
   if (node.kind === 'form') {
     return JSON.stringify([node.kind, node.title, node.fields.map((field) => [field.id, field.label, field.value])]);
   }
+  if (node.kind === 'assemble') {
+    return JSON.stringify([node.kind, node.title, node.template, node.fileName ?? '', node.contract.version,
+      node.contract.inputs.map(field => fieldKey(field)), node.contract.outputs.map(field => fieldKey(field, true))]);
+  }
   const binding = node.binding ? [node.binding.companyId, node.binding.agentId, node.binding.agentName] : null;
   const contract = node.contract
     ? [node.contract.version, node.contract.inputs.map(field => fieldKey(field)), node.contract.outputs.map(field => fieldKey(field, true))]

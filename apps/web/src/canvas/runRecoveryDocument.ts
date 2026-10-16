@@ -321,6 +321,23 @@ function nodeInput(node: CanvasNode, inScope: boolean) {
         : null,
     };
   }
+  if (node.kind === 'assemble') {
+    return {
+      id: node.id,
+      kind: node.kind,
+      title: node.title,
+      template: node.template,
+      fileName: node.fileName ?? null,
+      contract: {
+        version: node.contract.version,
+        inputs: node.contract.inputs.map(fieldInput),
+        outputs: node.contract.outputs.map(fieldOutput),
+      },
+      reusedOutput: inScope ? null : node.lastOutput
+        ? { text: node.lastOutput.text, partial: node.lastOutput.partial === true }
+        : null,
+    };
+  }
   return {
     id: node.id,
     kind: node.kind,
@@ -447,8 +464,9 @@ export function mergeRecoveredManualConversation(
   }, new Set());
 }
 
+// A form or assemble node has no conversation: its journal entry names the thread 'form'.
 function belongsToJournalThread(node: CanvasNode, threadId: string): boolean {
-  return node.kind === 'form' ? threadId === 'form' : activeThreadId(node) === threadId;
+  return node.kind !== 'session' ? threadId === 'form' : activeThreadId(node) === threadId;
 }
 
 function belongsToJournalBinding(
@@ -456,7 +474,7 @@ function belongsToJournalBinding(
   item: CanvasRunJournal['nodes'][string],
 ): boolean {
   if (!belongsToJournalThread(node, item.threadId)) return false;
-  if (node.kind === 'form') return true;
+  if (node.kind !== 'session') return true;
   return Boolean(node.binding
     && node.binding.companyId === item.companyId
     && node.binding.agentId === item.agentId);

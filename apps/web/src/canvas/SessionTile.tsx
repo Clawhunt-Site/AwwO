@@ -30,7 +30,7 @@
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
-import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
+import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Layers, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
 import { displayText } from './displayCopy';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
@@ -51,6 +51,8 @@ import { collaborationInputSummary, htmlPreviewSummary } from './readableTranscr
 import { ContractFields } from './ContractFields';
 import { emptyContract, type ContractField } from './nodeContracts';
 import { NodeDeliverables } from './NodeDeliverables';
+import { AssembleTileBody } from './AssembleTileBody';
+import type { AssembleInputView } from './assembleNode';
 import { ReworkFindingsNote } from './ReworkFindingsNote';
 import { NodeBrief, NodeFailure } from './NodeBrief';
 import { getAgentTemplateForNode } from './agentTemplates';
@@ -263,6 +265,7 @@ function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField
 
 function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass: string; label: string } {
   if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: canvasText(locale, 'tile.form') };
+  if (node.kind === 'assemble') return { glyph: '⧉', kindClass: 'assemble', label: canvasText(locale, 'tile.assemble') };
   const meta = AGENT_KIND_META[node.agentKind];
   const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : node.agentKind === 'video' ? 'node.video' : node.agentKind === 'model3d' ? 'node.model3d' : 'node.llm');
   return { glyph: meta.glyph, kindClass: node.agentKind, label };
@@ -311,6 +314,8 @@ export interface SessionTileProps {
   onSend?: (node: SessionNode, text: string, onAccepted?: () => void, displayText?: string) => void;
   /** Current graph-resolved inputs; absent uses this node's local contract values only. */
   conversationContext?: NodeConversationContext;
+  /** An assemble node's inputs as its slots will read them now (assembleInputViews). */
+  assembleInputs?: ReadonlyArray<AssembleInputView>;
   onMove?: (nodeId: string, x: number, y: number) => void;
   onResizeNode?: (nodeId: string, w: number, h: number) => void;
   /**
@@ -407,6 +412,7 @@ export const SessionTile = memo(function SessionTile({
   onAskAssistant,
   deliveryBeside = true,
   modelNames,
+  assembleInputs,
 }: SessionTileProps) {
   const { locale, t } = useCanvasI18n();
   const simple = useSimpleCanvas();
@@ -702,6 +708,10 @@ export const SessionTile = memo(function SessionTile({
       const filled = node.fields.find((f) => f.value.trim());
       return filled ? `${filled.label || t('common.field')}: ${filled.value.trim()}` : t('tile.emptyField');
     }
+    if (node.kind === 'assemble') {
+      const outputs = node.contract.outputs.map(field => field.label || field.id).join(' + ');
+      return t('tile.assembleSummary', { inputs: node.contract.inputs.length, outputs });
+    }
     return livePreview(session.turns, node.contract?.outputs, locale, mediaKindOf(node.agentKind) ? locale : undefined) || htmlPreviewSummary(node.preview, locale) || node.preview;
   }, [node, session.turns, locale, t]);
   const compactPreview = node.kind === 'session'
@@ -739,7 +749,7 @@ export const SessionTile = memo(function SessionTile({
   const busy = interactionLocked || session.streaming || run?.state === 'running' || run?.state === 'waiting';
   const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
-  const NodeIcon = node.kind === 'form' ? FileText : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
+  const NodeIcon = node.kind === 'form' ? FileText : node.kind === 'assemble' ? Layers : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
     : node.agentKind === 'model3d' ? Box : Bot;
   const updateFields = (fields: ContractField[]) => {
     if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
@@ -918,6 +928,9 @@ export const SessionTile = memo(function SessionTile({
                 </div>
               ))}
             </div>
+          ) : node.kind === 'assemble' ? (
+            <AssembleTileBody node={node} expanded={expanded} canvasEntries={canvasEntries}
+              inputs={assembleInputs ?? node.contract.inputs.map(field => ({ id: field.id, label: field.label || field.id, required: field.required, source: null, bytes: 0, used: true }))} />
           ) : (
             <div className={`awwo-node-workbench${deliverablesOpen || configurationPanel ? ' has-deliverables' : ''}${caseIntro ? ' is-case-intro' : ''}`}>
               {expanded && sessionsOpen ? <nav className="awwo-session-sidebar" aria-label={t('tile.sessionManagement')}>
@@ -995,7 +1008,7 @@ export const SessionTile = memo(function SessionTile({
           {/* Actions ride BOTH the open and focus levels. Focus is the level where you actually
               work in a tile, and it is where an unbound node has to be bound — hiding 配置 there
               would leave a focused, unbound node with no route to the inspector at all. */}
-          {node.kind === 'form' && expanded ? (
+          {node.kind !== 'session' && expanded ? (
             <div className="canvas-tile-actions">
               {onConfigure ? (
                 <button type="button" className="canvas-tile-action" disabled={busy} onClick={() => onConfigure(nodeId)}>

@@ -1,4 +1,4 @@
-import type { CanvasDocument, CanvasNode, SessionNode } from '../canvas/canvasDoc';
+import type { AssembleNode, CanvasDocument, CanvasNode, SessionNode } from '../canvas/canvasDoc';
 import { parseContractOutput } from '../canvas/nodeContracts';
 import { validateNodeOutput } from '../canvas/runGraph';
 import { createOfficialCopyDocument, type OfficialCopyModel } from './examples/OfficialCopySetup';
@@ -7,7 +7,7 @@ import type { ProductionRunRecord } from './productionRuns';
 
 /** A single text field is its own source; text that happens to be JSON naming the field is wrapped,
  * so what a downstream node reads is exactly what the case delivered. */
-function recordedText(node: SessionNode, output: string): string | null {
+function recordedText(node: SessionNode | AssembleNode, output: string): string | null {
   const field = node.contract?.outputs.length === 1 ? node.contract.outputs[0] : undefined;
   if (!node.contract || !field) return null;
   const keeps = (text: string) => {
@@ -42,11 +42,16 @@ export function createProductionCopyDocument(workflow: OfficialWorkflow, record:
     const spec = workflow.nodes[index];
     if (!spec || fed.has(spec.id)) return node;
     const recorded = record.nodes.find(value => value.id === spec.id);
-    if (node.kind !== 'session' || recorded?.status !== 'done') return node;
+    if (node.kind === 'form' || recorded?.status !== 'done') return node;
     if (spec.outputType === 'html' && files.some(file => recorded.output?.includes(file))) return node;
+    // An assemble node that also delivers a file is made afresh on the copy's first run: the file it delivered is
+    // stored in the case's workspace, and the copy's run makes it again in a moment, without a model.
+    if (node.kind === 'assemble' && node.contract.outputs.some(field => field.type === 'file')) return node;
     const text = recorded.output?.trim() ? recordedText(node, recorded.output) : null;
     // The copy dialog counts every delivered node as carried, so a delivery the canvas cannot hold stops the copy.
     if (text === null) throw new Error(`The run record of ${record.caseId} has a delivery of ${recorded.id} its canvas cannot hold.`);
+    // An assemble node ran no model: its recording carries none.
+    if (node.kind === 'assemble') return { ...node, lastOutput: { text, at, source: 'case' } };
     // Opened, the node shows its delivery beside the (still empty) conversation.
     return { ...node, lastOutput: { text, at, source: 'case', model: record.model }, deliverablesOpen: true };
   });

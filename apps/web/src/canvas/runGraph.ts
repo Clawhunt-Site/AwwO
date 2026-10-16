@@ -15,7 +15,8 @@
 // receives per-node status callbacks to drive badges. Nothing here fakes progress: every state
 // change mirrors a real event.
 
-import type { CanvasEdge, CanvasNode, FormNode, SessionNode } from './canvasDoc';
+import type { AssembleNode, CanvasEdge, CanvasNode, FormNode, SessionNode } from './canvasDoc';
+import { assembleTemplate } from './assembleNode';
 import { mediaInputText } from './mediaOutput';
 import { parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
 import { isMediaSessionNode, isSoftMediaFeed, reconcileEdges } from './ports';
@@ -142,7 +143,7 @@ export function preflightGraphIssue(
       const issues = validateNodeTeam(node.team);
       if (issues.length) return { code: 'invalid_team', values: { nodeTitle: node.title, detail: issues[0].message }, message: `「${node.title}」协作配置无效：${issues[0].message}` };
     }
-    if (options.conversation || node.kind !== 'session' || !node.contract) continue;
+    if (options.conversation || node.kind === 'form' || !node.contract) continue;
     // Wired fields are checked once their actual values arrive. A missing or incompatible
     // source port must never stand in for a required value during preflight.
     const local: ContractField[] = [];
@@ -225,7 +226,25 @@ function resolvedInputs(node: SessionNode, upstream: ReadonlyArray<UpstreamInput
 
 /** The same publication gate for graph runs, cached results, and manual chat selections. */
 export function validateNodeOutput(node: CanvasNode, output: string): string[] {
-  return node.kind === 'session' && node.contract ? parseContractOutput(node.contract, output).errors : [];
+  return node.kind !== 'form' && node.contract ? parseContractOutput(node.contract, output).errors : [];
+}
+
+/** An assemble node's result in a run on this device: no model, its inputs' exact text in its template's slots. A
+ *  file output needs the cloud's file storage, so such a node runs only in the cloud. */
+export function runAssembleNode(node: AssembleNode, upstream: ReadonlyArray<UpstreamInput>): { ok: true; output: string } | { ok: false; detail: string } {
+  if (node.contract.outputs.some(field => field.type === 'file')) return { ok: false, detail: '装配节点的文件输出只能在云端运行。' };
+  const values: Record<string, string> = {};
+  for (const field of node.contract.inputs) {
+    const wired = upstream.filter(input => input.toPort === `in:${field.id}`);
+    if (wired.length > 1) return { ok: false, detail: `输入「${field.label || field.id}」只能连接一个来源。` };
+    const value = wired.length ? wired[0].output : field.value;
+    if (field.required && !value.trim()) return { ok: false, detail: wired.length ? `输入「${field.label || field.id}」的上游没有交付内容。` : `「${field.label || field.id}」为必填项。` };
+    values[field.id] = value;
+  }
+  const assembled = assembleTemplate(node.template, values);
+  if (!assembled.ok) return { ok: false, detail: assembled.error };
+  const errors = validateNodeOutput(node, assembled.text);
+  return errors.length ? { ok: false, detail: `输出格式校验失败：${errors.join(' ')}` } : { ok: true, output: assembled.text };
 }
 
 /** Compose the message a session node receives: its task framing + every upstream output as an
@@ -388,11 +407,21 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
         return {
           fromTitle: source?.title ?? d.fromNode,
           toPort: d.toPort,
-          output: source?.kind === 'session' && source.contract
+          output: source && source.kind !== 'form' && source.contract
             ? parseContractOutput(source.contract, text).values[d.fromPort.slice('out:'.length)] ?? ''
             : source && isMediaSessionNode(source) ? mediaInputText(source, outputs.get(d.fromNode)) : text,
         };
       });
+      if (node.kind === 'assemble') {
+        const assembled = runAssembleNode(node, upstream);
+        if (!assembled.ok) {
+          set(id, { state: 'failed', detail: assembled.detail });
+          return false;
+        }
+        outputs.set(id, assembled.output);
+        set(id, { state: 'done', output: assembled.output });
+        return true;
+      }
       // A throwing transport marks THIS node failed — it must never reject the whole run.
       let result: ExecAgentResult;
       try {

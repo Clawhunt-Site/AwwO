@@ -583,6 +583,15 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				a.setGraphNode(ctx, tid, id, n.ID, "done", formOutput(n), "")
 				continue
 			}
+			if n.Kind == "assemble" {
+				// No model: the node is settled as soon as its inputs are, in this same pass.
+				if out, err := a.executeAssembleNode(ctx, tid, id, canvasID, n, d, outputs); err != nil {
+					a.setGraphNode(ctx, tid, id, n.ID, "failed", "", err.Error())
+				} else {
+					a.setGraphNode(ctx, tid, id, n.ID, "done", out, "")
+				}
+				continue
+			}
 			var prompt string
 			var err error
 			media := false

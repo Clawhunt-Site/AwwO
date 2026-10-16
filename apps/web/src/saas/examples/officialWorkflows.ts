@@ -1,5 +1,5 @@
 import type { AgentTemplateId } from '../../canvas/agentTemplates';
-import { createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../../canvas/canvasDoc';
+import { createAssembleNode, createSessionNode, emptyDocument, type AssembleNode, type CanvasDocument, type SessionNode } from '../../canvas/canvasDoc';
 import type { ContractField } from '../../canvas/nodeContracts';
 import { updateNodeDraft } from '../../canvas/nodeThreads';
 import { edgeId } from '../../canvas/ports';
@@ -19,6 +19,10 @@ export interface OfficialWorkflowNode {
   readonly acceptance: ReadonlyArray<string>;
   readonly column: number;
   readonly row: number;
+  /** An assemble node instead of an agent (assembleNode.ts): no model; each `{{in:from_<upstream id>}}` slot of the
+   *  template takes that upstream's delivery byte for byte. `task` then says what it puts together; `file` also
+   *  delivers the page as a file (`fileName`, default index.html) for a sandbox node downstream. */
+  readonly assemble?: { readonly template: string; readonly file?: true; readonly fileName?: string };
 }
 /** The canvas behind a homepage production case (productionWorkflows.ts), which createOfficialDocument
  * compiles into the canvas a member copies. */
@@ -62,7 +66,8 @@ const EVIDENCE = 'This is an official reference workflow awaiting execution. Use
 export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
   // The case's media nodes, made first so the pages they feed can name their inputs after them.
   const media = (item.media ?? []).map(spec => ({ spec, node: officialMediaNode(spec) }));
-  const nodes = item.nodes.map((spec): SessionNode => {
+  const nodes = item.nodes.map((spec): SessionNode | AssembleNode => {
+    if (spec.assemble) return officialAssembleNode(item, spec, spec.assemble);
     const base = createSessionNode(['frontend', 'backend', 'users'].includes(spec.role) ? 'coding' : 'llm',
       { x: spec.column * 680, y: spec.row * 560 });
     const incoming = item.edges.filter(edge => edge.to === spec.id);
@@ -124,6 +129,22 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
     return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId, toNode: to.nodeId, toPort: to.portId, dataType: 'image' as const };
   }));
   return { ...emptyDocument(), nodes: [...nodes, ...media.map(entry => entry.node)], edges: [...edges, ...mediaEdges, ...referenceEdges] };
+}
+
+/** An assemble node as a case canvas declares one: one text input per incoming wire, named like an agent's
+ * (`from_<upstream id>`), and the page (plus, with `file`, the same page as a file). */
+function officialAssembleNode(item: OfficialWorkflow, spec: OfficialWorkflowNode, assemble: NonNullable<OfficialWorkflowNode['assemble']>): AssembleNode {
+  const base = createAssembleNode({ x: spec.column * 680, y: spec.row * 560 }, 'en');
+  const inputs = item.edges.filter(edge => edge.to === spec.id).map((edge): ContractField => ({
+    id: `from_${edge.from}`, label: edge.label, type: 'text', required: true, value: '',
+  }));
+  return { ...base, title: spec.title, w: 560, h: 420, template: assemble.template,
+    contract: { version: 1, inputs, outputs: [
+      { id: 'result', label: spec.output, type: spec.outputType ?? 'html', required: true, value: '', help: spec.acceptance.join('\n') },
+      ...(assemble.file ? [{ id: 'file', label: `${spec.output} (file)`, type: 'file' as const, required: true, value: '' }] : []),
+    ] },
+    ...(assemble.fileName ? { fileName: assemble.fileName } : {}),
+  };
 }
 
 /** A media node as the canvas makes one: its model and parameters chosen, its prompt in the draft a run or a Send

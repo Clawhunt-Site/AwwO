@@ -1,0 +1,113 @@
+{
+  "description": "Assemble node template filling. The Go executor (graph_assemble.go) and the canvas engine (apps/web/src/canvas/assembleNode.ts) must produce exactly these outputs, or fail where error is set.",
+  "vectors": [
+    {
+      "name": "slots take each input's exact text in page, style and script",
+      "template": "<!DOCTYPE html><html><head><style>{{in:css}}</style></head><body>{{in:body}}<script>{{in:a}}\n{{in:b}}</script></body></html>",
+      "values": { "css": "body{margin:0}", "body": "<main id=\"app\"></main>", "a": "const A=1;", "b": "boot(A);" },
+      "output": "<!DOCTYPE html><html><head><style>body{margin:0}</style></head><body><main id=\"app\"></main><script>const A=1;\nboot(A);</script></body></html>"
+    },
+    {
+      "name": "a value that is one code fence goes in without its fence lines",
+      "template": "<script>{{in:a}}</script>",
+      "values": { "a": "```javascript\nconst x = 1;\nconsole.log(x);\n```" },
+      "output": "<script>const x = 1;\nconsole.log(x);</script>"
+    },
+    {
+      "name": "surrounding white space around a fence is dropped with it",
+      "template": "<script>{{in:a}}</script>",
+      "values": { "a": "\n\n```js\nrun();\n```\n" },
+      "output": "<script>run();</script>"
+    },
+    {
+      "name": "CRLF fences are unwrapped and their body uses LF",
+      "template": "<script>{{in:a}}</script>",
+      "values": { "a": "```js\r\nlet a = 1;\r\nlet b = 2;\r\n```" },
+      "output": "<script>let a = 1;\nlet b = 2;</script>"
+    },
+    {
+      "name": "text holding two fences is not one fence and stays as it is",
+      "template": "<pre>{{in:a}}</pre>",
+      "values": { "a": "```js\na();\n```\nthen\n```js\nb();\n```" },
+      "output": "<pre>```js\na();\n```\nthen\n```js\nb();\n```</pre>"
+    },
+    {
+      "name": "a fence that is never closed stays as it is",
+      "template": "<pre>{{in:a}}</pre>",
+      "values": { "a": "```js\nnot closed" },
+      "output": "<pre>```js\nnot closed</pre>"
+    },
+    {
+      "name": "inside a script, text cannot close the script or open an HTML comment",
+      "template": "<script>{{in:a}}</script>",
+      "values": { "a": "var s = '</script><!--x' + '</SCRIPT>';" },
+      "output": "<script>var s = '<\\/script><\\!--x' + '<\\/SCRIPT>';</script>"
+    },
+    {
+      "name": "inside a style sheet, text cannot close the style element",
+      "template": "<style>{{in:css}}</style>",
+      "values": { "css": "a::after{content:'</style>'}" },
+      "output": "<style>a::after{content:'<\\/style>'}</style>"
+    },
+    {
+      "name": "in the page itself, markup is inserted unchanged",
+      "template": "<body>{{in:html}}</body>",
+      "values": { "html": "<script>alert(1)</script><!-- note -->" },
+      "output": "<body><script>alert(1)</script><!-- note --></body>"
+    },
+    {
+      "name": "an opening tag with attributes still starts its element, and the tag name is case-insensitive",
+      "template": "<SCRIPT type=\"module\">{{in:a}}</SCRIPT><div>{{in:a}}</div>",
+      "values": { "a": "x='</script>'" },
+      "output": "<SCRIPT type=\"module\">x='<\\/script>'</SCRIPT><div>x='</script>'</div>"
+    },
+    {
+      "name": "a tag that only starts with script is not a script",
+      "template": "<scripts>{{in:a}}</scripts>",
+      "values": { "a": "</script>" },
+      "output": "<scripts></script></scripts>"
+    },
+    {
+      "name": "a script tag inside an HTML comment does not start a script",
+      "template": "<!-- <script> -->{{in:a}}<script>{{in:a}}</script>",
+      "values": { "a": "</script>" },
+      "output": "<!-- <script> --></script><script><\\/script></script>"
+    },
+    {
+      "name": "inserted text is never scanned for slots again",
+      "template": "{{in:a}}|{{in:b}}",
+      "values": { "a": "{{in:b}}", "b": "B" },
+      "output": "{{in:b}}|B"
+    },
+    {
+      "name": "the same input may fill several slots",
+      "template": "{{in:a}}-{{in:a}}",
+      "values": { "a": "x" },
+      "output": "x-x"
+    },
+    {
+      "name": "other braces are left alone",
+      "template": "{{name}} {{ in:a }} {{in:a}}",
+      "values": { "a": "A" },
+      "output": "{{name}} {{ in:a }} A"
+    },
+    {
+      "name": "non-ASCII letters before a script do not shift where it starts",
+      "template": "<h1>İstanbul ẞtraße 字</h1><script>{{in:a}}</script>{{in:a}}",
+      "values": { "a": "'</script>' + '中文'" },
+      "output": "<h1>İstanbul ẞtraße 字</h1><script>'<\\/script>' + '中文'</script>'</script>' + '中文'"
+    },
+    {
+      "name": "only ASCII letters fold in a tag name, as in a browser",
+      "template": "<script>{{in:a}}</script>",
+      "values": { "a": "'</ſcript>' + '</sCrIpT>'" },
+      "output": "<script>'</ſcript>' + '<\\/sCrIpT>'</script>"
+    },
+    {
+      "name": "a slot naming no input fails",
+      "template": "<p>{{in:missing}}</p>",
+      "values": { "a": "x" },
+      "error": "Template slot {{in:missing}} names no input"
+    }
+  ]
+}

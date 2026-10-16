@@ -248,6 +248,11 @@ export function searchCanvas(
         push('人设', node.persona);
         continue;
       }
+    } else if (node.kind === 'assemble') {
+      if (matchField(node.template, q)) {
+        push('字段', node.template);
+        continue;
+      }
     } else {
       const field = node.fields.find((f) => matchField(f.label, q) || matchField(f.value, q));
       if (field) {

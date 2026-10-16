@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpFromLine, Check, Copy, FileCode2, FileDown, FileText, RotateCcw } from 'lucide-react';
-import { caseRunLabel, type SessionNode } from './canvasDoc';
+import { caseRunLabel, type AssembleNode, type SessionNode } from './canvasDoc';
 import { ContractFields } from './ContractFields';
 import { emptyContract, parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
 import { activeNodeThread } from './nodeThreads';
@@ -74,9 +74,10 @@ function deliveryAge(at: number, now: number, t: ReturnType<typeof useCanvasI18n
 }
 
 export interface NodeDeliverablesProps {
-  node: SessionNode;
+  /** An assemble node's delivery is shown the same way; it has no conversation and nothing to publish by hand. */
+  node: SessionNode | AssembleNode;
   readOnly: boolean;
-  onUpdateNode?: (node: SessionNode) => void;
+  onUpdateNode?: (node: SessionNode | AssembleNode) => void;
   /** 'result' shows only what the node published, as the canvas's 成果 view does: no editors, and not an
    *  earlier conversation's result. The tile drawer is 'drawer'. */
   presentation?: 'drawer' | 'result';
@@ -123,22 +124,25 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
   const [selection, setSelection] = useState<{ identity: string; fieldId: string } | null>(null);
   const [deliveryProfile, setDeliveryProfile] = useState<DeliveryProfileId>('web');
   const selectedPanelId = useId();
-  const deliverableTitle = getAgentTemplateForNode(node, locale)?.deliverableTitle;
+  const session = node.kind === 'session' ? node : null;
+  const deliverableTitle = session ? getAgentTemplateForNode(session, locale)?.deliverableTitle : undefined;
   const contract = node.contract ?? emptyContract();
   const result = presentation === 'result';
-  const output = result ? node.lastOutput ?? undefined : node.lastOutput ?? activeNodeThread(node).lastOutput;
+  // Which conversation a delivery belongs to; an assemble node has none.
+  const threadKey = session ? activeNodeThread(session).id : 'assemble';
+  const output = result || !session ? node.lastOutput ?? undefined : node.lastOutput ?? activeNodeThread(session).lastOutput;
   // Looking at an earlier Session must not publish its historical result downstream.
   const historical = !node.lastOutput && Boolean(output);
   const locked = readOnly || !onUpdateNode;
   const parsed = output ? deliveryPresentation(contract, output.text) : null;
   const publishedFields = parsed ? contract.outputs.filter(field => Object.hasOwn(parsed.values, field.id) || parsed.pendingFiles.has(field.id)) : [];
-  const outputIdentity = `${node.id}:${activeNodeThread(node).id}:${output?.at ?? ''}`;
+  const outputIdentity = `${node.id}:${threadKey}:${output?.at ?? ''}`;
   // A selection belongs to one publication. New Sessions/results and removed fields fall
   // back synchronously, so no render exposes a previous file while effects catch up.
   const selectedField = (selection?.identity === outputIdentity && publishedFields.find(field => field.id === selection.fieldId))
     || (initialFieldId ? publishedFields.find(field => field.id === initialFieldId) : undefined) || publishedFields[0];
   // An image or video node's result names stored files; it is shown as them, not as its record.
-  const media = output && !contract.outputs.length && mediaKindOf(node.agentKind) ? parseMediaOutput(output.text) : null;
+  const media = output && !contract.outputs.length && session && mediaKindOf(session.agentKind) ? parseMediaOutput(output.text) : null;
   // A malformed or legacy result remains visible as evidence, without manufacturing fields.
   const showRawOutput = output && !media && (!contract.outputs.length || Boolean(parsed?.errors.length) || !publishedFields.length);
 
@@ -179,7 +183,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
 
   return <div className="awwo-deliverables">
     {deliverableTitle && !result ? <h3 className="awwo-deliverables-title">{deliverableTitle}</h3> : null}
-    {!locked && !result && <details className="awwo-deliverables-editor">
+    {session && !locked && !result && <details className="awwo-deliverables-editor">
       <summary>{locale === 'zh' ? '添加交付要求' : 'Add a deliverable'}</summary>
       <label>{locale === 'zh' ? '交付形式' : 'Deliverable type'}
         <select value={deliveryProfile} onChange={event => setDeliveryProfile(event.target.value as DeliveryProfileId)}>
@@ -275,13 +279,13 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
           </header> : null}
           <div className={`awwo-deliverable-body${field.type === 'html' || field.type === 'markdown' || artifactUrl ? ' awwo-deliverable-with-preview' : ''}`}>
             {pendingFile ? <PendingFileDelivery file={pendingFile} /> : field.type === 'html' || field.type === 'markdown'
-              ? <ArtifactPreview key={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
+              ? <ArtifactPreview key={`${node.id}:${threadKey}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
                   previewSource={field.type === 'markdown' ? legacyWrappedPreview(value, field.id) : undefined}
                   title={field.label || field.id} canDownload={Boolean(value.trim()) && !output.partial}
                   resolveAsset={field.type === 'html' ? resolveAsset : undefined}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}
-                  identity={`${node.id}:${activeNodeThread(node).id}:${output.at}:${field.id}`}
+                  identity={`${node.id}:${threadKey}:${output.at}:${field.id}`}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : fileState(field, String(value), output.source === 'manual') === 'missing' ? <MissingFile value={String(value)} onRerun={onRerun} readOnly={readOnly} />
               : filePath ? <LocalFileReference key={filePath} path={filePath} />
@@ -291,7 +295,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
         })}
       </div>}
     </>}
-    {!result && <details ref={editor} className="awwo-deliverables-editor" open={editorOpen || undefined}>
+    {/* An assemble node delivers what its template makes; there is no hand publication to edit. */}
+    {session && !result && <details ref={editor} className="awwo-deliverables-editor" open={editorOpen || undefined}>
       <summary>{t('deliverable.editForm')}</summary>
       <ContractFields fields={contract.outputs} label={t('deliverable.outputLabel')} readOnly={locked} onChange={updateFields} />
       <div className="awwo-output-publish">

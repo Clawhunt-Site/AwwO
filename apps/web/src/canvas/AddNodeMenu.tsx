@@ -6,7 +6,7 @@
 // that leaks a capture-phase window listener would keep swallowing presses after it is gone.
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { MonitorPlay } from 'lucide-react';
+import { Layers, MonitorPlay } from 'lucide-react';
 import type { AgentKind } from './canvasDoc';
 import { getAgentTemplates, type AgentTemplateId } from './agentTemplates';
 import { AgentGlyph } from './AgentWorkspace';
@@ -14,7 +14,7 @@ import { displayText } from './displayCopy';
 import { useCanvasI18n } from './i18n';
 
 /** What the menu can create: a user-authored form, a session tile of one agent kind, or a 预览展示 window. */
-export type AddNodeKind = 'form' | AgentKind | AgentTemplateId | 'display';
+export type AddNodeKind = 'form' | AgentKind | AgentTemplateId | 'display' | 'assemble';
 
 export interface AddNodeMenuProps {
   /** Position relative to the `.canvas-root` element (already converted by the caller). */
@@ -99,6 +99,11 @@ export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenMod
           <span><strong>{item.title}</strong><small>{item.subtitle}</small></span>
         </button>
       ))}
+      <button type="button" role="menuitem" className="canvas-add-menu-item awwo-template-menu-item" aria-label={t('command.addAssemble')}
+        data-template="assemble" onClick={(e) => { e.stopPropagation(); onPick('assemble'); }}>
+        <span className="canvas-tile-glyph"><Layers size={16} aria-hidden="true" /></span>
+        <span><strong>{t('assemble.title')}</strong><small>{t('tile.assembleNoModel')}</small></span>
+      </button>
       {withDisplay ? <>
         <div className="canvas-add-menu-title">{displayText(locale, 'display.addSection')}</div>
         <button type="button" role="menuitem" className="canvas-add-menu-item awwo-template-menu-item" aria-label={displayText(locale, 'display.add')}

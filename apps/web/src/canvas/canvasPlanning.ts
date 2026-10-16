@@ -192,6 +192,11 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
     ...(requirements.size ? { requirements: Object.fromEntries(requirements) } : {}),
     nodes: doc.nodes.map(node => {
       if (node.kind === 'form') return { id: node.id, kind: node.kind, title: node.title, fields: node.fields };
+      // An assemble node runs no model: the planner sees what it reads and delivers, not its page frame.
+      if (node.kind === 'assemble') return { id: node.id, kind: node.kind, title: node.title,
+        inputs: node.contract.inputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
+        outputs: node.contract.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
+        ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}), ...runView(extras.runs?.[node.id]) };
       // A media node is described by what it makes and the prompt it will make it from, never by its model.
       const media = mediaKindOf(node.agentKind);
       if (media) return { id: node.id, templateId: media, title: node.title, prompt: activeNodeThread(node).draft, ...runView(extras.runs?.[node.id]) };

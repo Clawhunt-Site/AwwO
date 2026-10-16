@@ -35,6 +35,7 @@ import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
 import { NodeModelSettings } from './NodeModelSettings';
+import { AssembleSettings } from './AssembleSettings';
 import type { ModelPaletteGroup } from './modelPalette';
 import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
 import {
@@ -254,6 +255,7 @@ export function InspectorPanel({
   }, [node.id]);
   const sessionDraft = draft.kind === 'session' ? draft : null;
   const formDraft = draft.kind === 'form' ? draft : null;
+  const assembleDraft = draft.kind === 'assemble' ? draft : null;
   const mediaCatalogue = mediaCatalogueOf(media);
   // A SaaS host saves a media node only once its catalog model and parameters are valid; a host
   // without the media service never saves one.
@@ -669,6 +671,8 @@ export function InspectorPanel({
               ＋ {t('inspector.addField')}
             </button>
           </>
+        ) : assembleDraft ? (
+          <AssembleSettings draft={assembleDraft} busy={busy} onChange={editDraft} />
         ) : null}
       </div>
 

@@ -64,18 +64,21 @@ export function portsFor(node: CanvasNode): PortSpec[] {
   if (node.kind === 'form') {
     return [{ id: 'data', side: 'output', dataType: 'text' }];
   }
-  if (node.contract) {
+  // An assemble node always has a contract: its inputs are its slots, its outputs the page and/or its file.
+  const contract = node.contract;
+  if (contract) {
     return [
-      ...node.contract.inputs.map((field): PortSpec => ({
+      ...contract.inputs.map((field): PortSpec => ({
         id: `in:${field.id}`, side: 'input', label: field.label,
         dataType: field.type === 'markdown' || field.type === 'html' ? 'text' : field.type,
       })),
-      ...node.contract.outputs.map((field): PortSpec => ({
+      ...contract.outputs.map((field): PortSpec => ({
         id: `out:${field.id}`, side: 'output', label: field.label,
         dataType: field.type === 'markdown' || field.type === 'html' ? 'text' : field.type,
       })),
     ];
   }
+  if (node.kind === 'assemble') return [];
   const ports: PortSpec[] = [{ id: 'context', side: 'input', dataType: 'text', multi: true }];
   // A picture wired here is the generation's reference where the node's model takes one (image edit, image-to-3D).
   if (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d') ports.push({ id: 'reference', side: 'input', dataType: 'image' });

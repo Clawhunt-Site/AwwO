@@ -72,11 +72,12 @@ export function stepDelivery(node: CanvasNode, depth: number, reviewer = false):
   const input = node.kind === 'form';
   const review = node.kind === 'session' && (reviewer || (!finalDelivery(node)
     && (getAgentTemplateForNode(node)?.id === 'review' || ACCEPTANCE_TITLE.test(node.title))));
-  const output = node.kind === 'session' ? node.lastOutput ?? null : null;
+  // An assemble node's page is a delivery like any agent's (it is often the canvas's final result).
+  const output = node.kind !== 'form' ? node.lastOutput ?? null : null;
   const base = { node, depth, output, input, review };
   if (!output || !output.text.trim()) return { ...base, output: null, state: 'none', kind: null };
   const state: DeliveryState = output.partial ? 'partial' : output.source === 'manual' ? 'manual' : output.source === 'case' ? 'case' : 'run';
-  const contract = (node.kind === 'session' && node.contract) || emptyContract();
+  const contract = (node.kind !== 'form' && node.contract) || emptyContract();
   if (!contract.outputs.length && node.kind === 'session' && mediaKindOf(node.agentKind) && parseMediaOutput(output.text)) return { ...base, state, kind: 'media' };
   const parsed = deliveryPresentation(contract, output.text);
   const published = parsed.errors.length ? [] : contract.outputs.filter(field => {
@@ -170,10 +171,10 @@ export function deliveredItems(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Pa
   const items: DeliveredItem[] = [];
   for (const step of result.stages.flat()) {
     const node = step.node;
-    if (step.input || !step.output || node.kind !== 'session') continue;
+    if (step.input || !step.output || node.kind === 'form') continue;
     const nodeTitle = node.title.trim() || node.id;
     const contract = node.contract || emptyContract();
-    if (!contract.outputs.length && mediaKindOf(node.agentKind)) {
+    if (!contract.outputs.length && node.kind === 'session' && mediaKindOf(node.agentKind)) {
       const media = parseMediaOutput(step.output.text);
       for (const item of media?.items ?? []) {
         const kind: DeliveredItemKind = item.contentType.startsWith('video/') ? 'video' : item.contentType.startsWith('model/') ? 'model' : 'image';

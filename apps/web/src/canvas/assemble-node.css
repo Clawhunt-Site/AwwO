@@ -1,0 +1,19 @@
+/* The assemble node: no conversation, a slot list and the page it assembled. */
+.canvas-root .canvas-tile--assemble::before { background: var(--kind-form); }
+.awwo-assemble-body { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; padding: 4px 2px; }
+.awwo-assemble-note { margin: 0; color: var(--awwo-muted); font-size: 12px; line-height: 1.45; }
+.awwo-assemble-inputs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.awwo-assemble-inputs li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'slot size' 'source source';
+  gap: 1px 8px; padding: 6px 8px; border: 1px solid var(--awwo-line); border-radius: 8px; background: var(--awwo-card);
+}
+.awwo-assemble-inputs li.is-unused { opacity: .6; }
+.awwo-assemble-slot { grid-area: slot; color: var(--awwo-ink); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.awwo-assemble-source { grid-area: source; color: var(--awwo-muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.awwo-assemble-size { grid-area: size; color: var(--awwo-teal); font-family: var(--awwo-mono, ui-monospace, monospace); font-size: 11.5px; }
+.awwo-assemble-waiting { margin: 0; color: var(--awwo-muted); font-size: 12px; }
+.awwo-assemble-settings { display: flex; flex-direction: column; gap: 6px; }
+.awwo-assemble-template { min-height: 220px; font-family: var(--awwo-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.5; white-space: pre; resize: vertical; }
+.awwo-assemble-input-row { grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) auto auto; }
+.awwo-assemble-input-id { font-family: var(--awwo-mono, ui-monospace, monospace); }
+.awwo-assemble-required, .awwo-assemble-also-file { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--awwo-muted); }

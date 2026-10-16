@@ -54,6 +54,7 @@ import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversatio
   readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
+import { assembleInputViews } from './assembleNode';
 import { followupDeliveryContract } from './followupDelivery';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
 import { CanvasViewport } from './CanvasViewport';
@@ -82,6 +83,7 @@ import { useCanvasKeys, keyHintMap } from './useCanvasKeys';
 import {
   CANVAS_STORAGE_KEY,
   createFormNode,
+  createAssembleNode,
   createSessionNode,
   loadDocumentWithStatus,
   migrateFromLegacy,
@@ -933,7 +935,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const stage = viewportSize(configuring);
     const target = docRef.current.nodes.find((n) => n.id === nodeId);
     if (!stage || !target) return null;
-    const besidePanel = configuring && (canInitialize || target.kind === 'form');
+    const besidePanel = configuring && (canInitialize || target.kind !== 'session');
     // Opened to be configured (or re-fitted while its inspector is open) where the inspector floats
     // over the stage (cloud canvases, forms), the node keeps clear of it, as far as it can while
     // staying readable: the reserve shrinks before the node would drop below the readable scale.
@@ -2134,6 +2136,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // A cloud image or video node is a plain generator: no role template, delivery format or
       // team. The first catalog model is shown, and runs only once the operator saves it.
       const node = kind === 'form' ? createFormNode(world)
+        : kind === 'assemble' ? createAssembleNode(world, locale)
         : media ? { ...createSessionNode(media, world), title: t(media === 'video' ? 'node.video' : media === 'model3d' ? 'node.model3d' : 'node.image'),
           model: mediaModelsOf(mediaCatalogueOf(mediaState), media)[0]?.id ?? '' }
         : kind === 'llm' || kind === 'coding' || kind === 'image' || kind === 'video' || kind === 'model3d'
@@ -2284,6 +2287,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (configChanged) setHandoffNote(surfaceNotice(t, 'config_forked'));
     } else if (live.kind === 'form' && draft.kind === 'form') {
       saveNode({ ...live, title: draft.title, fields: draft.fields });
+    } else if (live.kind === 'assemble' && draft.kind === 'assemble') {
+      saveNode({ ...live, title: draft.title, template: draft.template, contract: draft.contract,
+        ...(draft.fileName ? { fileName: draft.fileName } : { fileName: undefined }) });
     }
   }, [canEditStructure, saveNode]);
   const initializeInspector = useCallback(async (draft: SessionNode) => {
@@ -2456,7 +2462,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const openStudio = useCallback((nodeId?: string, entryId?: string) => setStudio({ nodeId, entryId }), []);
   // Every file the canvas made, for previews that show what another node generated. Keyed on outputs only, so a
   // moved card does not hand every card a new array (cards are memoised).
-  const outputsKey = nodes.map(node => node.kind === 'session'
+  const outputsKey = nodes.map(node => node.kind !== 'form'
     ? `${node.id}\u0001${node.title}\u0001${node.lastOutput?.at ?? ''}\u0001${node.lastOutput?.text.length ?? 0}` : node.id).join('\u0002');
   const canvasEntries = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: docRef.current.edges }).flatMap(group => group.entries), [outputsKey]);
   // What the 预览展示 windows read, keyed so a moved card hands them nothing new (they are memoised and run pages).
@@ -3867,6 +3873,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             gatewayBase={gatewayApiBase()}
             onSend={tileOnSend}
             conversationContext={node.kind === 'session' ? prepareNodeConversation(node, nodes, edges.filter(edge => edge.kind !== 'feedback')) : undefined}
+            assembleInputs={node.kind === 'assemble' ? assembleInputViews(node, nodes, edges) : undefined}
             onIssueId={tileOnIssueId}
             onPreview={readOnly ? undefined : persistPreview}
             onDraftChange={readOnly ? undefined : persistDraft}
@@ -3953,7 +3960,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         />
       ) : null}
 
-      {inspectorNode && (inspectorNode.kind === 'form' || canInitialize) ? renderInspector(inspectorNode) : null}
+      {inspectorNode && (inspectorNode.kind !== 'session' || canInitialize) ? renderInspector(inspectorNode) : null}
 
       {!readOnly && addMenu ? (
         <AddNodeMenu

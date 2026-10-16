@@ -15,9 +15,12 @@ describe('canvas add menu model shelf mode', () => {
     render(<AddNodeMenu {...p} />);
     expect(screen.queryByRole('menuitem', { name: '前端开发' })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: '后端服务' })).toBeNull();
-    expect(screen.getAllByRole('menuitem')).toHaveLength(3);
+    // The model shelf, the workspace Agent library, the custom Agent and the assemble node (no model, so no shelf).
+    expect(screen.getAllByRole('menuitem')).toHaveLength(4);
+    fireEvent.click(screen.getByRole('menuitem', { name: '添加装配节点' }));
+    expect(p.onPick).toHaveBeenCalledWith('assemble');
     fireEvent.click(screen.getByRole('menuitem', { name: '模型与人设…' }));
-    expect(order).toEqual(['close', 'shelf']); expect(p.onPick).not.toHaveBeenCalled();
+    expect(order).toEqual(['close', 'shelf']); expect(p.onPick).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('menuitem', { name: '自定义 Agent' }));
     expect(p.onPick).toHaveBeenCalledWith('general');
     fireEvent.click(screen.getByRole('menuitem', { name: '选择工作区 Agent…' }));
@@ -26,7 +29,9 @@ describe('canvas add menu model shelf mode', () => {
 
   it('preserves all eight template choices when the model shelf is not supplied', () => {
     const p = props(); render(<AddNodeMenu {...p} />);
-    expect(screen.getAllByRole('menuitem')).toHaveLength(8);
+    // The eight templates and the assemble node.
+    expect(screen.getAllByRole('menuitem')).toHaveLength(9);
+    expect(screen.getByRole('menuitem', { name: '添加装配节点' })).toBeEnabled();
     expect(screen.queryByRole('menuitem', { name: '模型与人设…' })).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: '前端开发' }));
     expect(p.onPick).toHaveBeenCalledWith('frontend');

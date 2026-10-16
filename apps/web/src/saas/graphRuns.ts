@@ -237,7 +237,7 @@ export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRun
       && !snapshot.scope.includes(result.nodeId) && typeof result.output === 'string'
       && result.output.trim() && result.partial !== true) {
       const source = snapshot.document?.nodes.find(node => node.id === result.nodeId);
-      if (source && (source.kind === 'form' || source.binding?.companyId === journal.serverGraph.tenantId)) {
+      if (source && (source.kind !== 'session' || source.binding?.companyId === journal.serverGraph.tenantId)) {
         previous = { nodeId: result.nodeId,
           threadId: source.kind === 'session' ? activeThreadId(source) : 'form',
           companyId: journal.serverGraph.tenantId,

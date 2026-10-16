@@ -50,6 +50,9 @@ type graphNode struct {
 		Text    string `json:"text"`
 		Partial bool   `json:"partial"`
 	} `json:"lastOutput"`
+	// An assemble node's page frame and, when it also delivers a file, that file's name (graph_assemble.go).
+	Template string `json:"template,omitempty"`
+	FileName string `json:"fileName,omitempty"`
 	// A media node in a canvas run generates from the draft of its active conversation (graph_media.go). Read raw:
 	// a shape this host does not expect leaves the draft empty instead of failing the whole graph.
 	ActiveThreadID json.RawMessage `json:"activeThreadId,omitempty"`
@@ -190,8 +193,13 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 	in := map[string]bool{}
 	indeg := map[string]int{}
 	for _, n := range d.Nodes {
-		if n.ID == "" || byID[n.ID].ID != "" || (n.Kind != "form" && n.Kind != "session") {
+		if n.ID == "" || byID[n.ID].ID != "" || (n.Kind != "form" && n.Kind != "session" && n.Kind != "assemble") {
 			return d, nil, errors.New("Invalid or duplicate graph node")
+		}
+		if n.Kind == "assemble" {
+			if err := validateAssembleNode(n); err != nil {
+				return d, nil, err
+			}
 		}
 		byID[n.ID] = n
 		indeg[n.ID] = 0
@@ -250,6 +258,15 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 		}
 		if !in[n.ID] {
 			continue
+		}
+		if n.Kind == "assemble" {
+			for _, f := range n.Contract.Inputs {
+				if incoming[n.ID+"\x00in:"+f.ID] == 0 {
+					if err := fieldValue(f, f.Value); err != nil {
+						return d, nil, err
+					}
+				}
+			}
 		}
 		if n.Kind == "session" {
 			if n.Binding == nil || n.Binding.AgentID == "" {

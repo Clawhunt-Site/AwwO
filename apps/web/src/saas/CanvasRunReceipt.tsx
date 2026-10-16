@@ -42,7 +42,7 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
   }, [tenantId, canvasId]);
 
   const when = (value: string) => new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const output = final?.kind === 'session' ? final.lastOutput : null;
+  const output = final && final.kind !== 'form' ? final.lastOutput : null;
   // A partial result is what a step left when a run did not finish it: the receipt names that run instead.
   const partial = output?.partial === true;
   const matches = (state: string) => partial ? state === 'failed' || state === 'cancelled' || state === 'blocked' : state === 'done';

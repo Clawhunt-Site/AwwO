@@ -130,7 +130,7 @@ export function RunTimeline({
           // A blocked row says WHY it was blocked; every other state keeps its own label and
           // carries the detail in the tooltip.
           const label = (state === 'blocked' || state === 'cancelled') && detail ? detail : meta;
-          const color = KIND_COLOR[node.kind === 'form' ? 'form' : node.agentKind] ?? 'var(--muted, #8a8a8a)';
+          const color = KIND_COLOR[node.kind === 'session' ? node.agentKind : 'form'] ?? 'var(--muted, #8a8a8a)';
           const started = run?.startedAt;
           const ended = run?.endedAt;
           const barLeft = started ? ((started - origin) / span) * 100 : 0;
@@ -142,6 +142,8 @@ export function RunTimeline({
           const runtime =
             node.kind === 'form'
               ? t('timeline.form')
+              : node.kind === 'assemble'
+                ? t('timeline.assemble')
               : runsOnMediaModel(node)
                 ? [mediaGroupLabel(locale), modelLabel].filter(Boolean).join(' · ')
                 : node.runtime
