@@ -177,3 +177,33 @@ func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) 
 		t.Fatalf("model calls accounted %d %v", priced, e)
 	}
 }
+
+// A case canvas is set up the way a member's copy is (POST /initialize): its sandbox node gets an Agent on the sandbox
+// runtime and its assemble node, which has no Agent, is left as it is.
+func TestPostgresInitializeSetsUpASandboxNodeAndLeavesAnAssembleNode(t *testing.T) {
+	sandboxWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { workspaceHealthWithLimit(w, 8) }))
+	defer sandboxWorker.Close()
+	h := newHarness(t, "")
+	h.a.cfg.SandboxAgentsURL, h.a.cfg.SandboxAgentsToken = sandboxWorker.URL, strings.Repeat("s", 32)
+	h.a.cfg.WorkspaceCallbackURL = h.server.URL + "/api/internal/workspace-calls"
+	c, tid, _ := h.register(t, "sandbox-initialize@example.test")
+	page := map[string]any{"id": "page", "kind": "assemble", "title": "Page", "template": "<!DOCTYPE html><html><body>{{in:code}}</body></html>", "fileName": "page.html",
+		"contract": graphContract{Version: 1, Inputs: []graphField{{ID: "code", Label: "Code", Type: "text", Required: true}}, Outputs: []graphField{{ID: "file", Label: "Page", Type: "file", Required: true}}}}
+	test := map[string]any{"id": "test", "kind": "session", "agentKind": "coding", "title": "Test and fix", "runtime": runtimeSandbox, "model": "test-model", "persona": "Test the page.", "effort": "", "binding": nil, "issueId": nil, "preview": "", "threads": []any{},
+		"contract": graphContract{Version: 1, Inputs: []graphField{{ID: "page", Label: "Page", Type: "file", Required: true}}, Outputs: []graphField{{ID: "result", Label: "Page", Type: "html", Required: true}}}}
+	doc := map[string]any{"nodes": []any{page, test}, "edges": []map[string]string{{"id": "e1", "fromNode": "page", "fromPort": "out:file", "toNode": "test", "toPort": "in:page", "dataType": "file"}}}
+	cid := h.request(t, c, "POST", "/tenants/"+tid+"/canvases", map[string]any{"name": "Sandbox setup", "document": doc}, 201)["id"].(string)
+	v := h.request(t, c, "POST", "/tenants/"+tid+"/canvases/"+cid+"/initialize", map[string]any{"documentVersion": 1}, 200)
+	assembled, tester := setupNodeAt(v, 0), setupNodeAt(v, 1)
+	if assembled["kind"] != "assemble" || assembled["binding"] != nil || assembled["template"] != page["template"] {
+		t.Fatalf("assemble node changed: %v", assembled)
+	}
+	binding, _ := tester["binding"].(map[string]any)
+	if tester["runtime"] != runtimeSandbox || binding == nil || binding["agentId"] == nil {
+		t.Fatalf("sandbox node not set up: %v", tester)
+	}
+	var runtime string
+	if e := h.db.QueryRow(context.Background(), "SELECT runtime FROM agents WHERE tenant_id=$1 AND id=$2", tid, binding["agentId"]).Scan(&runtime); e != nil || runtime != runtimeSandbox {
+		t.Fatalf("agent runtime %q %v", runtime, e)
+	}
+}
