@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -103,6 +104,228 @@ func validateComputerCompletion(raw []byte, budget int) (map[string]json.RawMess
 	delete(request, "stream_options")
 	return request, streaming, nil
 }
+
+// withoutReferenceBlock is the completion request with every copy of block cut out of its message texts, or false when
+// none holds one or the request is not one JSON object. Only message texts are searched (string content and the text
+// of content parts, found by reading the request's structure), for the block as the OpenMaus core's JSON.stringify
+// writes it or as Go writes it; only those bytes go, everything else stays exactly as sent (no re-encoding), and the
+// caller validates the result again.
+func withoutReferenceBlock(raw []byte, block string) ([]byte, bool) {
+	if block == "" {
+		return nil, false
+	}
+	spans, ok := messageTextSpans(raw)
+	if !ok {
+		return nil, false
+	}
+	for _, form := range jsonStringForms(block) {
+		var cuts [][2]int
+		for _, span := range spans {
+			for from := span[0]; ; {
+				i := bytes.Index(raw[from:span[1]], form)
+				if i < 0 {
+					break
+				}
+				i += from
+				// A match right after an odd run of backslashes starts inside an escape, not at a character.
+				if n := i - span[0] - len(bytes.TrimRight(raw[span[0]:i], `\`)); n%2 == 1 {
+					from = i + 1
+					continue
+				}
+				cuts = append(cuts, [2]int{i, i + len(form)})
+				from = i + len(form)
+			}
+		}
+		if len(cuts) == 0 {
+			continue
+		}
+		out, at := make([]byte, 0, len(raw)), 0
+		for _, cut := range cuts {
+			out, at = append(out, raw[at:cut[0]]...), cut[1]
+		}
+		return append(out, raw[at:]...), true
+	}
+	return nil, false
+}
+
+// messageTextSpans are the byte ranges, inside their quotes, of a completion request's message texts: each message's
+// "content" when it is a string, and each content part's "text". False when raw is not one JSON object.
+func messageTextSpans(raw []byte) ([][2]int, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var spans [][2]int
+	// value reads a value's first token; a string's span is recorded when record says so (only blanks and ':' come
+	// between the key and the opening quote).
+	value := func(record bool) (json.Token, error) {
+		from := int(decoder.InputOffset())
+		token, e := decoder.Token()
+		if _, text := token.(string); e == nil && text && record {
+			spans = append(spans, [2]int{from + bytes.IndexByte(raw[from:], '"') + 1, int(decoder.InputOffset()) - 1})
+		}
+		return token, e
+	}
+	// skip reads the rest of a value whose first token was read.
+	skip := func(token json.Token) error {
+		if token != json.Delim('{') && token != json.Delim('[') {
+			return nil
+		}
+		for depth := 1; depth > 0; {
+			t, e := decoder.Token()
+			if e != nil {
+				return e
+			}
+			switch t {
+			case json.Delim('{'), json.Delim('['):
+				depth++
+			case json.Delim('}'), json.Delim(']'):
+				depth--
+			}
+		}
+		return nil
+	}
+	// members calls each with every key of the object whose '{' was read, then reads its '}'.
+	members := func(each func(key string) error) error {
+		for decoder.More() {
+			key, e := decoder.Token()
+			if e != nil {
+				return e
+			}
+			if e = each(key.(string)); e != nil {
+				return e
+			}
+		}
+		_, e := decoder.Token()
+		return e
+	}
+	// elements calls each with the first token of every element of the array whose '[' was read, then reads its ']'.
+	elements := func(each func(first json.Token) error) error {
+		for decoder.More() {
+			first, e := decoder.Token()
+			if e != nil {
+				return e
+			}
+			if e = each(first); e != nil {
+				return e
+			}
+		}
+		_, e := decoder.Token()
+		return e
+	}
+	part := func(first json.Token) error {
+		if first != json.Delim('{') {
+			return skip(first)
+		}
+		return members(func(key string) error {
+			token, e := value(key == "text")
+			if e != nil {
+				return e
+			}
+			return skip(token)
+		})
+	}
+	message := func(first json.Token) error {
+		if first != json.Delim('{') {
+			return skip(first)
+		}
+		return members(func(key string) error {
+			token, e := value(key == "content")
+			if e == nil && key == "content" && token == json.Delim('[') {
+				return elements(part)
+			}
+			if e != nil {
+				return e
+			}
+			return skip(token)
+		})
+	}
+	if first, e := decoder.Token(); e != nil || first != json.Delim('{') {
+		return nil, false
+	}
+	e := members(func(key string) error {
+		token, e := value(false)
+		if e == nil && key == "messages" && token == json.Delim('[') {
+			return elements(message)
+		}
+		if e != nil {
+			return e
+		}
+		return skip(token)
+	})
+	if e != nil {
+		return nil, false
+	}
+	if _, e = decoder.Token(); e != io.EOF {
+		return nil, false
+	}
+	return spans, true
+}
+
+// jsonStringForms are the ways common encoders write s inside a JSON string: JavaScript's JSON.stringify (the OpenMaus
+// core; U+2028 and HTML characters stay literal), Go's encoder without HTML escaping, and Go's json.Marshal.
+func jsonStringForms(s string) [][]byte {
+	var js bytes.Buffer
+	for _, r := range s {
+		switch r {
+		case '"':
+			js.WriteString(`\"`)
+		case '\\':
+			js.WriteString(`\\`)
+		case '\b':
+			js.WriteString(`\b`)
+		case '\f':
+			js.WriteString(`\f`)
+		case '\n':
+			js.WriteString(`\n`)
+		case '\r':
+			js.WriteString(`\r`)
+		case '\t':
+			js.WriteString(`\t`)
+		default:
+			if r < 0x20 {
+				fmt.Fprintf(&js, `\u%04x`, r)
+			} else {
+				js.WriteRune(r)
+			}
+		}
+	}
+	var plain bytes.Buffer
+	encoder := json.NewEncoder(&plain)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(s)
+	marshalled, _ := json.Marshal(s)
+	forms := [][]byte{js.Bytes()}
+	for _, quoted := range [][]byte{bytes.TrimRight(plain.Bytes(), "\n"), marshalled} {
+		if f := quoted[1 : len(quoted)-1]; !slices.ContainsFunc(forms, func(have []byte) bool { return bytes.Equal(have, f) }) {
+			forms = append(forms, f)
+		}
+	}
+	return forms
+}
+
+// computerWorkerBodyLimit is what the worker reads of one call's body (MAX_BYTES in apps/computer-model.ts).
+const computerWorkerBodyLimit = 512 << 10
+
+// computerForwardBody is the body this proxy sends the worker for one validated call.
+func computerForwardBody(lease *computerLease, completion map[string]json.RawMessage) []byte {
+	snap := lease.snapshot
+	completion["model"], _ = json.Marshal(snap.Model)
+	body, _ := json.Marshal(map[string]any{"runId": lease.runID, "tenantId": lease.tenantID, "sessionId": lease.sessionID, "model": snap.Model, "effort": snap.Effort, "completion": completion})
+	return body
+}
+
+// computerCallFits says whether a validated call should also pass the worker's own admission (apps/computer-model.ts):
+// its context measure, the JSON of the call plus 32 bytes a message, within the model's budget (estimated from above
+// from the request as sent), and the body this proxy sends, with room for a personal key, within what the worker reads.
+func computerCallFits(raw []byte, completion map[string]json.RawMessage, lease *computerLease) bool {
+	var messages, tools []json.RawMessage
+	_ = json.Unmarshal(completion["messages"], &messages)
+	_ = json.Unmarshal(completion["tools"], &tools)
+	if len(raw)+32*len(messages)+32*len(tools)+256 > lease.snapshot.Budget {
+		return false
+	}
+	return len(computerForwardBody(lease, completion))+4096 <= computerWorkerBodyLimit
+}
+
 func (a *App) settleComputerCall(tid, id, status, code string, facts *invocationFacts) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -140,6 +363,19 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	completion, streaming, e := validateComputerCompletion(raw, lease.snapshot.Budget)
+	// The reference blocks executeComputer added to the task's words come after admission: a call they push over the
+	// model's budget, here or in the worker's own admission, goes without them, the earlier tasks first. Never for a
+	// body the read limit cut short.
+	whole := len(raw) <= 512<<10
+	for _, block := range lease.blocks {
+		if !whole || (e != nil && e.Error() != "context_limit") || (e == nil && computerCallFits(raw, completion, lease)) {
+			break
+		}
+		if trimmed, ok := withoutReferenceBlock(raw, block); ok {
+			raw = trimmed
+			completion, streaming, e = validateComputerCompletion(raw, lease.snapshot.Budget)
+		}
+	}
 	if e != nil {
 		fail(w, 400, e.Error(), "Completion input exceeds its admitted schema or context budget")
 		return
@@ -186,8 +422,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "computer_accounting_failed", "Could not reserve the model call")
 		return
 	}
-	completion["model"], _ = json.Marshal(snap.Model)
-	body, _ := json.Marshal(map[string]any{"runId": lease.runID, "tenantId": lease.tenantID, "sessionId": lease.sessionID, "model": snap.Model, "effort": snap.Effort, "completion": completion})
+	body := computerForwardBody(lease, completion)
 	facts.InputBytes = int64(len(body))
 	// The failures before the request is sent leave nothing to pay for.
 	if a.cfg.UserCredentials {

@@ -329,10 +329,25 @@ func briefingSize(size int) string {
 }
 
 // withoutCanvasBriefing is the task text as its user wrote it: the worker echoes the whole prompt as the task's first
-// message, and the transcript shows the user's words, not the briefing the model read.
+// message, and the transcript shows the user's words, not the earlier tasks or the briefing the model read.
 func withoutCanvasBriefing(text string) string {
-	if i := strings.Index(text, canvasBriefingMarker); i >= 0 {
-		return text[:i]
+	markers := []string{earlierTasksMarker, canvasBriefingMarker}
+	cut := len(text)
+	for _, marker := range markers {
+		if i := strings.Index(text, marker); i >= 0 && i < cut {
+			cut = i
+		}
 	}
-	return text
+	// The worker cuts an echo past 64 KiB and says so; the cut can fall inside the first marker itself (only a part
+	// that names the block, through its colon, is taken for one: user words may end like a marker's first dashes).
+	if body, ok := strings.CutSuffix(text, "\n[truncated]"); ok && cut == len(text) {
+		for _, marker := range markers {
+			for k := len(marker) - 1; k > strings.Index(marker, ":"); k-- {
+				if strings.HasSuffix(body, marker[:k]) {
+					return body[:len(body)-k]
+				}
+			}
+		}
+	}
+	return text[:cut]
 }

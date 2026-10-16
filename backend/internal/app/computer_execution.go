@@ -100,6 +100,34 @@ type computerLease struct {
 	busy, closed               bool
 	// refusal is an allowance or plan refusal of one of the run's model calls; the run fails with it.
 	refusal string
+	// blocks are the reference blocks added to the task's words (earlier tasks, canvas briefing), in the order a model
+	// call they push over the model's budget goes without them; set before the lease is shared, then only read.
+	blocks []string
+}
+
+// What the broker reads of a task's start, and of its prompt (LIMITS.request and parseRun in
+// apps/openmaus-worker/protocol.ts).
+const (
+	computerTaskBodyLimit   = 512 << 10
+	computerTaskPromptLimit = 256 << 10
+)
+
+// fitComputerStart sets the start's prompt to the task's words and the reference blocks that fit, and returns those
+// blocks: the prompt, and the body as computerRequest writes it (Go escapes <, > and &, six bytes each), must fit what
+// the broker reads, so when they would not the blocks go, the earlier tasks first (a start too large without them goes
+// as before).
+func fitComputerStart(payload map[string]any, words string, blocks []string) []string {
+	for {
+		prompt := words + strings.Join(blocks, "")
+		payload["prompt"] = prompt
+		if len(blocks) == 0 {
+			return blocks
+		}
+		if raw, _ := json.Marshal(payload); len(prompt) <= computerTaskPromptLimit && len(raw) <= computerTaskBodyLimit {
+			return blocks
+		}
+		blocks = blocks[1:]
+	}
 }
 
 func validateComputerConfiguration(c Config) error {
@@ -400,11 +428,22 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 		a.finish(tid, rid, "failed", "", "invalid_computer_snapshot")
 		return
 	}
-	// The workspace holds none of the canvas the task came from, so the task reads an account of it after the user's
-	// words (canvas_briefing.go); the transcript keeps the user's words alone.
-	prompt += a.canvasBriefing(ctx, tid, sid, prompt)
-	lease := &computerLease{ctx: ctx, tenantID: tid, runID: rid, sessionID: sid, snapshot: snap}
+	// The workspace holds none of the canvas the task came from, nor anything of the user's earlier tasks, so the task
+	// reads an account of both after the user's words (earlier_tasks.go, canvas_briefing.go); the transcript keeps the
+	// user's words alone. The earlier tasks take a share of what the model budget leaves after everything else.
+	request := prompt
+	canvas := a.canvasBriefing(ctx, tid, sid, request)
+	earlier := a.earlierTasksBriefing(ctx, tid, rid, sid, request, snap.Budget-snap.Overhead-len(prompt)-len(instructions)-len(canvas))
+	var blocks []string
+	for _, block := range []string{earlier, canvas} {
+		if block != "" {
+			blocks = append(blocks, block)
+		}
+	}
 	token := randomID() + randomID()
+	payload := map[string]any{"runId": rid, "tenantId": tid, "sessionId": sid, "instructions": instructions, "modelProxyURL": a.cfg.ComputerModelProxyURL, "modelProxyToken": token, "timeoutMs": computerRunTimeout(a.cfg.RunTimeout).Milliseconds(), "maxModelCalls": snap.Computer.MaxModelCalls}
+	blocks = fitComputerStart(payload, request, blocks)
+	lease := &computerLease{ctx: ctx, tenantID: tid, runID: rid, sessionID: sid, snapshot: snap, blocks: blocks}
 	key := tokenHash(token)
 	a.computerLeases.Store(key, lease)
 	defer func() {
@@ -419,7 +458,6 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			response.Body.Close()
 		}
 	}()
-	payload := map[string]any{"runId": rid, "tenantId": tid, "sessionId": sid, "prompt": prompt, "instructions": instructions, "modelProxyURL": a.cfg.ComputerModelProxyURL, "modelProxyToken": token, "timeoutMs": computerRunTimeout(a.cfg.RunTimeout).Milliseconds(), "maxModelCalls": snap.Computer.MaxModelCalls}
 	response, started := a.startComputerTask(ctx, tid, rid, payload)
 	if !started {
 		return
