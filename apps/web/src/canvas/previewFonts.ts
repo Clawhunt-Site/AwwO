@@ -29,8 +29,9 @@ export function previewFontNeeds(...texts: readonly string[]): PreviewFont[] {
   return PREVIEW_FONTS.filter(font => decoded.some(text => PATTERNS.get(font)!.test(text)));
 }
 
-// Each face's file, as a data: URL in its own chunk, fetched only when a page uses that family. The hosted build starts
-// that chunk with the face's license (scripts/font-licences.mjs), which the SIL Open Font License asks every copy to carry.
+// Each face's file, as a data: URL in its own chunk, fetched only when a page uses that family. The hosted and native
+// builds start that chunk with the face's license (scripts/font-licences.mjs), which the SIL Open Font License asks every
+// copy to carry.
 const FILES = import.meta.glob<string>('./fonts/*.woff2', { query: '?inline', import: 'default' });
 const loaded = new Map<string, Promise<string>>();
 

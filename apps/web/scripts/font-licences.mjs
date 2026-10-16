@@ -1,19 +1,20 @@
-// Keeps the license of a folder of fonts with every copy the hosted build ships of them. The fonts are under the SIL
+// Keeps the license of a folder of fonts with every copy the app's builds ship of them. The fonts are under the SIL
 // Open Font License, which asks that each copy of a font come with its copyright notice and license, as a stand-alone
-// text file or a human-readable header. Two plugins, for the two ways the hosted build ships fonts:
-// - fontLicences, for src/saas/design/fonts/ (Mona Sans): a stylesheet names its fonts, so they reach the bundle as
-//   files Vite emits under hashed names, but nothing names the license file beside them, so Vite leaves it out. The
-//   plugin writes every license file of the folder, unchanged and under its own name, into each output directory that
-//   receives one of the folder's fonts. The build fails when a font of the folder ships as no file of its own
-//   (inlined, or no longer used) or the folder has no license, so no copy goes without it.
-// - inlinedFontLicences, for src/canvas/fonts/ (the preview fonts, each family with its own <family>.LICENSE.txt,
-//   which vite.saas.config.mjs pairs with the family's fonts by src/canvas/previewFontList.ts): previewFonts.ts
-//   inlines each font as a data: URL in a script chunk of its own, so no file beside it would travel with it. The
-//   plugin starts every chunk that holds one of them with its family's license, unchanged, as a /*! comment (an output
-//   postBanner: the minifier would strip a comment in the code, and the chunk's hash covers it). The build fails when
-//   a font of the folder has no license, ships in any other file (also one copied into the output), or in no file.
+// text file or a human-readable header. Two plugins, for the two ways the builds ship fonts:
+// - fontLicences, for src/saas/design/fonts/ (Mona Sans, which only the hosted build ships): a stylesheet names its
+//   fonts, so they reach the bundle as files Vite emits under hashed names, but nothing names the license file beside
+//   them, so Vite leaves it out. The plugin writes every license file of the folder, unchanged and under its own name,
+//   into each output directory that receives one of the folder's fonts. The build fails when a font of the folder
+//   ships as no file of its own (inlined, or no longer used) or the folder has no license, so no copy goes without it.
+// - inlinedFontLicences, for src/canvas/fonts/ (the preview fonts, which the hosted build and the native one both
+//   ship, each family with its own <family>.LICENSE.txt, which both configs pair with the family's fonts by
+//   src/canvas/previewFontList.ts through familyLicences): previewFonts.ts inlines each font as a data: URL in a script
+//   chunk of its own, so no file beside it would travel with it. The plugin starts every chunk that holds one of them
+//   with its family's license, unchanged, as a /*! comment (an output postBanner: the minifier would strip a comment in
+//   the code, and the chunk's hash covers it). The build fails when a font of the folder has no license, ships in any
+//   other file (also one copied into the output), or in no file.
 // tests/saas-font-licences.test.ts runs the hosted build config (vite.saas.config.mjs) on both folders and checks
-// what it writes.
+// what it writes; tests/native-font-licences.test.ts runs the native one (vite.config.mjs) on the preview fonts.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 
@@ -81,6 +82,13 @@ const FAMILY_LICENCE = /\.LICEN[CS]E\.txt$/i;
 export function folderFiles(directory) {
   return new Map(readdirSync(directory).filter(name => !name.startsWith('.')).sort().map(name => [name, readFileSync(join(directory, name))]));
 }
+
+/**
+ * Each font's license file by the font's name, given the families with their fonts (src/canvas/previewFontList.ts): its
+ * family's, <family>.LICENSE.txt with the family's name in lower case and a dash for each space, alike in every build.
+ */
+export const familyLicences = families => new Map(families.flatMap(font => font.faces.map(face =>
+  [face.file, `${font.family.toLowerCase().replace(/ /g, '-')}.LICENSE.txt`])));
 
 /**
  * The fonts of a folder that holds each font family's license as <family>.LICENSE.txt (src/canvas/fonts/), given its

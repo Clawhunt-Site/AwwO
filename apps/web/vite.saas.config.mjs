@@ -3,12 +3,10 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { copyFileSync, cpSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fontLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
+import { familyLicences, fontLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
 import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
-/** Each preview font face's license file: its family's, by the list that names the families. */
-const PREVIEW_FONT_LICENCES = new Map(PREVIEW_FONTS.flatMap(font => font.faces.map(face => [face.file, `${font.family.toLowerCase().replace(/ /g, '-')}.LICENSE.txt`])));
 /** Where the hosted site serves the figure kit: the path of FIGURE_KIT_URL (tests/saas-figure-kit.test.ts checks both). */
 const FIGURE_KIT_PATH = '/kits/anatomy/1/anatomy.js';
 const FIGURE_KIT_FILE = join(root, 'src', 'canvas', 'figureKit', 'anatomy-kit.js');
@@ -41,8 +39,9 @@ export default defineConfig({
   // fonts/LICENSE-mona-sans.txt beside the font files it emits (scripts/font-licences.mjs).
   fontLicences(join(root, 'src', 'saas', 'design', 'fonts')),
   // So are the preview fonts (src/canvas/previewFonts.ts), each family with its own license, which they inline as
-  // data: URLs: every script chunk holding one of them starts with that font's license (scripts/font-licences.mjs).
-  inlinedFontLicences(join(root, 'src', 'canvas', 'fonts'), PREVIEW_FONT_LICENCES)],
+  // data: URLs: every script chunk holding one of them starts with that font's license (scripts/font-licences.mjs), as
+  // in the native build (vite.config.mjs).
+  inlinedFontLicences(join(root, 'src', 'canvas', 'fonts'), familyLicences(PREVIEW_FONTS))],
   define: { 'import.meta.env.VITE_AWWO_SAAS': JSON.stringify('1') },
   server: { host: process.env.VITE_AWWO_WEB_HOST || '127.0.0.1', port: Number(process.env.VITE_AWWO_WEB_PORT || 5189), strictPort: true,
     proxy: { '/api/v1': { target: process.env.AWWO_API_TARGET || 'http://127.0.0.1:8087' } } },

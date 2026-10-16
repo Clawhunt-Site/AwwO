@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { familyLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
+import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
 
 // Native fusion of the vendored Paperclip board UI (server/ui) into apps/web's
 // build: the company surface mounts the real board (CompanyBoard.tsx) instead of
@@ -272,7 +274,12 @@ function gatewayLauncherPlugin() {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), gatewayLauncherPlugin()],
+  plugins: [react(), tailwindcss(), gatewayLauncherPlugin(),
+    // The preview fonts a running preview of a delivered page gets (src/canvas/previewFonts.ts, reached through the
+    // canvas's artifact preview) are under the SIL Open Font License, which asks that every copy carry its license.
+    // They are inlined as data: URLs, so as in the hosted build every script chunk holding one of them starts with
+    // its family's license, and the build fails when one would ship without it (scripts/font-licences.mjs).
+    inlinedFontLicences(fileURLToPath(new URL('./src/canvas/fonts', import.meta.url)), familyLicences(PREVIEW_FONTS))],
   define: {
     // Bare-identifier define (most reliable replacement target — unlike
     // `import.meta.env.X`, it is substituted even inside casts/optional chains).

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { build } from 'vite';
 import { describe, expect, it } from 'vitest';
-import { familyFonts, folderFiles, fontFolder, fontsInModules, inlinedFontLicences, licenceAssets, licenceBanner, unlicensedFonts } from '../scripts/font-licences.mjs';
+import { familyFonts, familyLicences, folderFiles, fontFolder, fontsInModules, inlinedFontLicences, licenceAssets, licenceBanner, unlicensedFonts } from '../scripts/font-licences.mjs';
 import { PREVIEW_FONTS } from '../src/canvas/previewFontList';
 import { glyphCount } from './woff2-font';
 
@@ -35,7 +35,7 @@ const outputFiles = (result: unknown) => (Array.isArray(result) ? result : [resu
 
 const PREVIEW = path.join(WEB, 'src', 'canvas', 'fonts');
 const slug = (family: string) => family.toLowerCase().replace(/ /g, '-');
-// Each face's license file, as vite.saas.config.mjs gives the plugin: its family's.
+// Each face's license file, as both build configs give the plugin (familyLicences): its family's.
 const PREVIEW_PAIRS = new Map(PREVIEW_FONTS.flatMap(font => font.faces.map(face => [face.file, `${slug(font.family)}.LICENSE.txt`] as const)));
 // Each preview font family's license in src/canvas/fonts/, unchanged, from where its fonts come from
 // (tests/canvas-preview-fonts.test.ts pins those): the LICENSE of its Fontsource 5.3.0 package
@@ -154,6 +154,7 @@ describe('the fonts AwwO supplies to running previews', () => {
       expect(bytes.toString('utf8'), name).toContain('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007');
     }
     // Every face of every family has its family's license, and the folder holds nothing else.
+    expect(familyLicences(PREVIEW_FONTS)).toEqual(PREVIEW_PAIRS);
     const fonts = familyFonts(PREVIEW, files, PREVIEW_PAIRS) as FamilyFont[];
     const faces = PREVIEW_FONTS.flatMap(font => font.faces.map(face => `${face.file} ${slug(font.family)}.LICENSE.txt`)).sort();
     expect(fonts.map(font => `${font.name} ${font.licence.name}`)).toEqual(faces);
