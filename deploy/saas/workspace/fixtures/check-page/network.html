@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: network requests are blocked</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter&display=swap">
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #f7f7fb; color: #222244; }</style>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" onerror="window.cdnFailed = true"></script>
+</head>
+<body>
+<h1>Offline page</h1>
+<p id="status">Checking the network…</p>
+<script>
+// Each attempt fails because the check is offline; the page copes, so it passes and the requests are listed.
+const fetched = fetch('https://api.example.com/scores').then(() => 'reached', () => 'refused');
+const socket = new Promise(resolve => {
+  const ws = new WebSocket('wss://live.example.com/feed');
+  ws.onerror = () => resolve('refused');
+  ws.onclose = () => resolve('refused');
+  ws.onopen = () => resolve('reached');
+});
+Promise.all([fetched, socket]).then(([api, live]) => {
+  document.getElementById('status').textContent = `API ${api}, live feed ${live}, CDN script ${window.cdnFailed ? 'refused' : 'loaded'}`;
+});
+window.awwoSelfTest = async () => {
+  const [api, live] = await Promise.all([fetched, socket]);
+  return { tests: [
+    { name: 'the CDN script did not load', ok: window.cdnFailed === true && typeof window.confetti === 'undefined' },
+    { name: 'fetch to an API is refused', ok: api === 'refused', detail: api },
+    { name: 'a WebSocket is refused', ok: live === 'refused', detail: live },
+  ] };
+};
+</script>
+</body>
+</html>

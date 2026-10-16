@@ -1,8 +1,61 @@
 # Coding workspace sandbox
 
-`apps/openai-agents-worker/workspace-sandbox.ts` is a trusted broker. Only the fixed Docker CLI runs on the host; generated code and shell commands execute inside the operator-built image. Build the Dockerfile from this directory and configure the worker with its immutable image digest. Runtime startup does not pull images. The image provides Node 22, Python 3 and Git; it does not contain provider credentials or a browser. It supports self-contained web/game projects, Python or JavaScript tools, JSON/glTF/OBJ assets and text reports. Network-dependent package installs, authenticated external tools and browser verification require a separate governed capability; they are not silently enabled here.
+`apps/openai-agents-worker/workspace-sandbox.ts` is a trusted broker. Only the fixed Docker CLI runs on the host; generated code and shell commands execute inside the operator-built image. Build the Dockerfile with this directory as the build context and configure the worker with its immutable image digest. Runtime startup does not pull images. The image provides Node 22, Python 3, Git, an offline headless Chromium with `awwo-check-page`, and the `rea` code-reading CLI; it does not contain provider credentials. It supports self-contained web/game projects, Python or JavaScript tools, JSON/glTF/OBJ assets and text reports, checking a page in a real browser, and static evidence reports on a JavaScript or Electron application. Network-dependent package installs and authenticated external tools require a separate governed capability; they are not silently enabled here.
 
-Every run gets a non-root container with no network, capabilities, host mounts or Docker socket, a read-only root filesystem, 1 CPU, 1 GiB memory, 128 PIDs, a 128 MiB workspace tmpfs and a 32 MiB temporary tmpfs. Inputs live in a separate root-owned mount and are read-only to generated programs. Container environment does not include worker/provider secrets. The host Docker service and the broker account must be restricted to trusted operators; Docker daemon access itself is privileged.
+## What the image contains
+
+| Component | Version | Installed from | Command or path |
+| --- | --- | --- | --- |
+| Node.js | 22.19.0 | `node:22.19.0-bookworm-slim` | `node`, `npm` |
+| Python, Git, procps | Debian 12 | apt | `python3`, `git`, `ps` |
+| Chromium headless shell | 155.0.8059.39 | apt: `chromium-headless-shell` 155.0.8059.39-1~deb12u1 (bookworm-security) | `/usr/lib/chromium/chromium-headless-shell` |
+| Fonts | DejaVu, WenQuanYi Micro Hei | apt: `fonts-dejavu-core`, `fonts-wqy-microhei`, `fontconfig` | |
+| rea | `rea-agents` 6.5.0 | npm, `tools/package-lock.json` | `rea` |
+| playwright-core | 1.64.1 | npm, `tools/package-lock.json` | `/opt/awwo/tools/node_modules` |
+| awwo-check-page | this repository | `tools/awwo-check-page.mjs` | `awwo-check-page` |
+
+The image is 1.19 GB unpacked (531 MB before these tools; 300 MB of compressed layers, from 131 MB): Chromium and its libraries 339 MB, the npm tools 145 MB.
+
+- **Chromium.** `chromium-headless-shell` is Debian's build of Chromium for automation, from the same source package and security updates as `chromium`, without GTK, D-Bus or systemd; it is also what Playwright runs for headless pages by default. `chromium-common` depends on the desktop helpers `x11-utils` and `xdg-utils`, which bring Mesa and LLVM (about 215 MB) that a headless browser never loads, so the Dockerfile first installs a local placeholder package, `awwo-headless-placeholders`, that provides those two names. WebGL runs on Chromium's bundled SwiftShader. By apt's count the browser adds 348 MB this way; the full `chromium` package with its real dependencies would add 730 MB.
+- **Fonts.** DejaVu covers Latin, Greek and Cyrillic (3 MB); WenQuanYi Micro Hei covers Chinese, Japanese and Korean (5 MB). `fonts-noto-cjk` would cost 91 MB and colour emoji (`fonts-noto-color-emoji`) 11 MB, so emoji render as empty boxes. `fontconfig` builds the font cache when the image is built.
+- **npm tools.** `npm ci --ignore-scripts` installs exactly the versions and integrity hashes in `tools/package-lock.json`: 179 packages, of which 174 install on Linux x64 (the other five are other platforms' `node-pty` binaries). `rea-agents` pins its own `playwright-core` 1.58.2 beside the 1.64.1 that `awwo-check-page` uses. No install script runs; the only one in the tree belongs to `frida`, an optional `rea-agents` dependency for live instrumentation, whose script would download a prebuilt binary, so it stays without its binding; REA's static JavaScript analysis does not use it. `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` is set; Playwright drives the system Chromium and never downloads a browser. To change a version, edit `tools/package.json` and regenerate the lockfile with the image's npm: `npm install --package-lock-only --ignore-scripts` inside `node:22.19.0-bookworm-slim`.
+- **PATH.** The broker runs every command with `PATH=/usr/local/bin:/usr/bin:/bin` through a login shell (which sets `PATH` again from `/etc/profile`), so `rea` and `awwo-check-page` are symbolic links in `/usr/local/bin`; their files live, read-only, in `/opt/awwo/tools`.
+- **REA** needs a procps `ps` on its `PATH` even for static JavaScript analysis, hence `procps`. `rea analyze-javascript-application /inputs/app --json > report.json` writes an evidence report whose `normalized_result.graph` holds the modules, their `imports` edges (specifier and resolved path) and Electron wiring, with the limitations of a static reading; progress lines go to stderr. It writes nothing else into the workspace. Features that need the network, a debugger attachment or native analysis engines (Ghidra, Hopper, IDA, JADX, Frida) are not available in the sandbox.
+
+## awwo-check-page
+
+```
+awwo-check-page <page.html> [--out <dir>] [--wait-ms N] [--timeout-ms N] [--viewport 1280x800]
+```
+
+It opens the page from `file://` in headless Chromium with no network: the page and the local files it references load; every `http`, `https` and WebSocket request is aborted and listed in the report (service workers are blocked, all host names are unresolvable and no proxy is used, as a second wall). It waits `--wait-ms` (default 1,500), takes a viewport screenshot, then calls `window.awwoSelfTest()` if the page defines it, for at most `--timeout-ms` (default 15,000). Chromium's profile, caches and temporary files live in a private directory under `/tmp` that is removed afterwards; nothing is written to the workspace except `--out` (default `./check-out`): `report.json` and `screenshot.png`, typically 5–30 KB. The output belongs to the workspace snapshot (2 MiB compressed in all); delete it when it is no longer needed. `awwo-check-page --help` prints the protocol below in short.
+
+**Self-test protocol.** A page may define `window.awwoSelfTest` as an async function that runs the page's own tests and resolves to:
+
+```js
+{
+  tests:   [{ name: string, ok: boolean, detail?: string }],        // at least one, at most 200
+  planted: [{ name: string, rejected: boolean, detail?: string }],  // optional, at most 200
+}
+```
+
+`planted` lists deliberately wrong variants of the code under test (an off-by-one, a missing rule) and whether the page's own tests rejected each one, which shows that the tests can fail. The result crosses over as JSON and its shape is checked: a missing field, a non-boolean `ok` or `rejected`, an empty `tests`, more than 1,000,000 characters of JSON, a throw or a timeout is reported as such and fails the check, never counts as a pass. `detail` may be omitted or `null`; names are cut at 200 characters and details at 2,000. The check cannot tell whether the tests are meaningful: that is what `planted` is for.
+
+**Errors.** Uncaught exceptions, unhandled promise rejections (told apart through Chromium's DevTools protocol) and `console.error` messages are collected, the first 50, each at most 2,000 characters, with the phase (`load` or `selftest`) in which they happened. Console errors logged while the self-test runs are listed but not counted, because a self-test may exercise error paths on purpose and its own verdict covers them. "Failed to load resource" messages for the requests the check itself blocked are not counted either (they are in `blockedRequests`); a missing local file is. A renderer crash counts as an error.
+
+**Blank signal.** The screenshot is downscaled 4x with smoothing; the page is blank when the result has at most 2 distinct colours (4 bits per channel) and a luma standard deviation below 1, that is a flat white, black or other single-colour render. A page showing one short line of text is not blank (9 colours, deviation 2.4).
+
+**Exit codes.** 0: the page loaded, had no counted errors, either has no self-test or every test is `ok` and every planted variant `rejected`, and the render is not blank. 1: the page failed one of those. 2: usage error (bad option, missing file). 3: the check itself could not run, for example Chromium did not start or the report could not be written; the report then has `verdict: "error"`.
+
+**report.json** (`schemaVersion: 1`): `verdict` (`pass`, `fail` or `error`), `exitCode`, `reasons`, `errorCount` (counted errors), `selfTestConsoleErrorCount`, `errors` (`kind`: `uncaught`, `unhandledrejection`, `console` or `crash`; `phase`; `message`) and `errorsDropped`, `blockedRequests` (`url`, `type`) and `blockedDropped`, `load` (`ok`, `error`), `selfTest` (`present`, `ok`, `passed`, `failed`, `plantedTotal`, `plantedRejected`, `items` with the validated `tests` and `planted`, and `error`, `malformed`, `timedOut`, `durationMs` when they apply), `blank`, `pixels` (`distinctColours`, `lumaStdDev`, sample size), `screenshot`, `screenshotError`, `viewport`, `timings` (`launchMs`, `loadMs`, `waitMs`, `screenshotMs`, `selfTestMs`, `totalMs`), `chromium` (`version`, `executable`) and `reportFile`.
+
+**Time.** A sandbox command gets 30 seconds and a command that overruns removes the whole container, so every step is bounded: launch 15 s, load 10 s, screenshot 5 s, closing 5 s, and the self-test 15 s by default (rather than a longer default that could never finish inside a command). A check usually takes 2–5 s. The slowest cases measured under the sandbox's limits: a page that busy-loops while loading fails in 15.5 s, and a self-test that busy-loops fails in 19.5 s (the loop takes the container's one CPU, so the timers run late). Raise `--timeout-ms` only where commands are allowed longer.
+
+## Sandbox limits
+
+Every run gets a non-root container with no network, capabilities, host mounts or Docker socket, a read-only root filesystem, 1 CPU, 1 GiB memory, 128 PIDs, a 128 MiB workspace tmpfs and a 32 MiB temporary tmpfs. Docker mounts each tmpfs `noexec` unless told otherwise, so programs run through their interpreter (`node`, `python3`, `sh`). Inputs live in a separate root-owned mount and are read-only to generated programs. Container environment does not include worker/provider secrets. The host Docker service and the broker account must be restricted to trusted operators; Docker daemon access itself is privileged.
+
+Chromium runs within these limits unchanged. Measured with the broker's exact flags while REA and every fixture page ran: at most 96 tasks (threads count against the PID limit; a WebGL page is the largest, a plain page needs about 84), 249 MiB of memory, 188 KiB and 59 inodes of `/tmp`, nothing in `/dev/shm`. The task count levels off with the CPUs the host shows (84, 91, 100 and 102 with 1, 4, 12 and 24 CPUs visible, measured before the check stopped running two renderers at once). Chromium's own sandbox needs user namespaces or a setuid helper, which the container does not grant, so it runs with `--no-sandbox`: the container is the boundary, and a page runs with exactly the rights of the generated code that wrote it.
 
 The workspace persists across tool calls. At completion the broker produces a verified ZIP snapshot for the server to store with the tenant/session; a later run may restore only that server-authorized snapshot. Restoration rejects traversal, symlinks, special files, duplicates, encryption, excessive entry counts and size expansion. Snapshots contain regular source files, omit dependency/cache directories (`node_modules`, `.git`, `.venv`, `__pycache__`, `.pytest_cache`, `.mypy_cache`), and are limited to 2 MiB compressed, 32 MiB uncompressed and 1,024 entries. Individual published files are limited to 2 MiB. This is explicit bounded workspace continuity, not an unbounded writable host volume.
 
@@ -12,10 +65,13 @@ The worker must call `close()` from its `finally` path. Treat a failed cleanup a
 
 `AWWO_OPENAI_AGENTS_WORKSPACE_MAX_CALLS` defaults to 32 and accepts only 2–64. The server freezes each run's selected limit; existing 16-call runs remain bounded at 16. Every model invocation, including final delivery repair, still requires its own admission and settlement. Exceeding the frozen budget makes no extra provider request or admission, and the existing total run timeout is unchanged.
 
-Run the broker tests with the repository-supported Node runtime:
+## Build and test
 
 ```sh
+docker build --platform linux/amd64 -t awwo-workspace:20261016 deploy/saas/workspace
 node --test apps/openai-agents-worker/workspace-sandbox.test.ts
+AWWO_TEST_WORKSPACE_IMAGE=awwo-workspace:20261016 AWWO_TEST_DOCKER_EXECUTABLE=/usr/bin/docker \
+  node --test apps/openai-agents-worker/workspace-sandbox.test.ts
 ```
 
-The fixed Python filesystem helper has local temporary-directory security tests. Optional real Docker smoke tests require `AWWO_TEST_WORKSPACE_IMAGE` and an absolute `AWWO_TEST_DOCKER_EXECUTABLE`; they run only the supplied trusted image and never modify daemon settings.
+The build ends by running `rea --version`, `awwo-check-page --help` and `chromium-headless-shell --version`, which proves the wiring without writing anything. The first `node --test` runs the broker tests with the repository-supported Node runtime; the fixed Python filesystem helper has local temporary-directory security tests. With `AWWO_TEST_WORKSPACE_IMAGE` and an absolute `AWWO_TEST_DOCKER_EXECUTABLE` (and `AWWO_TEST_DOCKER_CONTEXT` when needed), the optional real Docker smoke tests also run, through the real broker and its limits, against only the supplied trusted image, and they never modify daemon settings. One of them copies `fixtures/` into `/inputs` and, with the 30-second command limit of production, checks that `rea --version` and `rea analyze-javascript-application` work on `fixtures/rea-app`, that `awwo-check-page` gives the expected exit code and report for each page of `fixtures/check-page` (a passing self-test with planted variants rejected, a failing test, a planted variant left unrejected, a malformed result, an error on load, an unhandled rejection, a blank page, blocked network requests, WebGL, a self-test that never settles), exit 2 for a missing page and 3 when the report cannot be written, and that afterwards the workspace holds only the reports and still archives.

@@ -29,7 +29,7 @@ npm run setup --prefix apps/openmaus-worker
 npm run typecheck --prefix apps/openmaus-worker
 npm run check:saas:computer-model
 npm run test:saas:computer-model
-docker build -f deploy/saas/workspace/Dockerfile -t awwo-workspace:release-check .
+docker build -t awwo-workspace:release-check deploy/saas/workspace
 AWWO_OPENMAUS_REAL_TEST=1 \
   AWWO_TEST_DOCKER_EXECUTABLE=/usr/bin/docker \
   AWWO_TEST_DOCKER_CONTEXT=default \

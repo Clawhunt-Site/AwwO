@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: throws while loading</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #fdf6e3; color: #333; }</style>
+</head>
+<body>
+<h1>Level select</h1>
+<p>The level list below never appears: the script throws while the page loads.</p>
+<ol id="levels"></ol>
+<script>
+const levels = undefined;
+// TypeError on purpose: the level data was never loaded.
+for (const level of levels.list) document.getElementById('levels').append(level);
+</script>
+</body>
+</html>

@@ -103,6 +103,30 @@ notices; ffmpeg's LGPL-2.1-or-later, or the GPL when it is built with GPL
 parts). Preserve the installed package's LICENSE, NOTICE and
 ThirdPartyNotices.txt when distributing such an image.
 
+The workspace sandbox image (`deploy/saas/workspace/Dockerfile`) installs
+`rea-agents` `6.5.0` (MIT, Copyright (c) 2026 morluto; source `morluto/rea`)
+and `playwright-core` `1.64.1` (Apache-2.0, Copyright (c) Microsoft
+Corporation; its NOTICE says it contains code derived from Puppeteer, also
+Apache-2.0) with the dependency tree pinned in
+`deploy/saas/workspace/tools/package-lock.json`: 179 packages, among them the
+`playwright-core` `1.58.2` that `rea-agents` pins for itself, and `frida`
+`17.23.2` (LGPL-2.0 WITH WxWindows-exception-3.1), an optional dependency
+installed without running its install script, so without its native binding.
+The other packages declare MIT (136), ISC (14), Apache-2.0 (11), BSD-3-Clause
+(7), BlueOak-1.0.0 (5), BSD-2-Clause (1), a combination of these (`rc`,
+`sha.js`), MIT and Zlib (`pako`) or MIT or WTFPL (`expand-template`); their
+license files ship in the image under
+`/opt/awwo/tools/node_modules`. The image also installs Debian bookworm's
+`chromium-headless-shell` and `chromium-common` `155.0.8059.39-1~deb12u1`
+(Chromium is BSD-3-Clause, Copyright The Chromium Authors, and bundles
+third-party components under their own licenses, all listed in
+`/usr/share/doc/chromium-common/copyright`), `fonts-dejavu-core` (Bitstream
+Vera license), `fonts-wqy-microhei` (Apache-2.0 or GPL-3+ with the font
+exception) and `procps` (GPL-2+ and LGPL-2+). Preserve `/usr/share/doc/*/copyright`
+and the npm packages' LICENSE, NOTICE and ThirdPartyNotices.txt files when
+distributing the image. These tools run inside the sandbox only and do not
+change AwwO's own license.
+
 ## Existing fusion boundary
 
 The first fusion release keeps each upstream runtime isolated. SuperClaw exposes

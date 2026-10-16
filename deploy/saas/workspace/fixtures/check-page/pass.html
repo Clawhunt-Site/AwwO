@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: passing self-test</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #f4f1ea; color: #1d2a24; }
+  h1 { color: #245f4e; }
+  canvas { border: 1px solid #8a9a90; }
+</style>
+</head>
+<body>
+<h1>Score board</h1>
+<p id="total">Total: …</p>
+<canvas id="bar" width="320" height="40"></canvas>
+<script>
+// The rule under test: a game's score is the sum of its rounds, each counted from 0 up to 100 points.
+function score(rounds) {
+  return rounds.reduce((total, points) => total + Math.min(100, Math.max(0, points)), 0);
+}
+const cases = [
+  { name: 'an empty game scores 0', input: [], expected: 0 },
+  { name: 'rounds add up', input: [10, 20, 30], expected: 60 },
+  { name: 'a round counts at most 100', input: [150, 5], expected: 105 },
+  { name: 'a negative round counts 0', input: [-40, 25], expected: 25 },
+];
+const runCases = implementation => cases.map(({ name, input, expected }) => {
+  const actual = implementation(input);
+  return { name, ok: actual === expected, detail: `expected ${expected}, got ${actual}` };
+});
+// Deliberately wrong variants: the cases above must catch each of them.
+const planted = {
+  'no cap per round': rounds => rounds.reduce((total, points) => total + Math.max(0, points), 0),
+  'negative rounds subtract': rounds => rounds.reduce((total, points) => total + Math.min(100, points), 0),
+};
+window.awwoSelfTest = async () => ({
+  tests: runCases(score),
+  planted: Object.entries(planted).map(([name, variant]) => {
+    const caught = runCases(variant).filter(result => !result.ok).map(result => result.name);
+    return { name, rejected: caught.length > 0, detail: caught.length ? `caught by: ${caught.join('; ')}` : 'no case failed' };
+  }),
+});
+const total = score([40, 120, -5, 35]);
+document.getElementById('total').textContent = `Total: ${total}`;
+const graphics = document.getElementById('bar').getContext('2d');
+graphics.fillStyle = '#3d7d64';
+graphics.fillRect(0, 0, 320 * total / 300, 40);
+</script>
+</body>
+</html>

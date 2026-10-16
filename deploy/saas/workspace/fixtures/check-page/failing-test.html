@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a failing self-test</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #fff; color: #222; }</style>
+</head>
+<body>
+<h1>Leap years</h1>
+<ul id="years"></ul>
+<script>
+// Bug on purpose: the century rule (1900 is not a leap year, 2000 is) is missing.
+const isLeapYear = year => year % 4 === 0;
+const cases = [
+  { name: '2024 is a leap year', year: 2024, expected: true },
+  { name: '2023 is not a leap year', year: 2023, expected: false },
+  { name: '1900 is not a leap year', year: 1900, expected: false },
+  { name: '2000 is a leap year', year: 2000, expected: true },
+];
+const runCases = implementation => cases.map(({ name, year, expected }) => ({ name, ok: implementation(year) === expected, detail: `got ${implementation(year)}` }));
+const planted = { 'never a leap year': () => false, 'every odd year': year => year % 2 === 1 };
+window.awwoSelfTest = async () => ({
+  tests: runCases(isLeapYear),
+  planted: Object.entries(planted).map(([name, variant]) => ({ name, rejected: runCases(variant).some(result => !result.ok) })),
+});
+for (const year of [1900, 2000, 2024]) {
+  const item = document.createElement('li');
+  item.textContent = `${year}: ${isLeapYear(year) ? 'leap' : 'common'}`;
+  document.getElementById('years').append(item);
+}
+</script>
+</body>
+</html>

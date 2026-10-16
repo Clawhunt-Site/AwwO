@@ -1,0 +1,13 @@
+{
+  "name": "awwo-workspace-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tools baked into the AwwO workspace sandbox image (see ../README.md).",
+  "engines": {
+    "node": "^22.19.0 || ^24.11.0 || >=26.0.0"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.1",
+    "rea-agents": "6.5.0"
+  }
+}

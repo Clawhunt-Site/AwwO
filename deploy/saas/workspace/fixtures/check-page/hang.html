@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a self-test that never settles</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #f3f0fa; color: #2a2238; }</style>
+</head>
+<body>
+<h1>Waiting room</h1>
+<p>Its self-test waits for a server that does not exist, so the check stops it at --timeout-ms.</p>
+<script>
+window.awwoSelfTest = () => new Promise(() => {});
+</script>
+</body>
+</html>

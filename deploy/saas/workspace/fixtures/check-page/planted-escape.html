@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: tests too weak to reject a planted variant</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #eef3f8; color: #1b2733; }</style>
+</head>
+<body>
+<h1>Clamp</h1>
+<p id="out"></p>
+<script>
+const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+// Every case stays inside the range, so a variant that never clamps passes them all.
+const cases = [
+  { name: 'a value inside the range is kept', args: [5, 0, 10], expected: 5 },
+  { name: 'the lower bound itself is kept', args: [0, 0, 10], expected: 0 },
+];
+const runCases = implementation => cases.map(({ name, args, expected }) => ({ name, ok: implementation(...args) === expected }));
+const planted = { 'never clamps': value => value, 'always returns the lower bound': (value, low) => low };
+window.awwoSelfTest = async () => ({
+  tests: runCases(clamp),
+  planted: Object.entries(planted).map(([name, variant]) => ({ name, rejected: runCases(variant).some(result => !result.ok) })),
+});
+document.getElementById('out').textContent = `clamp(42, 0, 10) = ${clamp(42, 0, 10)}`;
+</script>
+</body>
+</html>

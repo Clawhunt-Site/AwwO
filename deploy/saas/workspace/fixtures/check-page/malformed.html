@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a malformed self-test result</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #fff7f0; color: #3a2a1a; }</style>
+</head>
+<body>
+<h1>Inventory</h1>
+<p>Its self-test reports "ok" as text, which the check refuses to trust.</p>
+<script>
+window.awwoSelfTest = async () => ({ tests: [{ name: 'stock is never negative', ok: 'yes' }] });
+</script>
+</body>
+</html>

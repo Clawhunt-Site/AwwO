@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: renders nothing</title>
+</head>
+<body>
+<script>
+// Waits for a start signal that never comes, so nothing is ever drawn; there is no error to report.
+window.addEventListener('awwo-start-that-never-fires', () => { document.body.textContent = 'Started'; });
+</script>
+</body>
+</html>

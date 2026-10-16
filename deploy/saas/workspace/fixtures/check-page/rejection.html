@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: an unhandled rejection</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #f0f5ee; color: #223322; }</style>
+</head>
+<body>
+<h1>Save game</h1>
+<p>Saving fails after the page has loaded and nothing handles the failure.</p>
+<script>
+async function save() { throw new Error('fixture: the save slot is missing'); }
+setTimeout(() => { save(); }, 200);
+</script>
+</body>
+</html>
