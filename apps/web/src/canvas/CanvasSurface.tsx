@@ -678,6 +678,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   // ---- viewport / selection / focus ----------------------------------------------------------
   const [view, setView] = useState<ViewportState>(() => doc.view ?? { x: 0, y: 0, scale: 1 });
+  // The camera the canvas opened on, before any fit or the operator moved it.
+  const startupCamera = useRef(view);
   const viewRef = useRef(view);
   viewRef.current = view;
   // Opening and closing a node glide the camera, so the card is seen to grow out of where it sat and to
@@ -731,10 +733,23 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const unsavedCamera = useRef<ViewportState | null>(doc.view ? null : view);
   // The operator's camera waiting out the save debounce (see the viewport persistence below).
   const pendingCameraSave = useRef<{ timer: ReturnType<typeof setTimeout>; camera: ViewportState; save: () => void } | null>(null);
-  const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: StageBox, automatic = false) => {
-    // The overview fits the stage right of a sidebar that floats over its left edge.
+  /** The overview of these nodes on this stage, fitted in the part right of a sidebar that floats over its left edge. */
+  const overviewCamera = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: StageBox) => {
     const cover = box.cover ?? 0;
-    const next = shiftView(fitNodeOverview(fitNodes, { w: box.w - cover, h: box.h }, cardFramesRef.current, docRef.current.displays), cover);
+    return shiftView(fitNodeOverview(fitNodes, { w: box.w - cover, h: box.h }, cardFramesRef.current, docRef.current.displays), cover);
+  }, []);
+  // The canvas's first fit, put off while a node opened before the stage's first size arrived is open (the opening
+  // fit below): closing that node lands on the overview instead of the camera the canvas started with.
+  const overviewOnReturn = useRef(false);
+  // The saved view owns the initial position only while it still shows the whole graph on THIS
+  // stage; a view persisted on a wider screen (or none at all) fits once the first real size is
+  // known. Explicit Fit and newly generated plans still fit on request, and take the first fit's place.
+  const savedView = useRef(doc.view);
+  const fitted = useRef(false);
+  const autoFit = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: StageBox, automatic = false) => {
+    const next = overviewCamera(fitNodes, box);
+    overviewOnReturn.current = false;
+    if (!automatic) fitted.current = true;
     lastAutoView.current = next;
     // The app refits only a camera it may take over (a requested fit, say): the operator's camera still waiting to be
     // saved is saved now, before the refit replaces it.
@@ -752,7 +767,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
     unsavedCamera.current = automatic ? next : null;
     moveCamera(next);
-  }, [moveCamera, patchDoc]);
+  }, [moveCamera, patchDoc, overviewCamera]);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const sizeRef = useRef(size);
   sizeRef.current = size;
@@ -832,11 +847,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     autoFit(nodes, box);
   }, [nodes, viewportSize, autoFit]);
 
-  // The saved view owns the initial position only while it still shows the whole graph on THIS
-  // stage; a view persisted on a wider screen (or none at all) fits once the first real size is
-  // known. Explicit Fit and newly generated plans still fit on request.
-  const savedView = useRef(doc.view);
-  const fitted = useRef(false);
   useEffect(() => {
     if (fitted.current || size.w === 0) return;
     const saved = savedView.current;
@@ -844,15 +854,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // canvas waits for its first node.
     if (nodes.length === 0) { if (saved) fitted.current = true; return; }
     fitted.current = true;
-    // A node opened before the stage's first size arrived owns the camera: no overview is fitted over it (the
-    // camera it returns to stays the one it opened from).
-    if (focusedRef.current !== null) return;
-    const box: StageBox = viewportSize() || size;
+    // The board as it is with Configure closed: a node open (and configured) now returns to it.
+    const box: StageBox = viewportSize(false) || size;
     // A kept saved view already shows the whole graph, so it counts as fitted: a later stage change
     // may refit it, exactly as it would the overview computed below. It shows it only in the part a
     // sidebar floating over the stage leaves (simple mode opens the assistant with the canvas).
     const cover = box.cover ?? 0;
-    if (saved && boundsWithinViewport(boundsOfNodes(presentationNodes(nodes, null)), shiftView(saved, -cover), { w: box.w - cover, h: box.h })) {
+    const keepSaved = Boolean(saved && boundsWithinViewport(boundsOfNodes(presentationNodes(nodes, null)), shiftView(saved, -cover), { w: box.w - cover, h: box.h }));
+    // A node opened before the stage's first size arrived owns the camera: no overview is fitted over it. Closing it
+    // lands on the overview of the stage it closes on (restoreFocusCamera), not on the camera the canvas started with,
+    // which may not show the graph at all (none saved: the app's default camera); a saved view that shows it stays,
+    // and so does a camera the operator took before opening the node (a pan, a zoom, a waypoint).
+    if (focusedRef.current !== null) {
+      overviewOnReturn.current = !keepSaved && focusReturn.current !== null && isFittedCamera(focusReturn.current, startupCamera.current);
+      return;
+    }
+    if (keepSaved) {
       lastAutoView.current = viewRef.current;
       return;
     }
@@ -1050,12 +1067,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const restoreFocusCamera = useCallback(() => {
     const back = focusReturn.current;
     focusReturn.current = null;
+    const overview = overviewOnReturn.current;
+    overviewOnReturn.current = false;
     // Only an open node has a camera to return from; with none open, a leftover one is just forgotten.
     if (!back || !focusedRef.current) return;
+    // The canvas's first fit, put off while the node was open: the overview of the stage now, the app's camera (a later
+    // stage change may refit it, and it is not saved as the operator's).
+    const box = overview && docRef.current.nodes.length ? viewportSize(false) : null;
+    const target = box ? overviewCamera(docRef.current.nodes, box) : back;
+    if (box) { lastAutoView.current = target; unsavedCamera.current = target; }
     const node = docRef.current.nodes.find(candidate => candidate.id === focusedRef.current);
-    if (node) glideTo(back, { x: node.x, y: node.y });
-    else moveCamera(back);
-  }, [glideTo, moveCamera]);
+    if (node) glideTo(target, { x: node.x, y: node.y });
+    else moveCamera(target);
+  }, [glideTo, moveCamera, viewportSize, overviewCamera]);
 
   const unfocus = useCallback(() => {
     if (inspectorCloseLocked.current) return;

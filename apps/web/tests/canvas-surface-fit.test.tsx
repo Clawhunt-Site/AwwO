@@ -915,6 +915,101 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     expect(after.right).toBeLessThanOrEqual(1232 - 28 + 1e-6);
   });
 
+  it('lands on the overview when a node opened before the stage’s first size arrived closes, unless a saved camera shows the graph', async () => {
+    // Its first fit was put off while the node was open, and closing it glided back to the camera the canvas started
+    // with: with none saved the app's default, where the card at x 3000 stayed off the stage (pre-existing, 2026-10-16).
+    const savedView = () => (JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).view ?? null;
+    for (const saved of [null, { x: -2800, y: -1800, scale: 1 }]) {
+      const deliveries: Array<() => void> = [];
+      vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+      layout = { ...layout, viewportLate: true };
+      canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 3000, y: 2000 }), view: saved }));
+      const view = render(<CanvasSurface />);
+      await openNode();
+      layout.viewportLate = false;
+      act(() => { deliveries.forEach(deliver => deliver()); });
+      await settle();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).not.toBe('focus'));
+      await glideDone();
+      await settle();
+      const card = measure();
+      const [x, y, scale] = transformOf(document.querySelector('.canvas-world') as HTMLElement);
+      if (saved) {
+        // A saved camera that shows the graph is the operator's: closing returns to it.
+        expect([x, y, scale]).toEqual([saved.x, saved.y, saved.scale]);
+      } else {
+        expect(card.left, 'none saved').toBeGreaterThanOrEqual(0);
+        expect(card.right, 'none saved').toBeLessThanOrEqual(stage.w);
+        // The overview is the app's camera, a fit to this screen: not saved as the operator's (past the save's
+        // debounce), and refitted when the stage changes shape.
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 500)); });
+        expect(savedView()).toBeNull();
+        layout.w = 600;
+        act(() => { deliveries.forEach(deliver => deliver()); });
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
+        expect(measure().right, 'refitted').toBeLessThanOrEqual(600);
+      }
+      view.unmount();
+    }
+  });
+
+  it('returns to the operator’s camera once 查看全部节点 has taken the first fit’s place, whenever the first size arrives', async () => {
+    // 查看全部节点 fits the overview itself: a camera the operator takes after it is theirs to return to, also where the
+    // stage's first size only arrives after that (the first fit then re-armed the overview on return, found in review).
+    for (const firstSize of ['before', 'after'] as const) {
+      const deliveries: Array<() => void> = [];
+      vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+      layout = { ...layout, viewportLate: true };
+      canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 3000, y: 2000 }), view: null }));
+      const view = render(<CanvasSurface />);
+      const deliver = async () => {
+        layout.viewportLate = false;
+        act(() => { deliveries.forEach(callback => callback()); });
+        await settle();
+      };
+      await openNode();
+      if (firstSize === 'before') await deliver();
+      fireEvent.click(screen.getByRole('button', { name: '查看全部节点', exact: true }));
+      await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).not.toBe('focus'));
+      await glideDone();
+      fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
+      await settle();
+      const world = document.querySelector('.canvas-world') as HTMLElement;
+      const mine = transformOf(world);
+      await openNode();
+      if (firstSize === 'after') await deliver();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).not.toBe('focus'));
+      await glideDone();
+      expect(transformOf(world), `first size ${firstSize}`).toEqual(mine);
+      view.unmount();
+    }
+  });
+
+  it('returns to a camera the operator took before opening the node, the first size arriving after', async () => {
+    // The put-off first fit stands only for the camera the canvas started with: a zoom before opening is the
+    // operator's, and closing returns to it (found in review).
+    const deliveries: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+    layout = { ...layout, viewportLate: true };
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 300, y: 200 }), view: null }));
+    render(<CanvasSurface />);
+    fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
+    await settle();
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    const mine = transformOf(world);
+    expect(mine).not.toEqual([0, 0, 1]);
+    await openNode();
+    layout.viewportLate = false;
+    act(() => { deliveries.forEach(deliver => deliver()); });
+    await settle();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).not.toBe('focus'));
+    await glideDone();
+    expect(transformOf(world)).toEqual(mine);
+  });
+
   it('steps the assistant aside when the stage shrinks under an open node until it leaves no readable room', async () => {
     // Opened beside the sidebar on a wide stage, the node kept the whole stage under the sidebar once the window
     // narrowed (found in review). Bringing the assistant back over it then is the reader's choice, kept.
@@ -941,6 +1036,29 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     await waitFor(() => expect(shown()).toBe(true));
     await settle();
     expect(shown(), 'the reader brought it back').toBe(true);
+  });
+
+  it('judges the camera a node configured before the first size returns to on the board as it is once Configure closes', async () => {
+    // At 900 px and below Configure lifts the board over the sidebar, so the first fit judged the saved camera (the card
+    // at x 60, under the 340 px sidebar) on the whole stage and kept it: closing Configure and then the node returned the
+    // card under the sidebar (pre-existing, found in review). It returns to the overview right of the sidebar.
+    const deliveries: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+    layout = { ...layout, viewportLate: true };
+    await renderHosted(880, 340, true);
+    await configure();
+    layout.viewportLate = false;
+    act(() => { deliveries.forEach(deliver => deliver()); });
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: '关闭配置' }));
+    await waitFor(() => expect(document.querySelector('.canvas-root > .canvas-inspector')).toBeNull());
+    await settle();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).not.toBe('focus'));
+    await glideDone();
+    const card = measure();
+    expect(card.left).toBeGreaterThanOrEqual(340 - 1e-6);
+    expect(card.right).toBeLessThanOrEqual(880 + 1e-6);
   });
 
   it('steps the assistant aside for a node opened on a stage it leaves no readable room on, back once the node closes', async () => {
