@@ -440,7 +440,8 @@ export function workspaceDockerArgs(name: string, image: string, egress?: { sock
   return ['run', '--detach', '--pull=never', '--name', name, '--label', 'awwo.workspace-sandbox=true',
     '--network=none', '--read-only', '--user=1000:1000', '--cap-drop=ALL', '--security-opt=no-new-privileges',
     '--memory=1g', '--memory-swap=1g', '--cpus=1', '--pids-limit=128', '--ulimit=nofile=1024:1024',
-    '--tmpfs', '/workspace:rw,nosuid,nodev,size=134217728,nr_inodes=8192,uid=1000,gid=1000,mode=0700',
+    // exec: tools a project installs (a bundler's native binary) run from /workspace; /inputs and /tmp stay noexec.
+    '--tmpfs', '/workspace:rw,nosuid,nodev,size=134217728,nr_inodes=8192,uid=1000,gid=1000,mode=0700,exec',
     // 8 MiB of inputs plus a page for each file's last partial one: tmpfs counts whole 4 KiB pages.
     '--tmpfs', '/inputs:rw,nosuid,nodev,noexec,size=9437184,nr_inodes=2048,uid=0,gid=0,mode=0755',
     '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=33554432,nr_inodes=2048,uid=1000,gid=1000,mode=0700',

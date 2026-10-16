@@ -13,8 +13,8 @@ const CHROMIUM = '/usr/lib/chromium/chromium-headless-shell';
 const ORIGIN = 'https://awwo-check.invalid';
 const EXIT = { pass: 0, fail: 1, usage: 2, error: 3 };
 const MAX = { errors: 50, text: 2000, name: 200, items: 200, blocked: 50, selfTestJson: 1_000_000, screenshotBytes: 400_000 };
-// A sandbox command gets 30 s and overrunning it removes the whole container. So each step has its own bound and
-// also fits the --budget-ms counted from process start, less FINISH_MS kept back for closing and writing the report.
+// A sandbox command gets 30 s (120 s when the workspace has the web) and is stopped when it overruns. So each step has its
+// own bound and also fits the --budget-ms counted from process start, less FINISH_MS kept back for closing and writing the report.
 const STEP_MS = { launch: 15_000, load: 10_000, probe: 5_000, screenshot: 5_000 };
 const FINISH_MS = 3000;
 const DEFAULTS = { out: 'check-out', waitMs: 1500, timeoutMs: 15_000, budgetMs: 25_000, width: 1280, height: 800 };
