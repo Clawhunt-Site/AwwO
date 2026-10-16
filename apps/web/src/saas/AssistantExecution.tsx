@@ -102,6 +102,7 @@ export function executionHost(execution: ManagedExecution): AssistantExecutionHo
     start: execution.start,
     stop: execution.stopTask,
     finished: execution.finished,
+    running: taskId => beingRead(execution, taskId) && execution.run !== null && !executionTerminal(execution.run.status),
     renderTask: (taskId, actions) => <ExecutionTaskCard execution={execution} taskId={taskId} actions={actions} />,
     outcome: taskId => taskOutcome(execution, taskId),
     renderEarlier: (mentioned, open) => <ExecutionEarlier execution={execution} mentioned={mentioned} open={open} />,

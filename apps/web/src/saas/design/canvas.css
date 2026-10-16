@@ -319,6 +319,15 @@ html:root .saas-canvas-shell {
   .awwo-empty p, .awwo-empty-note { color: var(--saas-muted); }
   .awwo-empty-kicker { color: var(--saas-muted); font: 500 var(--saas-text-xs)/1.5 var(--saas-font); letter-spacing: 0; }
   .awwo-empty-kicker > span { background: var(--saas-bio); box-shadow: 0 0 8px var(--saas-bio); }
+  .awwo-empty-diagram-caption { color: var(--saas-subtle); font: 600 var(--saas-text-xs)/1.4 var(--saas-font); letter-spacing: .5px; }
+  /* What the canvas assistant is doing (StageActivity.tsx): in the empty canvas, or as a pill over one with nodes. */
+  .awwo-stage-activity-headline { color: var(--saas-text); font-family: var(--saas-font); }
+  .awwo-stage-activity-headline svg { color: var(--saas-signal); }
+  .awwo-stage-activity-headline small, .awwo-stage-activity-body { color: var(--saas-muted); font-family: var(--saas-font); }
+  .awwo-stage-activity-switch { border-color: var(--saas-border); background: var(--saas-raised); color: var(--saas-link); font: 600 var(--saas-text-sm)/1.4 var(--saas-font);
+    &:hover:not(:disabled) { border-color: var(--saas-link); color: var(--saas-link-hover); } }
+  .awwo-stage-activity.is-compact { border-color: var(--saas-hairline); background: var(--saas-raised); box-shadow: var(--saas-shadow-md); }
+  .awwo-stage-activity .awwo-assistant-steps { margin-top: 4px; padding-left: 0; }
 
   /* ── Agent cards ─────────────────────────────────────────────────────────────────────────── */
   /* The resting shadow, at the older dark theme's specificity so its own does not win; placed first, so

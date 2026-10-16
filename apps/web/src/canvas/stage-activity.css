@@ -1,0 +1,20 @@
+/* What the canvas assistant is doing, on the stage (StageActivity.tsx): a card where an empty canvas's introduction
+ * was, or one line over a canvas with nodes. Only its button takes the pointer, so the canvas still pans. */
+.awwo-stage-activity { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--awwo-ink, #232c29); text-align: center; pointer-events: none; }
+.awwo-stage-activity button { pointer-events: auto; }
+.awwo-stage-activity-headline { display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 8px; margin: 0;
+  color: var(--awwo-ink, #232c29); font-size: 17px; font-weight: 600; line-height: 1.5; }
+.awwo-stage-activity-headline svg { flex: 0 0 auto; color: var(--awwo-accent, #286454); animation: awwo-assistant-spin 1s linear infinite; }
+.awwo-stage-activity-headline small { color: var(--awwo-muted, #68736d); font-size: 12px; font-weight: 500; }
+.awwo-stage-activity-body { max-width: 460px; margin: 0; color: var(--awwo-muted, #68736d); font-size: 13px; line-height: 1.7; }
+.awwo-stage-activity .awwo-assistant-steps { width: min(380px, 100%); margin-top: 4px; padding-left: 0; text-align: left; }
+.awwo-stage-activity-switch { margin-top: 4px; padding: 7px 14px; border: 1px solid var(--awwo-border, #dce4de); border-radius: 999px; background: var(--awwo-surface, #fffefa);
+  color: var(--awwo-accent, #286454); font-size: 13px; font-weight: 600; cursor: pointer; }
+.awwo-stage-activity-switch:hover:not(:disabled) { border-color: var(--awwo-accent, #286454); }
+.awwo-stage-activity-switch:disabled { opacity: .55; cursor: default; }
+/* Over a canvas with nodes: a pill at the stage's top right, clear of the notes (top left), the selection's actions
+ * (top centre) and the view tools (bottom left). */
+.awwo-stage-activity.is-compact { position: absolute; top: 12px; right: 16px; z-index: 24; width: max-content; max-width: min(420px, calc(100% - 32px));
+  padding: 7px 14px; border: 1px solid var(--awwo-border, #dce4de); border-radius: 16px; background: var(--awwo-surface, #fffefa); box-shadow: 0 6px 22px #0000000f; }
+.awwo-stage-activity.is-compact .awwo-stage-activity-headline { justify-content: flex-start; font-size: 13px; text-align: left; }
+@media (prefers-reduced-motion: reduce) { .awwo-stage-activity-headline svg { animation: none; } }

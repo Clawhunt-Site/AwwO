@@ -108,6 +108,19 @@ function stepOf(stage: PlanProgress['stage'] | undefined): number {
   return 0; // not yet reported, queued, or starting over after a malformed plan
 }
 
+/** The four steps as a bar, the one under way marked: in the composer, whose status names it, and on the stage
+ *  (StageActivity.tsx), which gives it its own `label`. */
+export function PlanSteps({ stage, label }: { stage: PlanProgress['stage'] | undefined; label?: string }) {
+  const { t } = useCanvasI18n();
+  const step = stepOf(stage);
+  return <div className="awwo-assistant-steps" role="progressbar" {...(label ? { 'aria-label': label } : {})} aria-valuemin={0} aria-valuemax={STEPS.length} aria-valuenow={step}
+    aria-valuetext={t('assistant.progressStep', { step: step + 1, total: STEPS.length, name: t(STEPS[step]) })}>
+    {STEPS.map((label, index) => <span key={label} className={`awwo-assistant-step ${index < step ? 'is-done' : index === step ? 'is-active' : ''}`}>
+      <i aria-hidden="true" /><span>{t(label)}</span>
+    </span>)}
+  </div>;
+}
+
 // A stage that has lasted this long gets a line saying what the wait usually means, so the
 // status never reads the same for a minute. Each is a fact about the stage, not a forecast.
 const HINT_AFTER: Partial<Record<PlanProgress['stage'], { seconds: number; key: CanvasTextKey }>> = {
@@ -259,7 +272,6 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       </p>
     </div>;
   } else if (busy) {
-    const step = stepOf(progress?.stage);
     // A media node is named by what it makes (图像生成, 视频生成, 3D 模型生成), like the add menu.
     const mediaTitles: Record<string, string> = { image: t('node.addImage'), video: t('node.addVideo'), model3d: t('node.addModel3d') };
     const titleOf = (id: string | undefined) => id ? mediaTitles[id] ?? getAgentTemplates(locale).find(item => item.id === id)?.title : undefined;
@@ -287,12 +299,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
         <span className="awwo-assistant-status-facts">{facts.join(' · ')}</span>
         {hint ? <span className="awwo-assistant-status-hint">{hint}</span> : null}
       </p>
-      <div className="awwo-assistant-steps" role="progressbar" aria-valuemin={0} aria-valuemax={STEPS.length} aria-valuenow={step}
-        aria-valuetext={t('assistant.progressStep', { step: step + 1, total: STEPS.length, name: t(STEPS[step]) })}>
-        {STEPS.map((label, index) => <span key={label} className={`awwo-assistant-step ${index < step ? 'is-done' : index === step ? 'is-active' : ''}`}>
-          <i aria-hidden="true" /><span>{t(label)}</span>
-        </span>)}
-      </div>
+      <PlanSteps stage={progress?.stage} />
     </div>;
   }
 

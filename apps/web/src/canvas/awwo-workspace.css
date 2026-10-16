@@ -97,6 +97,9 @@
 .awwo-workspace .canvas-root { --page: #f6f7f4; --grid: #d5ded4; --text: #26362c; --muted: #68766c; --faint: #859088; --line: #dfe5dc; --soft: #f3f6f1; --strong: #245f4e; --strong-text: white; --blue: #3d7265; --teal: #3d7d64; --shadow: rgba(35,54,40,.08); --fs-body: 13px; --fs-title: 15px; --fs-meta: 12px; --fs-micro: 11px; }
 .awwo-empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-52%); width: min(720px, 92%); text-align: center; pointer-events: none; }
 .awwo-empty button { pointer-events: auto; }
+/* An empty canvas's introduction or the assistant's activity card in its place (not the welcome) is centred on the
+   part of the stage an assistant panel floating over it leaves (--awwo-stage-cover, AgentWorkspace). */
+.awwo-empty:not(.has-assistant) { margin-left: calc(var(--awwo-stage-cover, 0px) / 2); width: min(720px, calc(92% - var(--awwo-stage-cover, 0px))); }
 .awwo-empty.has-assistant { inset: 0; transform: none; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: safe center; pointer-events: auto; overflow-y: auto; padding: 30px 24px; background: var(--awwo-surface); }
 .awwo-empty.has-assistant > .awwo-canvas-assistant { flex: 0 0 auto; height: auto; overflow: visible; padding: 16px 0 24px; }
 .awwo-empty.has-assistant .awwo-empty-actions { margin-top: 10px; padding-top: 20px; border-top: 1px solid var(--awwo-border); width: min(640px,100%); }
@@ -107,8 +110,9 @@
 .awwo-empty-kicker > span { width: 5px; height: 5px; border-radius: 50%; background: #719d7e; }
 .awwo-empty h2 { color: #34483b; font-size: clamp(24px, 2.7vw, 35px); font-weight: 550; line-height: 1.35; letter-spacing: -1.4px; margin: 0 0 14px; }
 .awwo-empty p { color: #849186; font-size: 12px; line-height: 1.9; margin: 0; }
-.awwo-empty-diagram { display: flex; align-items: center; justify-content: center; padding: 37px 0 32px; }
-.awwo-example-node { position: relative; text-align: left; padding: 16px 18px; width: 142px; border: 1px solid #dfe6da; border-radius: 11px; background: #fdfefb; box-shadow: 0 5px 17px #2f442907; }
+.awwo-empty-diagram { position: relative; display: flex; align-items: center; justify-content: center; padding: 37px 0 32px; }
+.awwo-empty-diagram-caption { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); color: #8e9b8c; font-size: 10px; font-weight: 600; letter-spacing: 1px; }
+.awwo-example-node { position: relative; text-align: left; padding: 16px 18px; width: 142px; border: 1px dashed #cfd9ca; border-radius: 11px; background: #fdfefb; box-shadow: 0 5px 17px #2f442907; }
 .awwo-example-node > span { display: flex; color: #7a937a; margin-bottom: 12px; }.awwo-example-node strong { display: block; font-size: 12px; font-weight: 600; color: #4d6151; }.awwo-example-node small { display: block; font-size: 9px; margin-top: 5px; color: #8e9b8c; }
 .awwo-example-node.is-featured { border-color: #a6c3a6; background: #f8fbf5; box-shadow: 0 7px 23px #345c3410; }
 .awwo-example-line { display: flex; align-items: center; width: 49px; color: #a8bba4; }.awwo-example-line > span { flex: 1; border-top: 1px dashed #b6c6b0; }.awwo-example-line svg { margin-left: -1px; }
@@ -159,6 +163,7 @@
 :root[data-theme='dark'] .awwo-example-node.is-featured { background: #2a3b2f; border-color: #577961; }
 :root[data-theme='dark'] .awwo-example-node strong { color: #dce8de; }
 :root[data-theme='dark'] .awwo-example-node small { color: #a4b4a6; }
+:root[data-theme='dark'] .awwo-empty-diagram-caption { color: #a4b4a6; }
 :root[data-theme='dark'] .awwo-primary, :root[data-theme='dark'] .awwo-run-slot .canvas-run-btn { color: #152c23; }
 :root[data-theme='dark'] .awwo-primary:hover { background: #9bd6c2; }
 :root[data-theme='dark'] .awwo-template-icon, :root[data-theme='dark'] .awwo-empty-kicker { color: #95bda2; }

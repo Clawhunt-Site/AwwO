@@ -33,6 +33,7 @@ import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePoint
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
+import { StageActivity, showsStageLine, type StageActivityState } from './StageActivity';
 import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, runRequestKind, type NextStep, type NextSteps } from './nextSteps';
 import { reviewVerdict, reworkRequirements } from './reviewVerdict';
 import { runErrorText } from '../saas/canvasErrors';
@@ -3604,6 +3605,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     refocus('.awwo-assistant-toggle');
   };
   const panelShown = Boolean(assistantPanel) && !assistantStowed;
+  // What the stage says the assistant is doing (StageActivity.tsx): a message being handled, a plan being made, or the
+  // latest direct task under way (read only while the conversation is on screen); and on an empty canvas whose
+  // conversation has tasks, that a task leaves the canvas as it is.
+  const latestTask = lastReply?.route === 'execute' ? lastReply.taskId : undefined;
+  const stageActivity: StageActivityState | undefined = readOnly ? undefined
+    : assistantPending ? { kind: 'pending', phase: assistantPending.phase }
+      : planningBusy ? { kind: 'planning', progress: planningProgress }
+        : latestTask && panelShown && assistantExecution?.running?.(latestTask) ? { kind: 'task' }
+          : !nodes.length && mentionedTasks.size > 0 ? { kind: 'empty' } : undefined;
+  // Offered on the stage only where nothing is under way: handing a running task over stops it, which the stage
+  // would not say (the conversation's own button is beside the task). A task no longer read may still run.
+  const stageSwitch = switchRoute?.to === 'plan' && stageActivity?.kind === 'empty' && (!latestTask || assistantExecution?.finished(latestTask))
+    ? switchRoute.onSwitch : undefined;
   // The stage shrinking under an open node until the floating assistant leaves it no readable room steps the assistant
   // aside, as opening the node there does; bringing it back over the node is the reader's (no size changes then).
   const stageSeen = useRef(size);
@@ -3814,6 +3828,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       assistant={assistantPanel} assistantStowed={assistantStowed} stageCover={stageCover}
       // One composer at a time: on an empty canvas whose conversation is in the side panel, the welcome steps aside.
       welcome={readOnly || assistantPanel ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} unified={unified} />}
+      emptyStage={stageActivity && !nodes.length ? <StageActivity state={stageActivity} {...(stageSwitch ? { onSwitchToPlan: stageSwitch } : {})} /> : undefined}
       // The toggle reports the panel as it is drawn; tasks need no canvas, so it is offered on an empty one with them.
       assistantOpen={panelShown} assistantAvailable={viewerTasks || mentionedTasks.size > 0} assistantHint={assistantHint}
       onToggleAssistant={readOnly && !assistantExecution ? undefined : () => { if (panelShown) closeAssistant(); else setAssistantOpen(true); }}
@@ -3957,6 +3972,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       {running && collaborationJournal?.collaboration && <CollaborationStatus nodes={nodes} collaboration={collaborationJournal.collaboration} />}
 
       {initializing && <div className="awwo-handoff-note" role="status">{locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…'}</div>}
+      {/* Over a canvas with nodes, a plan being made or a direct task under way is said where the canvas is. */}
+      {stageActivity && showsStageLine(stageActivity, { nodes: nodes.length, results: showingResults, note: initializing || Boolean(handoffNote) })
+        && <StageActivity compact state={stageActivity} announce={!panelShown} />}
       {!initializing && handoffNote && <div className="awwo-handoff-note" role="alert"><span>{handoffNote}</span><button type="button" aria-label={locale === 'zh' ? '关闭提示' : 'Dismiss notice'} onClick={() => setHandoffNote('')}>×</button></div>}
       {/* Same guard as the minimap: the view tools never paint over the opaque welcome overlay of a
           fresh canvas. An empty canvas that still has something to undo or redo keeps them, or a

@@ -50,6 +50,8 @@ export interface AgentWorkspaceProps {
   onModelDragOver?: DragEventHandler<HTMLDivElement>;
   onModelDrop?: DragEventHandler<HTMLDivElement>;
   welcome?: ReactNode;
+  /** On an empty canvas without the welcome: what the assistant is doing (StageActivity), in place of the introduction. */
+  emptyStage?: ReactNode;
   assistantOpen?: boolean;
   /** The assistant's panel stays mounted (a reply being written, a file uploading) but is not drawn: it steps aside for
    *  an open node on a stage it leaves no readable room on. */
@@ -76,7 +78,7 @@ export interface AgentWorkspaceProps {
   children: ReactNode;
 }
 
-export function AgentWorkspace({ simple = false, workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, canvasTools, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, assistantOpen, assistantStowed = false, stageCover = 0, assistantAvailable = false, assistantHint = false, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, view = 'canvas', onViewChange, results, children }: AgentWorkspaceProps) {
+export function AgentWorkspace({ simple = false, workspaceName, workspaceCaption, storageMode = 'local', nodes, selectedIds, runs, running, readOnly = false, onFocusNode, onAddAgent, loadWorkspaceAgents, modelCatalogue, agentLibraryRequest, onAddWorkspaceAgent, onAddMarketAgent, onCreateTemplate, onSearch, onOpenSettings, toolbar, accountControl, headerTitle, headerActions, canvasTools, assistant, modelShelf, personaControls, onModelDragOver, onModelDrop, welcome, emptyStage, assistantOpen, assistantStowed = false, stageCover = 0, assistantAvailable = false, assistantHint = false, onToggleAssistant, onRailsChange, modelRailCollapsed = false, onExpandModelRail, view = 'canvas', onViewChange, results, children }: AgentWorkspaceProps) {
   const { locale, t } = useCanvasI18n();
   const [query, setQuery] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -304,11 +306,13 @@ export function AgentWorkspace({ simple = false, workspaceName, workspaceCaption
           style={stageCover > 0 ? { '--awwo-stage-cover': `${stageCover}px` } as CSSProperties : undefined}>{children}
         {view === 'results' && results}
         {!nodes.length && <div className={`awwo-empty${welcome ? ' has-assistant' : ''}`}>
-          {welcome || <>
+          {welcome || emptyStage || <>
           <div className="awwo-empty-kicker"><span />{t('workspace.emptyKicker')}</div>
           <h2>{t('workspace.emptyTitle')}</h2>
           <p>{t('workspace.emptyBody')}</p>
+          {/* An example, said so: its cards are not nodes and cannot be moved (a customer took them for the canvas). */}
           <div className="awwo-empty-diagram" aria-hidden="true">
+            <span className="awwo-empty-diagram-caption">{t('workspace.exampleCaption')}</span>
             <div className="awwo-example-node"><span><Database size={19} /></span><strong>{t('workspace.exampleData')}</strong><small>{t('workspace.exampleDataDetail')}</small><i /></div>
             <div className="awwo-example-line"><span /><ArrowRight size={15} /></div>
             <div className="awwo-example-node is-featured"><span><TerminalSquare size={19} /></span><strong>{t('workspace.exampleBackend')}</strong><small>{t('workspace.exampleBackendDetail')}</small><i /></div>

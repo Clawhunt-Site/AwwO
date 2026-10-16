@@ -48,6 +48,9 @@ export interface AssistantExecutionHost {
   stop: (taskId: string) => Promise<void>;
   /** Whether the task has ended, as far as the host has read. */
   finished: (taskId: string) => boolean;
+  /** Whether the task is known to be under way: read, and not ended. A task is read only while the conversation is on
+   *  screen (setVisible), so this is current only then. */
+  running?: (taskId: string) => boolean;
   renderTask: (taskId: string, actions?: AssistantTaskActions) => ReactNode;
   /** How a task ended, in a few plain English words for the router (undefined while it is not known). */
   outcome?: (taskId: string) => string | undefined;
