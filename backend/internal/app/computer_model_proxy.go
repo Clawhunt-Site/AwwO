@@ -12,9 +12,10 @@ import (
 	"time"
 )
 
-// computerModelCallTimeout bounds one managed-execution model call through the proxy: the Pi and openai-agents
-// workers stop a call themselves after 10 minutes (AWWO_PI_TIMEOUT_MS), and the task's lease ends it sooner when
-// the task stops. Thinking models routinely need more than the 30 s an ordinary API request gets.
+// computerModelCallTimeout bounds one managed-execution model call through the proxy: the workers stop a call
+// themselves at their own per-call limit (AWWO_PI_TIMEOUT_MS, 10 minutes in production), the OpenMaus core waits as
+// long for the answer (CORE_MODEL_IDLE_TIMEOUT_MS in apps/openmaus-worker/runtime.ts), and the task's lease ends it
+// sooner when the task stops. Thinking models routinely need more than the 30 s an ordinary API request gets.
 const computerModelCallTimeout = 10 * time.Minute
 
 // OpenMaus receives a task-scoped bearer, never a user's provider key. Only the

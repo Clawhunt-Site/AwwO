@@ -10,10 +10,15 @@ import { closeServer, createTransport, listenLocal } from './transport.ts';
 import { WorkerError, boundedText, hash, record, responseJSON, safeMessage, type ApprovalAnswer, type RunRequest, type WorkerEvent } from './protocol.ts';
 import { diagnostic, safeFailureDetails, type RuntimeStage } from './diagnostics.ts';
 
+// How long the core waits for any byte of one model call. Every hop to the model answers in one piece (the API proxy, the
+// workers and the Converse bridge gather the stream), so this is the time the whole answer may take: at 120 s a task whose
+// model wrote a long file stopped part-way (2026-10-16, CORE_EXECUTION_FAILED at stage poll). 10 minutes matches the API
+// proxy's computerModelCallTimeout and the workers' own per-call limit.
+export const CORE_MODEL_IDLE_TIMEOUT_MS = '600000';
 export function coreEnvironment(home: string, port: string, webhookPort: string): NodeJS.ProcessEnv {
   return { PATH: dirname(process.execPath) + ':/usr/bin:/bin', HOME: home, TMPDIR: join(home, 'tmp'),
     OMB_DATA_DIR: home, OMB_PORT: port, OMB_WEBHOOK_PORT: webhookPort, OMB_LOOPBACK_TRUST: 'service', OMB_CLI_OWNER_STDIN: '1',
-    NODE_ENV: 'production', NO_COLOR: '1', OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS: '120000' };
+    NODE_ENV: 'production', NO_COLOR: '1', OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS: CORE_MODEL_IDLE_TIMEOUT_MS };
 }
 async function freePort(): Promise<string> { const server = createServer(); const url = await listenLocal(server); await closeServer(server); return new URL(url).port; }
 export async function stopProcess(child: ChildProcess): Promise<void> {

@@ -20,6 +20,8 @@ test('core environment never inherits credentials or host tools; MCP has only si
   process.env.AWWO_SENTINEL_SECRET = 'must-not-inherit';
   const env = coreEnvironment('/isolated', '1234', '1235');
   assert.equal(env.AWWO_SENTINEL_SECRET, undefined); assert.equal(env.OPENAI_API_KEY, undefined); assert.equal(env.OMB_LOOPBACK_TRUST, 'service');
+  // A model call may take up to the API proxy's 10 minutes before its one-piece answer arrives.
+  assert.equal(env.OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS, '600000');
   assert.deepEqual(TOOLS.map(tool => tool.name), ['list', 'read', 'write', 'exec', 'publish', 'archive']);
   for (const tool of TOOLS) assert.equal(tool.inputSchema.additionalProperties, false);
   delete process.env.AWWO_SENTINEL_SECRET;
