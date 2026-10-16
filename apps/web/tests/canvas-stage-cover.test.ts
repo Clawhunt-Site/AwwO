@@ -2,7 +2,7 @@
 // assistant panel floating over it covers (CanvasSurface measures it, AgentWorkspace sets it on the stage). The run notes
 // in the stage's top-left corner, the selection bar at its top centre and the 成果 view sat under the panel (found
 // 2026-10-16). jsdom lays nothing out, so this reads the rules: each overlay keeps its place right of the cover, the board
-// that Configure lifts over the panel resets it.
+// that Configure lifts over the panel resets it, and the results studio wraps its header on its own width.
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -104,5 +104,24 @@ describe('the stage overlays lay themselves out right of an assistant panel floa
     const lifted = '.saas-canvas-shell .awwo-stage-canvas:has(.canvas-root > .canvas-inspector):not(:has(> .awwo-results))';
     expect(declarations(sheet, lifted, '@media (max-width: 900px)')['z-index']).toBe('31');
     expect(declarations(sheet, `${lifted} > .canvas-root`, '@media (max-width: 900px)')['--awwo-stage-cover']).toBe('0px');
+  });
+
+  it('wraps the results studio’s header on the studio’s own width, not the window’s', () => {
+    const sheet = css('canvas/studio/studio.css');
+    const narrow = '@container awwo-studio (max-width: 760px)';
+    expect(declarations(sheet, '.awwo-studio').container).toBe('awwo-studio / inline-size');
+    expect(declarations(sheet, '.awwo-studio-header', narrow)['flex-wrap']).toBe('wrap');
+    expect([declarations(sheet, '.awwo-studio-file', narrow).order, declarations(sheet, '.awwo-studio-action span, .awwo-studio-title span', narrow).display])
+      .toEqual(['3', 'none']);
+    // After the header's own rules, which it overrides at the same specificity (found in review).
+    const query = sheet.indexOf(narrow);
+    for (const base of ['.awwo-studio-header {', '.awwo-studio-file {', '.awwo-studio-title {']) {
+      expect(sheet.indexOf(base), base).toBeGreaterThanOrEqual(0);
+      expect(sheet.indexOf(base), base).toBeLessThan(query);
+    }
+    // The window's own breakpoint keeps only what belongs to a narrow window: the full-screen dialog, the tree laid over.
+    const windowRules = rules(sheet).filter(([prelude]) => prelude === '@media (max-width: 760px)').flatMap(([, body]) => rules(body).map(([selector]) => selector));
+    expect(windowRules).not.toContain('.awwo-studio-header');
+    expect(windowRules).toContain('.awwo-studio-dialog');
   });
 });

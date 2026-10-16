@@ -15,6 +15,8 @@
   --studio-code-text: #d8e3e8;
   position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
   background: var(--studio-bg); color: var(--studio-text); font: 400 13px/1.45 var(--saas-font, system-ui, sans-serif);
+  /* Its header follows its own width (below): inline in the 成果 view it can be far narrower than the window. */
+  container: awwo-studio / inline-size;
 }
 .awwo-studio.is-embedded { height: 100%; border: 1px solid var(--studio-line); border-radius: var(--saas-radius-xl, 16px); }
 .awwo-studio-dialog {
@@ -192,11 +194,15 @@ span.awwo-studio-disclose { cursor: default; }
 @keyframes awwo-studio-in { from { opacity: 0; translate: 0 12px; scale: .985; } }
 @keyframes awwo-studio-fade { from { opacity: 0; } }
 
-@media (max-width: 760px) {
-  .awwo-studio-dialog { width: 100vw; height: 100dvh; border-radius: 0; }
+/* Its title, open file and tools need about 710 px on one row: a narrower studio wraps them (the 成果 view beside the
+   assistant's panel, a narrow window) instead of drawing them over one another. */
+@container awwo-studio (max-width: 760px) {
   .awwo-studio-header { flex-wrap: wrap; row-gap: 6px; }
   .awwo-studio-file { order: 3; flex-basis: 100%; padding-left: 0; border-left: 0; }
   .awwo-studio-action span, .awwo-studio-title span { display: none; }
+}
+@media (max-width: 760px) {
+  .awwo-studio-dialog { width: 100vw; height: 100dvh; border-radius: 0; }
   .awwo-studio-tree { position: absolute; inset: 0 auto 0 0; z-index: 4; width: min(320px, 86vw); box-shadow: 12px 0 32px rgb(0 0 0 / 18%); }
   .awwo-studio-status .awwo-studio-status-sandbox { display: none; }
 }
