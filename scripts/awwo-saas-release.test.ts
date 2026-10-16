@@ -486,7 +486,7 @@ test('THIRD_PARTY_NOTICES.md names no license or notice file the artifacts leave
   const files = trackedFiles(), markdown = readFileSync(join(repository, 'THIRD_PARTY_NOTICES.md'), 'utf8');
   assert.deepEqual(uncoveredNotices(markdown, files), []);
   const { required } = requiredNotices(markdown, files);
-  for (const path of ['LICENSE', 'apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt', 'apps/web/src/saas/skillLicences.txt', 'server/packages/adapters/hermes/LICENSE',
+  for (const path of ['LICENSE', 'apps/web/licences/LICENSE-brotli.txt', 'apps/web/src/saas/bundleLicences.txt', 'apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt', 'apps/web/src/saas/skillLicences.txt', 'server/packages/adapters/hermes/LICENSE',
     'third_party/adapted/aihot/NOTICE', 'third_party/clawwork/NOTICE', 'third_party/osiris/LICENSE']) assert.ok(required.includes(path), path);
   // Each preview font's license: its family's, <family>.LICENSE.txt beside it, here the longest family whose name, then
   // "-", starts the font's (the build pairs them by apps/web/src/canvas/previewFontList.ts); and every license file there.

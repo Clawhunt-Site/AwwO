@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { copyFileSync, cpSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assetFileNames } from './scripts/asset-names.mjs';
+import { bundleLicences } from './scripts/bundle-licences.mjs';
 import { familyLicences, fontLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
 import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
 
@@ -42,7 +43,10 @@ export default defineConfig({
   // So are the preview fonts (src/canvas/previewFonts.ts), each family with its own license, which they inline as
   // data: URLs: every script chunk holding one of them starts with that font's license (scripts/font-licences.mjs), as
   // in the native build (vite.config.mjs).
-  inlinedFontLicences(join(root, 'src', 'canvas', 'fonts'), familyLicences(PREVIEW_FONTS))],
+  inlinedFontLicences(join(root, 'src', 'canvas', 'fonts'), familyLicences(PREVIEW_FONTS)),
+  // The license texts of the npm code the bundle ships, in one file at the root of the site, from the committed
+  // src/saas/bundleLicences.txt; the build fails when the bundle needs a text that file lacks (scripts/bundle-licences.mjs).
+  bundleLicences(root)],
   define: { 'import.meta.env.VITE_AWWO_SAAS': JSON.stringify('1') },
   server: { host: process.env.VITE_AWWO_WEB_HOST || '127.0.0.1', port: Number(process.env.VITE_AWWO_WEB_PORT || 5189), strictPort: true,
     proxy: { '/api/v1': { target: process.env.AWWO_API_TARGET || 'http://127.0.0.1:8087' } } },

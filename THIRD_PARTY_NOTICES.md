@@ -177,6 +177,83 @@ copyright files under `/usr/share/doc` and the npm packages' LICENSE, NOTICE
 and ThirdPartyNotices.txt files when distributing the image. These tools run inside the sandbox only and do not
 change AwwO's own license.
 
+## The hosted web app
+
+The hosted app (`apps/web`, built by `npm run build:saas` into the releases'
+html/ and the image `deploy/saas/web.Dockerfile` builds) bundles code and files
+of npm packages at the versions `apps/web/package-lock.json` pins. A build of
+2026-10-16 holds parts of 80 of them, counting three.js's two versions apart:
+
+- React 19.2.6 (react, react-dom and scheduler 0.27.0; MIT), minified.
+- three.js 0.186.1 (three; MIT), minified where the app itself shows 3D models,
+  and 89 of its files unchanged, which a running preview loads as ES modules;
+  and three.js r128 (three 0.128.0, installed as three-r128; MIT), its
+  build/three.min.js unchanged, for previews that load r128.
+- pdf.js 6.3.289 (pdfjs-dist; Apache-2.0, without a NOTICE file): its main
+  build minified; its worker unchanged, which embeds Brotli's decoder (MIT,
+  Copyright 2017 Google Inc.) and the JavaScript loaders of pdf.js's qcms
+  (MIT), OpenJPEG (BSD-2-Clause) and JBIG2 (Apache-2.0, with PDFium's
+  BSD-3-Clause) builds, whose WebAssembly the site does not ship;
+  Adobe's 168 character maps (BSD-3-Clause, Copyright 1990-2009 Adobe Systems
+  Incorporated); and two of PDFium's Foxit fonts (BSD-3-Clause, Copyright 2014
+  PDFium Authors), the Symbol and ZapfDingbats ones.
+- lucide-react 0.468.0 (ISC; its text also names the MIT-licensed Feather it
+  derives from) and fflate 0.8.3 (MIT), minified.
+- react-markdown 10.1.0 and remark-gfm 4.0.1 with the 68 packages they use
+  (unified, micromark, mdast, hast, unist and vfile among them), minified: MIT,
+  but ISC for @ungap/structured-clone.
+- The helpers Vite 8.0.16 and Rolldown 1.0.3 write into the bundle (MIT): the
+  module preload polyfill, which Vite adapted from es-module-shims (MIT,
+  Copyright (C) 2018-2021 Guy Bedford), and Rolldown's runtime helpers, which
+  derive from esbuild's (MIT, Copyright (c) 2020 Evan Wallace).
+
+The other dependencies in `apps/web/package.json` reach no part of the hosted
+bundle (@tanstack/react-query, react-router-dom and @tailwindcss/typography
+among them; the rest are build, test or type packages).
+
+Minifying drops the license comments in the code; of the libraries' banners
+only those in files that ship unchanged remain (three.js's build files and
+pdf.js's worker). So the hosted build writes the license texts into one file at
+the root of the site, third-party-licenses.txt: for each package above, its
+license and notice files from its top directory and from every directory
+between it and a file the bundle uses (and pdf.js's wasm/ directory, whose
+licenses cover the loaders its worker embeds), as the package has them, and
+the comment at the top of a minified file when that comment grants a license.
+One does: vfile's path module took code from path-browserify (MIT, Copyright
+(c) 2013 James Halliday) and Node.js (MIT, Copyright Joyent, Inc. and other
+Node contributors) and says so only there. Of Vite's LICENSE.md it takes
+Vite's own license, not the list of what Vite's own build bundles. For three
+pieces of code that reach the bundle with no license text of their own, it
+adds texts kept in `apps/web/licences/`, each pinned by its SHA-256 and by the
+version of the package it was checked for: Brotli's license and the comment
+its decoder starts with, from pdf.js's repository at v6.3.289; es-module-shims'
+license, which Vite 5 kept above the polyfill and Rolldown's version of it no
+longer does; and the list of licenses Rolldown's LICENSE links (Rollup's and
+esbuild's), from its repository at v1.0.3. Code that a package credits to
+another project only in a comment is not covered. It leaves out, and
+names, two license files of such directories whose files the bundle does not
+hold: pdf.js's Liberation Sans license and three.js's SculptGL license; either
+comes back as soon as any other file of its directory ships. The text is
+`apps/web/src/saas/bundleLicences.txt`, committed so that every license is read
+before it ships: the build (`apps/web/scripts/bundle-licences.mjs`) fails when
+its bundle needs a text that file lacks, and `npm run licences:saas` in
+apps/web writes the file again from a full build. The build also fails where it
+knows npm code would enter unseen: a stylesheet, or a page's style element,
+that pulls in an npm package's CSS by @import or by CSS Modules' composes or
+@value ... from; a Web Worker, or another script emitted without its sources;
+and pdf.js's legacy build, which embeds core-js. A small npm file that a
+stylesheet's url() or a script's new URL() names would be inlined unseen (the
+app has none). The PDF preview links pdf.js's license, Adobe's and PDFium's,
+which ship as text files of their own as well.
+
+pdf.js also comes with PDFium's eight other Foxit fonts and the four Liberation
+Sans 1.07.4 fonts (Copyright (c) 2007 Red Hat, Inc., under the GNU General
+Public License v2 with Red Hat's font exception; their source is that release's
+FontForge files). The hosted bundle holds none of them: AwwO's PDF preview lets
+pdf.js use the system's fonts, and pdf.js then asks for the Symbol and
+ZapfDingbats data only (`apps/web/src/canvas/pdfPreviewResources.ts`, checked
+by `apps/web/tests/canvas-artifact-viewers.test.tsx`).
+
 ## What the API image and the release archive carry
 
 Both artifacts carry AwwO's `LICENSE`, this file, every license and notice file
