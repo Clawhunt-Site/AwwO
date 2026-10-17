@@ -94,7 +94,8 @@ type harness struct {
 	cfg    Config
 }
 
-func newHarness(t *testing.T, piURL string) *harness {
+// newHarness starts the app on a fresh schema; each before runs on it ahead of Start (a test's own logger, say).
+func newHarness(t *testing.T, piURL string, before ...func(*App)) *harness {
 	t.Helper()
 	dsn := os.Getenv("AWWO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -128,6 +129,9 @@ func newHarness(t *testing.T, piURL string) *harness {
 	c := testConfig()
 	c.PIURL = piURL
 	a := New(db, c)
+	for _, f := range before {
+		f(a)
+	}
 	if e = a.Start(ctx); e != nil {
 		t.Fatal(e)
 	}

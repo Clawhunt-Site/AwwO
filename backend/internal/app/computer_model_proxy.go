@@ -303,42 +303,138 @@ func jsonStringForms(s string) [][]byte {
 	return forms
 }
 
-// computerModelFailure is the ledger's code for a model call the worker answered with an error (apps/computer-model.ts):
-// cut off (499, the worker's own time limit); the provider or the call's machinery failing (computerProviderFault); the
-// model's own answer not holding (reason answer, or stream: a Bedrock answer the model's output broke, such as too many
-// tool calls at once or a malformed tool call); or not known (computer_model_failed: a request the provider refused
-// before any work, and any non-Bedrock provider error, which the worker does not tell apart yet). Only the first two are
-// the platform's faults (invocationFailure, direct_task_refund.go; security review 2026-10-16).
-func computerModelFailure(status int, body []byte) string {
+// computerWorkerError is the worker's refusal of a model call as labels (reject in apps/computer-model.ts): its code,
+// what failed (reason: a provider's status, the network, the model's answer, a cut) and which check an answer or a
+// request failed (detail). The rest of the body, its message among it, is dropped, and so is a field that is not a label.
+func computerWorkerError(body []byte) (code, reason, detail string) {
 	var reply struct {
 		Error struct {
 			Code   string `json:"code"`
 			Reason string `json:"reason"`
+			Detail string `json:"detail"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &reply)
+	return computerWorkerCode(reply.Error.Code), computerWorkerLabel(reply.Error.Reason), computerWorkerLabel(reply.Error.Detail)
+}
+
+// computerWorkerLabel keeps a failure label as the worker writes them (letters, digits and _.:-, as its LABEL), or "".
+func computerWorkerLabel(s string) string {
+	if len(s) > 120 {
+		return ""
+	}
+	for _, c := range s {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("_.:-", c) {
+			return ""
+		}
+	}
+	return s
+}
+
+// computerModelFailure is the ledger's code for a model call the worker answered with an error (apps/computer-model.ts)
+// after elapsed: lost with the worker (cancelled because it was stopping: a release or a restart); cut off (499, the
+// worker's own time limit, its caller leaving, a cancel; or a time limit on the way to the provider,
+// computerProviderTimedOut); the provider or the call's machinery failing (computerProviderFault); the model's own answer
+// not holding (reason answer, or stream: a Bedrock answer the model's output broke, such as too many tool calls at once or
+// a malformed tool call); or not known (computer_model_failed, among them a request the provider refused before any
+// work). Only the first and the provider's are the platform's faults (invocationFailure, direct_task_refund.go; security
+// review 2026-10-16). With personal credentials the provider, its key and its quota are the user's own, so its failures
+// are never the platform's; nor is a failure of a provider behind LLM Gate later than computerFastFailure.
+func computerModelFailure(status int, body []byte, personal bool, elapsed time.Duration) string {
+	code, reason, _ := computerWorkerError(body)
+	gate := strings.HasPrefix(reason, "provider:") || strings.HasPrefix(reason, "network") || reason == "body"
 	switch {
-	case status == 499 || reply.Error.Code == "CANCELLED":
+	case code == "CANCELLED" && reason == "stopping":
+		return "computer_model_transport"
+	case status == 499 || code == "CANCELLED":
 		return "computer_model_cut"
-	case reply.Error.Code == "PROVIDER_ERROR" && (reply.Error.Reason == "answer" || reply.Error.Reason == "stream"):
-		return "computer_model_answer"
-	case reply.Error.Code == "PROVIDER_ERROR" && computerProviderFault(reply.Error.Reason):
+	case code == "PROVIDER_ERROR" && computerProviderTimedOut(reason):
+		return "computer_model_cut"
+	case code == "PROVIDER_ERROR" && gate && (personal || elapsed > computerFastFailure):
+		return "computer_model_failed"
+	case code == "PROVIDER_ERROR" && computerProviderFault(reason):
 		return "computer_model_provider"
+	case code == "PROVIDER_ERROR" && (reason == "answer" || reason == "stream" || strings.HasPrefix(reason, "stream:")):
+		return "computer_model_answer"
 	}
 	return "computer_model_failed"
 }
 
-// computerProviderFault says whether a Bedrock call's failure label (apps/pi-worker/bedrock-call.mjs, runner.mjs) is the
-// platform's side: the provider throttling, failing or refusing our access (bedrock:<status>:<type> with 401, 403, 404,
-// 408, 424, 429 or 5xx), or the call's machinery (bridge-error:…, credentials, child…). A request the provider refused
-// as invalid (400 and other 4xx) is not.
+// computerProviderFault says whether a call's failure label (apps/computer-model.ts, apps/pi-worker/bedrock-call.mjs,
+// runner.mjs) is the platform's side, and only where neither the user's task nor the model's answer can bring it about
+// (security reviews 2026-10-16 and 2026-10-17):
+//   - a Bedrock call refused or failed before its stream began (bedrock:<status>:<type> with 401, 403, 404, 408, 424, 429
+//     or 5xx), or the call's machinery (bridge-error:…, credentials, child…);
+//   - an AWS outage after the stream began (stream:error:<status>:<type> naming one of computerAWSOutages), never a model
+//     whose own output broke the stream (ModelStreamErrorException, ModelErrorException) nor the bridge's refusal of
+//     what the model sent;
+//   - a provider behind LLM Gate refusing our key or our quota, missing the model, throttling, out of service or out of
+//     the edge's reach (provider:<401|404|429|503|529> and Cloudflare's 521, 522, 523, 525, 526 and 530; a 403 only with
+//     a kind in computerGateRefusals), never a bare 403 (a firewall rule on the task's words can give one), another 5xx
+//     (a long answer the gateway dropped can give one) nor a refusal of the request (400 and the like);
+//   - the provider out of reach before the request was sent (network:<one of computerConnectFailures>), a 2xx answer
+//     that is not JSON (body), or the worker failing on an answer it already held (worker).
 func computerProviderFault(reason string) bool {
 	if rest, ok := strings.CutPrefix(reason, "bedrock:"); ok {
 		code, _, _ := strings.Cut(rest, ":")
 		n, err := strconv.Atoi(code)
 		return err == nil && (n >= 500 || n == 401 || n == 403 || n == 404 || n == 408 || n == 424 || n == 429)
 	}
-	return reason == "credentials" || strings.HasPrefix(reason, "bridge-error:") || strings.HasPrefix(reason, "child")
+	if rest, ok := strings.CutPrefix(reason, "stream:error:"); ok {
+		_, kind, _ := strings.Cut(rest, ":")
+		return computerAWSOutages[strings.ToLower(kind)]
+	}
+	if rest, ok := strings.CutPrefix(reason, "provider:"); ok {
+		status, kind, _ := strings.Cut(rest, ":")
+		return slices.Contains([]string{"401", "404", "429", "503", "529", "521", "522", "523", "525", "526", "530"}, status) ||
+			status == "403" && computerGateRefusals[kind]
+	}
+	if code, ok := strings.CutPrefix(reason, "network:"); ok {
+		return computerConnectFailures[code]
+	}
+	return reason == "credentials" || reason == "body" || reason == "worker" || strings.HasPrefix(reason, "bridge-error:") || strings.HasPrefix(reason, "child")
+}
+
+// computerFastFailure bounds how long a call to a provider behind LLM Gate may have run for its failure to be the
+// platform's: an outage, a refused key or a missing model is answered at once, while a 5xx or a dropped connection at the
+// end of a long answer that is not streamed can be the answer's own length (security review 2026-10-17).
+const computerFastFailure = 30 * time.Second
+
+// computerAWSOutages are the AWS exceptions after a Bedrock stream began that are the service's own trouble, as the
+// bridge names them (apps/bedrock-bridge.ts: the stream's own exception members and the SDK's exception names). The
+// model service's own time limit (ModelTimeoutException) is a long answer's, so a cut (computerProviderTimedOut).
+var computerAWSOutages = map[string]bool{"throttlingexception": true, "servicequotaexceededexception": true, "serviceunavailableexception": true,
+	"internalserverexception": true, "modelnotreadyexception": true}
+
+// computerGateRefusals are the kinds of a 403 behind LLM Gate that refuse the operator's access, never the task's words:
+// the gateway's balance run out (new-api's insufficient_user_quota) and a key without the right (Anthropic's
+// permission_error).
+var computerGateRefusals = map[string]bool{"insufficient_user_quota": true, "permission_error": true}
+
+// computerConnectFailures are the socket errors that come before a request is sent (Node's and undici's codes): the
+// provider out of reach, whatever the task asked.
+var computerConnectFailures = map[string]bool{"ECONNREFUSED": true, "ENOTFOUND": true, "EAI_AGAIN": true, "EHOSTUNREACH": true, "ENETUNREACH": true,
+	"UND_ERR_CONNECT_TIMEOUT": true, "CERT_HAS_EXPIRED": true, "UNABLE_TO_VERIFY_LEAF_SIGNATURE": true, "DEPTH_ZERO_SELF_SIGNED_CERT": true,
+	"SELF_SIGNED_CERT_IN_CHAIN": true, "ERR_TLS_CERT_ALTNAME_INVALID": true}
+
+// computerProviderTimedOut says whether a call to a provider ran past a time limit on its way: a 408, an edge's 504 or
+// 524 (LLM Gate's Cloudflare cuts a call that answers nothing for about 100 s, and a call that is not streamed answers
+// nothing until its last token), no answer within the worker's HTTP client's own limits, or a Bedrock model's own
+// processing time running out after its stream began. That is the call's length, which a model's own long answer can
+// bring about, so it is a cut and never the platform's fault (security reviews 2026-10-16 and 2026-10-17).
+func computerProviderTimedOut(reason string) bool {
+	status, _, _ := strings.Cut(strings.TrimPrefix(reason, "provider:"), ":")
+	return strings.HasPrefix(reason, "provider:") && (status == "408" || status == "504" || status == "524") ||
+		reason == "network:UND_ERR_HEADERS_TIMEOUT" || reason == "network:UND_ERR_BODY_TIMEOUT" || strings.HasPrefix(reason, "stream:error:408:")
+}
+
+// logComputerCall logs a direct task's model call that failed once it went to its worker: the call's place in its task,
+// its model, what the worker answered (its status, and its error's labels: computerWorkerError) and the ledger's code.
+// Never the call's messages or the worker's message, so a refused call can be told apart in the API's own log.
+func (a *App) logComputerCall(lease *computerLease, call, status int, body []byte, code string, facts *invocationFacts) {
+	workerCode, reason, detail := computerWorkerError(body)
+	a.log.Warn("managed model call failed", "run", lease.runID, "call", call, "runtime", lease.snapshot.Runtime, "model", lease.snapshot.Model,
+		"workerStatus", status, "workerCode", workerCode, "reason", reason, "detail", detail, "code", code, "ms", facts.Ended.Sub(facts.Streamed).Milliseconds())
 }
 
 // computerWorkerBodyLimit is what the worker reads of one call's body (MAX_BYTES in apps/computer-model.ts).
@@ -501,6 +597,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 			// review 2026-10-16). A worker that cannot be reached or drops the connection is.
 			code = "computer_model_cut"
 		}
+		a.logComputerCall(lease, index, 0, nil, code, facts)
 		fail(w, 502, "computer_model_transport", "Model response is unavailable; the call will not be retried")
 		return
 	}
@@ -521,8 +618,9 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		case e != nil:
 			code = "computer_model_transport" // the worker's answer broke off
 		default:
-			code = computerModelFailure(response.StatusCode, data)
+			code = computerModelFailure(response.StatusCode, data, a.cfg.UserCredentials, facts.Ended.Sub(facts.Streamed))
 		}
+		a.logComputerCall(lease, index, response.StatusCode, data, code, facts)
 		fail(w, 502, "computer_model_failed", "The selected model could not complete this call")
 		return
 	}
@@ -532,6 +630,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if json.Unmarshal(data, &result) != nil || !json.Valid(result.Completion) {
 		code = "computer_model_protocol"
+		a.logComputerCall(lease, index, response.StatusCode, nil, code, facts)
 		fail(w, 502, "computer_model_protocol", "Model response was invalid")
 		return
 	}
@@ -549,6 +648,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if json.Unmarshal(result.Completion, &answer) != nil || len(answer.Choices) < 1 || len(answer.Choices) > 4 {
 		code = "computer_model_protocol"
+		a.logComputerCall(lease, index, response.StatusCode, nil, code, facts)
 		fail(w, 502, "computer_model_protocol", "Model response was invalid")
 		return
 	}
