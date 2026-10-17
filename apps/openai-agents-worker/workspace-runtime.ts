@@ -97,6 +97,12 @@ export function compileWorkspaceDelivery(source: string, fields: OutputField[], 
   return JSON.stringify(result);
 }
 
+/** The Agents SDK's step limit (MaxTurnsExceededError), however it is wrapped. */
+const stepLimit = (error: unknown): boolean => {
+  const name = (value: unknown) => (value && typeof value === 'object' ? String((value as { name?: unknown }).name ?? (value as { constructor?: { name?: string } }).constructor?.name ?? '') : '');
+  return name(error) === 'MaxTurnsExceededError' || (error instanceof Error && name(error.cause) === 'MaxTurnsExceededError');
+};
+
 const property = (type: string, description: string) => ({ type, description });
 const definitions = [
   { name: 'workspace_list', description: 'List project files or read-only inputs. Relative path, use . for project and inputs for supplied files.', properties: { path: property('string', 'Relative directory') } },
@@ -237,7 +243,16 @@ export async function executeWorkspaceAgent({ request, modelConfig, signal, emit
   for (let attempt = 0; attempt < 2; attempt++) {
     const result = await runner.run(agent, input, { stream: true, signal, maxTurns: request.workspace.maxModelCalls - calls });
     try { for await (const _event of result) { signal.throwIfAborted(); } await result.completed; }
-    catch (error) { await result.completed.catch(() => undefined); throw error; }
+    catch (error) {
+      await result.completed.catch(() => undefined);
+      // A run that used up its steps after publishing every output it owes delivers what it published: real, verified
+      // files, the last of each the agent chose. One with an output still unpublished fails as before.
+      if (stepLimit(error) && fields.length && fields.every(field => published.has(field.id) || !field.required)) {
+        text = compileWorkspaceDelivery('{}', fields, published);
+        break;
+      }
+      throw error;
+    }
     if (!calls || result.interruptions.length || typeof result.finalOutput !== 'string') throw new RuntimeError('MODEL_PROTOCOL_ERROR');
     try { text = compileWorkspaceDelivery(result.finalOutput, fields, published); break; }
     catch (error) {

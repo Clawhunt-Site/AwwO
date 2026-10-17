@@ -87,6 +87,28 @@ test('a prose final reply completes a delivery whose every field is already publ
   assert.throws(() => compileWorkspaceDelivery('Published core.js.', fields, new Map([['result', file('core.js', 'x')]])));
 });
 
+test('a run that used up its steps after publishing every output it owes delivers what it published', async t => {
+  // The 2026-10-17 flagship tester published nothing before its 64 steps ran out and lost the page it had made; one
+  // that publishes as it goes keeps its last published page.
+  const fields: OutputField[] = [{ id: 'page', type: 'markdown', required: true }];
+  const publish = { name: 'workspace_publish', args: { field: 'page', path: 'actual.txt' } };
+  const list = { name: 'workspace_list', args: { path: '.' } };
+  const state = await fixture(t, [publish, list, list, list], fields, { maxCalls: 4 });
+  await state.run();
+  const done = state.events.find(event => event.type === 'completed');
+  assert.ok(done, 'the run completed');
+  assert.equal(JSON.parse(String(done.text)).page, 'actual verified project bytes');
+});
+
+test('a run that used up its steps with a required output unpublished still fails', async t => {
+  const fields: OutputField[] = [{ id: 'page', type: 'markdown', required: true }, { id: 'report', type: 'markdown', required: true }];
+  const publish = { name: 'workspace_publish', args: { field: 'page', path: 'actual.txt' } };
+  const list = { name: 'workspace_list', args: { path: '.' } };
+  const state = await fixture(t, [publish, list, list, list], fields, { maxCalls: 4 });
+  await assert.rejects(state.run());
+  assert.ok(!state.events.some(event => event.type === 'completed'));
+});
+
 test('one invalid final is repaired with the same history and separately admitted model call', async t => {
   const state = await fixture(t, [invalid, { text: '{"count":7}' }], countFields);
   await state.run(); assertPaidCalls(state, 2);
